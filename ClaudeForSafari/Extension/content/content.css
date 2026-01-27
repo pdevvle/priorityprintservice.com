@@ -1,0 +1,198 @@
+/* Claude for Safari - Content Script Styles */
+
+/* Claude overlay elements styling */
+#claude-recording-indicator,
+#claude-highlight-overlay,
+.claude-overlay {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif !important;
+}
+
+/* Selection highlight when Claude is analyzing */
+::selection.claude-analyzing {
+  background: rgba(217, 119, 6, 0.3) !important;
+}
+
+/* Claude tooltip for element info */
+.claude-tooltip {
+  position: fixed;
+  background: #1a1a1a;
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 300px;
+  z-index: 999999;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  border: 1px solid #3a3a3a;
+  pointer-events: none;
+}
+
+.claude-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 6px 6px 0 6px;
+  border-style: solid;
+  border-color: #1a1a1a transparent transparent transparent;
+}
+
+/* Form field highlighting */
+.claude-form-field-highlight {
+  outline: 2px solid #D97706 !important;
+  outline-offset: 2px;
+  background: rgba(217, 119, 6, 0.05) !important;
+  transition: all 0.2s ease;
+}
+
+.claude-form-field-filled {
+  outline: 2px solid #22c55e !important;
+  outline-offset: 2px;
+  background: rgba(34, 197, 94, 0.05) !important;
+}
+
+/* Click target indicator */
+.claude-click-target {
+  position: relative;
+}
+
+.claude-click-target::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  background: radial-gradient(circle, rgba(217, 119, 6, 0.5) 0%, transparent 70%);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  animation: click-ripple 0.6s ease-out;
+  pointer-events: none;
+}
+
+@keyframes click-ripple {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(3);
+    opacity: 0;
+  }
+}
+
+/* Workflow step indicator */
+.claude-step-indicator {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 20px;
+  height: 20px;
+  background: #D97706;
+  color: white;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999997;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Data extraction highlight */
+.claude-extracted-data {
+  background: rgba(217, 119, 6, 0.1) !important;
+  border-left: 3px solid #D97706 !important;
+  padding-left: 8px !important;
+}
+
+/* Loading state for elements */
+.claude-loading {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.claude-loading::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  border: 2px solid transparent;
+  border-top-color: #D97706;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: claude-spin 0.8s linear infinite;
+}
+
+@keyframes claude-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+/* Notification toast */
+.claude-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a1a;
+  color: white;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 999999;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: toast-in 0.3s ease;
+}
+
+.claude-toast.success {
+  background: #22c55e;
+}
+
+.claude-toast.error {
+  background: #ef4444;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Automation mode overlay */
+.claude-automation-active {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.1);
+  z-index: 999990;
+  pointer-events: none;
+}
+
+/* Element selector mode */
+.claude-selector-mode * {
+  cursor: crosshair !important;
+}
+
+.claude-selector-mode *:hover {
+  outline: 2px dashed #D97706 !important;
+  outline-offset: 2px;
+}
