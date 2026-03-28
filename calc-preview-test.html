@@ -281,26 +281,26 @@ function calcCustomImp(longest, shortest, bindDir) {
 
 // Papers: factory = factory-coated (non-inventory), coatable = surface supports UV coating
 const PAPERS_NC = _CFG.papers_nc || [
-  {label:"70lb Uncoated Opaque Text",val:0.001,price:0.06,factory:false,coatable:false},
-  {label:"80lb Matte Text",val:0.002,price:0.069,factory:false,coatable:false},
-  {label:"100lb Gloss Text",val:0.003,price:0.085,factory:false,coatable:true},
-  {label:"50lb Offset Smooth Opaque",val:2.001,price:0.039,factory:true,coatable:false},
-  {label:"60lb Offset Smooth Opaque",val:2.002,price:0.042,factory:true,coatable:false},
-  {label:"80lb Offset Smooth Opaque",val:2.003,price:0.056,factory:true,coatable:false},
-  {label:"80lb Gloss Factory Coated",val:2.004,price:0.0525,factory:true,coatable:true},
-  {label:"100lb Matte Factory Coated",val:2.005,price:0.070,factory:true,coatable:true},
+  {label:"70lb Uncoated Opaque Text",val:0.001,price:0.06,oversizePrice:0.06,factory:false,coatable:false},
+  {label:"80lb Matte Text",val:0.002,price:0.069,oversizePrice:0.069,factory:false,coatable:false},
+  {label:"100lb Gloss Text",val:0.003,price:0.085,oversizePrice:0.085,factory:false,coatable:true},
+  {label:"50lb Offset Smooth Opaque",val:2.001,price:0.039,oversizePrice:0.039,factory:true,coatable:false},
+  {label:"60lb Offset Smooth Opaque",val:2.002,price:0.042,oversizePrice:0.042,factory:true,coatable:false},
+  {label:"80lb Offset Smooth Opaque",val:2.003,price:0.056,oversizePrice:0.056,factory:true,coatable:false},
+  {label:"80lb Gloss Factory Coated",val:2.004,price:0.0525,oversizePrice:0.0525,factory:true,coatable:true},
+  {label:"100lb Matte Factory Coated",val:2.005,price:0.070,oversizePrice:0.070,factory:true,coatable:true},
 ];
 const PAPERS_CS = _CFG.papers_cs || [
-  {label:"80lb Opaque Uncoated",val:0.01,price:0.0919,factory:false,coatable:false},
-  {label:"80lb Matte Cardstock",val:0.02,price:0.1119,factory:false,coatable:true},
-  {label:"100lb Gloss Cardstock",val:0.03,price:0.1319,factory:false,coatable:true},
-  {label:"14pt Gloss C1S",val:1.01,price:0.1619,factory:false,coatable:true},
-  {label:"16pt Coated C2S",val:1.02,price:0.1919,factory:false,coatable:true},
-  {label:"80lb Gloss Factory Coated",val:2.21,price:0.13192,factory:true,coatable:true},
-  {label:"100lb Matte Factory Coated",val:2.22,price:0.145619,factory:true,coatable:true},
-  {label:"12pt C2S Factory Coated",val:2.23,price:0.155719,factory:true,coatable:true},
-  {label:"14pt C2S Factory Coated",val:2.24,price:0.169019,factory:true,coatable:true},
-  {label:"18pt C1S Factory Gloss",val:2.25,price:0.186719,factory:true,coatable:true},
+  {label:"80lb Opaque Uncoated",val:0.01,price:0.0919,oversizePrice:0.0919,factory:false,coatable:false},
+  {label:"80lb Matte Cardstock",val:0.02,price:0.1119,oversizePrice:0.1119,factory:false,coatable:true},
+  {label:"100lb Gloss Cardstock",val:0.03,price:0.1319,oversizePrice:0.1319,factory:false,coatable:true},
+  {label:"14pt Gloss C1S",val:1.01,price:0.1619,oversizePrice:0.1619,factory:false,coatable:true},
+  {label:"16pt Coated C2S",val:1.02,price:0.1919,oversizePrice:0.1919,factory:false,coatable:true},
+  {label:"80lb Gloss Factory Coated",val:2.21,price:0.13192,oversizePrice:0.13192,factory:true,coatable:true},
+  {label:"100lb Matte Factory Coated",val:2.22,price:0.145619,oversizePrice:0.145619,factory:true,coatable:true},
+  {label:"12pt C2S Factory Coated",val:2.23,price:0.155719,oversizePrice:0.155719,factory:true,coatable:true},
+  {label:"14pt C2S Factory Coated",val:2.24,price:0.169019,oversizePrice:0.169019,factory:true,coatable:true},
+  {label:"18pt C1S Factory Gloss",val:2.25,price:0.186719,oversizePrice:0.186719,factory:true,coatable:true},
 ];
 const COVER_SAME=_CFG.cover_same||{label:"Same as Inside Pages",val:0.001,price:0.01,factory:false,coatable:false};
 const COVER_SCORING_VALS=_CFG.cover_scoring_vals||[0.01,0.02,0.03,1.01,1.02,2.21,2.22,2.23,2.24,2.25];
@@ -424,9 +424,11 @@ function calculate(c) {
   const P={};
   P.insidePrint=c.insideColor==="bw"?((PCF.printing_black_cost*2)*tS)*mk:(((PCF.printing_black_cost*2)*tS)*mk)+((PCF.printing_fullcolor_cost*2)*tS);
   P.coverPrint=c.coverColor==="bw"?((PCF.printing_black_cost*tS)*2)/imp:((PCF.printing_fullcolor_cost*tS)*2)/imp;
-  const lowYield = imp < 1; // signature exceeds 19×13 parent sheet
-  P.insidePaper=lowYield?((c.insidePaper.price*tS)*mk)/imp:(c.insidePaper.price*tS)*mk;
-  P.coverPaper=lowYield?(((cvr.price*tQ)/imp)*mk)/imp:((cvr.price*tQ)/imp)*mk;
+  const lowYield = imp < 1; // signature exceeds 19×13 parent sheet — use oversize paper prices
+  const iPaper = lowYield && c.insidePaper.oversizePrice ? c.insidePaper.oversizePrice : c.insidePaper.price;
+  const cPaper = lowYield && cvr.oversizePrice ? cvr.oversizePrice : cvr.price;
+  P.insidePaper=(iPaper*tS)*mk;
+  P.coverPaper=((cPaper*tQ)/imp)*mk;
   P.press=(tS/PCF.press_printsperhour)*PCF.labor_press_hr;
   P.cutting=((tS*imp)/PCF.cutter_sheetsperhour)*(PCF.labor_cutting_hr+mk)+PCF.cutterbasefee;
   P.scoreCover=cvrScoring?(tQ/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
@@ -594,7 +596,7 @@ function calculate(c) {
     easySize,
     commonSize,
     lowYield,
-    lowYieldPenalty: lowYield ? `÷${imp} (paper/yield)` : "none",
+    lowYieldPaper: lowYield ? `oversize pricing (inside: $${iPaper}, cover: $${cPaper})` : "standard pricing",
     // Two staple
     twoStapleMode:twoAuto?"auto (no charge)":twoOptIn?"user opt-in (+charge)":"single staple",
     twoStapleApplied:twoApplied,
