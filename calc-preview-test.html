@@ -1433,8 +1433,20 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const slotFilesRef = useRef({}); // { slotIndex: File } — original files for per-slot uploads
   const fileInputRef = useRef(null);
   const dragRef = useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
+  const [printReadyBlob, setPrintReadyBlob] = useState(null); // Blob of the print-ready PDF
+  const [generatingPdf, setGeneratingPdf] = useState(false); // true while building print-ready PDF
   const [rot, setRot] = useState({ x: -15, y: -25 });
   const expanded = activeModal !== null; // backward compat for useEffects
+
+  // Clear approval when transforms change — forces re-approval with new print-ready PDF
+  const prevTransforms = useRef({ fitMode, artScale, rotateSteps });
+  useEffect(() => {
+    const prev = prevTransforms.current;
+    if (prev.fitMode !== fitMode || prev.artScale !== artScale || prev.rotateSteps !== rotateSteps) {
+      if (artApproved) { setArtApproved(false); setPrintReadyBlob(null); }
+      prevTransforms.current = { fitMode, artScale, rotateSteps };
+    }
+  }, [fitMode, artScale, rotateSteps]);
 
   // Blank page — plain off-white, no text
   const blankPage = useMemo(() => {
@@ -1501,6 +1513,132 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       };
       img.src = dataUrl;
     });
+  }
+
+  // ── Generate print-ready PDF with customer's transforms baked in ──
+  // Renders each page at 300 DPI onto bleed-inclusive canvas, applies rotation + crop/scale/fit.
+  // Returns a Blob. For PDFs, re-renders from pdfDocRef (vector quality at 300 DPI).
+  // For images, draws from the dataUrl at native resolution.
+  async function generatePrintReadyPDF(onPageProgress) {
+    const BLEED = 0.125;
+    const bleedW = dims.w + BLEED * 2;
+    const bleedH = dims.h + BLEED * 2;
+    const DPI = 300;
+    const canvasW = Math.round(bleedW * DPI);
+    const canvasH = Math.round(bleedH * DPI);
+    const ed = effectiveDims; // art dims after rotation
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({
+      orientation: bleedW > bleedH ? "landscape" : "portrait",
+      unit: "in",
+      format: [bleedW, bleedH],
+    });
+
+    const pageSources = displayPages || effectivePages;
+    const totalPages = pageSources.length;
+
+    for (let i = 0; i < totalPages; i++) {
+      if (i > 0) pdf.addPage([bleedW, bleedH], bleedW > bleedH ? "landscape" : "portrait");
+      if (onPageProgress) onPageProgress(i + 1, totalPages);
+
+      const page = pageSources[i];
+      if (page.isBlank) continue; // leave blank pages empty
+
+      const c = document.createElement("canvas");
+      c.width = canvasW;
+      c.height = canvasH;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvasW, canvasH);
+
+      // Render the source image onto a temp canvas first
+      let srcCanvas;
+      if (pdfDocRef.current && artDims?.source === "pdf") {
+        // PDF: render the page from the original PDF at 300 DPI
+        const pdfPageNum = i + 1;
+        if (pdfPageNum <= pdfDocRef.current.numPages) {
+          const pg = await pdfDocRef.current.getPage(pdfPageNum);
+          const baseVp = pg.getViewport({ scale: 1 });
+          // Scale to get 300 DPI: target px / pdf points
+          const pdfScale = (DPI / 72);
+          const vp = pg.getViewport({ scale: pdfScale });
+          srcCanvas = document.createElement("canvas");
+          srcCanvas.width = Math.round(vp.width);
+          srcCanvas.height = Math.round(vp.height);
+          await pg.render({ canvasContext: srcCanvas.getContext("2d"), viewport: vp }).promise;
+
+          // Apply rotation if needed
+          if (rotateSteps > 0) {
+            const s = ((rotateSteps % 4) + 4) % 4;
+            const swap = s % 2 === 1;
+            const rc = document.createElement("canvas");
+            rc.width = swap ? srcCanvas.height : srcCanvas.width;
+            rc.height = swap ? srcCanvas.width : srcCanvas.height;
+            const rctx = rc.getContext("2d");
+            rctx.translate(rc.width / 2, rc.height / 2);
+            rctx.rotate((s * Math.PI) / 2);
+            rctx.drawImage(srcCanvas, -srcCanvas.width / 2, -srcCanvas.height / 2);
+            srcCanvas = rc;
+          }
+        }
+      }
+
+      if (!srcCanvas && !page.isBlank) {
+        // Image source: load from dataUrl
+        srcCanvas = await new Promise(resolve => {
+          const img = new Image();
+          img.onload = () => {
+            const tc = document.createElement("canvas");
+            tc.width = img.naturalWidth;
+            tc.height = img.naturalHeight;
+            tc.getContext("2d").drawImage(img, 0, 0);
+            resolve(tc);
+          };
+          img.src = page.dataUrl;
+        });
+      }
+
+      if (!srcCanvas) continue;
+
+      // Position art on the bleed-inclusive canvas using the active fit mode
+      const srcW = srcCanvas.width;
+      const srcH = srcCanvas.height;
+
+      if (fitMode === "crop" || fitMode === "scale") {
+        // Native size (crop) or scaled native size
+        const mult = fitMode === "scale" ? artScale / 100 : 1;
+        const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
+        const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
+        const drawW = canvasW * nativeW;
+        const drawH = canvasH * nativeH;
+        const dx = (canvasW - drawW) / 2;
+        const dy = (canvasH - drawH) / 2;
+        ctx.drawImage(srcCanvas, dx, dy, drawW, drawH);
+      } else if (fitMode === "cover") {
+        // Fill: cover the entire canvas, crop overflow
+        const scaleX = canvasW / srcW;
+        const scaleY = canvasH / srcH;
+        const sc = Math.max(scaleX, scaleY);
+        const drawW = srcW * sc;
+        const drawH = srcH * sc;
+        ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+      } else {
+        // Fit (contain): fit within canvas, letterbox
+        const scaleX = canvasW / srcW;
+        const scaleY = canvasH / srcH;
+        const sc = Math.min(scaleX, scaleY);
+        const drawW = srcW * sc;
+        const drawH = srcH * sc;
+        ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+      }
+
+      // Add page image to PDF
+      const jpegUrl = c.toDataURL("image/jpeg", 0.95);
+      pdf.addImage(jpegUrl, "JPEG", 0, 0, bleedW, bleedH);
+    }
+
+    return pdf.output("blob");
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -1828,7 +1966,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       // Pass raw file up for order submission
       if (onArtwork) onArtwork({ type: "files", list: [fileList[0]] });
       setSlotsOpen(true);
-      setArtApproved(false);
+      setArtApproved(false); setPrintReadyBlob(null);
     } catch (err) { console.error("Extraction error:", err); }
     setLoading(false); setLoadingProgress(null);
   }
@@ -1848,7 +1986,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     setRawPages([]); setFileName(""); setUploadPageCount(0);
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
     setRotatedCache({ key: "", pages: [] }); setRotateSteps(0);
-    setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false);
+    setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setPrintReadyBlob(null);
     pdfDocRef.current = null;
     slotFilesRef.current = {};
     if (onArtwork) onArtwork({ type: "none" });
@@ -2066,7 +2204,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               </div>
             </div>
             <div style={{ display:"flex", gap:4 }}>
-              <button type="button" onClick={() => setArtApproved(false)} style={{
+              <button type="button" onClick={() => { setArtApproved(false); setPrintReadyBlob(null); }} style={{
                 padding:"3px 10px", fontSize:10, fontWeight:600, borderRadius:4, cursor:"pointer", fontFamily:"inherit",
                 border:"1px solid #86efac", background:"#fff", color:"#16a34a",
               }}>Review</button>
@@ -2224,14 +2362,29 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               <div style={{ width:"100%", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
                 <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", justifyContent:"space-between" }}>
                   <div style={{ display:"flex", borderRadius:6, border: artApproved && proof===0 ? "2px solid #22c55e" : "2px solid #ef4444", boxShadow: artApproved && proof===0 ? "0 2px 10px rgba(34,197,94,.3)" : "0 2px 10px rgba(239,68,68,.2)" }}>
-                    <button type="button" onClick={() => { if(proof===0 && !artApproved){ setArtApproved(true); } else if(proof!==0){ setProof(0); } }} style={{
+                    <button type="button" disabled={generatingPdf} onClick={async () => {
+                      if (proof===0 && !artApproved) {
+                        setGeneratingPdf(true);
+                        try {
+                          const blob = await generatePrintReadyPDF();
+                          setPrintReadyBlob(blob);
+                          setArtApproved(true);
+                          // Notify parent with the print-ready file
+                          if (onArtwork) {
+                            const file = new File([blob], (fileName || "artwork").replace(/\.[^.]+$/, "") + "_print-ready.pdf", { type: "application/pdf" });
+                            onArtwork({ type: "files", list: [file] });
+                          }
+                        } catch (err) { console.error("Print-ready PDF generation failed:", err); alert("Failed to generate print-ready PDF: " + err.message); }
+                        setGeneratingPdf(false);
+                      } else if (proof!==0) { setProof(0); }
+                    }} style={{
                       padding:"8px 18px", fontSize:12, fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em",
                       background: artApproved && proof===0
                         ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
                         : proof===0 ? "rgba(255,255,255,.04)" : "rgba(255,255,255,.04)",
                       color: artApproved && proof===0 ? "#fff" : proof===0 ? "#ef4444" : "rgba(255,255,255,.3)",
                       borderRight:"1px solid rgba(255,255,255,.08)",
-                    }}>{artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
+                    }}>{generatingPdf ? "Generating PDF…" : artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
                     <button type="button" onClick={() => setProof(0.01)} style={{
                       padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
                       background: proof===0.01 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 40%, #60a5fa 50%, #2563eb 60%, #1d4ed8 100%)" : "rgba(255,255,255,.04)",
@@ -2243,7 +2396,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                       color: proof>=3 ? "#000" : "rgba(255,255,255,.4)",
                     }}>Hardcopy Proof</button>
                   </div>
-                  {/* FitToggle hidden until Phase 2: server-side print-ready rendering */}
+                  <FitToggle dark />
                 </div>
                 <div style={{ fontSize:10, color:"rgba(255,255,255,.45)", marginTop:6, lineHeight:1.4 }}>
                   {proof === 0 && !artApproved && "Review each page, then click Approve Now to confirm your artwork is print-ready. Your approval means we print exactly what you see."}
@@ -2251,6 +2404,22 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
                   {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
                 </div>
+                {artApproved && printReadyBlob && (
+                  <div style={{ marginTop:6 }}>
+                    <button type="button" onClick={() => {
+                      const url = URL.createObjectURL(printReadyBlob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = (fileName || "artwork").replace(/\.[^.]+$/, "") + "_print-ready.pdf";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }} style={{
+                      padding:"6px 14px", fontSize:11, fontWeight:700, border:"1px solid rgba(34,197,94,.4)",
+                      borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(34,197,94,.1)",
+                      color:"#4ade80", letterSpacing:".03em",
+                    }}>⬇ Download Print-Ready PDF</button>
+                  </div>
+                )}
               </div>
             </div>
             {!artApproved && proof === 0 && (
