@@ -424,9 +424,9 @@ function calculate(c) {
   const P={};
   P.insidePrint=c.insideColor==="bw"?((PCF.printing_black_cost*2)*tS)*mk:(((PCF.printing_black_cost*2)*tS)*mk)+((PCF.printing_fullcolor_cost*2)*tS);
   P.coverPrint=c.coverColor==="bw"?((PCF.printing_black_cost*tS)*2)/imp:((PCF.printing_fullcolor_cost*tS)*2)/imp;
-  const lowYield = imp < 1; // oversize: sheet yield < 1, paper cost multiplier applies
-  P.insidePaper=(c.insidePaper.price*tS)*mk*(lowYield?1.75:1);
-  P.coverPaper=((cvr.price*tQ)/imp)*mk*(lowYield?1.75:1);
+  const lowYield = imp < 1; // signature exceeds 19×13 parent sheet
+  P.insidePaper=lowYield?((c.insidePaper.price*tS)*mk)/imp:(c.insidePaper.price*tS)*mk;
+  P.coverPaper=lowYield?(((cvr.price*tQ)/imp)*mk)/imp:((cvr.price*tQ)/imp)*mk;
   P.press=(tS/PCF.press_printsperhour)*PCF.labor_press_hr;
   P.cutting=((tS*imp)/PCF.cutter_sheetsperhour)*(PCF.labor_cutting_hr+mk)+PCF.cutterbasefee;
   P.scoreCover=cvrScoring?(tQ/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
@@ -594,7 +594,7 @@ function calculate(c) {
     easySize,
     commonSize,
     lowYield,
-    lowYieldMult: lowYield ? 1.75 : 1,
+    lowYieldPenalty: lowYield ? `÷${imp} (paper/yield)` : "none",
     // Two staple
     twoStapleMode:twoAuto?"auto (no charge)":twoOptIn?"user opt-in (+charge)":"single staple",
     twoStapleApplied:twoApplied,
