@@ -1873,6 +1873,47 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       ctx.restore();
     }
 
+    // Draw template guide lines onto a preview canvas
+    function drawGuides(ctx, w, h, pageIdx) {
+      const trimX = (BLEED / bleedW) * w;
+      const trimY = (BLEED / bleedH) * h;
+      const safeX = ((BLEED + SAFETY) / bleedW) * w;
+      const safeY = ((BLEED + SAFETY) / bleedH) * h;
+      ctx.save();
+      ctx.lineWidth = Math.max(1, w / 400);
+
+      // Bleed line (red dashed) — at the container edge
+      ctx.strokeStyle = "#ef4444";
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(1, 1, w - 2, h - 2);
+
+      // Trim line (white dashed)
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(trimX, trimY, w - trimX * 2, h - trimY * 2);
+
+      // Safety line (green dashed)
+      ctx.strokeStyle = "#38a169";
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(safeX, safeY, w - safeX * 2, h - safeY * 2);
+
+      // Spine bar (blue) on binding edge
+      const spineX = pageIdx % 2 === 0 ? trimX : w - trimX - 3;
+      ctx.fillStyle = "#3b82f6";
+      ctx.setLineDash([]);
+      ctx.fillRect(spineX, trimY + h * 0.02, 3, h - trimY * 2 - h * 0.04);
+
+      // Labels
+      ctx.font = `bold ${Math.max(9, Math.round(w / 100))}px sans-serif`;
+      ctx.textAlign = "center";
+      const labelY = h - 6;
+      ctx.fillStyle = "#ef4444"; ctx.fillText("Bleed", w * 0.15, labelY);
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillText("Trim", w * 0.38, labelY);
+      ctx.fillStyle = "#38a169"; ctx.fillText("Safety", w * 0.62, labelY);
+      ctx.fillStyle = "#3b82f6"; ctx.fillText("Spine", w * 0.85, labelY);
+      ctx.restore();
+    }
+
     const pageSources = displayPages || effectivePages;
     const totalPages = pageSources.length;
 
