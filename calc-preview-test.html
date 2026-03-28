@@ -2511,21 +2511,27 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                 {artApproved && approvalPkg && (() => {
                   const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                   const dlFile = (blob, name) => {
+                    if (!blob) return;
                     const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a"); a.href = url; a.download = name; a.click();
-                    URL.revokeObjectURL(url);
+                    const a = document.createElement("a");
+                    a.href = url; a.download = name;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
                   };
-                  const dlAll = () => {
-                    // 1. Raw
-                    if (rawFileRef.current) dlFile(rawFileRef.current, rawFileRef.current.name || baseName + "_raw");
-                    // 2. Print-ready (only if transforms were applied)
-                    if (!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob) dlFile(approvalPkg.printReadyBlob, baseName + "_print-ready.pdf");
-                    // 3. Previews
+                  const dlAll = async () => {
+                    const files = [];
+                    if (rawFileRef.current) files.push([rawFileRef.current, rawFileRef.current.name || baseName + "_raw"]);
+                    if (!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob) files.push([approvalPkg.printReadyBlob, baseName + "_print-ready.pdf"]);
                     approvalPkg.previewBlobs.forEach((b, i) => {
-                      if (b) dlFile(b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`);
+                      if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
                     });
-                    // 4. Manifest
-                    if (approvalPkg.manifestBlob) dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt");
+                    if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
+                    for (let i = 0; i < files.length; i++) {
+                      dlFile(files[i][0], files[i][1]);
+                      if (i < files.length - 1) await new Promise(r => setTimeout(r, 500));
+                    }
                   };
                   const previewCount = approvalPkg.previewBlobs.filter(b => b).length;
                   return (
