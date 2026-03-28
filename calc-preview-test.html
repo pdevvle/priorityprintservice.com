@@ -2496,29 +2496,30 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
                         try {
                           const pkg = await generateApprovalPackage();
+                          if (!pkg || !pkg.manifestBlob) throw new Error("Package generation returned empty result");
                           setApprovalPkg(pkg);
                           setArtApproved(true);
                           // Send deliverables to parent
                           if (onArtwork) {
                             const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                             const files = [];
-                            // 1. Raw file (always)
                             if (rawFileRef.current) files.push(rawFileRef.current);
-                            // 2. Print-ready PDF (skip if generation was skipped — raw IS print-ready)
-                            if (!pkg.skippedGeneration) {
+                            if (!pkg.skippedGeneration && pkg.printReadyBlob) {
                               files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
                             }
-                            // 3. Screen previews as individual JPEGs
                             pkg.previewBlobs.forEach((b, i) => {
                               if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
                             });
-                            // 4. Manipulation manifest
                             files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
                             onArtwork({ type: "files", list: files });
                           }
-                        } catch (err) { console.error("Approval package generation failed:", err); alert("Failed to generate print-ready package: " + err.message); }
-                        setGeneratingPdf(false);
-                        setGenProgress(null);
+                        } catch (err) {
+                          console.error("Approval package generation failed:", err);
+                          alert("Failed to generate print-ready package: " + (err.message || err));
+                        } finally {
+                          setGeneratingPdf(false);
+                          setGenProgress(null);
+                        }
                       } else if (proof!==0) { setProof(0); }
                     }} style={{
                       padding:"8px 18px", fontSize:12, fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em",
@@ -2582,7 +2583,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   const previewCount = approvalPkg.previewBlobs.filter(b => b).length;
                   return (
                     <div style={{ marginTop:8, padding:"8px 12px", borderRadius:6, background:"rgba(34,197,94,.08)", border:"1px solid rgba(34,197,94,.2)" }}>
-                      <div style={{ fontSize:10, fontWeight:700, color:"#4ade80", marginBottom:6, letterSpacing:".04em" }}>TEST DOWNLOAD — APPROVAL PACKAGE</div>
+                      <div style={{ fontSize:10, fontWeight:700, color:"#4ade80", marginBottom:6, letterSpacing:".04em" }}>TEST DOWNLOAD — APPROVAL PACKAGE ({previewCount} previews{approvalPkg.skippedGeneration ? ", no transforms" : ", print-ready generated"})</div>
                       <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
                         <button type="button" onClick={dlAll} style={{
                           padding:"5px 12px", fontSize:10, fontWeight:700, border:"1px solid rgba(34,197,94,.5)",
