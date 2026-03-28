@@ -1518,144 +1518,146 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   }
 
   // ── Generate 4 deliverables on approval ──
-  // 1. Print-ready PDF (300 DPI, transforms baked in)
+  // 1. Print-ready PDF (300 DPI, transforms baked in) — or raw file if no transforms needed
   // 2. Screen preview images (what the customer saw, ~150 DPI JPEGs)
   // 3. Manipulation manifest (text describing all transforms)
   // 4. Raw file is already in rawFileRef
-  // Returns { printReadyBlob, previewBlobs[], manifestBlob }
+  // Returns { printReadyBlob, previewBlobs[], manifestBlob, skippedGeneration }
   async function generateApprovalPackage() {
     const BLEED = 0.125;
     const bleedW = dims.w + BLEED * 2;
     const bleedH = dims.h + BLEED * 2;
     const DPI = 300;
-    const PREVIEW_DPI = 150;
     const canvasW = Math.round(bleedW * DPI);
     const canvasH = Math.round(bleedH * DPI);
-    const prevW = Math.round(bleedW * PREVIEW_DPI);
-    const prevH = Math.round(bleedH * PREVIEW_DPI);
     const ed = effectiveDims; // art dims after rotation
-
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({
-      orientation: bleedW > bleedH ? "landscape" : "portrait",
-      unit: "in",
-      format: [bleedW, bleedH],
-    });
 
     const pageSources = displayPages || effectivePages;
     const totalPages = pageSources.length;
+
+    // ── Skip generation when raw file is already print-ready ──
+    // Conditions: crop mode, no rotation, art matches bleed size (within 0.25" tolerance)
+    const artMatchesBleed = ed && Math.abs(ed.wIn - bleedW) < 0.25 && Math.abs(ed.hIn - bleedH) < 0.25;
+    const noTransforms = fitMode === "crop" && rotateSteps === 0 && artMatchesBleed;
+    const isSourcePdf = artDims?.source === "pdf";
+
+    let printReadyBlob = null;
     const previewBlobs = [];
 
-    // Helper: render source art for a page at a given target size, applying rotation
-    async function renderSource(pageIdx, targetW, targetH) {
-      const page = pageSources[pageIdx];
-      if (page.isBlank) return null;
-
-      let srcCanvas;
-      if (pdfDocRef.current && artDims?.source === "pdf") {
-        const pdfPageNum = pageIdx + 1;
-        if (pdfPageNum <= pdfDocRef.current.numPages) {
-          const pg = await pdfDocRef.current.getPage(pdfPageNum);
-          const pdfScale = (targetW / (pg.getViewport({ scale: 1 }).width * (bleedW / (artDims.wPx / 72)))) || (DPI / 72);
-          // Use consistent DPI-based scale for quality
-          const vp = pg.getViewport({ scale: targetW === canvasW ? DPI / 72 : PREVIEW_DPI / 72 });
-          srcCanvas = document.createElement("canvas");
-          srcCanvas.width = Math.round(vp.width);
-          srcCanvas.height = Math.round(vp.height);
-          await pg.render({ canvasContext: srcCanvas.getContext("2d"), viewport: vp }).promise;
-
-          if (rotateSteps > 0) {
-            const s = ((rotateSteps % 4) + 4) % 4;
-            const swap = s % 2 === 1;
-            const rc = document.createElement("canvas");
-            rc.width = swap ? srcCanvas.height : srcCanvas.width;
-            rc.height = swap ? srcCanvas.width : srcCanvas.height;
-            const rctx = rc.getContext("2d");
-            rctx.translate(rc.width / 2, rc.height / 2);
-            rctx.rotate((s * Math.PI) / 2);
-            rctx.drawImage(srcCanvas, -srcCanvas.width / 2, -srcCanvas.height / 2);
-            srcCanvas = rc;
-          }
-        }
-      }
-
-      if (!srcCanvas) {
-        srcCanvas = await new Promise(resolve => {
+    if (noTransforms && isSourcePdf && rawFileRef.current) {
+      // Raw PDF is already print-ready — skip rasterization to preserve vector quality
+      printReadyBlob = rawFileRef.current; // File object, not Blob, but works the same
+      // Still generate preview images from the display pages
+      for (let i = 0; i < totalPages; i++) {
+        setGenProgress({ step: "previews", page: i + 1, totalPages });
+        const page = pageSources[i];
+        if (page.isBlank) { previewBlobs.push(null); continue; }
+        // Use the existing thumbnail dataUrl (already rendered at 1.5x by extractPdfPages)
+        const blob = await new Promise(resolve => {
           const img = new Image();
           img.onload = () => {
-            const tc = document.createElement("canvas");
-            tc.width = img.naturalWidth;
-            tc.height = img.naturalHeight;
-            tc.getContext("2d").drawImage(img, 0, 0);
-            resolve(tc);
+            const pc = document.createElement("canvas");
+            pc.width = img.naturalWidth; pc.height = img.naturalHeight;
+            pc.getContext("2d").drawImage(img, 0, 0);
+            pc.toBlob(resolve, "image/jpeg", 0.85);
           };
           img.src = page.dataUrl;
         });
+        previewBlobs.push(blob);
       }
-      return srcCanvas;
-    }
+    } else {
+      // ── Full generation: render each page with transforms ──
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({
+        orientation: bleedW > bleedH ? "landscape" : "portrait",
+        unit: "in",
+        format: [bleedW, bleedH],
+      });
 
-    // Helper: draw source onto target canvas using active fit mode
-    function drawFitted(ctx, srcCanvas, tw, th) {
-      const srcW = srcCanvas.width, srcH = srcCanvas.height;
-      if (fitMode === "crop" || fitMode === "scale") {
-        const mult = fitMode === "scale" ? artScale / 100 : 1;
-        const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
-        const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
-        const drawW = tw * nativeW, drawH = th * nativeH;
-        ctx.drawImage(srcCanvas, (tw - drawW) / 2, (th - drawH) / 2, drawW, drawH);
-      } else if (fitMode === "cover") {
-        const sc = Math.max(tw / srcW, th / srcH);
-        const drawW = srcW * sc, drawH = srcH * sc;
-        ctx.drawImage(srcCanvas, (tw - drawW) / 2, (th - drawH) / 2, drawW, drawH);
-      } else {
-        const sc = Math.min(tw / srcW, th / srcH);
-        const drawW = srcW * sc, drawH = srcH * sc;
-        ctx.drawImage(srcCanvas, (tw - drawW) / 2, (th - drawH) / 2, drawW, drawH);
-      }
-    }
+      for (let i = 0; i < totalPages; i++) {
+        if (i > 0) pdf.addPage([bleedW, bleedH], bleedW > bleedH ? "landscape" : "portrait");
+        setGenProgress({ step: "print-ready", page: i + 1, totalPages });
 
-    for (let i = 0; i < totalPages; i++) {
-      if (i > 0) pdf.addPage([bleedW, bleedH], bleedW > bleedH ? "landscape" : "portrait");
-      setGenProgress({ step: "print-ready", page: i + 1, totalPages });
+        const page = pageSources[i];
+        if (page.isBlank) { previewBlobs.push(null); continue; }
 
-      const page = pageSources[i];
-      if (page.isBlank) {
-        // Blank page — white in print PDF, simple marker for preview
-        previewBlobs.push(null);
-        continue;
-      }
+        // Render source at 300 DPI
+        let srcCanvas = null;
+        if (pdfDocRef.current && isSourcePdf) {
+          const pdfPageNum = i + 1;
+          if (pdfPageNum <= pdfDocRef.current.numPages) {
+            const pg = await pdfDocRef.current.getPage(pdfPageNum);
+            const vp = pg.getViewport({ scale: DPI / 72 });
+            srcCanvas = document.createElement("canvas");
+            srcCanvas.width = Math.round(vp.width);
+            srcCanvas.height = Math.round(vp.height);
+            await pg.render({ canvasContext: srcCanvas.getContext("2d"), viewport: vp }).promise;
 
-      // ── Print-ready (300 DPI) ──
-      const srcHi = await renderSource(i, canvasW, canvasH);
-      if (srcHi) {
+            if (rotateSteps > 0) {
+              const s = ((rotateSteps % 4) + 4) % 4;
+              const swap = s % 2 === 1;
+              const rc = document.createElement("canvas");
+              rc.width = swap ? srcCanvas.height : srcCanvas.width;
+              rc.height = swap ? srcCanvas.width : srcCanvas.height;
+              const rctx = rc.getContext("2d");
+              rctx.translate(rc.width / 2, rc.height / 2);
+              rctx.rotate((s * Math.PI) / 2);
+              rctx.drawImage(srcCanvas, -srcCanvas.width / 2, -srcCanvas.height / 2);
+              srcCanvas = rc;
+            }
+          }
+        }
+        if (!srcCanvas) {
+          srcCanvas = await new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => {
+              const tc = document.createElement("canvas");
+              tc.width = img.naturalWidth; tc.height = img.naturalHeight;
+              tc.getContext("2d").drawImage(img, 0, 0);
+              resolve(tc);
+            };
+            img.src = page.dataUrl;
+          });
+        }
+        if (!srcCanvas) continue;
+
+        // Draw onto print-ready canvas with fit mode
         const c = document.createElement("canvas");
         c.width = canvasW; c.height = canvasH;
         const ctx = c.getContext("2d");
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, canvasW, canvasH);
-        drawFitted(ctx, srcHi, canvasW, canvasH);
-        pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, bleedW, bleedH);
-      }
 
-      // ── Screen preview (150 DPI) ──
-      setGenProgress({ step: "previews", page: i + 1, totalPages });
-      const srcLo = await renderSource(i, prevW, prevH);
-      if (srcLo) {
+        const srcW = srcCanvas.width, srcH = srcCanvas.height;
+        if (fitMode === "crop" || fitMode === "scale") {
+          const mult = fitMode === "scale" ? artScale / 100 : 1;
+          const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
+          const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
+          const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
+          ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+        } else if (fitMode === "cover") {
+          const sc = Math.max(canvasW / srcW, canvasH / srcH);
+          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+        } else {
+          const sc = Math.min(canvasW / srcW, canvasH / srcH);
+          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+        }
+
+        pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, bleedW, bleedH);
+
+        // Downscale the same 300 DPI canvas for preview (no second render)
+        setGenProgress({ step: "previews", page: i + 1, totalPages });
+        const prevW = Math.round(bleedW * 150);
+        const prevH = Math.round(bleedH * 150);
         const pc = document.createElement("canvas");
         pc.width = prevW; pc.height = prevH;
-        const pctx = pc.getContext("2d");
-        pctx.fillStyle = "#fff";
-        pctx.fillRect(0, 0, prevW, prevH);
-        drawFitted(pctx, srcLo, prevW, prevH);
-        const blob = await new Promise(res => pc.toBlob(res, "image/jpeg", 0.85));
-        previewBlobs.push(blob);
-      } else {
-        previewBlobs.push(null);
+        pc.getContext("2d").drawImage(c, 0, 0, prevW, prevH);
+        const prevBlob = await new Promise(res => pc.toBlob(res, "image/jpeg", 0.85));
+        previewBlobs.push(prevBlob);
       }
-    }
 
-    const printReadyBlob = pdf.output("blob");
+      printReadyBlob = pdf.output("blob");
+    }
 
     // ── Manipulation manifest ──
     setGenProgress({ step: "manifest", page: totalPages, totalPages });
@@ -1690,8 +1692,10 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       "",
       "── Deliverables ──",
       `1. Raw file: ${fileName || "original upload"} (unmodified customer upload)`,
-      `2. Print-ready PDF: ${totalPages} pages at ${DPI} DPI, ${bleedW}″ × ${bleedH}″, JPEG quality 0.95`,
-      `3. Screen previews: ${previewBlobs.filter(b => b).length} page images at ${PREVIEW_DPI} DPI, JPEG quality 0.85`,
+      noTransforms
+        ? `2. Print-ready PDF: SKIPPED — raw file is already print-ready (no transforms applied, art matches bleed size)`
+        : `2. Print-ready PDF: ${totalPages} pages at ${DPI} DPI, ${bleedW}″ × ${bleedH}″, JPEG quality 0.95`,
+      `3. Screen previews: ${previewBlobs.filter(b => b).length} page images at 150 DPI, JPEG quality 0.85`,
       `4. This manifest`,
       "",
       "── Per-Page Detail ──",
@@ -1700,6 +1704,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       manifestLines.push(`  Page ${i + 1}: ${p.label}${p.isBlank ? " (blank — no art)" : ""}`);
     });
     manifestLines.push("", "── Notes ──");
+    if (noTransforms) manifestLines.push("No customer transforms were applied. The raw uploaded file is print-ready as-is — no rasterized print PDF was generated, preserving original vector/quality.");
     if (rotateSteps > 0) manifestLines.push(`Art was rotated ${rotateSteps * 90}° clockwise by the customer to match booklet orientation.`);
     if (fitMode === "crop" && effectiveDims) {
       const coverageW = (effectiveDims.wIn / bleedW * 100).toFixed(1);
@@ -1713,7 +1718,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
-    return { printReadyBlob, previewBlobs, manifestBlob };
+    return { printReadyBlob, previewBlobs, manifestBlob, skippedGeneration: noTransforms };
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -2447,14 +2452,16 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           const pkg = await generateApprovalPackage();
                           setPrintReadyBlob(pkg.printReadyBlob);
                           setArtApproved(true);
-                          // Send all 4 deliverables to parent
+                          // Send deliverables to parent
                           if (onArtwork) {
                             const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                             const files = [];
-                            // 1. Raw file
+                            // 1. Raw file (always)
                             if (rawFileRef.current) files.push(rawFileRef.current);
-                            // 2. Print-ready PDF
-                            files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
+                            // 2. Print-ready PDF (skip if generation was skipped — raw IS print-ready)
+                            if (!pkg.skippedGeneration) {
+                              files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
+                            }
                             // 3. Screen previews as individual JPEGs
                             pkg.previewBlobs.forEach((b, i) => {
                               if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
