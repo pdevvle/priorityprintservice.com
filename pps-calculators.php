@@ -1236,3 +1236,206 @@ add_action( 'rest_api_init', function() {
     ) );
 
 } );
+
+// ═══════════════════════════════════════════════════════════════
+// SEO: JSON-LD SCHEMAS, NOSCRIPT FALLBACK, LLMS.TXT
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Inject structured data schemas on calculator product pages.
+ * Runs via wp_head so schemas appear before page content.
+ */
+add_action( 'wp_head', function() {
+    if ( ! is_product() ) return;
+    global $product;
+    if ( ! $product ) return;
+    $product_id = $product->get_id();
+    if ( ! pps_get_calculator_for_product( $product_id ) ) return;
+
+    $site_url    = home_url( '/' );
+    $product_url = get_permalink( $product_id );
+    $product_img = wp_get_attachment_url( $product->get_image_id() ) ?: '';
+    $product_name = $product->get_name();
+    $config      = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+
+    // ── Product + AggregateOffer ──
+    $product_schema = array(
+        '@context'    => 'https://schema.org',
+        '@type'       => 'Product',
+        'name'        => $product_name,
+        'description' => 'Custom printed saddle-stitched booklets with full color or greyscale printing, multiple paper options, and finishing services including UV coating, round cornering, and bundling.',
+        'brand'       => array( '@type' => 'Brand', 'name' => get_bloginfo( 'name' ) ),
+        'category'    => 'Printing Services > Booklets',
+        'image'       => $product_img,
+        'url'         => $product_url,
+        'offers'      => array(
+            '@type'           => 'AggregateOffer',
+            'priceCurrency'   => get_woocommerce_currency(),
+            'lowPrice'        => '50',
+            'highPrice'       => '5000',
+            'offerCount'      => '1',
+            'availability'    => 'https://schema.org/InStock',
+            'priceValidUntil' => date( 'Y-12-31', strtotime( '+1 year' ) ),
+            'seller'          => array( '@type' => 'Organization', 'name' => get_bloginfo( 'name' ) ),
+        ),
+        'additionalProperty' => array(
+            array( '@type' => 'PropertyValue', 'name' => 'Binding', 'value' => 'Saddle Stitch (Stapled)' ),
+            array( '@type' => 'PropertyValue', 'name' => 'Page Count', 'value' => '8 to 64 pages' ),
+            array( '@type' => 'PropertyValue', 'name' => 'Minimum Quantity', 'value' => '1' ),
+            array( '@type' => 'PropertyValue', 'name' => 'Turnaround', 'value' => ( $config['minimum_turnaround_days'] ?? 3 ) . '+ business days' ),
+        ),
+    );
+    echo '<script type="application/ld+json" id="pps-schema-product">' . wp_json_encode( $product_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+
+    // ── LocalBusiness ──
+    $seo = $config['seo'] ?? array();
+    $business_schema = array(
+        '@context'       => 'https://schema.org',
+        '@type'          => 'LocalBusiness',
+        'additionalType' => 'https://schema.org/ProfessionalService',
+        'name'           => get_bloginfo( 'name' ),
+        'description'    => 'Full-service commercial print shop specializing in saddle-stitch booklets, brochures, and custom printing with fast turnaround.',
+        'url'            => $site_url,
+        'telephone'      => $seo['phone'] ?? '',
+        'email'          => $seo['email'] ?? get_option( 'admin_email' ),
+        'address'        => array(
+            '@type'           => 'PostalAddress',
+            'streetAddress'   => $seo['street'] ?? '',
+            'addressLocality' => $seo['city'] ?? 'Phoenix',
+            'addressRegion'   => $seo['state'] ?? 'AZ',
+            'postalCode'      => $seo['zip'] ?? '85027',
+            'addressCountry'  => 'US',
+        ),
+        'priceRange'  => '$$',
+        'areaServed'  => array( '@type' => 'Country', 'name' => 'United States' ),
+        'knowsAbout'  => array( 'Saddle Stitch Booklets', 'Digital Printing', 'Offset Printing', 'UV Coating', 'Booklet Binding' ),
+    );
+    if ( ! empty( $seo['lat'] ) && ! empty( $seo['lng'] ) ) {
+        $business_schema['geo'] = array( '@type' => 'GeoCoordinates', 'latitude' => $seo['lat'], 'longitude' => $seo['lng'] );
+    }
+    echo '<script type="application/ld+json" id="pps-schema-business">' . wp_json_encode( $business_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+
+    // ── FAQPage ──
+    $faq_schema = array(
+        '@context'   => 'https://schema.org',
+        '@type'      => 'FAQPage',
+        'mainEntity' => array(
+            array( '@type' => 'Question', 'name' => 'What is saddle stitch booklet binding?',
+                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'Saddle stitch binding uses staples along the spine fold to hold pages together. It\'s the most cost-effective binding method for booklets up to 64 pages.' ) ),
+            array( '@type' => 'Question', 'name' => 'What is the minimum page count for a saddle stitch booklet?',
+                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'The minimum page count is 8 pages (including the cover). Page counts must be in multiples of 4 since each sheet creates 4 pages when folded.' ) ),
+            array( '@type' => 'Question', 'name' => 'What paper options are available?',
+                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'We offer text weight papers (70lb Uncoated, 80lb Matte, 100lb Gloss) and cardstock options (80lb through 18pt) for both inside pages and covers. Cardstock insides are available for booklets of 24 pages or less.' ) ),
+            array( '@type' => 'Question', 'name' => 'What is the turnaround time for booklet printing?',
+                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'Minimum turnaround is ' . intval( $config['minimum_turnaround_days'] ?? 3 ) . ' business days. Turnaround varies based on quantity, paper selection, and finishing options. Rush options are available.' ) ),
+            array( '@type' => 'Question', 'name' => 'What sizes of booklets can you print?',
+                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'We print standard sizes from 3.5x5.5 up to 12x9, including square formats (4x4 through 12x12) and landscape orientations. Custom sizes are also available.' ) ),
+            array( '@type' => 'Question', 'name' => 'Do I need to add bleeds to my artwork?',
+                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'For edge-to-edge printing, artwork should include 0.125 inch (1/8") bleed on all sides. If your artwork doesn\'t have bleeds, we offer a bleed setup service.' ) ),
+            array( '@type' => 'Question', 'name' => 'What finishing options are available?',
+                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'Available options include UV Gloss or UV Matte coating on covers, round cornering, bundling in groups of 25/50/100, two-staple binding, and enhanced vivid quality printing.' ) ),
+        ),
+    );
+    echo '<script type="application/ld+json" id="pps-schema-faq">' . wp_json_encode( $faq_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+
+    // ── WebApplication ──
+    $webapp_schema = array(
+        '@context'            => 'https://schema.org',
+        '@type'               => 'WebApplication',
+        'name'                => $product_name . ' Price Calculator',
+        'description'         => 'Instant online pricing calculator for custom saddle-stitched booklets. Configure size, paper, quantity, and finishing options for a real-time quote.',
+        'url'                 => $product_url,
+        'applicationCategory' => 'BusinessApplication',
+        'operatingSystem'     => 'Any',
+        'browserRequirements' => 'Requires JavaScript',
+        'offers'              => array( '@type' => 'Offer', 'price' => '0', 'priceCurrency' => get_woocommerce_currency(), 'description' => 'Free to use' ),
+        'creator'             => array( '@type' => 'Organization', 'name' => get_bloginfo( 'name' ) ),
+    );
+    echo '<script type="application/ld+json" id="pps-schema-webapp">' . wp_json_encode( $webapp_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+}, 5 );
+
+/**
+ * Noscript fallback — static HTML for crawlers that don't render JS.
+ */
+add_action( 'woocommerce_after_single_product_summary', function() {
+    global $product;
+    if ( ! $product ) return;
+    if ( ! pps_get_calculator_for_product( $product->get_id() ) ) return;
+
+    $config   = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    $min_days = intval( $config['minimum_turnaround_days'] ?? 3 );
+    $email    = esc_html( get_option( 'admin_email' ) );
+    $name     = esc_html( get_bloginfo( 'name' ) );
+    ?>
+    <noscript>
+    <div style="max-width:800px;margin:40px auto;padding:20px;font-family:sans-serif;color:#333">
+        <h1>Custom Saddle Stitch Booklet Printing</h1>
+        <p>Order custom saddle-stitched booklets from <?php echo $name; ?>.
+        Configure size, paper, quantity, and finishing options for an instant quote.</p>
+        <h2>Available Sizes</h2>
+        <ul>
+            <li>3.5&times;5.5, 4&times;6, 4.25&times;5.5, 5&times;7</li>
+            <li>5.5&times;8.5 (most popular), 6&times;9, 8.5&times;11, 9&times;12</li>
+            <li>Square: 4&times;4 through 12&times;12</li>
+            <li>Landscape formats &amp; custom sizes (2.5&Prime;&ndash;13.5&Prime;)</li>
+        </ul>
+        <h2>Paper Options</h2>
+        <p><strong>Text weight:</strong> 70lb Uncoated, 80lb Matte, 100lb Gloss, factory-coated options.<br>
+        <strong>Cardstock:</strong> 80lb&ndash;18pt (covers always, insides up to 24 pages).</p>
+        <h2>Finishing</h2>
+        <p>UV Gloss/Matte coating, round cornering, bundling (25/50/100), two-staple binding, vivid printing.</p>
+        <h2>Turnaround</h2>
+        <p>Minimum <?php echo $min_days; ?> business days. Free ground shipping US-wide. Rush available.</p>
+        <h2>Artwork</h2>
+        <p>Upload PDF or images. Built-in proof tool with bleed, trim, and safety guides.</p>
+        <p><strong>Enable JavaScript for the interactive price calculator.</strong></p>
+        <p>Contact: <a href="mailto:<?php echo esc_attr( get_option( 'admin_email' ) ); ?>"><?php echo $email; ?></a></p>
+    </div>
+    </noscript>
+    <?php
+}, 25 );
+
+/**
+ * llms.txt — AI search engine content descriptor at /llms.txt
+ */
+add_action( 'init', function() {
+    add_rewrite_rule( '^llms\.txt$', 'index.php?pps_llms_txt=1', 'top' );
+} );
+add_filter( 'query_vars', function( $vars ) {
+    $vars[] = 'pps_llms_txt';
+    return $vars;
+} );
+add_action( 'template_redirect', function() {
+    if ( ! get_query_var( 'pps_llms_txt' ) ) return;
+
+    $name     = get_bloginfo( 'name' );
+    $url      = home_url( '/' );
+    $config   = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    $min_days = intval( $config['minimum_turnaround_days'] ?? 3 );
+    $email    = get_option( 'admin_email' );
+
+    header( 'Content-Type: text/plain; charset=utf-8' );
+    header( 'Cache-Control: public, max-age=86400' );
+
+    echo "# {$name}\n";
+    echo "> Full-service commercial print shop in Phoenix, AZ specializing in custom saddle-stitch booklet printing with online instant pricing.\n\n";
+    echo "## Services\n";
+    echo "- Custom saddle-stitch (stapled) booklet printing\n";
+    echo "- Full color and greyscale digital printing\n";
+    echo "- Paper stocks: text weight (70lb-100lb) and cardstock (80lb-18pt)\n";
+    echo "- UV Gloss and UV Matte cover coating\n";
+    echo "- Round cornering, bundling, two-staple binding\n";
+    echo "- Professional prepress artwork review\n";
+    echo "- Nationwide shipping (UPS Ground, overnight available)\n\n";
+    echo "## Saddle Stitch Booklets\n";
+    echo "- Page counts: 8 to 64 pages (multiples of 4)\n";
+    echo "- Sizes: 3.5x5.5 through 12x9, square 4x4-12x12, landscape, custom\n";
+    echo "- Minimum quantity: 1 | Minimum turnaround: {$min_days} business days\n";
+    echo "- Instant online pricing calculator available\n";
+    echo "- Upload artwork with built-in bleed/trim/safety proof tool\n\n";
+    echo "## Contact\n";
+    echo "- Website: {$url}\n";
+    echo "- Email: {$email}\n";
+
+    exit;
+} );
