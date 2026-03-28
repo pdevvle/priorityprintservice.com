@@ -1431,10 +1431,12 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [hiResProof, setHiResProof] = useState(null); // {idx, dataUrl} — 300 DPI render of current proof page
   const pdfDocRef = useRef(null); // holds the pdf.js document for hi-res re-rendering
   const slotFilesRef = useRef({}); // { slotIndex: File } — original files for per-slot uploads
+  const rawFileRef = useRef(null); // holds the original uploaded File for the raw deliverable
   const fileInputRef = useRef(null);
   const dragRef = useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
   const [printReadyBlob, setPrintReadyBlob] = useState(null); // Blob of the print-ready PDF
   const [generatingPdf, setGeneratingPdf] = useState(false); // true while building print-ready PDF
+  const [genProgress, setGenProgress] = useState(null); // { step, page, totalPages } during generation
   const [rot, setRot] = useState({ x: -15, y: -25 });
   const expanded = activeModal !== null; // backward compat for useEffects
 
@@ -1515,17 +1517,22 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     });
   }
 
-  // ── Generate print-ready PDF with customer's transforms baked in ──
-  // Renders each page at 300 DPI onto bleed-inclusive canvas, applies rotation + crop/scale/fit.
-  // Returns a Blob. For PDFs, re-renders from pdfDocRef (vector quality at 300 DPI).
-  // For images, draws from the dataUrl at native resolution.
-  async function generatePrintReadyPDF(onPageProgress) {
+  // ── Generate 4 deliverables on approval ──
+  // 1. Print-ready PDF (300 DPI, transforms baked in)
+  // 2. Screen preview images (what the customer saw, ~150 DPI JPEGs)
+  // 3. Manipulation manifest (text describing all transforms)
+  // 4. Raw file is already in rawFileRef
+  // Returns { printReadyBlob, previewBlobs[], manifestBlob }
+  async function generateApprovalPackage() {
     const BLEED = 0.125;
     const bleedW = dims.w + BLEED * 2;
     const bleedH = dims.h + BLEED * 2;
     const DPI = 300;
+    const PREVIEW_DPI = 150;
     const canvasW = Math.round(bleedW * DPI);
     const canvasH = Math.round(bleedH * DPI);
+    const prevW = Math.round(bleedW * PREVIEW_DPI);
+    const prevH = Math.round(bleedH * PREVIEW_DPI);
     const ed = effectiveDims; // art dims after rotation
 
     const { jsPDF } = window.jspdf;
@@ -1537,38 +1544,26 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
     const pageSources = displayPages || effectivePages;
     const totalPages = pageSources.length;
+    const previewBlobs = [];
 
-    for (let i = 0; i < totalPages; i++) {
-      if (i > 0) pdf.addPage([bleedW, bleedH], bleedW > bleedH ? "landscape" : "portrait");
-      if (onPageProgress) onPageProgress(i + 1, totalPages);
+    // Helper: render source art for a page at a given target size, applying rotation
+    async function renderSource(pageIdx, targetW, targetH) {
+      const page = pageSources[pageIdx];
+      if (page.isBlank) return null;
 
-      const page = pageSources[i];
-      if (page.isBlank) continue; // leave blank pages empty
-
-      const c = document.createElement("canvas");
-      c.width = canvasW;
-      c.height = canvasH;
-      const ctx = c.getContext("2d");
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(0, 0, canvasW, canvasH);
-
-      // Render the source image onto a temp canvas first
       let srcCanvas;
       if (pdfDocRef.current && artDims?.source === "pdf") {
-        // PDF: render the page from the original PDF at 300 DPI
-        const pdfPageNum = i + 1;
+        const pdfPageNum = pageIdx + 1;
         if (pdfPageNum <= pdfDocRef.current.numPages) {
           const pg = await pdfDocRef.current.getPage(pdfPageNum);
-          const baseVp = pg.getViewport({ scale: 1 });
-          // Scale to get 300 DPI: target px / pdf points
-          const pdfScale = (DPI / 72);
-          const vp = pg.getViewport({ scale: pdfScale });
+          const pdfScale = (targetW / (pg.getViewport({ scale: 1 }).width * (bleedW / (artDims.wPx / 72)))) || (DPI / 72);
+          // Use consistent DPI-based scale for quality
+          const vp = pg.getViewport({ scale: targetW === canvasW ? DPI / 72 : PREVIEW_DPI / 72 });
           srcCanvas = document.createElement("canvas");
           srcCanvas.width = Math.round(vp.width);
           srcCanvas.height = Math.round(vp.height);
           await pg.render({ canvasContext: srcCanvas.getContext("2d"), viewport: vp }).promise;
 
-          // Apply rotation if needed
           if (rotateSteps > 0) {
             const s = ((rotateSteps % 4) + 4) % 4;
             const swap = s % 2 === 1;
@@ -1584,8 +1579,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         }
       }
 
-      if (!srcCanvas && !page.isBlank) {
-        // Image source: load from dataUrl
+      if (!srcCanvas) {
         srcCanvas = await new Promise(resolve => {
           const img = new Image();
           img.onload = () => {
@@ -1598,47 +1592,128 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
           img.src = page.dataUrl;
         });
       }
+      return srcCanvas;
+    }
 
-      if (!srcCanvas) continue;
-
-      // Position art on the bleed-inclusive canvas using the active fit mode
-      const srcW = srcCanvas.width;
-      const srcH = srcCanvas.height;
-
+    // Helper: draw source onto target canvas using active fit mode
+    function drawFitted(ctx, srcCanvas, tw, th) {
+      const srcW = srcCanvas.width, srcH = srcCanvas.height;
       if (fitMode === "crop" || fitMode === "scale") {
-        // Native size (crop) or scaled native size
         const mult = fitMode === "scale" ? artScale / 100 : 1;
         const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
         const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
-        const drawW = canvasW * nativeW;
-        const drawH = canvasH * nativeH;
-        const dx = (canvasW - drawW) / 2;
-        const dy = (canvasH - drawH) / 2;
-        ctx.drawImage(srcCanvas, dx, dy, drawW, drawH);
+        const drawW = tw * nativeW, drawH = th * nativeH;
+        ctx.drawImage(srcCanvas, (tw - drawW) / 2, (th - drawH) / 2, drawW, drawH);
       } else if (fitMode === "cover") {
-        // Fill: cover the entire canvas, crop overflow
-        const scaleX = canvasW / srcW;
-        const scaleY = canvasH / srcH;
-        const sc = Math.max(scaleX, scaleY);
-        const drawW = srcW * sc;
-        const drawH = srcH * sc;
-        ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+        const sc = Math.max(tw / srcW, th / srcH);
+        const drawW = srcW * sc, drawH = srcH * sc;
+        ctx.drawImage(srcCanvas, (tw - drawW) / 2, (th - drawH) / 2, drawW, drawH);
       } else {
-        // Fit (contain): fit within canvas, letterbox
-        const scaleX = canvasW / srcW;
-        const scaleY = canvasH / srcH;
-        const sc = Math.min(scaleX, scaleY);
-        const drawW = srcW * sc;
-        const drawH = srcH * sc;
-        ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+        const sc = Math.min(tw / srcW, th / srcH);
+        const drawW = srcW * sc, drawH = srcH * sc;
+        ctx.drawImage(srcCanvas, (tw - drawW) / 2, (th - drawH) / 2, drawW, drawH);
       }
-
-      // Add page image to PDF
-      const jpegUrl = c.toDataURL("image/jpeg", 0.95);
-      pdf.addImage(jpegUrl, "JPEG", 0, 0, bleedW, bleedH);
     }
 
-    return pdf.output("blob");
+    for (let i = 0; i < totalPages; i++) {
+      if (i > 0) pdf.addPage([bleedW, bleedH], bleedW > bleedH ? "landscape" : "portrait");
+      setGenProgress({ step: "print-ready", page: i + 1, totalPages });
+
+      const page = pageSources[i];
+      if (page.isBlank) {
+        // Blank page — white in print PDF, simple marker for preview
+        previewBlobs.push(null);
+        continue;
+      }
+
+      // ── Print-ready (300 DPI) ──
+      const srcHi = await renderSource(i, canvasW, canvasH);
+      if (srcHi) {
+        const c = document.createElement("canvas");
+        c.width = canvasW; c.height = canvasH;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvasW, canvasH);
+        drawFitted(ctx, srcHi, canvasW, canvasH);
+        pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, bleedW, bleedH);
+      }
+
+      // ── Screen preview (150 DPI) ──
+      setGenProgress({ step: "previews", page: i + 1, totalPages });
+      const srcLo = await renderSource(i, prevW, prevH);
+      if (srcLo) {
+        const pc = document.createElement("canvas");
+        pc.width = prevW; pc.height = prevH;
+        const pctx = pc.getContext("2d");
+        pctx.fillStyle = "#fff";
+        pctx.fillRect(0, 0, prevW, prevH);
+        drawFitted(pctx, srcLo, prevW, prevH);
+        const blob = await new Promise(res => pc.toBlob(res, "image/jpeg", 0.85));
+        previewBlobs.push(blob);
+      } else {
+        previewBlobs.push(null);
+      }
+    }
+
+    const printReadyBlob = pdf.output("blob");
+
+    // ── Manipulation manifest ──
+    setGenProgress({ step: "manifest", page: totalPages, totalPages });
+    const fitLabels = { crop: "Crop (native size, centered)", cover: "Fill (cover, overflow cropped)", contain: "Fit (contain, letterboxed)", scale: `Scale (${artScale}% of native size)` };
+    const manifestLines = [
+      "ARTWORK MANIPULATION MANIFEST",
+      "=" .repeat(50),
+      `Generated: ${new Date().toISOString()}`,
+      "",
+      "── Source File ──",
+      `Filename: ${fileName || "unknown"}`,
+      `Source type: ${artDims?.source === "pdf" ? "PDF" : "Image"}`,
+      `Original dimensions: ${artDims ? `${artDims.wIn}″ × ${artDims.hIn}″ (${artDims.wPx} × ${artDims.hPx} px)` : "unknown"}`,
+      `Pages detected: ${uploadPageCount}`,
+      "",
+      "── Booklet Specifications ──",
+      `Trim size: ${dims.w}″ × ${dims.h}″`,
+      `Bleed-inclusive size: ${bleedW}″ × ${bleedH}″`,
+      `Bleed margin: ${BLEED}″ per side`,
+      `Page count (with padding): ${totalPages}`,
+      "",
+      "── Customer Transforms ──",
+      `Fit mode: ${fitLabels[fitMode] || fitMode}`,
+      `Rotation: ${rotateSteps * 90}° clockwise${rotateSteps === 0 ? " (none)" : ""}`,
+      `Scale: ${artScale}%${fitMode !== "scale" ? " (only applies in Scale mode)" : ""}`,
+      "",
+      "── Edge Detection ──",
+      `Margins detected: ${edgeHasMargins === null ? "not analyzed" : edgeHasMargins ? "yes — white edges found (art may not bleed)" : "no — art extends to edges"}`,
+      "",
+      "── Effective Art Dimensions (after rotation) ──",
+      effectiveDims ? `${effectiveDims.wIn}″ × ${effectiveDims.hIn}″` : "N/A",
+      "",
+      "── Deliverables ──",
+      `1. Raw file: ${fileName || "original upload"} (unmodified customer upload)`,
+      `2. Print-ready PDF: ${totalPages} pages at ${DPI} DPI, ${bleedW}″ × ${bleedH}″, JPEG quality 0.95`,
+      `3. Screen previews: ${previewBlobs.filter(b => b).length} page images at ${PREVIEW_DPI} DPI, JPEG quality 0.85`,
+      `4. This manifest`,
+      "",
+      "── Per-Page Detail ──",
+    ];
+    pageSources.forEach((p, i) => {
+      manifestLines.push(`  Page ${i + 1}: ${p.label}${p.isBlank ? " (blank — no art)" : ""}`);
+    });
+    manifestLines.push("", "── Notes ──");
+    if (rotateSteps > 0) manifestLines.push(`Art was rotated ${rotateSteps * 90}° clockwise by the customer to match booklet orientation.`);
+    if (fitMode === "crop" && effectiveDims) {
+      const coverageW = (effectiveDims.wIn / bleedW * 100).toFixed(1);
+      const coverageH = (effectiveDims.hIn / bleedH * 100).toFixed(1);
+      manifestLines.push(`In Crop mode, art covers ${coverageW}% width × ${coverageH}% height of the bleed area.`);
+      if (effectiveDims.wIn < bleedW || effectiveDims.hIn < bleedH) manifestLines.push("WARNING: Art does not fully cover the bleed area. White margins may be visible after trimming.");
+      if (effectiveDims.wIn > bleedW || effectiveDims.hIn > bleedH) manifestLines.push("Art extends beyond bleed boundary and will be clipped.");
+    }
+    if (fitMode === "cover") manifestLines.push("Fill mode: art scaled to cover entire bleed area. Some art content may be cropped at edges.");
+    if (fitMode === "contain") manifestLines.push("Fit mode: art scaled to fit within bleed area. White letterbox bars may appear.");
+
+    const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
+
+    return { printReadyBlob, previewBlobs, manifestBlob };
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -1963,7 +2038,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         if (pg < 8) pg = 8;
         onPagesDetected(pg);
       }
-      // Pass raw file up for order submission
+      // Store raw file for the 4-deliverable package
+      rawFileRef.current = fileList[0];
       if (onArtwork) onArtwork({ type: "files", list: [fileList[0]] });
       setSlotsOpen(true);
       setArtApproved(false); setPrintReadyBlob(null);
@@ -1989,6 +2065,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setPrintReadyBlob(null);
     pdfDocRef.current = null;
     slotFilesRef.current = {};
+    rawFileRef.current = null;
     if (onArtwork) onArtwork({ type: "none" });
     if (onCoverArt) onCoverArt(null);
   }
@@ -2365,17 +2442,30 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                     <button type="button" disabled={generatingPdf} onClick={async () => {
                       if (proof===0 && !artApproved) {
                         setGeneratingPdf(true);
+                        setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
                         try {
-                          const blob = await generatePrintReadyPDF();
-                          setPrintReadyBlob(blob);
+                          const pkg = await generateApprovalPackage();
+                          setPrintReadyBlob(pkg.printReadyBlob);
                           setArtApproved(true);
-                          // Notify parent with the print-ready file
+                          // Send all 4 deliverables to parent
                           if (onArtwork) {
-                            const file = new File([blob], (fileName || "artwork").replace(/\.[^.]+$/, "") + "_print-ready.pdf", { type: "application/pdf" });
-                            onArtwork({ type: "files", list: [file] });
+                            const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
+                            const files = [];
+                            // 1. Raw file
+                            if (rawFileRef.current) files.push(rawFileRef.current);
+                            // 2. Print-ready PDF
+                            files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
+                            // 3. Screen previews as individual JPEGs
+                            pkg.previewBlobs.forEach((b, i) => {
+                              if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
+                            });
+                            // 4. Manipulation manifest
+                            files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
+                            onArtwork({ type: "files", list: files });
                           }
-                        } catch (err) { console.error("Print-ready PDF generation failed:", err); alert("Failed to generate print-ready PDF: " + err.message); }
+                        } catch (err) { console.error("Approval package generation failed:", err); alert("Failed to generate print-ready package: " + err.message); }
                         setGeneratingPdf(false);
+                        setGenProgress(null);
                       } else if (proof!==0) { setProof(0); }
                     }} style={{
                       padding:"8px 18px", fontSize:12, fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em",
@@ -2384,7 +2474,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         : proof===0 ? "rgba(255,255,255,.04)" : "rgba(255,255,255,.04)",
                       color: artApproved && proof===0 ? "#fff" : proof===0 ? "#ef4444" : "rgba(255,255,255,.3)",
                       borderRight:"1px solid rgba(255,255,255,.08)",
-                    }}>{generatingPdf ? "Generating PDF…" : artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
+                    }}>{generatingPdf && genProgress ? (
+                      <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+                        <span>{genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… {genProgress.page}/{genProgress.totalPages}</span>
+                        <span style={{ display:"block", width:80, height:4, background:"rgba(255,255,255,.15)", borderRadius:2, overflow:"hidden" }}>
+                          <span style={{ display:"block", height:"100%", borderRadius:2, background: proof===0 ? "#ef4444" : "#3b82f6", transition:"width .15s", width: `${Math.round((genProgress.page / genProgress.totalPages) * 100)}%` }} />
+                        </span>
+                      </span>
+                    ) : artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
                     <button type="button" onClick={() => setProof(0.01)} style={{
                       padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
                       background: proof===0.01 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 40%, #60a5fa 50%, #2563eb 60%, #1d4ed8 100%)" : "rgba(255,255,255,.04)",
