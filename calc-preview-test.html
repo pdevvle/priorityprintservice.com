@@ -1087,7 +1087,7 @@ function BookClosed3D({ pages, bookW, bookH, spineW, rotateX: rX, rotateY: rY, s
   // Saddlestitch: derive visual thickness from page count (exaggerated for 3D effect)
   const saddleDepth = isSaddle ? Math.max(2, pages.length * 0.3) : 0;
   const halfDepth = isSaddle ? saddleDepth / 2 : Math.max(1, spineW / 2);
-  const bgFit = fitMode === "stretch" ? "fill" : fitMode === "contain" ? "contain" : "cover"; // crop and scale map to cover for 3D preview
+  const bgFit = fitMode === "stretch" ? "100% 100%" : fitMode === "contain" ? "contain" : "cover"; // stretch distorts via explicit dimensions
   const edgeGrad = "linear-gradient(180deg,#f5f0e8,#e8e0d4,#f0ebe3)";
   // Page-edge texture: repeating thin lines to suggest individual pages
   const pageEdgeBg = `repeating-linear-gradient(${isSaddle ? "0deg" : "90deg"},#f5f0e8 0px,#e8e0d4 1px,#f0ebe3 2px)`;
