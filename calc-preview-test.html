@@ -1434,7 +1434,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const rawFileRef = useRef(null); // holds the original uploaded File for the raw deliverable
   const fileInputRef = useRef(null);
   const dragRef = useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
-  const [printReadyBlob, setPrintReadyBlob] = useState(null); // Blob of the print-ready PDF
+  const [approvalPkg, setApprovalPkg] = useState(null); // { printReadyBlob, previewBlobs[], manifestBlob, skippedGeneration }
   const [generatingPdf, setGeneratingPdf] = useState(false); // true while building print-ready PDF
   const [genProgress, setGenProgress] = useState(null); // { step, page, totalPages } during generation
   const [rot, setRot] = useState({ x: -15, y: -25 });
@@ -1445,7 +1445,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   useEffect(() => {
     const prev = prevTransforms.current;
     if (prev.fitMode !== fitMode || prev.artScale !== artScale || prev.rotateSteps !== rotateSteps) {
-      if (artApproved) { setArtApproved(false); setPrintReadyBlob(null); }
+      if (artApproved) { setArtApproved(false); setApprovalPkg(null); }
       prevTransforms.current = { fitMode, artScale, rotateSteps };
     }
   }, [fitMode, artScale, rotateSteps]);
@@ -2047,7 +2047,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       rawFileRef.current = fileList[0];
       if (onArtwork) onArtwork({ type: "files", list: [fileList[0]] });
       setSlotsOpen(true);
-      setArtApproved(false); setPrintReadyBlob(null);
+      setArtApproved(false); setApprovalPkg(null);
     } catch (err) { console.error("Extraction error:", err); }
     setLoading(false); setLoadingProgress(null);
   }
@@ -2067,7 +2067,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     setRawPages([]); setFileName(""); setUploadPageCount(0);
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
     setRotatedCache({ key: "", pages: [] }); setRotateSteps(0);
-    setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setPrintReadyBlob(null);
+    setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setApprovalPkg(null);
     pdfDocRef.current = null;
     slotFilesRef.current = {};
     rawFileRef.current = null;
@@ -2286,7 +2286,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               </div>
             </div>
             <div style={{ display:"flex", gap:4 }}>
-              <button type="button" onClick={() => { setArtApproved(false); setPrintReadyBlob(null); }} style={{
+              <button type="button" onClick={() => { setArtApproved(false); setApprovalPkg(null); }} style={{
                 padding:"3px 10px", fontSize:10, fontWeight:600, borderRadius:4, cursor:"pointer", fontFamily:"inherit",
                 border:"1px solid #86efac", background:"#fff", color:"#16a34a",
               }}>Review</button>
@@ -2450,7 +2450,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
                         try {
                           const pkg = await generateApprovalPackage();
-                          setPrintReadyBlob(pkg.printReadyBlob);
+                          setApprovalPkg(pkg);
                           setArtApproved(true);
                           // Send deliverables to parent
                           if (onArtwork) {
@@ -2508,22 +2508,64 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
                   {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
                 </div>
-                {artApproved && printReadyBlob && (
-                  <div style={{ marginTop:6 }}>
-                    <button type="button" onClick={() => {
-                      const url = URL.createObjectURL(printReadyBlob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = (fileName || "artwork").replace(/\.[^.]+$/, "") + "_print-ready.pdf";
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    }} style={{
-                      padding:"6px 14px", fontSize:11, fontWeight:700, border:"1px solid rgba(34,197,94,.4)",
-                      borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(34,197,94,.1)",
-                      color:"#4ade80", letterSpacing:".03em",
-                    }}>⬇ Download Print-Ready PDF</button>
-                  </div>
-                )}
+                {artApproved && approvalPkg && (() => {
+                  const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
+                  const dlFile = (blob, name) => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+                    URL.revokeObjectURL(url);
+                  };
+                  const dlAll = () => {
+                    // 1. Raw
+                    if (rawFileRef.current) dlFile(rawFileRef.current, rawFileRef.current.name || baseName + "_raw");
+                    // 2. Print-ready (only if transforms were applied)
+                    if (!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob) dlFile(approvalPkg.printReadyBlob, baseName + "_print-ready.pdf");
+                    // 3. Previews
+                    approvalPkg.previewBlobs.forEach((b, i) => {
+                      if (b) dlFile(b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`);
+                    });
+                    // 4. Manifest
+                    if (approvalPkg.manifestBlob) dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt");
+                  };
+                  const previewCount = approvalPkg.previewBlobs.filter(b => b).length;
+                  return (
+                    <div style={{ marginTop:8, padding:"8px 12px", borderRadius:6, background:"rgba(34,197,94,.08)", border:"1px solid rgba(34,197,94,.2)" }}>
+                      <div style={{ fontSize:10, fontWeight:700, color:"#4ade80", marginBottom:6, letterSpacing:".04em" }}>TEST DOWNLOAD — APPROVAL PACKAGE</div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+                        <button type="button" onClick={dlAll} style={{
+                          padding:"5px 12px", fontSize:10, fontWeight:700, border:"1px solid rgba(34,197,94,.5)",
+                          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(34,197,94,.15)",
+                          color:"#4ade80",
+                        }}>⬇ Download All</button>
+                        {rawFileRef.current && (
+                          <button type="button" onClick={() => dlFile(rawFileRef.current, rawFileRef.current.name || baseName + "_raw")} style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          }}>Raw file</button>
+                        )}
+                        {!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob && (
+                          <button type="button" onClick={() => dlFile(approvalPkg.printReadyBlob, baseName + "_print-ready.pdf")} style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          }}>Print-ready PDF</button>
+                        )}
+                        {previewCount > 0 && (
+                          <button type="button" onClick={() => approvalPkg.previewBlobs.forEach((b, i) => { if (b) dlFile(b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`); })} style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          }}>Previews ({previewCount})</button>
+                        )}
+                        <button type="button" onClick={() => dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt")} style={{
+                          padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                        }}>Manifest</button>
+                      </div>
+                      {approvalPkg.skippedGeneration && (
+                        <div style={{ fontSize:9, color:"rgba(255,255,255,.35)", marginTop:4 }}>No print-ready PDF generated — raw file is already print-ready (no transforms applied)</div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             {!artApproved && proof === 0 && (
