@@ -1087,7 +1087,7 @@ function BookClosed3D({ pages, bookW, bookH, spineW, rotateX: rX, rotateY: rY, s
   // Saddlestitch: derive visual thickness from page count (exaggerated for 3D effect)
   const saddleDepth = isSaddle ? Math.max(2, pages.length * 0.3) : 0;
   const halfDepth = isSaddle ? saddleDepth / 2 : Math.max(1, spineW / 2);
-  const bgFit = fitMode === "contain" ? "contain" : "cover"; // crop and scale map to cover for 3D preview
+  const bgFit = fitMode === "stretch" ? "fill" : fitMode === "contain" ? "contain" : "cover"; // crop and scale map to cover for 3D preview
   const edgeGrad = "linear-gradient(180deg,#f5f0e8,#e8e0d4,#f0ebe3)";
   // Page-edge texture: repeating thin lines to suggest individual pages
   const pageEdgeBg = `repeating-linear-gradient(${isSaddle ? "0deg" : "90deg"},#f5f0e8 0px,#e8e0d4 1px,#f0ebe3 2px)`;
@@ -1126,7 +1126,7 @@ function BookOpen3D({ pages, bookW, bookH, spread, scale, rotateX: rX, rotateY: 
   const interior = pages.slice(1, pages.length - 1);
   const li = spread * 2, ri = spread * 2 + 1;
   const lp = interior[li], rp = interior[ri];
-  const objFit = fitMode === "contain" ? "contain" : "cover"; // crop and scale map to cover for 3D preview
+  const objFit = fitMode === "stretch" ? "fill" : fitMode === "contain" ? "contain" : "cover"; // crop and scale map to cover for 3D preview
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       <div className="bp-scene" style={{ transform: `scale(${scale}) rotateX(${rX}deg) rotateY(${rY}deg)` }}>
@@ -1679,7 +1679,9 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         ctx.fillRect(0, 0, canvasW, canvasH);
 
         const srcW = srcCanvas.width, srcH = srcCanvas.height;
-        if (fitMode === "crop" || fitMode === "scale") {
+        if (fitMode === "stretch") {
+          ctx.drawImage(srcCanvas, 0, 0, canvasW, canvasH);
+        } else if (fitMode === "crop" || fitMode === "scale") {
           const mult = fitMode === "scale" ? artScale / 100 : 1;
           const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
           const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
@@ -1713,7 +1715,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
     // ── Manipulation manifest ──
     setGenProgress({ step: "manifest", page: totalPages, totalPages });
-    const fitLabels = { crop: "Crop (native size, centered)", cover: "Fill (cover, overflow cropped)", contain: "Fit (contain, letterboxed)", scale: `Scale (${artScale}% of native size)` };
+    const fitLabels = { crop: "Crop (native size, centered)", cover: "Fill (cover, overflow cropped)", contain: "Fit (contain, letterboxed)", stretch: "Stretch to fill (distorted to fit bleed area)", scale: `Scale (${artScale}% of native size)` };
     const manifestLines = [
       "ARTWORK MANIPULATION MANIFEST",
       "=" .repeat(50),
@@ -1766,6 +1768,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       if (effectiveDims.wIn > bleedW || effectiveDims.hIn > bleedH) manifestLines.push("Art extends beyond bleed boundary and will be clipped.");
     }
     if (fitMode === "cover") manifestLines.push("Fill mode: art scaled to cover entire bleed area. Some art content may be cropped at edges.");
+    if (fitMode === "stretch") manifestLines.push("Stretch mode: art distorted to fill entire bleed area. Aspect ratio NOT preserved — image may appear warped.");
     if (fitMode === "contain") manifestLines.push("Fit mode: art scaled to fit within bleed area. White letterbox bars may appear.");
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
@@ -2258,7 +2261,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const FitToggle = ({ dark }) => (
     <div style={{ display: "flex", alignItems:"center", gap: 6 }}>
       <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
-        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "scale", l: "Scale" }].map(o => (
+        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Stretch" }, { v: "scale", l: "Scale" }].map(o => (
           <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} style={{
             padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
             background: fitMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
@@ -2285,6 +2288,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
           </div>
           <span style={{ fontSize:10, fontWeight:600, color:"rgba(255,255,255,.4)", minWidth:32, textAlign:"center" }}>{artScale}%</span>
         </div>
+      )}
+      {fitMode === "stretch" && (
+        <button type="button" onClick={() => setFitMode("crop")} style={{
+          padding:"5px 12px", fontSize:10, fontWeight:700, border:"1px solid rgba(239,68,68,.4)",
+          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(239,68,68,.12)",
+          color:"#f87171", letterSpacing:".03em",
+        }}>Reset Stretch</button>
       )}
     </div>
   );
@@ -2452,7 +2462,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   position: "relative", transition: "border-color .2s",
                 }}>
                 {isUserPage ? (
-                  <img src={p.dataUrl} alt={p.label} style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:fitMode==="contain"?"contain":"cover", display:"block", background:"#e8e8e8", filter:gsFilter }} />
+                  <img src={p.dataUrl} alt={p.label} style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:fitMode==="stretch"?"fill":fitMode==="contain"?"contain":"cover", display:"block", background:"#e8e8e8", filter:gsFilter }} />
                 ) : (
                   <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, padding:4 }}>
                     <span style={{ fontSize:16, opacity:.3 }}>+</span>
@@ -2736,6 +2746,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                                 : <img src={hiResValid ? hiResProof.dataUrl : proofPage.dataUrl} style={{
                                     ...(fitMode === "crop" ? cropStyle(1)
                                       : fitMode === "scale" ? cropStyle(artScale / 100)
+                                      : fitMode === "stretch" ? { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit:"fill", position:"absolute", inset:0 }
                                       : { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit: fitMode==="contain" ? "contain" : "cover" }
                                     )
                                   }} />
@@ -2883,7 +2894,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         <div style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", background:"#2a2e36", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
                           {p.isBlank
                             ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.2)", fontSize:10 }}>Blank</div>
-                            : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
+                            : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: fitMode==="stretch"?"fill":fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
                           }
                         </div>
                         <span style={{ fontSize:9, color: p.isBlank ? "rgba(255,255,255,.3)" : "rgba(255,255,255,.5)", marginTop:3, display:"block" }}>{p.label}</span>
