@@ -845,8 +845,11 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         if ( strpos( $path, '..' ) === false && strpos( $path, 'pps-artwork/' ) === 0 ) {
             $upload = wp_upload_dir();
             $full   = trailingslashit( $upload['basedir'] ) . $path;
-            if ( file_exists( $full ) ) {
-                $item->add_meta_data( '_pps_artwork_path', $path, true );
+            // Store path even if local file was moved to Google Drive —
+            // it serves as a reference for reorders and Drive lookups
+            $item->add_meta_data( '_pps_artwork_path', $path, true );
+            if ( ! file_exists( $full ) ) {
+                $item->add_meta_data( '_pps_artwork_on_drive', 'yes', true );
             }
         }
     }
