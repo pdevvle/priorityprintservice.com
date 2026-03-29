@@ -1280,16 +1280,37 @@ function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner) {
       var labelAngle = spineLeft ? 90 : -90;
       pdf.text("SPINE / BOUND EDGE", labelX, bleed + trimH / 2, { angle: labelAngle, align: "center" });
 
-      // Logo — centered, near top of safety area
-      var logoW = Math.min(trimW * 0.25, 1.5); // max 1.5" or 25% of trim width
-      var logoH = logoW; // 1:1 aspect ratio
-      var logoX = (docW - logoW) / 2;
-      var logoY = bleed + safety + 0.2;
-      try { pdf.addImage(PPS_LOGO_B64, "PNG", logoX, logoY, logoW, logoH); } catch(e) {}
+      // Logo watermark — tiled step-repeat across the page within safety area
+      var tileSize = Math.min(trimW * 0.18, 1.0); // each tile ~1" or 18% of trim width
+      var tileGap = tileSize * 0.6; // gap between tiles
+      var tileStep = tileSize + tileGap;
+      var safeLeft = bleed + safety;
+      var safeTop = bleed + safety;
+      var safeRight = bleed + trimW - safety;
+      var safeBottom = bleed + trimH - safety;
+      var safeW = safeRight - safeLeft;
+      var safeH = safeBottom - safeTop;
+      var cols = Math.floor(safeW / tileStep);
+      var rows = Math.floor(safeH / tileStep);
+      // Center the grid within safety
+      var gridW = cols * tileStep - tileGap;
+      var gridH = rows * tileStep - tileGap;
+      var offsetX = safeLeft + (safeW - gridW) / 2;
+      var offsetY = safeTop + (safeH - gridH) / 2;
+      pdf.saveGraphicsState();
+      pdf.setGState(new pdf.GState({ opacity: 0.06 }));
+      for (var row = 0; row < rows; row++) {
+        for (var col = 0; col < cols; col++) {
+          var tx = offsetX + col * tileStep;
+          var ty = offsetY + row * tileStep;
+          try { pdf.addImage(PPS_LOGO_B64, "PNG", tx, ty, tileSize, tileSize); } catch(e) {}
+        }
+      }
+      pdf.restoreGraphicsState();
 
-      // Page label — below logo
+      // Page label — centered
       var cx = docW / 2;
-      var labelY = logoY + logoH + 0.25;
+      var labelY = docH / 2 - 0.1;
       pdf.setFontSize(10);
       pdf.setTextColor(170, 170, 170);
       var pgLabel = pageLabel(pg, pageCount);
