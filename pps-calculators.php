@@ -458,6 +458,12 @@ add_action( 'wp', function() {
             $config['zoneMap'] = $zone_map;
         }
 
+        // Per-product defaults — stored as product meta, overrides central config defaults
+        $product_defaults = get_post_meta( $product_id, '_pps_defaults', true );
+        if ( ! empty( $product_defaults ) && is_array( $product_defaults ) ) {
+            $config['defaults'] = $product_defaults;
+        }
+
         // Forward reorder config if present on the product page URL
         if ( ! empty( $_GET['pps_reorder'] ) ) {
             $config['reorder'] = sanitize_text_field( $_GET['pps_reorder'] );
@@ -975,6 +981,66 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
     $hidden[] = '_pps_artwork_path';
     return $hidden;
 });
+
+// ═══════════════════════════════════════════════════════════════
+// PER-PRODUCT DEFAULTS (WooCommerce Product Editor)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Add a "PPS Defaults" tab to the WooCommerce product data panel.
+ * Lets you set default calculator values per product (size, qty, paper, etc.)
+ * so different product URLs start with different configurations.
+ */
+add_filter( 'woocommerce_product_data_tabs', function( $tabs ) {
+    $tabs['pps_defaults'] = array(
+        'label'    => 'PPS Defaults',
+        'target'   => 'pps_defaults_data',
+        'class'    => array(),
+        'priority' => 90,
+    );
+    return $tabs;
+} );
+
+add_action( 'woocommerce_product_data_panels', function() {
+    global $post;
+    $defaults = get_post_meta( $post->ID, '_pps_defaults', true ) ?: array();
+    ?>
+    <div id="pps_defaults_data" class="panel woocommerce_options_panel" style="padding:12px 20px">
+        <p style="color:#666;font-size:12px">Set default calculator values for this product. Leave blank to use the global defaults. URL parameters override these.</p>
+        <?php
+        $fields = array(
+            'sizeLabel'       => array( 'label' => 'Size', 'placeholder' => '5.5×8.5 (Opens to 8.5×11)' ),
+            'qty'             => array( 'label' => 'Default Quantity', 'placeholder' => '100', 'type' => 'number' ),
+            'pages'           => array( 'label' => 'Default Pages', 'placeholder' => '8', 'type' => 'number' ),
+            'bindDir'         => array( 'label' => 'Bind Direction', 'placeholder' => 'short' ),
+            'insideColor'     => array( 'label' => 'Inside Color', 'placeholder' => 'color (or bw)' ),
+            'coverColor'      => array( 'label' => 'Cover Color', 'placeholder' => 'color (or bw)' ),
+            'insidePaperType' => array( 'label' => 'Inside Paper Type', 'placeholder' => 'noncardstock (or cardstock)' ),
+            'coverMode'       => array( 'label' => 'Cover Mode', 'placeholder' => 'same (or separate)' ),
+            'shipState'       => array( 'label' => 'Default Ship State', 'placeholder' => 'AZ' ),
+        );
+        foreach ( $fields as $key => $f ) {
+            $val = $defaults[ $key ] ?? '';
+            $type = $f['type'] ?? 'text';
+            echo '<p class="form-field"><label for="pps_d_' . $key . '">' . esc_html( $f['label'] ) . '</label>';
+            echo '<input type="' . $type . '" id="pps_d_' . $key . '" name="pps_defaults[' . $key . ']" value="' . esc_attr( $val ) . '" placeholder="' . esc_attr( $f['placeholder'] ) . '" style="width:300px" /></p>';
+        }
+        ?>
+    </div>
+    <?php
+} );
+
+add_action( 'woocommerce_process_product_meta', function( $post_id ) {
+    if ( ! isset( $_POST['pps_defaults'] ) ) return;
+    $raw = array_map( 'sanitize_text_field', $_POST['pps_defaults'] );
+    // Strip empty values so they fall through to global defaults
+    $clean = array_filter( $raw, function( $v ) { return $v !== ''; } );
+    if ( ! empty( $clean ) ) {
+        update_post_meta( $post_id, '_pps_defaults', $clean );
+    } else {
+        delete_post_meta( $post_id, '_pps_defaults' );
+    }
+} );
 
 // ═══════════════════════════════════════════════════════════════
 // REORDER: BUTTON ON MY ACCOUNT → ORDERS

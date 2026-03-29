@@ -3245,13 +3245,40 @@ function App(){
   const mob=useIsMobile();
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
+  const[shareCopied,setShareCopied]=useState(false);
   const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
 
-  // Per-product defaults from admin config
-  const D = (window.PPS_CONFIG || {}).defaults || {};
+  // Per-product defaults from admin config, then URL params override
+  const D = (() => {
+    const base = (window.PPS_CONFIG || {}).defaults || {};
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.has("qty")) base.qty = parseInt(p.get("qty"));
+      if (p.has("pages")) base.pages = parseInt(p.get("pages"));
+      if (p.has("size")) base.sizeLabel = p.get("size");
+      if (p.has("long")) base.customLong = parseFloat(p.get("long"));
+      if (p.has("short")) base.customShort = parseFloat(p.get("short"));
+      if (p.has("bind")) base.bindDir = p.get("bind");
+      if (p.has("color")) base.insideColor = p.get("color");
+      if (p.has("covercolor")) base.coverColor = p.get("covercolor");
+      if (p.has("paper")) base.insidePaperType = p.get("paper");
+      if (p.has("covermode")) base.coverMode = p.get("covermode");
+      if (p.has("coverpaper")) base.coverPaperType = p.get("coverpaper");
+      if (p.has("staple")) base.twoStaple = p.get("staple") === "true";
+      if (p.has("vivid")) base.vividPrint = p.get("vivid") === "true";
+      if (p.has("coating")) base.coating = Number(p.get("coating"));
+      if (p.has("bundling")) base.bundling = Number(p.get("bundling"));
+      if (p.has("corner")) base.roundCorner = Number(p.get("corner"));
+      if (p.has("state")) base.shipState = p.get("state");
+      if (p.has("sets")) {
+        try { const s = JSON.parse(decodeURIComponent(p.get("sets"))); if (Array.isArray(s)) base.setsArr = s; } catch(e) {}
+      }
+    } catch(e) {}
+    return base;
+  })();
   const _findPaper = (list, val) => { const f = list.find(p => String(p.val) === String(val)); return f || list[2] || list[0]; };
 
-  const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||8, name:""}]);
+  const[sets,setSets]=useState(D.setsArr || [{qty:D.qty||100, pages:D.pages||8, name:""}]);
   const[sizeLabel,setSizeLabel]=useState(D.sizeLabel || "5.5×8.5 (Opens to 8.5×11)");
   const[sizeMode,setSizeMode]=useState(D.sizeLabel==="Custom Size"?"custom":"preset");
   const[customLong,setCustomLong]=useState(D.customLong||8.5);
@@ -3466,6 +3493,43 @@ function App(){
 
   const[submitting,setSubmitting]=useState(false);
   const[uploadProgress,setUploadProgress]=useState(null); // null | {phase, pct, fileName, fileIdx, fileCount}
+
+  const buildShareUrl = () => {
+    const p = new URLSearchParams();
+    if (sizeLabel !== "5.5×8.5 (Opens to 8.5×11)") p.set("size", sizeLabel);
+    if (sizeLabel === "Custom Size") { p.set("long", customLong); p.set("short", customShort); }
+    if (bindDir !== "short") p.set("bind", bindDir);
+    if (insideColor !== "color") p.set("color", insideColor);
+    if (coverColor !== "color") p.set("covercolor", coverColor);
+    if (insidePaperType !== "noncardstock") p.set("paper", insidePaperType);
+    if (coverMode !== "same") p.set("covermode", coverMode);
+    if (coverPaperType !== "cardstock") p.set("coverpaper", coverPaperType);
+    if (twoStaple) p.set("staple", "true");
+    if (vividPrint) p.set("vivid", "true");
+    if (coating > 0) p.set("coating", coating);
+    if (bundling > 0) p.set("bundling", bundling);
+    if (roundCorner > 0) p.set("corner", roundCorner);
+    if (shipState !== "AZ") p.set("state", shipState);
+    // Encode sets compactly
+    const setsData = sets.map(s => ({ qty: s.qty, pages: s.pages, name: s.name || "" }));
+    if (setsData.length > 1 || setsData[0].qty !== 100 || setsData[0].pages !== 8) {
+      p.set("sets", JSON.stringify(setsData));
+    }
+    const base = window.location.origin + window.location.pathname;
+    const qs = p.toString();
+    return qs ? base + "?" + qs : base;
+  };
+
+  const handleShareLink = () => {
+    const url = buildShareUrl();
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    }).catch(() => {
+      // Fallback for non-HTTPS or denied clipboard
+      prompt("Copy this link:", url);
+    });
+  };
 
   const handleAddToOrder = async () => {
     if (!result || result.error?.length || submitting) return;
@@ -3903,6 +3967,9 @@ function App(){
                 )}
               </div>
             ) : submitting ? "Uploading artwork…" : "Add to Order"}
+          </button>
+          <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+            {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
           <button type="button" onClick={()=>setShowDebug(p=>!p)} style={{width:"100%",marginTop:8,padding:"6px",borderRadius:4,border:`1px solid ${showDebug?"#555":"#ddd"}`,background:showDebug?"#1a1a1a":"#fafafa",color:showDebug?"#888":"#bbb",fontSize:10,fontWeight:600,letterSpacing:".5px",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {showDebug?"▼ Hide":"▶ Show"} Debug Panel
