@@ -1238,6 +1238,57 @@ add_action( 'rest_api_init', function() {
 } );
 
 // ═══════════════════════════════════════════════════════════════
+// SEO: SUPPRESS THIRD-PARTY SCHEMAS ON CALCULATOR PAGES
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Remove WooCommerce and SEO plugin structured data on PPS calculator product pages.
+ * Our plugin injects its own schemas tailored to the calculator.
+ */
+add_action( 'wp_head', function() {
+    if ( ! is_product() ) return;
+    global $product;
+    if ( ! $product ) return;
+    if ( ! pps_get_calculator_for_product( $product->get_id() ) ) return;
+
+    // WooCommerce native structured data
+    remove_action( 'wp_footer', array( WC()->structured_data, 'output_structured_data' ), 10 );
+    remove_action( 'woocommerce_email_order_details', array( WC()->structured_data, 'output_email_structured_data' ), 30 );
+
+    // Yoast SEO
+    if ( class_exists( 'WPSEO_Frontend' ) ) {
+        add_filter( 'wpseo_json_ld_output', '__return_empty_array' );
+    }
+    // Yoast WooCommerce SEO addon
+    add_filter( 'wpseo_schema_graph', function( $graph ) {
+        // Remove Product and Offer pieces, keep Organization/WebSite/BreadcrumbList
+        return array_values( array_filter( $graph, function( $piece ) {
+            $type = $piece['@type'] ?? '';
+            if ( is_array( $type ) ) $type = implode( ',', $type );
+            return stripos( $type, 'Product' ) === false && stripos( $type, 'Offer' ) === false;
+        } ) );
+    } );
+
+    // RankMath
+    add_filter( 'rank_math/json_ld', function( $data ) {
+        unset( $data['ProductPage'], $data['product'], $data['Product'] );
+        return $data;
+    }, 99 );
+
+    // All in One SEO
+    add_filter( 'aioseo_schema_output', function( $graphs ) {
+        if ( ! is_array( $graphs ) ) return $graphs;
+        return array_values( array_filter( $graphs, function( $g ) {
+            $type = $g['@type'] ?? '';
+            return stripos( $type, 'Product' ) === false;
+        } ) );
+    } );
+
+    // SEOPress
+    add_filter( 'seopress_schemas_auto_output', '__return_false' );
+}, 1 ); // priority 1 = runs before our schema injection at priority 5
+
+// ═══════════════════════════════════════════════════════════════
 // SEO: JSON-LD SCHEMAS, NOSCRIPT FALLBACK, LLMS.TXT
 // ═══════════════════════════════════════════════════════════════
 
