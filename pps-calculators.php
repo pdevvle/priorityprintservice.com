@@ -848,6 +848,41 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
     // Visible in order emails
     $item->add_meta_data( 'Estimated Delivery', $delivery->format( 'l, M j, Y' ), true );
     $item->add_meta_data( 'Order Summary', $values['pps_summary'] ?? '', true );
+
+    // ── Missive-parseable fields ──
+    $full = json_decode( $values['pps_metadata'] ?? '{}', true );
+    if ( $full ) {
+        // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
+        $sets     = $full['sets'] ?? array();
+        $totalQty = array_sum( array_column( $sets, 'qty' ) );
+        $totalPg  = array_sum( array_column( $sets, 'pages' ) );
+        $size     = $full['sizeLabel'] ?? 'Unknown';
+        $iPaper   = is_array( $full['insidePaper'] ?? null ) ? ( $full['insidePaper']['label'] ?? '' ) : '';
+        $iColor   = ( $full['insideColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
+        $proof    = ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' );
+        $rush     = ( $full['rushCost'] ?? 0 ) > 0 ? 'RUSH' : 'Standard';
+        $days     = intval( $full['days'] ?? $biz_days );
+        $sets_ct  = count( $sets );
+
+        $spec = implode( ' | ', array(
+            $size,
+            $totalQty . 'qty',
+            $totalPg . 'pg',
+            $sets_ct . ( $sets_ct === 1 ? 'set' : 'sets' ),
+            $iPaper,
+            $iColor,
+            $proof,
+            $rush,
+            $days . 'days',
+        ) );
+        $item->add_meta_data( 'PPS-Spec', $spec, true );
+
+        // Production start date — distinct label for Missive rule parsing
+        $prodStart = $full['productionStartDate'] ?? '';
+        if ( $prodStart ) {
+            $item->add_meta_data( 'PPS-Production-Start', $prodStart, true );
+        }
+    }
 }, 10, 4 );
 
 // ═══════════════════════════════════════════════════════════════
