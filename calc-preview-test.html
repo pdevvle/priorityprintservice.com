@@ -1304,6 +1304,10 @@ function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner) {
           var tx = offsetX + col * tileStep;
           var ty = offsetY + row * tileStep;
           try { pdf.addImage(PPS_LOGO_B64, "PNG", tx, ty, tileSize, tileSize); } catch(e) {}
+          // URL text below each logo tile
+          pdf.setFontSize(tileSize * 4.5);
+          pdf.setTextColor(180, 180, 180);
+          pdf.text("PriorityPrintService.com", tx + tileSize / 2, ty + tileSize + tileSize * 0.12, { align: "center" });
         }
       }
       pdf.restoreGraphicsState();
