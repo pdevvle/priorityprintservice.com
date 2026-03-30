@@ -303,7 +303,7 @@ const PAPERS_CS = _CFG.papers_cs || [
   {label:"14pt C2S Factory Coated",val:2.24,price:0.169019,oversizePrice:0.169019,factory:true,coatable:true},
   {label:"18pt C1S Factory Gloss",val:2.25,price:0.186719,oversizePrice:0.186719,factory:true,coatable:true},
 ];
-const COVER_SAME=_CFG.cover_same||{label:"Same as Inside Pages",val:0.001,price:0.01,factory:false,coatable:false};
+const COVER_SAME=_CFG.cover_same||{label:"Same as Inside Pages",val:0.001,price:0.01,oversizePrice:0.01,factory:false,coatable:false};
 const COVER_SCORING_VALS=_CFG.cover_scoring_vals||[0.01,0.02,0.03,1.01,1.02,2.21,2.22,2.23,2.24,2.25];
 const _INV_NC=_CFG.inv_nc||[0.001,0.002,0.003], _INV_CS=_CFG.inv_cs||[0.01,0.02,0.03,1.01,1.02];
 const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_CS];
@@ -505,9 +505,12 @@ function calculate(c) {
   let needByValid = false;
   let tooSoon = false;
 
+  let needByPast = false;
   if (c.needByDate) {
     const nbd = new Date(c.needByDate + "T00:00:00");
-    if (nbd > shopToday) {
+    if (nbd <= shopToday) {
+      needByPast = true;
+    } else if (nbd > shopToday) {
       bizDaysToDate = businessDaysBetween(shopToday, nbd);
       needByValid = true;
       if (bizDaysToDate < earliestBizDays) {
@@ -643,7 +646,7 @@ function calculate(c) {
   };
 
   return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,hcOK,sz,debug,ti,
-    shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
+    shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,needByPast,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1068,7 +1071,8 @@ async function extractImagePages(files, onProgress) {
   let imgW = 0, imgH = 0;
   for (let i = 0; i < sorted.length; i++) {
     if (onProgress) onProgress(i + 1, sorted.length);
-    const url = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(sorted[i]); });
+    const url = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(sorted[i]); });
+    if (!url) continue;
     if (i === 0) {
       const d = await new Promise((res, rej) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => rej(new Error("Image load failed")); img.src = url; }).catch(() => ({ w: 0, h: 0 }));
       imgW = d.w; imgH = d.h;
@@ -2209,7 +2213,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     }
 
     // Single image → insert/replace at slot index
-    const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
+    const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
+    if (!dataUrl) return;
     const imgDims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
 
     const newPage = { dataUrl, label: pageLabel(idx, pageCount) };
@@ -2518,7 +2523,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       {/* ════════════════════════════════════════════════════════════
            PROOF MODAL — flat page proof with guides, controls, approve
          ════════════════════════════════════════════════════════════ */}
-      {activeModal === "proof" && hasFile && (
+      {activeModal === "proof" && hasFile && displayPages.length > 0 && (
         <div className="bp-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) setActiveModal(null); }}>
           <div className="bp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
@@ -2941,7 +2946,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       {/* ════════════════════════════════════════════════════════════
            PREVIEW MODAL — 3D closed book, page spreads, animations
          ════════════════════════════════════════════════════════════ */}
-      {activeModal === "preview" && hasFile && (
+      {activeModal === "preview" && hasFile && displayPages.length > 0 && (
         <div className="bp-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) setActiveModal(null); }}>
           <div className="bp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
@@ -3878,7 +3883,8 @@ function App(){
                 <label style={ST.lbl}>Need It Sooner? Pick a Date</label>
                 <DatePicker value={needByDate} onChange={setNeedByDate}
                   earliestDate={r.shipping?.earliestYMD} freeDate={r.shipping?.freeDeliveryYMD}/>
-                {needByDate&&!r.shipping?.needByValid&&<p style={ST.err}>Date must be in the future</p>}
+                {needByDate&&r.shipping?.needByPast&&<p style={ST.err}>This date has passed — please select a future date</p>}
+                {needByDate&&!r.shipping?.needByValid&&!r.shipping?.needByPast&&<p style={ST.err}>Date must be in the future</p>}
               </div>
 
               {r.shipping?.needByValid&&!r.shipping?.tooSoon&&r.shipping?.rushMultiplier>1&&(
