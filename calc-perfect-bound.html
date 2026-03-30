@@ -439,15 +439,24 @@ function calculate(c) {
 
   const P={};
 
-  // ── Mixed color printing ──
-  // For now, insideColor drives all pages. Future: per-set color/BW page splits.
+  // ── Mixed color printing — per-set color/BW page splits ──
+  // Each set specifies colorPages and bwPages independently.
   // Color pages get BOTH BW base cost + full color surcharge. BW pages get BW cost only.
-  const colorPages = c.insideColor === "bw" ? 0 : tP;
-  const bwPages = c.insideColor === "bw" ? tP : 0;
-  const bwFraction = tP > 0 ? bwPages / tP : 0;
+  const totalColorPages = sets.reduce((s,x) => s + (x.colorPages || 0), 0);
+  const totalBwPages = sets.reduce((s,x) => s + (x.bwPages || 0), 0);
+  const bwFraction = tP > 0 ? totalBwPages / tP : 0;
 
-  // Inside print: BW base on all pages + color surcharge on color pages
-  P.insidePrint = (((PCF.printing_black_cost * tP / imp) * mk) + ((PCF.printing_fullcolor_cost / imp) * colorPages)) * tQ / tP;
+  // Inside print: per-set calculation to handle mixed color correctly
+  P.insidePrint = sets.reduce((sum, st) => {
+    const cp = st.colorPages || 0;
+    const bp = st.bwPages || 0;
+    const sp = cp + bp; // set total pages
+    if (sp <= 0 || st.qty <= 0) return sum;
+    // BW cost on ALL pages + full color surcharge on color pages only
+    const bwCost = ((PCF.printing_black_cost * sp / imp) * mk) * st.qty;
+    const colorCost = ((PCF.printing_fullcolor_cost / imp) * cp) * st.qty;
+    return sum + bwCost + colorCost;
+  }, 0);
   // Cover print: front + back = 2 sides
   P.coverPrint = c.coverColor === "bw"
     ? ((PCF.printing_black_cost * 2 * tQ) / imp)
@@ -637,7 +646,7 @@ function calculate(c) {
     // Volumes
     totalQty:tQ,
     totalPages:tP,
-    colorPages, bwPages, bwFraction,
+    totalColorPages, totalBwPages, bwFraction,
     numSets:N,
     // Pricing intermediates
     markup:mk,
@@ -3361,13 +3370,14 @@ function App(){
   })();
   const _findPaper = (list, val) => { const f = list.find(p => String(p.val) === String(val)); return f || list[2] || list[0]; };
 
-  const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||20, name:""}]);
+  const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||20, name:"", colorMode:D.insideColor==="bw"?"bw":"color", colorPages:D.pages||20, bwPages:0}]);
   const[sizeLabel,setSizeLabel]=useState(D.sizeLabel || "5.5×8.5 (Opens to 8.5×11)");
   const[sizeMode,setSizeMode]=useState(D.sizeLabel==="Custom Size"?"custom":"preset");
   const[customLong,setCustomLong]=useState(D.customLong||8.5);
   const[customShort,setCustomShort]=useState(D.customShort||5.5);
   const[bindDir,setBindDir]=useState(D.bindDir||"short");
-  const[insideColor,setInsideColor]=useState(D.insideColor||"color");
+  // insideColor derived from sets' color modes (for gsFilter, metadata compat)
+  const insideColor = sets.every(s => s.colorMode === "bw") ? "bw" : "color";
   const[coverColor,setCoverColor]=useState(D.coverColor||"color");
   const[insidePaperType,setInsidePaperType]=useState(D.insidePaperType||"noncardstock");
   const[insidePaper,setInsidePaper]=useState(()=>_findPaper(D.insidePaperType==="cardstock"?PAPERS_CS:PAPERS_NC, D.insidePaper));
@@ -3438,7 +3448,7 @@ function App(){
       }
 
       // Color
-      if (rc.insideColor) setInsideColor(rc.insideColor);
+      if (rc.insideColor) upSet(0, { colorMode: rc.insideColor === "bw" ? "bw" : "color" });
       if (rc.coverColor) setCoverColor(rc.coverColor);
 
       // Paper — match by label from current catalog
@@ -3572,7 +3582,19 @@ function App(){
   useEffect(()=>{if(r.q100===false)setBundling(0)},[r.q100]);
   useEffect(()=>{if(r.shipping?.freeDeliveryYMD)setNeedByDate(r.shipping.freeDeliveryYMD)},[r.shipping?.freeDeliveryYMD]);
   // NOTE: hardcopy proof is NOT auto-removed — always available as option
-  const upSet=(i,p)=>setSets(s=>s.map((x,j)=>j===i?{...x,...p}:x));
+  const upSet=(i,p)=>setSets(s=>s.map((x,j)=>{
+    if(j!==i) return x;
+    const n={...x,...p};
+    // Sync page counts when color mode or individual page counts change
+    if(n.colorMode==="color") { n.colorPages=n.pages; n.bwPages=0; }
+    else if(n.colorMode==="bw") { n.bwPages=n.pages; n.colorPages=0; }
+    else if(n.colorMode==="mixed") {
+      // If pages changed, preserve ratio; if colorPages/bwPages changed, update pages
+      if(p.pages!=null) { const ratio=x.colorPages/(x.colorPages+x.bwPages||1); n.colorPages=Math.round(n.pages*ratio)||Math.floor(n.pages/2); n.bwPages=n.pages-n.colorPages; }
+      else if(p.colorPages!=null||p.bwPages!=null) { n.pages=n.colorPages+n.bwPages; }
+    }
+    return n;
+  }));
   const r2=mob?{display:"grid",gridTemplateColumns:"1fr",gap:8}:ST.row2;
   const r3=mob?{display:"grid",gridTemplateColumns:"1fr",gap:8}:ST.row3;
 
@@ -3681,9 +3703,20 @@ function App(){
             <div style={ST.hr}/>
             <div style={r3}>
               <TxtNum label="Quantity" value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>
-              <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(20,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={20} max={350}/>
+              <Pil label="Inside Print Color" value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}},{t:"Mixed",v:"mixed",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #888 100%)",color:"#fff",fontWeight:600}}]}/>
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
             </div>
+            {sets[0].colorMode === "mixed" ? (
+              <div style={{...r3, marginTop:6}}>
+                <TxtNum label="Color Pages" value={sets[0].colorPages} onChange={v=>upSet(0,{colorPages:Math.max(0,Math.round(v))})} min={0} max={350}/>
+                <TxtNum label="B&W Pages" value={sets[0].bwPages} onChange={v=>upSet(0,{bwPages:Math.max(0,Math.round(v))})} min={0} max={350}/>
+                <div style={{...ST.f, justifyContent:"center"}}><span style={{fontSize:11,color:CC.mid,fontWeight:600}}>{sets[0].colorPages+sets[0].bwPages} total pages</span></div>
+              </div>
+            ) : (
+              <div style={{marginTop:6}}>
+                <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(20,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={20} max={350}/>
+              </div>
+            )}
 
             {/* Perfect Binding — always applied, no toggle needed */}
             <div style={ST.f}><label style={ST.lbl}>Binding</label><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Perfect Bound (Glue Spine)</div></div>
@@ -3692,7 +3725,6 @@ function App(){
           {/* SECTION 2: Printing & Paper */}
           <Sec title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
             <div style={r2}>
-              <Pil label="Inside Ink" value={insideColor} onChange={setInsideColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
               <Pil label="Cover Ink" value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
             </div>
             <div style={ST.hr}/>
