@@ -426,8 +426,8 @@ function calculate(c) {
   P.insidePrint=c.insideColor==="bw"?((PCF.printing_black_cost*2)*tS)*mk:(((PCF.printing_black_cost*2)*tS)*mk)+((PCF.printing_fullcolor_cost*2)*tS);
   P.coverPrint=c.coverColor==="bw"?((PCF.printing_black_cost*tS)*2)/imp:((PCF.printing_fullcolor_cost*tS)*2)/imp;
   const lowYield = imp < 1; // signature exceeds 19×13 parent sheet — use oversize paper prices
-  const iPaper = lowYield && c.insidePaper.oversizePrice ? c.insidePaper.oversizePrice : c.insidePaper.price;
-  const cPaper = lowYield && cvr.oversizePrice ? cvr.oversizePrice : cvr.price;
+  const iPaper = lowYield && c.insidePaper.oversizePrice != null ? c.insidePaper.oversizePrice : c.insidePaper.price;
+  const cPaper = lowYield && cvr.oversizePrice != null ? cvr.oversizePrice : cvr.price;
   P.insidePaper=(iPaper*tS)*mk;
   P.coverPaper=((cPaper*tQ)/imp)*mk;
   P.press=(tS/PCF.press_printsperhour)*PCF.labor_press_hr;
@@ -3339,8 +3339,8 @@ function App(){
         if (rc.sizeLabel === "Custom Size") {
           setSizeMode("custom");
           setSizeLabel("Custom Size");
-          if (rc.customLong) setCustomLong(rc.customLong);
-          if (rc.customShort) setCustomShort(rc.customShort);
+          if (rc.customLong) setCustomLong(Number(rc.customLong));
+          if (rc.customShort) setCustomShort(Number(rc.customShort));
         } else {
           setSizeMode("preset");
           setSizeLabel(rc.sizeLabel);
@@ -3351,8 +3351,8 @@ function App(){
       // Sets (quantity & pages)
       if (rc.sets && Array.isArray(rc.sets)) {
         setSets(rc.sets.map(s => ({
-          qty: s.qty || 100,
-          pages: s.pages || 8,
+          qty: Number(s.qty) || 100,
+          pages: Number(s.pages) || 8,
           name: s.name || "",
         })));
       }
@@ -3376,18 +3376,18 @@ function App(){
         if (match) setTimeout(() => setCoverPaper(match), 0);
       }
 
-      // Finishing
-      if (rc.twoStaple != null) setTwoStaple(rc.twoStaple);
-      if (rc.vividPrint != null) setVividPrint(rc.vividPrint);
-      if (rc.coating != null) setCoating(rc.coating);
-      if (rc.bundling != null) setBundling(rc.bundling);
-      if (rc.roundCorner != null) setRoundCorner(rc.roundCorner);
+      // Finishing — coerce types from JSON (strings → numbers/booleans)
+      if (rc.twoStaple != null) setTwoStaple(rc.twoStaple === true || rc.twoStaple === "true");
+      if (rc.vividPrint != null) setVividPrint(rc.vividPrint === true || rc.vividPrint === "true");
+      if (rc.coating != null) setCoating(Number(rc.coating));
+      if (rc.bundling != null) setBundling(Number(rc.bundling));
+      if (rc.roundCorner != null) setRoundCorner(Number(rc.roundCorner));
 
       // Artwork & proofing
-      if (rc.artwork != null) setArtwork(rc.artwork);
-      if (rc.artEditPages != null) setArtEditPages(rc.artEditPages);
-      if (rc.bleed != null) setBleed(rc.bleed);
-      if (rc.proof != null) setProof(rc.proof);
+      if (rc.artwork != null) setArtwork(Number(rc.artwork));
+      if (rc.artEditPages != null) setArtEditPages(Number(rc.artEditPages));
+      if (rc.bleed != null) setBleed(Number(rc.bleed));
+      if (rc.proof != null) setProof(Number(rc.proof));
 
       // Shipping (no date — recalculated fresh)
       if (rc.shipState) setShipState(rc.shipState);

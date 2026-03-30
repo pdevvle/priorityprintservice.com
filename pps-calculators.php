@@ -624,12 +624,12 @@ function pps_ajax_add_to_cart() {
         wp_send_json_error( 'Invalid metadata JSON.' );
     }
 
-    // Edit mode: remove old cart item if this is a re-add from edit
+    // Edit mode: remember old cart key — remove AFTER successful add for atomicity
+    $edit_key = null;
     if ( WC()->session && WC()->cart ) {
         $edit_key = WC()->session->get( 'pps_edit_key_' . $product_id );
-        if ( $edit_key && isset( WC()->cart->get_cart()[ $edit_key ] ) ) {
-            WC()->cart->remove_cart_item( $edit_key );
-            WC()->session->set( 'pps_edit_key_' . $product_id, null );
+        if ( $edit_key && ! isset( WC()->cart->get_cart()[ $edit_key ] ) ) {
+            $edit_key = null; // key no longer in cart
         }
     }
 
@@ -661,6 +661,11 @@ function pps_ajax_add_to_cart() {
     $cart_item_key = WC()->cart->add_to_cart( $product_id, 1, 0, array(), $cart_item_data );
 
     if ( $cart_item_key ) {
+        // Edit mode: now safe to remove old item since new one succeeded
+        if ( $edit_key ) {
+            WC()->cart->remove_cart_item( $edit_key );
+            WC()->session->set( 'pps_edit_key_' . $product_id, null );
+        }
         wp_send_json_success( array( 'cart_item_key' => $cart_item_key ) );
     } else {
         wp_send_json_error( 'Could not add to cart.' );
@@ -863,7 +868,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
     $full = json_decode( $values['pps_metadata'] ?? '{}', true );
     if ( $full ) {
         // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
-        $sets     = $full['sets'] ?? array();
+        $sets     = is_array( $full['sets'] ?? null ) ? $full['sets'] : array();
         $totalQty = array_sum( array_column( $sets, 'qty' ) );
         $totalPg  = array_sum( array_column( $sets, 'pages' ) );
         $size     = $full['sizeLabel'] ?? 'Unknown';
@@ -1358,8 +1363,10 @@ add_action( 'wp_head', function() {
     if ( ! pps_get_calculator_for_product( $product->get_id() ) ) return;
 
     // WooCommerce native structured data
-    remove_action( 'wp_footer', array( WC()->structured_data, 'output_structured_data' ), 10 );
-    remove_action( 'woocommerce_email_order_details', array( WC()->structured_data, 'output_email_structured_data' ), 30 );
+    if ( WC() && isset( WC()->structured_data ) ) {
+        remove_action( 'wp_footer', array( WC()->structured_data, 'output_structured_data' ), 10 );
+        remove_action( 'woocommerce_email_order_details', array( WC()->structured_data, 'output_email_structured_data' ), 30 );
+    }
 
     // Yoast SEO
     if ( class_exists( 'WPSEO_Frontend' ) ) {

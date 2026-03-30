@@ -187,10 +187,17 @@ function pps_gdrive_auth_page() {
     // Handle credential save
     if ( isset( $_POST['pps_gdrive_save_creds'] ) ) {
         check_admin_referer( 'pps_gdrive_auth' );
-        update_option( 'pps_gdrive_client_id', sanitize_text_field( $_POST['pps_gdrive_cid'] ?? '' ), false );
-        update_option( 'pps_gdrive_client_secret', sanitize_text_field( $_POST['pps_gdrive_csec'] ?? '' ), false );
-        update_option( 'pps_gdrive_parent_folder', sanitize_text_field( $_POST['pps_gdrive_folder'] ?? '' ), false );
-        echo '<div class="notice notice-success is-dismissible"><p>Credentials saved.</p></div>';
+        $cid   = sanitize_text_field( $_POST['pps_gdrive_cid'] ?? '' );
+        $csec  = sanitize_text_field( $_POST['pps_gdrive_csec'] ?? '' );
+        $folder = sanitize_text_field( $_POST['pps_gdrive_folder'] ?? '' );
+        if ( ! $cid || ! $csec ) {
+            echo '<div class="notice notice-error"><p>Client ID and Client Secret are required.</p></div>';
+        } else {
+            update_option( 'pps_gdrive_client_id', $cid, false );
+            update_option( 'pps_gdrive_client_secret', $csec, false );
+            update_option( 'pps_gdrive_parent_folder', $folder, false );
+            echo '<div class="notice notice-success is-dismissible"><p>Credentials saved.</p></div>';
+        }
         // Rebuild auth URL with new client ID
         $auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query( array(
             'client_id'     => pps_gdrive_client_id(),
