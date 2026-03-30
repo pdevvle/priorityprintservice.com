@@ -440,7 +440,7 @@ function calculate(c) {
   P.coat=0;
   if(coat.val>0&&coatOK){const sc=tQ/imp;P.coat=Math.ceil((coat.price*sc*mk)+(((sc/PCF.uvcoaterimpressionsperhour)*PCF.labor_bindery_hr)*(coat.price*mk*3))+PCF.labor_bindery_hr)}
   P.bundle=(bund.val>0&&q100)?Math.ceil(((tQ/bund.price)/mk)*(PCF.labor_bindery_hr/PCF.bundlesperhour))+PCF.bundling_base_fee:0;
-  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.labor_bindery_hr*PCF.roundcornerperhour):0;
+  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr):0;
 
   let ndc=art.val>=4?(art.price*tP)*PCF.art_newdesignmodifier:0;
   let aec=(art.val>=2&&art.val<4)?PCF.art_pagesperhour+((c.artEditPages/PCF.art_pagesperhour)*art.price):0;

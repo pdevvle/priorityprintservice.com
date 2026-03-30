@@ -458,7 +458,7 @@ function calculate(c) {
   const iPaper = lowYield && c.insidePaper.oversizePrice != null ? c.insidePaper.oversizePrice : c.insidePaper.price;
   const cPaper = lowYield && cvr.oversizePrice != null ? cvr.oversizePrice : cvr.price;
   P.insidePaper=(iPaper*tS)*mk;
-  P.coverPaper=((cPaper*tQ)/imp)*mk;
+  P.coverPaper=((cPaper*tQ)/(imp/2))*mk;
 
   // ── Production labor ──
   P.press=(tS/PCF.press_printsperhour)*PCF.labor_press_hr;
@@ -477,8 +477,8 @@ function calculate(c) {
   P.vivid=c.vividPrint?Math.ceil(P.press):0;
   P.coat=0;
   if(coat.val>0&&coatOK){const sc=tQ/imp;P.coat=Math.ceil((coat.price*sc*mk)+(((sc/PCF.uvcoaterimpressionsperhour)*PCF.labor_bindery_hr)*(coat.price*mk*3))+PCF.labor_bindery_hr)}
-  P.bundle=(bund.val>0&&q100)?Math.ceil(((tQ/bund.price)/mk)*(PCF.labor_bindery_hr/PCF.bundlesperhour))+PCF.bundling_base_fee:0;
-  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.labor_bindery_hr*PCF.roundcornerperhour):0;
+  P.bundle=(bund.val>0&&q100)?Math.ceil(((tQ/bund.price)/mk)*(PCF.labor_bindery_hr/PCF.bundlesperhour)+PCF.bundling_base_fee):0;
+  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr):0;
 
   // ── Outfold ──
   P.outfold=0;
@@ -3681,7 +3681,7 @@ function App(){
             <div style={ST.hr}/>
             <div style={r3}>
               <TxtNum label="Quantity" value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>
-              <Sel label="Pages" value={sets[0].pages} onChange={v=>upSet(0,{pages:parseInt(v)})}>{PAGE_COUNTS.map(p=><option key={p} value={p}>{p} Pages</option>)}</Sel>
+              <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(20,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={20} max={350}/>
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
             </div>
 
