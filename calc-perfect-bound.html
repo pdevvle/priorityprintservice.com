@@ -117,24 +117,34 @@ const PCF = Object.assign({
   art_pagesperhour:8, art_newdesignmodifier:0.5,
   sheetsforlowcosthardcopyproof:1500,
   minimum_turnaround_days:3,
-  two_staple_threshold:5.25,     // binding edge > this = auto two staple
-  non_inventory_fee:35,          // surcharge for non-stock papers
-  bw_discount_rate:0.3,          // press cost reduction for B&W
-  easy_discount_rate:0.05,       // materials discount for easy (imp≥4) sizes
-  common_discount_max:1000,      // max competitive discount for common sizes
-  bundling_base_fee:7,           // flat add-on for any bundling
-  proof_hardcopy_cost:35,        // hardcopy proof base price
-  proof_digital_cost:10,         // digital proof base price
-  sets_surcharge:20,             // per-set surcharge ($20×N - $20)
-  bleed_minimum:15,              // minimum charge for adding bleeds
-  default_transit_days:4,        // fallback when state not in transit map
+  non_inventory_fee:35,
+  bw_discount_rate:0.3,
+  easy_discount_rate_1:0.07,       // 7% materials discount tier 1
+  easy_discount_rate_2:0.05,       // 5% materials discount tier 2
+  common_discount_max:1000,
+  bundling_base_fee:7,
+  proof_hardcopy_cost:35,
+  proof_digital_cost:10,
+  sets_surcharge:20,
+  bleed_minimum:15,
+  default_transit_days:4,
+  base_rate:40,                       // flat base charge per order
+  // Perfect binding specific
+  perfect_binding_speedperhr:200,     // books per hour on binder
+  labor_perf_bind_hr:50,              // perfect binder operator hourly rate
+  labor_perf_bind_setup:35,           // setup fee per run
+  perfboundunitsperday:2500,          // daily capacity for turnaround calc
+  cutter_stackheight_inches:3.5,      // max stack height for finishing cuts
+  cutter_cyclesperhour:120,           // cutter cycles per hour (for finishing cuts)
+  // GW machine (perforation)
+  speed_gwperhr:500,                  // GW perf machine speed per hour
+  labor_gw_hour:45,                   // GW operator hourly rate
   // Shipping & Rush
-  shop_timezone:"America/Phoenix",  // IANA timezone — no DST in AZ
-  shop_cutoff_hour:14,              // 2:00 PM — orders after this = next business day
-  free_shipping_buffer:1.5,           // multiplier on production days for free ship ETA
-  // Shippo integration (future) — when shippo_api_token is set, zip-based ETAs replace static transit map
-  shippo_api_token:"",              // Shippo API Live Token — leave empty to use static transit map
-  shippo_origin_zip:"85027",        // Shop origin zip for rate/ETA lookups
+  shop_timezone:"America/Phoenix",
+  shop_cutoff_hour:14,
+  free_shipping_buffer:1.5,
+  shippo_api_token:"",
+  shippo_origin_zip:"85027",
 }, _CFG.pcf || {});
 
 // Ground transit days from facility (Phoenix AZ) — state-level fallback
@@ -317,6 +327,9 @@ const BUNDLING=_CFG.bundling||[{label:"No Bundling",val:0,price:500},{label:"Bun
 const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
 const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01,price:0},{label:"Email Art After Order",val:0.02,price:0},{label:"Artwork already discussed",val:0.03,price:0},{label:"I have a design in Canva",val:0.04,price:0},{label:"Artwork needs edits",val:2.01,price:75},{label:"Design from scratch",val:4.01,price:75}];
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
+// Perfect bound specific options
+const OUTFOLD_OPTS=_CFG.outfold_opts||[{label:"No Outfold",val:0,price:0},{label:"1 Fold-Out Page (Bifold)",val:1000,price:0.02},{label:"2 Fold-Out Pages (Bifold)",val:500,price:0.04}];
+const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0},{label:"1 Perforation Line",val:2000,price:0.01},{label:"2 Perforation Lines",val:1000,price:0.02}];
 
 // ═══════════════════════════════════════════════════════════════
 // SIZE + PRICING
@@ -396,12 +409,21 @@ function calculate(c) {
   const art=ART_OPTS.find(x=>x.val===c.artwork)||ART_OPTS[0];
   const bld=BLEED_OPTS.find(x=>x.val===c.bleed)||BLEED_OPTS[0];
   const cvr=c.coverMode==="same"?COVER_SAME:c.coverPaper;
+  const outfold=OUTFOLD_OPTS.find(x=>x.val===(c.outfold||0))||OUTFOLD_OPTS[0];
+  const perf=PERF_OPTS.find(x=>x.val===(c.perforation||0))||PERF_OPTS[0];
 
   const tQ=sets.reduce((s,x)=>s+x.qty,0);
   const tP=sets.reduce((s,x)=>s+x.pages,0);
-  const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/4,0)/(imp/2);
-  const dL=(0.6*Math.log(tS))-0.1447;
+  // Perfect bound: pages / 2 per sheet (each sheet = 2 pages front/back)
+  const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/2,0)/imp;
+
+  // Discount limiter — two-branch logarithmic curve
+  const dL = tS >= 1000
+    ? 1.1782 * Math.log(tS) - 5.5887
+    : 2.5003 * Math.pow(Math.log(tS), 2) - 21.9175 * Math.log(tS) + 34.6437;
   const mk=Math.max(PCF.backend_maximummarkup-dL,PCF.backend_minimummarkup);
+
+  // Spine proxy: used for bundling/corner turnaround estimates
   const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
   const csOK=sets.every(s=>s.pages<=24);
 
@@ -413,59 +435,94 @@ function calculate(c) {
   const coatPaper=c.coverMode==="same"?c.insidePaper:cvr;
   const coatOK=coatPaper.coatable;
   const hcOK=c.insidePaper.factory;
-
-  // Two staple: auto (no extra charge) for binding edge > 5.25"
-  // Only charges when user opts in on small sizes (binding edge <= 5.25")
-  const twoAuto=sz.bindEdge>TWO_STAPLE_THRESH;
-  const twoOptIn=!twoAuto&&c.twoStaple;
-  const twoApplied=twoAuto||twoOptIn;
-
   const easySize=!sz.isCustom?imp>=4:false;
-  const commonSize=!sz.isCustom?["5.5×8.5 (Opens to 8.5×11)","8.5×11 (Opens to 11×17)"].includes(c.sizeLabel):false;
 
   const P={};
-  P.insidePrint=c.insideColor==="bw"?((PCF.printing_black_cost*2)*tS)*mk:(((PCF.printing_black_cost*2)*tS)*mk)+((PCF.printing_fullcolor_cost*2)*tS);
-  P.coverPrint=c.coverColor==="bw"?((PCF.printing_black_cost*tS)*2)/imp:((PCF.printing_fullcolor_cost*tS)*2)/imp;
-  const lowYield = imp < 1; // signature exceeds 19×13 parent sheet — use oversize paper prices
+
+  // ── Mixed color printing ──
+  // For now, insideColor drives all pages. Future: per-set color/BW page splits.
+  // Color pages get BOTH BW base cost + full color surcharge. BW pages get BW cost only.
+  const colorPages = c.insideColor === "bw" ? 0 : tP;
+  const bwPages = c.insideColor === "bw" ? tP : 0;
+  const bwFraction = tP > 0 ? bwPages / tP : 0;
+
+  // Inside print: BW base on all pages + color surcharge on color pages
+  P.insidePrint = (((PCF.printing_black_cost * tP / imp) * mk) + ((PCF.printing_fullcolor_cost / imp) * colorPages)) * tQ / tP;
+  // Cover print: front + back = 2 sides
+  P.coverPrint = c.coverColor === "bw"
+    ? ((PCF.printing_black_cost * 2 * tQ) / imp)
+    : ((PCF.printing_fullcolor_cost * 2 * tQ) / imp);
+
+  // ── Paper ──
+  const lowYield = imp < 1;
   const iPaper = lowYield && c.insidePaper.oversizePrice != null ? c.insidePaper.oversizePrice : c.insidePaper.price;
   const cPaper = lowYield && cvr.oversizePrice != null ? cvr.oversizePrice : cvr.price;
   P.insidePaper=(iPaper*tS)*mk;
   P.coverPaper=((cPaper*tQ)/imp)*mk;
+
+  // ── Production labor ──
   P.press=(tS/PCF.press_printsperhour)*PCF.labor_press_hr;
   P.cutting=((tS*imp)/PCF.cutter_sheetsperhour)*(PCF.labor_cutting_hr+mk)+PCF.cutterbasefee;
+  // 3 finishing cuts (head, foot, face) after binding
+  P.finishingCuts=(((spine/PCF.cutter_stackheight_inches)*3)/PCF.cutter_cyclesperhour)*PCF.labor_cutting_hr+PCF.cutterbasefee;
   P.scoreCover=cvrScoring?(tQ/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
   P.scoreInsides=csInside?(((tS*(imp/2))-tQ)/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
-  P.stitching=((((tS*imp)/2)/PCF.horizonspf20_sheetsperhour)*PCF.labor_horizonspf20_hr)+PCF.labor_horizonspf20_setup;
-  P.twoStitch=twoOptIn?Math.ceil(P.stitching*1):0;
+
+  // ── Perfect binding (replaces stitching) ──
+  const bindQty = imp >= 2 ? tQ / 2 : tQ; // 2-up or 1-up
+  P.perfectBind=((bindQty/PCF.perfect_binding_speedperhr)*PCF.labor_perf_bind_hr)+PCF.labor_perf_bind_setup;
+  const perfBindTurnaround = Math.ceil(tQ / PCF.perfboundunitsperday);
+
+  // ── Addons ──
   P.vivid=c.vividPrint?Math.ceil(P.press):0;
   P.coat=0;
   if(coat.val>0&&coatOK){const sc=tQ/imp;P.coat=Math.ceil((coat.price*sc*mk)+(((sc/PCF.uvcoaterimpressionsperhour)*PCF.labor_bindery_hr)*(coat.price*mk*3))+PCF.labor_bindery_hr)}
   P.bundle=(bund.val>0&&q100)?Math.ceil(((tQ/bund.price)/mk)*(PCF.labor_bindery_hr/PCF.bundlesperhour))+PCF.bundling_base_fee:0;
   P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.labor_bindery_hr*PCF.roundcornerperhour):0;
 
+  // ── Outfold ──
+  P.outfold=0;
+  if(outfold.val>0){
+    P.outfold=((PCF.printing_fullcolor_cost*tQ*outfold.price)+((tQ*outfold.price)/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr)*mk;
+  }
+  const outfoldTurnaround = outfold.val > 0 ? Math.ceil(tQ / outfold.val) : 0;
+
+  // ── Perforation ──
+  P.perforation=0;
+  if(perf.val>0){
+    const perfMult = imp >= 2 ? 2.0 : 0.9; // bind direction multiplier
+    P.perforation=((((tS/(imp/perf.price))/PCF.speed_gwperhr)*PCF.labor_gw_hour)*perfMult)*mk+PCF.labor_gw_hour;
+  }
+  const perfTurnaround = perf.val > 0 ? Math.ceil(tS / perf.val) : 0;
+
+  // ── Artwork ──
   let ndc=art.val>=4?(art.price*tP)*PCF.art_newdesignmodifier:0;
   let aec=(art.val>=2&&art.val<4)?PCF.art_pagesperhour+((c.artEditPages/PCF.art_pagesperhour)*art.price):0;
   P.artwork=artWork?(ndc+aec)*N:0;
   P.bleed=artWork?0:(bld.val>0?Math.max(bld.price*tP,PCF.bleed_minimum):0);
   P.proof=0;
   if(c.proof>0){const sf=(PCF.sheetsforlowcosthardcopyproof/tS)>1?1:(PCF.sheetsforlowcosthardcopyproof/tS);P.proof=((c.proof>=3?PCF.proof_hardcopy_cost:PCF.proof_digital_cost)*sf)*N}
+
+  // ── Fees & Discounts ──
+  P.baseRate=PCF.base_rate;
   P.sets=(N*PCF.sets_surcharge)-PCF.sets_surcharge;
-  P.diffSize=(sz.bindEdge<=3.5&&sz.bindEdge<=TWO_STAPLE_THRESH&&csInside)?Math.ceil(P.stitching):0;
+  P.diffSize=P.finishingCuts; // finishing cuts serve as the difficult size surcharge
   const iInv=c.insidePaperType==="cardstock"?INV_CS.includes(c.insidePaper.val):INV_NC.includes(c.insidePaper.val);
   P.nonInv=(iInv&&COVER_INV.includes(cvr.val))?0:PCF.non_inventory_fee;
-  P.discBW=c.insideColor==="bw"?-(P.press*PCF.bw_discount_rate):0;
+  // BW discount proportional to fraction of BW pages
+  P.discBW = bwFraction > 0 ? -(P.press * PCF.bw_discount_rate * bwFraction) : 0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
-  P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate,PCF.easydiscount_max):0;
-  P.discCommon=(commonSize&&q250)?-Math.min(P.press+P.cutting+P.stitching,PCF.common_discount_max):0;
+  P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate_1,PCF.easydiscount_max):0;
 
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
   // Turnaround
   const pT=(c.insidePaper.val||0)+(cvr.val||0);
-  const aT=(twoApplied?Math.floor(tQ/PCF.sheetsturnaround):0)+(c.vividPrint?Math.floor(tS/PCF.sheetsturnaround):0)+
+  const aT=(c.vividPrint?Math.floor(tS/PCF.sheetsturnaround):0)+
     (coat.val>0&&coatOK?Math.floor((tQ/(imp/2))/coat.val):0)+
     (bund.val>0&&q100?Math.floor(spine/bund.val):0)+
-    (rc.val>0?Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)):0);
+    (rc.val>0?Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)):0)+
+    outfoldTurnaround+perfTurnaround+perfBindTurnaround;
   const dT=art.val>=4?Math.ceil(art.val*(tP/4)):0;
   const eT=(art.val>=2&&art.val<4)?Math.ceil((c.artEditPages/PCF.art_pagesperhour)/2):0;
   const bT=(!artWork&&bld.val>0)?Math.floor(bld.val*tP)/12:0;
@@ -477,11 +534,13 @@ function calculate(c) {
   const ti = {
     insidePaper: Math.floor(c.insidePaper.val || 0),
     coverPaper: Math.floor(cvr.val || 0),
-    twoStaple: twoApplied ? Math.floor(tQ/PCF.sheetsturnaround) : 0,
+    perfectBind: perfBindTurnaround,
     vivid: c.vividPrint ? Math.floor(tS/PCF.sheetsturnaround) : 0,
     coating: (coat.val>0&&coatOK) ? Math.floor((tQ/(imp/2))/coat.val) : 0,
     bundling: (bund.val>0&&q100) ? Math.floor(spine/bund.val) : 0,
     roundCorner: rc.val>0 ? Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)) : 0,
+    outfold: outfoldTurnaround,
+    perforation: perfTurnaround,
     artDesign: dT,
     artEdits: eT,
     bleed: Math.round(bT*10)/10,
@@ -544,15 +603,15 @@ function calculate(c) {
   const bd=[
     {l:"Inside Paper",v:P.insidePaper,g:"mat"},{l:"Cover Paper",v:P.coverPaper,g:"mat"},
     {l:"Inside Print",v:P.insidePrint,g:"mat"},{l:"Cover Print",v:P.coverPrint,g:"mat"},
-    {l:"Press",v:P.press,g:"lab"},{l:"Cutting",v:P.cutting,g:"lab"},
+    {l:"Press",v:P.press,g:"lab"},{l:"Cutting",v:P.cutting,g:"lab"},{l:"Finishing Cuts",v:P.finishingCuts,g:"lab"},
     {l:"Cover Scoring",v:P.scoreCover,g:"lab"},{l:"Inside Scoring",v:P.scoreInsides,g:"lab"},
-    {l:"Stitching",v:P.stitching,g:"lab"},
-    {l:"Two-Staple",v:P.twoStitch,g:"add"},{l:"Vivid Print",v:P.vivid,g:"add"},
+    {l:"Perfect Binding",v:P.perfectBind,g:"lab"},
+    {l:"Vivid Print",v:P.vivid,g:"add"},
     {l:"UV Coating",v:P.coat,g:"add"},{l:"Bundling",v:P.bundle,g:"add"},
-    {l:"Round Cornering",v:P.rc,g:"add"},
+    {l:"Round Cornering",v:P.rc,g:"add"},{l:"Outfold",v:P.outfold,g:"add"},{l:"Perforation",v:P.perforation,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
-    {l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Difficult Size",v:P.diffSize,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
-    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},
+    {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
+    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 
   // CMYK-derived group colors
@@ -566,8 +625,8 @@ function calculate(c) {
   // Debug: intermediate values
   const baseDays=Math.floor(tS/PCF.sheetsturnaround);
   const paperDays=Math.floor(pT);
-  const perSetSheets=sets.map(s=>({name:s.name||`Set ${sets.indexOf(s)+1}`,qty:s.qty,pages:s.pages,bookletSheets:(s.qty*s.pages)/4}));
-  const bookletSheetsTotal=sets.reduce((s,x)=>s+(x.qty*x.pages)/4,0);
+  const perSetSheets=sets.map(s=>({name:s.name||`Set ${sets.indexOf(s)+1}`,qty:s.qty,pages:s.pages,bookletSheets:(s.qty*s.pages)/2}));
+  const bookletSheetsTotal=sets.reduce((s,x)=>s+(x.qty*x.pages)/2,0);
 
   const debug={
     // Sheet math
@@ -575,10 +634,10 @@ function calculate(c) {
     bookletSheetsTotal,
     parentSheets:tS,
     imp,
-    impHalf:imp/2,
     // Volumes
     totalQty:tQ,
     totalPages:tP,
+    colorPages, bwPages, bwFraction,
     numSets:N,
     // Pricing intermediates
     markup:mk,
@@ -599,12 +658,14 @@ function calculate(c) {
     bindingEdge:sz.bindEdge,
     isCustom:sz.isCustom,
     easySize,
-    commonSize,
     lowYield,
     lowYieldPaper: lowYield ? `oversize pricing (inside: $${iPaper}, cover: $${cPaper})` : "standard pricing",
-    // Two staple
-    twoStapleMode:twoAuto?"auto (no charge)":twoOptIn?"user opt-in (+charge)":"single staple",
-    twoStapleApplied:twoApplied,
+    // Perfect binding
+    bindMode: imp >= 2 ? "2-up" : "1-up",
+    bindQty,
+    perfBindTurnaround,
+    outfoldLabel: outfold.label,
+    perforationLabel: perf.label,
     // Turnaround breakdown
     turnaround:{
       baseDays,
@@ -614,11 +675,13 @@ function calculate(c) {
       coverPaperVal:cvr.val,
       addonDays:aT,
       addonBreakdown:{
-        twoStaple:twoApplied?Math.floor(tQ/PCF.sheetsturnaround):0,
+        perfectBind:perfBindTurnaround,
         vivid:c.vividPrint?Math.floor(tS/PCF.sheetsturnaround):0,
         coating:(coat.val>0&&coatOK)?Math.floor((tQ/(imp/2))/coat.val):0,
         bundling:(bund.val>0&&q100)?Math.floor(spine/bund.val):0,
         roundCorner:rc.val>0?Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)):0,
+        outfold:outfoldTurnaround,
+        perforation:perfTurnaround,
       },
       artworkDays:artT,
       artBreakdown:{
@@ -646,7 +709,7 @@ function calculate(c) {
     minDaysConfig:PCF.minimum_turnaround_days,
   };
 
-  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,hcOK,sz,debug,ti,
+  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,q100,coatOK,hcOK,sz,debug,ti,
     shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,needByPast,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
@@ -991,7 +1054,10 @@ function DebugPanel({debug}){
 
         <Hdr>Size & Binding</Hdr>
         <Row label="Binding edge" value={d.bindingEdge} unit="inches"/>
-        <Row label="Two staple mode" value={d.twoStapleMode}/>
+        <Row label="Binding mode" value={d.bindMode || "perfect bound"}/>
+        <Row label="Bind quantity" value={d.bindQty} unit="units"/>
+        {d.outfoldLabel && d.outfoldLabel !== "No Outfold" && <Row label="Outfold" value={d.outfoldLabel}/>}
+        {d.perforationLabel && d.perforationLabel !== "No Perforation" && <Row label="Perforation" value={d.perforationLabel}/>}
         <div style={{padding:"4px 0",display:"flex",flexWrap:"wrap"}}>
           <Flag label="Custom size" value={d.isCustom}/>
           <Flag label="Easy size" value={d.easySize}/>
@@ -1017,7 +1083,9 @@ function DebugPanel({debug}){
         <Row label="  Inside paper .value" value={t.insidePaperVal} indent/>
         <Row label="  Cover paper .value" value={t.coverPaperVal} indent/>
         <Row label="Addon days (total)" value={t.addonDays} unit="days"/>
-        {ab.twoStaple>0&&<Row label="  Two staple" value={ab.twoStaple} unit="days" indent/>}
+        {ab.perfectBind>0&&<Row label="  Perfect binding" value={ab.perfectBind} unit="days" indent/>}
+        {ab.outfold>0&&<Row label="  Outfold" value={ab.outfold} unit="days" indent/>}
+        {ab.perforation>0&&<Row label="  Perforation" value={ab.perforation} unit="days" indent/>}
         {ab.vivid>0&&<Row label="  Vivid" value={ab.vivid} unit="days" indent/>}
         {ab.coating>0&&<Row label="  Coating" value={ab.coating} unit="days" indent/>}
         {ab.bundling>0&&<Row label="  Bundling" value={ab.bundling} unit="days" indent/>}
@@ -3089,6 +3157,8 @@ function buildMetadata(config, result) {
     coating: config.coating,
     bundling: config.bundling,
     roundCorner: config.roundCorner,
+    outfold: config.outfold,
+    perforation: config.perforation,
     artwork: config.artwork,
     artEditPages: config.artEditPages,
     bleed: config.bleed,
@@ -3309,6 +3379,8 @@ function App(){
   const[coating,setCoating]=useState(Number(D.coating)||0);
   const[bundling,setBundling]=useState(Number(D.bundling)||0);
   const[roundCorner,setRoundCorner]=useState(Number(D.roundCorner)||0);
+  const[outfold,setOutfold]=useState(Number(D.outfold)||0);
+  const[perforation,setPerforation]=useState(Number(D.perforation)||0);
   const[artwork,setArtwork]=useState(Number(D.artwork)||0.01);
   const[artEditPages,setArtEditPages]=useState(Number(D.artEditPages)||0);
   const[bleed,setBleed]=useState(Number(D.bleed)||0);
@@ -3434,11 +3506,11 @@ function App(){
   const result=useMemo(()=>calculate({
     sets,sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
     insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
-    twoStaple,vividPrint,coating,bundling,roundCorner,artwork,artEditPages,bleed,proof,
+    twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,artwork,artEditPages,bleed,proof,
     shipState,shipZip,needByDate,
   }),[sets,sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
     insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
-    twoStaple,vividPrint,coating,bundling,roundCorner,artwork,artEditPages,bleed,proof,
+    twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,artwork,artEditPages,bleed,proof,
     shipState,shipZip,needByDate]);
 
   const r=result||{};
@@ -3475,7 +3547,7 @@ function App(){
     const baseConfig = {
       sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
       insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
-      twoStaple,vividPrint,coating,bundling,roundCorner,artwork,artEditPages,bleed,proof,
+      twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,artwork,artEditPages,bleed,proof,
       shipState,shipZip,needByDate,
     };
     const currentQty = sets[0]?.qty || 100;
@@ -3493,7 +3565,7 @@ function App(){
     });
   }, [result, sets, sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
     insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
-    twoStaple,vividPrint,coating,bundling,roundCorner,artwork,artEditPages,bleed,proof,
+    twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,artwork,artEditPages,bleed,proof,
     shipState,shipZip,needByDate]);
 
   useEffect(()=>{if(r.coatOK===false)setCoating(0)},[r.coatOK]);
@@ -3665,6 +3737,10 @@ function App(){
                 );
               })()}
             </div>
+
+            {/* Perfect bound specific addons */}
+            <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+            <Sel label="Perforation" badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
@@ -3846,7 +3922,9 @@ function App(){
                   const items = [
                     {l:"Base production", d:r.debug?.turnaround?.baseDays},
                     {l:"Paper lead time", d:r.ti.insidePaper + r.ti.coverPaper},
-                    {l:"Stapling", d:r.ti.twoStaple},
+                    {l:"Perfect Binding", d:r.ti.perfectBind},
+                    {l:"Outfold", d:r.ti.outfold},
+                    {l:"Perforation", d:r.ti.perforation},
                     {l:"Vivid print", d:r.ti.vivid},
                     {l:"Coating", d:r.ti.coating},
                     {l:"Bundling", d:r.ti.bundling},
