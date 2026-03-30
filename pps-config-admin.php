@@ -272,6 +272,8 @@ function pps_parse_ups_zone_csv( $raw ) {
             $parts = explode( '-', $dest );
             $lo = intval( trim( $parts[0] ) );
             $hi = intval( trim( $parts[1] ) );
+            if ( $hi > 999 ) $hi = 999; // ZIP prefixes are 000-999
+            if ( $lo < 0 ) $lo = 0;
             for ( $i = $lo; $i <= $hi; $i++ ) {
                 $map[ str_pad( $i, 3, '0', STR_PAD_LEFT ) ] = $days;
             }
