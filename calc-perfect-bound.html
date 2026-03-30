@@ -283,7 +283,7 @@ const SIZE_PRESETS = _CFG.size_presets || [
   ]},
 ];
 const ALL_SIZES = SIZE_PRESETS.flatMap(g => g.items);
-const TWO_STAPLE_THRESH = PCF.two_staple_threshold;
+// TWO_STAPLE_THRESH removed — not applicable to perfect bound
 
 function calcCustomImp(longest, shortest, bindDir) {
   const sA=x=>{const r=18.5/x;return r<.5?0:r<1?.5:r<2?1:r<3?2:r<4?3:r<5?4:4};
@@ -1070,8 +1070,7 @@ function DebugPanel({debug}){
         <div style={{padding:"4px 0",display:"flex",flexWrap:"wrap"}}>
           <Flag label="Custom size" value={d.isCustom}/>
           <Flag label="Easy size" value={d.easySize}/>
-          <Flag label="Common size" value={d.commonSize}/>
-          <Flag label="Low yield (imp<1, paper×1.75)" value={d.lowYield}/>
+          <Flag label="Low yield (imp<1)" value={d.lowYield}/>
         </div>
 
         <Hdr>Paper & Cover</Hdr>
@@ -4175,7 +4174,6 @@ function App(){
           <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>setShowDebug(p=>!p)}>
             <Panel result={result} compact/>
             <div style={{fontSize:8,textAlign:"center",color:showDebug?CK.cyan:CC.light,marginTop:2,letterSpacing:".5px",textTransform:"uppercase",fontWeight:600}}>{showDebug?"▼ Hide Debug":"▲ Debug"}</div>
-          </div>
           </div>
           <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined}}
             disabled={!!result?.error?.length||submitting}>
