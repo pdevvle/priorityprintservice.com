@@ -126,8 +126,11 @@ function pps_gdrive_auth_page() {
         echo '<div class="notice notice-warning is-dismissible"><p>Google Drive disconnected.</p></div>';
     }
 
-    // Handle OAuth callback
+    // Handle OAuth callback — verify state to prevent CSRF
     if ( isset( $_GET['code'] ) && ! isset( $_POST['pps_gdrive_disconnect'] ) ) {
+        if ( ! isset( $_GET['state'] ) || ! wp_verify_nonce( $_GET['state'], 'pps_gdrive_oauth' ) ) {
+            echo '<div class="notice notice-error"><p>OAuth state mismatch — please try connecting again.</p></div>';
+        } else {
         $code = sanitize_text_field( $_GET['code'] );
 
         $response = wp_remote_post( 'https://oauth2.googleapis.com/token', array(
@@ -172,9 +175,11 @@ function pps_gdrive_auth_page() {
                 echo '<div class="notice notice-error"><p>No refresh token received. Try disconnecting and reconnecting with the "prompt=consent" flow.</p></div>';
             }
         }
+        } // end state verification
     }
 
-    // Build authorization URL
+    // Generate CSRF state token for OAuth
+    $oauth_state = wp_create_nonce( 'pps_gdrive_oauth' );
     $auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query( array(
         'client_id'     => pps_gdrive_client_id(),
         'redirect_uri'  => $redirect_uri,
@@ -182,9 +187,8 @@ function pps_gdrive_auth_page() {
         'scope'         => PPS_GDRIVE_SCOPE . ' https://www.googleapis.com/auth/userinfo.email',
         'access_type'   => 'offline',
         'prompt'        => 'consent',
+        'state'         => $oauth_state,
     ) );
-
-    // Handle credential save
     if ( isset( $_POST['pps_gdrive_save_creds'] ) ) {
         check_admin_referer( 'pps_gdrive_auth' );
         $cid   = sanitize_text_field( $_POST['pps_gdrive_cid'] ?? '' );
@@ -198,7 +202,8 @@ function pps_gdrive_auth_page() {
             update_option( 'pps_gdrive_parent_folder', $folder, false );
             echo '<div class="notice notice-success is-dismissible"><p>Credentials saved.</p></div>';
         }
-        // Rebuild auth URL with new client ID
+        // Rebuild auth URL with new client ID + fresh state
+        $oauth_state = wp_create_nonce( 'pps_gdrive_oauth' );
         $auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query( array(
             'client_id'     => pps_gdrive_client_id(),
             'redirect_uri'  => $redirect_uri,
@@ -206,6 +211,7 @@ function pps_gdrive_auth_page() {
             'scope'         => PPS_GDRIVE_SCOPE . ' https://www.googleapis.com/auth/userinfo.email',
             'access_type'   => 'offline',
             'prompt'        => 'consent',
+            'state'         => $oauth_state,
         ) );
     }
 
