@@ -1070,7 +1070,7 @@ async function extractImagePages(files, onProgress) {
     if (onProgress) onProgress(i + 1, sorted.length);
     const url = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(sorted[i]); });
     if (i === 0) {
-      const d = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.src = url; });
+      const d = await new Promise((res, rej) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => rej(new Error("Image load failed")); img.src = url; }).catch(() => ({ w: 0, h: 0 }));
       imgW = d.w; imgH = d.h;
     }
     let label = pageLabel(i, sorted.length);
@@ -1545,6 +1545,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
         resolve(c.toDataURL("image/jpeg", 0.85));
       };
+      img.onerror = () => resolve(dataUrl); // fallback: return unrotated
       img.src = dataUrl;
     });
   }
@@ -1637,6 +1638,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
             drawGuides(pctx, pc.width, pc.height, i);
             pc.toBlob(resolve, "image/jpeg", 0.85);
           };
+          img.onerror = () => resolve(null);
           img.src = page.dataUrl;
         });
         previewBlobs.push(blob);
@@ -1692,6 +1694,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               tc.getContext("2d").drawImage(img, 0, 0);
               resolve(tc);
             };
+            img.onerror = () => resolve(null);
             img.src = page.dataUrl;
           });
         }
@@ -1886,6 +1889,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       c.getContext("2d").drawImage(img, 0, 0, w, h);
       analyzeEdges(c);
     };
+    img.onerror = () => { if (!cancelled) setEdgeHasMargins(null); };
     img.src = rawPages[0].dataUrl;
     return () => { cancelled = true; };
   }, [rawPages, artDims]);
@@ -2206,7 +2210,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
     // Single image → insert/replace at slot index
     const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
-    const imgDims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.src = dataUrl; });
+    const imgDims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
 
     const newPage = { dataUrl, label: pageLabel(idx, pageCount) };
 
@@ -3213,8 +3217,9 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     if (artworkPath) fd.append("pps_artwork_path", artworkPath);
 
     const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: fd });
+    if (!resp.ok) { alert("Server error (" + resp.status + "). Please try again."); return; }
     const data = await resp.json();
-    if (data.success) {
+    if (data && data.success) {
       window.location.href = PPS.cartUrl;
     } else {
       alert("Error: " + (data.data || "Could not add to cart."));
@@ -3254,11 +3259,13 @@ function App(){
     const base = (window.PPS_CONFIG || {}).defaults || {};
     try {
       const p = new URLSearchParams(window.location.search);
-      if (p.has("qty")) base.qty = parseInt(p.get("qty"));
-      if (p.has("pages")) base.pages = parseInt(p.get("pages"));
+      const _int = (v) => { const n = parseInt(v, 10); return isNaN(n) ? undefined : n; };
+      const _float = (v) => { const n = parseFloat(v); return isNaN(n) ? undefined : n; };
+      if (p.has("qty") && _int(p.get("qty"))) base.qty = _int(p.get("qty"));
+      if (p.has("pages") && _int(p.get("pages"))) base.pages = _int(p.get("pages"));
       if (p.has("size")) base.sizeLabel = p.get("size");
-      if (p.has("long")) base.customLong = parseFloat(p.get("long"));
-      if (p.has("short")) base.customShort = parseFloat(p.get("short"));
+      if (p.has("long") && _float(p.get("long"))) base.customLong = _float(p.get("long"));
+      if (p.has("short") && _float(p.get("short"))) base.customShort = _float(p.get("short"));
       if (p.has("bind")) base.bindDir = p.get("bind");
       if (p.has("color")) base.insideColor = p.get("color");
       if (p.has("covercolor")) base.coverColor = p.get("covercolor");
@@ -3267,9 +3274,9 @@ function App(){
       if (p.has("coverpaper")) base.coverPaperType = p.get("coverpaper");
       if (p.has("staple")) base.twoStaple = p.get("staple") === "true";
       if (p.has("vivid")) base.vividPrint = p.get("vivid") === "true";
-      if (p.has("coating")) base.coating = Number(p.get("coating"));
-      if (p.has("bundling")) base.bundling = Number(p.get("bundling"));
-      if (p.has("corner")) base.roundCorner = Number(p.get("corner"));
+      if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
+      if (p.has("bundling") && _float(p.get("bundling")) != null) base.bundling = _float(p.get("bundling"));
+      if (p.has("corner") && _float(p.get("corner")) != null) base.roundCorner = _float(p.get("corner"));
       if (p.has("state")) base.shipState = p.get("state");
     } catch(e) {}
     return base;

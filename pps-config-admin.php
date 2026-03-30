@@ -304,6 +304,7 @@ function pps_config_render_page() {
 
     // Handle save
     if ( isset( $_POST['pps_config_save'] ) ) {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
         check_admin_referer( 'pps_config_save' );
         $cfg = pps_get_config();
 

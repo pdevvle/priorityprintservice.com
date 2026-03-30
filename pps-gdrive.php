@@ -13,10 +13,11 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════
 
-define( 'PPS_GDRIVE_CLIENT_ID',     '252905040113-l48t7hu7skhph823p6haavephfjk4qnq.apps.googleusercontent.com' );
-define( 'PPS_GDRIVE_CLIENT_SECRET', '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' );
-define( 'PPS_GDRIVE_PARENT_FOLDER', '1bIBOS7_CXfoE4ei7Y7MN9M-OUz_4fVeX' );
-define( 'PPS_GDRIVE_SCOPE',         'https://www.googleapis.com/auth/drive.file' );
+// Credentials loaded from wp_options — configure in WP Admin → PPS Calculators → Google Drive
+function pps_gdrive_client_id()     { return get_option( 'pps_gdrive_client_id', '' ); }
+function pps_gdrive_client_secret() { return get_option( 'pps_gdrive_client_secret', '' ); }
+function pps_gdrive_parent_folder() { return get_option( 'pps_gdrive_parent_folder', '' ); }
+define( 'PPS_GDRIVE_SCOPE', 'https://www.googleapis.com/auth/drive.file' );
 
 // ═══════════════════════════════════════════════════════════════
 // THUMBNAIL DIRECTORY
@@ -54,8 +55,8 @@ function pps_gdrive_get_access_token() {
     $response = wp_remote_post( 'https://oauth2.googleapis.com/token', array(
         'timeout' => 15,
         'body'    => array(
-            'client_id'     => PPS_GDRIVE_CLIENT_ID,
-            'client_secret' => PPS_GDRIVE_CLIENT_SECRET,
+            'client_id'     => pps_gdrive_client_id(),
+            'client_secret' => pps_gdrive_client_secret(),
             'refresh_token' => $refresh_token,
             'grant_type'    => 'refresh_token',
         ),
@@ -133,8 +134,8 @@ function pps_gdrive_auth_page() {
             'timeout' => 15,
             'body'    => array(
                 'code'          => $code,
-                'client_id'     => PPS_GDRIVE_CLIENT_ID,
-                'client_secret' => PPS_GDRIVE_CLIENT_SECRET,
+                'client_id'     => pps_gdrive_client_id(),
+                'client_secret' => pps_gdrive_client_secret(),
                 'redirect_uri'  => $redirect_uri,
                 'grant_type'    => 'authorization_code',
             ),
@@ -175,7 +176,7 @@ function pps_gdrive_auth_page() {
 
     // Build authorization URL
     $auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query( array(
-        'client_id'     => PPS_GDRIVE_CLIENT_ID,
+        'client_id'     => pps_gdrive_client_id(),
         'redirect_uri'  => $redirect_uri,
         'response_type' => 'code',
         'scope'         => PPS_GDRIVE_SCOPE . ' https://www.googleapis.com/auth/userinfo.email',
@@ -183,12 +184,48 @@ function pps_gdrive_auth_page() {
         'prompt'        => 'consent',
     ) );
 
+    // Handle credential save
+    if ( isset( $_POST['pps_gdrive_save_creds'] ) ) {
+        check_admin_referer( 'pps_gdrive_auth' );
+        update_option( 'pps_gdrive_client_id', sanitize_text_field( $_POST['pps_gdrive_cid'] ?? '' ), false );
+        update_option( 'pps_gdrive_client_secret', sanitize_text_field( $_POST['pps_gdrive_csec'] ?? '' ), false );
+        update_option( 'pps_gdrive_parent_folder', sanitize_text_field( $_POST['pps_gdrive_folder'] ?? '' ), false );
+        echo '<div class="notice notice-success is-dismissible"><p>Credentials saved.</p></div>';
+        // Rebuild auth URL with new client ID
+        $auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query( array(
+            'client_id'     => pps_gdrive_client_id(),
+            'redirect_uri'  => $redirect_uri,
+            'response_type' => 'code',
+            'scope'         => PPS_GDRIVE_SCOPE . ' https://www.googleapis.com/auth/userinfo.email',
+            'access_type'   => 'offline',
+            'prompt'        => 'consent',
+        ) );
+    }
+
     $connected = pps_gdrive_is_connected();
     $email     = get_option( 'pps_gdrive_user_email', '' );
 
     ?>
     <div class="wrap" style="max-width:600px">
         <h1>📁 Google Drive Integration</h1>
+
+        <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:24px;margin-top:16px">
+            <h3 style="margin:0 0 12px">API Credentials</h3>
+            <p style="font-size:12px;color:#666;margin:0 0 12px">From Google Cloud Console → APIs &amp; Services → Credentials. These are stored in your WordPress database, not in code.</p>
+            <form method="post">
+                <?php wp_nonce_field( 'pps_gdrive_auth' ); ?>
+                <table class="form-table" style="margin:0">
+                    <tr><th style="padding:8px 0;width:120px"><label>Client ID</label></th>
+                        <td><input type="text" name="pps_gdrive_cid" value="<?php echo esc_attr( pps_gdrive_client_id() ); ?>" class="regular-text" style="width:100%" /></td></tr>
+                    <tr><th style="padding:8px 0"><label>Client Secret</label></th>
+                        <td><input type="password" name="pps_gdrive_csec" value="<?php echo esc_attr( pps_gdrive_client_secret() ); ?>" class="regular-text" style="width:100%" /></td></tr>
+                    <tr><th style="padding:8px 0"><label>Parent Folder ID</label></th>
+                        <td><input type="text" name="pps_gdrive_folder" value="<?php echo esc_attr( pps_gdrive_parent_folder() ); ?>" class="regular-text" style="width:100%" />
+                        <p class="description">The Google Drive folder ID where order folders are created.</p></td></tr>
+                </table>
+                <p><button type="submit" name="pps_gdrive_save_creds" class="button">Save Credentials</button></p>
+            </form>
+        </div>
 
         <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:24px;margin-top:16px">
             <?php if ( $connected ) : ?>
@@ -221,9 +258,13 @@ function pps_gdrive_auth_page() {
                 <p style="font-size:13px;color:#555;margin:0 0 16px">
                     Connect your Google account to automatically upload artwork to Drive when orders are placed.
                 </p>
-                <a href="<?php echo esc_url( $auth_url ); ?>" class="button button-primary" style="font-size:14px;padding:8px 24px;height:auto">
-                    🔗 Connect Google Drive
-                </a>
+                <?php if ( pps_gdrive_client_id() && pps_gdrive_client_secret() ) : ?>
+                    <a href="<?php echo esc_url( $auth_url ); ?>" class="button button-primary" style="font-size:14px;padding:8px 24px;height:auto">
+                        🔗 Connect Google Drive
+                    </a>
+                <?php else : ?>
+                    <p style="color:#b91c1c;font-size:13px"><strong>Enter your API credentials above before connecting.</strong></p>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
     </div>
@@ -403,7 +444,7 @@ function pps_process_artwork_upload( $order_id ) {
     if ( ! $order ) return;
     if ( $order->get_meta( '_pps_artwork_processed' ) ) return;
 
-    if ( ! PPS_GDRIVE_PARENT_FOLDER ) {
+    if ( ! pps_gdrive_parent_folder() ) {
         error_log( 'PPS Drive: Parent folder ID not configured. Order ' . $order_id );
         return;
     }
@@ -432,13 +473,14 @@ function pps_process_artwork_upload( $order_id ) {
 
         $thumb_name = pps_generate_thumbnail( $full_path, $token );
         if ( $thumb_name ) {
-            wc_update_order_item_meta( $item_id, '_pps_artwork_thumb', $thumb_name );
+            $item->update_meta_data( '_pps_artwork_thumb', $thumb_name );
+            $item->save();
         }
 
         $folder_id = $order->get_meta( '_pps_gdrive_folder_id' );
         if ( ! $folder_id ) {
             $folder_name = 'Order #' . $order_id . ' — ' . $order->get_billing_first_name() . ' ' . $order->get_billing_last_name();
-            $folder_id   = pps_gdrive_create_folder( $folder_name, PPS_GDRIVE_PARENT_FOLDER );
+            $folder_id   = pps_gdrive_create_folder( $folder_name, pps_gdrive_parent_folder() );
             if ( $folder_id ) {
                 $order->update_meta_data( '_pps_gdrive_folder_id', $folder_id );
             }
@@ -459,15 +501,15 @@ function pps_process_artwork_upload( $order_id ) {
 
         if ( $file_id ) {
             $drive_url = 'https://drive.google.com/file/d/' . $file_id . '/view';
-            wc_update_order_item_meta( $item_id, '_pps_gdrive_file_id', $file_id );
-            wc_update_order_item_meta( $item_id, '_pps_gdrive_url', $drive_url );
+            $item->update_meta_data( '_pps_gdrive_file_id', $file_id );
+            $item->update_meta_data( '_pps_gdrive_url', $drive_url );
+            $item->update_meta_data( '_pps_artwork_path', '' );
+            $item->update_meta_data( '_pps_artwork_location', 'gdrive' );
+            $item->save();
 
-            unlink( $full_path );
+            if ( file_exists( $full_path ) ) unlink( $full_path );
             @rmdir( dirname( $full_path ) );
             @rmdir( dirname( dirname( $full_path ) ) );
-
-            wc_update_order_item_meta( $item_id, '_pps_artwork_path', '' );
-            wc_update_order_item_meta( $item_id, '_pps_artwork_location', 'gdrive' );
 
             error_log( 'PPS Drive: Order ' . $order_id . ' → ' . $file_id );
         } else {

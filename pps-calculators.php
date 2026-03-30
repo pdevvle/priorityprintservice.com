@@ -170,6 +170,7 @@ add_action( 'admin_head', function() {
 });
 
 function pps_admin_page() {
+    if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
     $reg = pps_get_registry();
     $dir = pps_upload_dir();
     $url = pps_upload_url();
@@ -1034,6 +1035,7 @@ add_action( 'woocommerce_product_data_panels', function() {
 } );
 
 add_action( 'woocommerce_process_product_meta', function( $post_id ) {
+    if ( ! current_user_can( 'edit_products' ) ) return;
     if ( ! isset( $_POST['pps_defaults'] ) ) return;
     $raw = array_map( 'sanitize_text_field', $_POST['pps_defaults'] );
     // Strip empty values so they fall through to global defaults
@@ -1217,7 +1219,7 @@ add_action( 'rest_api_init', function() {
     // Requires pcf.shippo_api_token to be set in Central Config
     register_rest_route( 'pps/v1', '/shipping/validate', array(
         'methods'             => 'POST',
-        'permission_callback' => '__return_true',
+        'permission_callback' => function() { return is_user_logged_in(); },
         'callback'            => function( $request ) {
             $cfg   = pps_get_config();
             $token = $cfg['pcf']['shippo_api_token'] ?? '';
@@ -1255,7 +1257,7 @@ add_action( 'rest_api_init', function() {
     // Lightweight call: just origin zip + destination zip → UPS ground transit days
     register_rest_route( 'pps/v1', '/shipping/transit-estimate', array(
         'methods'             => 'POST',
-        'permission_callback' => '__return_true',
+        'permission_callback' => function() { return is_user_logged_in(); },
         'callback'            => function( $request ) {
             $cfg   = pps_get_config();
             $token = $cfg['pcf']['shippo_api_token'] ?? '';
