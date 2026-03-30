@@ -4149,10 +4149,33 @@ function App(){
       </div>
 
       {/* Fixed bottom bar — mobile */}
-      {mob&&<div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:40,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
+      {mob&&<>
+        {showDebug&&<div style={{position:"fixed",bottom:76,left:0,right:0,zIndex:39,maxHeight:"60vh",overflowY:"auto",background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.12)",padding:"0 10px 10px",paddingBottom:"env(safe-area-inset-bottom)"}}>
+          <DebugPanel debug={result?.debug}/>
+          {schemaData && (
+            <div style={{...ST.pnl, marginTop:10}}>
+              <div style={{padding:"10px 16px",background:"#1a1a1a",borderBottom:"1px solid #333",display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:"#888"}}>🔍 SEO Schema</span>
+              </div>
+              <div style={{padding:"10px 16px",fontSize:11}}>
+                <div style={{display:"grid",gridTemplateColumns:"120px 1fr",gap:"2px 8px",padding:"4px 0"}}>
+                  {[["Price", `$${schemaData.product.lowPrice}`],["Per Unit", `$${schemaData.product.perUnit}`],["Pages", schemaData.product.pages],["Turnaround", schemaData.product.turnaround]].map(([k,v],i) => (
+                    <React.Fragment key={i}>
+                      <span style={{fontSize:10,color:"#888"}}>{k}</span>
+                      <span style={{fontSize:10,color:CK.cyan,fontFamily:"'SF Mono','Consolas',monospace",fontWeight:500}}>{v}</span>
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>}
+        <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:40,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{flex:1,minWidth:0}}>
+          <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>setShowDebug(p=>!p)}>
             <Panel result={result} compact/>
+            <div style={{fontSize:8,textAlign:"center",color:showDebug?CK.cyan:CC.light,marginTop:2,letterSpacing:".5px",textTransform:"uppercase",fontWeight:600}}>{showDebug?"▼ Hide Debug":"▲ Debug"}</div>
+          </div>
           </div>
           <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined}}
             disabled={!!result?.error?.length||submitting}>
@@ -4169,7 +4192,8 @@ function App(){
             ) : submitting ? "Uploading…" : "Add to Order"}
           </button>
         </div>
-      </div>}
+      </div>
+      </>}
     </div>
   );
 }
