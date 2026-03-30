@@ -466,12 +466,15 @@ function pps_process_artwork_upload( $order_id ) {
     $all_succeeded = true;
 
     foreach ( $order->get_items() as $item_id => $item ) {
+        // Skip items already uploaded to Drive (idempotent on retry)
+        if ( $item->get_meta( '_pps_artwork_location' ) === 'gdrive' ) continue;
+
         $artwork_path = $item->get_meta( '_pps_artwork_path' );
         if ( ! $artwork_path ) continue;
 
         $full_path = trailingslashit( $upload['basedir'] ) . $artwork_path;
         if ( ! file_exists( $full_path ) ) {
-            error_log( 'PPS Drive: File missing for order ' . $order_id . ': ' . $full_path );
+            error_log( 'PPS Drive: File missing for order ' . $order_id . ': ' . $artwork_path );
             continue;
         }
 
@@ -508,17 +511,19 @@ function pps_process_artwork_upload( $order_id ) {
 
         if ( $file_id ) {
             $drive_url = 'https://drive.google.com/file/d/' . $file_id . '/view';
+            // Save metadata BEFORE deleting local file — if this fails, retry will re-upload (duplicate on Drive, but no data loss)
             $item->update_meta_data( '_pps_gdrive_file_id', $file_id );
             $item->update_meta_data( '_pps_gdrive_url', $drive_url );
-            $item->update_meta_data( '_pps_artwork_path', '' );
             $item->update_meta_data( '_pps_artwork_location', 'gdrive' );
             $item->save();
 
+            // Only delete local file after metadata is confirmed saved
+            // Keep artwork_path for reorder reference even though local file is gone
             if ( file_exists( $full_path ) ) unlink( $full_path );
             @rmdir( dirname( $full_path ) );
             @rmdir( dirname( dirname( $full_path ) ) );
 
-            error_log( 'PPS Drive: Order ' . $order_id . ' → ' . $file_id );
+            error_log( 'PPS Drive: Order ' . $order_id . ' item ' . $item_id . ' → ' . $file_id );
         } else {
             error_log( 'PPS Drive: Upload failed for order ' . $order_id . '. File kept locally.' );
             $all_succeeded = false;
