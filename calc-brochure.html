@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Brochure & Flat Printing Calculator</title>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; padding: 0; }
+  .fold-viewport{perspective:1200px;display:flex;align-items:center;justify-content:center;overflow:visible;position:relative}
+  @media(max-width:700px){
+    select,input[type="text"],input[type="number"]{font-size:16px!important;padding:10px!important;min-height:44px!important}
+  }
+</style>
+</head>
+<body>
+<div id="pps-calculator-root"></div>
+<script type="text/babel">
+// PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+function useIsMobile(bp=700){const[m,s]=useState(window.innerWidth<=bp);useEffect(()=>{const h=()=>s(window.innerWidth<=bp);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h)},[bp]);return m}
+
+// ═══════════════════════════════════════════════════════════════
+// COLORS & CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+const CC={bg:"#f5f5f7",white:"#fff",dark:"#1d2327",mid:"#555",light:"#999",border:"#e5e5e5",primary:"#007eff"};
+const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#1d2327",cyanLight:"#e8f4ff",rushLight:"#f0fdf4",rush:"#6b8f2b"};
+
+const _CFG = (window.PPS_CONFIG || {}).calc || {};
+const PCF = Object.assign({
+  printing_fullcolor_cost:0.05, printing_black_cost:0.01,
+  labor_press_hr:35, labor_bindery_hr:35, labor_cutting_hr:45,
+  labor_gw_hour:45, labor_gw_setup:35,
+  press_printsperhour:600, bindery_morgana_impressionperhour:750,
+  cutter_stackheight_inches:3.5, cutter_cyclesperhour:120,
+  cutterbasefee:7.5, sheetsturnaround:2500,
+  backend_maximummarkup:9, backend_minimummarkup:1.5,
+  easydiscount_factor:0.05, easydiscount_max:1500,
+  uvcoaterimpressionsperhour:250, roundcornerperhour:75, bundlesperhour:50,
+  speed_gwperhr:500, addon_roundcornermaxdays:30,
+  art_newdesignmodifier:0.5, sheetsforlowcosthardcopyproof:1500,
+  minimum_turnaround_days:3, non_inventory_fee:45,
+  proof_hardcopy_cost:35, proof_digital_cost:10, bleed_minimum:15,
+  default_transit_days:4,
+  shop_timezone:"America/Phoenix", shop_cutoff_hour:14, free_shipping_buffer:1.5,
+  shippo_api_token:"", shippo_origin_zip:"85027",
+}, _CFG.pcf || {});
+
+// ═══════════════════════════════════════════════════════════════
+// DATA: SIZES, FOLDS, PAPERS, OPTIONS
+// ═══════════════════════════════════════════════════════════════
+const SIZE_PRESETS = _CFG.brochure_sizes || [
+  {label:"5.5×8.5",imp:4,long:8.5,short:5.5},
+  {label:"6×9",imp:4,long:9,short:6},
+  {label:"8.5×11",imp:2,long:11,short:8.5},
+  {label:"8.5×14",imp:1,long:14,short:8.5},
+  {label:"11×17",imp:1,long:17,short:11},
+];
+
+const FOLD_TYPES = _CFG.fold_types || [
+  {label:"Flat — No Folding",val:"flat",panels:1},
+  {label:"Bifold (2 Panel)",val:"bifold",panels:2},
+  {label:"Trifold (3 Panel)",val:"trifold",panels:3},
+  {label:'Accordion / "Z" Fold (3 Panel)',val:"z3",panels:3},
+  {label:"Gate Fold (3 Panel)",val:"gate3",panels:3},
+  {label:"Accordion (4 Panel)",val:"accordion4",panels:4},
+  {label:"Roll Fold (4 Panel)",val:"roll4",panels:4},
+  {label:"Double Gate Fold (4 Panel)",val:"dgate4",panels:4},
+  {label:"Double Parallel Fold (4 Panel)",val:"dparallel4",panels:4},
+];
+
+const PAPERS_NC = _CFG.papers_nc || [
+  {label:"70lb Uncoated Opaque Text",val:0.001,price:0.06,oversizePrice:0.06,factory:false,coatable:false},
+  {label:"80lb Matte Text",val:0.002,price:0.069,oversizePrice:0.069,factory:false,coatable:false},
+  {label:"100lb Gloss Text",val:0.003,price:0.085,oversizePrice:0.085,factory:false,coatable:true},
+  {label:"50lb Offset Smooth Opaque",val:2.001,price:0.039,oversizePrice:0.039,factory:true,coatable:false},
+  {label:"60lb Offset Smooth Opaque",val:2.002,price:0.042,oversizePrice:0.042,factory:true,coatable:false},
+  {label:"80lb Offset Smooth Opaque",val:2.003,price:0.056,oversizePrice:0.056,factory:true,coatable:false},
+  {label:"80lb Gloss Factory Coated",val:2.004,price:0.0525,oversizePrice:0.0525,factory:true,coatable:true},
+  {label:"100lb Matte Factory Coated",val:2.005,price:0.070,oversizePrice:0.070,factory:true,coatable:true},
+];
+const PAPERS_CS = _CFG.papers_cs || [
+  {label:"80lb Opaque Uncoated",val:0.01,price:0.0919,oversizePrice:0.0919,factory:false,coatable:false},
+  {label:"80lb Matte Cardstock",val:0.02,price:0.1119,oversizePrice:0.1119,factory:false,coatable:true},
+  {label:"100lb Gloss Cardstock",val:0.03,price:0.1319,oversizePrice:0.1319,factory:false,coatable:true},
+  {label:"14pt Gloss C1S",val:1.01,price:0.1619,oversizePrice:0.1619,factory:false,coatable:true},
+  {label:"16pt Coated C2S",val:1.02,price:0.1919,oversizePrice:0.1919,factory:false,coatable:true},
+];
+const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
+const INV_VALS=[0.001,0.002,0.003,0.01,0.02,0.03,1.01,1.02];
+
+const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
+const COAT_SIDES=[{label:"Front Only",val:1},{label:"Both Sides",val:2}];
+const BUNDLING=_CFG.bundling||[{label:"No Bundling",val:0,price:500},{label:"Bundle in 25s",val:750,price:25},{label:"Bundle in 50s",val:1500,price:50},{label:"Bundle in 100s",val:3000,price:100}];
+const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0},{label:"1 Perforation Line",val:2000,price:0.01},{label:"2 Perforation Lines",val:1000,price:0.02}];
+const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
+const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01,price:0},{label:"Email Art After Order",val:0.02,price:0},{label:"Artwork already discussed",val:0.03,price:0},{label:"I have a design in Canva",val:0.04,price:0},{label:"Artwork needs edits",val:2.01,price:75},{label:"Design from scratch",val:4.01,price:75}];
+const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
+
+// Transit days
+const TRANSIT_DAYS = _CFG.transit_days || {AZ:1,CA:2,CO:2,ID:3,MT:3,NM:2,NV:2,OR:3,TX:3,UT:2,WA:3,WY:3,AL:4,AR:4,CT:5,DC:5,DE:5,FL:4,GA:4,HI:7,IA:4,IL:4,IN:4,KS:3,KY:4,LA:4,MA:5,MD:5,ME:6,MI:4,MN:4,MO:4,MS:4,NC:5,ND:4,NE:3,NH:6,NJ:5,NY:5,OH:4,OK:3,PA:5,RI:5,SC:5,SD:4,TN:4,VA:5,VT:6,WI:4,WV:5};
+const US_STATES = Object.keys(TRANSIT_DAYS).sort();
+const _PPS = window.PPS_CONFIG || {};
+const _ZONE_SEED = {"000":7,"001":7,"002":7,"003":7,"004":7,"005":7,"006":7,"007":7,"008":7,"009":7,"010":5,"011":5,"012":5,"013":5,"014":5,"015":5,"016":5,"017":5,"018":5,"019":5,"020":5,"021":5,"022":5,"023":5,"024":5,"025":5,"026":5,"027":5,"028":7,"029":7,"030":6,"031":6,"032":6,"033":6,"034":6,"035":6,"036":6,"037":6,"038":6,"039":6,"040":6,"041":6,"042":6,"043":6,"044":6,"045":6,"046":6,"047":6,"048":6,"049":6,"050":6,"051":6,"052":6,"053":6,"054":6,"055":6,"056":6,"057":6,"058":6,"059":6,"060":6,"061":6,"062":6,"063":6,"064":6,"065":6,"066":6,"067":6,"068":6,"069":6,"070":5,"071":5,"072":5,"073":5,"074":5,"075":5,"076":5,"077":5,"078":5,"079":5,"080":5,"081":5,"082":5,"083":5,"084":5,"085":5,"086":5,"087":5,"088":5,"089":5,"090":7,"091":7,"092":7,"093":7,"094":7,"095":7,"096":7,"097":7,"098":7,"099":7,"100":5,"101":5,"102":5,"103":5,"104":5,"105":5,"106":5,"107":5,"108":5,"109":5,"110":5,"111":5,"112":5,"113":5,"114":5,"115":5,"116":5,"117":5,"118":5,"119":5,"120":5,"121":5,"122":5,"123":5,"124":5,"125":5,"126":5,"127":5,"128":5,"129":5,"130":5,"131":5,"132":5,"133":5,"134":5,"135":5,"136":5,"137":5,"138":5,"139":5,"140":5,"141":5,"142":5,"143":5,"144":5,"145":5,"146":5,"147":5,"148":5,"149":5,"150":4,"151":4,"152":4,"153":4,"154":4,"155":4,"156":4,"157":4,"158":4,"159":4,"160":4,"161":4,"162":4,"163":4,"164":4,"165":4,"166":4,"167":4,"168":4,"169":4,"170":4,"171":4,"172":4,"173":4,"174":4,"175":4,"176":4,"177":4,"178":4,"179":4,"180":4,"181":4,"182":4,"183":4,"184":4,"185":4,"186":4,"187":4,"188":4,"189":4,"190":4,"191":4,"192":4,"193":4,"194":4,"195":4,"196":4,"197":6,"198":6,"199":6,"200":6,"201":6,"202":6,"203":6,"204":6,"205":6,"206":6,"207":6,"208":6,"209":6,"210":6,"211":6,"212":6,"213":6,"214":6,"215":6,"216":6,"217":6,"218":6,"219":6,"220":5,"221":5,"222":5,"223":5,"224":5,"225":5,"226":5,"227":5,"228":5,"229":5,"230":5,"231":5,"232":5,"233":5,"234":5,"235":5,"236":5,"237":5,"238":5,"239":5,"240":5,"241":5,"242":5,"243":5,"244":5,"245":5,"246":5,"247":4,"248":4,"249":4,"250":4,"251":4,"252":4,"253":4,"254":4,"255":4,"256":4,"257":4,"258":4,"259":4,"260":4,"261":4,"262":4,"263":4,"264":4,"265":4,"266":4,"267":4,"268":4,"269":7,"270":5,"271":5,"272":5,"273":5,"274":5,"275":5,"276":5,"277":5,"278":5,"279":5,"280":5,"281":5,"282":5,"283":5,"284":5,"285":5,"286":5,"287":5,"288":5,"289":5,"290":5,"291":5,"292":5,"293":5,"294":5,"295":5,"296":5,"297":5,"298":5,"299":5,"300":4,"301":4,"302":4,"303":4,"304":4,"305":4,"306":4,"307":4,"308":4,"309":4,"310":4,"311":4,"312":4,"313":4,"314":4,"315":4,"316":4,"317":4,"318":4,"319":4,"320":4,"321":4,"322":4,"323":4,"324":4,"325":4,"326":4,"327":4,"328":4,"329":4,"330":4,"331":4,"332":4,"333":4,"334":4,"335":4,"336":4,"337":4,"338":4,"339":4,"340":4,"341":4,"342":4,"343":4,"344":4,"345":4,"346":4,"347":4,"348":4,"349":4,"350":4,"351":4,"352":4,"353":4,"354":4,"355":4,"356":4,"357":4,"358":4,"359":4,"360":4,"361":4,"362":4,"363":4,"364":4,"365":4,"366":4,"367":4,"368":4,"369":4,"370":4,"371":4,"372":4,"373":4,"374":4,"375":4,"376":4,"377":4,"378":4,"379":4,"380":4,"381":4,"382":4,"383":4,"384":4,"385":4,"386":4,"387":4,"388":4,"389":4,"390":4,"391":4,"392":4,"393":4,"394":4,"395":4,"396":4,"397":4,"398":7,"399":7,"400":4,"401":4,"402":4,"403":4,"404":4,"405":4,"406":4,"407":4,"408":4,"409":4,"410":4,"411":4,"412":4,"413":4,"414":4,"415":4,"416":4,"417":4,"418":4,"419":4,"420":4,"421":4,"422":4,"423":4,"424":4,"425":4,"426":4,"427":4,"428":7,"429":7,"430":5,"431":5,"432":5,"433":5,"434":5,"435":5,"436":5,"437":5,"438":5,"439":5,"440":5,"441":5,"442":5,"443":5,"444":5,"445":5,"446":5,"447":5,"448":5,"449":5,"450":5,"451":5,"452":5,"453":5,"454":5,"455":5,"456":5,"457":5,"458":5,"459":7,"460":4,"461":4,"462":4,"463":4,"464":4,"465":4,"466":4,"467":4,"468":4,"469":4,"470":4,"471":4,"472":4,"473":4,"474":4,"475":4,"476":4,"477":4,"478":4,"479":4,"480":4,"481":4,"482":4,"483":4,"484":4,"485":4,"486":4,"487":4,"488":4,"489":4,"490":4,"491":4,"492":4,"493":4,"494":4,"495":4,"496":4,"497":4,"498":4,"499":4,"500":4,"501":4,"502":4,"503":4,"504":4,"505":4,"506":4,"507":4,"508":4,"509":4,"510":4,"511":4,"512":4,"513":4,"514":4,"515":4,"516":4,"517":4,"518":4,"519":4,"520":4,"521":4,"522":4,"523":4,"524":4,"525":4,"526":4,"527":4,"528":4,"529":7,"530":4,"531":4,"532":4,"533":4,"534":4,"535":4,"536":4,"537":4,"538":4,"539":4,"540":4,"541":4,"542":4,"543":4,"544":4,"545":4,"546":4,"547":4,"548":4,"549":4,"550":4,"551":4,"552":4,"553":4,"554":4,"555":4,"556":4,"557":4,"558":4,"559":4,"560":4,"561":4,"562":4,"563":4,"564":4,"565":4,"566":4,"567":4,"568":7,"569":7,"570":4,"571":4,"572":4,"573":4,"574":4,"575":4,"576":4,"577":4,"578":7,"579":7,"580":4,"581":4,"582":4,"583":4,"584":4,"585":4,"586":4,"587":4,"588":4,"589":7,"590":4,"591":4,"592":4,"593":4,"594":4,"595":4,"596":4,"597":4,"598":4,"599":4,"600":4,"601":4,"602":4,"603":4,"604":4,"605":4,"606":4,"607":4,"608":4,"609":4,"610":4,"611":4,"612":4,"613":4,"614":4,"615":4,"616":4,"617":4,"618":4,"619":4,"620":4,"621":4,"622":4,"623":4,"624":4,"625":4,"626":4,"627":4,"628":4,"629":4,"630":4,"631":4,"632":4,"633":4,"634":4,"635":4,"636":4,"637":4,"638":4,"639":4,"640":4,"641":4,"642":4,"643":4,"644":4,"645":4,"646":4,"647":4,"648":4,"649":4,"650":4,"651":4,"652":4,"653":4,"654":4,"655":4,"656":4,"657":4,"658":4,"659":7,"660":4,"661":4,"662":4,"663":4,"664":4,"665":4,"666":4,"667":4,"668":4,"669":4,"670":4,"671":4,"672":4,"673":4,"674":4,"675":4,"676":4,"677":4,"678":4,"679":4,"680":4,"681":4,"682":4,"683":4,"684":4,"685":4,"686":4,"687":4,"688":4,"689":4,"690":4,"691":4,"692":4,"693":4,"694":7,"695":7,"696":7,"697":7,"698":7,"699":7,"700":4,"701":4,"702":4,"703":4,"704":4,"705":4,"706":4,"707":4,"708":4,"709":4,"710":4,"711":4,"712":4,"713":4,"714":4,"715":7,"716":4,"717":4,"718":4,"719":4,"720":4,"721":4,"722":4,"723":4,"724":4,"725":4,"726":4,"727":4,"728":4,"729":4,"730":4,"731":4,"732":4,"733":4,"734":4,"735":4,"736":4,"737":4,"738":4,"739":4,"740":4,"741":4,"742":4,"743":4,"744":4,"745":4,"746":4,"747":4,"748":4,"749":4,"750":3,"751":3,"752":3,"753":3,"754":3,"755":3,"756":3,"757":3,"758":3,"759":3,"760":3,"761":3,"762":3,"763":3,"764":3,"765":3,"766":3,"767":3,"768":3,"769":3,"770":3,"771":3,"772":3,"773":3,"774":3,"775":3,"776":3,"777":3,"778":3,"779":3,"780":3,"781":3,"782":3,"783":3,"784":3,"785":3,"786":3,"787":3,"788":3,"789":3,"790":3,"791":3,"792":3,"793":3,"794":3,"795":3,"796":3,"797":3,"798":3,"799":3,"800":2,"801":2,"802":2,"803":2,"804":2,"805":2,"806":2,"807":2,"808":2,"809":2,"810":2,"811":2,"812":2,"813":2,"814":2,"815":2,"816":2,"817":7,"818":7,"819":7,"820":4,"821":4,"822":4,"823":4,"824":4,"825":4,"826":4,"827":4,"828":4,"829":4,"830":4,"831":4,"832":3,"833":3,"834":3,"835":3,"836":3,"837":3,"838":3,"839":7,"840":2,"841":2,"842":2,"843":2,"844":2,"845":2,"846":2,"847":2,"848":7,"849":7,"850":1,"851":1,"852":1,"853":1,"854":1,"855":1,"856":1,"857":1,"858":1,"859":1,"860":1,"861":1,"862":1,"863":1,"864":1,"865":1,"866":7,"867":7,"868":7,"869":7,"870":2,"871":2,"872":2,"873":2,"874":2,"875":2,"876":2,"877":2,"878":2,"879":2,"880":2,"881":2,"882":2,"883":2,"884":2,"885":7,"886":7,"887":7,"888":7,"889":2,"890":2,"891":2,"892":2,"893":2,"894":2,"895":2,"896":2,"897":2,"898":2,"899":7,"900":2,"901":2,"902":2,"903":2,"904":2,"905":2,"906":2,"907":2,"908":2,"909":2,"910":2,"911":2,"912":2,"913":2,"914":2,"915":2,"916":2,"917":2,"918":2,"919":2,"920":2,"921":2,"922":2,"923":2,"924":2,"925":2,"926":2,"927":2,"928":2,"929":2,"930":2,"931":2,"932":2,"933":2,"934":2,"935":2,"936":2,"937":2,"938":2,"939":2,"940":2,"941":2,"942":2,"943":2,"944":2,"945":2,"946":2,"947":2,"948":2,"949":2,"950":2,"951":2,"952":2,"953":2,"954":2,"955":2,"956":2,"957":2,"958":2,"959":2,"960":2,"961":2,"962":2,"963":2,"964":2,"965":2,"966":2,"967":7,"968":7,"969":7,"970":3,"971":3,"972":3,"973":3,"974":3,"975":3,"976":3,"977":3,"978":3,"979":3,"980":3,"981":3,"982":3,"983":3,"984":3,"985":3,"986":3,"987":3,"988":3,"989":3,"990":3,"991":3,"992":3,"993":3,"994":3,"995":7,"996":7,"997":7,"998":7,"999":7};
+const ZONE_MAP = _PPS.zoneMap || _ZONE_SEED;
+const HAS_ZONE_MAP = Object.keys(ZONE_MAP).length > 100;
+function getTransitDays(state, zip) {
+  if (HAS_ZONE_MAP && zip && zip.length >= 3) {
+    const pfx = zip.substring(0, 3);
+    if (ZONE_MAP[pfx]) return ZONE_MAP[pfx];
+  }
+  return TRANSIT_DAYS[state] || PCF.default_transit_days;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UTILITY FUNCTIONS
+// ═══════════════════════════════════════════════════════════════
+function getShopToday() {
+  const now = new Date();
+  const opts = { timeZone: PCF.shop_timezone, hour: "numeric", hour12: false };
+  const shopHour = parseInt(new Intl.DateTimeFormat("en-US", opts).format(now));
+  const dateStr = new Intl.DateTimeFormat("en-US", { timeZone: PCF.shop_timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  const [m, d, y] = dateStr.split("/");
+  const today = new Date(y, m - 1, d);
+  if (shopHour >= PCF.shop_cutoff_hour || today.getDay() === 0 || today.getDay() === 6) {
+    today.setDate(today.getDate() + 1);
+    while (today.getDay() === 0 || today.getDay() === 6) today.setDate(today.getDate() + 1);
+  }
+  return today;
+}
+function addBusinessDays(start, days) {
+  const d = new Date(start); let added = 0;
+  while (added < days) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) added++; }
+  return d;
+}
+function businessDaysBetween(a, b) {
+  let count = 0; const d = new Date(a);
+  while (d < b) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) count++; }
+  return count;
+}
+function fmtDate(d) { return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); }
+function toYMD(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+
+// ═══════════════════════════════════════════════════════════════
+// IMPOSITION CALCULATION
+// ═══════════════════════════════════════════════════════════════
+function calcBrochureImp(longEdge, shortEdge) {
+  const r1 = 18.5 / longEdge;
+  const across = r1 < 0.5 ? 0 : r1 < 1 ? 0.5 : r1 < 1.48 ? 1 : r1 < 3 ? 2 : r1 < 4 ? 3 : r1 < 5 ? 4 : r1 < 6 ? 5 : r1 < 7 ? 6 : r1 < 8 ? 7 : 8;
+  const r2 = 12.5 / shortEdge;
+  const down = r2 < 2 ? 1 : r2 < 3 ? 2 : r2 < 4 ? 3 : 4;
+  return across * down;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PRICING ENGINE
+// ═══════════════════════════════════════════════════════════════
+function calculate(c) {
+  const errors = [];
+  let imp, longE, shortE;
+  if (c.sizeMode === "preset") {
+    const preset = SIZE_PRESETS.find(s => s.label === c.sizeLabel);
+    if (!preset) return { error: ["Select a size"] };
+    imp = preset.imp; longE = preset.long; shortE = preset.short;
+  } else {
+    longE = Math.max(c.longEdge, c.shortEdge);
+    shortE = Math.min(c.longEdge, c.shortEdge);
+    if (longE < 2 || shortE < 2) return { error: ["Minimum dimension is 2 inches"] };
+    if (longE > 27 || shortE > 12.5) return { error: ["Maximum size: 27×12.5 inches flat"] };
+    imp = calcBrochureImp(longE, shortE);
+    if (imp <= 0) return { error: ["Size too large for press sheet"] };
+  }
+
+  const qty = c.qty;
+  if (qty < 1) return { error: ["Enter quantity"] };
+  const fold = FOLD_TYPES.find(f => f.val === c.foldType) || FOLD_TYPES[0];
+  const panels = fold.panels;
+  const pressSheets = qty / imp;
+  const paper = c.paper;
+  const sides = c.sides;
+
+  // Folded dimension validation
+  if (panels > 1) {
+    const foldDim = c.foldDir === "short" ? shortE : longE;
+    const panelSize = foldDim / panels;
+    if (panelSize < 2) errors.push(`Folded panel too small (${panelSize.toFixed(1)}"). Min 2" per panel.`);
+    if (c.foldDir === "short" && longE > 13) errors.push("Long edge exceeds 13\" folder throat when folding short side.");
+  }
+  if (errors.length) return { error: errors };
+
+  // Markup
+  const dL = 0.7 * Math.log(pressSheets) + 0.5412;
+  const mk = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup);
+
+  // Approximate thickness
+  const approxThickness = (paper.price / 10) * qty;
+
+  const P = {};
+
+  // Paper
+  P.paper = (paper.price * pressSheets) * mk;
+
+  // Printing — front has markup on BW base, back does not
+  if (c.frontColor === "color") {
+    P.frontPrint = ((PCF.printing_black_cost * pressSheets) * mk) + (PCF.printing_fullcolor_cost * pressSheets);
+  } else {
+    P.frontPrint = (PCF.printing_black_cost * pressSheets) * mk;
+  }
+  P.backPrint = 0;
+  if (sides === 2) {
+    if (c.backColor === "color") {
+      P.backPrint = (PCF.printing_black_cost * pressSheets) + (PCF.printing_fullcolor_cost * pressSheets);
+    } else {
+      P.backPrint = PCF.printing_black_cost * pressSheets;
+    }
+  }
+
+  // Press labor
+  P.press = (pressSheets / PCF.press_printsperhour) * PCF.labor_press_hr;
+
+  // Cutting labor
+  P.cutting = ((((approxThickness / PCF.cutter_stackheight_inches) * imp) / PCF.cutter_cyclesperhour) * PCF.labor_cutting_hr) + PCF.cutterbasefee;
+
+  // Folding labor
+  P.folding = fold.val !== "flat" ? ((qty / PCF.bindery_morgana_impressionperhour) * PCF.labor_bindery_hr) + (PCF.labor_bindery_hr / 3) : 0;
+
+  // Vivid
+  P.vivid = c.vivid ? Math.ceil(P.press) : 0;
+
+  // Coating
+  const coat = COATINGS.find(x => x.val === c.coating) || COATINGS[0];
+  P.coat = 0;
+  if (coat.val > 0 && paper.coatable) {
+    const cs = c.coatSides || 1;
+    P.coat = PCF.labor_bindery_hr + Math.ceil(((pressSheets * coat.price * cs) * mk) + ((pressSheets / PCF.uvcoaterimpressionsperhour) * PCF.labor_bindery_hr));
+  }
+
+  // Bundling
+  const bund = BUNDLING.find(x => x.val === c.bundling) || BUNDLING[0];
+  P.bundle = (bund.val > 0 && qty >= 100) ? Math.ceil(((qty / bund.price) * mk) * (PCF.labor_bindery_hr / PCF.bundlesperhour) + 7) : 0;
+
+  // Perforation
+  const perf = PERF_OPTS.find(x => x.val === c.perforation) || PERF_OPTS[0];
+  P.perforation = 0;
+  if (perf.val > 0) {
+    P.perforation = Math.ceil(((((qty * perf.price) / PCF.speed_gwperhr) * PCF.labor_gw_hour) * mk) + PCF.labor_gw_setup);
+  }
+
+  // Round cornering (flat only)
+  const rc = CORNERS.find(x => x.val === c.roundCorner) || CORNERS[0];
+  P.rc = 0;
+  if (rc.val > 0 && fold.val === "flat") {
+    P.rc = Math.floor(((approxThickness / rc.price) / PCF.roundcornerperhour) * PCF.labor_bindery_hr) + (PCF.labor_bindery_hr / 2);
+  }
+
+  // Difficult fold surcharges
+  const foldLabor = (qty / PCF.bindery_morgana_impressionperhour) * PCF.labor_bindery_hr;
+  P.diffFold1 = (panels === 4 || (longE < 9 && fold.val !== "flat" && fold.val !== "bifold")) ? foldLabor + (PCF.labor_bindery_hr / 2) : 0;
+  P.diffFold2 = fold.val === "roll4" ? foldLabor : 0;
+  P.diffFold3 = (fold.val !== "flat" && (c.foldDir === "short" || shortE < 5)) ? foldLabor : 0;
+
+  // Minimum base cost
+  P.baseCost = (fold.val !== "flat" || qty <= 250) ? PCF.labor_bindery_hr : 0;
+
+  // Artwork
+  const art = ART_OPTS.find(x => x.val === c.artwork) || ART_OPTS[0];
+  const artWork = art.val >= 2;
+  const ndc = art.val >= 4 ? ((art.price * sides) * PCF.art_newdesignmodifier) + 15 : 0;
+  const aec = (art.val >= 2 && art.val < 4) ? art.price : 0;
+  P.artwork = ndc + aec;
+
+  // Bleed
+  const bld = BLEED_OPTS.find(x => x.val === c.bleed) || BLEED_OPTS[0];
+  P.bleed = (!artWork && bld.val > 0) ? Math.max(bld.price * sides, PCF.bleed_minimum) : 0;
+
+  // Proofing
+  P.proof = 0;
+  if (c.proof > 0) {
+    const sf = (PCF.sheetsforlowcosthardcopyproof / pressSheets) > 1 ? 1 : (1500 / pressSheets);
+    P.proof = (c.proof >= 3 ? PCF.proof_hardcopy_cost : PCF.proof_digital_cost) * sf;
+  }
+
+  // Non-inventory surcharge
+  P.nonInv = INV_VALS.includes(paper.val) ? 0 : PCF.non_inventory_fee;
+
+  // Easy discounts
+  const isEasySize = SIZE_PRESETS.some(s => s.label === c.sizeLabel);
+  const isEasyFold = ["flat","bifold","trifold","z3"].includes(fold.val);
+  const costSummary = P.paper + P.frontPrint + P.backPrint + P.cutting + P.folding + P.perforation + P.rc;
+  P.discEasyFlat = (fold.val === "flat" && isEasySize) ? -Math.min(costSummary * PCF.easydiscount_factor, PCF.easydiscount_max / 10) : 0;
+  P.discEasy = (fold.val !== "flat" && isEasyFold && isEasySize) ? -Math.min(P.press + P.cutting + P.folding, PCF.easydiscount_max / 10) : 0;
+
+  // BW discount
+  const allBW = c.frontColor === "bw" && (sides === 1 || c.backColor === "bw");
+  P.discBW = allBW ? -(P.press * 0.3) : 0;
+
+  // Cardstock discount
+  P.cardstockDisc = PAPERS_CS.some(p => p.val === paper.val) ? -(0.04 * pressSheets) : 0;
+
+  const total = Object.values(P).reduce((s, v) => s + v, 0);
+
+  // Turnaround
+  const paperDays = Math.floor(paper.val || 0);
+  const vividDays = c.vivid ? Math.floor(pressSheets / 2500) : 0;
+  const coatDays = (coat.val > 0 && paper.coatable) ? Math.ceil(pressSheets / (coat.val / (c.coatSides || 1))) : 0;
+  const bundleDays = (bund.val > 0 && qty >= 100) ? Math.floor(approxThickness / bund.val) : 0;
+  const perfDays = (perf.val > 0) ? Math.ceil(pressSheets / perf.val) : 0;
+  const rcDays = (rc.val > 0 && fold.val === "flat") ? Math.floor(Math.min(pressSheets / rc.val, PCF.addon_roundcornermaxdays)) : 0;
+  const artDays = art.val >= 4 ? Math.ceil(art.val) : 0;
+  const proofDays = c.proof >= 3 ? Math.ceil(paperDays + 3.01) : 0;
+  const baseDays = Math.floor(pressSheets / PCF.sheetsturnaround);
+  const days = Math.max(PCF.minimum_turnaround_days, baseDays + paperDays + vividDays + coatDays + bundleDays + perfDays + rcDays + artDays + proofDays);
+
+  // Shipping & Rush
+  const transitDays = getTransitDays(c.shipState, c.shipZip);
+  const productionBizDays = days;
+  const bufferedProdDays = productionBizDays * 2;
+  const freeDeliveryBizDays = bufferedProdDays + transitDays;
+  const earliestBizDays = productionBizDays + 1;
+  const shopToday = getShopToday();
+  const freeDeliveryDate = addBusinessDays(shopToday, freeDeliveryBizDays);
+  const earliestDate = addBusinessDays(shopToday, earliestBizDays);
+
+  let rushMultiplier = 1, rushCost = 0, bizDaysToDate = freeDeliveryBizDays, needByValid = false, tooSoon = false, needByPast = false;
+  if (c.needByDate) {
+    const nbd = new Date(c.needByDate + "T00:00:00");
+    if (nbd <= shopToday) { needByPast = true; }
+    else {
+      bizDaysToDate = businessDaysBetween(shopToday, nbd);
+      needByValid = true;
+      if (bizDaysToDate < earliestBizDays) { tooSoon = true; }
+      else if (bizDaysToDate < freeDeliveryBizDays) {
+        rushMultiplier = freeDeliveryBizDays / bizDaysToDate;
+        rushCost = Math.max(0, (total * rushMultiplier) - total);
+      }
+    }
+  }
+  const grandTotal = total + rushCost;
+  const effectiveDeliveryBiz = (needByValid && !tooSoon) ? bizDaysToDate : freeDeliveryBizDays;
+  const effectiveTransit = Math.min(transitDays, Math.max(1, effectiveDeliveryBiz - productionBizDays));
+  const prodStartBiz = Math.max(0, effectiveDeliveryBiz - effectiveTransit - productionBizDays);
+  const productionStartDate = addBusinessDays(shopToday, prodStartBiz);
+  const mustShipBiz = Math.max(0, effectiveDeliveryBiz - effectiveTransit);
+  const mustShipDate = addBusinessDays(shopToday, mustShipBiz);
+
+  // Cost breakdown
+  const bd = [
+    {l:"Paper",v:P.paper,g:"mat"},{l:"Front Print",v:P.frontPrint,g:"mat"},{l:"Back Print",v:P.backPrint,g:"mat"},
+    {l:"Press",v:P.press,g:"lab"},{l:"Cutting",v:P.cutting,g:"lab"},{l:"Folding",v:P.folding,g:"lab"},
+    {l:"Vivid Print",v:P.vivid,g:"add"},{l:"UV Coating",v:P.coat,g:"add"},{l:"Bundling",v:P.bundle,g:"add"},
+    {l:"Perforation",v:P.perforation,g:"add"},{l:"Round Cornering",v:P.rc,g:"add"},
+    {l:"Fold Surcharge 1",v:P.diffFold1,g:"fee"},{l:"Fold Surcharge 2",v:P.diffFold2,g:"fee"},{l:"Fold Surcharge 3",v:P.diffFold3,g:"fee"},
+    {l:"Base Cost",v:P.baseCost,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
+    {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
+    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Discount (Flat)",v:P.discEasyFlat,g:"disc"},{l:"Easy Discount",v:P.discEasy,g:"disc"},{l:"Cardstock Disc",v:P.cardstockDisc,g:"disc"},
+  ].filter(r => Math.abs(r.v) > 0.005);
+
+  const gC={mat:CK.cyan,lab:CK.key,add:CK.yellow,art:CK.magenta,fee:"#c25050",disc:CK.cyan};
+  const gL={mat:"Materials & Ink",lab:"Production Labor",add:"Addons",art:"Artwork & Proofing",fee:"Fees & Surcharges",disc:"Discounts"};
+  const grouped=Object.entries(gL).map(([k,label])=>({label,val:bd.filter(r=>r.g===k).reduce((s,r)=>s+r.v,0),c:gC[k]})).filter(g=>Math.abs(g.val)>0.005);
+
+  const perUnit = qty > 0 ? grandTotal / qty : 0;
+
+  return {
+    total: Math.round(grandTotal * 100) / 100, baseTotal: Math.round(total * 100) / 100,
+    perUnit: Math.round(perUnit * 100) / 100, days, qty: qty, bd, grouped,
+    imp, mk, fold, panels, pressSheets, longE, shortE, approxThickness,
+    coatOK: paper.coatable, q100: qty >= 100,
+    shipping: {
+      transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
+      earliestBizDays, earliestDate: fmtDate(earliestDate), shopToday: fmtDate(shopToday),
+      bizDaysToDate, rushMultiplier, rushCost: Math.round(rushCost * 100) / 100,
+      needByValid, needByPast, tooSoon, productionBizDays, bufferedProdDays,
+      productionStartDate: fmtDate(productionStartDate), productionStartYMD: toYMD(productionStartDate),
+      mustShipDate: fmtDate(mustShipDate), mustShipYMD: toYMD(mustShipDate),
+    },
+    debug: { pressSheets, imp, qty, mk, dL, approxThickness, fold: fold.label, panels, longE, shortE, paperDays, baseDays, days, P },
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3D FOLD SIMULATION
+// ═══════════════════════════════════════════════════════════════
+function FoldPreview({ longEdge, shortEdge, foldType, panels, foldDir }) {
+  const [foldAngle, setFoldAngle] = useState(0);
+  const foldingLong = foldDir === "long";
+  const foldDim = foldingLong ? longEdge : shortEdge;
+  const staticDim = foldingLong ? shortEdge : longEdge;
+  const panelW = foldDim / panels;
+
+  const maxPx = 500;
+  const scale = Math.min(maxPx / foldDim, maxPx / staticDim) * 0.8;
+  const pw = panelW * scale;
+  const ph = staticDim * scale;
+  const totalW = pw * panels;
+
+  const colors = ["#e3f2fd","#bbdefb","#90caf9","#64b5f6","#42a5f5"];
+
+  // Build nested panel chain — each panel is child of previous for proper 3D folding
+  function buildPanels(idx) {
+    if (idx >= panels) return null;
+    const angle = idx === 0 ? 0 : (() => {
+      const a = foldAngle;
+      if (foldType === "z3" || foldType === "accordion4") return idx % 2 === 1 ? a : -a;
+      if (foldType === "gate3") return idx === 2 ? -a : a;
+      if (foldType === "dgate4") return (idx === 1 || idx === 3) ? (idx <= 1 ? a : -a) : a;
+      if (foldType === "dparallel4") return idx % 2 === 1 ? a : -a;
+      return a; // bifold, trifold, roll4: all fold same direction
+    })();
+
+    return (
+      <div style={{
+        width: pw, height: ph, position: idx === 0 ? "relative" : "absolute",
+        left: idx === 0 ? 0 : pw, top: 0,
+        transformOrigin: "left center",
+        transform: idx === 0 ? "none" : `rotateY(${angle}deg)`,
+        transformStyle: "preserve-3d",
+        transition: "transform 0.3s ease",
+      }}>
+        {/* Front face */}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: colors[idx % colors.length],
+          border: "1px solid rgba(0,0,0,0.15)",
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          fontSize: 11, color: "rgba(0,0,0,0.5)", fontWeight: 600,
+          backfaceVisibility: "hidden", borderRadius: 2,
+        }}>
+          <div>Panel {idx + 1}</div>
+          <div style={{ fontSize: 9, fontWeight: 400, marginTop: 2 }}>{panelW.toFixed(1)}" × {staticDim.toFixed(1)}"</div>
+        </div>
+        {/* Back face */}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: `${colors[idx % colors.length]}88`,
+          border: "1px dashed rgba(0,0,0,0.2)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 10, color: "rgba(0,0,0,0.3)",
+          backfaceVisibility: "hidden", borderRadius: 2,
+          transform: "rotateY(180deg)",
+        }}>Back {idx + 1}</div>
+        {buildPanels(idx + 1)}
+      </div>
+    );
+  }
+
+  if (panels <= 1) {
+    return (
+      <div style={{ textAlign: "center", padding: 20 }}>
+        <div style={{ display: "inline-block", width: totalW, height: ph, background: colors[0], border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
+          Flat Sheet — {longEdge}" × {shortEdge}"
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div className="fold-viewport" style={{ height: ph + 40, margin: "0 auto", maxWidth: 600 }}>
+        <div style={{ transformStyle: "preserve-3d", transform: `rotateX(-5deg) rotateY(${-foldAngle * 0.1}deg)` }}>
+          {buildPanels(0)}
+        </div>
+      </div>
+      <div style={{ textAlign: "center", marginTop: 12 }}>
+        <input type="range" min={0} max={170} value={foldAngle} onChange={e => setFoldAngle(Number(e.target.value))} style={{ width: 220, accentColor: CK.cyan }} />
+        <div style={{ fontSize: 11, color: CC.mid, marginTop: 4 }}>{foldAngle === 0 ? "Flat (open)" : foldAngle >= 170 ? "Fully Folded" : `Fold: ${foldAngle}°`}</div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FOLD LINE OVERLAY (for proof/template view)
+// ═══════════════════════════════════════════════════════════════
+function FoldLines({ panels, foldDir }) {
+  if (panels <= 1) return null;
+  const foldingLong = foldDir === "long";
+  return Array.from({ length: panels - 1 }, (_, i) => {
+    const pct = ((i + 1) / panels) * 100;
+    return (
+      <div key={i} style={{
+        position: "absolute",
+        left: foldingLong ? `${pct}%` : 0,
+        top: foldingLong ? 0 : `${pct}%`,
+        width: foldingLong ? 0 : "100%",
+        height: foldingLong ? "100%" : 0,
+        borderLeft: foldingLong ? "2px dashed #f59e0b" : "none",
+        borderTop: !foldingLong ? "2px dashed #f59e0b" : "none",
+        zIndex: 2, pointerEvents: "none",
+      }}>
+        <span style={{
+          position: "absolute",
+          top: foldingLong ? 8 : -14,
+          left: foldingLong ? -30 : 8,
+          fontSize: 8, color: "#f59e0b", fontWeight: 700,
+          transform: foldingLong ? "rotate(-90deg)" : "none",
+          whiteSpace: "nowrap",
+        }}>Fold {i + 1}</span>
+      </div>
+    );
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UI COMPONENTS
+// ═══════════════════════════════════════════════════════════════
+function Panel({ result, compact }) {
+  if (!result || result.error) {
+    const err = result?.error?.[0] || "Configure options";
+    return <div style={{ padding: compact ? "6px 10px" : "12px 18px", background: compact ? "transparent" : CC.white, borderRadius: 8, border: compact ? "none" : `1px solid ${CC.border}` }}><div style={{ color: CC.light, fontSize: compact ? 11 : 13 }}>{err}</div></div>;
+  }
+  const r = result;
+  const sh = r.shipping || {};
+  if (compact) {
+    return (
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span style={{ fontSize: 20, fontWeight: 800, color: CC.dark }}>${r.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+        <span style={{ fontSize: 11, color: CC.mid }}>${r.perUnit.toFixed(2)}/ea</span>
+        <span style={{ fontSize: 10, color: CC.light }}>{r.days}d</span>
+      </div>
+    );
+  }
+  return (
+    <div style={{ background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden" }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}` }}>
+        <div style={{ fontSize: 11, color: CC.light, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 2 }}>Estimated Total</div>
+        <div style={{ fontSize: 28, fontWeight: 800, color: CC.dark }}>${r.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}</div>
+      </div>
+      <div style={{ display: "flex", borderBottom: `1px solid ${CC.border}` }}>
+        {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], ["Days", r.days + " biz"]].map(([l, v], i) => (
+          <div key={i} style={{ flex: 1, padding: "11px 8px", textAlign: "center", borderRight: i < 2 ? `1px solid ${CC.border}` : "none" }}>
+            <div style={{ fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", color: CC.light, marginBottom: 1 }}>{l}</div>
+            <div style={{ fontSize: 14.5, fontWeight: 700, color: CC.dark }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#fafafa", fontSize: 11, color: CC.mid }}>
+        Free delivery est: <strong>{sh.freeDeliveryDate}</strong> ({sh.freeDeliveryBizDays} biz days)
+      </div>}
+      {r.grouped.length > 0 && <div style={{ padding: "10px 18px" }}>
+        {r.grouped.map((g, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}>
+            <span style={{ color: g.c, fontWeight: 500 }}>{g.label}</span>
+            <span style={{ fontWeight: 600, color: g.val < 0 ? "#16a34a" : CC.dark }}>{g.val < 0 ? "-" : ""}${Math.abs(g.val).toFixed(2)}</span>
+          </div>
+        ))}
+      </div>}
+    </div>
+  );
+}
+
+const Chev=()=><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>;
+function Sel({label,badge,value,onChange,children}){return(<div style={ST.f}><label style={ST.lbl}>{label}{badge}</label><div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} style={ST.sel}>{children}</select><span style={ST.selA}><Chev/></span></div></div>)}
+function Pil({label,badge,value,onChange,options}){return(<div style={ST.f}><label style={ST.lbl}>{label}{badge}</label><div style={ST.pills}>{options.map((o,i)=><button key={i} type="button" onClick={()=>onChange(o.v)} style={{...ST.pill,...(value===o.v?(o.onStyle||ST.pillOn):{}),borderRight:i<options.length-1?`1px solid ${CC.border}`:"none"}}>{o.t}</button>)}</div></div>)}
+function TxtNum({label,value,onChange,min,max}){return(<div style={ST.f}><label style={ST.lbl}>{label}</label><input type="number" value={value} onChange={e=>onChange(Number(e.target.value))} min={min} max={max} style={ST.inp}/></div>)}
+function Sec({title,open,onToggle,children,badge}){return(<div style={{...ST.pnl,marginBottom:10}}><div onClick={onToggle} style={{...ST.secHdr,cursor:"pointer"}}><span>{open?"▼":"▶"} {title}</span>{badge&&<span style={{marginLeft:8,fontSize:10,color:CK.cyan,fontWeight:600}}>{badge}</span>}</div>{open&&<div style={ST.secBody}>{children}</div>}</div>)}
+
+// ═══════════════════════════════════════════════════════════════
+// APP
+// ═══════════════════════════════════════════════════════════════
+function App() {
+  const mob = useIsMobile();
+  const [op, setOp] = useState({ s1: true, s2: true, s3: false, s4: false, s5: false });
+  const tog = k => setOp(p => ({ ...p, [k]: !p[k] }));
+  const [showDebug, setShowDebug] = useState(false);
+
+  // State
+  const [qty, setQty] = useState(250);
+  const [sizeMode, setSizeMode] = useState("preset");
+  const [sizeLabel, setSizeLabel] = useState("8.5×11");
+  const [longEdge, setLongEdge] = useState(11);
+  const [shortEdge, setShortEdge] = useState(8.5);
+  const [foldType, setFoldType] = useState("flat");
+  const [foldDir, setFoldDir] = useState("long");
+  const [frontColor, setFrontColor] = useState("color");
+  const [backColor, setBackColor] = useState("color");
+  const [sides, setSides] = useState(2);
+  const [paperType, setPaperType] = useState("noncardstock");
+  const [paper, setPaper] = useState(PAPERS_NC[2] || PAPERS_NC[0]);
+  const [vivid, setVivid] = useState(false);
+  const [coating, setCoating] = useState(0);
+  const [coatSides, setCoatSides] = useState(1);
+  const [bundling, setBundling] = useState(0);
+  const [perforation, setPerforation] = useState(0);
+  const [roundCorner, setRoundCorner] = useState(0);
+  const [artwork, setArtwork] = useState(0.01);
+  const [bleed, setBleed] = useState(0);
+  const [proof, setProof] = useState(0);
+  const [shipState, setShipState] = useState("AZ");
+  const [shipAddr, setShipAddr] = useState({ name: "", company: "", street1: "", street2: "", city: "", zip: "" });
+  const [needByDate, setNeedByDate] = useState("");
+
+  const shipZip = shipAddr.zip || "";
+  const fold = FOLD_TYPES.find(f => f.val === foldType) || FOLD_TYPES[0];
+
+  const result = useMemo(() => calculate({
+    qty, sizeMode, sizeLabel, longEdge, shortEdge,
+    foldType, foldDir, frontColor, backColor, sides,
+    paper, vivid, coating, coatSides, bundling, perforation, roundCorner,
+    artwork, bleed, proof, shipState, shipZip, needByDate,
+  }), [qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate]);
+
+  const r = result || {};
+  const r2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
+  const r3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
+  const pList = paperType === "cardstock" ? PAPERS_CS : PAPERS_NC;
+  const preset = SIZE_PRESETS.find(s => s.label === sizeLabel);
+  const dimLong = sizeMode === "preset" ? (preset?.long || 11) : longEdge;
+  const dimShort = sizeMode === "preset" ? (preset?.short || 8.5) : shortEdge;
+
+  return (
+    <div style={{ minHeight: "100vh", background: CC.bg, fontFamily: "'Segoe UI','Helvetica Neue',Arial,sans-serif", color: CC.dark }}>
+      <style>{`@media(max-width:700px){.pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}.pps-sec-body{padding:12px 14px!important}}`}</style>
+
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "10px" : "20px 24px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+
+          {/* SECTION 1: Size, Qty, Fold */}
+          <Sec title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
+            <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
+            <div style={ST.hr} />
+            <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
+            {sizeMode === "preset"
+              ? <Sel label="Flat/Unfolded Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}</Sel>
+              : <div style={r2}>
+                  <TxtNum label="Long Edge (in)" value={longEdge} onChange={setLongEdge} min={2} max={27} />
+                  <TxtNum label="Short Edge (in)" value={shortEdge} onChange={setShortEdge} min={2} max={12.5} />
+                </div>
+            }
+            <div style={ST.hr} />
+            <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
+              {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
+            </Sel>
+            {fold.panels > 1 && sizeMode === "custom" && (
+              <Pil label="Fold Direction" value={foldDir} onChange={setFoldDir} options={[
+                { t: `Fold Long Side (${dimLong}")`, v: "long" },
+                { t: `Fold Short Side (${dimShort}")`, v: "short" },
+              ]} />
+            )}
+            {fold.panels > 1 && (
+              <div style={{ marginTop: 8, padding: "8px 12px", background: CK.cyanLight, borderRadius: 5, fontSize: 11, color: CC.mid }}>
+                Folded size: <strong>{(dimShort).toFixed(1)}" × {((foldDir === "long" ? dimLong : dimShort) / fold.panels).toFixed(1)}"</strong> ({fold.panels} panels)
+              </div>
+            )}
+          </Sec>
+
+          {/* SECTION 2: Printing & Paper */}
+          <Sec title="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
+            <Pil label="Sides Printed" value={sides} onChange={v => setSides(Number(v))} options={[{ t: "Both Sides", v: 2 }, { t: "Front Only", v: 1 }]} />
+            <div style={{ ...r2, marginTop: 10 }}>
+              <Pil label="Front Color" value={frontColor} onChange={setFrontColor} options={[
+                { t: "Full Color", v: "color", onStyle: { background: "conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)", color: "#fff", fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,.5)" } },
+                { t: "Greyscale", v: "bw", onStyle: { background: "linear-gradient(135deg, #888 0%, #444 50%, #999 100%)", color: "#fff", fontWeight: 600 } }
+              ]} />
+              {sides === 2 && <Pil label="Back Color" value={backColor} onChange={setBackColor} options={[
+                { t: "Full Color", v: "color", onStyle: { background: "conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)", color: "#fff", fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,.5)" } },
+                { t: "Greyscale", v: "bw", onStyle: { background: "linear-gradient(135deg, #888 0%, #444 50%, #999 100%)", color: "#fff", fontWeight: 600 } }
+              ]} />}
+            </div>
+            <div style={ST.hr} />
+            <Pil label="Paper Type" value={paperType} onChange={v => { setPaperType(v); const pool = v === "cardstock" ? PAPERS_CS : PAPERS_NC; setPaper(pool[2] || pool[0]); }} options={[{ t: "Text Weight", v: "noncardstock" }, { t: "Cardstock", v: "cardstock" }]} />
+            <Sel label="Select Paper" value={paper.val} onChange={v => { const f = ALL_PAPERS.find(p => String(p.val) === v); if (f) { setPaper(f); setPaperType(f.type); } }}>
+              {PAPERS_NC.map(p => <option key={p.val} value={p.val}>{p.label}</option>)}
+              <optgroup label="Cardstock">{PAPERS_CS.map(p => <option key={p.val} value={p.val}>{p.label}</option>)}</optgroup>
+            </Sel>
+          </Sec>
+
+          {/* SECTION 3: Addons */}
+          <Sec title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
+            <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />
+            <div style={ST.hr} />
+            <Sel label="Additional Coating" value={coating} onChange={v => setCoating(Number(v))}>
+              {COATINGS.map(o => <option key={o.val} value={o.val}>{o.label}{!paper.coatable && o.val > 0 ? " (not available for this paper)" : ""}</option>)}
+            </Sel>
+            {coating > 0 && paper.coatable && (
+              <Pil label="Sides to Coat" value={coatSides} onChange={v => setCoatSides(Number(v))} options={COAT_SIDES.map(o => ({ t: o.label, v: o.val }))} />
+            )}
+            <div style={ST.hr} />
+            <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
+              {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+            </Sel>
+            <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}>
+              {PERF_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+            </Sel>
+            {foldType === "flat" && (
+              <Sel label="Round Cornering" value={roundCorner} onChange={v => setRoundCorner(Number(v))}>
+                {CORNERS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+              </Sel>
+            )}
+          </Sec>
+
+          {/* SECTION 4: Artwork */}
+          <Sec title="Artwork & Proofing" open={op.s4} onToggle={() => tog("s4")}>
+            <Sel label="Artwork & Design" value={artwork} onChange={v => setArtwork(Number(v))}>
+              {ART_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+            </Sel>
+            <Sel label="Bleed Options" value={bleed} onChange={v => setBleed(Number(v))}>
+              {BLEED_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+            </Sel>
+            <Sel label="Proof Options" value={proof} onChange={v => setProof(Number(v))}>
+              <option value={0}>Approve artwork yourself</option>
+              <option value={0.01}>Professional Digital Proof</option>
+              <option value={3.01}>Hardcopy Proof</option>
+            </Sel>
+          </Sec>
+
+          {/* SECTION 5: Shipping */}
+          <Sec title="Shipping & Delivery" open={op.s5} onToggle={() => tog("s5")}>
+            <div style={r2}>
+              <Sel label="State" value={shipState} onChange={setShipState}>
+                {US_STATES.map(st => <option key={st} value={st}>{st}</option>)}
+              </Sel>
+              <div style={ST.f}><label style={ST.lbl}>ZIP Code</label><input type="text" value={shipAddr.zip} onChange={e => setShipAddr(p => ({ ...p, zip: e.target.value.replace(/[^\d-]/g, "").slice(0, 10) }))} placeholder="ZIP" maxLength={10} style={ST.inp} /></div>
+            </div>
+            <div style={ST.f}><label style={ST.lbl}>Need by Date</label><input type="date" value={needByDate} onChange={e => setNeedByDate(e.target.value)} style={ST.inp} /></div>
+            {r.shipping && <div style={{ marginTop: 10, padding: "8px 12px", background: CK.cyanLight, borderRadius: 5, fontSize: 11, color: CC.mid }}>
+              Free delivery est: <strong>{r.shipping.freeDeliveryDate}</strong> ({r.shipping.freeDeliveryBizDays} biz days)
+              {r.shipping.rushCost > 0 && <div style={{ color: CK.rush, fontWeight: 600, marginTop: 4 }}>Rush: +${r.shipping.rushCost.toFixed(2)} ({r.shipping.rushMultiplier.toFixed(2)}×)</div>}
+              {r.shipping.needByPast && <div style={{ color: "#dc2626", marginTop: 4 }}>Date has passed — select a future date</div>}
+              {r.shipping.tooSoon && <div style={{ color: "#dc2626", marginTop: 4 }}>Cannot deliver by this date</div>}
+            </div>}
+          </Sec>
+
+          {/* 3D Fold Preview */}
+          {fold.panels > 1 && (
+            <div style={{ ...ST.pnl, marginBottom: 10 }}>
+              <div style={{ ...ST.secHdr, cursor: "default" }}>3D Fold Preview — {fold.label}</div>
+              <FoldPreview longEdge={dimLong} shortEdge={dimShort} foldType={foldType} panels={fold.panels} foldDir={foldDir} />
+            </div>
+          )}
+
+          {/* Flat Sheet Preview with Fold Lines */}
+          <div style={{ ...ST.pnl, marginBottom: 10 }}>
+            <div style={{ ...ST.secHdr, cursor: "default" }}>Template Preview — {dimLong}" × {dimShort}" {fold.panels > 1 ? `(${fold.panels} panels)` : "flat"}</div>
+            <div style={{ padding: 20 }}>
+              <div style={{ position: "relative", margin: "0 auto", maxWidth: 500, aspectRatio: `${dimLong}/${dimShort}`, background: "#f0f4f8", border: "2px solid #cbd5e1", borderRadius: 4 }}>
+                {/* Bleed guide */}
+                <div style={{ position: "absolute", inset: 0, border: "1.5px dashed #ef4444", borderRadius: 2, pointerEvents: "none" }} />
+                {/* Trim guide */}
+                <div style={{ position: "absolute", top: "1.5%", left: "1.5%", right: "1.5%", bottom: "1.5%", border: "1.5px dashed #1e293b", borderRadius: 2, pointerEvents: "none" }} />
+                {/* Safety guide */}
+                <div style={{ position: "absolute", top: "3%", left: "3%", right: "3%", bottom: "3%", border: "1.5px dashed #38a169", borderRadius: 2, pointerEvents: "none" }} />
+                {/* Fold lines */}
+                <FoldLines panels={fold.panels} foldDir={foldDir} />
+                {/* Center label */}
+                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", color: CC.light, fontSize: 12 }}>
+                  <div style={{ fontWeight: 600 }}>{dimLong}" × {dimShort}"</div>
+                  {fold.panels > 1 && <div style={{ fontSize: 10, marginTop: 2 }}>{fold.panels} panels — folded: {(dimShort).toFixed(1)}" × {((foldDir === "long" ? dimLong : dimShort) / fold.panels).toFixed(1)}"</div>}
+                </div>
+                {/* Legend */}
+                <div style={{ position: "absolute", bottom: 4, left: 8, fontSize: 8, display: "flex", gap: 8 }}>
+                  <span style={{ color: "#ef4444" }}>— Bleed</span>
+                  <span style={{ color: "#1e293b" }}>- - Trim</span>
+                  <span style={{ color: "#38a169" }}>- - Safety</span>
+                  {fold.panels > 1 && <span style={{ color: "#f59e0b" }}>- - Fold</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Desktop sidebar */}
+        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18 }}>
+          <Panel result={result} />
+          <button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : "#ddd"}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
+            {showDebug ? "▼ Hide" : "▶ Show"} Debug Panel
+          </button>
+          {showDebug && r.debug && (
+            <div style={{ ...ST.pnl, marginTop: 10, padding: 14, fontSize: 11 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8, color: CC.mid }}>Debug</div>
+              {Object.entries(r.debug).map(([k, v]) => (
+                k !== "P" ? <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                  <span style={{ color: CC.light }}>{k}</span>
+                  <span style={{ fontFamily: "monospace", color: CK.cyan }}>{typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(4)) : String(v)}</span>
+                </div> : null
+              ))}
+              {r.debug.P && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontWeight: 600, color: CC.mid }}>Line Items</summary>
+                {Object.entries(r.debug.P).filter(([, v]) => Math.abs(v) > 0.005).map(([k, v]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                    <span style={{ color: CC.light }}>{k}</span>
+                    <span style={{ fontFamily: "monospace", color: v < 0 ? "#16a34a" : CK.cyan }}>${v.toFixed(2)}</span>
+                  </div>
+                ))}
+              </details>}
+            </div>
+          )}
+        </div>}
+      </div>
+
+      {/* Mobile bottom bar */}
+      {mob && <>
+        {showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: CC.mid, marginBottom: 6 }}>DEBUG</div>
+          {Object.entries(r.debug).filter(([k]) => k !== "P").map(([k, v]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "1px 0" }}>
+              <span style={{ color: CC.light }}>{k}</span>
+              <span style={{ fontFamily: "monospace", color: CK.cyan }}>{typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(3)) : String(v)}</span>
+            </div>
+          ))}
+        </div>}
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.08)", padding: "8px 10px", paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setShowDebug(p => !p)}>
+              <Panel result={result} compact />
+              <div style={{ fontSize: 8, textAlign: "center", color: showDebug ? CK.cyan : CC.light, marginTop: 2, letterSpacing: ".5px", textTransform: "uppercase", fontWeight: 600 }}>{showDebug ? "▼ Hide Debug" : "▲ Debug"}</div>
+            </div>
+            <button type="button" style={{ flexShrink: 0, padding: "12px 18px", borderRadius: 6, border: "none", background: result?.error ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: result?.error ? "default" : "pointer", fontFamily: "inherit", opacity: result?.error ? .5 : 1 }} disabled={!!result?.error}>Add to Order</button>
+          </div>
+        </div>
+      </>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STYLES
+// ═══════════════════════════════════════════════════════════════
+const ST = {
+  f: { marginTop: 10 },
+  lbl: { display: "block", fontSize: 13, fontWeight: 600, color: CC.mid, marginBottom: 5 },
+  sel: { width: "100%", padding: "10px 32px 10px 12px", borderRadius: 6, border: `1px solid ${CC.border}`, background: "linear-gradient(180deg, #fff 0%, #f9f9fa 100%)", fontSize: 15, color: CC.dark, fontFamily: "inherit", appearance: "none", cursor: "pointer", outline: "none" },
+  selA: { position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: CC.light, pointerEvents: "none" },
+  inp: { width: "100%", padding: "10px 12px", borderRadius: 6, border: `1px solid ${CC.border}`, background: "linear-gradient(180deg, #fff 0%, #f9f9fa 100%)", fontSize: 15, color: CC.dark, fontFamily: "inherit", outline: "none", boxSizing: "border-box" },
+  pills: { display: "flex", borderRadius: 6, border: `1px solid ${CC.border}`, overflow: "hidden" },
+  pill: { flex: 1, padding: "9px 10px", fontSize: 14, fontWeight: 500, fontFamily: "inherit", border: "none", borderRight: `1px solid ${CC.border}`, background: `linear-gradient(180deg, #fff 0%, #f7f7f8 100%)`, color: "#555", cursor: "pointer", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "center" },
+  pillOn: { background: `linear-gradient(135deg, ${CK.cyan} 0%, #0070e6 40%, #3d9cff 50%, #0070e6 60%, #005cc8 100%)`, color: "#fff", fontWeight: 600 },
+  pnl: { background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden" },
+  secHdr: { padding: "12px 18px", fontWeight: 600, fontSize: 14, color: CC.dark, borderBottom: `1px solid ${CC.border}`, background: "#fafafa" },
+  secBody: { padding: "14px 18px" },
+  hr: { height: 1, background: CC.border, margin: "12px 0" },
+  err: { color: "#dc2626", fontSize: 12, marginTop: 4 },
+};
+
+ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<App />);
+</script>
+</body>
+</html>
