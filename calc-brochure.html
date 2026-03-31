@@ -11,6 +11,8 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: 0; }
   .fold-viewport{perspective:1200px;display:flex;align-items:center;justify-content:center;overflow:visible;position:relative}
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; padding: 0; }
   @media(max-width:700px){
     select,input[type="text"],input[type="number"]{font-size:16px!important;padding:10px!important;min-height:44px!important}
   }
@@ -553,10 +555,34 @@ function Panel({ result, compact }) {
 }
 
 const Chev=()=><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>;
-function Sel({label,badge,value,onChange,children}){return(<div style={ST.f}><label style={ST.lbl}>{label}{badge}</label><div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} style={ST.sel}>{children}</select><span style={ST.selA}><Chev/></span></div></div>)}
-function Pil({label,badge,value,onChange,options}){return(<div style={ST.f}><label style={ST.lbl}>{label}{badge}</label><div style={ST.pills}>{options.map((o,i)=><button key={i} type="button" onClick={()=>onChange(o.v)} style={{...ST.pill,...(value===o.v?(o.onStyle||ST.pillOn):{}),borderRight:i<options.length-1?`1px solid ${CC.border}`:"none"}}>{o.t}</button>)}</div></div>)}
-function TxtNum({label,value,onChange,min,max}){return(<div style={ST.f}><label style={ST.lbl}>{label}</label><input type="number" value={value} onChange={e=>onChange(Number(e.target.value))} min={min} max={max} style={ST.inp}/></div>)}
-function Sec({title,open,onToggle,children,badge}){return(<div style={{...ST.pnl,marginBottom:10}}><div onClick={onToggle} style={{...ST.secHdr,cursor:"pointer"}}><span>{open?"▼":"▶"} {title}</span>{badge&&<span style={{marginLeft:8,fontSize:10,color:CK.cyan,fontWeight:600}}>{badge}</span>}</div>{open&&<div style={ST.secBody}>{children}</div>}</div>)}
+
+function Sel({label,value,onChange,children,disabled,note,badge}){
+  const m=useIsMobile();
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} style={{...ST.sel,fontSize:m?16:15,padding:m?"10px 32px 10px 12px":"10px 32px 10px 12px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
+}
+
+function TxtNum({label,value,onChange,min=1,max=99999}){
+  const[raw,setRaw]=useState(String(value));
+  useEffect(()=>setRaw(String(value)),[value]);
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
+}
+
+function Pil({label,options,value,onChange,disabled,badge}){
+  const m=useIsMobile();
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={ST.pills}>{options.map(o=><button type="button" key={String(o.v)} onClick={()=>!disabled&&onChange(o.v)} style={{...ST.pill,padding:m?"11px 10px":"9px 10px",...(value===o.v?(o.onStyle||ST.pillOn):{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>)}</div></div>;
+}
+
+function TurnBadge({days}){
+  if(!days || days < 0.5) return null;
+  const d = Math.round(days);
+  const label = d === 0 ? `+${days.toFixed(1)}d` : `+${d} day${d!==1?"s":""}`;
+  return <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,fontWeight:600,color:CK.magenta,background:"#fdf2f8",padding:"1px 6px",borderRadius:8,marginLeft:6,whiteSpace:"nowrap",verticalAlign:"middle"}}>⏱ {label}</span>;
+}
+
+function Sec({title,open,onToggle,children,badge}){
+  const m=useIsMobile();
+  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><span style={{fontWeight:600,color:CC.dark,fontSize:"inherit"}}>{title}</span><div style={{display:"flex",alignItems:"center",gap:8}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // APP
@@ -820,19 +846,22 @@ function App() {
 // STYLES
 // ═══════════════════════════════════════════════════════════════
 const ST = {
-  f: { marginTop: 10 },
-  lbl: { display: "block", fontSize: 13, fontWeight: 600, color: CC.mid, marginBottom: 5 },
-  sel: { width: "100%", padding: "10px 32px 10px 12px", borderRadius: 6, border: `1px solid ${CC.border}`, background: "linear-gradient(180deg, #fff 0%, #f9f9fa 100%)", fontSize: 15, color: CC.dark, fontFamily: "inherit", appearance: "none", cursor: "pointer", outline: "none" },
-  selA: { position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: CC.light, pointerEvents: "none" },
-  inp: { width: "100%", padding: "10px 12px", borderRadius: 6, border: `1px solid ${CC.border}`, background: "linear-gradient(180deg, #fff 0%, #f9f9fa 100%)", fontSize: 15, color: CC.dark, fontFamily: "inherit", outline: "none", boxSizing: "border-box" },
-  pills: { display: "flex", borderRadius: 6, border: `1px solid ${CC.border}`, overflow: "hidden" },
-  pill: { flex: 1, padding: "9px 10px", fontSize: 14, fontWeight: 500, fontFamily: "inherit", border: "none", borderRight: `1px solid ${CC.border}`, background: `linear-gradient(180deg, #fff 0%, #f7f7f8 100%)`, color: "#555", cursor: "pointer", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "center" },
-  pillOn: { background: `linear-gradient(135deg, ${CK.cyan} 0%, #0070e6 40%, #3d9cff 50%, #0070e6 60%, #005cc8 100%)`, color: "#fff", fontWeight: 600 },
-  pnl: { background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden" },
-  secHdr: { padding: "12px 18px", fontWeight: 600, fontSize: 14, color: CC.dark, borderBottom: `1px solid ${CC.border}`, background: "#fafafa" },
-  secBody: { padding: "14px 18px" },
-  hr: { height: 1, background: CC.border, margin: "12px 0" },
-  err: { color: "#dc2626", fontSize: 12, marginTop: 4 },
+  f:{marginTop:10},
+  lbl:{display:"block",fontSize:13,fontWeight:600,color:CC.mid,marginBottom:5},
+  sel:{width:"100%",padding:"10px 32px 10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"linear-gradient(180deg, #fff 0%, #f9f9fa 100%)",fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 3px rgba(0,0,0,.04)"},
+  selA:{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
+  inp:{width:"100%",padding:"10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"linear-gradient(180deg, #fff 0%, #f9f9fa 100%)",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 3px rgba(0,0,0,.04)"},
+  pills:{display:"flex",borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,.06)"},
+  pill:{flex:1,padding:"9px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRight:`1px solid ${CC.border}`,background:`linear-gradient(180deg, #fff 0%, #f7f7f8 100%)`,color:"#555",cursor:"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"inset 0 1px 0 rgba(255,255,255,.8), inset 0 -1px 0 rgba(0,0,0,.04)"},
+  pillOn:{background:`linear-gradient(135deg, ${CK.cyan} 0%, #0070e6 40%, #3d9cff 50%, #0070e6 60%, #005cc8 100%)`,color:"#fff",fontWeight:600,boxShadow:"inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(0,0,0,.15), 0 1px 3px rgba(0,126,255,.2)"},
+  row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12},
+  row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12},
+  hr:{height:1,background:"#eee",margin:"14px 0 4px"},
+  note:{fontSize:12,color:CC.light,margin:"4px 0 0"},
+  err:{color:"#dc2626",fontSize:13,margin:"8px 0 0",padding:"8px 10px",background:"#fef2f2",borderRadius:4,border:"1px solid #f5cccc"},
+  card:{background:CC.white,borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",marginBottom:10},
+  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"#fafafa",border:"none",borderBottom:"1px solid #eee",cursor:"pointer",fontFamily:"inherit",fontSize:15},
+  pnl:{background:CC.white,borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden"},
 };
 
 ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<App />);
