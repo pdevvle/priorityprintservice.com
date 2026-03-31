@@ -544,9 +544,10 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 3D FOLD SIMULATION
+// REMOVED: FoldPreview and FoldLines (preview now handled inline in SheetPreview modal)
 // ═══════════════════════════════════════════════════════════════
-function FoldPreview({ longEdge, shortEdge, foldType, panels, foldDir }) {
+
+function _REMOVED_FoldPreview({ longEdge, shortEdge, foldType, panels, foldDir }) {
   const [foldAngle, setFoldAngle] = useState(0);
   const foldingLong = foldDir === "long";
   const foldDim = foldingLong ? longEdge : shortEdge;
@@ -944,13 +945,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
         </div>
       )}
 
-      {/* 3D Preview Modal */}
+      {/* Preview Modal */}
       {previewOpen && frontArt && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.9)", display: "flex", flexDirection: "column" }}>
           {/* Header */}
           <div style={{ padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Book Preview</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Preview</div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
                 {longEdge}" × {shortEdge}" {panels > 1 ? `· ${panels} panels · ${foldType}` : "flat"}
               </div>
@@ -966,98 +967,92 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
             </div>
           </div>
 
-          {/* 3D fold viewport */}
+          {/* Preview content */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            {panels > 1 ? (() => {
+            {(() => {
               const artSrc = (side === "front" ? frontArt : backArt)?.dataUrl;
-              const foldingLong = foldDir === "long";
-              const totalW = foldingLong ? 500 : 500 * (shortEdge / longEdge);
-              const totalH = foldingLong ? 500 * (shortEdge / longEdge) : 500;
-              const pw = foldingLong ? totalW / panels : totalW;
-              const ph = foldingLong ? totalH : totalH / panels;
-              const angle = previewAngle;
-
-              function getFoldDir(type, idx) {
-                if (type === "bifold") return 1;
-                if (type === "trifold" || type === "roll4") return 1;
-                if (type === "z3" || type === "accordion4") return idx % 2 === 0 ? 1 : -1;
-                if (type === "gate3") return idx === 0 ? 1 : -1;
-                if (type === "dgate4") return (idx === 0 || idx === 2) ? 1 : -1;
-                if (type === "dparallel4") return idx % 2 === 0 ? 1 : -1;
-                return 1;
-              }
-
-              function buildPanels(idx) {
-                if (idx >= panels) return null;
-                const dir = idx === 0 ? 0 : getFoldDir(foldType, idx - 1);
-                const bgPos = foldingLong
-                  ? `${-(idx * pw)}px 0px` : `0px ${-(idx * ph)}px`;
-                const bgSize = foldingLong
-                  ? `${totalW}px ${totalH}px` : `${totalW}px ${totalH}px`;
-
-                return (
-                  <div style={{
-                    width: pw, height: ph,
-                    transformOrigin: foldingLong ? "left center" : "center top",
-                    transform: idx === 0 ? "none" : (foldingLong
-                      ? `rotateY(${dir * angle}deg)`
-                      : `rotateX(${-dir * angle}deg)`),
-                    transition: "transform .3s",
-                    position: "relative",
-                    transformStyle: "preserve-3d",
-                  }}>
-                    {/* Panel face */}
-                    <div style={{
-                      width: "100%", height: "100%",
-                      position: "absolute", inset: 0,
-                      backgroundImage: artSrc ? `url(${artSrc})` : "none",
-                      backgroundPosition: bgPos,
-                      backgroundSize: bgSize,
-                      backgroundColor: artSrc ? "transparent" : `hsl(${210 + idx * 30}, 30%, ${92 - idx * 3}%)`,
-                      border: "1px solid rgba(255,255,255,.15)",
-                      borderRadius: 2,
-                      backfaceVisibility: "hidden",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>
-                      {!artSrc && <span style={{ fontSize: 11, color: "rgba(255,255,255,.3)", fontWeight: 600 }}>Panel {idx + 1}</span>}
-                    </div>
-                    {/* Next panel nested for proper fold chaining */}
-                    {buildPanels(idx + 1)}
-                  </div>
-                );
-              }
+              const maxDim = 600;
+              const scale = Math.min(maxDim / longEdge, maxDim / shortEdge, 1) * 60;
+              const totalW = longEdge * scale;
+              const totalH = shortEdge * scale;
 
               return (
-                <div style={{ perspective: 1200 }}>
+                <div style={{ perspective: 1000 }}>
+                  {/* Sheet with subtle 3D tilt */}
                   <div style={{
+                    width: totalW, height: totalH,
+                    transform: "rotateX(8deg) rotateY(-3deg)",
                     transformStyle: "preserve-3d",
-                    transform: `rotateX(-5deg) rotateY(${panels > 2 && angle > 90 ? -15 : 0}deg)`,
-                    transition: "transform .3s",
+                    position: "relative",
+                    boxShadow: "0 20px 60px rgba(0,0,0,.5)",
+                    borderRadius: 3,
+                    overflow: "hidden",
                   }}>
-                    {buildPanels(0)}
+                    {/* Art background */}
+                    {artSrc ? (
+                      <img src={artSrc} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    ) : (
+                      <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg, #e2e8f0 0%, #f1f5f9 100%)" }} />
+                    )}
+
+                    {/* Panel dividers with fold lines */}
+                    {panels > 1 && (() => {
+                      const foldingLong = foldDir === "long";
+                      return Array.from({ length: panels - 1 }, (_, i) => {
+                        const frac = (i + 1) / panels;
+                        return (
+                          <div key={i} style={{
+                            position: "absolute", zIndex: 2,
+                            ...(foldingLong
+                              ? { left: `${frac * 100}%`, top: 0, bottom: 0, width: 2, background: "rgba(245,166,35,.6)", boxShadow: "0 0 8px rgba(245,166,35,.3)" }
+                              : { top: `${frac * 100}%`, left: 0, right: 0, height: 2, background: "rgba(245,166,35,.6)", boxShadow: "0 0 8px rgba(245,166,35,.3)" }
+                            ),
+                          }}>
+                            <span style={{
+                              position: "absolute", fontSize: 9, fontWeight: 700, color: "#f59e0b",
+                              background: "rgba(0,0,0,.6)", padding: "1px 5px", borderRadius: 2,
+                              ...(foldingLong ? { top: 6, left: 4 } : { left: 6, top: -14 }),
+                            }}>Fold {i + 1}</span>
+                          </div>
+                        );
+                      });
+                    })()}
+
+                    {/* Panel number labels */}
+                    {panels > 1 && Array.from({ length: panels }, (_, i) => {
+                      const foldingLong = foldDir === "long";
+                      const panelW = foldingLong ? totalW / panels : totalW;
+                      const panelH = foldingLong ? totalH : totalH / panels;
+                      const cx = foldingLong ? (i + 0.5) / panels * 100 : 50;
+                      const cy = foldingLong ? 50 : (i + 0.5) / panels * 100;
+                      return (
+                        <div key={`l${i}`} style={{
+                          position: "absolute", left: `${cx}%`, top: `${cy}%`,
+                          transform: "translate(-50%, -50%)", zIndex: 3,
+                          fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.5)",
+                          background: "rgba(0,0,0,.3)", padding: "2px 8px", borderRadius: 3,
+                        }}>Panel {i + 1}</div>
+                      );
+                    })}
+
+                    {/* Side label */}
+                    <div style={{ position: "absolute", bottom: 6, right: 8, fontSize: 10, fontWeight: 600, color: "#fff", background: "rgba(0,0,0,.5)", padding: "2px 8px", borderRadius: 3, zIndex: 3 }}>
+                      {side === "front" ? "Front / Outside" : "Back / Inside"}
+                    </div>
                   </div>
                 </div>
               );
-            })() : (
-              /* Flat — just show the artwork */
-              <div style={{ maxWidth: 600, width: "100%", position: "relative" }}>
-                <img src={(side === "front" ? frontArt : backArt)?.dataUrl || frontArt.dataUrl} style={{ width: "100%", display: "block", borderRadius: 4, border: "1px solid rgba(255,255,255,.15)" }} />
-                <div style={{ position: "absolute", bottom: 8, left: 8, fontSize: 10, fontWeight: 600, color: "#fff", background: "rgba(0,0,0,.5)", padding: "2px 8px", borderRadius: 3 }}>
-                  {side === "front" ? "Front / Outside" : "Back / Inside"}
-                </div>
-              </div>
-            )}
+            })()}
 
-            {/* Fold angle slider */}
-            {panels > 1 && (
-              <div style={{ marginTop: 20, textAlign: "center" }}>
-                <input type="range" min={0} max={180} value={previewAngle} onChange={e => setPreviewAngle(Number(e.target.value))}
-                  style={{ width: 240, accentColor: CK.cyan }} />
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 4 }}>
-                  {previewAngle === 0 ? "Flat (unfolded)" : previewAngle === 180 ? "Fully folded" : `${previewAngle}°`}
-                </div>
-              </div>
-            )}
+            {/* Dimensions info */}
+            <div style={{ marginTop: 16, textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+              {longEdge}" × {shortEdge}" flat
+              {panels > 1 && (() => {
+                const foldDim = foldDir === "long" ? longEdge : shortEdge;
+                const staticDim = foldDir === "long" ? shortEdge : longEdge;
+                return <span> · Folded: {staticDim.toFixed(1)}" × {(foldDim / panels).toFixed(1)}" ({panels} panels)</span>;
+              })()}
+            </div>
           </div>
         </div>
       )}
@@ -1607,14 +1602,6 @@ function App() {
               )}
             </>}
           </Sec>
-
-          {/* 3D Fold Preview */}
-          {fold.panels > 1 && (
-            <div style={{ ...ST.pnl, marginBottom: 10 }}>
-              <div style={{ ...ST.secHdr, cursor: "default" }}>3D Fold Preview — {fold.label}</div>
-              <FoldPreview longEdge={dimLong} shortEdge={dimShort} foldType={foldType} panels={fold.panels} foldDir={foldDir} />
-            </div>
-          )}
 
 
         </div>
