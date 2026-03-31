@@ -591,7 +591,10 @@ function Sec({title,open,onToggle,children,badge}){
   return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><span style={{fontWeight:600,color:CC.dark,fontSize:"inherit"}}>{title}</span><div style={{display:"flex",alignItems:"center",gap:8}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
-function RichTip({ children, title, content, dark }) {
+function RichTip({ children, tipKey, title, content, dark }) {
+  const tip = tipKey && (window.PPS_CONFIG || {}).tips ? (window.PPS_CONFIG.tips[tipKey] || null) : null;
+  const resolvedTitle = tip ? tip.title : title;
+  const resolvedContent = tip ? tip.content : content;
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const mob = useIsMobile();
@@ -602,7 +605,7 @@ function RichTip({ children, title, content, dark }) {
     return () => { document.removeEventListener("mousedown", h); document.removeEventListener("touchstart", h); };
   }, [open]);
   useEffect(() => { if (open) document.body.style.overflow = mob ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [open, mob]);
-  const blocks = Array.isArray(content) ? content : [{ type: "text", value: content || "" }];
+    const blocks = Array.isArray(resolvedContent) ? resolvedContent : [{ type: "text", value: resolvedContent || "" }];
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <span onClick={() => setOpen(o => !o)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
@@ -613,7 +616,7 @@ function RichTip({ children, title, content, dark }) {
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 99999 }} />
         <div style={{ position: "fixed", ...(mob ? { bottom: 0, left: 0, right: 0, borderRadius: "16px 16px 0 0", maxHeight: "80vh" } : { top: "50%", left: "50%", transform: "translate(-50%, -50%)", borderRadius: 12, maxHeight: "80vh", width: "min(420px, 90vw)" }), background: dark ? "#1a1d23" : "#fff", border: `1px solid ${dark ? "rgba(255,255,255,.1)" : "#ddd"}`, boxShadow: "0 16px 48px rgba(0,0,0,.25)", zIndex: 100000, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
           <div style={{ padding: "14px 18px 10px", borderBottom: `1px solid ${dark ? "rgba(255,255,255,.08)" : "#eee"}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: dark ? "#1a1d23" : "#fff", zIndex: 1 }}>
-            <span style={{ fontWeight: 700, fontSize: 14, color: dark ? "#fff" : CC.dark }}>{title || "Info"}</span>
+            <span style={{ fontWeight: 700, fontSize: 14, color: dark ? "#fff" : CC.dark }}>{resolvedTitle || "Info"}</span>
             <button type="button" onClick={() => setOpen(false)} style={{ background: "none", border: "none", fontSize: 18, color: dark ? "rgba(255,255,255,.4)" : CC.light, cursor: "pointer", padding: "0 4px" }}>✕</button>
           </div>
           <div style={{ padding: "12px 18px 18px" }}>

@@ -453,6 +453,12 @@ add_action( 'wp', function() {
             $config['calc'] = pps_get_config();
         }
 
+        // Inject tooltip content for RichTip components
+        $tips = get_option( 'pps_tooltips', array() );
+        if ( ! empty( $tips ) ) {
+            $config['tips'] = $tips;
+        }
+
         // Inject UPS zone map (3-digit ZIP prefix → transit days)
         $zone_map = get_option( 'pps_ups_zone_map', array() );
         if ( ! empty( $zone_map ) && is_array( $zone_map ) ) {
@@ -1346,6 +1352,155 @@ add_action( 'rest_api_init', function() {
         },
     ) );
 
+} );
+
+// ═══════════════════════════════════════════════════════════════
+// TOOLTIPS: CENTRALIZED RICH TOOLTIP CONTENT
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Default tooltip content — used when no custom content is saved.
+ * Keys match what the calculator JS looks up via PPS_CONFIG.tips[key].
+ * Each tooltip has: title, content (array of {type, value/src/alt/poster} blocks).
+ */
+function pps_default_tooltips() {
+    return array(
+        'vivid' => array(
+            'title' => 'Enhanced Vivid Printing',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Our vivid print mode runs your job through an enhanced print profile that produces richer blacks, more saturated colors, and sharper detail. Great for photography-heavy pieces and marketing materials.' ),
+                array( 'type' => 'text', 'value' => 'Adds approximately 1 day per 2,500 sheets to turnaround. Cost is roughly equivalent to a second press pass.' ),
+            ),
+        ),
+        'coating' => array(
+            'title' => 'UV Cover Coating',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'A liquid UV coating applied after printing. Enhances durability, color vibrancy, and provides a professional finish.' ),
+                array( 'type' => 'text', 'value' => 'UV Gloss: High-shine reflective finish that makes colors pop. UV Matte: Soft, non-reflective finish with a velvety feel.' ),
+                array( 'type' => 'text', 'value' => 'Requires a glossy or coated paper. Cannot be applied to uncoated stocks.' ),
+            ),
+        ),
+        'bundling' => array(
+            'title' => 'Bundling',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Pieces are counted and bundled in your chosen quantity using kraft paper or shrink wrap. Keeps your order organized and protected during shipping and storage.' ),
+                array( 'type' => 'text', 'value' => 'Available for orders of 100+ pieces. Bundle sizes: 25, 50, or 100 per bundle.' ),
+            ),
+        ),
+        'round_cornering' => array(
+            'title' => 'Round Cornering',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Rounds the corners of your finished piece for a softer, modern look. Available in two radius sizes and two corner configurations.' ),
+                array( 'type' => 'text', 'value' => 'Outside 2: rounds the two corners on the open (non-spine) edge. All 4: rounds every corner including the spine side.' ),
+                array( 'type' => 'text', 'value' => '1/4" radius is subtle and professional. 3/8" radius is more pronounced and playful.' ),
+            ),
+        ),
+        'perforation' => array(
+            'title' => 'Perforation',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'A line of small holes punched through the paper, allowing a section to be torn off cleanly. Common for reply cards, coupons, and tear-off tabs.' ),
+                array( 'type' => 'text', 'value' => 'Available for select sizes. Perforation lines run parallel to the fold or binding edge.' ),
+            ),
+        ),
+        'outfold' => array(
+            'title' => 'Fold-Out Page (Outfold)',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'An extra panel that folds out from the booklet, like a brochure insert inside the book. Printed full color on both sides.' ),
+                array( 'type' => 'text', 'value' => 'Adds both printing cost (full color) and folding labor. Available as single or double fold-out.' ),
+            ),
+        ),
+        'perfect_binding' => array(
+            'title' => 'Perfect Binding',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Pages are glued to a flat spine creating a clean, professional book-style edge. The cover wraps around the spine, which is printable.' ),
+                array( 'type' => 'text', 'value' => 'Requires enough pages to create a spine (typically 20+). Ideal for catalogs, manuals, and publications.' ),
+            ),
+        ),
+        'saddle_stitch' => array(
+            'title' => 'Saddle Stitch Binding',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Pages are folded and stapled through the spine. The most cost-effective binding method for booklets up to 64 pages.' ),
+                array( 'type' => 'text', 'value' => 'Page counts must be in multiples of 4. One or two staples depending on size.' ),
+            ),
+        ),
+        'bleed' => array(
+            'title' => 'Artwork Bleeds',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Bleed is the area of artwork that extends beyond the trim line. When your design has color or images that go to the edge of the page, the bleed ensures no white border appears after cutting.' ),
+                array( 'type' => 'text', 'value' => 'Standard bleed is 0.125" (1/8") on all sides. If your file doesn\'t include bleeds, we can add them for an additional fee.' ),
+            ),
+        ),
+        'paper_text_weight' => array(
+            'title' => 'Text Weight Paper',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Lighter, flexible paper used for most booklet interior pages. Measured in pounds (lb) — higher numbers are thicker.' ),
+                array( 'type' => 'text', 'value' => '70lb Uncoated: Clean, natural feel. Best for text-heavy content. 80lb Matte: Smooth with slight sheen. Good all-purpose choice. 100lb Gloss: Shiny, vibrant colors. Best for photo-heavy content.' ),
+            ),
+        ),
+        'paper_cardstock' => array(
+            'title' => 'Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Heavier, rigid paper typically used for covers. Measured in points (pt) or pounds (lb).' ),
+                array( 'type' => 'text', 'value' => '80lb Cardstock: Light card, good for self-mailers. 14pt C1S: One glossy side, one uncoated — premium cover stock. 16pt C2S: Glossy both sides, thick and sturdy.' ),
+            ),
+        ),
+    );
+}
+
+/**
+ * Save tooltips from admin — stored as a single wp_option.
+ * Accepts JSON with the same structure as pps_default_tooltips().
+ */
+add_action( 'wp_ajax_pps_save_tooltips', function() {
+    check_ajax_referer( 'pps_tooltip_save', 'nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorized' );
+
+    $raw = wp_unslash( $_POST['tips'] ?? '{}' );
+    $tips = json_decode( $raw, true );
+    if ( json_last_error() !== JSON_ERROR_NONE ) {
+        wp_send_json_error( 'Invalid JSON: ' . json_last_error_msg() );
+    }
+
+    // Sanitize each tooltip
+    $clean = array();
+    foreach ( $tips as $key => $tip ) {
+        $k = sanitize_key( $key );
+        $clean[ $k ] = array(
+            'title'   => sanitize_text_field( $tip['title'] ?? '' ),
+            'content' => array(),
+        );
+        if ( ! empty( $tip['content'] ) && is_array( $tip['content'] ) ) {
+            foreach ( $tip['content'] as $block ) {
+                $type = sanitize_key( $block['type'] ?? 'text' );
+                $b = array( 'type' => $type );
+                if ( $type === 'text' ) {
+                    $b['value'] = sanitize_textarea_field( $block['value'] ?? '' );
+                } elseif ( $type === 'image' ) {
+                    $b['src'] = esc_url_raw( $block['src'] ?? '' );
+                    $b['alt'] = sanitize_text_field( $block['alt'] ?? '' );
+                } elseif ( $type === 'video' ) {
+                    $b['src'] = esc_url_raw( $block['src'] ?? '' );
+                    $b['poster'] = esc_url_raw( $block['poster'] ?? '' );
+                } elseif ( $type === 'youtube' ) {
+                    $b['src'] = esc_url_raw( $block['src'] ?? '' );
+                    $b['alt'] = sanitize_text_field( $block['alt'] ?? '' );
+                }
+                $clean[ $k ]['content'][] = $b;
+            }
+        }
+    }
+
+    update_option( 'pps_tooltips', $clean, false );
+    wp_send_json_success( 'Saved ' . count( $clean ) . ' tooltips.' );
+} );
+
+/**
+ * Seed default tooltips on plugin activation if none exist.
+ */
+register_activation_hook( __FILE__, function() {
+    if ( ! get_option( 'pps_tooltips' ) ) {
+        update_option( 'pps_tooltips', pps_default_tooltips(), false );
+    }
 } );
 
 // ═══════════════════════════════════════════════════════════════

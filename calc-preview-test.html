@@ -1204,7 +1204,11 @@ function InfoTip({ children, text, dark }) {
 }
 
 // Rich tooltip for finishing options — supports text, images, and video
-function RichTip({ children, title, content, dark }) {
+// tipKey: looks up centralized tooltip from PPS_CONFIG.tips[key]. Falls back to title/content props.
+function RichTip({ children, tipKey, title, content, dark }) {
+  const tip = tipKey && (window.PPS_CONFIG || {}).tips ? (window.PPS_CONFIG.tips[tipKey] || null) : null;
+  const resolvedTitle = tip ? tip.title : title;
+  const resolvedContent = tip ? tip.content : content;
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const mob = useIsMobile();
@@ -1220,7 +1224,7 @@ function RichTip({ children, title, content, dark }) {
     return () => { document.body.style.overflow = ""; };
   }, [open, mob]);
   // content is an array of blocks: {type:"text",value:""}, {type:"image",src:"",alt:""}, {type:"video",src:""}
-  const blocks = Array.isArray(content) ? content : [{ type: "text", value: content || "" }];
+  const blocks = Array.isArray(resolvedContent) ? resolvedContent : [{ type: "text", value: resolvedContent || "" }];
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <span onClick={() => setOpen(o => !o)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
@@ -1246,7 +1250,7 @@ function RichTip({ children, title, content, dark }) {
         }}>
           {/* Header */}
           <div style={{ padding: "14px 18px 10px", borderBottom: `1px solid ${dark ? "rgba(255,255,255,.08)" : "#eee"}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: dark ? "#1a1d23" : "#fff", zIndex: 1 }}>
-            <span style={{ fontWeight: 700, fontSize: 14, color: dark ? "#fff" : CC.dark }}>{title || "Info"}</span>
+            <span style={{ fontWeight: 700, fontSize: 14, color: dark ? "#fff" : CC.dark }}>{resolvedTitle || "Info"}</span>
             <button type="button" onClick={() => setOpen(false)} style={{ background: "none", border: "none", fontSize: 18, color: dark ? "rgba(255,255,255,.4)" : CC.light, cursor: "pointer", padding: "0 4px" }}>✕</button>
           </div>
           {/* Content blocks */}
@@ -3706,18 +3710,18 @@ function App(){
           {/* SECTION 3: Finishing & Addons */}
           <Sec title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")} badge={r.debug?.turnaround?.addonDays>0?`+${r.debug.turnaround.addonDays}d turnaround`:null}>
             <div style={{display:"flex",alignItems:"center",gap:4}}>
-              <Pil label={<RichTip title="Enhanced Vivid Printing" content={[{type:"text",value:"Our vivid print mode runs your job through an enhanced print profile that produces richer blacks, more saturated colors, and sharper detail. Great for photography-heavy booklets and marketing materials."},{type:"text",value:"Adds approximately 1 day per 2,500 sheets to turnaround. Cost is roughly equivalent to a second press pass."}]}>Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>
+              <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>
             </div>
             <div style={ST.hr}/>
             <div style={r2}>
-              <Sel label={<RichTip title="UV Cover Coating" content={[{type:"text",value:"A liquid UV coating applied to the cover after printing. Enhances durability, color vibrancy, and provides a professional finish."},{type:"text",value:"UV Gloss: High-shine reflective finish that makes colors pop. UV Matte: Soft, non-reflective finish with a velvety feel."},{type:"text",value:"Requires a glossy or coated cover paper. Cannot be applied to uncoated stocks."}]}>Cover Coating</RichTip>} badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+              <Sel label={<RichTip tipKey="coating">Cover Coating</RichTip>} badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
               {r.q100!==false
-                ? <Sel label={<RichTip title="Bundling" content={[{type:"text",value:"Booklets are counted and bundled in your chosen quantity using kraft paper or shrink wrap. Keeps your booklets organized and protected during shipping and storage."},{type:"text",value:"Available for orders of 100+ pieces. Bundle sizes: 25, 50, or 100 per bundle."}]}>Bundling</RichTip>} badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+                ? <Sel label={<RichTip tipKey="bundling">Bundling</RichTip>} badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
                 : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>}
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <Sel label={<RichTip title="Round Cornering" content={[{type:"text",value:"Rounds the corners of your finished booklet for a softer, modern look. Available in two radius sizes and two corner configurations."},{type:"text",value:"Outside 2: rounds the two corners on the open (non-spine) edge. All 4: rounds every corner including the spine side."},{type:"text",value:"1/4\" radius is subtle and professional. 3/8\" radius is more pronounced and playful."}]}>Round Cornering</RichTip>} badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+                <Sel label={<RichTip tipKey="round_cornering">Round Cornering</RichTip>} badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
               </div>
               {coverArt && roundCorner > 0 && (() => {
                 const is4 = roundCorner === 108 || roundCorner === 107;
