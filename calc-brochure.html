@@ -9,6 +9,7 @@
 <script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+<script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: 0; }
@@ -399,6 +400,106 @@ function calculate(c) {
     },
     debug: { pressSheets, imp, qty, mk, dL, approxThickness, fold: fold.label, panels, longE, shortE, paperDays, baseDays, days, P },
   };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// DOWNLOADABLE BROCHURE TEMPLATE (jsPDF)
+// ═══════════════════════════════════════════════════════════════
+
+function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, sizeLabel) {
+  try {
+    if (!window.jspdf) { alert("PDF library not loaded. Please refresh."); return; }
+    const { jsPDF } = window.jspdf;
+    const bleed = 0.125, safety = 0.125;
+    const docW = longE + bleed * 2;
+    const docH = shortE + bleed * 2;
+    const pdf = new jsPDF({ orientation: docW > docH ? "landscape" : "portrait", unit: "in", format: [docW, docH] });
+
+    // Two pages: Front/Outside and Back/Inside
+    for (let pg = 0; pg < 2; pg++) {
+      if (pg > 0) pdf.addPage([docW, docH], docW > docH ? "landscape" : "portrait");
+      const label = pg === 0 ? "Front / Outside" : "Back / Inside";
+
+      // White background
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(0, 0, docW, docH, "F");
+
+      // Bleed line (red)
+      pdf.setDrawColor(229, 62, 62); pdf.setLineWidth(0.01);
+      pdf.setLineDashPattern([0.06, 0.04], 0);
+      pdf.rect(0.005, 0.005, docW - 0.01, docH - 0.01);
+
+      // Trim line (dark)
+      pdf.setDrawColor(30, 30, 30); pdf.setLineWidth(0.008);
+      pdf.setLineDashPattern([0.06, 0.04], 0);
+      pdf.rect(bleed, bleed, longE, shortE);
+
+      // Safety line (green)
+      pdf.setDrawColor(56, 161, 105); pdf.setLineWidth(0.008);
+      pdf.setLineDashPattern([0.04, 0.04], 0);
+      pdf.rect(bleed + safety, bleed + safety, longE - safety * 2, shortE - safety * 2);
+
+      // Fold lines (orange)
+      if (panels > 1) {
+        pdf.setDrawColor(245, 166, 35); pdf.setLineWidth(0.01);
+        pdf.setLineDashPattern([0.08, 0.04], 0);
+        const foldingLong = foldDir === "long";
+        for (let i = 1; i < panels; i++) {
+          const frac = i / panels;
+          if (foldingLong) {
+            const x = bleed + longE * frac;
+            pdf.line(x, bleed + 0.1, x, bleed + shortE - 0.1);
+            pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
+            pdf.text("Fold " + i, x + 0.04, bleed + 0.25);
+          } else {
+            const y = bleed + shortE * frac;
+            pdf.line(bleed + 0.1, y, bleed + longE - 0.1, y);
+            pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
+            pdf.text("Fold " + i, bleed + 0.15, y - 0.04);
+          }
+        }
+      }
+
+      // Reset dash
+      pdf.setLineDashPattern([], 0);
+
+      // Page label
+      pdf.setFontSize(10); pdf.setTextColor(170, 170, 170);
+      pdf.text(label, docW / 2, docH / 2 - 0.1, { align: "center" });
+
+      // Dimensions
+      pdf.setFontSize(7); pdf.setTextColor(190, 190, 190);
+      pdf.text("Flat: " + longE + '" \u00d7 ' + shortE + '"  |  With bleeds: ' + docW.toFixed(3) + '" \u00d7 ' + docH.toFixed(3) + '"', docW / 2, docH / 2 + 0.12, { align: "center" });
+      if (panels > 1) {
+        const foldDim = foldDir === "long" ? longE : shortE;
+        const staticDim = foldDir === "long" ? shortE : longE;
+        pdf.text("Folded: " + staticDim.toFixed(1) + '" \u00d7 ' + (foldDim / panels).toFixed(1) + '"  (' + panels + ' panels)', docW / 2, docH / 2 + 0.3, { align: "center" });
+      }
+
+      // URL
+      pdf.setFontSize(7); pdf.setTextColor(150, 150, 150);
+      pdf.text("priorityprintservice.com", docW / 2, docH - bleed - 0.08, { align: "center" });
+
+      // Legend on first page
+      if (pg === 0) {
+        var lx = bleed + safety + 0.1;
+        var ly = docH - bleed - 0.35;
+        pdf.setFontSize(6);
+        pdf.setTextColor(229, 62, 62); pdf.text("\u2014 Bleed (extend backgrounds to this edge)", lx, ly - 0.24);
+        pdf.setTextColor(30, 30, 30); pdf.text("- - Trim (cut line)", lx, ly - 0.16);
+        pdf.setTextColor(56, 161, 105); pdf.text("- - Safety (keep text inside)", lx, ly - 0.08);
+        if (panels > 1) { pdf.setTextColor(245, 166, 35); pdf.text("- - Fold lines", lx, ly); }
+      }
+    }
+
+    var safeName = (sizeLabel || (longE + "x" + shortE)).replace(/[^a-zA-Z0-9._-]/g, "_");
+    var foldName = foldType === "flat" ? "flat" : foldType;
+    pdf.save("PPS_Brochure_Template_" + safeName + "_" + foldName + ".pdf");
+  } catch (e) {
+    console.error("Template generation failed:", e);
+    alert("Template generation failed: " + e.message);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1328,30 +1429,29 @@ function App() {
             </div>
           )}
 
-          {/* Flat Sheet Preview with Fold Lines */}
+          {/* Template Download */}
           <div style={{ ...ST.pnl, marginBottom: 10 }}>
-            <div style={{ ...ST.secHdr, cursor: "default" }}>Template Preview — {dimLong}" × {dimShort}" {fold.panels > 1 ? `(${fold.panels} panels)` : "flat"}</div>
-            <div style={{ padding: 20 }}>
-              <div style={{ position: "relative", margin: "0 auto", maxWidth: 500, aspectRatio: `${dimLong}/${dimShort}`, background: "#f0f4f8", border: "2px solid #cbd5e1", borderRadius: 4 }}>
-                {/* Bleed guide */}
-                <div style={{ position: "absolute", inset: 0, border: "1.5px dashed #ef4444", borderRadius: 2, pointerEvents: "none" }} />
-                {/* Trim guide */}
-                <div style={{ position: "absolute", top: "1.5%", left: "1.5%", right: "1.5%", bottom: "1.5%", border: "1.5px dashed #1e293b", borderRadius: 2, pointerEvents: "none" }} />
-                {/* Safety guide */}
-                <div style={{ position: "absolute", top: "3%", left: "3%", right: "3%", bottom: "3%", border: "1.5px dashed #38a169", borderRadius: 2, pointerEvents: "none" }} />
-                {/* Fold lines */}
-                <FoldLines panels={fold.panels} foldDir={foldDir} />
-                {/* Center label */}
-                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", color: CC.light, fontSize: 12 }}>
-                  <div style={{ fontWeight: 600 }}>{dimLong}" × {dimShort}"</div>
-                  {fold.panels > 1 && <div style={{ fontSize: 10, marginTop: 2 }}>{fold.panels} panels — folded: {(dimShort).toFixed(1)}" × {((foldDir === "long" ? dimLong : dimShort) / fold.panels).toFixed(1)}"</div>}
+            <div style={{ padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: CC.dark }}>Artwork Template</div>
+                <div style={{ fontSize: 10, color: CC.light, marginTop: 1 }}>
+                  {dimLong}" × {dimShort}" {fold.panels > 1 ? `· ${fold.panels} panels (${fold.label})` : "flat"} · With bleed/trim/safety guides{fold.panels > 1 ? " + fold lines" : ""}
                 </div>
-                {/* Legend */}
-                <div style={{ position: "absolute", bottom: 4, left: 8, fontSize: 8, display: "flex", gap: 8 }}>
-                  <span style={{ color: "#ef4444" }}>— Bleed</span>
-                  <span style={{ color: "#1e293b" }}>- - Trim</span>
-                  <span style={{ color: "#38a169" }}>- - Safety</span>
-                  {fold.panels > 1 && <span style={{ color: "#f59e0b" }}>- - Fold</span>}
+              </div>
+              <button type="button" onClick={() => generateBrochureTemplate(dimLong, dimShort, foldType, fold.panels, foldDir, sizeLabel)} style={{
+                padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                border: `1px solid ${CK.cyan}`, background: CK.cyanLight, color: CK.cyan, whiteSpace: "nowrap",
+              }}>📐 Download Template</button>
+            </div>
+            {/* Mini visual preview */}
+            <div style={{ padding: "0 18px 14px" }}>
+              <div style={{ position: "relative", maxWidth: 300, aspectRatio: `${dimLong}/${dimShort}`, background: "#f8f9fa", border: `1px solid ${CC.border}`, borderRadius: 3, margin: 0 }}>
+                <div style={{ position: "absolute", inset: 0, border: "1px dashed #ef444466", pointerEvents: "none" }} />
+                <div style={{ position: "absolute", top: "1.5%", left: "1.5%", right: "1.5%", bottom: "1.5%", border: "1px dashed #1e293b44", pointerEvents: "none" }} />
+                <div style={{ position: "absolute", top: "3%", left: "3%", right: "3%", bottom: "3%", border: "1px dashed #38a16944", pointerEvents: "none" }} />
+                <FoldLines panels={fold.panels} foldDir={foldDir} />
+                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: CC.light, fontWeight: 500 }}>
+                  {dimLong}" × {dimShort}"
                 </div>
               </div>
             </div>
