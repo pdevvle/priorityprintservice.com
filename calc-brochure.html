@@ -539,6 +539,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState("");
   const fileRef = useRef(null);
+  const frontInputRef = useRef(null);
+  const backInputRef = useRef(null);
   const rawFileRef = useRef(null);
 
   const BLEED = 0.125;
@@ -650,20 +652,54 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
             </div>
           </div>
 
-          {/* Thumbnail preview */}
-          <div style={{ display: "flex", gap: 8 }}>
-            {frontArt && (
-              <div onClick={() => { setSide("front"); setProofOpen(true); }} style={{ flex: 1, cursor: "pointer", borderRadius: 4, overflow: "hidden", border: `1px solid ${CC.border}`, position: "relative" }}>
-                <img src={frontArt.dataUrl} style={{ width: "100%", display: "block" }} />
-                <div style={{ position: "absolute", bottom: 4, left: 4, fontSize: 9, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,.5)", padding: "1px 6px", borderRadius: 3 }}>Front</div>
-              </div>
-            )}
-            {backArt && (
-              <div onClick={() => { setSide("back"); setProofOpen(true); }} style={{ flex: 1, cursor: "pointer", borderRadius: 4, overflow: "hidden", border: `1px solid ${CC.border}`, position: "relative" }}>
-                <img src={backArt.dataUrl} style={{ width: "100%", display: "block" }} />
-                <div style={{ position: "absolute", bottom: 4, left: 4, fontSize: 9, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,.5)", padding: "1px 6px", borderRadius: 3 }}>Back</div>
-              </div>
-            )}
+          {/* Individual side upload slots */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+            {[{s:"front",label:"Front / Outside",art:frontArt,setArt:setFrontArt,inputRef:frontInputRef},{s:"back",label:"Back / Inside",art:backArt,setArt:setBackArt,inputRef:backInputRef}].map(({s,label,art,setArt,inputRef}) => {
+              const handleSlotFile = async (file) => {
+                if (!file) return;
+                const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
+                if (!dataUrl) return;
+                const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+                setArt({ dataUrl, file, dims });
+                setApproved(false);
+              };
+              return (
+                <div key={s} style={{ position: "relative" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".5px", color: CC.mid, marginBottom: 4 }}>
+                    {label}
+                  </div>
+                  {art ? (
+                    <div style={{ position: "relative", borderRadius: 6, overflow: "hidden", border: `2px solid ${CC.border}`, cursor: "pointer" }}
+                      onClick={() => { setSide(s); setProofOpen(true); }}>
+                      <img src={art.dataUrl} style={{ width: "100%", display: "block", aspectRatio: `${longEdge}/${shortEdge}`, objectFit: "cover" }} />
+                      <div style={{ position: "absolute", top: 4, right: 4, display: "flex", gap: 3 }}>
+                        <button type="button" onClick={e => { e.stopPropagation(); inputRef.current?.click(); }} style={{
+                          width: 22, height: 22, borderRadius: 4, border: "none", background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                        }} title="Replace">↻</button>
+                        <button type="button" onClick={e => { e.stopPropagation(); setArt(null); setApproved(false); }} style={{
+                          width: 22, height: 22, borderRadius: 4, border: "none", background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                        }} title="Remove">✕</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleSlotFile(f); }}
+                      onClick={() => inputRef.current?.click()}
+                      style={{
+                        aspectRatio: `${longEdge}/${shortEdge}`, borderRadius: 6,
+                        border: `2px dashed ${CC.border}`, background: "#fafafa",
+                        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer", transition: "all .15s",
+                      }}>
+                      <div style={{ fontSize: 20, marginBottom: 2 }}>+</div>
+                      <div style={{ fontSize: 10, color: CC.light }}>Drop or click</div>
+                    </div>
+                  )}
+                  <input ref={inputRef} type="file" accept=".jpg,.jpeg,.png,.tiff,.tif" onChange={e => { const f = e.target.files?.[0]; if (f) handleSlotFile(f); e.target.value = ""; }} style={{ display: "none" }} />
+                </div>
+              );
+            })}
           </div>
 
           {/* Approval status */}
