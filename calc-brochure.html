@@ -724,8 +724,14 @@ function App() {
   const [perforation, setPerforation] = useState(0);
   const [roundCorner, setRoundCorner] = useState(0);
   const [artwork, setArtwork] = useState(0.01);
+  const [artEditPages, setArtEditPages] = useState(0);
   const [bleed, setBleed] = useState(0);
   const [proof, setProof] = useState(0);
+  const [proofAddrSame, setProofAddrSame] = useState(true);
+  const [proofAddr, setProofAddr] = useState({name:"",street:"",city:"",state:"",zip:""});
+  const [canvaLink, setCanvaLink] = useState("");
+  const [canvaInstructions, setCanvaInstructions] = useState("");
+  const [referenceFiles, setReferenceFiles] = useState([]);
   const [shipState, setShipState] = useState("AZ");
   const [shipAddr, setShipAddr] = useState({ name: "", company: "", street1: "", street2: "", city: "", zip: "" });
   const [needByDate, setNeedByDate] = useState("");
@@ -855,19 +861,116 @@ function App() {
             )}
           </Sec>
 
-          {/* SECTION 4: Artwork */}
-          <Sec title="Artwork & Proofing" open={op.s4} onToggle={() => tog("s4")}>
-            <Sel label="Artwork & Design" value={artwork} onChange={v => setArtwork(Number(v))}>
-              {ART_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+          {/* SECTION 4: Artwork & Proofing */}
+          <Sec title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+
+            <Sel label="Artwork & Design" badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+
+            {artwork>=2&&artwork<4&&<TxtNum label="Pages Needing Edits" value={artEditPages} onChange={setArtEditPages} min={0}/>}
+
+            {artwork>=2 && (
+              <div style={{marginTop:8,padding:"12px 14px",borderRadius:6,background:"#f8f8fa",border:`1px solid ${CC.border}`}}>
+                <div style={{fontSize:12,fontWeight:700,color:CC.dark,marginBottom:4}}>📎 Upload Reference Files (optional)</div>
+                <div style={{fontSize:11,color:CC.mid,marginBottom:8,lineHeight:1.4}}>
+                  {artwork>=4 ? "Attach any reference materials, logos, content, or inspiration for your new design."
+                    : "Attach your artwork files or references for the pages needing edits."}
+                </div>
+                <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,padding:"10px",borderRadius:6,border:`2px dashed ${CC.border}`,cursor:"pointer",background:"#fff",fontSize:12,fontWeight:600,color:CC.mid}}>
+                  <span>Choose Files</span>
+                  <input type="file" multiple accept=".pdf,.ai,.psd,.tif,.tiff,.jpg,.jpeg,.png,.doc,.docx,.zip" onChange={e=>{
+                    const files=Array.from(e.target.files||[]);
+                    if(files.length) setReferenceFiles(prev=>[...prev,...files.map(f=>({name:f.name,size:f.size,file:f}))]);
+                    e.target.value="";
+                  }} style={{display:"none"}}/>
+                </label>
+                {referenceFiles.length>0&&(
+                  <div style={{marginTop:6,display:"flex",flexDirection:"column",gap:3}}>
+                    {referenceFiles.map((f,i)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:CC.mid,padding:"4px 8px",background:"#fff",borderRadius:4,border:`1px solid ${CC.border}`}}>
+                        <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name}</span>
+                        <span style={{fontSize:10,color:CC.light,flexShrink:0}}>{(f.size/1024).toFixed(0)} KB</span>
+                        <button type="button" onClick={()=>setReferenceFiles(prev=>prev.filter((_,j)=>j!==i))} style={{border:"none",background:"none",cursor:"pointer",color:CC.light,fontSize:12,padding:"0 2px"}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {artwork===0.01 && (
+              <div style={{marginTop:8,padding:"12px 14px",background:CK.cyanLight,border:`1px solid ${CK.cyan}44`,borderRadius:6,fontSize:12,color:CC.dark,lineHeight:1.6}}>
+                <div style={{fontWeight:700,marginBottom:4}}>📤 Upload Your Artwork</div>
+                <div style={{fontSize:11,color:CC.mid}}>Upload your print-ready files after adding to cart, or use the proof system on the product page. We accept PDF, AI, PSD, TIFF, and high-resolution JPG/PNG.</div>
+              </div>
+            )}
+
+            {artwork===0.02 && (
+              <div style={{marginTop:8,padding:"12px 14px",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:6,fontSize:12,color:CC.dark,lineHeight:1.6}}>
+                <div style={{fontWeight:700,marginBottom:4}}>📧 Email Your Artwork</div>
+                <div>Send your artwork or a link to your files to:</div>
+                <div style={{fontWeight:700,color:CC.primary,fontSize:14,margin:"6px 0"}}>office@priorityprintservice.com</div>
+                <div style={{fontSize:11,color:CC.mid}}>Include your order number in the subject line.</div>
+              </div>
+            )}
+
+            {artwork===0.03 && (
+              <div style={{marginTop:8,padding:"12px 14px",background:"#f0fdf4",border:"1px solid #86efac",borderRadius:6,fontSize:12,color:"#166534",lineHeight:1.6}}>
+                <div style={{fontWeight:700,marginBottom:4}}>✓ Artwork Previously Provided</div>
+                <div style={{fontSize:11,color:CC.mid}}>We'll proceed with the files on hand. Contact us if you need to make changes.</div>
+              </div>
+            )}
+
+            {artwork===0.04 && (
+              <div style={{marginTop:8,padding:"12px 14px",background:"#fefce8",border:"1px solid #fde68a",borderRadius:6}}>
+                <div style={{fontWeight:700,fontSize:12,marginBottom:8,color:"#854d0e"}}>🎨 Canva Design</div>
+                <div style={{fontSize:11,color:CC.mid,marginBottom:8,lineHeight:1.5}}>
+                  Share an <strong>editor link</strong> to your Canva design so we can download print-ready files.
+                </div>
+                <label style={{fontSize:11,fontWeight:600,color:CC.dark,display:"block",marginBottom:3}}>Canva Editor Link</label>
+                <input type="text" value={canvaLink} onChange={e=>setCanvaLink(e.target.value)} placeholder="https://www.canva.com/design/..." style={{...ST.inp,fontSize:13,marginBottom:8}}/>
+                <label style={{fontSize:11,fontWeight:600,color:CC.dark,display:"block",marginBottom:3}}>Special Instructions (optional)</label>
+                <textarea value={canvaInstructions} onChange={e=>setCanvaInstructions(e.target.value)} placeholder="Any notes about your design..." rows={3} style={{...ST.inp,fontSize:13,resize:"vertical",fontFamily:"inherit"}}/>
+                <div style={{fontSize:10,color:"#b45309",marginTop:6}}>* Canva designs require a digital or hardcopy proof before printing.</div>
+              </div>
+            )}
+
+            {artwork<2 && (
+              <Sel label={<RichTip tipKey="bleed">Bleed Options</RichTip>} value={bleed} onChange={v=>setBleed(Number(v))}>{BLEED_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+            )}
+
+            <div style={{marginTop:10}}/>
+            <Sel label="Proofing" badge={<TurnBadge days={r.ti?.proof}/>} value={proof} onChange={v=>setProof(Number(v))}>
+              {artwork===0.01 && <option value={0}>Proof & Approve Online (included)</option>}
+              {artwork!==0.01 && artwork!==0.04 && <option value={0}>No Proof Needed</option>}
+              <option value={0.01}>{`Manual Digital Proof ($${PCF.proof_digital_cost})`}</option>
+              <option value={3.01}>{`Hardcopy Proof ($${PCF.proof_hardcopy_cost})`}</option>
             </Sel>
-            <Sel label="Bleed Options" value={bleed} onChange={v => setBleed(Number(v))}>
-              {BLEED_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-            </Sel>
-            <Sel label="Proof Options" value={proof} onChange={v => setProof(Number(v))}>
-              <option value={0}>Approve artwork yourself</option>
-              <option value={0.01}>Professional Digital Proof</option>
-              <option value={3.01}>Hardcopy Proof</option>
-            </Sel>
+            {proof>=3 && (
+              <div style={{marginTop:8,padding:"10px 12px",borderRadius:6,background:"#fefce8",border:"1px solid #fde68a"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#854d0e",marginBottom:6}}>📮 Proof Shipping Address</div>
+                <div style={{display:"flex",gap:8,marginBottom:6}}>
+                  {[{v:true,l:"Same as shipping address"},{v:false,l:"Different address"}].map(o=>(
+                    <button type="button" key={String(o.v)} onClick={()=>setProofAddrSame(o.v)} style={{
+                      flex:1,padding:"6px 8px",fontSize:11,fontWeight:600,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
+                      border:`1px solid ${proofAddrSame===o.v?"#d97706":"#fde68a"}`,
+                      background:proofAddrSame===o.v?"#fef3c7":"#fff",
+                      color:proofAddrSame===o.v?"#854d0e":CC.mid,
+                    }}>{o.l}</button>
+                  ))}
+                </div>
+                {!proofAddrSame && (
+                  <div style={{display:"grid",gap:6}}>
+                    <input type="text" value={proofAddr.name} onChange={e=>setProofAddr(p=>({...p,name:e.target.value}))} placeholder="Full Name" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
+                    <input type="text" value={proofAddr.street} onChange={e=>setProofAddr(p=>({...p,street:e.target.value}))} placeholder="Street Address" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:6}}>
+                      <input type="text" value={proofAddr.city} onChange={e=>setProofAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
+                      <input type="text" value={proofAddr.state} onChange={e=>setProofAddr(p=>({...p,state:e.target.value}))} placeholder="State" maxLength={2} style={{...ST.inp,fontSize:12,padding:"7px 10px",textTransform:"uppercase"}}/>
+                      <input type="text" value={proofAddr.zip} onChange={e=>setProofAddr(p=>({...p,zip:e.target.value}))} placeholder="ZIP" maxLength={10} style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
