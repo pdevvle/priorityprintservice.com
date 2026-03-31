@@ -29,7 +29,7 @@ function useIsMobile(bp=700){const[m,s]=useState(window.innerWidth<=bp);useEffec
 // COLORS & CONSTANTS
 // ═══════════════════════════════════════════════════════════════
 const CC={bg:"#f5f5f7",white:"#fff",dark:"#1d2327",mid:"#555",light:"#999",border:"#e5e5e5",primary:"#007eff"};
-const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#1d2327",cyanLight:"#e8f4ff",rushLight:"#f0fdf4",rush:"#6b8f2b"};
+const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#1d2327",cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
 const PCF = Object.assign({
@@ -145,6 +145,17 @@ function businessDaysBetween(a, b) {
 }
 function fmtDate(d) { return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); }
 function toYMD(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+const SHOP_CLOSURES = (_CFG.pcf || {}).closures || [];
+function isBusinessDay(d) {
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) return false;
+  const mmdd = String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  const ymd = d.toISOString().split("T")[0];
+  for (const c of SHOP_CLOSURES) { if (c === mmdd || c === ymd) return false; }
+  return true;
+}
+const DNAMES=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const MNAMES=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 // ═══════════════════════════════════════════════════════════════
 // IMPOSITION CALCULATION
@@ -591,6 +602,56 @@ function Sec({title,open,onToggle,children,badge}){
   return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><span style={{fontWeight:600,color:CC.dark,fontSize:"inherit"}}>{title}</span><div style={{display:"flex",alignItems:"center",gap:8}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
+function DatePicker({value, onChange, earliestDate, freeDate}) {
+  const [open, setOpen] = useState(false);
+  const now = new Date();
+  const [vYear, setVYear] = useState(now.getFullYear());
+  const [vMonth, setVMonth] = useState(now.getMonth());
+  const initRef = useRef(false);
+  const trigRef = useRef(null);
+  const dropRef = useRef(null);
+  const [pos, setPos] = useState({top:0,left:0,width:0});
+  const isMob = useIsMobile();
+  const earliest = earliestDate ? new Date(earliestDate + "T00:00:00") : null;
+  const free = freeDate ? new Date(freeDate + "T00:00:00") : null;
+  useEffect(()=>{ if(initRef.current)return; const target=free||earliest; if(target){initRef.current=true;setVYear(target.getFullYear());setVMonth(target.getMonth());} },[freeDate,earliestDate]);
+  useEffect(()=>{ if(open&&trigRef.current){ const r=trigRef.current.getBoundingClientRect(); const vw=window.innerWidth; const vh=window.innerHeight; const m=vw<700; if(m){const w=Math.min(vw-32,360);setPos({top:Math.max(16,vh*0.08),left:(vw-w)/2,width:w,modal:true})}else{let top=r.bottom+4;if(top+360>vh)top=Math.max(8,r.top-364);setPos({top,left:r.left,width:Math.max(r.width,300),modal:false})} } },[open]);
+  useEffect(()=>{ if(!open)return; const h=e=>{if(trigRef.current?.contains(e.target))return;if(dropRef.current?.contains(e.target))return;setOpen(false)}; document.addEventListener("mousedown",h); return()=>document.removeEventListener("mousedown",h); },[open]);
+  const navM=dir=>{let m=vMonth+dir,y=vYear;if(m<0){m=11;y--}else if(m>11){m=0;y++}setVMonth(m);setVYear(y)};
+  const first=new Date(vYear,vMonth,1),last=new Date(vYear,vMonth+1,0),pad=first.getDay();
+  const cells=[];for(let i=0;i<pad;i++)cells.push(null);for(let d=1;d<=last.getDate();d++)cells.push(new Date(vYear,vMonth,d));
+  const selected=value?toYMD(new Date(value+"T00:00:00")):null;
+  const pick=d=>{onChange(toYMD(d));setOpen(false)};
+  const clear=()=>{onChange("");setOpen(false)};
+  const displayVal=value?fmtDate(new Date(value+"T00:00:00")):"";
+  return(<>
+    <div ref={trigRef} onClick={()=>setOpen(!open)} style={{...ST.inp,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:36}}>
+      <span style={{color:value?CC.dark:CC.light}}>{displayVal||"Select a date..."}</span>
+      <span style={{display:"flex",gap:4,alignItems:"center"}}>{value&&<span onClick={e=>{e.stopPropagation();clear()}} style={{color:CC.light,fontSize:14,cursor:"pointer",lineHeight:1}}>✕</span>}<Chev/></span>
+    </div>
+    {open&&ReactDOM.createPortal(<>
+      {pos.modal&&<div onClick={()=>setOpen(false)} style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,.4)"}}/>}
+      <div ref={dropRef} style={{position:"fixed",top:pos.top,left:pos.left,width:pos.width||300,zIndex:100000,background:CC.white,borderRadius:isMob?12:6,border:`1px solid ${CC.border}`,boxShadow:isMob?"0 12px 40px rgba(0,0,0,.25)":"0 8px 24px rgba(0,0,0,.15)",padding:isMob?16:10,maxHeight:isMob?"80vh":"70vh",overflowY:"auto",fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",boxSizing:"border-box"}}>
+        {isMob&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><span style={{fontSize:14,fontWeight:700,color:CC.dark}}>Select Delivery Date</span><button type="button" onClick={()=>setOpen(false)} style={{background:"none",border:"none",fontSize:20,color:CC.light,cursor:"pointer",padding:"0 4px",lineHeight:1}}>✕</button></div>}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <button type="button" onClick={()=>navM(-1)} style={{background:"none",border:`1px solid ${CC.border}`,borderRadius:3,padding:isMob?"6px 14px":"2px 8px",cursor:"pointer",color:CC.mid,fontFamily:"inherit",fontSize:isMob?16:14}}>◀</button>
+          <span style={{fontSize:isMob?14:12.5,fontWeight:700,color:CC.dark}}>{MNAMES[vMonth]} {vYear}</span>
+          <button type="button" onClick={()=>navM(1)} style={{background:"none",border:`1px solid ${CC.border}`,borderRadius:3,padding:isMob?"6px 14px":"2px 8px",cursor:"pointer",color:CC.mid,fontFamily:"inherit",fontSize:isMob?16:14}}>▶</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:isMob?2:1,marginBottom:2}}>{DNAMES.map(d=><div key={d} style={{textAlign:"center",fontSize:isMob?11:9.5,fontWeight:600,color:d==="Sun"||d==="Sat"?"#ccc":CC.light,padding:isMob?4:2}}>{d}</div>)}</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:isMob?2:1}}>
+          {cells.map((d,i)=>{if(!d)return<div key={`p${i}`}/>;const ymd=toYMD(d);const we=d.getDay()===0||d.getDay()===6;const closed=!isBusinessDay(d);const beforeEarliest=earliest&&d<earliest;const disabled=we||closed||beforeEarliest;const isSel=ymd===selected;const isFree=free&&ymd===toYMD(free);const isRush=!disabled&&earliest&&free&&d>=earliest&&d<free;const isPast=d<getShopToday();let bg="transparent",color=CC.dark,fw=400,bdr="1px solid transparent";if(isSel){bg=CK.cyan;color="#fff";fw=700;bdr=`1px solid ${CK.cyan}`}else if(disabled||isPast){bg="#f8f8f8";color="#d0d0d0"}else if(isFree){bg="#e8f5e3";color="#3a7124";fw=600;bdr="1px solid #b5d8a8"}else if(isRush){bg=CK.yellowLight;color=CK.yellow}return<div key={ymd} onClick={()=>!disabled&&!isPast&&pick(d)} style={{textAlign:"center",padding:isMob?"10px 2px":"5px 2px",borderRadius:isMob?4:3,fontSize:isMob?14:11.5,fontWeight:fw,background:bg,color,border:bdr,cursor:disabled||isPast?"default":"pointer",userSelect:"none"}}>{d.getDate()}</div>})}
+        </div>
+        <div style={{display:"flex",gap:isMob?12:10,marginTop:8,paddingTop:6,borderTop:`1px solid ${CC.border}`,flexWrap:"wrap"}}>
+          <span style={{fontSize:isMob?10:9,color:CC.light,display:"flex",alignItems:"center",gap:3}}><span style={{width:8,height:8,borderRadius:2,background:CK.yellowLight,border:`1px solid ${CK.yellow}44`}}/> Rush zone</span>
+          <span style={{fontSize:isMob?10:9,color:CC.light,display:"flex",alignItems:"center",gap:3}}><span style={{width:8,height:8,borderRadius:2,background:"#e8f5e3",border:"1px solid #b5d8a8"}}/> Free delivery</span>
+          <span style={{fontSize:isMob?10:9,color:CC.light,display:"flex",alignItems:"center",gap:3}}><span style={{width:8,height:8,borderRadius:2,background:"#f8f8f8"}}/> Unavailable</span>
+        </div>
+      </div>
+    </>,document.body)}
+  </>);
+}
+
 function RichTip({ children, tipKey, title, content, dark }) {
   const tip = tipKey && (window.PPS_CONFIG || {}).tips ? (window.PPS_CONFIG.tips[tipKey] || null) : null;
   const resolvedTitle = tip ? tip.title : title;
@@ -809,21 +870,65 @@ function App() {
             </Sel>
           </Sec>
 
-          {/* SECTION 5: Shipping */}
-          <Sec title="Shipping & Delivery" open={op.s5} onToggle={() => tog("s5")}>
+          {/* SECTION 5: Shipping & Delivery */}
+          <Sec title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+            <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>
-              <Sel label="State" value={shipState} onChange={setShipState}>
-                {US_STATES.map(st => <option key={st} value={st}>{st}</option>)}
-              </Sel>
-              <div style={ST.f}><label style={ST.lbl}>ZIP Code</label><input type="text" value={shipAddr.zip} onChange={e => setShipAddr(p => ({ ...p, zip: e.target.value.replace(/[^\d-]/g, "").slice(0, 10) }))} placeholder="ZIP" maxLength={10} style={ST.inp} /></div>
+              <div style={ST.f}><label style={ST.lbl}>Full Name</label><input type="text" value={shipAddr.name} onChange={e=>setShipAddr(p=>({...p,name:e.target.value}))} placeholder="Full Name" style={ST.inp}/></div>
+              <div style={ST.f}><label style={ST.lbl}>Company <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" value={shipAddr.company} onChange={e=>setShipAddr(p=>({...p,company:e.target.value}))} placeholder="Company" style={ST.inp}/></div>
             </div>
-            <div style={ST.f}><label style={ST.lbl}>Need by Date</label><input type="date" value={needByDate} onChange={e => setNeedByDate(e.target.value)} style={ST.inp} /></div>
-            {r.shipping && <div style={{ marginTop: 10, padding: "8px 12px", background: CK.cyanLight, borderRadius: 5, fontSize: 11, color: CC.mid }}>
-              Free delivery est: <strong>{r.shipping.freeDeliveryDate}</strong> ({r.shipping.freeDeliveryBizDays} biz days)
-              {r.shipping.rushCost > 0 && <div style={{ color: CK.rush, fontWeight: 600, marginTop: 4 }}>Rush: +${r.shipping.rushCost.toFixed(2)} ({r.shipping.rushMultiplier.toFixed(2)}×)</div>}
-              {r.shipping.needByPast && <div style={{ color: "#dc2626", marginTop: 4 }}>Date has passed — select a future date</div>}
-              {r.shipping.tooSoon && <div style={{ color: "#dc2626", marginTop: 4 }}>Cannot deliver by this date</div>}
-            </div>}
+            <div style={{...ST.f,marginTop:6}}><label style={ST.lbl}>Street Address</label><input type="text" value={shipAddr.street1} onChange={e=>setShipAddr(p=>({...p,street1:e.target.value}))} placeholder="Street address" style={ST.inp}/></div>
+            <div style={{...ST.f,marginTop:6}}><label style={ST.lbl}>Address Line 2 <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" value={shipAddr.street2} onChange={e=>setShipAddr(p=>({...p,street2:e.target.value}))} placeholder="Apt, suite, unit, etc." style={ST.inp}/></div>
+            <div style={{...r3,marginTop:6}}>
+              <div style={ST.f}><label style={ST.lbl}>City</label><input type="text" value={shipAddr.city} onChange={e=>setShipAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={ST.inp}/></div>
+              <Sel label="State" value={shipState} onChange={setShipState}>
+                {US_STATES.map(st=><option key={st} value={st}>{st}</option>)}
+              </Sel>
+              <div style={ST.f}><label style={ST.lbl}>ZIP Code</label><input type="text" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:e.target.value.replace(/[^\d-]/g,"").slice(0,10)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
+            </div>
+
+            {r.shipping&&<>
+              <div style={{marginTop:10,padding:mob?"8px 10px":"10px 14px",background:CK.cyanLight,borderRadius:5,border:`1px solid ${CK.cyan}33`}}>
+                <div style={{fontSize:10.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:CK.cyan,marginBottom:2}}>Free Delivery Estimate</div>
+                <div style={{fontSize:mob?14:15,fontWeight:700,color:CC.dark}}>{r.shipping.freeDeliveryDate}</div>
+                <div style={{fontSize:mob?10.5:11,color:CC.mid,marginTop:2}}>{r.shipping.freeDeliveryBizDays} business days</div>
+                <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #b3dff044",display:"flex",flexWrap:"wrap",gap:"2px 16px",fontSize:10.5}}>
+                  <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Production starts:</span> {r.shipping.productionStartDate}</span>
+                  <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Must ship by:</span> {r.shipping.mustShipDate}</span>
+                  <span style={{color: r.shipping.effectiveTransit < r.shipping.transitDays ? "#f59e0b" : CC.light}}>
+                    ({r.shipping.effectiveTransit}d {r.shipping.effectiveTransit < r.shipping.transitDays ? "overnight" : "ground"} transit)
+                  </span>
+                </div>
+                <div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,paddingTop:4,borderTop:"1px solid #b3dff044"}}>
+                  {mob?<>{r.shipping.earliestDate} earliest</>:<>Earliest possible: <strong style={{color:CC.mid}}>{r.shipping.earliestDate}</strong> ({r.shipping.earliestBizDays} biz days) · Shop: {r.shipping.pastCutoff}</>}
+                </div>
+              </div>
+
+              <div style={ST.f}>
+                <label style={ST.lbl}>Need It Sooner? Pick a Date</label>
+                <DatePicker value={needByDate} onChange={setNeedByDate}
+                  earliestDate={r.shipping.earliestYMD} freeDate={r.shipping.freeDeliveryYMD}/>
+                {needByDate&&r.shipping.needByPast&&<p style={ST.err}>This date has passed — please select a future date</p>}
+                {needByDate&&!r.shipping.needByValid&&!r.shipping.needByPast&&<p style={ST.err}>Date must be in the future</p>}
+              </div>
+
+              {r.shipping.needByValid&&!r.shipping.tooSoon&&r.shipping.rushMultiplier>1&&(
+                <div style={{marginTop:10,padding:"10px 14px",background:CK.rushLight,borderRadius:5,border:`1px solid ${CK.rush}55`}}>
+                  <div style={{display:"flex",flexDirection:mob?"column":"row",justifyContent:"space-between",alignItems:mob?"flex-start":"baseline",gap:mob?6:0}}>
+                    <div>
+                      <div style={{fontSize:10.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:"#6b8f2b",marginBottom:2}}>Rush Surcharge</div>
+                      <div style={{fontSize:11,color:CC.mid}}>{r.shipping.bizDaysToDate} business days vs {r.shipping.freeDeliveryBizDays} free — {r.shipping.rushMultiplier.toFixed(2)}×</div>
+                    </div>
+                    <div style={{fontSize:mob?22:18,fontWeight:800,color:"#6b8f2b"}}>+${r.shipping.rushCost.toFixed(2)}</div>
+                  </div>
+                </div>
+              )}
+              {r.shipping.needByValid&&!r.shipping.tooSoon&&r.shipping.rushMultiplier<=1&&(
+                <div style={{marginTop:10,padding:"8px 14px",background:"#e8f5e3",borderRadius:5,border:"1px solid #b5d8a8"}}>
+                  <span style={{fontSize:12,color:"#3a7124",fontWeight:600}}>✓ No rush needed — your date is within free delivery window</span>
+                </div>
+              )}
+            </>}
           </Sec>
 
           {/* 3D Fold Preview */}
