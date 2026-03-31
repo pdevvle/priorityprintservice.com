@@ -258,11 +258,17 @@ function calculate(c) {
     P.rc = Math.floor(((approxThickness / rc.price) / PCF.roundcornerperhour) * PCF.labor_bindery_hr) + (PCF.labor_bindery_hr / 2);
   }
 
-  // Difficult fold surcharges
+  // Difficult fold surcharges (stack)
   const foldLabor = (qty / PCF.bindery_morgana_impressionperhour) * PCF.labor_bindery_hr;
-  P.diffFold1 = (panels === 4 || (longE < 9 && fold.val !== "flat" && fold.val !== "bifold")) ? foldLabor + (PCF.labor_bindery_hr / 2) : 0;
+  // Tier 1: accordion4/roll4/dgate4, OR small sizes (long<9) with 3+ panel folds
+  const tier1Folds = ["accordion4","roll4","dgate4"];
+  const smallSizeFold = longE < 9 && fold.val !== "flat" && fold.val !== "bifold";
+  const smallPresetFold = ["5.5×8.5","6×9"].some(s => c.sizeLabel?.startsWith(s)) && fold.val !== "flat" && fold.val !== "bifold";
+  P.diffFold1 = (tier1Folds.includes(fold.val) || smallSizeFold || smallPresetFold) ? foldLabor + (PCF.labor_bindery_hr / 2) : 0;
+  // Tier 2: Roll fold specifically (stacks with tier 1)
   P.diffFold2 = fold.val === "roll4" ? foldLabor : 0;
-  P.diffFold3 = (fold.val !== "flat" && (c.foldDir === "short" || shortE < 5)) ? foldLabor : 0;
+  // Tier 3: narrow sheets (short < 5") with any fold
+  P.diffFold3 = (fold.val !== "flat" && shortE < 5) ? foldLabor : 0;
 
   // Minimum base cost
   P.baseCost = (fold.val !== "flat" || qty <= 250) ? PCF.labor_bindery_hr : 0;
@@ -299,8 +305,9 @@ function calculate(c) {
   const allBW = c.frontColor === "bw" && (sides === 1 || c.backColor === "bw");
   P.discBW = allBW ? -(P.press * 0.3) : 0;
 
-  // Cardstock discount
-  P.cardstockDisc = PAPERS_CS.some(p => p.val === paper.val) ? -(0.04 * pressSheets) : 0;
+  // Cardstock discount — specific cardstock values only
+  const csDiscVals = [0.01, 0.02, 0.03, 1.01, 1.02, 2.021, 2.022, 2.023, 2.024, 2.025, 2.01, 3.03, 3.01, 3.04, 3.02];
+  P.cardstockDisc = csDiscVals.includes(paper.val) ? -(0.04 * pressSheets) : 0;
 
   const total = Object.values(P).reduce((s, v) => s + v, 0);
 
@@ -666,11 +673,21 @@ function App() {
                 { t: `Fold Short Side (${dimShort}")`, v: "short" },
               ]} />
             )}
-            {fold.panels > 1 && (
-              <div style={{ marginTop: 8, padding: "8px 12px", background: CK.cyanLight, borderRadius: 5, fontSize: 11, color: CC.mid }}>
-                Folded size: <strong>{(dimShort).toFixed(1)}" × {((foldDir === "long" ? dimLong : dimShort) / fold.panels).toFixed(1)}"</strong> ({fold.panels} panels)
-              </div>
-            )}
+            {fold.panels > 1 && (() => {
+              const foldDim = foldDir === "long" ? dimLong : dimShort;
+              const staticDim = foldDir === "long" ? dimShort : dimLong;
+              const panelSize = foldDim / fold.panels;
+              const tooSmall = panelSize < 2;
+              const throatExceeded = foldDir === "short" && dimLong > 13;
+              return <>
+                <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall || throatExceeded ? "#fef2f2" : CK.cyanLight, borderRadius: 5, fontSize: 11, color: tooSmall || throatExceeded ? "#dc2626" : CC.mid, border: tooSmall || throatExceeded ? "1px solid #f5cccc" : "none" }}>
+                  Folded size: <strong>{staticDim.toFixed(1)}" × {panelSize.toFixed(1)}"</strong> ({fold.panels} panels)
+                  {tooSmall && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
+                  {throatExceeded && <span style={{marginLeft:8,fontWeight:700}}>— Exceeds 13" folder throat</span>}
+                </div>
+                {sizeMode !== "custom" && <p style={{fontSize:10,color:CC.light,margin:"4px 0 0"}}>All folds assume the longest edge is being folded. Use custom size to fold the short edge.</p>}
+              </>;
+            })()}
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
@@ -698,19 +715,35 @@ function App() {
           <Sec title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
             <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />
             <div style={ST.hr} />
-            <Sel label="Additional Coating" value={coating} onChange={v => setCoating(Number(v))}>
-              {COATINGS.map(o => <option key={o.val} value={o.val}>{o.label}{!paper.coatable && o.val > 0 ? " (not available for this paper)" : ""}</option>)}
-            </Sel>
-            {coating > 0 && paper.coatable && (
-              <Pil label="Sides to Coat" value={coatSides} onChange={v => setCoatSides(Number(v))} options={COAT_SIDES.map(o => ({ t: o.label, v: o.val }))} />
+            {paper.coatable ? (
+              <>
+                <Sel label="Additional Coating" value={coating} onChange={v => setCoating(Number(v))}>
+                  {COATINGS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+                </Sel>
+                {coating > 0 && (
+                  <>
+                    <Pil label="Sides to Coat" value={coatSides} onChange={v => setCoatSides(Number(v))} options={
+                      paper.val === 1.01
+                        ? [{ t: "Front Only", v: 1 }]
+                        : COAT_SIDES.map(o => ({ t: o.label, v: o.val }))
+                    } />
+                    {paper.val === 1.01 && coatSides !== 1 && <p style={ST.err}>14pt C1S can only be coated on the front side.</p>}
+                  </>
+                )}
+              </>
+            ) : (
+              <div style={{...ST.f, opacity: 0.4}}><label style={ST.lbl}>Additional Coating</label><div style={{padding:"8px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#f5f5f5",fontSize:13,color:CC.light}}>Not available for this paper type</div></div>
             )}
             <div style={ST.hr} />
             <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>
-            <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}>
-              {PERF_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-            </Sel>
+            {(() => {
+              const perfDisabled = !["5.5×8.5","6×9","8.5×11","8.5×14"].some(s => sizeLabel?.startsWith(s)) && sizeMode !== "custom";
+              return <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))} disabled={perfDisabled} note={perfDisabled ? "Perforation not available for this size" : undefined}>
+                {PERF_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+              </Sel>;
+            })()}
             {foldType === "flat" && (
               <Sel label="Round Cornering" value={roundCorner} onChange={v => setRoundCorner(Number(v))}>
                 {CORNERS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
