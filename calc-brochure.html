@@ -1321,9 +1321,19 @@ function App() {
               </div>
             )}
 
-            {artwork<2 && (
-              <Sel label={<RichTip tipKey="bleed">Bleed Options</RichTip>} value={bleed} onChange={v=>setBleed(Number(v))}>{BLEED_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-            )}
+            {/* Template download */}
+            <div style={{marginTop:10,padding:"10px 14px",background:"#f8f9fa",borderRadius:6,border:`1px solid ${CC.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:600,color:CC.dark}}>Artwork Template</div>
+                <div style={{fontSize:10,color:CC.light,marginTop:1}}>
+                  {dimLong}" × {dimShort}" {fold.panels > 1 ? `· ${fold.panels} panels` : "flat"} · Bleed, trim, safety{fold.panels > 1 ? ", fold lines" : ""}
+                </div>
+              </div>
+              <button type="button" onClick={() => generateBrochureTemplate(dimLong, dimShort, foldType, fold.panels, foldDir, sizeLabel)} style={{
+                padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                border: `1px solid ${CK.cyan}`, background: CK.cyanLight, color: CK.cyan, whiteSpace: "nowrap",
+              }}>📐 Download Template</button>
+            </div>
 
             <div style={{marginTop:10}}/>
             <Sel label="Proofing" badge={<TurnBadge days={r.ti?.proof}/>} value={proof} onChange={v=>setProof(Number(v))}>
@@ -1429,33 +1439,6 @@ function App() {
             </div>
           )}
 
-          {/* Template Download */}
-          <div style={{ ...ST.pnl, marginBottom: 10 }}>
-            <div style={{ padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: CC.dark }}>Artwork Template</div>
-                <div style={{ fontSize: 10, color: CC.light, marginTop: 1 }}>
-                  {dimLong}" × {dimShort}" {fold.panels > 1 ? `· ${fold.panels} panels (${fold.label})` : "flat"} · With bleed/trim/safety guides{fold.panels > 1 ? " + fold lines" : ""}
-                </div>
-              </div>
-              <button type="button" onClick={() => generateBrochureTemplate(dimLong, dimShort, foldType, fold.panels, foldDir, sizeLabel)} style={{
-                padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
-                border: `1px solid ${CK.cyan}`, background: CK.cyanLight, color: CK.cyan, whiteSpace: "nowrap",
-              }}>📐 Download Template</button>
-            </div>
-            {/* Mini visual preview */}
-            <div style={{ padding: "0 18px 14px" }}>
-              <div style={{ position: "relative", maxWidth: 300, aspectRatio: `${dimLong}/${dimShort}`, background: "#f8f9fa", border: `1px solid ${CC.border}`, borderRadius: 3, margin: 0 }}>
-                <div style={{ position: "absolute", inset: 0, border: "1px dashed #ef444466", pointerEvents: "none" }} />
-                <div style={{ position: "absolute", top: "1.5%", left: "1.5%", right: "1.5%", bottom: "1.5%", border: "1px dashed #1e293b44", pointerEvents: "none" }} />
-                <div style={{ position: "absolute", top: "3%", left: "3%", right: "3%", bottom: "3%", border: "1px dashed #38a16944", pointerEvents: "none" }} />
-                <FoldLines panels={fold.panels} foldDir={foldDir} />
-                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: CC.light, fontWeight: 500 }}>
-                  {dimLong}" × {dimShort}"
-                </div>
-              </div>
-            </div>
-          </div>
 
         </div>
 
