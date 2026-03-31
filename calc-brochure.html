@@ -525,6 +525,233 @@ function FoldLines({ panels, foldDir }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
+// ═══════════════════════════════════════════════════════════════
+
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwork }) {
+  const mob = useIsMobile();
+  const [frontArt, setFrontArt] = useState(null); // {dataUrl, file, dims:{w,h}}
+  const [backArt, setBackArt] = useState(null);
+  const [side, setSide] = useState("front"); // "front" | "back"
+  const [proofOpen, setProofOpen] = useState(false);
+  const [approved, setApproved] = useState(false);
+  const [dropHover, setDropHover] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const fileRef = useRef(null);
+  const rawFileRef = useRef(null);
+
+  const BLEED = 0.125;
+  const bleedW = longEdge + BLEED * 2;
+  const bleedH = shortEdge + BLEED * 2;
+  const bleedPctX = (BLEED / bleedW) * 100;
+  const bleedPctY = (BLEED / bleedH) * 100;
+  const safetyPctX = ((BLEED + 0.125) / bleedW) * 100;
+  const safetyPctY = ((BLEED + 0.125) / bleedH) * 100;
+
+  async function processFile(fileList) {
+    if (!fileList || !fileList.length) return;
+    const file = fileList[0];
+    setLoading(true);
+    setFileName(file.name);
+    rawFileRef.current = file;
+
+    try {
+      if (file.type === "application/pdf") {
+        const buf = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+        const renderPage = async (num) => {
+          const pg = await pdf.getPage(num);
+          const vp = pg.getViewport({ scale: 2 });
+          const c = document.createElement("canvas");
+          c.width = vp.width; c.height = vp.height;
+          await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+          const [x0, y0, x1, y1] = pg.view;
+          return { dataUrl: c.toDataURL("image/jpeg", 0.85), dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } };
+        };
+        const front = await renderPage(1);
+        setFrontArt({ ...front, file });
+        if (pdf.numPages >= 2) {
+          const back = await renderPage(2);
+          setBackArt({ ...back, file });
+        }
+      } else {
+        const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
+        if (!dataUrl) return;
+        const dims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+        setFrontArt({ dataUrl, file, dims });
+      }
+      setApproved(false);
+      if (onArtwork) onArtwork({ type: "files", list: [file] });
+    } catch (e) { console.error("File processing failed:", e); }
+    setLoading(false);
+  }
+
+  function handleClear() {
+    setFrontArt(null); setBackArt(null); setFileName(""); setApproved(false);
+    rawFileRef.current = null;
+    if (onArtwork) onArtwork({ type: "none" });
+  }
+
+  const hasArt = !!frontArt;
+  const currentArt = side === "front" ? frontArt : backArt;
+
+  // Fold line positions as percentages
+  const foldLines = [];
+  if (panels > 1) {
+    const foldingLong = foldDir === "long";
+    for (let i = 1; i < panels; i++) {
+      const pct = (i / panels) * 100;
+      foldLines.push({ pct, vertical: foldingLong });
+    }
+  }
+
+  return (
+    <div>
+      {/* Upload area */}
+      {!hasArt ? (
+        <div
+          onDragOver={e => { e.preventDefault(); setDropHover(true); }}
+          onDragLeave={() => setDropHover(false)}
+          onDrop={e => { e.preventDefault(); setDropHover(false); processFile(e.dataTransfer.files); }}
+          onClick={() => fileRef.current?.click()}
+          style={{
+            padding: mob ? "24px 16px" : "32px 20px", borderRadius: 8,
+            border: `2px dashed ${dropHover ? CK.cyan : CC.border}`,
+            background: dropHover ? CK.cyanLight : "#fafafa",
+            cursor: "pointer", textAlign: "center", transition: "all .15s",
+          }}>
+          <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif" onChange={e => processFile(e.target.files)} style={{ display: "none" }} />
+          <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: CC.dark }}>
+            {loading ? "Processing..." : "Drop your artwork here or click to upload"}
+          </div>
+          <div style={{ fontSize: 11, color: CC.light, marginTop: 4 }}>
+            PDF (page 1 = front, page 2 = back) or JPG/PNG for front side
+          </div>
+        </div>
+      ) : (
+        <div>
+          {/* File info + actions */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0" }}>
+            <div style={{ fontSize: 12, color: CC.mid }}>
+              <strong>{fileName}</strong>
+              {frontArt?.dims && <span style={{ color: CC.light, marginLeft: 6 }}>{frontArt.dims.w.toFixed(1)}" × {frontArt.dims.h.toFixed(1)}"</span>}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" onClick={() => setProofOpen(true)} style={{
+                padding: "4px 12px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                border: `1px solid ${CK.cyan}`, background: CK.cyanLight, color: CK.cyan,
+              }}>🔍 Proof</button>
+              <button type="button" onClick={handleClear} style={{
+                padding: "4px 10px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                border: `1px solid ${CC.border}`, background: "#fff", color: CC.light,
+              }}>Remove</button>
+            </div>
+          </div>
+
+          {/* Thumbnail preview */}
+          <div style={{ display: "flex", gap: 8 }}>
+            {frontArt && (
+              <div onClick={() => { setSide("front"); setProofOpen(true); }} style={{ flex: 1, cursor: "pointer", borderRadius: 4, overflow: "hidden", border: `1px solid ${CC.border}`, position: "relative" }}>
+                <img src={frontArt.dataUrl} style={{ width: "100%", display: "block" }} />
+                <div style={{ position: "absolute", bottom: 4, left: 4, fontSize: 9, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,.5)", padding: "1px 6px", borderRadius: 3 }}>Front</div>
+              </div>
+            )}
+            {backArt && (
+              <div onClick={() => { setSide("back"); setProofOpen(true); }} style={{ flex: 1, cursor: "pointer", borderRadius: 4, overflow: "hidden", border: `1px solid ${CC.border}`, position: "relative" }}>
+                <img src={backArt.dataUrl} style={{ width: "100%", display: "block" }} />
+                <div style={{ position: "absolute", bottom: 4, left: 4, fontSize: 9, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,.5)", padding: "1px 6px", borderRadius: 3 }}>Back</div>
+              </div>
+            )}
+          </div>
+
+          {/* Approval status */}
+          {approved ? (
+            <div style={{ marginTop: 8, padding: "6px 12px", background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#166534" }}>✓ Artwork Approved</span>
+              <button type="button" onClick={() => setApproved(false)} style={{ fontSize: 10, fontWeight: 600, border: "1px solid #86efac", background: "#fff", color: "#16a34a", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "inherit" }}>Review</button>
+            </div>
+          ) : (
+            <div style={{ marginTop: 8, padding: "6px 12px", background: "#fef2f2", border: "1px solid #f5cccc", borderRadius: 5, fontSize: 11, color: "#dc2626" }}>
+              Open the proof view to review and approve your artwork
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Proof Modal */}
+      {proofOpen && currentArt && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.85)", display: "flex", flexDirection: "column" }}>
+          {/* Header */}
+          <div style={{ padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Artwork Proof — {side === "front" ? "Front / Outside" : "Back / Inside"}</div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {backArt && (
+                <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: "1px solid rgba(255,255,255,.2)" }}>
+                  <button type="button" onClick={() => setSide("front")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: side === "front" ? CK.cyan : "rgba(255,255,255,.06)", color: side === "front" ? "#fff" : "rgba(255,255,255,.5)" }}>Front</button>
+                  <button type="button" onClick={() => setSide("back")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: side === "back" ? CK.cyan : "rgba(255,255,255,.06)", color: side === "back" ? "#fff" : "rgba(255,255,255,.5)" }}>Back</button>
+                </div>
+              )}
+              <button type="button" onClick={() => { setApproved(true); setProofOpen(false); }} style={{
+                padding: "5px 14px", fontSize: 11, fontWeight: 700, border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)", color: "#fff",
+              }}>✓ Approve</button>
+              <button type="button" onClick={() => setProofOpen(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,.15)", color: "rgba(255,255,255,.5)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            </div>
+          </div>
+
+          {/* Proof view */}
+          <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#2a2e36", borderRadius: 4, overflow: "hidden" }}>
+              {/* Art image */}
+              <img src={currentArt.dataUrl} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+
+              {/* Bleed guide (red dashed) */}
+              <div style={{ position: "absolute", inset: 0, border: "2px dashed #ef4444", pointerEvents: "none", zIndex: 1 }} />
+              {/* Trim guide (white dashed) */}
+              <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "2px dashed rgba(255,255,255,.8)", pointerEvents: "none", zIndex: 1 }} />
+              {/* Safety guide (green dashed) */}
+              <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "2px dashed #38a169", pointerEvents: "none", zIndex: 1 }} />
+
+              {/* Fold lines (orange dashed) */}
+              {foldLines.map((fl, i) => (
+                <div key={i} style={{
+                  position: "absolute", pointerEvents: "none", zIndex: 2,
+                  ...(fl.vertical
+                    ? { left: `${fl.pct}%`, top: 0, bottom: 0, width: 0, borderLeft: "2px dashed #f59e0b" }
+                    : { top: `${fl.pct}%`, left: 0, right: 0, height: 0, borderTop: "2px dashed #f59e0b" }
+                  ),
+                }}>
+                  <span style={{
+                    position: "absolute", fontSize: 9, fontWeight: 700, color: "#f59e0b",
+                    ...(fl.vertical
+                      ? { top: 8, left: 4, writingMode: "vertical-rl" }
+                      : { left: 8, top: 2 }
+                    ),
+                  }}>Fold {i + 1}</span>
+                </div>
+              ))}
+
+              {/* Legend */}
+              <div style={{ position: "absolute", bottom: 8, left: 8, display: "flex", gap: 10, fontSize: 9, zIndex: 2 }}>
+                <span style={{ color: "#ef4444", fontWeight: 600 }}>— Bleed</span>
+                <span style={{ color: "rgba(255,255,255,.8)", fontWeight: 600 }}>- - Trim</span>
+                <span style={{ color: "#38a169", fontWeight: 600 }}>- - Safety</span>
+                {foldLines.length > 0 && <span style={{ color: "#f59e0b", fontWeight: 600 }}>- - Fold</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // UI COMPONENTS
 // ═══════════════════════════════════════════════════════════════
 function Panel({ result, compact }) {
@@ -918,9 +1145,12 @@ function App() {
             )}
 
             {artwork===0.01 && (
-              <div style={{marginTop:8,padding:"12px 14px",background:CK.cyanLight,border:`1px solid ${CK.cyan}44`,borderRadius:6,fontSize:12,color:CC.dark,lineHeight:1.6}}>
-                <div style={{fontWeight:700,marginBottom:4}}>📤 Upload Your Artwork</div>
-                <div style={{fontSize:11,color:CC.mid}}>Upload your print-ready files after adding to cart, or use the proof system on the product page. We accept PDF, AI, PSD, TIFF, and high-resolution JPG/PNG.</div>
+              <div style={{marginTop:8}}>
+                <SheetPreview
+                  longEdge={dimLong} shortEdge={dimShort}
+                  foldType={foldType} foldDir={foldDir} panels={fold.panels}
+                  onArtwork={(a) => {/* artFiles state if needed */}}
+                />
               </div>
             )}
 
