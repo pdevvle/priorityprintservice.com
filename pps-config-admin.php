@@ -394,6 +394,44 @@ function pps_config_render_page() {
         check_admin_referer( 'pps_config_save' );
         delete_option( PPS_CONFIG_OPTION );
         $saved_msg = '<div class="notice notice-warning is-dismissible"><p>Configuration reset to factory defaults.</p></div>';
+
+    } elseif ( isset( $_POST['pps_tooltips_save'] ) ) {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
+        check_admin_referer( 'pps_config_save' );
+        $tips = get_option( 'pps_tooltips', array() );
+        if ( empty( $tips ) ) $tips = function_exists( 'pps_default_tooltips' ) ? pps_default_tooltips() : array();
+
+        foreach ( $tips as $key => &$tip ) {
+            if ( isset( $_POST[ 'tip_title_' . $key ] ) ) {
+                $tip['title'] = sanitize_text_field( $_POST[ 'tip_title_' . $key ] );
+            }
+            // Rebuild content blocks from POST
+            $new_content = array();
+            $i = 0;
+            while ( isset( $_POST[ 'tip_' . $key . '_type_' . $i ] ) ) {
+                $type = sanitize_key( $_POST[ 'tip_' . $key . '_type_' . $i ] );
+                $b = array( 'type' => $type );
+                if ( $type === 'text' ) {
+                    $b['value'] = sanitize_textarea_field( $_POST[ 'tip_' . $key . '_value_' . $i ] ?? '' );
+                } elseif ( $type === 'image' ) {
+                    $b['src'] = esc_url_raw( $_POST[ 'tip_' . $key . '_src_' . $i ] ?? '' );
+                    $b['alt'] = sanitize_text_field( $_POST[ 'tip_' . $key . '_alt_' . $i ] ?? '' );
+                } elseif ( $type === 'video' ) {
+                    $b['src'] = esc_url_raw( $_POST[ 'tip_' . $key . '_src_' . $i ] ?? '' );
+                    $b['poster'] = esc_url_raw( $_POST[ 'tip_' . $key . '_poster_' . $i ] ?? '' );
+                } elseif ( $type === 'youtube' ) {
+                    $b['src'] = esc_url_raw( $_POST[ 'tip_' . $key . '_src_' . $i ] ?? '' );
+                }
+                if ( $type === 'text' ? ! empty( $b['value'] ) : ! empty( $b['src'] ) ) {
+                    $new_content[] = $b;
+                }
+                $i++;
+            }
+            if ( ! empty( $new_content ) ) $tip['content'] = $new_content;
+        }
+        unset( $tip );
+        update_option( 'pps_tooltips', $tips, false );
+        $saved_msg = '<div class="notice notice-success is-dismissible"><p><strong>Tooltips saved.</strong></p></div>';
     }
 
     $cfg = pps_get_config();
@@ -406,6 +444,7 @@ function pps_config_render_page() {
         'artwork'    => 'Artwork',
         'sizes'      => 'Sizes',
         'shipping'   => 'Shipping',
+        'tooltips'   => 'Tooltips',
     );
 
     ?>
@@ -436,6 +475,7 @@ function pps_config_render_page() {
                 case 'artwork':    pps_config_tab_artwork( $cfg ); break;
                 case 'sizes':      pps_config_tab_sizes( $cfg ); break;
                 case 'shipping':   pps_config_tab_shipping( $cfg ); break;
+                case 'tooltips':   pps_config_tab_tooltips(); break;
             }
             ?>
 
@@ -947,4 +987,70 @@ function pps_config_tab_shipping( $cfg ) {
     echo '</div>';
 
     pps_render_chips( 'closures', 'Shop Closures', $cfg['closures'], 'MM-DD annual or YYYY-MM-DD one-off' );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TAB: TOOLTIPS
+// ═══════════════════════════════════════════════════════════════
+
+function pps_config_tab_tooltips() {
+    $tips = get_option( 'pps_tooltips', array() );
+    if ( empty( $tips ) && function_exists( 'pps_default_tooltips' ) ) {
+        $tips = pps_default_tooltips();
+    }
+    ?>
+    <div class="pps-cfg-section">
+        <h2>Rich Tooltips</h2>
+        <p style="color:#666;font-size:13px;margin-top:0">
+            These tooltips appear across all calculators when users click the <span style="display:inline-flex;width:16px;height:16px;border-radius:50%;background:#007eff22;color:#007eff;font-size:9px;font-weight:700;align-items:center;justify-content:center;border:1px solid #007eff44">?</span> icons.
+            Each tooltip supports text, images, video files, and YouTube embeds. Content blocks render in order.
+        </p>
+    </div>
+
+    <?php foreach ( $tips as $key => $tip ) : $title = $tip['title'] ?? $key; $blocks = $tip['content'] ?? array(); ?>
+    <div class="pps-cfg-section" style="border:1px solid #ddd;border-radius:6px;padding:16px;margin-bottom:12px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div>
+                <code style="background:#f0f0f0;padding:2px 8px;border-radius:3px;font-size:11px;color:#007eff"><?php echo esc_html( $key ); ?></code>
+            </div>
+        </div>
+        <div style="margin-bottom:10px">
+            <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:3px">Title</label>
+            <input type="text" name="tip_title_<?php echo esc_attr( $key ); ?>" value="<?php echo esc_attr( $title ); ?>" style="width:100%;max-width:400px" />
+        </div>
+        <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:6px">Content Blocks</label>
+        <?php foreach ( $blocks as $i => $block ) :
+            $type = $block['type'] ?? 'text';
+            $prefix = 'tip_' . $key . '_';
+        ?>
+        <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;padding:8px;background:#f9f9f9;border-radius:4px;border:1px solid #eee">
+            <select name="<?php echo esc_attr( $prefix . 'type_' . $i ); ?>" style="width:90px;font-size:12px">
+                <option value="text" <?php selected( $type, 'text' ); ?>>Text</option>
+                <option value="image" <?php selected( $type, 'image' ); ?>>Image</option>
+                <option value="video" <?php selected( $type, 'video' ); ?>>Video</option>
+                <option value="youtube" <?php selected( $type, 'youtube' ); ?>>YouTube</option>
+            </select>
+            <?php if ( $type === 'text' ) : ?>
+                <textarea name="<?php echo esc_attr( $prefix . 'value_' . $i ); ?>" rows="2" style="flex:1;font-size:12px;min-height:40px"><?php echo esc_textarea( $block['value'] ?? '' ); ?></textarea>
+            <?php elseif ( $type === 'image' ) : ?>
+                <div style="flex:1">
+                    <input type="text" name="<?php echo esc_attr( $prefix . 'src_' . $i ); ?>" value="<?php echo esc_attr( $block['src'] ?? '' ); ?>" placeholder="Image URL" style="width:100%;font-size:12px;margin-bottom:3px" />
+                    <input type="text" name="<?php echo esc_attr( $prefix . 'alt_' . $i ); ?>" value="<?php echo esc_attr( $block['alt'] ?? '' ); ?>" placeholder="Alt text" style="width:100%;font-size:12px" />
+                </div>
+            <?php elseif ( $type === 'video' ) : ?>
+                <div style="flex:1">
+                    <input type="text" name="<?php echo esc_attr( $prefix . 'src_' . $i ); ?>" value="<?php echo esc_attr( $block['src'] ?? '' ); ?>" placeholder="Video URL (.mp4)" style="width:100%;font-size:12px;margin-bottom:3px" />
+                    <input type="text" name="<?php echo esc_attr( $prefix . 'poster_' . $i ); ?>" value="<?php echo esc_attr( $block['poster'] ?? '' ); ?>" placeholder="Poster image URL (optional)" style="width:100%;font-size:12px" />
+                </div>
+            <?php elseif ( $type === 'youtube' ) : ?>
+                <input type="text" name="<?php echo esc_attr( $prefix . 'src_' . $i ); ?>" value="<?php echo esc_attr( $block['src'] ?? '' ); ?>" placeholder="YouTube embed URL (https://www.youtube.com/embed/...)" style="flex:1;font-size:12px" />
+            <?php endif; ?>
+        </div>
+        <?php endforeach; ?>
+        <p style="font-size:11px;color:#999;margin:4px 0 0">To add blocks, save first then edit. To remove a block, clear its content and save.</p>
+    </div>
+    <?php endforeach; ?>
+
+    <button type="submit" name="pps_tooltips_save" class="button button-primary">💾 Save Tooltips</button>
+    <?php
 }
