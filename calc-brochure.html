@@ -407,88 +407,129 @@ function calculate(c) {
 // DOWNLOADABLE BROCHURE TEMPLATE (jsPDF)
 // ═══════════════════════════════════════════════════════════════
 
+function drawDashedLine(pdf, x1, y1, x2, y2, dashLen, gapLen) {
+  var dx = x2 - x1, dy = y2 - y1;
+  var len = Math.sqrt(dx * dx + dy * dy);
+  if (len === 0) return;
+  var ux = dx / len, uy = dy / len;
+  var pos = 0, drawing = true;
+  while (pos < len) {
+    var segLen = drawing ? dashLen : gapLen;
+    if (pos + segLen > len) segLen = len - pos;
+    if (drawing) pdf.line(x1 + ux * pos, y1 + uy * pos, x1 + ux * (pos + segLen), y1 + uy * (pos + segLen));
+    pos += segLen; drawing = !drawing;
+  }
+}
+function drawDashedRect(pdf, x, y, w, h, dashLen, gapLen) {
+  drawDashedLine(pdf, x, y, x + w, y, dashLen, gapLen);
+  drawDashedLine(pdf, x + w, y, x + w, y + h, dashLen, gapLen);
+  drawDashedLine(pdf, x + w, y + h, x, y + h, dashLen, gapLen);
+  drawDashedLine(pdf, x, y + h, x, y, dashLen, gapLen);
+}
+
 function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, sizeLabel) {
   try {
     if (!window.jspdf) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
     const bleed = 0.125, safety = 0.125;
-    const docW = longE + bleed * 2;
-    const docH = shortE + bleed * 2;
-    const pdf = new jsPDF({ orientation: docW > docH ? "landscape" : "portrait", unit: "in", format: [docW, docH] });
+    const trimW = longE, trimH = shortE;
+    const docW = trimW + bleed * 2;
+    const docH = trimH + bleed * 2;
+    const pdf = new jsPDF({ orientation: docW > docH ? "l" : "p", unit: "in", format: [docW, docH] });
 
-    // Two pages: Front/Outside and Back/Inside
     for (let pg = 0; pg < 2; pg++) {
-      if (pg > 0) pdf.addPage([docW, docH], docW > docH ? "landscape" : "portrait");
+      if (pg > 0) pdf.addPage([docW, docH], docW > docH ? "l" : "p");
       const label = pg === 0 ? "Front / Outside" : "Back / Inside";
 
-      // White background
-      pdf.setFillColor(255, 255, 255);
+      // Light grey bleed zone background
+      pdf.setFillColor(240, 240, 240);
       pdf.rect(0, 0, docW, docH, "F");
 
-      // Bleed line (red)
-      pdf.setDrawColor(229, 62, 62); pdf.setLineWidth(0.01);
-      pdf.setLineDashPattern([0.06, 0.04], 0);
-      pdf.rect(0.005, 0.005, docW - 0.01, docH - 0.01);
+      // White trim area
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(bleed, bleed, trimW, trimH, "F");
 
-      // Trim line (dark)
-      pdf.setDrawColor(30, 30, 30); pdf.setLineWidth(0.008);
-      pdf.setLineDashPattern([0.06, 0.04], 0);
-      pdf.rect(bleed, bleed, longE, shortE);
+      // Bleed line — red solid at document edge
+      pdf.setDrawColor(229, 62, 62);
+      pdf.setLineWidth(0.012);
+      pdf.rect(0.006, 0.006, docW - 0.012, docH - 0.012, "S");
 
-      // Safety line (green)
-      pdf.setDrawColor(56, 161, 105); pdf.setLineWidth(0.008);
-      pdf.setLineDashPattern([0.04, 0.04], 0);
-      pdf.rect(bleed + safety, bleed + safety, longE - safety * 2, shortE - safety * 2);
+      // Trim line — black dashed
+      pdf.setDrawColor(30, 30, 30);
+      pdf.setLineWidth(0.01);
+      drawDashedRect(pdf, bleed, bleed, trimW, trimH, 0.08, 0.05);
 
-      // Fold lines (orange)
+      // Safety line — green dashed
+      pdf.setDrawColor(56, 161, 105);
+      pdf.setLineWidth(0.008);
+      drawDashedRect(pdf, bleed + safety, bleed + safety, trimW - safety * 2, trimH - safety * 2, 0.05, 0.03);
+
+      // Fold lines — orange dashed
       if (panels > 1) {
-        pdf.setDrawColor(245, 166, 35); pdf.setLineWidth(0.01);
-        pdf.setLineDashPattern([0.08, 0.04], 0);
+        pdf.setDrawColor(245, 166, 35);
+        pdf.setLineWidth(0.01);
         const foldingLong = foldDir === "long";
         for (let i = 1; i < panels; i++) {
           const frac = i / panels;
           if (foldingLong) {
-            const x = bleed + longE * frac;
-            pdf.line(x, bleed + 0.1, x, bleed + shortE - 0.1);
+            const x = bleed + trimW * frac;
+            drawDashedLine(pdf, x, bleed + 0.1, x, bleed + trimH - 0.1, 0.08, 0.04);
             pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
-            pdf.text("Fold " + i, x + 0.04, bleed + 0.25);
+            pdf.text("FOLD " + i, x + 0.04, bleed + 0.25);
           } else {
-            const y = bleed + shortE * frac;
-            pdf.line(bleed + 0.1, y, bleed + longE - 0.1, y);
+            const y = bleed + trimH * frac;
+            drawDashedLine(pdf, bleed + 0.1, y, bleed + trimW - 0.1, y, 0.08, 0.04);
             pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
-            pdf.text("Fold " + i, bleed + 0.15, y - 0.04);
+            pdf.text("FOLD " + i, bleed + 0.15, y - 0.04);
           }
         }
       }
 
-      // Reset dash
-      pdf.setLineDashPattern([], 0);
+      // Text watermark — tiled "PriorityPrintService.com"
+      var tileSize = Math.min(trimW * 0.2, 1.2);
+      var tileStep = tileSize * 1.6;
+      var safeL = bleed + safety, safeT = bleed + safety;
+      var safeW = trimW - safety * 2, safeH = trimH - safety * 2;
+      var cols = Math.floor(safeW / tileStep), rows = Math.floor(safeH / tileStep);
+      var gridW = cols * tileStep, gridH = rows * tileStep;
+      var offX = safeL + (safeW - gridW) / 2, offY = safeT + (safeH - gridH) / 2;
+      pdf.setFontSize(tileSize * 3.5);
+      pdf.setTextColor(230, 230, 230);
+      for (var row = 0; row < rows; row++) {
+        for (var col = 0; col < cols; col++) {
+          pdf.text("PriorityPrintService.com", offX + col * tileStep + tileStep / 2, offY + row * tileStep + tileStep / 2, { align: "center" });
+        }
+      }
 
       // Page label
+      var cx = docW / 2;
       pdf.setFontSize(10); pdf.setTextColor(170, 170, 170);
-      pdf.text(label, docW / 2, docH / 2 - 0.1, { align: "center" });
+      pdf.text(label, cx, docH / 2 - 0.1, { align: "center" });
 
       // Dimensions
       pdf.setFontSize(7); pdf.setTextColor(190, 190, 190);
-      pdf.text("Flat: " + longE + '" \u00d7 ' + shortE + '"  |  With bleeds: ' + docW.toFixed(3) + '" \u00d7 ' + docH.toFixed(3) + '"', docW / 2, docH / 2 + 0.12, { align: "center" });
+      pdf.text("Trim: " + trimW + '" \u00d7 ' + trimH + '"  |  With bleeds: ' + docW.toFixed(3) + '" \u00d7 ' + docH.toFixed(3) + '"', cx, docH / 2 + 0.12, { align: "center" });
       if (panels > 1) {
-        const foldDim = foldDir === "long" ? longE : shortE;
-        const staticDim = foldDir === "long" ? shortE : longE;
-        pdf.text("Folded: " + staticDim.toFixed(1) + '" \u00d7 ' + (foldDim / panels).toFixed(1) + '"  (' + panels + ' panels)', docW / 2, docH / 2 + 0.3, { align: "center" });
+        var foldDim = foldDir === "long" ? trimW : trimH;
+        var staticDim = foldDir === "long" ? trimH : trimW;
+        pdf.text("Folded: " + staticDim.toFixed(1) + '" \u00d7 ' + (foldDim / panels).toFixed(1) + '"  (' + panels + ' panels)', cx, docH / 2 + 0.3, { align: "center" });
       }
 
       // URL
       pdf.setFontSize(7); pdf.setTextColor(150, 150, 150);
-      pdf.text("priorityprintservice.com", docW / 2, docH - bleed - 0.08, { align: "center" });
+      pdf.text("priorityprintservice.com", cx, docH - bleed - 0.08, { align: "center" });
 
       // Legend on first page
       if (pg === 0) {
         var lx = bleed + safety + 0.1;
-        var ly = docH - bleed - 0.35;
+        var ly = docH - bleed - 0.42;
         pdf.setFontSize(6);
-        pdf.setTextColor(229, 62, 62); pdf.text("\u2014 Bleed (extend backgrounds to this edge)", lx, ly - 0.24);
-        pdf.setTextColor(30, 30, 30); pdf.text("- - Trim (cut line)", lx, ly - 0.16);
-        pdf.setTextColor(56, 161, 105); pdf.text("- - Safety (keep text inside)", lx, ly - 0.08);
+        pdf.setTextColor(229, 62, 62);
+        pdf.text("\u2014 Bleed (extend backgrounds to this edge)", lx, ly - 0.24);
+        pdf.setTextColor(30, 30, 30);
+        pdf.text("- - Trim (cut line)", lx, ly - 0.16);
+        pdf.setTextColor(56, 161, 105);
+        pdf.text("- - Safety (keep text inside)", lx, ly - 0.08);
         if (panels > 1) { pdf.setTextColor(245, 166, 35); pdf.text("- - Fold lines", lx, ly); }
       }
     }
@@ -856,42 +897,45 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
             </div>
           </div>
 
-          {/* Proof view */}
+          {/* Proof view — bleed-inclusive container like saddle stitch */}
           <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            <div style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#2a2e36", borderRadius: 4, overflow: "hidden" }}>
-              {/* Art image */}
-              <img src={currentArt.dataUrl} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            <div style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#1a1d23", borderRadius: 4, overflow: "hidden" }}>
+              {/* Art in trim area — inset from bleed container */}
+              <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, overflow: "hidden" }}>
+                <img src={currentArt.dataUrl} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              </div>
 
-              {/* Bleed guide (red dashed) */}
-              <div style={{ position: "absolute", inset: 0, border: "2px dashed #ef4444", pointerEvents: "none", zIndex: 1 }} />
-              {/* Trim guide (white dashed) */}
-              <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "2px dashed rgba(255,255,255,.8)", pointerEvents: "none", zIndex: 1 }} />
-              {/* Safety guide (green dashed) */}
-              <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "2px dashed #38a169", pointerEvents: "none", zIndex: 1 }} />
+              {/* Bleed guide (red dashed) — at container edge */}
+              <div style={{ position: "absolute", inset: 0, border: "2.5px dashed #ef4444", pointerEvents: "none", zIndex: 1, opacity: 0.8 }} />
+              {/* Trim guide (white/light dashed) — inset by bleed */}
+              <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "2.5px dashed #e2e8f0", pointerEvents: "none", zIndex: 1 }} />
+              {/* Safety guide (green dashed) — further inset */}
+              <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "2.5px dashed #38a169", pointerEvents: "none", zIndex: 1 }} />
 
               {/* Fold lines (orange dashed) */}
               {foldLines.map((fl, i) => (
                 <div key={i} style={{
                   position: "absolute", pointerEvents: "none", zIndex: 2,
                   ...(fl.vertical
-                    ? { left: `${fl.pct}%`, top: 0, bottom: 0, width: 0, borderLeft: "2px dashed #f59e0b" }
-                    : { top: `${fl.pct}%`, left: 0, right: 0, height: 0, borderTop: "2px dashed #f59e0b" }
+                    ? { left: `${bleedPctX + (100 - bleedPctX * 2) * fl.pct / 100}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 0, borderLeft: "2.5px dashed #f59e0b" }
+                    : { top: `${bleedPctY + (100 - bleedPctY * 2) * fl.pct / 100}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 0, borderTop: "2.5px dashed #f59e0b" }
                   ),
                 }}>
                   <span style={{
                     position: "absolute", fontSize: 9, fontWeight: 700, color: "#f59e0b",
-                    ...(fl.vertical
-                      ? { top: 8, left: 4, writingMode: "vertical-rl" }
-                      : { left: 8, top: 2 }
-                    ),
+                    background: "rgba(0,0,0,.5)", padding: "1px 4px", borderRadius: 2,
+                    ...(fl.vertical ? { top: 8, left: 4 } : { left: 8, top: 2 }),
                   }}>Fold {i + 1}</span>
                 </div>
               ))}
 
+              {/* Trim shadow overlay — darkens the bleed zone around the art */}
+              <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, boxShadow: "0 0 0 200px rgba(0,0,0,0.15)", pointerEvents: "none", zIndex: 0 }} />
+
               {/* Legend */}
-              <div style={{ position: "absolute", bottom: 8, left: 8, display: "flex", gap: 10, fontSize: 9, zIndex: 2 }}>
+              <div style={{ position: "absolute", bottom: 8, left: 8, display: "flex", gap: 10, fontSize: 9, zIndex: 3, background: "rgba(0,0,0,.6)", padding: "3px 8px", borderRadius: 3 }}>
                 <span style={{ color: "#ef4444", fontWeight: 600 }}>— Bleed</span>
-                <span style={{ color: "rgba(255,255,255,.8)", fontWeight: 600 }}>- - Trim</span>
+                <span style={{ color: "#e2e8f0", fontWeight: 600 }}>- - Trim</span>
                 <span style={{ color: "#38a169", fontWeight: 600 }}>- - Safety</span>
                 {foldLines.length > 0 && <span style={{ color: "#f59e0b", fontWeight: 600 }}>- - Fold</span>}
               </div>
