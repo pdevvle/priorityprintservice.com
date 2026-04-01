@@ -14,7 +14,7 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: 0; }
   /* 3D Fold Preview CSS — from proven brochure-fold-previewer */
-  .fold-viewport{perspective:1800px;perspective-origin:50% 50%;display:flex;justify-content:center;align-items:center;position:relative;overflow:hidden;border-radius:8px;background:linear-gradient(135deg,#1a1d23,#2a2e36);border:1px solid rgba(255,255,255,.08);min-height:350px;width:100%}
+  .fold-viewport{perspective:1800px;perspective-origin:50% 50%;display:flex;justify-content:center;align-items:center;position:relative;overflow:hidden;border-radius:8px;background:linear-gradient(135deg,#1a1d23,#2a2e36);border:1px solid rgba(255,255,255,.08);min-height:280px;width:100%}
   .fold-scene{position:relative;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
   .fold-panel-wrap{position:absolute;top:0;left:0;transform-style:preserve-3d}
   .fold-hinge{position:absolute;top:0;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
@@ -746,8 +746,9 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
   const fold = FOLDS_3D[foldKey];
   if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.4)" }}>Flat — no fold preview</div>;
 
+  const mob = useIsMobile();
   const isP = false; // landscape
-  const maxDim = 400;
+  const maxDim = mob ? 260 : 400;
   const pw = (maxDim * (shortEdge / longEdge)) / (fold.mode === "gate3" ? 4 : fold.n);
   const ph = maxDim * (shortEdge / longEdge);
   const iW = pw * (fold.mode === "gate3" ? 4 : fold.n);
@@ -774,7 +775,7 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
   }, [viewIdx, foldDir]);
 
   return (
-    <div className="fold-viewport" style={{ minHeight: 350 }}>
+    <div className="fold-viewport" style={{ minHeight: mob ? 220 : 350 }}>
       <div ref={sceneRef} className="fold-scene"
         style={{ transformStyle: "preserve-3d", position: "relative" }} />
     </div>
@@ -1212,7 +1213,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
             return (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
                 {/* View step buttons */}
-                <div style={{ display: "flex", gap: 6, justifyContent: "center", padding: "12px 16px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 6, justifyContent: "center", padding: "10px 12px", flexWrap: "wrap", overflowX: "auto" }}>
                   {foldCfg.views.map((v, i) => (
                     <button key={i} type="button" onClick={() => setPreviewAngle(i)} style={{
                       padding: "7px 16px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600,
@@ -1225,8 +1226,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
                   ))}
                 </div>
                 {/* 3D viewport — centered */}
-                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <div style={{ width: "100%", maxWidth: 700 }}>
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 10px", overflow: "hidden" }}>
+                  <div style={{ width: "100%", maxWidth: 700, margin: "0 auto" }}>
                     <FoldRenderer
                       foldKey={foldKey}
                       frontSrc={frontArt?.dataUrl}
