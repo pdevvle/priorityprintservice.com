@@ -683,10 +683,96 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
   const [dropHover, setDropHover] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState("");
+  const [fitMode, setFitMode] = useState("crop");
+  const [artScale, setArtScale] = useState(100);
+  const [rotateSteps, setRotateSteps] = useState(0);
   const fileRef = useRef(null);
   const frontInputRef = useRef(null);
   const backInputRef = useRef(null);
   const rawFileRef = useRef(null);
+
+  // Clear approval when transforms change
+  const prevTransforms = useRef({ fitMode, artScale, rotateSteps });
+  useEffect(() => {
+    const prev = prevTransforms.current;
+    if (prev.fitMode !== fitMode || prev.artScale !== artScale || prev.rotateSteps !== rotateSteps) {
+      if (approved) setApproved(false);
+      prevTransforms.current = { fitMode, artScale, rotateSteps };
+    }
+  }, [fitMode, artScale, rotateSteps]);
+
+  // Rotate a dataUrl image by N steps of 90° clockwise
+  function rotateImageBySteps(dataUrl, steps) {
+    if (steps <= 0) return Promise.resolve(dataUrl);
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        const s = ((steps % 4) + 4) % 4;
+        const swap = s % 2 === 1;
+        const c = document.createElement("canvas");
+        c.width = swap ? img.naturalHeight : img.naturalWidth;
+        c.height = swap ? img.naturalWidth : img.naturalHeight;
+        const ctx = c.getContext("2d");
+        ctx.translate(c.width / 2, c.height / 2);
+        ctx.rotate((s * Math.PI) / 2);
+        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+        resolve(c.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
+  // Effective art dimensions after rotation
+  const currentArtRaw = side === "front" ? frontArt : backArt;
+  const effectiveDims = useMemo(() => {
+    if (!currentArtRaw?.dims) return null;
+    const d = currentArtRaw.dims;
+    if (rotateSteps % 2 === 1) return { w: d.h, h: d.w };
+    return d;
+  }, [currentArtRaw, rotateSteps]);
+
+  // Rotated art dataUrl
+  const [rotatedUrl, setRotatedUrl] = useState(null);
+  useEffect(() => {
+    if (!currentArtRaw?.dataUrl) { setRotatedUrl(null); return; }
+    if (rotateSteps === 0) { setRotatedUrl(currentArtRaw.dataUrl); return; }
+    let cancelled = false;
+    rotateImageBySteps(currentArtRaw.dataUrl, rotateSteps).then(url => { if (!cancelled) setRotatedUrl(url); });
+    return () => { cancelled = true; };
+  }, [currentArtRaw?.dataUrl, rotateSteps]);
+
+  // FitToggle component
+  const FitToggle = () => (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,.12)" }}>
+        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Stretch" }, { v: "scale", l: "Scale" }].map(o => (
+          <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} style={{
+            padding: "6px 12px", fontSize: 10, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit",
+            background: fitMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
+            color: fitMode === o.v ? "#000" : "rgba(255,255,255,.5)",
+          }}>{o.l}</button>
+        ))}
+        <button type="button" onClick={() => setRotateSteps(s => (s + 1) % 4)} style={{
+          padding: "6px 12px", fontSize: 10, fontWeight: 600, border: "none", borderLeft: "1px solid rgba(255,255,255,.08)", cursor: "pointer", fontFamily: "inherit",
+          background: rotateSteps > 0 ? CK.cyan : "rgba(255,255,255,.06)",
+          color: rotateSteps > 0 ? "#000" : "rgba(255,255,255,.5)",
+        }}>Rotate 90°{rotateSteps > 0 ? ` (${rotateSteps * 90}°)` : ""}</button>
+      </div>
+      {fitMode === "scale" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+          <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,.12)" }}>
+            <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 1))} style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>−</button>
+            <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 1))} style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>+</button>
+          </div>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,.4)", minWidth: 32, textAlign: "center" }}>{artScale}%</span>
+        </div>
+      )}
+      {fitMode === "stretch" && (
+        <button type="button" onClick={() => setFitMode("crop")} style={{ padding: "5px 12px", fontSize: 10, fontWeight: 700, border: "1px solid rgba(239,68,68,.4)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(239,68,68,.12)", color: "#f87171" }}>Reset Stretch</button>
+      )}
+    </div>
+  );
 
   const BLEED = 0.125;
   const bleedW = longEdge + BLEED * 2;
@@ -878,33 +964,58 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
       {proofOpen && currentArt && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.85)", display: "flex", flexDirection: "column" }}>
           {/* Header */}
-          <div style={{ padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Artwork Proof — {side === "front" ? "Front / Outside" : "Back / Inside"}</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}</div>
+          <div style={{ padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Artwork Proof — {side === "front" ? "Front / Outside" : "Back / Inside"}</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {backArt && (
+                  <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: "1px solid rgba(255,255,255,.2)" }}>
+                    <button type="button" onClick={() => setSide("front")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: side === "front" ? CK.cyan : "rgba(255,255,255,.06)", color: side === "front" ? "#fff" : "rgba(255,255,255,.5)" }}>Front</button>
+                    <button type="button" onClick={() => setSide("back")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: side === "back" ? CK.cyan : "rgba(255,255,255,.06)", color: side === "back" ? "#fff" : "rgba(255,255,255,.5)" }}>Back</button>
+                  </div>
+                )}
+                <button type="button" onClick={() => { setApproved(true); setProofOpen(false); }} style={{
+                  padding: "5px 14px", fontSize: 11, fontWeight: 700, border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                  background: approved ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)" : "rgba(255,255,255,.04)",
+                  color: approved ? "#fff" : "#ef4444", border: approved ? "none" : "2px solid #ef4444",
+                }}>{approved ? "✓ Approved" : "Approve Now"}</button>
+                <button type="button" onClick={() => setProofOpen(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,.15)", color: "rgba(255,255,255,.5)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {backArt && (
-                <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: "1px solid rgba(255,255,255,.2)" }}>
-                  <button type="button" onClick={() => setSide("front")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: side === "front" ? CK.cyan : "rgba(255,255,255,.06)", color: side === "front" ? "#fff" : "rgba(255,255,255,.5)" }}>Front</button>
-                  <button type="button" onClick={() => setSide("back")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: side === "back" ? CK.cyan : "rgba(255,255,255,.06)", color: side === "back" ? "#fff" : "rgba(255,255,255,.5)" }}>Back</button>
-                </div>
-              )}
-              <button type="button" onClick={() => { setApproved(true); setProofOpen(false); }} style={{
-                padding: "5px 14px", fontSize: 11, fontWeight: 700, border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
-                background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)", color: "#fff",
-              }}>✓ Approve</button>
-              <button type="button" onClick={() => setProofOpen(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,.15)", color: "rgba(255,255,255,.5)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            {/* Transform controls */}
+            <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <FitToggle />
             </div>
           </div>
 
           {/* Proof view — bleed-inclusive container like saddle stitch */}
           <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#1a1d23", borderRadius: 4, overflow: "hidden" }}>
-              {/* Art in trim area — inset from bleed container */}
-              <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, overflow: "hidden" }}>
-                <img src={currentArt.dataUrl} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-              </div>
+              {/* Art with transforms — renders in full bleed container */}
+              {(() => {
+                const ed = effectiveDims;
+                const artSrc = rotatedUrl || currentArt.dataUrl;
+                const nativeW = ed ? ed.w / bleedW : 1;
+                const cropStyle = (mult) => ({
+                  width: `${nativeW * mult * 100}%`, height: "auto",
+                  position: "absolute", top: "50%", left: "50%",
+                  transform: "translate(-50%, -50%)", display: "block",
+                });
+                return (
+                  <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#2a2e36" }}>
+                    <img src={artSrc} style={{
+                      ...(fitMode === "crop" ? cropStyle(1)
+                        : fitMode === "scale" ? cropStyle(artScale / 100)
+                        : fitMode === "stretch" ? { display: "block", width: "100%", height: "100%", objectFit: "fill", position: "absolute", inset: 0 }
+                        : { display: "block", width: "100%", height: "100%", objectFit: fitMode === "contain" ? "contain" : "cover" }
+                      )
+                    }} />
+                  </div>
+                );
+              })()}
 
               {/* Bleed guide (red dashed) — at container edge */}
               <div style={{ position: "absolute", inset: 0, border: "2.5px dashed #ef4444", pointerEvents: "none", zIndex: 1, opacity: 0.8 }} />
