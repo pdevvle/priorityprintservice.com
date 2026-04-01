@@ -13,7 +13,16 @@
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: 0; }
-  .fold-viewport{perspective:1200px;display:flex;align-items:center;justify-content:center;overflow:visible;position:relative}
+  /* 3D Fold Preview CSS — from proven brochure-fold-previewer */
+  .fold-viewport{perspective:1800px;perspective-origin:50% 50%;display:flex;justify-content:center;align-items:center;cursor:grab;user-select:none;position:relative;overflow:hidden;border-radius:8px;background:rgba(0,0,0,.15);min-height:350px}
+  .fold-viewport:active{cursor:grabbing}
+  .fold-scene{position:relative;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
+  .fold-panel-wrap{position:absolute;top:0;left:0;transform-style:preserve-3d}
+  .fold-hinge{position:absolute;top:0;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
+  .fold-face{position:absolute;top:0;left:0;backface-visibility:hidden;overflow:hidden}
+  .fold-face img{display:block}
+  .fold-face.ff{z-index:2}
+  .fold-face.fb{transform:rotateY(180deg);z-index:1}
   @media(max-width:700px){
     select,input[type="text"],input[type="number"]{font-size:16px!important;padding:10px!important;min-height:44px!important}
   }
@@ -544,128 +553,272 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
 }
 
 // ═══════════════════════════════════════════════════════════════
-// REMOVED: FoldPreview and FoldLines (preview now handled inline in SheetPreview modal)
+// 3D FOLD RENDERER — Proven engine from brochure-fold-previewer.html
+// Uses vanilla DOM via useRef to preserve exact anti-clipping math
 // ═══════════════════════════════════════════════════════════════
 
-function _REMOVED_FoldPreview({ longEdge, shortEdge, foldType, panels, foldDir }) {
-  const [foldAngle, setFoldAngle] = useState(0);
-  const foldingLong = foldDir === "long";
-  const foldDim = foldingLong ? longEdge : shortEdge;
-  const staticDim = foldingLong ? shortEdge : longEdge;
-  const panelW = foldDim / panels;
+// Fold type mapping: our calculator values → previewer fold keys
+const FOLD_KEY_MAP = {
+  bifold: "half-fold", trifold: "tri-fold", z3: "accordion-3",
+  gate3: "gate-fold", accordion4: "accordion-4", roll4: "roll-fold",
+  dgate4: "double-gate", dparallel4: "accordion-4",
+};
 
-  const maxPx = 500;
-  const scale = Math.min(maxPx / foldDim, maxPx / staticDim) * 0.8;
-  const pw = panelW * scale;
-  const ph = staticDim * scale;
-  const totalW = pw * panels;
+// Verified fold configurations with anti-clipping translateZ factors
+const FOLDS_3D = {
+  "half-fold": { n:2, mode:"nested", views:[
+    {label:"Front (Open)",sc:[8,-6,0,0],f:[0]},
+    {label:"Half Fold",sc:[20,-30,60,0],f:[-175]},
+    {label:"Back (Open)",sc:[8,174,0,0],f:[0]}]},
+  "accordion-3": { n:3, mode:"nested", views:[
+    {label:"Front (Open)",sc:[8,-6,0,0],f:[0,0]},
+    {label:"Accordion Fold",sc:[20,-35,60,0],f:[-175,168]},
+    {label:"Back (Open)",sc:[8,174,0,0],f:[0,0]}]},
+  "accordion-4": { n:4, mode:"nested", views:[
+    {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0]},
+    {label:"Accordion Fold",sc:[20,-35,100,0],f:[-175,168,-162]},
+    {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0]}]},
+  "tri-fold": { n:3, mode:"trifold", views:[
+    {label:"Inside (Open)",sc:[8,-6,0,0],f:[0,0],tz:[0,0]},
+    {label:"Right Tucks In",sc:[20,-35,50,0],f:[0,-179],tz:[0,0]},
+    {label:"Tri-Fold",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+    {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0],tz:[0,0]}]},
+  "gate-fold": { n:4, mode:"gate3", views:[
+    {label:"Front (Open)",sc:[8,-6,0,0],g:[0,0]},
+    {label:"Gate Fold",sc:[20,-25,30,0],g:[175,-175]},
+    {label:"Back (Open)",sc:[8,174,0,0],g:[0,0]}]},
+  "double-gate": { n:4, mode:"dgate", views:[
+    {label:"Inside (Open)",sc:[8,-5,0,0],dg:[0,0,0],tzf:[0,0,0]},
+    {label:"Flaps In",sc:[20,-30,50,0],dg:[178,-178,0],tzf:[0.04,0.04,0]},
+    {label:"Double Gate Fold",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+    {label:"Outside (Open)",sc:[8,174,0,0],dg:[0,0,0],tzf:[0,0,0]}]},
+  "roll-fold": { n:4, mode:"nested", views:[
+    {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
+    {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
+    {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
+    {label:"Roll Fold",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+    {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
+};
 
-  const colors = ["#e3f2fd","#bbdefb","#90caf9","#64b5f6","#42a5f5"];
+// Panel face builder — maps artwork onto front/back of each panel
+function foldMkF(idx, n, pw, ph, iW, iH, isP, frontSrc, backSrc, swap) {
+  const bi = n - 1 - idx;
+  const fS = swap ? backSrc : frontSrc, bS = swap ? frontSrc : backSrc;
+  let fml=0, fmt=0, bml=0, bmt=0;
+  if (isP) { fmt = -ph*idx; bmt = -ph*bi; } else { fml = -pw*idx; bml = -pw*bi; }
+  return `<div class="fold-face ff" style="width:${pw}px;height:${ph}px"><img src="${fS}" style="width:${iW}px;height:${iH}px;margin-left:${fml}px;margin-top:${fmt}px"></div><div class="fold-face fb" style="width:${pw}px;height:${ph}px"><img src="${bS}" style="width:${iW}px;height:${iH}px;margin-left:${bml}px;margin-top:${bmt}px"></div>`;
+}
 
-  // Build nested panel chain — each panel is child of previous for proper 3D folding
-  function buildPanels(idx) {
-    if (idx >= panels) return null;
-    const angle = idx === 0 ? 0 : (() => {
-      const a = foldAngle;
-      if (foldType === "z3" || foldType === "accordion4") return idx % 2 === 1 ? a : -a;
-      if (foldType === "gate3") return idx === 2 ? -a : a;
-      if (foldType === "dgate4") return (idx === 1 || idx === 3) ? (idx <= 1 ? a : -a) : a;
-      if (foldType === "dparallel4") return idx % 2 === 1 ? a : -a;
-      return a; // bifold, trifold, roll4: all fold same direction
-    })();
-
-    return (
-      <div style={{
-        width: pw, height: ph, position: idx === 0 ? "relative" : "absolute",
-        left: idx === 0 ? 0 : pw, top: 0,
-        transformOrigin: "left center",
-        transform: idx === 0 ? "none" : `rotateY(${angle}deg)`,
-        transformStyle: "preserve-3d",
-        transition: "transform 0.3s ease",
-      }}>
-        {/* Front face */}
-        <div style={{
-          position: "absolute", inset: 0,
-          background: colors[idx % colors.length],
-          border: "1px solid rgba(0,0,0,0.15)",
-          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          fontSize: 11, color: "rgba(0,0,0,0.5)", fontWeight: 600,
-          backfaceVisibility: "hidden", borderRadius: 2,
-        }}>
-          <div>Panel {idx + 1}</div>
-          <div style={{ fontSize: 9, fontWeight: 400, marginTop: 2 }}>{panelW.toFixed(1)}" × {staticDim.toFixed(1)}"</div>
-        </div>
-        {/* Back face */}
-        <div style={{
-          position: "absolute", inset: 0,
-          background: `${colors[idx % colors.length]}88`,
-          border: "1px dashed rgba(0,0,0,0.2)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 10, color: "rgba(0,0,0,0.3)",
-          backfaceVisibility: "hidden", borderRadius: 2,
-          transform: "rotateY(180deg)",
-        }}>Back {idx + 1}</div>
-        {buildPanels(idx + 1)}
-      </div>
-    );
+// Gate face builder — source divided into quarters
+function foldMkFGate(startQ, spanQ, qw, qh, iW, iH, isP, totalQ, frontSrc, backSrc) {
+  const bStartQ = totalQ - startQ - spanQ;
+  if (isP) {
+    return `<div class="fold-face ff" style="width:${qw}px;height:${qh*spanQ}px"><img src="${frontSrc}" style="width:${iW}px;height:${iH}px;margin-top:${-qh*startQ}px"></div><div class="fold-face fb" style="width:${qw}px;height:${qh*spanQ}px"><img src="${backSrc}" style="width:${iW}px;height:${iH}px;margin-top:${-qh*bStartQ}px"></div>`;
   }
+  return `<div class="fold-face ff" style="width:${qw*spanQ}px;height:${qh}px"><img src="${frontSrc}" style="width:${iW}px;height:${iH}px;margin-left:${-qw*startQ}px"></div><div class="fold-face fb" style="width:${qw*spanQ}px;height:${qh}px"><img src="${backSrc}" style="width:${iW}px;height:${iH}px;margin-left:${-qw*bStartQ}px"></div>`;
+}
 
-  if (panels <= 1) {
-    return (
-      <div style={{ textAlign: "center", padding: 20 }}>
-        <div style={{ display: "inline-block", width: totalW, height: ph, background: colors[0], border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
-          Flat Sheet — {longEdge}" × {shortEdge}"
-        </div>
-      </div>
-    );
+// Recursive nested builder (accordion, half, roll)
+function foldBuildNest(idx, n, pw, ph, iW, iH, isP, fSrc, bSrc) {
+  const last = idx === n-1;
+  let h = `<div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">`;
+  h += foldMkF(idx, n, pw, ph, iW, iH, isP, fSrc, bSrc);
+  if (!last) {
+    const hp = isP ? `left:0;top:${ph}px;` : `left:${pw}px;top:0;`;
+    const og = isP ? "center top" : "left center";
+    h += `<div class="fold-hinge" id="fh${idx+1}" style="${hp}width:${pw}px;height:${ph}px;transform-origin:${og}">`;
+    h += foldBuildNest(idx+1, n, pw, ph, iW, iH, isP, fSrc, bSrc);
+    h += `</div>`;
   }
+  h += `</div>`; return h;
+}
+
+// Tri-fold builder (center base, left/right hinges)
+function foldBuildTri(pw, ph, iW, iH, isP, n, fSrc, bSrc) {
+  let h = "";
+  if (isP) {
+    h += `<div class="fold-panel-wrap" style="left:0;top:${ph}px;width:${pw}px;height:${ph}px">`;
+    h += foldMkF(1,n,pw,ph,iW,iH,isP,fSrc,bSrc,true);
+    h += `<div class="fold-hinge" id="fhL" style="left:0;top:${-ph}px;width:${pw}px;height:${ph}px;transform-origin:center bottom"><div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(0,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div></div>`;
+    h += `<div class="fold-hinge" id="fhR" style="left:0;top:${ph}px;width:${pw}px;height:${ph}px;transform-origin:center top"><div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(2,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div></div>`;
+    h += `</div>`;
+  } else {
+    h += `<div class="fold-panel-wrap" style="left:${pw}px;top:0;width:${pw}px;height:${ph}px">`;
+    h += foldMkF(1,n,pw,ph,iW,iH,isP,fSrc,bSrc,true);
+    h += `<div class="fold-hinge" id="fhL" style="left:${-pw}px;top:0;width:${pw}px;height:${ph}px;transform-origin:right center"><div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(0,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div></div>`;
+    h += `<div class="fold-hinge" id="fhR" style="left:${pw}px;top:0;width:${pw}px;height:${ph}px;transform-origin:left center"><div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(2,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div></div>`;
+    h += `</div>`;
+  }
+  return h;
+}
+
+// Gate fold builder (25%+50%+25%)
+function foldBuildGate(qw, qh, iW, iH, isP, fSrc, bSrc) {
+  let h = "";
+  if (isP) {
+    const cH = qh*2;
+    h += `<div class="fold-hinge" id="fhGL" style="left:0;top:0;width:${qw}px;height:${qh}px;transform-origin:center bottom">${foldMkFGate(0,1,qw,qh,iW,iH,isP,4,fSrc,bSrc)}</div>`;
+    h += `<div class="fold-panel-wrap" style="left:0;top:${qh}px;width:${qw}px;height:${cH}px">${foldMkFGate(1,2,qw,qh,iW,iH,isP,4,fSrc,bSrc)}</div>`;
+    h += `<div class="fold-hinge" id="fhGR" style="left:0;top:${qh+cH}px;width:${qw}px;height:${qh}px;transform-origin:center top">${foldMkFGate(3,1,qw,qh,iW,iH,isP,4,fSrc,bSrc)}</div>`;
+  } else {
+    const cW = qw*2;
+    h += `<div class="fold-hinge" id="fhGL" style="left:0;top:0;width:${qw}px;height:${qh}px;transform-origin:right center">${foldMkFGate(0,1,qw,qh,iW,iH,isP,4,fSrc,bSrc)}</div>`;
+    h += `<div class="fold-panel-wrap" style="left:${qw}px;top:0;width:${cW}px;height:${qh}px">${foldMkFGate(1,2,qw,qh,iW,iH,isP,4,fSrc,bSrc)}</div>`;
+    h += `<div class="fold-hinge" id="fhGR" style="left:${qw+cW}px;top:0;width:${qw}px;height:${qh}px;transform-origin:left center">${foldMkFGate(3,1,qw,qh,iW,iH,isP,4,fSrc,bSrc)}</div>`;
+  }
+  return h;
+}
+
+// Double gate builder (4 equal panels, flaps fold in, center folds over)
+function foldBuildDGate(pw, ph, iW, iH, isP, n, fSrc, bSrc) {
+  let h = "";
+  if (isP) {
+    h += `<div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph*2}px">`;
+    h += `<div class="fold-panel-wrap" style="left:0;top:${ph}px;width:${pw}px;height:${ph}px">${foldMkF(1,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div>`;
+    h += `<div class="fold-hinge" id="fhL" style="left:0;top:0;width:${pw}px;height:${ph}px;transform-origin:center bottom"><div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(0,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div></div>`;
+    h += `<div class="fold-hinge" id="fhCtr" style="left:0;top:${ph*2}px;width:${pw}px;height:${ph*2}px;transform-origin:center top">`;
+    h += `<div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(2,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div>`;
+    h += `<div class="fold-hinge" id="fhR" style="left:0;top:${ph}px;width:${pw}px;height:${ph}px;transform-origin:center top"><div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(3,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div></div>`;
+    h += `</div></div>`;
+  } else {
+    h += `<div class="fold-panel-wrap" style="left:0;top:0;width:${pw*2}px;height:${ph}px">`;
+    h += `<div class="fold-panel-wrap" style="left:${pw}px;top:0;width:${pw}px;height:${ph}px">${foldMkF(1,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div>`;
+    h += `<div class="fold-hinge" id="fhL" style="left:0;top:0;width:${pw}px;height:${ph}px;transform-origin:right center"><div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(0,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div></div>`;
+    h += `<div class="fold-hinge" id="fhCtr" style="left:${pw*2}px;top:0;width:${pw*2}px;height:${ph}px;transform-origin:left center">`;
+    h += `<div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(2,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div>`;
+    h += `<div class="fold-hinge" id="fhR" style="left:${pw}px;top:0;width:${pw}px;height:${ph}px;transform-origin:left center"><div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(3,n,pw,ph,iW,iH,isP,fSrc,bSrc,true)}</div></div>`;
+    h += `</div></div>`;
+  }
+  return h;
+}
+
+// Apply a view config to the scene DOM — sets all hinge transforms with anti-clipping translateZ
+function foldApplyView(sceneEl, foldKey, viewIdx, dirSign) {
+  const fold = FOLDS_3D[foldKey]; if (!fold) return;
+  const view = fold.views[viewIdx]; if (!view) return;
+  const s = dirSign || 1;
+  const isP = false; // landscape for now (could be extended)
+  let [rx, ry, tx, ty] = view.sc;
+  if (s < 0) ry = -ry;
+
+  sceneEl.style.transition = "transform 1.4s cubic-bezier(.4,0,.2,1)";
+  sceneEl.style.transform = `scale(1) rotateX(${rx}deg) rotateY(${ry}deg) translateX(${tx}px) translateY(${ty}px)`;
+
+  const $ = id => sceneEl.querySelector("#" + id);
+
+  if (fold.mode === "trifold") {
+    const [lA, rA] = view.f;
+    const tzf = view.tzf_tf || [0, 0];
+    const hL = $("fhL"), hR = $("fhR");
+    const pw = hL ? parseInt(hL.style.width) || 0 : 0;
+    if (hR) hR.style.transform = `${tzf[1]?`translateZ(${(tzf[1]*pw).toFixed(1)}px) `:""}rotateY(${rA*s}deg)`;
+    if (hL) hL.style.transform = `${tzf[0]?`translateZ(${(tzf[0]*pw).toFixed(1)}px) `:""}rotateY(${lA*s}deg)`;
+  } else if (fold.mode === "gate3") {
+    const [lA, rA] = view.g;
+    const gL = $("fhGL"), gR = $("fhGR");
+    if (gL) gL.style.transform = `rotateY(${lA*s}deg)`;
+    if (gR) gR.style.transform = `rotateY(${rA*s}deg)`;
+  } else if (fold.mode === "dgate") {
+    const [lA, rA, cA] = view.dg;
+    const tzf = view.tzf || [0, 0, 0];
+    const hL = $("fhL"), hR = $("fhR"), hC = $("fhCtr");
+    const pw = hL ? parseInt(hL.style.width) || 0 : 0;
+    if (hL) hL.style.transform = `${tzf[0]?`translateZ(${(tzf[0]*pw).toFixed(1)}px) `:""}rotateY(${lA*s}deg)`;
+    if (hR) hR.style.transform = `${tzf[1]?`translateZ(${(tzf[1]*pw).toFixed(1)}px) `:""}rotateY(${rA*s}deg)`;
+    if (hC) hC.style.transform = `${tzf[2]?`translateZ(${(tzf[2]*pw).toFixed(1)}px) `:""}rotateY(${cA*s}deg)`;
+  } else {
+    // Nested mode (accordion, half, roll)
+    const tzf = view.tzf;
+    view.f.forEach((a, i) => {
+      const h = $("fh" + (i + 1)); if (!h) return;
+      let tz = "";
+      if (tzf && tzf[i]) { const pw = parseInt(h.style.width) || 0; tz = `translateZ(${(tzf[i]*pw).toFixed(1)}px) `; }
+      h.style.transform = `${tz}rotateY(${a*s}deg)`;
+    });
+  }
+}
+
+// React component that renders the 3D fold scene
+function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx, foldDir }) {
+  const sceneRef = useRef(null);
+  const containerRef = useRef(null);
+  const [dragRX, setDragRX] = useState(0);
+  const [dragRY, setDragRY] = useState(0);
+  const dragState = useRef({ active: false, sx: 0, sy: 0, brx: 0, bry: 0 });
+
+  const fold = FOLDS_3D[foldKey];
+  if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.4)" }}>Flat — no fold preview</div>;
+
+  const isP = false; // landscape
+  const maxDim = 500;
+  const pw = isP ? maxDim / fold.n : (maxDim * (shortEdge / longEdge)) / (fold.mode === "gate3" ? 4 : fold.n);
+  const ph = isP ? maxDim * (longEdge / shortEdge) / fold.n : maxDim * (shortEdge / longEdge);
+  const iW = isP ? pw : pw * fold.n;
+  const iH = isP ? ph * fold.n : ph;
+  const qw = fold.mode === "gate3" ? iW / 4 : pw;
+
+  // Build scene HTML
+  useEffect(() => {
+    if (!sceneRef.current || !frontSrc) return;
+    const fSrc = frontSrc, bSrc = backSrc || frontSrc;
+    let html = "";
+    if (fold.mode === "nested") html = foldBuildNest(0, fold.n, pw, ph, iW, iH, isP, fSrc, bSrc);
+    else if (fold.mode === "trifold") html = foldBuildTri(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
+    else if (fold.mode === "gate3") html = foldBuildGate(qw, ph, iW, iH, isP, fSrc, bSrc);
+    else if (fold.mode === "dgate") html = foldBuildDGate(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
+    sceneRef.current.innerHTML = html;
+    // Apply initial view after DOM is built
+    setTimeout(() => { if (sceneRef.current) foldApplyView(sceneRef.current, foldKey, viewIdx || 0, foldDir === "right" ? -1 : 1); }, 50);
+  }, [frontSrc, backSrc, foldKey, pw, ph]);
+
+  // Apply view changes
+  useEffect(() => {
+    if (!sceneRef.current || !frontSrc) return;
+    foldApplyView(sceneRef.current, foldKey, viewIdx || 0, foldDir === "right" ? -1 : 1);
+  }, [viewIdx, foldDir]);
+
+  // Drag to rotate
+  const onDragStart = useCallback(e => {
+    e.preventDefault();
+    const pt = e.touches ? e.touches[0] : e;
+    dragState.current = { active: true, sx: pt.clientX, sy: pt.clientY, brx: dragRX, bry: dragRY };
+    if (sceneRef.current) sceneRef.current.style.transition = "none";
+  }, [dragRX, dragRY]);
+
+  useEffect(() => {
+    const onMove = e => {
+      if (!dragState.current.active) return;
+      const pt = e.touches ? e.touches[0] : e;
+      const dx = pt.clientX - dragState.current.sx;
+      const dy = pt.clientY - dragState.current.sy;
+      const nrx = dragState.current.brx - dy * 0.3;
+      const nry = dragState.current.bry + dx * 0.3;
+      setDragRX(nrx); setDragRY(nry);
+      if (sceneRef.current) {
+        sceneRef.current.style.transform = `scale(1) rotateX(${nrx}deg) rotateY(${nry}deg)`;
+      }
+    };
+    const onEnd = () => { dragState.current.active = false; };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("mouseup", onEnd);
+    document.addEventListener("touchend", onEnd);
+    return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("touchmove", onMove); document.removeEventListener("mouseup", onEnd); document.removeEventListener("touchend", onEnd); };
+  }, []);
 
   return (
-    <div style={{ padding: 20 }}>
-      <div className="fold-viewport" style={{ height: ph + 40, margin: "0 auto", maxWidth: 600 }}>
-        <div style={{ transformStyle: "preserve-3d", transform: `rotateX(-5deg) rotateY(${-foldAngle * 0.1}deg)` }}>
-          {buildPanels(0)}
-        </div>
-      </div>
-      <div style={{ textAlign: "center", marginTop: 12 }}>
-        <input type="range" min={0} max={170} value={foldAngle} onChange={e => setFoldAngle(Number(e.target.value))} style={{ width: 220, accentColor: CK.cyan }} />
-        <div style={{ fontSize: 11, color: CC.mid, marginTop: 4 }}>{foldAngle === 0 ? "Flat (open)" : foldAngle >= 170 ? "Fully Folded" : `Fold: ${foldAngle}°`}</div>
+    <div ref={containerRef} className="fold-viewport"
+      onMouseDown={onDragStart} onTouchStart={onDragStart}
+      style={{ width: "100%", minHeight: 350 }}>
+      <div ref={sceneRef} className="fold-scene"
+        style={{ transformStyle: "preserve-3d", position: "relative" }} />
+      <div style={{ position: "absolute", bottom: 10, left: "50%", transform: "translateX(-50%)", fontSize: 10, color: "rgba(255,255,255,.3)", letterSpacing: ".08em", textTransform: "uppercase", pointerEvents: "none" }}>
+        Drag to rotate
       </div>
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// FOLD LINE OVERLAY (for proof/template view)
-// ═══════════════════════════════════════════════════════════════
-function FoldLines({ panels, foldDir }) {
-  if (panels <= 1) return null;
-  const foldingLong = foldDir === "long";
-  return Array.from({ length: panels - 1 }, (_, i) => {
-    const pct = ((i + 1) / panels) * 100;
-    return (
-      <div key={i} style={{
-        position: "absolute",
-        left: foldingLong ? `${pct}%` : 0,
-        top: foldingLong ? 0 : `${pct}%`,
-        width: foldingLong ? 0 : "100%",
-        height: foldingLong ? "100%" : 0,
-        borderLeft: foldingLong ? "2px dashed #f59e0b" : "none",
-        borderTop: !foldingLong ? "2px dashed #f59e0b" : "none",
-        zIndex: 2, pointerEvents: "none",
-      }}>
-        <span style={{
-          position: "absolute",
-          top: foldingLong ? 8 : -14,
-          left: foldingLong ? -30 : 8,
-          fontSize: 8, color: "#f59e0b", fontWeight: 700,
-          transform: foldingLong ? "rotate(-90deg)" : "none",
-          whiteSpace: "nowrap",
-        }}>Fold {i + 1}</span>
-      </div>
-    );
-  });
-}
 
 // ═══════════════════════════════════════════════════════════════
 // SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
@@ -1078,93 +1231,51 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
             </div>
           </div>
 
-          {/* Preview content */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            {(() => {
-              const artSrc = (side === "front" ? frontArt : backArt)?.dataUrl;
-              const maxDim = 600;
-              const scale = Math.min(maxDim / longEdge, maxDim / shortEdge, 1) * 60;
-              const totalW = longEdge * scale;
-              const totalH = shortEdge * scale;
-
-              return (
-                <div style={{ perspective: 1000 }}>
-                  {/* Sheet with subtle 3D tilt */}
-                  <div style={{
-                    width: totalW, height: totalH,
-                    transform: "rotateX(8deg) rotateY(-3deg)",
-                    transformStyle: "preserve-3d",
-                    position: "relative",
-                    boxShadow: "0 20px 60px rgba(0,0,0,.5)",
-                    borderRadius: 3,
-                    overflow: "hidden",
-                  }}>
-                    {/* Art background */}
-                    {artSrc ? (
-                      <img src={artSrc} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                    ) : (
-                      <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg, #e2e8f0 0%, #f1f5f9 100%)" }} />
-                    )}
-
-                    {/* Panel dividers with fold lines */}
-                    {panels > 1 && (() => {
-                      const foldingLong = foldDir === "long";
-                      return Array.from({ length: panels - 1 }, (_, i) => {
-                        const frac = (i + 1) / panels;
-                        return (
-                          <div key={i} style={{
-                            position: "absolute", zIndex: 2,
-                            ...(foldingLong
-                              ? { left: `${frac * 100}%`, top: 0, bottom: 0, width: 2, background: "rgba(245,166,35,.6)", boxShadow: "0 0 8px rgba(245,166,35,.3)" }
-                              : { top: `${frac * 100}%`, left: 0, right: 0, height: 2, background: "rgba(245,166,35,.6)", boxShadow: "0 0 8px rgba(245,166,35,.3)" }
-                            ),
-                          }}>
-                            <span style={{
-                              position: "absolute", fontSize: 9, fontWeight: 700, color: "#f59e0b",
-                              background: "rgba(0,0,0,.6)", padding: "1px 5px", borderRadius: 2,
-                              ...(foldingLong ? { top: 6, left: 4 } : { left: 6, top: -14 }),
-                            }}>Fold {i + 1}</span>
-                          </div>
-                        );
-                      });
-                    })()}
-
-                    {/* Panel number labels */}
-                    {panels > 1 && Array.from({ length: panels }, (_, i) => {
-                      const foldingLong = foldDir === "long";
-                      const panelW = foldingLong ? totalW / panels : totalW;
-                      const panelH = foldingLong ? totalH : totalH / panels;
-                      const cx = foldingLong ? (i + 0.5) / panels * 100 : 50;
-                      const cy = foldingLong ? 50 : (i + 0.5) / panels * 100;
-                      return (
-                        <div key={`l${i}`} style={{
-                          position: "absolute", left: `${cx}%`, top: `${cy}%`,
-                          transform: "translate(-50%, -50%)", zIndex: 3,
-                          fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.5)",
-                          background: "rgba(0,0,0,.3)", padding: "2px 8px", borderRadius: 3,
-                        }}>Panel {i + 1}</div>
-                      );
-                    })}
-
-                    {/* Side label */}
-                    <div style={{ position: "absolute", bottom: 6, right: 8, fontSize: 10, fontWeight: 600, color: "#fff", background: "rgba(0,0,0,.5)", padding: "2px 8px", borderRadius: 3, zIndex: 3 }}>
-                      {side === "front" ? "Front / Outside" : "Back / Inside"}
-                    </div>
-                  </div>
+          {/* 3D Fold Viewport */}
+          {(() => {
+            const foldKey = FOLD_KEY_MAP[foldType];
+            const foldCfg = foldKey ? FOLDS_3D[foldKey] : null;
+            if (!foldCfg) return (
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+                <div style={{ maxWidth: 600, width: "100%" }}>
+                  <img src={frontArt.dataUrl} style={{ width: "100%", borderRadius: 4, border: "1px solid rgba(255,255,255,.15)" }} />
+                  <div style={{ textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 8 }}>{longEdge}" × {shortEdge}" flat</div>
                 </div>
-              );
-            })()}
-
-            {/* Dimensions info */}
-            <div style={{ marginTop: 16, textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.4)" }}>
-              {longEdge}" × {shortEdge}" flat
-              {panels > 1 && (() => {
-                const foldDim = foldDir === "long" ? longEdge : shortEdge;
-                const staticDim = foldDir === "long" ? shortEdge : longEdge;
-                return <span> · Folded: {staticDim.toFixed(1)}" × {(foldDim / panels).toFixed(1)}" ({panels} panels)</span>;
-              })()}
-            </div>
-          </div>
+              </div>
+            );
+            return (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                {/* View step buttons */}
+                <div style={{ display: "flex", gap: 8, justifyContent: "center", padding: "12px 20px", flexWrap: "wrap" }}>
+                  {foldCfg.views.map((v, i) => (
+                    <button key={i} type="button" onClick={() => setPreviewAngle(i)} style={{
+                      padding: "8px 18px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 500,
+                      letterSpacing: ".04em", textTransform: "uppercase", transition: "all .3s",
+                      background: previewAngle === i ? CK.cyan : "rgba(255,255,255,.06)",
+                      border: `1px solid ${previewAngle === i ? CK.cyan : "rgba(255,255,255,.12)"}`,
+                      color: previewAngle === i ? "#000" : "rgba(255,255,255,.5)",
+                      boxShadow: previewAngle === i ? "0 4px 20px rgba(0,174,239,.3)" : "none",
+                    }}>{v.label}</button>
+                  ))}
+                </div>
+                {/* 3D viewport */}
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 20px 20px" }}>
+                  <FoldRenderer
+                    foldKey={foldKey}
+                    frontSrc={frontArt.dataUrl}
+                    backSrc={backArt?.dataUrl}
+                    longEdge={longEdge}
+                    shortEdge={shortEdge}
+                    viewIdx={previewAngle}
+                    foldDir={foldDir}
+                  />
+                </div>
+                <div style={{ textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.4)", paddingBottom: 12 }}>
+                  {longEdge}" × {shortEdge}" {panels > 1 && `· ${panels} panels`}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
