@@ -459,6 +459,14 @@ add_action( 'wp', function() {
             $config['tips'] = $tips;
         }
 
+        // Logo URL for template watermarks — set in Central Config or defaults to site logo
+        $logo_url = get_option( 'pps_logo_url', '' );
+        if ( ! $logo_url ) {
+            $custom_logo_id = get_theme_mod( 'custom_logo' );
+            if ( $custom_logo_id ) $logo_url = wp_get_attachment_image_url( $custom_logo_id, 'medium' );
+        }
+        if ( $logo_url ) $config['logoUrl'] = $logo_url;
+
         // Inject UPS zone map (3-digit ZIP prefix → transit days)
         $zone_map = get_option( 'pps_ups_zone_map', array() );
         if ( ! empty( $zone_map ) && is_array( $zone_map ) ) {
