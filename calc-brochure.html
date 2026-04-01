@@ -14,8 +14,7 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: 0; }
   /* 3D Fold Preview CSS — from proven brochure-fold-previewer */
-  .fold-viewport{perspective:1800px;perspective-origin:50% 50%;display:flex;justify-content:center;align-items:center;cursor:grab;user-select:none;position:relative;overflow:hidden;border-radius:8px;background:rgba(0,0,0,.15);min-height:350px}
-  .fold-viewport:active{cursor:grabbing}
+  .fold-viewport{perspective:1800px;perspective-origin:50% 50%;display:flex;justify-content:center;align-items:center;position:relative;overflow:hidden;border-radius:8px;background:linear-gradient(135deg,#1a1d23,#2a2e36);border:1px solid rgba(255,255,255,.08);min-height:350px;width:100%}
   .fold-scene{position:relative;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
   .fold-panel-wrap{position:absolute;top:0;left:0;transform-style:preserve-3d}
   .fold-hinge{position:absolute;top:0;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
@@ -606,16 +605,18 @@ function foldMkF(idx, n, pw, ph, iW, iH, isP, frontSrc, backSrc, swap) {
   const fS = swap ? backSrc : frontSrc, bS = swap ? frontSrc : backSrc;
   let fml=0, fmt=0, bml=0, bmt=0;
   if (isP) { fmt = -ph*idx; bmt = -ph*bi; } else { fml = -pw*idx; bml = -pw*bi; }
-  return `<div class="fold-face ff" style="width:${pw}px;height:${ph}px"><img src="${fS}" style="width:${iW}px;height:${iH}px;margin-left:${fml}px;margin-top:${fmt}px"></div><div class="fold-face fb" style="width:${pw}px;height:${ph}px"><img src="${bS}" style="width:${iW}px;height:${iH}px;margin-left:${bml}px;margin-top:${bmt}px"></div>`;
+  const fContent = fS ? `<img src="${fS}" style="width:${iW}px;height:${iH}px;margin-left:${fml}px;margin-top:${fmt}px">` : "";
+  const bContent = bS ? `<img src="${bS}" style="width:${iW}px;height:${iH}px;margin-left:${bml}px;margin-top:${bmt}px">` : "";
+  return `<div class="fold-face ff" style="width:${pw}px;height:${ph}px;background:#fff">${fContent}</div><div class="fold-face fb" style="width:${pw}px;height:${ph}px;background:#fff">${bContent}</div>`;
 }
 
 // Gate face builder — source divided into quarters
 function foldMkFGate(startQ, spanQ, qw, qh, iW, iH, isP, totalQ, frontSrc, backSrc) {
   const bStartQ = totalQ - startQ - spanQ;
-  if (isP) {
-    return `<div class="fold-face ff" style="width:${qw}px;height:${qh*spanQ}px"><img src="${frontSrc}" style="width:${iW}px;height:${iH}px;margin-top:${-qh*startQ}px"></div><div class="fold-face fb" style="width:${qw}px;height:${qh*spanQ}px"><img src="${backSrc}" style="width:${iW}px;height:${iH}px;margin-top:${-qh*bStartQ}px"></div>`;
-  }
-  return `<div class="fold-face ff" style="width:${qw*spanQ}px;height:${qh}px"><img src="${frontSrc}" style="width:${iW}px;height:${iH}px;margin-left:${-qw*startQ}px"></div><div class="fold-face fb" style="width:${qw*spanQ}px;height:${qh}px"><img src="${backSrc}" style="width:${iW}px;height:${iH}px;margin-left:${-qw*bStartQ}px"></div>`;
+  const pw = isP ? qw : qw*spanQ, ph = isP ? qh*spanQ : qh;
+  const fContent = frontSrc ? `<img src="${frontSrc}" style="width:${iW}px;height:${iH}px;margin-left:${isP?0:-qw*startQ}px;margin-top:${isP?-qh*startQ:0}px">` : "";
+  const bContent = backSrc ? `<img src="${backSrc}" style="width:${iW}px;height:${iH}px;margin-left:${isP?0:-qw*bStartQ}px;margin-top:${isP?-qh*bStartQ:0}px">` : "";
+  return `<div class="fold-face ff" style="width:${pw}px;height:${ph}px;background:#fff">${fContent}</div><div class="fold-face fb" style="width:${pw}px;height:${ph}px;background:#fff">${bContent}</div>`;
 }
 
 // Recursive nested builder (accordion, half, roll)
@@ -741,80 +742,41 @@ function foldApplyView(sceneEl, foldKey, viewIdx, dirSign) {
 // React component that renders the 3D fold scene
 function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx, foldDir }) {
   const sceneRef = useRef(null);
-  const containerRef = useRef(null);
-  const [dragRX, setDragRX] = useState(0);
-  const [dragRY, setDragRY] = useState(0);
-  const dragState = useRef({ active: false, sx: 0, sy: 0, brx: 0, bry: 0 });
 
   const fold = FOLDS_3D[foldKey];
   if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.4)" }}>Flat — no fold preview</div>;
 
   const isP = false; // landscape
-  const maxDim = 500;
-  const pw = isP ? maxDim / fold.n : (maxDim * (shortEdge / longEdge)) / (fold.mode === "gate3" ? 4 : fold.n);
-  const ph = isP ? maxDim * (longEdge / shortEdge) / fold.n : maxDim * (shortEdge / longEdge);
-  const iW = isP ? pw : pw * fold.n;
-  const iH = isP ? ph * fold.n : ph;
+  const maxDim = 400;
+  const pw = (maxDim * (shortEdge / longEdge)) / (fold.mode === "gate3" ? 4 : fold.n);
+  const ph = maxDim * (shortEdge / longEdge);
+  const iW = pw * (fold.mode === "gate3" ? 4 : fold.n);
+  const iH = ph;
   const qw = fold.mode === "gate3" ? iW / 4 : pw;
 
   // Build scene HTML
   useEffect(() => {
-    if (!sceneRef.current || !frontSrc) return;
-    const fSrc = frontSrc, bSrc = backSrc || frontSrc;
+    if (!sceneRef.current) return;
+    const fSrc = frontSrc || null, bSrc = backSrc || null;
     let html = "";
     if (fold.mode === "nested") html = foldBuildNest(0, fold.n, pw, ph, iW, iH, isP, fSrc, bSrc);
     else if (fold.mode === "trifold") html = foldBuildTri(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
     else if (fold.mode === "gate3") html = foldBuildGate(qw, ph, iW, iH, isP, fSrc, bSrc);
     else if (fold.mode === "dgate") html = foldBuildDGate(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
     sceneRef.current.innerHTML = html;
-    // Apply initial view after DOM is built
     setTimeout(() => { if (sceneRef.current) foldApplyView(sceneRef.current, foldKey, viewIdx || 0, foldDir === "right" ? -1 : 1); }, 50);
   }, [frontSrc, backSrc, foldKey, pw, ph]);
 
   // Apply view changes
   useEffect(() => {
-    if (!sceneRef.current || !frontSrc) return;
+    if (!sceneRef.current) return;
     foldApplyView(sceneRef.current, foldKey, viewIdx || 0, foldDir === "right" ? -1 : 1);
   }, [viewIdx, foldDir]);
 
-  // Drag to rotate
-  const onDragStart = useCallback(e => {
-    e.preventDefault();
-    const pt = e.touches ? e.touches[0] : e;
-    dragState.current = { active: true, sx: pt.clientX, sy: pt.clientY, brx: dragRX, bry: dragRY };
-    if (sceneRef.current) sceneRef.current.style.transition = "none";
-  }, [dragRX, dragRY]);
-
-  useEffect(() => {
-    const onMove = e => {
-      if (!dragState.current.active) return;
-      const pt = e.touches ? e.touches[0] : e;
-      const dx = pt.clientX - dragState.current.sx;
-      const dy = pt.clientY - dragState.current.sy;
-      const nrx = dragState.current.brx - dy * 0.3;
-      const nry = dragState.current.bry + dx * 0.3;
-      setDragRX(nrx); setDragRY(nry);
-      if (sceneRef.current) {
-        sceneRef.current.style.transform = `scale(1) rotateX(${nrx}deg) rotateY(${nry}deg)`;
-      }
-    };
-    const onEnd = () => { dragState.current.active = false; };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("touchmove", onMove, { passive: false });
-    document.addEventListener("mouseup", onEnd);
-    document.addEventListener("touchend", onEnd);
-    return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("touchmove", onMove); document.removeEventListener("mouseup", onEnd); document.removeEventListener("touchend", onEnd); };
-  }, []);
-
   return (
-    <div ref={containerRef} className="fold-viewport"
-      onMouseDown={onDragStart} onTouchStart={onDragStart}
-      style={{ width: "100%", minHeight: 350 }}>
+    <div className="fold-viewport" style={{ minHeight: 350 }}>
       <div ref={sceneRef} className="fold-scene"
         style={{ transformStyle: "preserve-3d", position: "relative" }} />
-      <div style={{ position: "absolute", bottom: 10, left: "50%", transform: "translateX(-50%)", fontSize: 10, color: "rgba(255,255,255,.3)", letterSpacing: ".08em", textTransform: "uppercase", pointerEvents: "none" }}>
-        Drag to rotate
-      </div>
     </div>
   );
 }
@@ -1209,69 +1171,76 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
         </div>
       )}
 
-      {/* Preview Modal */}
-      {previewOpen && frontArt && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.9)", display: "flex", flexDirection: "column" }}>
-          {/* Header */}
-          <div style={{ padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
+      {/* Preview Modal — matches booklet previewer style */}
+      {previewOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", background: "linear-gradient(135deg,#1a1d23,#2a2e36)" }}>
+          {/* Header bar */}
+          <div style={{ padding: "10px 20px", background: "rgba(0,0,0,.3)", borderBottom: "1px solid rgba(255,255,255,.06)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Preview</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Book Preview</div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
-                {longEdge}" × {shortEdge}" {panels > 1 ? `· ${panels} panels · ${foldType}` : "flat"}
+                {longEdge}" × {shortEdge}" {panels > 1 ? `· ${panels} panels` : "flat"}
+                {frontArt && !backArt && <span style={{ color: "#f59e0b", marginLeft: 6 }}>(back side blank)</span>}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {backArt && (
-                <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: "1px solid rgba(255,255,255,.2)" }}>
-                  <button type="button" onClick={() => setSide("front")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: side === "front" ? CK.cyan : "rgba(255,255,255,.06)", color: side === "front" ? "#fff" : "rgba(255,255,255,.5)" }}>Front</button>
-                  <button type="button" onClick={() => setSide("back")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: side === "back" ? CK.cyan : "rgba(255,255,255,.06)", color: side === "back" ? "#fff" : "rgba(255,255,255,.5)" }}>Back</button>
-                </div>
-              )}
-              <button type="button" onClick={() => setPreviewOpen(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,.15)", color: "rgba(255,255,255,.5)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
-            </div>
+            <button type="button" onClick={() => setPreviewOpen(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,.15)", color: "rgba(255,255,255,.5)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
           </div>
 
-          {/* 3D Fold Viewport */}
           {(() => {
             const foldKey = FOLD_KEY_MAP[foldType];
             const foldCfg = foldKey ? FOLDS_3D[foldKey] : null;
+
+            // Flat — show front/back artwork centered
             if (!foldCfg) return (
               <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-                <div style={{ maxWidth: 600, width: "100%" }}>
-                  <img src={frontArt.dataUrl} style={{ width: "100%", borderRadius: 4, border: "1px solid rgba(255,255,255,.15)" }} />
-                  <div style={{ textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 8 }}>{longEdge}" × {shortEdge}" flat</div>
+                <div style={{ maxWidth: 500, width: "100%", textAlign: "center" }}>
+                  {frontArt && <img src={frontArt.dataUrl} style={{ width: "100%", borderRadius: 6, border: "1px solid rgba(255,255,255,.1)", boxShadow: "0 8px 32px rgba(0,0,0,.4)" }} />}
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,.35)", marginTop: 10 }}>
+                    {longEdge}" × {shortEdge}" flat · {side === "front" ? "Front / Outside" : "Back / Inside"}
+                  </div>
+                  {backArt && (
+                    <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 10 }}>
+                      <button type="button" onClick={() => setSide("front")} style={{ padding: "5px 14px", fontSize: 11, fontWeight: 600, border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: side === "front" ? CK.cyan : "rgba(255,255,255,.08)", color: side === "front" ? "#000" : "rgba(255,255,255,.5)" }}>Front</button>
+                      <button type="button" onClick={() => setSide("back")} style={{ padding: "5px 14px", fontSize: 11, fontWeight: 600, border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: side === "back" ? CK.cyan : "rgba(255,255,255,.08)", color: side === "back" ? "#000" : "rgba(255,255,255,.5)" }}>Back</button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
+
+            // Folded — 3D renderer with view buttons
             return (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
                 {/* View step buttons */}
-                <div style={{ display: "flex", gap: 8, justifyContent: "center", padding: "12px 20px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 6, justifyContent: "center", padding: "12px 16px", flexWrap: "wrap" }}>
                   {foldCfg.views.map((v, i) => (
                     <button key={i} type="button" onClick={() => setPreviewAngle(i)} style={{
-                      padding: "8px 18px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 500,
-                      letterSpacing: ".04em", textTransform: "uppercase", transition: "all .3s",
+                      padding: "7px 16px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600,
+                      letterSpacing: ".03em", transition: "all .3s",
                       background: previewAngle === i ? CK.cyan : "rgba(255,255,255,.06)",
-                      border: `1px solid ${previewAngle === i ? CK.cyan : "rgba(255,255,255,.12)"}`,
-                      color: previewAngle === i ? "#000" : "rgba(255,255,255,.5)",
-                      boxShadow: previewAngle === i ? "0 4px 20px rgba(0,174,239,.3)" : "none",
+                      border: `1px solid ${previewAngle === i ? CK.cyan : "rgba(255,255,255,.1)"}`,
+                      color: previewAngle === i ? "#000" : "rgba(255,255,255,.45)",
+                      boxShadow: previewAngle === i ? "0 2px 12px rgba(0,174,239,.25)" : "none",
                     }}>{v.label}</button>
                   ))}
                 </div>
-                {/* 3D viewport */}
-                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 20px 20px" }}>
-                  <FoldRenderer
-                    foldKey={foldKey}
-                    frontSrc={frontArt.dataUrl}
-                    backSrc={backArt?.dataUrl}
-                    longEdge={longEdge}
-                    shortEdge={shortEdge}
-                    viewIdx={previewAngle}
-                    foldDir={foldDir}
-                  />
+                {/* 3D viewport — centered */}
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ width: "100%", maxWidth: 700 }}>
+                    <FoldRenderer
+                      foldKey={foldKey}
+                      frontSrc={frontArt?.dataUrl}
+                      backSrc={backArt?.dataUrl}
+                      longEdge={longEdge}
+                      shortEdge={shortEdge}
+                      viewIdx={previewAngle}
+                      foldDir={foldDir}
+                    />
+                  </div>
                 </div>
-                <div style={{ textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.4)", paddingBottom: 12 }}>
-                  {longEdge}" × {shortEdge}" {panels > 1 && `· ${panels} panels`}
+                {/* Footer info */}
+                <div style={{ textAlign: "center", fontSize: 10, color: "rgba(255,255,255,.3)", padding: "8px 0 14px", borderTop: "1px solid rgba(255,255,255,.06)" }}>
+                  {longEdge}" × {shortEdge}" · {foldCfg.views[previewAngle]?.label || ""}
                 </div>
               </div>
             );
