@@ -777,7 +777,7 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
   return (
     <div className="fold-viewport" style={{ minHeight: mob ? 220 : 350 }}>
       <div ref={sceneRef} className="fold-scene"
-        style={{ transformStyle: "preserve-3d", position: "relative" }} />
+        style={{ transformStyle: "preserve-3d", position: "relative", width: iW, height: iH }} />
     </div>
   );
 }
