@@ -1749,19 +1749,10 @@ function App() {
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>
             {(() => {
-              // JSON logic: perforation available for 11×17 preset, small presets (5.5×8.5 etc.),
-              // and custom sizes only when non-folded dimension exceeds threshold
-              let perfEnabled = false;
-              if (sizeMode === "preset") {
-                perfEnabled = true; // all presets including 11×17
-              } else {
-                // Custom: enabled when folded dimension long enough for perforator
-                const foldingLong = foldDir === "long";
-                if (foldingLong && dimLong > 14) perfEnabled = true;
-                else if (!foldingLong && dimShort > 14) perfEnabled = true;
-                else if (!foldingLong && dimLong > 19) perfEnabled = true;
-              }
-              return <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))} disabled={!perfEnabled} note={!perfEnabled ? "Perforation not available for this size" : undefined}>
+              // 14" rotary perf throat: short edge > 14" means perf must run along length
+              const perfAlongLength = dimShort > 14;
+              const perfNote = perfAlongLength ? "Short edge exceeds 14\" throat — perf runs along length" : undefined;
+              return <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))} note={perfNote}>
                 {PERF_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
               </Sel>;
             })()}
