@@ -287,8 +287,8 @@ function calculate(c) {
   P.diffFold1 = (tier1Folds.includes(fold.val) || smallSizeFold || smallPresetFold) ? foldLabor + (PCF.labor_bindery_hr / 2) : 0;
   // Tier 2: Roll fold specifically (stacks with tier 1)
   P.diffFold2 = fold.val === "roll4" ? foldLabor : 0;
-  // Tier 3: narrow sheets (short < 5") with any fold
-  P.diffFold3 = (fold.val !== "flat" && shortE < 5) ? foldLabor : 0;
+  // Tier 3: narrow sheets (short < 5") with any fold, OR folding the short side
+  P.diffFold3 = (fold.val !== "flat" && shortE < 5) || (c.foldDir === "short") ? foldLabor : 0;
 
   // Minimum base cost
   P.baseCost = (fold.val !== "flat" || qty <= 250) ? PCF.labor_bindery_hr : 0;
@@ -314,8 +314,11 @@ function calculate(c) {
   // Non-inventory surcharge
   P.nonInv = INV_VALS.includes(paper.val) ? 0 : PCF.non_inventory_fee;
 
-  // Easy discounts
-  const isEasySize = SIZE_PRESETS.some(s => s.label === c.sizeLabel);
+  // Easy discounts — preset OR custom dims matching standard sizes
+  const stdLongs = [8.5, 9, 11, 14, 17];
+  const stdShorts = [5.5, 6, 8.5, 11];
+  const isEasySize = SIZE_PRESETS.some(s => s.label === c.sizeLabel)
+    || (c.sizeMode === "custom" && stdLongs.includes(longE) && stdShorts.includes(shortE));
   const isEasyFold = ["flat","bifold","trifold","z3"].includes(fold.val);
   const costSummary = P.paper + P.frontPrint + P.backPrint + P.cutting + P.folding + P.perforation + P.rc;
   P.discEasyFlat = (fold.val === "flat" && isEasySize) ? -Math.min(costSummary * PCF.easydiscount_factor, PCF.easydiscount_max / 10) : 0;
@@ -1597,8 +1600,19 @@ function App() {
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>
             {(() => {
-              const perfDisabled = !["5.5×8.5","6×9","8.5×11","8.5×14"].some(s => sizeLabel?.startsWith(s)) && sizeMode !== "custom";
-              return <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))} disabled={perfDisabled} note={perfDisabled ? "Perforation not available for this size" : undefined}>
+              // JSON logic: perforation available for 11×17 preset, small presets (5.5×8.5 etc.),
+              // and custom sizes only when non-folded dimension exceeds threshold
+              let perfEnabled = false;
+              if (sizeMode === "preset") {
+                perfEnabled = true; // all presets including 11×17
+              } else {
+                // Custom: enabled when folded dimension long enough for perforator
+                const foldingLong = foldDir === "long";
+                if (foldingLong && dimLong > 14) perfEnabled = true;
+                else if (!foldingLong && dimShort > 14) perfEnabled = true;
+                else if (!foldingLong && dimLong > 19) perfEnabled = true;
+              }
+              return <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))} disabled={!perfEnabled} note={!perfEnabled ? "Perforation not available for this size" : undefined}>
                 {PERF_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
               </Sel>;
             })()}
