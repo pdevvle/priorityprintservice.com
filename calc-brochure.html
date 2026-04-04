@@ -745,16 +745,30 @@ function foldApplyView(sceneEl, foldKey, viewIdx, dirSign) {
 // React component that renders the 3D fold scene
 function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx, foldDir }) {
   const sceneRef = useRef(null);
+  const [imgDims, setImgDims] = useState(null); // {w, h} in pixels
 
   const fold = FOLDS_3D[foldKey];
   if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.4)" }}>Flat — no fold preview</div>;
+
+  // Detect actual image dimensions to avoid stretching
+  useEffect(() => {
+    const src = frontSrc || backSrc;
+    if (!src) { setImgDims(null); return; }
+    const img = new Image();
+    img.onload = () => setImgDims({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => setImgDims(null);
+    img.src = src;
+  }, [frontSrc, backSrc]);
 
   const mob = useIsMobile();
   const isP = false; // landscape
   const maxDim = mob ? 260 : 400;
   const nPanels = fold.mode === "gate3" ? 4 : fold.n;
-  // Panel aspect ratio: (longEdge/n) / shortEdge — matches standalone previewer
-  const pa = (longEdge / nPanels) / shortEdge;
+  // Use actual image aspect ratio when available (matches standalone previewer),
+  // fall back to physical page dimensions for placeholder panels
+  const eW = imgDims ? imgDims.w : longEdge;
+  const eH = imgDims ? imgDims.h : shortEdge;
+  const pa = (eW / nPanels) / eH;
   const pw = Math.round(Math.min(maxDim / nPanels, (mob ? window.innerWidth - 80 : 700) / nPanels));
   const ph = Math.round(pw / pa);
   const iW = pw * nPanels;
