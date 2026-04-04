@@ -358,6 +358,19 @@ function calculate(c) {
   const baseDays = Math.floor(pressSheets / PCF.sheetsturnaround);
   const days = Math.max(PCF.minimum_turnaround_days, baseDays + paperDays + vividDays + coatDays + bundleDays + perfDays + rcDays + artDays + proofDays);
 
+  // Turnaround impact per option (for UI badges)
+  const ti = {
+    paper: paperDays,
+    vivid: vividDays,
+    coating: coatDays,
+    bundling: bundleDays,
+    perforation: perfDays,
+    roundCorner: rcDays,
+    artDesign: artDays,
+    artEdits: (art.val >= 2 && art.val < 4) ? 1 : 0,
+    proof: proofDays,
+  };
+
   // Shipping & Rush
   const transitDays = getTransitDays(c.shipState, c.shipZip);
   const productionBizDays = days;
@@ -412,7 +425,7 @@ function calculate(c) {
     total: Math.round(grandTotal * 100) / 100, baseTotal: Math.round(total * 100) / 100,
     perUnit: Math.round(perUnit * 100) / 100, days, qty: qty, bd, grouped,
     imp, mk, fold, panels, pressSheets, longE, shortE, approxThickness,
-    coatOK: paper.coatable, q100: qty >= 100,
+    coatOK: paper.coatable, q100: qty >= 100, ti,
     shipping: {
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
       earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday),
@@ -636,14 +649,17 @@ const FOLDS_3D = {
     {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
 };
 
+// Sanitize src for innerHTML injection — only allow data: URIs
+function safeSrc(src) { return src && src.startsWith("data:") ? src : ""; }
+
 // Panel face builder — maps artwork onto front/back of each panel
 function foldMkF(idx, n, pw, ph, iW, iH, isP, frontSrc, backSrc, swap) {
   const bi = n - 1 - idx;
   const fS = swap ? backSrc : frontSrc, bS = swap ? frontSrc : backSrc;
   let fml=0, fmt=0, bml=0, bmt=0;
   if (isP) { fmt = -ph*idx; bmt = -ph*bi; } else { fml = -pw*idx; bml = -pw*bi; }
-  const fContent = fS ? `<img src="${fS}" style="width:${iW}px;height:${iH}px;margin-left:${fml}px;margin-top:${fmt}px">` : "";
-  const bContent = bS ? `<img src="${bS}" style="width:${iW}px;height:${iH}px;margin-left:${bml}px;margin-top:${bmt}px">` : "";
+  const fContent = fS ? `<img src="${safeSrc(fS)}" style="width:${iW}px;height:${iH}px;margin-left:${fml}px;margin-top:${fmt}px">` : "";
+  const bContent = bS ? `<img src="${safeSrc(bS)}" style="width:${iW}px;height:${iH}px;margin-left:${bml}px;margin-top:${bmt}px">` : "";
   return `<div class="fold-face ff" style="width:${pw}px;height:${ph}px;background:#fff">${fContent}</div><div class="fold-face fb" style="width:${pw}px;height:${ph}px;background:#fff">${bContent}</div>`;
 }
 
@@ -651,8 +667,8 @@ function foldMkF(idx, n, pw, ph, iW, iH, isP, frontSrc, backSrc, swap) {
 function foldMkFGate(startQ, spanQ, qw, qh, iW, iH, isP, totalQ, frontSrc, backSrc) {
   const bStartQ = totalQ - startQ - spanQ;
   const pw = isP ? qw : qw*spanQ, ph = isP ? qh*spanQ : qh;
-  const fContent = frontSrc ? `<img src="${frontSrc}" style="width:${iW}px;height:${iH}px;margin-left:${isP?0:-qw*startQ}px;margin-top:${isP?-qh*startQ:0}px">` : "";
-  const bContent = backSrc ? `<img src="${backSrc}" style="width:${iW}px;height:${iH}px;margin-left:${isP?0:-qw*bStartQ}px;margin-top:${isP?-qh*bStartQ:0}px">` : "";
+  const fContent = frontSrc ? `<img src="${safeSrc(frontSrc)}" style="width:${iW}px;height:${iH}px;margin-left:${isP?0:-qw*startQ}px;margin-top:${isP?-qh*startQ:0}px">` : "";
+  const bContent = backSrc ? `<img src="${safeSrc(backSrc)}" style="width:${iW}px;height:${iH}px;margin-left:${isP?0:-qw*bStartQ}px;margin-top:${isP?-qh*bStartQ:0}px">` : "";
   return `<div class="fold-face ff" style="width:${pw}px;height:${ph}px;background:#fff">${fContent}</div><div class="fold-face fb" style="width:${pw}px;height:${ph}px;background:#fff">${bContent}</div>`;
 }
 
