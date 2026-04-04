@@ -1166,10 +1166,10 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
               {/* Fold lines (orange dashed) */}
               {foldLines.map((fl, i) => (
                 <div key={i} style={{
-                  position: "absolute", pointerEvents: "none", zIndex: 2,
+                  position: "absolute", pointerEvents: "none", zIndex: 4,
                   ...(fl.vertical
-                    ? { left: `${bleedPctX + (100 - bleedPctX * 2) * fl.pct / 100}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 0, borderLeft: "2.5px dashed #f59e0b" }
-                    : { top: `${bleedPctY + (100 - bleedPctY * 2) * fl.pct / 100}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 0, borderTop: "2.5px dashed #f59e0b" }
+                    ? { left: `${bleedPctX + (100 - bleedPctX * 2) * fl.pct / 100}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 2.5, background: "repeating-linear-gradient(to bottom, #f59e0b 0, #f59e0b 6px, transparent 6px, transparent 12px)" }
+                    : { top: `${bleedPctY + (100 - bleedPctY * 2) * fl.pct / 100}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 2.5, background: "repeating-linear-gradient(to right, #f59e0b 0, #f59e0b 6px, transparent 6px, transparent 12px)" }
                   ),
                 }}>
                   <span style={{
