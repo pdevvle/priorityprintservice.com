@@ -752,9 +752,12 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
   const mob = useIsMobile();
   const isP = false; // landscape
   const maxDim = mob ? 260 : 400;
-  const pw = (maxDim * (shortEdge / longEdge)) / (fold.mode === "gate3" ? 4 : fold.n);
-  const ph = maxDim * (shortEdge / longEdge);
-  const iW = pw * (fold.mode === "gate3" ? 4 : fold.n);
+  const nPanels = fold.mode === "gate3" ? 4 : fold.n;
+  // Panel aspect ratio: (longEdge/n) / shortEdge — matches standalone previewer
+  const pa = (longEdge / nPanels) / shortEdge;
+  const pw = Math.round(Math.min(maxDim / nPanels, (mob ? window.innerWidth - 80 : 700) / nPanels));
+  const ph = Math.round(pw / pa);
+  const iW = pw * nPanels;
   const iH = ph;
   const qw = fold.mode === "gate3" ? iW / 4 : pw;
 
