@@ -95,6 +95,29 @@ const PANEL_LABELS = {
   dparallel4:{ front: ["Inside Left","Back","Front","Inside Right"], back: ["Inside 1","Inside 2","Inside 3","Inside 4"] },
 };
 
+// Compute fold-line fractions accounting for flap offset (inner/tuck panels
+// shortened by 1/32" so they nest cleanly). Z-folds and bifolds don't nest.
+function getFoldFracs(foldType, panels, foldDim) {
+  const NOMINAL = { gate3: [0.25, 0.50, 0.25] };
+  const nomFracs = NOMINAL[foldType] || Array(panels).fill(1 / panels);
+  const widths = nomFracs.map(f => f * foldDim);
+  // Offset multipliers: negative = panel shortened, positive = panel widened; must sum to 0
+  const OFF = 1 / 32;
+  const OFFSETS = {
+    trifold:    [-1, 0, 1],
+    roll4:      [-2, -1, 0, 3],
+    gate3:      [-1, 2, -1],
+    dgate4:     [-1, 1, 1, -1],
+    dparallel4: [-1, 1, 1, -1],
+  };
+  const off = OFFSETS[foldType];
+  if (off) off.forEach((m, i) => { widths[i] += m * OFF; });
+  const fracs = [];
+  let cum = 0;
+  for (let i = 0; i < panels - 1; i++) { cum += widths[i]; fracs.push(cum / foldDim); }
+  return fracs;
+}
+
 const PAPERS_NC = _CFG.papers_nc || [
   {label:"70lb Uncoated Opaque Text",val:0.001,price:0.06,oversizePrice:0.06,factory:false,coatable:false},
   {label:"80lb Matte Text",val:0.002,price:0.069,oversizePrice:0.069,factory:false,coatable:false},
@@ -500,12 +523,13 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
       pdf.setLineWidth(0.008);
       drawDashedRect(pdf, bleed + safety, bleed + safety, trimW - safety * 2, trimH - safety * 2, 0.05, 0.03);
 
-      // Fold lines — orange dashed (gate fold uses 25%/75%, others equal)
+      // Fold lines — orange dashed, with flap offset for nesting folds
       if (panels > 1) {
         pdf.setDrawColor(245, 166, 35);
         pdf.setLineWidth(0.01);
         const foldingLong = foldDir === "long";
-        const tplFracs = foldType === "gate3" ? [0.25, 0.75] : Array.from({length: panels - 1}, (_, i) => (i + 1) / panels);
+        const tplFoldDim = foldingLong ? trimW : trimH;
+        const tplFracs = getFoldFracs(foldType, panels, tplFoldDim);
         for (let i = 0; i < tplFracs.length; i++) {
           const frac = tplFracs[i];
           if (foldingLong) {
@@ -527,10 +551,9 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
       if (panelCfg && panels > 1) {
         const labels = pg === 0 ? panelCfg.front : panelCfg.back;
         const foldingLong2 = foldDir === "long";
-        // Gate fold has unequal panels: 25%+50%+25%
-        const tplCenters = foldType === "gate3"
-          ? [0.125, 0.5, 0.875]
-          : Array.from({length: panels}, (_, i) => (i + 0.5) / panels);
+        const tplFoldDim2 = foldingLong2 ? trimW : trimH;
+        const tplEdges = [0, ...getFoldFracs(foldType, panels, tplFoldDim2), 1];
+        const tplCenters = Array.from({length: panels}, (_, i) => (tplEdges[i] + tplEdges[i + 1]) / 2);
         pdf.setFontSize(8); pdf.setTextColor(180, 140, 60);
         for (let p = 0; p < labels.length; p++) {
           const cx = foldingLong2
@@ -1023,10 +1046,10 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
   const hasArt = !!frontArt;
   const currentArt = side === "front" ? frontArt : backArt;
 
-  // Fold line positions as percentages
+  // Fold line positions as percentages, with flap offset for nesting folds
   const foldLines = [];
-  // Panel fraction boundaries (gate fold has unequal panels: 25%+50%+25%)
-  const panelFracs = foldType === "gate3" ? [0.25, 0.75] : Array.from({length: panels - 1}, (_, i) => (i + 1) / panels);
+  const foldDim = foldDir === "long" ? longEdge : shortEdge;
+  const panelFracs = panels > 1 ? getFoldFracs(foldType, panels, foldDim) : [];
   if (panels > 1) {
     const foldingLong = foldDir === "long";
     for (const frac of panelFracs) {
