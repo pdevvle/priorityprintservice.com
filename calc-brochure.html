@@ -415,7 +415,7 @@ function calculate(c) {
     coatOK: paper.coatable, q100: qty >= 100,
     shipping: {
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
-      earliestBizDays, earliestDate: fmtDate(earliestDate), shopToday: fmtDate(shopToday),
+      earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday),
       bizDaysToDate, rushMultiplier, rushCost: Math.round(rushCost * 100) / 100,
       needByValid, needByPast, tooSoon, productionBizDays, bufferedProdDays,
       productionStartDate: fmtDate(productionStartDate), productionStartYMD: toYMD(productionStartDate),
@@ -851,6 +851,9 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
   const [side, setSide] = useState("front"); // "front" | "back"
   const [foldFlipped, setFoldFlipped] = useState(false);
   const canFlip = panels > 1 && !["gate3","dgate4"].includes(foldType);
+  // Reset flip when fold type changes
+  const prevFoldType = useRef(foldType);
+  if (prevFoldType.current !== foldType) { prevFoldType.current = foldType; if (foldFlipped) setFoldFlipped(false); }
   const [proofOpen, setProofOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewAngle, setPreviewAngle] = useState(0);
@@ -1882,7 +1885,7 @@ function App() {
                   </span>
                 </div>
                 <div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,paddingTop:4,borderTop:"1px solid #b3dff044"}}>
-                  {mob?<>{r.shipping.earliestDate} earliest</>:<>Earliest possible: <strong style={{color:CC.mid}}>{r.shipping.earliestDate}</strong> ({r.shipping.earliestBizDays} biz days) · Shop: {r.shipping.pastCutoff}</>}
+                  {mob?<>{r.shipping.earliestDate} earliest</>:<>Earliest possible: <strong style={{color:CC.mid}}>{r.shipping.earliestDate}</strong> ({r.shipping.earliestBizDays} biz days) · Shop: {r.shipping.shopToday}</>}
                 </div>
               </div>
 
