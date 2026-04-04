@@ -795,7 +795,7 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
 
 function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwork }) {
   const mob = useIsMobile();
-  const hasIO = panels > 1 && !["z3","accordion4"].includes(foldType);
+  const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
   const bLabel = hasIO ? "Back / Inside" : "Back";
   const [frontArt, setFrontArt] = useState(null); // {dataUrl, file, dims:{w,h}}
@@ -1509,7 +1509,7 @@ function App() {
   const dimLong = sizeMode === "preset" ? (preset?.long || 11) : longEdge;
   const dimShort = sizeMode === "preset" ? (preset?.short || 8.5) : shortEdge;
   // Z-folds (accordion) show both art sides on outside, so no inside/outside distinction
-  const hasInsideOutside = fold.panels > 1 && !["z3","accordion4"].includes(foldType);
+  const hasInsideOutside = fold.panels > 1 && foldType !== "z3";
   const frontLabel = hasInsideOutside ? "Front / Outside" : "Front";
   const backLabel = hasInsideOutside ? "Back / Inside" : "Back";
 
