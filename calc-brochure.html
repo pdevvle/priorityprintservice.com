@@ -64,11 +64,14 @@ const PCF = Object.assign({
 // DATA: SIZES, FOLDS, PAPERS, OPTIONS
 // ═══════════════════════════════════════════════════════════════
 const SIZE_PRESETS = _CFG.brochure_sizes || [
-  {label:"5.5×8.5",imp:4,long:8.5,short:5.5},
-  {label:"6×9",imp:4,long:9,short:6},
-  {label:"8.5×11",imp:2,long:11,short:8.5},
-  {label:"8.5×14",imp:1,long:14,short:8.5},
-  {label:"11×17",imp:1,long:17,short:11},
+  {label:"5.5×8.5",imp:4,long:8.5,short:5.5,easy:true},
+  {label:"6×9",imp:4,long:9,short:6,easy:true},
+  {label:"8.5×11",imp:2,long:11,short:8.5,easy:true},
+  {label:"8.5×14",imp:1,long:14,short:8.5,easy:true},
+  {label:"9×12",imp:2,long:12,short:9},
+  {label:"11×17",imp:1,long:17,short:11,easy:true},
+  {label:"12×18",imp:1,long:18,short:12},
+  {label:"11×25.5",imp:0.5,long:25.5,short:11},
 ];
 
 const FOLD_TYPES = _CFG.fold_types || [
@@ -352,7 +355,7 @@ function calculate(c) {
   // Easy discounts — preset OR custom dims matching standard sizes
   const stdLongs = [8.5, 9, 11, 14, 17];
   const stdShorts = [5.5, 6, 8.5, 11];
-  const isEasySize = SIZE_PRESETS.some(s => s.label === c.sizeLabel)
+  const isEasySize = SIZE_PRESETS.some(s => s.label === c.sizeLabel && s.easy)
     || (c.sizeMode === "custom" && stdLongs.includes(longE) && stdShorts.includes(shortE));
   const isEasyFold = ["flat","bifold","trifold","z3"].includes(fold.val);
   const costSummary = P.paper + P.frontPrint + P.backPrint + P.cutting + P.folding + P.perforation + P.rc;
