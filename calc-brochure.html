@@ -300,7 +300,7 @@ function calculate(c) {
   // Tier 2: Roll fold specifically (stacks with tier 1)
   P.diffFold2 = fold.val === "roll4" ? foldLabor : 0;
   // Tier 3: narrow sheets (short < 5") with any fold, OR folding the short side
-  P.diffFold3 = (fold.val !== "flat" && shortE < 5) || (c.foldDir === "short") ? foldLabor : 0;
+  P.diffFold3 = fold.val !== "flat" && (shortE < 5 || c.foldDir === "short") ? foldLabor : 0;
 
   // Minimum base cost
   P.baseCost = (fold.val !== "flat" || qty <= 250) ? PCF.labor_bindery_hr : 0;
@@ -487,23 +487,24 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
       pdf.setLineWidth(0.008);
       drawDashedRect(pdf, bleed + safety, bleed + safety, trimW - safety * 2, trimH - safety * 2, 0.05, 0.03);
 
-      // Fold lines — orange dashed
+      // Fold lines — orange dashed (gate fold uses 25%/75%, others equal)
       if (panels > 1) {
         pdf.setDrawColor(245, 166, 35);
         pdf.setLineWidth(0.01);
         const foldingLong = foldDir === "long";
-        for (let i = 1; i < panels; i++) {
-          const frac = i / panels;
+        const tplFracs = foldType === "gate3" ? [0.25, 0.75] : Array.from({length: panels - 1}, (_, i) => (i + 1) / panels);
+        for (let i = 0; i < tplFracs.length; i++) {
+          const frac = tplFracs[i];
           if (foldingLong) {
             const x = bleed + trimW * frac;
             drawDashedLine(pdf, x, bleed + 0.1, x, bleed + trimH - 0.1, 0.08, 0.04);
             pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
-            pdf.text("FOLD " + i, x + 0.04, bleed + 0.25);
+            pdf.text("FOLD " + (i + 1), x + 0.04, bleed + 0.25);
           } else {
             const y = bleed + trimH * frac;
             drawDashedLine(pdf, bleed + 0.1, y, bleed + trimW - 0.1, y, 0.08, 0.04);
             pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
-            pdf.text("FOLD " + i, bleed + 0.15, y - 0.04);
+            pdf.text("FOLD " + (i + 1), bleed + 0.15, y - 0.04);
           }
         }
       }
@@ -513,14 +514,18 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
       if (panelCfg && panels > 1) {
         const labels = pg === 0 ? panelCfg.front : panelCfg.back;
         const foldingLong2 = foldDir === "long";
+        // Gate fold has unequal panels: 25%+50%+25%
+        const tplCenters = foldType === "gate3"
+          ? [0.125, 0.5, 0.875]
+          : Array.from({length: panels}, (_, i) => (i + 0.5) / panels);
         pdf.setFontSize(8); pdf.setTextColor(180, 140, 60);
         for (let p = 0; p < labels.length; p++) {
           const cx = foldingLong2
-            ? bleed + trimW * (p + 0.5) / panels
+            ? bleed + trimW * tplCenters[p]
             : bleed + trimW / 2;
           const cy = foldingLong2
             ? bleed + trimH / 2 + 0.15
-            : bleed + trimH * (p + 0.5) / panels;
+            : bleed + trimH * tplCenters[p];
           pdf.text(labels[p], cx, cy, { align: "center" });
         }
       }
@@ -775,9 +780,7 @@ function foldApplyView(sceneEl, foldKey, viewIdx, dirSign) {
 function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx, foldDir, flipped }) {
   const sceneRef = useRef(null);
   const [imgDims, setImgDims] = useState(null); // {w, h} in pixels
-
   const fold = FOLDS_3D[foldKey];
-  if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.4)" }}>Flat — no fold preview</div>;
 
   // Detect actual image dimensions to avoid stretching
   useEffect(() => {
@@ -792,7 +795,7 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
   const mob = useIsMobile();
   const isP = false; // landscape
   const maxDim = mob ? 260 : 400;
-  const nPanels = fold.mode === "gate3" ? 4 : fold.n;
+  const nPanels = fold ? (fold.mode === "gate3" ? 4 : fold.n) : 1;
   // Use actual image aspect ratio when available (matches standalone previewer),
   // fall back to physical page dimensions for placeholder panels
   const eW = imgDims ? imgDims.w : longEdge;
@@ -802,11 +805,11 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
   const ph = Math.round(pw / pa);
   const iW = pw * nPanels;
   const iH = ph;
-  const qw = fold.mode === "gate3" ? iW / 4 : pw;
+  const qw = fold && fold.mode === "gate3" ? iW / 4 : pw;
 
   // Build scene HTML
   useEffect(() => {
-    if (!sceneRef.current) return;
+    if (!sceneRef.current || !fold) return;
     const fSrc = frontSrc || null, bSrc = backSrc || null;
     let html = "";
     if (fold.mode === "nested") html = foldBuildNest(0, fold.n, pw, ph, iW, iH, isP, fSrc, bSrc);
@@ -815,13 +818,15 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
     else if (fold.mode === "dgate") html = foldBuildDGate(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
     sceneRef.current.innerHTML = html;
     setTimeout(() => { if (sceneRef.current) foldApplyView(sceneRef.current, foldKey, viewIdx || 0, flipped ? -1 : 1); }, 50);
-  }, [frontSrc, backSrc, foldKey, pw, ph]);
+  }, [frontSrc, backSrc, foldKey, pw, ph, flipped]);
 
   // Apply view changes
   useEffect(() => {
-    if (!sceneRef.current) return;
+    if (!sceneRef.current || !fold) return;
     foldApplyView(sceneRef.current, foldKey, viewIdx || 0, flipped ? -1 : 1);
   }, [viewIdx, foldDir, flipped]);
+
+  if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.4)" }}>Flat — no fold preview</div>;
 
   return (
     <div className="fold-viewport" style={{ minHeight: mob ? 220 : 350 }}>
@@ -1001,13 +1006,15 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
 
   // Fold line positions as percentages
   const foldLines = [];
+  // Panel fraction boundaries (gate fold has unequal panels: 25%+50%+25%)
+  const panelFracs = foldType === "gate3" ? [0.25, 0.75] : Array.from({length: panels - 1}, (_, i) => (i + 1) / panels);
   if (panels > 1) {
     const foldingLong = foldDir === "long";
-    for (let i = 1; i < panels; i++) {
-      const pct = (i / panels) * 100;
-      foldLines.push({ pct, vertical: foldingLong });
+    for (const frac of panelFracs) {
+      foldLines.push({ pct: frac * 100, vertical: foldingLong });
     }
   }
+
 
   // Panel labels for current fold type + side, respecting flip
   const panelCfg = PANEL_LABELS[foldType];
@@ -1234,11 +1241,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
                 const trimL = bleedPctX, trimR = 100 - bleedPctX;
                 const trimT = bleedPctY, trimB = 100 - bleedPctY;
                 const trimW = trimR - trimL, trimH = trimB - trimT;
-                const panelFrac = 1 / panels;
-                const left = foldingLong ? (trimL + trimW * panelFrac * i) : trimL;
-                const right = foldingLong ? (100 - trimL - trimW * panelFrac * (i + 1)) : (100 - trimR);
-                const top = foldingLong ? trimT : (trimT + trimH * panelFrac * i);
-                const bottom = foldingLong ? (100 - trimB) : (100 - trimT - trimH * panelFrac * (i + 1));
+                // Panel bounds from panelFracs (handles unequal gate fold panels)
+                const edges = [0, ...panelFracs, 1];
+                const pStart = edges[i], pEnd = edges[i + 1];
+                const left = foldingLong ? (trimL + trimW * pStart) : trimL;
+                const right = foldingLong ? (100 - trimL - trimW * pEnd) : (100 - trimR);
+                const top = foldingLong ? trimT : (trimT + trimH * pStart);
+                const bottom = foldingLong ? (100 - trimB) : (100 - trimT - trimH * pEnd);
                 return (
                   <div key={"pl" + i} style={{
                     position: "absolute", left: `${left}%`, right: `${right}%`, top: `${top}%`, bottom: `${bottom}%`,
