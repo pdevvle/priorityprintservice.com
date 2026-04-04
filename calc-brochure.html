@@ -795,6 +795,9 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
 
 function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwork }) {
   const mob = useIsMobile();
+  const hasIO = panels > 1 && !["z3","accordion4"].includes(foldType);
+  const fLabel = hasIO ? "Front / Outside" : "Front";
+  const bLabel = hasIO ? "Back / Inside" : "Back";
   const [frontArt, setFrontArt] = useState(null); // {dataUrl, file, dims:{w,h}}
   const [backArt, setBackArt] = useState(null);
   const [side, setSide] = useState("front"); // "front" | "back"
@@ -1020,7 +1023,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
 
           {/* Individual side upload slots */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-            {[{s:"front",label:"Front / Outside",art:frontArt,setArt:setFrontArt,inputRef:frontInputRef},{s:"back",label:"Back / Inside",art:backArt,setArt:setBackArt,inputRef:backInputRef}].map(({s,label,art,setArt,inputRef}) => {
+            {[{s:"front",label:fLabel,art:frontArt,setArt:setFrontArt,inputRef:frontInputRef},{s:"back",label:bLabel,art:backArt,setArt:setBackArt,inputRef:backInputRef}].map(({s,label,art,setArt,inputRef}) => {
               const handleSlotFile = async (file) => {
                 if (!file) return;
                 const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
@@ -1089,7 +1092,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
           <div style={{ padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Artwork Proof — {side === "front" ? "Front / Outside" : "Back / Inside"}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Artwork Proof — {side === "front" ? fLabel : bLabel}</div>
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}</div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1203,7 +1206,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
                 <div style={{ maxWidth: 500, width: "100%", textAlign: "center" }}>
                   {frontArt && <img src={frontArt.dataUrl} style={{ width: "100%", borderRadius: 6, border: "1px solid rgba(255,255,255,.1)", boxShadow: "0 8px 32px rgba(0,0,0,.4)" }} />}
                   <div style={{ fontSize: 11, color: "rgba(255,255,255,.35)", marginTop: 10 }}>
-                    {longEdge}" × {shortEdge}" flat · {side === "front" ? "Front / Outside" : "Back / Inside"}
+                    {longEdge}" × {shortEdge}" flat · {side === "front" ? fLabel : bLabel}
                   </div>
                   {backArt && (
                     <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 10 }}>
@@ -1449,7 +1452,6 @@ function App() {
   const [frontColor, setFrontColor] = useState("color");
   const [backColor, setBackColor] = useState("color");
   const [sides, setSides] = useState(2);
-  const [paperType, setPaperType] = useState("noncardstock");
   const [paper, setPaper] = useState(PAPERS_NC[2] || PAPERS_NC[0]);
   const [vivid, setVivid] = useState(false);
   const [coating, setCoating] = useState(0);
@@ -1503,10 +1505,13 @@ function App() {
 
   const r2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
   const r3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
-  const pList = paperType === "cardstock" ? PAPERS_CS : PAPERS_NC;
   const preset = SIZE_PRESETS.find(s => s.label === sizeLabel);
   const dimLong = sizeMode === "preset" ? (preset?.long || 11) : longEdge;
   const dimShort = sizeMode === "preset" ? (preset?.short || 8.5) : shortEdge;
+  // Z-folds (accordion) show both art sides on outside, so no inside/outside distinction
+  const hasInsideOutside = fold.panels > 1 && !["z3","accordion4"].includes(foldType);
+  const frontLabel = hasInsideOutside ? "Front / Outside" : "Front";
+  const backLabel = hasInsideOutside ? "Back / Inside" : "Back";
 
   return (
     <div style={{ minHeight: "100vh", background: CC.bg, fontFamily: "'Segoe UI','Helvetica Neue',Arial,sans-serif", color: CC.dark }}>
@@ -1558,18 +1563,17 @@ function App() {
           <Sec title="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
             <Pil label="Sides Printed" value={sides} onChange={v => setSides(Number(v))} options={[{ t: "Both Sides", v: 2 }, { t: "Front Only", v: 1 }]} />
             <div style={{ ...r2, marginTop: 10 }}>
-              <Pil label="Front Color" value={frontColor} onChange={setFrontColor} options={[
+              <Pil label={frontLabel + " Color"} value={frontColor} onChange={setFrontColor} options={[
                 { t: "Full Color", v: "color", onStyle: { background: "conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)", color: "#fff", fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,.5)" } },
                 { t: "Greyscale", v: "bw", onStyle: { background: "linear-gradient(135deg, #888 0%, #444 50%, #999 100%)", color: "#fff", fontWeight: 600 } }
               ]} />
-              {sides === 2 && <Pil label="Back Color" value={backColor} onChange={setBackColor} options={[
+              {sides === 2 && <Pil label={backLabel + " Color"} value={backColor} onChange={setBackColor} options={[
                 { t: "Full Color", v: "color", onStyle: { background: "conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)", color: "#fff", fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,.5)" } },
                 { t: "Greyscale", v: "bw", onStyle: { background: "linear-gradient(135deg, #888 0%, #444 50%, #999 100%)", color: "#fff", fontWeight: 600 } }
               ]} />}
             </div>
             <div style={ST.hr} />
-            <Pil label="Paper Type" value={paperType} onChange={v => { setPaperType(v); const pool = v === "cardstock" ? PAPERS_CS : PAPERS_NC; setPaper(pool[2] || pool[0]); }} options={[{ t: "Text Weight", v: "noncardstock" }, { t: "Cardstock", v: "cardstock" }]} />
-            <Sel label="Select Paper" value={paper.val} onChange={v => { const f = ALL_PAPERS.find(p => String(p.val) === v); if (f) { setPaper(f); setPaperType(f.type); } }}>
+            <Sel label="Paper" value={paper.val} onChange={v => { const f = ALL_PAPERS.find(p => String(p.val) === v); if (f) setPaper(f); }}>
               {PAPERS_NC.map(p => <option key={p.val} value={p.val}>{p.label}</option>)}
               <optgroup label="Cardstock">{PAPERS_CS.map(p => <option key={p.val} value={p.val}>{p.label}</option>)}</optgroup>
             </Sel>
