@@ -83,6 +83,18 @@ const FOLD_TYPES = _CFG.fold_types || [
   {label:"Double Parallel Fold (4 Panel)",val:"dparallel4",panels:4},
 ];
 
+// Panel labels per fold type — front (outside art) and back (inside art), left to right
+const PANEL_LABELS = {
+  bifold:    { front: ["Back","Front"], back: ["Inside Front","Inside Back"] },
+  trifold:   { front: ["Inside Flap","Back","Front"], back: ["Inside Left","Inside Center","Inside Right"] },
+  z3:        { front: ["Back","Center","Front"], back: ["Back Inside","Center Inside","Front Inside"] },
+  gate3:     { front: ["Left Flap","Front","Right Flap"], back: ["Inside Left","Inside Center","Inside Right"] },
+  accordion4:{ front: ["Back","Inside Right","Inside Left","Front"], back: ["Back Inside","Outside Right","Outside Left","Front Inside"] },
+  roll4:     { front: ["Innermost","Inner Flap","Back","Front"], back: ["Innermost Inside","Flap Inside","Inside Left","Inside Right"] },
+  dgate4:    { front: ["Left Flap","Left Center","Right Center","Right Flap"], back: ["Inside Left","Inside Left Center","Inside Right Center","Inside Right"] },
+  dparallel4:{ front: ["Inside Left","Back","Front","Inside Right"], back: ["Inside 1","Inside 2","Inside 3","Inside 4"] },
+};
+
 const PAPERS_NC = _CFG.papers_nc || [
   {label:"70lb Uncoated Opaque Text",val:0.001,price:0.06,oversizePrice:0.06,factory:false,coatable:false},
   {label:"80lb Matte Text",val:0.002,price:0.069,oversizePrice:0.069,factory:false,coatable:false},
@@ -496,6 +508,23 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
         }
       }
 
+      // Panel labels
+      const panelCfg = PANEL_LABELS[foldType];
+      if (panelCfg && panels > 1) {
+        const labels = pg === 0 ? panelCfg.front : panelCfg.back;
+        const foldingLong2 = foldDir === "long";
+        pdf.setFontSize(8); pdf.setTextColor(180, 140, 60);
+        for (let p = 0; p < labels.length; p++) {
+          const cx = foldingLong2
+            ? bleed + trimW * (p + 0.5) / panels
+            : bleed + trimW / 2;
+          const cy = foldingLong2
+            ? bleed + trimH / 2 + 0.15
+            : bleed + trimH * (p + 0.5) / panels;
+          pdf.text(labels[p], cx, cy, { align: "center" });
+        }
+      }
+
       // Text watermark — tiled "PriorityPrintService.com"
       var tileSize = Math.min(trimW * 0.2, 1.2);
       var tileStep = tileSize * 1.6;
@@ -743,7 +772,7 @@ function foldApplyView(sceneEl, foldKey, viewIdx, dirSign) {
 }
 
 // React component that renders the 3D fold scene
-function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx, foldDir }) {
+function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx, foldDir, flipped }) {
   const sceneRef = useRef(null);
   const [imgDims, setImgDims] = useState(null); // {w, h} in pixels
 
@@ -785,14 +814,14 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
     else if (fold.mode === "gate3") html = foldBuildGate(qw, ph, iW, iH, isP, fSrc, bSrc);
     else if (fold.mode === "dgate") html = foldBuildDGate(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
     sceneRef.current.innerHTML = html;
-    setTimeout(() => { if (sceneRef.current) foldApplyView(sceneRef.current, foldKey, viewIdx || 0, foldDir === "right" ? -1 : 1); }, 50);
+    setTimeout(() => { if (sceneRef.current) foldApplyView(sceneRef.current, foldKey, viewIdx || 0, flipped ? -1 : 1); }, 50);
   }, [frontSrc, backSrc, foldKey, pw, ph]);
 
   // Apply view changes
   useEffect(() => {
     if (!sceneRef.current) return;
-    foldApplyView(sceneRef.current, foldKey, viewIdx || 0, foldDir === "right" ? -1 : 1);
-  }, [viewIdx, foldDir]);
+    foldApplyView(sceneRef.current, foldKey, viewIdx || 0, flipped ? -1 : 1);
+  }, [viewIdx, foldDir, flipped]);
 
   return (
     <div className="fold-viewport" style={{ minHeight: mob ? 220 : 350 }}>
@@ -815,6 +844,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
   const [frontArt, setFrontArt] = useState(null); // {dataUrl, file, dims:{w,h}}
   const [backArt, setBackArt] = useState(null);
   const [side, setSide] = useState("front"); // "front" | "back"
+  const [foldFlipped, setFoldFlipped] = useState(false);
+  const canFlip = panels > 1 && !["gate3","dgate4"].includes(foldType);
   const [proofOpen, setProofOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewAngle, setPreviewAngle] = useState(0);
@@ -978,6 +1009,15 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
     }
   }
 
+  // Panel labels for current fold type + side, respecting flip
+  const panelCfg = PANEL_LABELS[foldType];
+  const panelLabels = useMemo(() => {
+    if (!panelCfg || panels <= 1) return [];
+    const labels = [...(side === "front" ? panelCfg.front : panelCfg.back)];
+    if (foldFlipped) labels.reverse();
+    return labels;
+  }, [foldType, panels, side, foldFlipped]);
+
   return (
     <div>
       {/* Upload area */}
@@ -1110,6 +1150,14 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}</div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {canFlip && (
+                  <button type="button" onClick={() => setFoldFlipped(f => !f)} style={{
+                    padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "1px solid rgba(255,255,255,.2)",
+                    borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                    background: foldFlipped ? "#f59e0b" : "rgba(255,255,255,.06)",
+                    color: foldFlipped ? "#000" : "rgba(255,255,255,.5)",
+                  }}>Flip Fold</button>
+                )}
                 {backArt && (
                   <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: "1px solid rgba(255,255,255,.2)" }}>
                     <button type="button" onClick={() => setSide("front")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: side === "front" ? CK.cyan : "rgba(255,255,255,.06)", color: side === "front" ? "#fff" : "rgba(255,255,255,.5)" }}>Front</button>
@@ -1179,6 +1227,31 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
                   }}>Fold {i + 1}</span>
                 </div>
               ))}
+
+              {/* Panel labels */}
+              {panelLabels.length > 0 && panelLabels.map((label, i) => {
+                const foldingLong = foldDir === "long";
+                const trimL = bleedPctX, trimR = 100 - bleedPctX;
+                const trimT = bleedPctY, trimB = 100 - bleedPctY;
+                const trimW = trimR - trimL, trimH = trimB - trimT;
+                const panelFrac = 1 / panels;
+                const left = foldingLong ? (trimL + trimW * panelFrac * i) : trimL;
+                const right = foldingLong ? (100 - trimL - trimW * panelFrac * (i + 1)) : (100 - trimR);
+                const top = foldingLong ? trimT : (trimT + trimH * panelFrac * i);
+                const bottom = foldingLong ? (100 - trimB) : (100 - trimT - trimH * panelFrac * (i + 1));
+                return (
+                  <div key={"pl" + i} style={{
+                    position: "absolute", left: `${left}%`, right: `${right}%`, top: `${top}%`, bottom: `${bottom}%`,
+                    display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 3,
+                  }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.85)",
+                      background: "rgba(0,0,0,.55)", padding: "2px 8px", borderRadius: 3,
+                      whiteSpace: "nowrap", letterSpacing: ".02em",
+                    }}>{label}</span>
+                  </div>
+                );
+              })}
 
               {/* Trim shadow overlay — darkens the bleed zone around the art */}
               <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, boxShadow: "0 0 0 200px rgba(0,0,0,0.15)", pointerEvents: "none", zIndex: 0 }} />
@@ -1259,6 +1332,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
                       shortEdge={shortEdge}
                       viewIdx={previewAngle}
                       foldDir={foldDir}
+                      flipped={foldFlipped}
                     />
                   </div>
                 </div>
