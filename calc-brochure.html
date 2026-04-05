@@ -1283,7 +1283,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
 
           {/* Proof view — bleed-inclusive container like saddle stitch */}
           <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            <div ref={proofContainerRef} style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#1a1d23", borderRadius: 4, overflow: "hidden" }}
+            <div ref={proofContainerRef} style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#1a1d23", borderRadius: 4, overflow: "hidden", ...(draggingPerf !== null ? { touchAction: "none" } : {}) }}
               onPointerMove={handlePerfDrag}
               onPointerUp={() => setDraggingPerf(null)}
             >
@@ -1341,30 +1341,33 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 const trimDim = pl.vertical ? longEdge : shortEdge;
                 const inches = (pl.pct / 100 * trimDim);
                 const inchLabel = (Math.round(inches * 8) / 8).toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '"';
+                const isDragging = draggingPerf === pl.index;
+                const hitW = mob ? 36 : 20;
                 return (
                   <React.Fragment key={"perf" + pl.index}>
                     {/* Visible line */}
                     <div style={{
                       position: "absolute", pointerEvents: "none", zIndex: 5,
+                      transition: isDragging ? "none" : "left .1s, top .1s",
                       ...(pl.vertical
-                        ? { left: `${pos}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 2.5, background: "repeating-linear-gradient(to bottom, #8b5cf6 0, #8b5cf6 6px, transparent 6px, transparent 12px)" }
-                        : { top: `${pos}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 2.5, background: "repeating-linear-gradient(to right, #8b5cf6 0, #8b5cf6 6px, transparent 6px, transparent 12px)" }
+                        ? { left: `${pos}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: isDragging ? 3.5 : 2.5, background: "repeating-linear-gradient(to bottom, #8b5cf6 0, #8b5cf6 6px, transparent 6px, transparent 12px)", boxShadow: isDragging ? "0 0 6px rgba(139,92,246,.6)" : "none" }
+                        : { top: `${pos}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: isDragging ? 3.5 : 2.5, background: "repeating-linear-gradient(to right, #8b5cf6 0, #8b5cf6 6px, transparent 6px, transparent 12px)", boxShadow: isDragging ? "0 0 6px rgba(139,92,246,.6)" : "none" }
                       ),
                     }}>
                       <span style={{
                         position: "absolute", fontSize: 9, fontWeight: 700, color: "#8b5cf6",
-                        background: "rgba(0,0,0,.6)", padding: "1px 4px", borderRadius: 2, whiteSpace: "nowrap",
+                        background: "rgba(0,0,0,.7)", padding: "1px 5px", borderRadius: 2, whiteSpace: "nowrap",
                         ...(pl.vertical ? { bottom: 8, left: 4 } : { right: 8, top: 2 }),
-                      }}>Perf {pl.index + 1}{draggingPerf === pl.index ? ` · ${inchLabel}` : ""}</span>
+                      }}>Perf {pl.index + 1} · {inchLabel}</span>
                     </div>
-                    {/* Invisible wide hit zone for dragging */}
+                    {/* Touch/mouse hit zone */}
                     <div
                       style={{
-                        position: "absolute", zIndex: 6,
+                        position: "absolute", zIndex: 6, touchAction: "none",
                         cursor: pl.vertical ? "col-resize" : "row-resize",
                         ...(pl.vertical
-                          ? { left: `calc(${pos}% - 8px)`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 16 }
-                          : { top: `calc(${pos}% - 8px)`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 16 }
+                          ? { left: `calc(${pos}% - ${hitW/2}px)`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: hitW }
+                          : { top: `calc(${pos}% - ${hitW/2}px)`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: hitW }
                         ),
                       }}
                       onPointerDown={(e) => { e.preventDefault(); setDraggingPerf(pl.index); e.target.setPointerCapture(e.pointerId); }}
@@ -1858,13 +1861,13 @@ function App() {
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>
             <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
-              note={dimShort > 14 && perfCount > 0 ? `Short edge exceeds 14" throat — perf runs across ${dimLong}" side only` : undefined}>
+              note={dimShort > 14 && perfCount > 0 ? `14" throat — ${dimLong}" perf only` : undefined}>
               {PERF_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>
             {perfCount > 0 && dimShort <= 14 && (
               <Pil label="Perf Direction" value={perfDir} onChange={setPerfDir} options={[
-                { t: `Across ${dimLong}" side`, v: "length" },
-                { t: `Across ${dimShort}" side`, v: "width" },
+                { t: `${dimLong}" perf`, v: "length" },
+                { t: `${dimShort}" perf`, v: "width" },
               ]} />
             )}
             {foldType === "flat" && (
