@@ -691,9 +691,9 @@ const FOLDS_3D = {
     {label:"Outside (Open)",sc:[8,174,0,0],dg:[0,0,0],tzf:[0,0,0]}]},
   "roll-fold": { n:4, mode:"nested", views:[
     {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
-    {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,179],tzf:[0,0,0.02]},
-    {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,178,179],tzf:[0,0.05,0.02]},
-    {label:"Roll Fold",sc:[20,-30,100,0],f:[176,178,179],tzf:[0.1,0.05,0.02]},
+    {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
+    {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
+    {label:"Roll Fold",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
     {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
 };
 
@@ -876,7 +876,12 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
     if (!sceneRef.current || !fold) return;
     const fSrc = frontSrc || null, bSrc = backSrc || null;
     let html = "";
-    if (fold.mode === "nested") html = foldBuildNest(0, fold.n, pw, ph, iW, iH, isP, fSrc, bSrc);
+    if (fold.mode === "nested") {
+      // Roll fold: panels fold inward onto the back/inside, so swap art
+      // so front art shows on the closed exterior, back art on the open interior
+      const swapArt = foldKey === "roll-fold";
+      html = foldBuildNest(0, fold.n, pw, ph, iW, iH, isP, swapArt ? bSrc : fSrc, swapArt ? fSrc : bSrc);
+    }
     else if (fold.mode === "trifold") html = foldBuildTri(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
     else if (fold.mode === "gate3") html = foldBuildGate(qw, ph, iW, iH, isP, fSrc, bSrc);
     else if (fold.mode === "dgate") html = foldBuildDGate(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
