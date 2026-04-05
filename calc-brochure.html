@@ -144,7 +144,7 @@ const INV_VALS=[0.001,0.002,0.003,0.01,0.02,0.03,1.01,1.02];
 const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
 const COAT_SIDES=[{label:"Front Only",val:1},{label:"Both Sides",val:2}];
 const BUNDLING=_CFG.bundling||[{label:"No Bundling",val:0,price:500},{label:"Bundle in 25s",val:750,price:25},{label:"Bundle in 50s",val:1500,price:50},{label:"Bundle in 100s",val:3000,price:100}];
-const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0},{label:"1 Perforation Line",val:2000,price:0.01},{label:"2 Perforation Lines",val:1000,price:0.02}];
+const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.01,count:1},{label:"2 Perforation Lines",val:1000,price:0.02,count:2}];
 const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
 const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01,price:0},{label:"Email Art After Order",val:0.02,price:0},{label:"Artwork already discussed",val:0.03,price:0},{label:"I have a design in Canva",val:0.04,price:0},{label:"Artwork needs edits",val:2.01,price:75},{label:"Design from scratch",val:4.01,price:75}];
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
@@ -489,7 +489,7 @@ function drawDashedRect(pdf, x, y, w, h, dashLen, gapLen) {
   drawDashedLine(pdf, x, y + h, x, y, dashLen, gapLen);
 }
 
-function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, sizeLabel) {
+function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, sizeLabel, perfCount, perfDir, perfPositions) {
   try {
     if (!window.jspdf) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
@@ -545,6 +545,27 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
             drawDashedLine(pdf, bleed + 0.1, y, bleed + trimW - 0.1, y, 0.08, 0.04);
             pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
             pdf.text("FOLD " + (i + 1), bleed + 0.15, y - 0.04);
+          }
+        }
+      }
+
+      // Perf lines (purple dashed)
+      if (perfCount > 0 && perfPositions) {
+        pdf.setDrawColor(139, 92, 246);
+        pdf.setLineWidth(0.01);
+        const perfVertical2 = perfDir === "length" ? (foldDir === "long") : (foldDir !== "long");
+        for (let i = 0; i < Math.min(perfCount, perfPositions.length); i++) {
+          const frac = perfPositions[i] / 100;
+          if (perfVertical2) {
+            const x = bleed + trimW * frac;
+            drawDashedLine(pdf, x, bleed + 0.1, x, bleed + trimH - 0.1, 0.08, 0.04);
+            pdf.setFontSize(6); pdf.setTextColor(139, 92, 246);
+            pdf.text("PERF " + (i + 1), x + 0.04, bleed + trimH - 0.15);
+          } else {
+            const y = bleed + trimH * frac;
+            drawDashedLine(pdf, bleed + 0.1, y, bleed + trimW - 0.1, y, 0.08, 0.04);
+            pdf.setFontSize(6); pdf.setTextColor(139, 92, 246);
+            pdf.text("PERF " + (i + 1), bleed + 0.15, y - 0.04);
           }
         }
       }
@@ -615,6 +636,7 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
         pdf.setTextColor(56, 161, 105);
         pdf.text("- - Safety (keep text inside)", lx, ly - 0.08);
         if (panels > 1) { pdf.setTextColor(245, 166, 35); pdf.text("- - Fold lines", lx, ly); }
+        if (perfCount > 0) { pdf.setTextColor(139, 92, 246); pdf.text("- - Perf lines", lx, ly + 0.08); }
       }
     }
 
@@ -883,7 +905,7 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
 // SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwork }) {
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, onArtwork }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
@@ -906,6 +928,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
   const [fitMode, setFitMode] = useState("crop");
   const [artScale, setArtScale] = useState(100);
   const [rotateSteps, setRotateSteps] = useState(0);
+  const [draggingPerf, setDraggingPerf] = useState(null);
+  const proofContainerRef = useRef(null);
   const fileRef = useRef(null);
   const frontInputRef = useRef(null);
   const backInputRef = useRef(null);
@@ -1060,6 +1084,12 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
     }
   }
 
+
+  // Perf line positions — perfDir "length" crosses longEdge (vertical when foldDir=long)
+  const perfVertical = perfDir === "length" ? (foldDir === "long") : (foldDir !== "long");
+  const perfLines = (perfCount > 0 && perfPositions)
+    ? perfPositions.slice(0, perfCount).map((pct, i) => ({ pct, vertical: perfVertical, index: i }))
+    : [];
 
   // Panel labels for current fold type + side, respecting flip
   const panelCfg = PANEL_LABELS[foldType];
@@ -1232,7 +1262,29 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
 
           {/* Proof view — bleed-inclusive container like saddle stitch */}
           <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            <div style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#1a1d23", borderRadius: 4, overflow: "hidden" }}>
+            <div ref={proofContainerRef} style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#1a1d23", borderRadius: 4, overflow: "hidden" }}
+              onPointerMove={draggingPerf !== null ? (e) => {
+                const rect = proofContainerRef.current.getBoundingClientRect();
+                const pl = perfLines[draggingPerf];
+                if (!pl) return;
+                const trimDim = pl.vertical ? longEdge : shortEdge;
+                const bPct = pl.vertical ? bleedPctX : bleedPctY;
+                const trimSpan = 100 - bPct * 2;
+                const mouseRel = pl.vertical
+                  ? ((e.clientX - rect.left) / rect.width * 100)
+                  : ((e.clientY - rect.top) / rect.height * 100);
+                let rawPct = (mouseRel - bPct) / trimSpan * 100;
+                const rawInches = rawPct / 100 * trimDim;
+                const snapped = Math.round(rawInches * 8) / 8;
+                let newPct = snapped / trimDim * 100;
+                newPct = Math.max(2, Math.min(98, newPct));
+                const updated = [...perfPositions];
+                updated[draggingPerf] = Math.round(newPct * 10) / 10;
+                onPerfPositions(updated);
+              } : undefined}
+              onPointerUp={draggingPerf !== null ? () => setDraggingPerf(null) : undefined}
+              onPointerLeave={draggingPerf !== null ? () => setDraggingPerf(null) : undefined}
+            >
               {/* Art with transforms — renders in full bleed container */}
               {(() => {
                 const ed = effectiveDims;
@@ -1280,6 +1332,45 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
                 </div>
               ))}
 
+              {/* Perf lines (purple dashed, draggable) */}
+              {perfLines.map((pl) => {
+                const bPct = pl.vertical ? bleedPctX : bleedPctY;
+                const pos = bPct + (100 - bPct * 2) * pl.pct / 100;
+                const trimDim = pl.vertical ? longEdge : shortEdge;
+                const inches = (pl.pct / 100 * trimDim);
+                const inchLabel = (Math.round(inches * 8) / 8).toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '"';
+                return (
+                  <React.Fragment key={"perf" + pl.index}>
+                    {/* Visible line */}
+                    <div style={{
+                      position: "absolute", pointerEvents: "none", zIndex: 5,
+                      ...(pl.vertical
+                        ? { left: `${pos}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 2.5, background: "repeating-linear-gradient(to bottom, #8b5cf6 0, #8b5cf6 6px, transparent 6px, transparent 12px)" }
+                        : { top: `${pos}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 2.5, background: "repeating-linear-gradient(to right, #8b5cf6 0, #8b5cf6 6px, transparent 6px, transparent 12px)" }
+                      ),
+                    }}>
+                      <span style={{
+                        position: "absolute", fontSize: 9, fontWeight: 700, color: "#8b5cf6",
+                        background: "rgba(0,0,0,.6)", padding: "1px 4px", borderRadius: 2, whiteSpace: "nowrap",
+                        ...(pl.vertical ? { bottom: 8, left: 4 } : { right: 8, top: 2 }),
+                      }}>Perf {pl.index + 1}{draggingPerf === pl.index ? ` · ${inchLabel}` : ""}</span>
+                    </div>
+                    {/* Invisible wide hit zone for dragging */}
+                    <div
+                      style={{
+                        position: "absolute", zIndex: 6,
+                        cursor: pl.vertical ? "col-resize" : "row-resize",
+                        ...(pl.vertical
+                          ? { left: `calc(${pos}% - 8px)`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 16 }
+                          : { top: `calc(${pos}% - 8px)`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 16 }
+                        ),
+                      }}
+                      onPointerDown={(e) => { e.preventDefault(); setDraggingPerf(pl.index); e.target.setPointerCapture(e.pointerId); }}
+                    />
+                  </React.Fragment>
+                );
+              })}
+
               {/* Panel labels */}
               {panelLabels.length > 0 && panelLabels.map((label, i) => {
                 const foldingLong = foldDir === "long";
@@ -1316,6 +1407,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, onArtwor
                 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>- - Trim</span>
                 <span style={{ color: "#38a169", fontWeight: 600 }}>- - Safety</span>
                 {foldLines.length > 0 && <span style={{ color: "#f59e0b", fontWeight: 600 }}>- - Fold</span>}
+                {perfLines.length > 0 && <span style={{ color: "#8b5cf6", fontWeight: 600 }}>- - Perf (drag)</span>}
               </div>
             </div>
           </div>
@@ -1600,6 +1692,8 @@ function App() {
   const [coatSides, setCoatSides] = useState(1);
   const [bundling, setBundling] = useState(0);
   const [perforation, setPerforation] = useState(0);
+  const [perfDir, setPerfDir] = useState("length");
+  const [perfPositions, setPerfPositions] = useState([50]);
   const [roundCorner, setRoundCorner] = useState(0);
   const [artwork, setArtwork] = useState(0.01);
   const [artEditPages, setArtEditPages] = useState(0);
@@ -1620,9 +1714,9 @@ function App() {
   const result = useMemo(() => calculate({
     qty, sizeMode, sizeLabel, longEdge, shortEdge,
     foldType, foldDir, frontColor, backColor, sides,
-    paper, vivid, coating, coatSides, bundling, perforation, roundCorner,
+    paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner,
     artwork, bleed, proof, shipState, shipZip, needByDate,
-  }), [qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate]);
+  }), [qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate]);
 
   const r = result || {};
 
@@ -1632,7 +1726,7 @@ function App() {
     const baseConfig = {
       qty, sizeMode, sizeLabel, longEdge, shortEdge,
       foldType, foldDir, frontColor, backColor, sides,
-      paper, vivid, coating, coatSides, bundling, perforation, roundCorner,
+      paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner,
       artwork, bleed, proof, shipState, shipZip,
     };
     const breakpoints = [25,50,100,250,500,1000,2500,5000].filter(q => q !== qty);
@@ -1643,13 +1737,25 @@ function App() {
       if (!pr || pr.error) return {qty: q, total: null, perUnit: null, current: q === qty};
       return {qty: q, total: pr.total, perUnit: pr.perUnit, current: q === qty};
     });
-  }, [result, qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate]);
+  }, [result, qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate]);
 
   const r2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
   const r3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
   const preset = SIZE_PRESETS.find(s => s.label === sizeLabel);
   const dimLong = sizeMode === "preset" ? (preset?.long || 11) : longEdge;
   const dimShort = sizeMode === "preset" ? (preset?.short || 8.5) : shortEdge;
+
+  // Perf count + auto-reset logic
+  const perfOpt = PERF_OPTS.find(x => x.val === perforation) || PERF_OPTS[0];
+  const perfCount = perfOpt.count || 0;
+  const perfDefaults = (n) => n === 2 ? [33.3, 66.7] : [50];
+  if (dimShort > 14 && perfDir !== "length") setPerfDir("length");
+  const prevPerfKey = useRef(`${perfCount}-${perfDir}`);
+  if (prevPerfKey.current !== `${perfCount}-${perfDir}`) {
+    prevPerfKey.current = `${perfCount}-${perfDir}`;
+    setPerfPositions(perfDefaults(perfCount));
+  }
+
   // Z-folds (accordion) show both art sides on outside, so no inside/outside distinction
   const hasInsideOutside = fold.panels > 1 && foldType !== "z3";
   const frontLabel = hasInsideOutside ? "Front / Outside" : "Front";
@@ -1748,14 +1854,16 @@ function App() {
             <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>
-            {(() => {
-              // 14" rotary perf throat: short edge > 14" means perf must run along length
-              const perfAlongLength = dimShort > 14;
-              const perfNote = perfAlongLength ? "Short edge exceeds 14\" throat — perf runs along length" : undefined;
-              return <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))} note={perfNote}>
-                {PERF_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-              </Sel>;
-            })()}
+            <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
+              note={dimShort > 14 && perfCount > 0 ? `Short edge exceeds 14" throat — perf runs across ${dimLong}" side only` : undefined}>
+              {PERF_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+            </Sel>
+            {perfCount > 0 && dimShort <= 14 && (
+              <Pil label="Perf Direction" value={perfDir} onChange={setPerfDir} options={[
+                { t: `Across ${dimLong}" side`, v: "length" },
+                { t: `Across ${dimShort}" side`, v: "width" },
+              ]} />
+            )}
             {foldType === "flat" && (
               <Sel label="Round Cornering" value={roundCorner} onChange={v => setRoundCorner(Number(v))}>
                 {CORNERS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
@@ -1804,6 +1912,8 @@ function App() {
                 <SheetPreview
                   longEdge={dimLong} shortEdge={dimShort}
                   foldType={foldType} foldDir={foldDir} panels={fold.panels}
+                  perfCount={perfCount} perfDir={perfDir}
+                  perfPositions={perfPositions} onPerfPositions={setPerfPositions}
                   onArtwork={(a) => {/* artFiles state if needed */}}
                 />
               </div>
@@ -1847,7 +1957,7 @@ function App() {
                   {dimLong}" × {dimShort}" {fold.panels > 1 ? `· ${fold.panels} panels` : "flat"} · Bleed, trim, safety{fold.panels > 1 ? ", fold lines" : ""}
                 </div>
               </div>
-              <button type="button" onClick={() => generateBrochureTemplate(dimLong, dimShort, foldType, fold.panels, foldDir, sizeLabel)} style={{
+              <button type="button" onClick={() => generateBrochureTemplate(dimLong, dimShort, foldType, fold.panels, foldDir, sizeLabel, perfCount, perfDir, perfPositions)} style={{
                 padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CK.cyan}`, background: CK.cyanLight, color: CK.cyan, whiteSpace: "nowrap",
               }}>📐 Download Template</button>
