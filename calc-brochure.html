@@ -1833,7 +1833,7 @@ function App() {
       <style>{`@media(max-width:700px){.pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}.pps-sec-body{padding:12px 14px!important}}`}</style>
 
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "10px" : "20px 24px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size, Qty, Fold */}
           <Sec title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
