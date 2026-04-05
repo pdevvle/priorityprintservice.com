@@ -1091,6 +1091,27 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     ? perfPositions.slice(0, perfCount).map((pct, i) => ({ pct, vertical: perfVertical, index: i }))
     : [];
 
+  // Drag handler for perf lines
+  function handlePerfDrag(e) {
+    if (draggingPerf === null || !proofContainerRef.current) return;
+    const pl = perfLines[draggingPerf];
+    if (!pl) return;
+    const rect = proofContainerRef.current.getBoundingClientRect();
+    const trimDim = pl.vertical ? longEdge : shortEdge;
+    const bPct = pl.vertical ? bleedPctX : bleedPctY;
+    const trimSpan = 100 - bPct * 2;
+    const mouseRel = pl.vertical
+      ? ((e.clientX - rect.left) / rect.width * 100)
+      : ((e.clientY - rect.top) / rect.height * 100);
+    var rawPct = (mouseRel - bPct) / trimSpan * 100;
+    var rawInches = rawPct / 100 * trimDim;
+    var snapped = Math.round(rawInches * 8) / 8;
+    var newPct = Math.max(2, Math.min(98, snapped / trimDim * 100));
+    var updated = perfPositions.slice();
+    updated[draggingPerf] = Math.round(newPct * 10) / 10;
+    onPerfPositions(updated);
+  }
+
   // Panel labels for current fold type + side, respecting flip
   const panelCfg = PANEL_LABELS[foldType];
   const panelLabels = useMemo(() => {
@@ -1263,27 +1284,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
           {/* Proof view — bleed-inclusive container like saddle stitch */}
           <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div ref={proofContainerRef} style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#1a1d23", borderRadius: 4, overflow: "hidden" }}
-              onPointerMove={draggingPerf !== null ? (e) => {
-                const rect = proofContainerRef.current.getBoundingClientRect();
-                const pl = perfLines[draggingPerf];
-                if (!pl) return;
-                const trimDim = pl.vertical ? longEdge : shortEdge;
-                const bPct = pl.vertical ? bleedPctX : bleedPctY;
-                const trimSpan = 100 - bPct * 2;
-                const mouseRel = pl.vertical
-                  ? ((e.clientX - rect.left) / rect.width * 100)
-                  : ((e.clientY - rect.top) / rect.height * 100);
-                let rawPct = (mouseRel - bPct) / trimSpan * 100;
-                const rawInches = rawPct / 100 * trimDim;
-                const snapped = Math.round(rawInches * 8) / 8;
-                let newPct = snapped / trimDim * 100;
-                newPct = Math.max(2, Math.min(98, newPct));
-                const updated = [...perfPositions];
-                updated[draggingPerf] = Math.round(newPct * 10) / 10;
-                onPerfPositions(updated);
-              } : undefined}
-              onPointerUp={draggingPerf !== null ? () => setDraggingPerf(null) : undefined}
-              onPointerLeave={draggingPerf !== null ? () => setDraggingPerf(null) : undefined}
+              onPointerMove={handlePerfDrag}
+              onPointerUp={() => setDraggingPerf(null)}
             >
               {/* Art with transforms — renders in full bleed container */}
               {(() => {
