@@ -701,10 +701,10 @@ const FOLDS_3D = {
 function safeSrc(src) { return src && src.startsWith("data:") ? src : ""; }
 
 // Panel face builder — maps artwork onto front/back of each panel
-// Wrap image in a positioned div so object-fit:cover works with sprite-sheet clipping
+// Wrap image in a positioned div so object-fit:contain works with sprite-sheet clipping
 function foldImgWrap(src, iW, iH, ml, mt) {
   if (!src) return "";
-  return `<div style="width:${iW}px;height:${iH}px;margin-left:${ml}px;margin-top:${mt}px;position:relative"><img src="${safeSrc(src)}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`;
+  return `<div style="width:${iW}px;height:${iH}px;margin-left:${ml}px;margin-top:${mt}px;position:relative"><img src="${safeSrc(src)}" style="width:100%;height:100%;object-fit:contain;display:block"></div>`;
 }
 
 function foldMkF(idx, n, pw, ph, iW, iH, isP, frontSrc, backSrc, swap) {
