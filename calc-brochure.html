@@ -1746,8 +1746,9 @@ function App() {
   const dimShort = sizeMode === "preset" ? (preset?.short || 8.5) : shortEdge;
 
   // Perf count + auto-reset logic
-  const perfOpt = PERF_OPTS.find(x => x.val === perforation) || PERF_OPTS[0];
-  const perfCount = perfOpt.count || 0;
+  const perfIdx = PERF_OPTS.findIndex(x => x.val === perforation);
+  const perfOpt = perfIdx >= 0 ? PERF_OPTS[perfIdx] : PERF_OPTS[0];
+  const perfCount = perfOpt.count != null ? perfOpt.count : perfIdx;
   const perfDefaults = (n) => n === 2 ? [33.3, 66.7] : [50];
   if (dimShort > 14 && perfDir !== "length") setPerfDir("length");
   const prevPerfKey = useRef(`${perfCount}-${perfDir}`);
