@@ -845,7 +845,7 @@ function foldApplyView(sceneEl, foldKey, viewIdx, dirSign) {
 }
 
 // React component that renders the 3D fold scene
-function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx, foldDir, flipped }) {
+function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx, foldDir, flipped, frontGray, backGray }) {
   const sceneRef = useRef(null);
   const fold = FOLDS_3D[foldKey];
 
@@ -867,18 +867,23 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
     if (!sceneRef.current || !fold) return;
     const fSrc = frontSrc || null, bSrc = backSrc || null;
     let html = "";
+    // Roll fold: panels fold inward onto the back/inside, so swap art
+    const swapArt = foldKey === "roll-fold";
     if (fold.mode === "nested") {
-      // Roll fold: panels fold inward onto the back/inside, so swap art
-      // so front art shows on the closed exterior, back art on the open interior
-      const swapArt = foldKey === "roll-fold";
       html = foldBuildNest(0, fold.n, pw, ph, iW, iH, isP, swapArt ? bSrc : fSrc, swapArt ? fSrc : bSrc);
     }
     else if (fold.mode === "trifold") html = foldBuildTri(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
     else if (fold.mode === "gate3") html = foldBuildGate(qw, ph, iW, iH, isP, fSrc, bSrc);
     else if (fold.mode === "dgate") html = foldBuildDGate(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc);
     sceneRef.current.innerHTML = html;
+    // Apply greyscale filters — ff=front face, fb=back face
+    // For roll fold, art is swapped so ff shows back art and fb shows front art
+    var ffGray = swapArt ? backGray : frontGray;
+    var fbGray = swapArt ? frontGray : backGray;
+    sceneRef.current.querySelectorAll(".ff img").forEach(function(img) { img.style.filter = ffGray ? "grayscale(1)" : "none"; });
+    sceneRef.current.querySelectorAll(".fb img").forEach(function(img) { img.style.filter = fbGray ? "grayscale(1)" : "none"; });
     setTimeout(() => { if (sceneRef.current) foldApplyView(sceneRef.current, foldKey, viewIdx || 0, flipped ? -1 : 1); }, 50);
-  }, [frontSrc, backSrc, foldKey, pw, ph, flipped]);
+  }, [frontSrc, backSrc, foldKey, pw, ph, flipped, frontGray, backGray]);
 
   // Apply view changes
   useEffect(() => {
@@ -901,7 +906,7 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
 // SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, onArtwork }) {
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onArtwork }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
@@ -1319,9 +1324,12 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                   position: "absolute", top: "50%", left: "50%",
                   transform: "translate(-50%, -50%)", display: "block",
                 });
+                const sideColor = side === "front" ? frontColor : backColor;
+                const grayFilter = sideColor === "bw" ? "grayscale(1)" : "none";
                 return (
                   <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#2a2e36" }}>
                     <img src={artSrc} style={{
+                      filter: grayFilter,
                       ...(fitMode === "crop" ? cropStyle(1)
                         : fitMode === "scale" ? cropStyle(artScale / 100)
                         : fitMode === "stretch" ? { display: "block", width: "100%", height: "100%", objectFit: "fill", position: "absolute", inset: 0 }
@@ -1531,6 +1539,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                       viewIdx={previewAngle}
                       foldDir={foldDir}
                       flipped={foldFlipped}
+                      frontGray={frontColor === "bw"}
+                      backGray={backColor === "bw"}
                     />
                   </div>
                 </div>
@@ -2018,6 +2028,7 @@ function App() {
                   foldType={foldType} foldDir={foldDir} panels={fold.panels}
                   perfCount={perfCount} perfDir={perfDir}
                   perfPositions={perfPositions} onPerfPositions={setPerfPositions}
+                  frontColor={frontColor} backColor={backColor} sides={sides}
                   onArtwork={(a) => {/* artFiles state if needed */}}
                 />
               </div>
