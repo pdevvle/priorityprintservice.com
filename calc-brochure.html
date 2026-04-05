@@ -929,6 +929,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const [artScale, setArtScale] = useState(100);
   const [rotateSteps, setRotateSteps] = useState(0);
   const [draggingPerf, setDraggingPerf] = useState(null);
+  const [editingPerf, setEditingPerf] = useState(null); // index of perf being edited via text input
+  const [editPerfVal, setEditPerfVal] = useState("");
   const proofContainerRef = useRef(null);
   const fileRef = useRef(null);
   const frontInputRef = useRef(null);
@@ -1091,25 +1093,49 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     ? perfPositions.slice(0, perfCount).map((pct, i) => ({ pct, vertical: perfVertical, index: i }))
     : [];
 
+  // Perf constraint: 1" from edge, 1" between perfs, snap to 1/8"
+  function clampPerfInches(inches, idx, trimDim, positions) {
+    var minIn = 1, maxIn = trimDim - 1;
+    // 1" away from the other perf line
+    for (var j = 0; j < positions.length; j++) {
+      if (j === idx) continue;
+      var otherIn = positions[j] / 100 * trimDim;
+      if (inches < otherIn) maxIn = Math.min(maxIn, otherIn - 1);
+      else minIn = Math.max(minIn, otherIn + 1);
+    }
+    var snapped = Math.round(Math.max(minIn, Math.min(maxIn, inches)) * 8) / 8;
+    return Math.max(minIn, Math.min(maxIn, snapped));
+  }
+
   // Drag handler for perf lines
   function handlePerfDrag(e) {
     if (draggingPerf === null || !proofContainerRef.current) return;
-    const pl = perfLines[draggingPerf];
+    var pl = perfLines[draggingPerf];
     if (!pl) return;
-    const rect = proofContainerRef.current.getBoundingClientRect();
-    const trimDim = pl.vertical ? longEdge : shortEdge;
-    const bPct = pl.vertical ? bleedPctX : bleedPctY;
-    const trimSpan = 100 - bPct * 2;
-    const mouseRel = pl.vertical
+    var rect = proofContainerRef.current.getBoundingClientRect();
+    var trimDim = pl.vertical ? longEdge : shortEdge;
+    var bPct = pl.vertical ? bleedPctX : bleedPctY;
+    var trimSpan = 100 - bPct * 2;
+    var mouseRel = pl.vertical
       ? ((e.clientX - rect.left) / rect.width * 100)
       : ((e.clientY - rect.top) / rect.height * 100);
-    var rawPct = (mouseRel - bPct) / trimSpan * 100;
-    var rawInches = rawPct / 100 * trimDim;
-    var snapped = Math.round(rawInches * 8) / 8;
-    var newPct = Math.max(2, Math.min(98, snapped / trimDim * 100));
+    var rawInches = (mouseRel - bPct) / trimSpan * trimDim;
+    var clamped = clampPerfInches(rawInches, draggingPerf, trimDim, perfPositions);
     var updated = perfPositions.slice();
-    updated[draggingPerf] = Math.round(newPct * 10) / 10;
+    updated[draggingPerf] = Math.round(clamped / trimDim * 1000) / 10;
     onPerfPositions(updated);
+  }
+
+  // Commit typed perf value
+  function commitPerfEdit(idx) {
+    var v = parseFloat(editPerfVal);
+    if (isNaN(v)) { setEditingPerf(null); return; }
+    var trimDim = perfVertical ? longEdge : shortEdge;
+    var clamped = clampPerfInches(v, idx, trimDim, perfPositions);
+    var updated = perfPositions.slice();
+    updated[idx] = Math.round(clamped / trimDim * 1000) / 10;
+    onPerfPositions(updated);
+    setEditingPerf(null);
   }
 
   // Panel labels for current fold type + side, respecting flip
@@ -1340,8 +1366,9 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 const pos = bPct + (100 - bPct * 2) * pl.pct / 100;
                 const trimDim = pl.vertical ? longEdge : shortEdge;
                 const inches = (pl.pct / 100 * trimDim);
-                const inchLabel = (Math.round(inches * 8) / 8).toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '"';
+                const inchLabel = (Math.round(inches * 8) / 8).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
                 const isDragging = draggingPerf === pl.index;
+                const isEditing = editingPerf === pl.index;
                 const hitW = mob ? 36 : 20;
                 return (
                   <React.Fragment key={"perf" + pl.index}>
@@ -1354,13 +1381,37 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                         : { top: `${pos}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: isDragging ? 3.5 : 2.5, background: "repeating-linear-gradient(to right, #8b5cf6 0, #8b5cf6 6px, transparent 6px, transparent 12px)", boxShadow: isDragging ? "0 0 6px rgba(139,92,246,.6)" : "none" }
                       ),
                     }}>
-                      <span style={{
-                        position: "absolute", fontSize: 9, fontWeight: 700, color: "#8b5cf6",
-                        background: "rgba(0,0,0,.7)", padding: "1px 5px", borderRadius: 2, whiteSpace: "nowrap",
-                        ...(pl.vertical ? { bottom: 8, left: 4 } : { right: 8, top: 2 }),
-                      }}>Perf {pl.index + 1} · {inchLabel}</span>
+                      {/* Tappable label — click to type a value */}
+                      {isEditing ? (
+                        <span style={{
+                          position: "absolute", zIndex: 8, pointerEvents: "auto",
+                          ...(pl.vertical ? { bottom: 8, left: 4 } : { right: 8, top: 2 }),
+                        }}>
+                          <input type="number" autoFocus step="0.125" min="1" max={trimDim - 1}
+                            value={editPerfVal}
+                            onChange={(e) => setEditPerfVal(e.target.value)}
+                            onBlur={() => commitPerfEdit(pl.index)}
+                            onKeyDown={(e) => { if (e.key === "Enter") commitPerfEdit(pl.index); if (e.key === "Escape") setEditingPerf(null); }}
+                            style={{
+                              width: 52, fontSize: 10, fontWeight: 700, color: "#8b5cf6",
+                              background: "rgba(0,0,0,.85)", border: "1px solid #8b5cf6",
+                              borderRadius: 3, padding: "2px 4px", outline: "none",
+                              textAlign: "center",
+                            }}
+                          />
+                        </span>
+                      ) : (
+                        <span
+                          onClick={() => { setEditingPerf(pl.index); setEditPerfVal(inchLabel); }}
+                          style={{
+                            position: "absolute", fontSize: 9, fontWeight: 700, color: "#8b5cf6",
+                            background: "rgba(0,0,0,.7)", padding: "1px 5px", borderRadius: 2, whiteSpace: "nowrap",
+                            cursor: "text", pointerEvents: "auto",
+                            ...(pl.vertical ? { bottom: 8, left: 4 } : { right: 8, top: 2 }),
+                          }}>Perf {pl.index + 1} · {inchLabel}"</span>
+                      )}
                     </div>
-                    {/* Touch/mouse hit zone */}
+                    {/* Touch/mouse hit zone for dragging */}
                     <div
                       style={{
                         position: "absolute", zIndex: 6, touchAction: "none",
@@ -1370,7 +1421,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                           : { top: `calc(${pos}% - ${hitW/2}px)`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: hitW }
                         ),
                       }}
-                      onPointerDown={(e) => { e.preventDefault(); setDraggingPerf(pl.index); e.target.setPointerCapture(e.pointerId); }}
+                      onPointerDown={(e) => { if (editingPerf !== null) return; e.preventDefault(); setDraggingPerf(pl.index); e.target.setPointerCapture(e.pointerId); }}
                     />
                   </React.Fragment>
                 );
@@ -1750,10 +1801,20 @@ function App() {
   const dimLong = sizeMode === "preset" ? (preset?.long || 11) : longEdge;
   const dimShort = sizeMode === "preset" ? (preset?.short || 8.5) : shortEdge;
 
-  // Perf count + auto-reset logic
+  // Perf count + constraint logic
+  // The perf crosses one dimension: "length" → longEdge, "width" → shortEdge
+  const perfCrossDim = perfDir === "length" ? dimLong : dimShort;
+  // Max perfs: need 1" from each edge + 1" between each pair → n perfs need (n+1)" min
+  const maxPerfs = Math.max(0, Math.floor(perfCrossDim - 1)); // e.g. 2" → 1 perf, 4" → 2 perfs
   const perfIdx = PERF_OPTS.findIndex(x => x.val === perforation);
   const perfOpt = perfIdx >= 0 ? PERF_OPTS[perfIdx] : PERF_OPTS[0];
-  const perfCount = perfOpt.count != null ? perfOpt.count : perfIdx;
+  const rawPerfCount = perfOpt.count != null ? perfOpt.count : perfIdx;
+  const perfCount = Math.min(rawPerfCount, maxPerfs);
+  // Auto-downgrade if dimension too small for selected count
+  if (rawPerfCount > maxPerfs && perforation !== 0) {
+    var downgraded = PERF_OPTS.find(x => (x.count != null ? x.count : PERF_OPTS.indexOf(x)) === maxPerfs);
+    if (downgraded && downgraded.val !== perforation) setPerforation(downgraded.val);
+  }
   const perfDefaults = (n) => n === 2 ? [33.3, 66.7] : [50];
   if (dimShort > 14 && perfDir !== "length") setPerfDir("length");
   const prevPerfKey = useRef(`${perfCount}-${perfDir}`);
@@ -1861,13 +1922,16 @@ function App() {
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>
             <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
-              note={dimShort > 14 && perfCount > 0 ? `14" throat — ${dimLong}" perf only` : undefined}>
-              {PERF_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+              note={dimShort > 14 && perfCount > 0 ? `14" throat — ${dimShort}" perf only` : (perfCount > 0 && perfCrossDim < 4 ? `${perfCrossDim}" too short for 2 perfs` : undefined)}>
+              {PERF_OPTS.filter(o => {
+                var c = o.count != null ? o.count : PERF_OPTS.indexOf(o);
+                return c <= maxPerfs;
+              }).map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>
             {perfCount > 0 && dimShort <= 14 && (
               <Pil label="Perf Direction" value={perfDir} onChange={setPerfDir} options={[
-                { t: `${dimLong}" perf`, v: "length" },
-                { t: `${dimShort}" perf`, v: "width" },
+                { t: `${dimShort}" perf`, v: "length" },
+                { t: `${dimLong}" perf`, v: "width" },
               ]} />
             )}
             {foldType === "flat" && (
