@@ -906,7 +906,7 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, longEdge, shortEdge, viewIdx
 // SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onArtwork }) {
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onArtwork }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
@@ -1139,6 +1139,30 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     setEditingPerf(null);
   }
 
+  // Scale order size to match uploaded art dimensions
+  function handleMatchSize() {
+    if (!effectiveDims || !onSizeOverride) return;
+    var artW = effectiveDims.w, artH = effectiveDims.h;
+    if (!artW || !artH) return;
+    if (!confirm("This will change your brochure size to match the uploaded artwork dimensions. Continue?")) return;
+    var input = prompt(
+      "Artwork is " + artW.toFixed(2) + "\u2033 \u00d7 " + artH.toFixed(2) + "\u2033.\n\n" +
+      "How much of this size is bleed (per side)?\n\n" +
+      "Enter 0 if artwork has no bleeds.\n" +
+      "Standard print bleed is 0.125\u2033.",
+      "0.125"
+    );
+    if (input === null) return;
+    var bleedVal = parseFloat(input);
+    if (isNaN(bleedVal) || bleedVal < 0 || bleedVal >= Math.min(artW, artH) / 2) {
+      alert("Invalid bleed value.");
+      return;
+    }
+    var trimW = artW - bleedVal * 2;
+    var trimH = artH - bleedVal * 2;
+    onSizeOverride(trimW, trimH);
+  }
+
   // Panel labels for current fold type + side, respecting flip
   const panelCfg = PANEL_LABELS[foldType];
   const panelLabels = useMemo(() => {
@@ -1305,6 +1329,12 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
             {/* Transform controls */}
             <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <FitToggle />
+              {onSizeOverride && effectiveDims && (
+                <button type="button" onClick={handleMatchSize} style={{
+                  padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                  border: "1px solid rgba(255,255,255,.2)", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)",
+                }}>↔ Match size to art</button>
+              )}
             </div>
           </div>
 
@@ -2029,6 +2059,13 @@ function App() {
                   perfCount={perfCount} perfDir={perfDir}
                   perfPositions={perfPositions} onPerfPositions={setPerfPositions}
                   frontColor={frontColor} backColor={backColor} sides={sides}
+                  onSizeOverride={(w, h) => {
+                    setSizeMode("custom");
+                    setSizeLabel("Custom Size");
+                    var long = Math.max(w, h), short = Math.min(w, h);
+                    setLongEdge(parseFloat(long.toFixed(3)));
+                    setShortEdge(parseFloat(short.toFixed(3)));
+                  }}
                   onArtwork={(a) => {/* artFiles state if needed */}}
                 />
               </div>
