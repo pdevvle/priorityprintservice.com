@@ -122,21 +122,21 @@ function getFoldFracs(foldType, panels, foldDim) {
 }
 
 const PAPERS_NC = _CFG.papers_nc || [
-  {label:"70lb Uncoated Opaque Text",val:0.001,price:0.06,oversizePrice:0.06,factory:false,coatable:false},
-  {label:"80lb Matte Text",val:0.002,price:0.069,oversizePrice:0.069,factory:false,coatable:false},
-  {label:"100lb Gloss Text",val:0.003,price:0.085,oversizePrice:0.085,factory:false,coatable:true},
-  {label:"50lb Offset Smooth Opaque",val:2.001,price:0.039,oversizePrice:0.039,factory:true,coatable:false},
-  {label:"60lb Offset Smooth Opaque",val:2.002,price:0.042,oversizePrice:0.042,factory:true,coatable:false},
-  {label:"80lb Offset Smooth Opaque",val:2.003,price:0.056,oversizePrice:0.056,factory:true,coatable:false},
-  {label:"80lb Gloss Factory Coated",val:2.004,price:0.0525,oversizePrice:0.0525,factory:true,coatable:true},
-  {label:"100lb Matte Factory Coated",val:2.005,price:0.070,oversizePrice:0.070,factory:true,coatable:true},
+  {label:"70lb Uncoated Opaque Text",val:0.001,days:0,price:0.06,oversizePrice:0.06,factory:false,coatable:false},
+  {label:"80lb Matte Text",val:0.002,days:0,price:0.069,oversizePrice:0.069,factory:false,coatable:false},
+  {label:"100lb Gloss Text",val:0.003,days:0,price:0.085,oversizePrice:0.085,factory:false,coatable:true},
+  {label:"50lb Offset Smooth Opaque",val:2.001,days:2,price:0.039,oversizePrice:0.039,factory:true,coatable:false},
+  {label:"60lb Offset Smooth Opaque",val:2.002,days:2,price:0.042,oversizePrice:0.042,factory:true,coatable:false},
+  {label:"80lb Offset Smooth Opaque",val:2.003,days:2,price:0.056,oversizePrice:0.056,factory:true,coatable:false},
+  {label:"80lb Gloss Factory Coated",val:2.004,days:2,price:0.0525,oversizePrice:0.0525,factory:true,coatable:true},
+  {label:"100lb Matte Factory Coated",val:2.005,days:2,price:0.070,oversizePrice:0.070,factory:true,coatable:true},
 ];
 const PAPERS_CS = _CFG.papers_cs || [
-  {label:"80lb Opaque Uncoated",val:0.01,price:0.0919,oversizePrice:0.0919,factory:false,coatable:false},
-  {label:"80lb Matte Cardstock",val:0.02,price:0.1119,oversizePrice:0.1119,factory:false,coatable:true},
-  {label:"100lb Gloss Cardstock",val:0.03,price:0.1319,oversizePrice:0.1319,factory:false,coatable:true},
-  {label:"14pt Gloss C1S",val:1.01,price:0.1619,oversizePrice:0.1619,factory:false,coatable:true},
-  {label:"16pt Coated C2S",val:1.02,price:0.1919,oversizePrice:0.1919,factory:false,coatable:true},
+  {label:"80lb Opaque Uncoated",val:0.01,days:0,price:0.0919,oversizePrice:0.0919,factory:false,coatable:false},
+  {label:"80lb Matte Cardstock",val:0.02,days:0,price:0.1119,oversizePrice:0.1119,factory:false,coatable:true},
+  {label:"100lb Gloss Cardstock",val:0.03,days:0,price:0.1319,oversizePrice:0.1319,factory:false,coatable:true},
+  {label:"14pt Gloss C1S",val:1.01,days:1,price:0.1619,oversizePrice:0.1619,factory:false,coatable:true},
+  {label:"16pt Coated C2S",val:1.02,days:1,price:0.1919,oversizePrice:0.1919,factory:false,coatable:true},
 ];
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
 const INV_VALS=[0.001,0.002,0.003,0.01,0.02,0.03,1.01,1.02];
@@ -373,7 +373,7 @@ function calculate(c) {
   const total = Object.values(P).reduce((s, v) => s + v, 0);
 
   // Turnaround
-  const paperDays = Math.floor(paper.val || 0);
+  const paperDays = paper.days != null ? paper.days : Math.floor(paper.val || 0);
   const vividDays = c.vivid ? Math.floor(pressSheets / 2500) : 0;
   const coatDays = (coat.val > 0 && paper.coatable) ? Math.ceil(pressSheets / (coat.val / (c.coatSides || 1))) : 0;
   const bundleDays = (bund.val > 0 && qty >= 100) ? Math.floor(approxThickness / bund.val) : 0;
