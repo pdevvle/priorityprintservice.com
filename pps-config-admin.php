@@ -812,9 +812,43 @@ function pps_config_tab_production( $cfg ) {
             if ( $meta[1] ) echo '<td class="ss-unit">' . esc_html( $meta[1] ) . '</td>';
             echo '</tr>';
         }
-        echo '</tbody></table></div>';
+        echo '</tbody></table>';
+        if ( $gLabel === 'Shippo Integration' ) {
+            echo '<div style="margin:8px 0 4px">';
+            echo '<button type="button" id="pps-test-shippo" class="button button-small">Test Connection</button>';
+            echo ' <span id="pps-shippo-result" style="font-size:12px;margin-left:6px"></span>';
+            echo '</div>';
+        }
+        echo '</div>';
     }
     echo '</div>';
+
+    // Inline JS for Shippo test button
+    ?>
+    <script>
+    jQuery(function($){
+        $('#pps-test-shippo').on('click', function(){
+            var $btn = $(this), $res = $('#pps-shippo-result');
+            $btn.prop('disabled', true).text('Testing…');
+            $res.text('').css('color','');
+            $.post(ajaxurl, {
+                action: 'pps_test_shippo',
+                _wpnonce: $('#pps-config-form').find('[name="_wpnonce"]').val()
+            }, function(resp){
+                if (resp.success) {
+                    $res.css('color','#00a32a').text('✓ ' + resp.data.message);
+                } else {
+                    $res.css('color','#d63638').text('✗ ' + resp.data);
+                }
+            }).fail(function(){
+                $res.css('color','#d63638').text('✗ Request failed');
+            }).always(function(){
+                $btn.prop('disabled', false).text('Test Connection');
+            });
+        });
+    });
+    </script>
+    <?php
 }
 
 // ═══════════════════════════════════════════════════════════════

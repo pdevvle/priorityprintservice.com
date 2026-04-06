@@ -1456,6 +1456,58 @@ function pps_default_tooltips() {
 }
 
 /**
+ * Test Shippo API connection — validates the configured token.
+ * Makes a lightweight address-creation call to verify authentication.
+ */
+add_action( 'wp_ajax_pps_test_shippo', function() {
+    check_ajax_referer( 'pps_config_save', '_wpnonce' );
+    if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorized' );
+
+    $cfg   = pps_get_config();
+    $token = trim( $cfg['pcf']['shippo_api_token'] ?? '' );
+    if ( empty( $token ) ) {
+        wp_send_json_error( 'No Shippo API token configured. Enter a token and save first.' );
+    }
+
+    // Lightweight validation: create a test address (non-validate mode, minimal data)
+    $resp = wp_remote_post( 'https://api.goshippo.com/addresses/', array(
+        'headers' => array(
+            'Authorization' => 'ShippoToken ' . $token,
+            'Content-Type'  => 'application/json',
+        ),
+        'body'    => wp_json_encode( array(
+            'name'    => 'PPS Connection Test',
+            'street1' => '1234 Test St',
+            'city'    => 'Phoenix',
+            'state'   => 'AZ',
+            'zip'     => '85027',
+            'country' => 'US',
+        ) ),
+        'timeout' => 10,
+    ) );
+
+    if ( is_wp_error( $resp ) ) {
+        wp_send_json_error( 'Network error: ' . $resp->get_error_message() );
+    }
+
+    $code = wp_remote_retrieve_response_code( $resp );
+    $body = json_decode( wp_remote_retrieve_body( $resp ), true );
+
+    if ( $code === 401 ) {
+        wp_send_json_error( 'Authentication failed — check your API token.' );
+    }
+    if ( $code >= 400 ) {
+        wp_send_json_error( 'Shippo returned HTTP ' . $code . ': ' . ( $body['detail'] ?? 'Unknown error' ) );
+    }
+
+    wp_send_json_success( array(
+        'message'    => 'Connected to Shippo successfully.',
+        'object_id'  => $body['object_id'] ?? null,
+        'origin_zip' => $cfg['pcf']['shippo_origin_zip'] ?? '85027',
+    ) );
+} );
+
+/**
  * Save tooltips from admin — stored as a single wp_option.
  * Accepts JSON with the same structure as pps_default_tooltips().
  */
