@@ -1243,7 +1243,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
           </div>
 
           {/* Fold selection + 3D Preview */}
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 8 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>
               <Sel label="Fold Type" value={foldType} onChange={onFoldChange}>
                 {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
@@ -1253,7 +1253,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
               <button type="button" onClick={() => { setPreviewOpen(true); setPreviewAngle(0); }} style={{
                 padding: "10px 16px", fontSize: 12, fontWeight: 600, borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CC.border}`, background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
-                display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap", marginBottom: 10,
+                display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap",
               }}>📖 3D Preview</button>
             )}
           </div>
