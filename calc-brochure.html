@@ -1962,7 +1962,7 @@ function App() {
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sec title="Size & Quantity" open={op.s1} onToggle={() => tog("s1")}>
+          <Sec title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
@@ -1974,6 +1974,32 @@ function App() {
                   <TxtNum label="Short Edge (in)" value={shortEdge} onChange={setShortEdge} min={2} max={12.5} />
                 </div>
             }
+            <div style={ST.hr} />
+            <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
+              {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
+            </Sel>
+            {fold.panels > 1 && sizeMode === "custom" && (
+              <Pil label="Fold Direction" value={foldDir} onChange={setFoldDir} options={[
+                { t: `Fold Long Side (${dimLong}")`, v: "long" },
+                { t: `Fold Short Side (${dimShort}")`, v: "short" },
+              ]} />
+            )}
+            {fold.panels > 1 && (() => {
+              const foldDim = foldDir === "long" ? dimLong : dimShort;
+              const staticDim = foldDir === "long" ? dimShort : dimLong;
+              const panelSize = foldDim / fold.panels;
+              const tooSmall = panelSize < 2;
+              const throatExceeded = foldDir === "short" && dimLong > 13;
+              return <>
+                <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall || throatExceeded ? "#fef2f2" : CK.cyanLight, borderRadius: 5, fontSize: 11, color: tooSmall || throatExceeded ? "#dc2626" : CC.mid, border: tooSmall || throatExceeded ? "1px solid #f5cccc" : "none" }}>
+                  Folded size: <strong>{staticDim.toFixed(1)}" × {panelSize.toFixed(1)}"</strong> ({fold.panels} panels)
+                  {tooSmall && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
+                  {throatExceeded && <span style={{marginLeft:8,fontWeight:700}}>— Exceeds 13" folder throat</span>}
+                </div>
+                {sizeMode !== "custom" && <p style={{fontSize:10,color:CC.light,margin:"4px 0 0"}}>All folds assume the longest edge is being folded. Use custom size to fold the short edge.</p>}
+                <p style={{fontSize:10,color:CC.light,margin:"4px 0 0"}}>You can preview the fold once artwork is uploaded.</p>
+              </>;
+            })()}
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
