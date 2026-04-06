@@ -1963,9 +1963,10 @@ function App() {
 
           {/* SECTION 1: Size & Quantity */}
           <Sec title="Size & Quantity" open={op.s1} onToggle={() => tog("s1")}>
-            <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
-            <div style={ST.hr} />
-            <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
+            <div style={r2}>
+              <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
+              <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
+            </div>
             {sizeMode === "preset"
               ? <Sel label="Flat/Unfolded Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}</Sel>
               : <div style={r2}>
