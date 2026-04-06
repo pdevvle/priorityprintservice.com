@@ -1998,6 +1998,10 @@ function App() {
 
           {/* SECTION 3: Addons */}
           <Sec title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
+            <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
+              {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
+            </Sel>
+            <div style={ST.hr} />
             <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />
             <div style={ST.hr} />
             {paper.coatable ? (
