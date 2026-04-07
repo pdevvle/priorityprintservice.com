@@ -272,9 +272,9 @@ function calculate(c) {
   P.backPrint = 0;
   if (sides === 2) {
     if (c.backColor === "color") {
-      P.backPrint = (PCF.printing_black_cost * pressSheets) + (PCF.printing_fullcolor_cost * pressSheets);
+      P.backPrint = ((PCF.printing_black_cost * pressSheets) * mk) + (PCF.printing_fullcolor_cost * pressSheets);
     } else {
-      P.backPrint = PCF.printing_black_cost * pressSheets;
+      P.backPrint = (PCF.printing_black_cost * pressSheets) * mk;
     }
   }
 
