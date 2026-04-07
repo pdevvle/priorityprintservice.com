@@ -1497,7 +1497,7 @@ add_action( 'wp_ajax_pps_test_shippo', function() {
         wp_send_json_error( 'Authentication failed — check your API token.' );
     }
     if ( $code >= 400 ) {
-        wp_send_json_error( 'Shippo returned HTTP ' . $code . ': ' . ( $body['detail'] ?? 'Unknown error' ) );
+        wp_send_json_error( 'Shippo returned HTTP ' . $code . ': ' . sanitize_text_field( $body['detail'] ?? 'Unknown error' ) );
     }
 
     wp_send_json_success( array(

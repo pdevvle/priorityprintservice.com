@@ -263,7 +263,7 @@ function calculate(c) {
   // Paper
   P.paper = (paper.price * pressSheets) * mk;
 
-  // Printing — front has markup on BW base, back does not
+  // Printing — both sides get markup on BW base
   if (c.frontColor === "color") {
     P.frontPrint = ((PCF.printing_black_cost * pressSheets) * mk) + (PCF.printing_fullcolor_cost * pressSheets);
   } else {
