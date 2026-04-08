@@ -359,8 +359,11 @@ function calculate(c) {
     || (c.sizeMode === "custom" && stdLongs.includes(longE) && stdShorts.includes(shortE));
   const isEasyFold = ["flat","bifold","trifold","z3"].includes(fold.val);
   const costSummary = P.paper + P.frontPrint + P.backPrint + P.cutting + P.folding + P.perforation + P.rc;
+  // Easy Discount stacks on top of the flat discount when both apply.
+  // Per the source pricing model, flat items get BOTH discEasyFlat and discEasy
+  // (folding labor is 0 for flat, so the formula reduces to press + cutting only).
   P.discEasyFlat = (fold.val === "flat" && isEasySize) ? -Math.min(costSummary * PCF.easydiscount_factor, PCF.easydiscount_max / 10) : 0;
-  P.discEasy = (fold.val !== "flat" && isEasyFold && isEasySize) ? -Math.min(P.press + P.cutting + P.folding, PCF.easydiscount_max / 10) : 0;
+  P.discEasy = (isEasyFold && isEasySize) ? -Math.min(P.press + P.cutting + P.folding, PCF.easydiscount_max / 10) : 0;
 
   // BW discount
   const allBW = c.frontColor === "bw" && (sides === 1 || c.backColor === "bw");
