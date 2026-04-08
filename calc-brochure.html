@@ -320,7 +320,7 @@ function calculate(c) {
   const perf = PERF_OPTS.find(x => x.val === c.perforation) || PERF_OPTS[0];
   P.perforation = 0;
   if (perf.val > 0) {
-    P.perforation = Math.ceil(((((qty * perf.price) / PCF.speed_gwperhr) * PCF.labor_gw_hour) * mk) + PCF.labor_gw_setup);
+    P.perforation = Math.ceil(((((qty * perf.price) / PCF.speed_gwperhr) * PCF.labor_gw_hour) * mk) + (PCF.labor_gw_setup * perf.count));
   }
 
   // Round cornering (flat only)
