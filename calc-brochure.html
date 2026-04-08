@@ -253,7 +253,7 @@ function calculate(c) {
 
   // Markup
   const dL = 1.85 * Math.log(pressSheets) - 0.5;
-  const mk = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup);
+  const mk = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup) * (c.sizeMode === "custom" ? 1.5 : 1);
 
   // Approximate thickness
   const approxThickness = (paper.price / 10) * qty;
