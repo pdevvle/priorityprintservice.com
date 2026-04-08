@@ -167,7 +167,7 @@ const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS
 const INV_VALS=[0.001,0.002,0.003,0.01,0.02,0.03,1.01,1.02];
 
 const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
-const COAT_SIDES=[{label:"Front Only",val:1},{label:"Both Sides",val:2}];
+const COAT_SIDES=[{label:"Front Only",val:1,mult:1,daysMult:1},{label:"Back Only",val:1.02,mult:2,daysMult:1},{label:"Both Sides",val:2,mult:2,daysMult:2}];
 const BUNDLING=_CFG.bundling||[{label:"No Bundling",val:0,price:500},{label:"Bundle in 25s",val:750,price:25},{label:"Bundle in 50s",val:1500,price:50},{label:"Bundle in 100s",val:3000,price:100}];
 const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.03,count:1},{label:"2 Perforation Lines",val:1000,price:0.03,count:2}];
 const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
@@ -333,7 +333,8 @@ function calculate(c) {
   const coat = COATINGS.find(x => x.val === c.coating) || COATINGS[0];
   P.coat = 0;
   if (coat.val > 0 && paper.coatable) {
-    const cs = c.coatSides || 1;
+    const csOpt = COAT_SIDES.find(o => o.val === c.coatSides) || COAT_SIDES[0];
+    const cs = csOpt.mult;
     P.coat = PCF.labor_bindery_hr + Math.ceil(((pressSheets * coat.price * cs) * mk) + ((pressSheets / PCF.uvcoaterimpressionsperhour) * PCF.labor_bindery_hr));
   }
 
@@ -420,7 +421,8 @@ function calculate(c) {
   // Turnaround
   const paperDays = paper.days != null ? paper.days : Math.floor(paper.val || 0);
   const vividDays = c.vivid ? Math.floor(pressSheets / 2500) : 0;
-  const coatDays = (coat.val > 0 && paper.coatable) ? Math.ceil(pressSheets / (coat.val / (c.coatSides || 1))) : 0;
+  const coatDaysMult = (COAT_SIDES.find(o => o.val === c.coatSides) || COAT_SIDES[0]).daysMult;
+  const coatDays = (coat.val > 0 && paper.coatable) ? Math.ceil(pressSheets / (coat.val / coatDaysMult)) : 0;
   const bundleDays = (bund.val > 0 && qty >= 100) ? Math.floor(approxThickness / bund.val) : 0;
   const perfDays = (perf.val > 0) ? Math.ceil(pressSheets / perf.val) : 0;
   const rcDays = (rc.val > 0 && fold.val === "flat") ? Math.floor(Math.min(pressSheets / rc.val, PCF.addon_roundcornermaxdays)) : 0;
