@@ -251,10 +251,23 @@ function calculate(c) {
   }
   if (errors.length) return { error: errors };
 
-  // Markup
+  // Markup — custom sizes get a tiered bump based on how close they are to a preset
+  //   Exact preset match:                1.00x
+  //   Similar to preset (<=0.5" on both): 1.15x
+  //   Flat, not similar to any preset:    1.25x
+  //   Folded, not similar to any preset:  1.50x
   const dL = 1.85 * Math.log(pressSheets) - 0.5;
-  const matchesPreset = SIZE_PRESETS.some(s => s.long === longE && s.short === shortE);
-  const mk = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup) * (c.sizeMode === "custom" && !matchesPreset ? 1.5 : 1);
+  let sizeTierMult = 1;
+  if (c.sizeMode === "custom") {
+    const exactMatch = SIZE_PRESETS.some(s => s.long === longE && s.short === shortE);
+    if (!exactMatch) {
+      const similar = SIZE_PRESETS.some(s => Math.abs(s.long - longE) <= 0.5 && Math.abs(s.short - shortE) <= 0.5);
+      if (similar) sizeTierMult = 1.15;
+      else if (fold.val === "flat") sizeTierMult = 1.25;
+      else sizeTierMult = 1.5;
+    }
+  }
+  const mk = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup) * sizeTierMult;
 
   // Approximate thickness
   const approxThickness = (paper.price / 10) * qty;
