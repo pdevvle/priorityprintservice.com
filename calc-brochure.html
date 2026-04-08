@@ -48,8 +48,8 @@ const PCF = Object.assign({
   press_printsperhour:600, bindery_morgana_impressionperhour:750,
   cutter_stackheight_inches:3.5, cutter_cyclesperhour:120,
   cutterbasefee:7.5, sheetsturnaround:2500,
-  backend_maximummarkup:9, backend_minimummarkup:1.5,
-  easydiscount_factor:0.05, easydiscount_max:1500,
+  backend_maximummarkup:15.2, backend_minimummarkup:3.5,
+  easydiscount_factor:0.05, easydiscount_max:0,
   uvcoaterimpressionsperhour:250, roundcornerperhour:75, bundlesperhour:50,
   speed_gwperhr:500, addon_roundcornermaxdays:30,
   art_newdesignmodifier:0.5, sheetsforlowcosthardcopyproof:1500,
@@ -252,7 +252,7 @@ function calculate(c) {
   if (errors.length) return { error: errors };
 
   // Markup
-  const dL = 0.7 * Math.log(pressSheets) + 0.5412;
+  const dL = 1.85 * Math.log(pressSheets) - 0.5;
   const mk = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup);
 
   // Approximate thickness
@@ -263,18 +263,18 @@ function calculate(c) {
   // Paper
   P.paper = (paper.price * pressSheets) * mk;
 
-  // Printing — front has markup on BW base, back does not
+  // Printing — markup applied uniformly to all printing costs
   if (c.frontColor === "color") {
-    P.frontPrint = ((PCF.printing_black_cost * pressSheets) * mk) + (PCF.printing_fullcolor_cost * pressSheets);
+    P.frontPrint = ((PCF.printing_black_cost + PCF.printing_fullcolor_cost) * pressSheets) * mk;
   } else {
     P.frontPrint = (PCF.printing_black_cost * pressSheets) * mk;
   }
   P.backPrint = 0;
   if (sides === 2) {
     if (c.backColor === "color") {
-      P.backPrint = (PCF.printing_black_cost * pressSheets) + (PCF.printing_fullcolor_cost * pressSheets);
+      P.backPrint = ((PCF.printing_black_cost + PCF.printing_fullcolor_cost) * pressSheets) * mk;
     } else {
-      P.backPrint = PCF.printing_black_cost * pressSheets;
+      P.backPrint = (PCF.printing_black_cost * pressSheets) * mk;
     }
   }
 
@@ -327,9 +327,6 @@ function calculate(c) {
   P.diffFold2 = fold.val === "roll4" ? foldLabor : 0;
   // Tier 3: narrow sheets (short < 5") with any fold, OR folding the short side
   P.diffFold3 = fold.val !== "flat" && (shortE < 5 || c.foldDir === "short") ? foldLabor : 0;
-
-  // Minimum base cost
-  P.baseCost = (fold.val !== "flat" || qty <= 250) ? PCF.labor_bindery_hr : 0;
 
   // Artwork
   const art = ART_OPTS.find(x => x.val === c.artwork) || ART_OPTS[0];
@@ -436,7 +433,7 @@ function calculate(c) {
     {l:"Vivid Print",v:P.vivid,g:"add"},{l:"UV Coating",v:P.coat,g:"add"},{l:"Bundling",v:P.bundle,g:"add"},
     {l:"Perforation",v:P.perforation,g:"add"},{l:"Round Cornering",v:P.rc,g:"add"},
     {l:"Fold Surcharge 1",v:P.diffFold1,g:"fee"},{l:"Fold Surcharge 2",v:P.diffFold2,g:"fee"},{l:"Fold Surcharge 3",v:P.diffFold3,g:"fee"},
-    {l:"Base Cost",v:P.baseCost,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
+    {l:"Non-Inventory",v:P.nonInv,g:"fee"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Discount (Flat)",v:P.discEasyFlat,g:"disc"},{l:"Easy Discount",v:P.discEasy,g:"disc"},{l:"Cardstock Disc",v:P.cardstockDisc,g:"disc"},
   ].filter(r => Math.abs(r.v) > 0.005);
