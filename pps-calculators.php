@@ -1457,7 +1457,8 @@ function pps_default_tooltips() {
 
 /**
  * Test Shippo API connection — validates the configured token.
- * Makes a lightweight address-creation call to verify authentication.
+ * Creates a test address via the v2 Address Book API, then immediately
+ * deletes it so admin testing doesn't accumulate junk records.
  */
 add_action( 'wp_ajax_pps_test_shippo', function() {
     check_ajax_referer( 'pps_config_save', '_wpnonce' );
@@ -1469,41 +1470,60 @@ add_action( 'wp_ajax_pps_test_shippo', function() {
         wp_send_json_error( 'No Shippo API token configured. Enter a token and save first.' );
     }
 
-    // Lightweight validation: create a test address (non-validate mode, minimal data)
-    $resp = wp_remote_post( 'https://api.goshippo.com/addresses/', array(
+    // Step 1: Create test address via v2 API (supports DELETE for cleanup)
+    $create_resp = wp_remote_post( 'https://api.goshippo.com/v2/addresses/', array(
         'headers' => array(
             'Authorization' => 'ShippoToken ' . $token,
             'Content-Type'  => 'application/json',
         ),
         'body'    => wp_json_encode( array(
-            'name'    => 'PPS Connection Test',
-            'street1' => '1234 Test St',
-            'city'    => 'Phoenix',
-            'state'   => 'AZ',
-            'zip'     => '85027',
-            'country' => 'US',
+            'name'           => 'PPS Connection Test',
+            'address_line_1' => '1234 Test St',
+            'city_locality'  => 'Phoenix',
+            'state_province' => 'AZ',
+            'postal_code'    => '85027',
+            'country_code'   => 'US',
         ) ),
         'timeout' => 10,
     ) );
 
-    if ( is_wp_error( $resp ) ) {
-        wp_send_json_error( 'Network error: ' . $resp->get_error_message() );
+    if ( is_wp_error( $create_resp ) ) {
+        wp_send_json_error( 'Network error: ' . $create_resp->get_error_message() );
     }
 
-    $code = wp_remote_retrieve_response_code( $resp );
-    $body = json_decode( wp_remote_retrieve_body( $resp ), true );
+    $code = wp_remote_retrieve_response_code( $create_resp );
+    $body = json_decode( wp_remote_retrieve_body( $create_resp ), true );
 
     if ( $code === 401 ) {
         wp_send_json_error( 'Authentication failed — check your API token.' );
     }
     if ( $code >= 400 ) {
-        wp_send_json_error( 'Shippo returned HTTP ' . $code . ': ' . sanitize_text_field( $body['detail'] ?? 'Unknown error' ) );
+        wp_send_json_error( 'Shippo returned HTTP ' . $code . ': ' . sanitize_text_field( $body['detail'] ?? $body['message'] ?? 'Unknown error' ) );
+    }
+
+    $object_id = $body['object_id'] ?? $body['id'] ?? null;
+
+    // Step 2: Cleanup — DELETE the address we just created so it doesn't accumulate
+    $cleanup_ok = false;
+    if ( ! empty( $object_id ) ) {
+        $del_resp = wp_remote_request( 'https://api.goshippo.com/v2/addresses/' . rawurlencode( $object_id ) . '/', array(
+            'method'  => 'DELETE',
+            'headers' => array(
+                'Authorization' => 'ShippoToken ' . $token,
+            ),
+            'timeout' => 10,
+        ) );
+        if ( ! is_wp_error( $del_resp ) ) {
+            $del_code   = wp_remote_retrieve_response_code( $del_resp );
+            $cleanup_ok = ( $del_code >= 200 && $del_code < 300 );
+        }
     }
 
     wp_send_json_success( array(
         'message'    => 'Connected to Shippo successfully.',
-        'object_id'  => $body['object_id'] ?? null,
+        'object_id'  => $object_id,
         'origin_zip' => $cfg['pcf']['shippo_origin_zip'] ?? '85027',
+        'cleanup'    => $cleanup_ok ? 'removed' : 'left in place',
     ) );
 } );
 
