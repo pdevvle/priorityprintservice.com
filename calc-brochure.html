@@ -144,7 +144,7 @@ const INV_VALS=[0.001,0.002,0.003,0.01,0.02,0.03,1.01,1.02];
 const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
 const COAT_SIDES=[{label:"Front Only",val:1},{label:"Both Sides",val:2}];
 const BUNDLING=_CFG.bundling||[{label:"No Bundling",val:0,price:500},{label:"Bundle in 25s",val:750,price:25},{label:"Bundle in 50s",val:1500,price:50},{label:"Bundle in 100s",val:3000,price:100}];
-const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.01,count:1},{label:"2 Perforation Lines",val:1000,price:0.02,count:2}];
+const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.01,count:1},{label:"2 Perforation Lines",val:1000,price:0.01,count:2}];
 const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
 const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01,price:0},{label:"Email Art After Order",val:0.02,price:0},{label:"Artwork already discussed",val:0.03,price:0},{label:"I have a design in Canva",val:0.04,price:0},{label:"Artwork needs edits",val:2.01,price:75},{label:"Design from scratch",val:4.01,price:75}];
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
@@ -316,11 +316,16 @@ function calculate(c) {
   const bund = BUNDLING.find(x => x.val === c.bundling) || BUNDLING[0];
   P.bundle = (bund.val > 0 && qty >= 100) ? Math.ceil(((qty / bund.price) * mk) * (PCF.labor_bindery_hr / PCF.bundlesperhour) + 7) : 0;
 
-  // Perforation
+  // Perforation — runtime is charged at 2x the base GW labor rate (specialty
+  // operation) and marked up by mk. Setup is flat per-line. Each additional
+  // perf line past the first costs 60% of a full line.
   const perf = PERF_OPTS.find(x => x.val === c.perforation) || PERF_OPTS[0];
   P.perforation = 0;
   if (perf.val > 0) {
-    P.perforation = Math.ceil(((((qty * perf.price) / PCF.speed_gwperhr) * PCF.labor_gw_hour) * mk) + (PCF.labor_gw_setup * perf.count));
+    const perfRuntime = ((qty * perf.price) / PCF.speed_gwperhr) * (PCF.labor_gw_hour * 2) * mk;
+    const perfPerLine = perfRuntime + PCF.labor_gw_setup;
+    const perfLineMult = 1 + (perf.count - 1) * 0.6;
+    P.perforation = Math.ceil(perfPerLine * perfLineMult);
   }
 
   // Round cornering (flat only)
