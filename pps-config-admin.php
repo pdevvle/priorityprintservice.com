@@ -115,7 +115,7 @@ function pps_default_config() {
             array( 'label' => 'Upload Art with Order',      'val' => 0.01, 'price' => 0 ),
             array( 'label' => 'Email Art After Order',      'val' => 0.02, 'price' => 0 ),
             array( 'label' => 'Artwork already discussed',  'val' => 0.03, 'price' => 0 ),
-            array( 'label' => 'I have a design in Canva',   'val' => 0.04, 'price' => 0 ),
+            array( 'label' => 'I have a design in Canva',   'val' => 0.04, 'price' => 10 ),
             array( 'label' => 'Artwork needs edits',        'val' => 2.01, 'price' => 75 ),
             array( 'label' => 'Design from scratch',        'val' => 4.01, 'price' => 75 ),
         ),
