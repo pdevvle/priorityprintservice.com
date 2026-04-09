@@ -138,8 +138,9 @@ const PCF = Object.assign({
   cutter_stackheight_inches:3.5,      // max stack height for finishing cuts
   cutter_cyclesperhour:120,           // cutter cycles per hour (for finishing cuts)
   // GW machine (perforation)
-  speed_gwperhr:500,                  // GW perf machine speed per hour
+  speed_gwperhr:250,                  // GW perf machine speed per hour
   labor_gw_hour:45,                   // GW operator hourly rate
+  labor_gw_setup:50,                  // GW flat setup fee per perf line
   // Shipping & Rush
   shop_timezone:"America/Phoenix",
   shop_cutoff_hour:14,
@@ -330,7 +331,7 @@ const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01},{label:"
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
 // Perfect bound specific options
 const OUTFOLD_OPTS=_CFG.outfold_opts||[{label:"No Outfold",val:0,price:0},{label:"1 Fold-Out Page (Bifold)",val:1000,price:0.02},{label:"2 Fold-Out Pages (Bifold)",val:500,price:0.04}];
-const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0},{label:"1 Perforation Line",val:2000,price:0.01},{label:"2 Perforation Lines",val:1000,price:0.02}];
+const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.03,count:1},{label:"2 Perforation Lines",val:1000,price:0.03,count:2}];
 
 // ═══════════════════════════════════════════════════════════════
 // SIZE + PRICING
@@ -498,10 +499,17 @@ function calculate(c) {
   const outfoldTurnaround = outfold.val > 0 ? Math.ceil(tQ / outfold.val) : 0;
 
   // ── Perforation ──
+  // Runtime is charged at 2x the base GW labor rate (specialty operation) and
+  // marked up by mk. Setup is flat per-line (labor_gw_setup). Each additional
+  // perf line past the first costs 60% of a full line. The bind-direction
+  // factor (imp>=2 = 2.0, else 0.9) stacks on top for perfect bound.
   P.perforation=0;
   if(perf.val>0){
-    const perfMult = imp >= 2 ? 2.0 : 0.9; // bind direction multiplier
-    P.perforation=((((tS/(imp/perf.price))/PCF.speed_gwperhr)*PCF.labor_gw_hour)*perfMult)*mk+PCF.labor_gw_hour;
+    const perfRuntime=((tS*perf.price)/PCF.speed_gwperhr)*(PCF.labor_gw_hour*2)*mk;
+    const perfPerLine=perfRuntime+PCF.labor_gw_setup;
+    const perfLineMult=1+(perf.count-1)*0.6;
+    const bindDirMult=imp>=2?2.0:0.9;
+    P.perforation=Math.ceil(perfPerLine*perfLineMult*bindDirMult);
   }
   const perfTurnaround = perf.val > 0 ? Math.ceil(tS / perf.val) : 0;
 

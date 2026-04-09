@@ -27,10 +27,13 @@ function pps_default_config() {
             'labor_cutting_hr'                  => 45,
             'labor_horizonspf20_hr'             => 50,
             'labor_horizonspf20_setup'          => 35,
+            'labor_gw_hour'                     => 45,
+            'labor_gw_setup'                    => 50,
             'press_printsperhour'               => 600,
             'bindery_morgana_impressionperhour' => 750,
             'cutter_sheetsperhour'              => 15000,
             'horizonspf20_sheetsperhour'        => 4000,
+            'speed_gwperhr'                     => 250,
             'cutterbasefee'                     => 7.5,
             'sheetsturnaround'                  => 2500,
             'backend_maximummarkup'             => 9,
@@ -113,6 +116,11 @@ function pps_default_config() {
             array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 Outside 2",    'val' => 215, 'price' => 0.15 ),
             array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 All 4",            'val' => 108, 'price' => 0.1 ),
             array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 All 4",        'val' => 107, 'price' => 0.075 ),
+        ),
+        'perf_opts' => array(
+            array( 'label' => 'No Perforation',      'val' => 0,    'price' => 0,    'count' => 0 ),
+            array( 'label' => '1 Perforation Line',  'val' => 2000, 'price' => 0.03, 'count' => 1 ),
+            array( 'label' => '2 Perforation Lines', 'val' => 1000, 'price' => 0.03, 'count' => 2 ),
         ),
         'art_opts' => array(
             array( 'label' => 'Upload Art with Order',      'val' => 0.01 ),
@@ -331,7 +339,7 @@ function pps_config_render_page() {
         $json_keys = array(
             'papers_nc', 'papers_cs', 'cover_same',
             'cover_scoring_vals', 'inv_nc', 'inv_cs',
-            'coatings', 'bundling', 'corners',
+            'coatings', 'bundling', 'corners', 'perf_opts',
             'art_opts', 'bleed_opts',
             'size_presets', 'transit_days', 'closures', 'page_counts',
         );
@@ -750,12 +758,15 @@ function pps_config_tab_production( $cfg ) {
             'labor_cutting_hr'          => array( 'Cutter', '$/hr' ),
             'labor_horizonspf20_hr'     => array( 'Stitcher (SPF-20)', '$/hr' ),
             'labor_horizonspf20_setup'  => array( 'Stitcher Setup', '$ flat' ),
+            'labor_gw_hour'             => array( 'GW Perf Operator', '$/hr' ),
+            'labor_gw_setup'            => array( 'GW Perf Setup', '$ flat' ),
         ),
         'Machine Speeds' => array(
             'press_printsperhour'               => array( 'Press', '/hr' ),
             'bindery_morgana_impressionperhour'  => array( 'Morgana', '/hr' ),
             'cutter_sheetsperhour'               => array( 'Cutter', '/hr' ),
             'horizonspf20_sheetsperhour'         => array( 'Stitcher', '/hr' ),
+            'speed_gwperhr'                      => array( 'GW Perf', '/hr' ),
             'uvcoaterimpressionsperhour'         => array( 'UV Coater', '/hr' ),
             'roundcornerperhour'                 => array( 'Round Corner', '/hr' ),
             'bundlesperhour'                     => array( 'Bundler', '/hr' ),
@@ -867,9 +878,17 @@ function pps_config_tab_finishing( $cfg ) {
         array( 'field' => 'price', 'header' => 'Price',  'type' => 'number', 'width' => '80px' ),
     );
 
+    $perf_cols = array(
+        array( 'field' => 'label', 'header' => 'Option',  'type' => 'text',   'width' => '50%' ),
+        array( 'field' => 'val',   'header' => 'Val',     'type' => 'number', 'width' => '70px' ),
+        array( 'field' => 'price', 'header' => '$/sheet', 'type' => 'number', 'width' => '80px' ),
+        array( 'field' => 'count', 'header' => 'Lines',   'type' => 'number', 'width' => '60px' ),
+    );
+
     pps_render_spreadsheet( 'coatings', 'Coatings', $cfg['coatings'], $cols, 'val=imp/hr, 0=none' );
     pps_render_spreadsheet( 'bundling', 'Bundling', $cfg['bundling'], $cols, 'price=bundle size' );
     pps_render_spreadsheet( 'corners', 'Round Cornering', $cfg['corners'], $cols );
+    pps_render_spreadsheet( 'perf_opts', 'Perforation', $cfg['perf_opts'], $perf_cols, 'count = number of perf lines (drives per-line setup math). GW speed, labor rate, and setup fee set on Production tab.' );
 }
 
 // ═══════════════════════════════════════════════════════════════
