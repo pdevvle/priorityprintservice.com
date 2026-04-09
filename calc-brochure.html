@@ -691,8 +691,8 @@ const FOLD_KEY_MAP = {
 const FOLDS_3D = {
   "half-fold": { n:2, mode:"nested", swap:true, views:[
     {label:"Inside (Open)",sc:[8,-6,0,0],f:[0]},
-    {label:"Folded (Back)",sc:[20,-30,60,0],f:[-175]},
-    {label:"Folded (Front)",sc:[20,150,60,0],f:[-175]},
+    {label:"Folded (Front)",sc:[20,-30,60,0],f:[-175]},
+    {label:"Folded (Back)",sc:[20,150,60,0],f:[-175]},
     {label:"Outside (Open)",sc:[8,174,0,0],f:[0]}]},
   "accordion-3": { n:3, mode:"nested", views:[
     {label:"Front (Open)",sc:[8,-6,0,0],f:[0,0]},
@@ -701,43 +701,43 @@ const FOLDS_3D = {
     {label:"Back (Open)",sc:[8,174,0,0],f:[0,0]}]},
   "accordion-4": { n:4, mode:"nested", swap:true, views:[
     {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0]},
-    {label:"Folded (Back)",sc:[20,-35,100,0],f:[-175,168,-162]},
-    {label:"Folded (Front)",sc:[20,145,100,0],f:[-175,168,-162]},
+    {label:"Folded (Front)",sc:[20,-35,100,0],f:[-175,168,-162]},
+    {label:"Folded (Back)",sc:[20,145,100,0],f:[-175,168,-162]},
     {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0]}]},
   "tri-fold": { n:3, mode:"trifold", views:[
     {label:"Inside (Open)",sc:[8,-6,0,0],f:[0,0],tz:[0,0]},
     {label:"Right Tucks In",sc:[20,-35,50,0],f:[0,-179],tz:[0,0]},
-    {label:"Folded (Back)",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
-    {label:"Folded (Front)",sc:[20,155,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+    {label:"Folded (Front)",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+    {label:"Folded (Back)",sc:[20,155,60,0],f:[175,-179],tzf_tf:[0.04,0]},
     {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0],tz:[0,0]}]},
   "gate-fold": { n:4, mode:"gate3", views:[
-    {label:"Front (Open)",sc:[8,-6,0,0],g:[0,0]},
-    {label:"Folded (Front)",sc:[20,-25,30,0],g:[175,-175]},
-    {label:"Folded (Back)",sc:[20,155,30,0],g:[175,-175]},
-    {label:"Back (Open)",sc:[8,174,0,0],g:[0,0]}]},
+    {label:"Inside (Open)",sc:[8,-6,0,0],g:[0,0]},
+    {label:"Folded (Front)",sc:[20,-25,30,0],g:[-175,175]},
+    {label:"Folded (Back)",sc:[20,155,30,0],g:[-175,175]},
+    {label:"Outside (Open)",sc:[8,174,0,0],g:[0,0]}]},
   "double-gate": { n:4, mode:"dgate", views:[
     {label:"Inside (Open)",sc:[8,-5,0,0],dg:[0,0,0],tzf:[0,0,0]},
     {label:"Flaps In",sc:[20,-30,50,0],dg:[178,-178,0],tzf:[0.04,0.04,0]},
-    {label:"Folded (Back)",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
-    {label:"Folded (Front)",sc:[20,155,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+    {label:"Folded (Front)",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+    {label:"Folded (Back)",sc:[20,155,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
     {label:"Outside (Open)",sc:[8,174,0,0],dg:[0,0,0],tzf:[0,0,0]}]},
   "roll-fold": { n:4, mode:"nested", swap:true, views:[
     {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
     {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
     {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
-    {label:"Folded (Back)",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
-    {label:"Folded (Front)",sc:[20,150,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+    {label:"Folded (Front)",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+    {label:"Folded (Back)",sc:[20,150,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
     {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
-  // Double parallel: fold in half, then in half again (same direction).
-  // Uses nested DOM; fh3 stays at 0 (panels 2+3 fold together as the first
-  // "half"), fh2 is the first fold (half in half), fh1 is the second fold
-  // (half again onto panel 0).
-  "double-parallel": { n:4, mode:"nested", swap:true, views:[
-    {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
-    {label:"First Fold",sc:[20,-30,60,0],f:[0,-175,0],tzf:[0,0.08,0]},
-    {label:"Folded (Back)",sc:[20,-30,80,0],f:[-175,-175,0],tzf:[0.18,0.08,0]},
-    {label:"Folded (Front)",sc:[20,150,80,0],f:[-175,-175,0],tzf:[0.18,0.08,0]},
-    {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
+  // Double parallel: bifold, then bifold of the bifold. Final 1/4 size, 4
+  // layers. Uses dedicated "dparallel" mode with a bifurcated DOM: P3 is
+  // inside fh2 so fold 2 rotates it again after fold 1; P4 is OUTSIDE fh2 (in
+  // sibling fh1b) so it stays put during fold 2. view.f = [fold1, fold2].
+  "double-parallel": { n:4, mode:"dparallel", views:[
+    {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0],tzf:[0,0]},
+    {label:"First Bifold",sc:[20,-30,60,0],f:[-175,0],tzf:[0.04,0]},
+    {label:"Folded (Front)",sc:[20,-30,80,0],f:[-175,-175],tzf:[0.04,0.08]},
+    {label:"Folded (Back)",sc:[20,150,80,0],f:[-175,-175],tzf:[0.04,0.08]},
+    {label:"Back (Open)",sc:[8,174,0,0],f:[0,0],tzf:[0,0]}]},
 };
 
 // Sanitize src for innerHTML injection — only allow data: URIs
@@ -790,6 +790,48 @@ function foldBuildNest(idx, n, pw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, b
     h += `</div>`;
   }
   h += `</div>`; return h;
+}
+
+// Double parallel fold builder — "bifold of a bifold".
+// Physical: 4 panels [P1|P2|P3|P4]. Fold 1 brings right half (P3+P4) onto
+// left half (P1+P2) around x=2pw. Fold 2 brings right half of the post-fold-1
+// stack (P2 on bottom + P3 on top, at x=[pw,2pw]) onto the left half (P1 + P4).
+// Key insight: after fold 1, P4 is at x=[0,pw] stacked on P1, and P3 is at
+// x=[pw,2pw] stacked on P2. Fold 2 should rotate P2+P3 (now at [pw,2pw]) but
+// NOT P4 (at [0,pw]). So P4 cannot be inside the same hinge tree as P3 during
+// fold 2 — they need separate fold-1 hinges at the root level.
+//
+// DOM:
+//   root
+//   ├─ P1 wrap (at x=0)
+//   ├─ fh2 (fold-2 hinge at x=pw, transform-origin:left center)
+//   │   ├─ P2 wrap (at local x=0 inside fh2 → world x=pw)
+//   │   └─ fh1a (fold-1 hinge for P3 at fh2 local x=pw → world x=2pw)
+//   │       └─ P3 wrap
+//   └─ fh1b (fold-1 hinge for P4 at root x=2pw, SIBLING of fh2)
+//       └─ P4 wrap (at fh1b local x=pw → world x=3pw initially)
+//
+// fh1a and fh1b rotate together (both by the "fold 1" angle).
+// fh2 rotates by the "fold 2" angle.
+function foldBuildDParallel(pw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH, swap) {
+  const mkP = (idx) => `<div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">${foldMkF(idx, 4, pw, ph, iW, iH, isP, fSrc, bSrc, !!swap, fRW, fRH, bRW, bRH)}</div>`;
+  let h = "";
+  // Panel 0 (P1) at root
+  h += mkP(0);
+  // fh2 (fold-2 hinge) at x=pw, contains P2 + fh1a (for P3)
+  h += `<div class="fold-hinge" id="fh2" style="left:${pw}px;top:0;width:${pw}px;height:${ph}px;transform-origin:left center">`;
+  h += mkP(1); // P2 at local x=0
+  // fh1a (fold-1 hinge for P3) at fh2 local x=pw → world x=2pw
+  h += `<div class="fold-hinge" id="fh1a" style="left:${pw}px;top:0;width:${pw}px;height:${ph}px;transform-origin:left center">`;
+  h += mkP(2); // P3 at local x=0
+  h += `</div>`; // close fh1a
+  h += `</div>`; // close fh2
+  // fh1b (fold-1 hinge for P4) at root x=2pw, SIBLING of fh2
+  h += `<div class="fold-hinge" id="fh1b" style="left:${2*pw}px;top:0;width:${pw}px;height:${ph}px;transform-origin:left center">`;
+  // P4 wrap at fh1b local x=pw → world x=3pw initially
+  h += `<div class="fold-panel-wrap" style="left:${pw}px;top:0;width:${pw}px;height:${ph}px">${foldMkF(3, 4, pw, ph, iW, iH, isP, fSrc, bSrc, !!swap, fRW, fRH, bRW, bRH)}</div>`;
+  h += `</div>`; // close fh1b
+  return h;
 }
 
 // Tri-fold builder (center base, left/right hinges)
@@ -885,6 +927,18 @@ function foldApplyView(sceneEl, foldKey, viewIdx, dirSign) {
     if (hL) hL.style.transform = `${tzf[0]?`translateZ(${(tzf[0]*pw).toFixed(1)}px) `:""}rotateY(${lA*s}deg)`;
     if (hR) hR.style.transform = `${tzf[1]?`translateZ(${(tzf[1]*pw).toFixed(1)}px) `:""}rotateY(${rA*s}deg)`;
     if (hC) hC.style.transform = `${tzf[2]?`translateZ(${(tzf[2]*pw).toFixed(1)}px) `:""}rotateY(${cA*s}deg)`;
+  } else if (fold.mode === "dparallel") {
+    // view.f = [fold1angle, fold2angle]. fh1a + fh1b rotate together (fold 1),
+    // fh2 rotates alone (fold 2). view.tzf = [tz1, tz2] for each pair.
+    const [a1, a2] = view.f;
+    const tzf = view.tzf || [0, 0];
+    const fh1a = $("fh1a"), fh1b = $("fh1b"), fh2 = $("fh2");
+    const pw = fh2 ? parseInt(fh2.style.width) || 0 : 0;
+    const tz1 = tzf[0] ? `translateZ(${(tzf[0]*pw).toFixed(1)}px) ` : "";
+    const tz2 = tzf[1] ? `translateZ(${(tzf[1]*pw).toFixed(1)}px) ` : "";
+    if (fh1a) fh1a.style.transform = `${tz1}rotateY(${a1*s}deg)`;
+    if (fh1b) fh1b.style.transform = `${tz1}rotateY(${a1*s}deg)`;
+    if (fh2)  fh2.style.transform  = `${tz2}rotateY(${a2*s}deg)`;
   } else {
     // Nested mode (accordion, half, roll)
     const tzf = view.tzf;
@@ -932,6 +986,7 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdg
     if (fold.mode === "nested") {
       html = foldBuildNest(0, fold.n, pw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH, swap);
     }
+    else if (fold.mode === "dparallel") html = foldBuildDParallel(pw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH, swap);
     else if (fold.mode === "trifold") html = foldBuildTri(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc, fRW, fRH, bRW, bRH);
     else if (fold.mode === "gate3") html = foldBuildGate(qw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH);
     else if (fold.mode === "dgate") html = foldBuildDGate(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc, fRW, fRH, bRW, bRH);
