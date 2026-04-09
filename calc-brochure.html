@@ -248,7 +248,7 @@ function calculate(c) {
     const foldDim = c.foldDir === "short" ? shortE : longE;
     const panelSize = foldDim / panels;
     if (panelSize < 2) errors.push(`Folded panel too small (${panelSize.toFixed(1)}"). Min 2" per panel.`);
-    if (c.foldDir === "short" && longE > 13) errors.push("Long edge exceeds 13\" folder throat when folding short side.");
+    if (c.foldDir === "short" && longE > 13) errors.push("Cannot fold, unfolded edge exceeds 13 inches.");
   }
   if (errors.length) return { error: errors };
 
@@ -1314,7 +1314,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
               <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall2 || throatExceeded2 ? "#fef2f2" : CK.cyanLight, borderRadius: 5, fontSize: 11, color: tooSmall2 || throatExceeded2 ? "#dc2626" : CC.mid, border: tooSmall2 || throatExceeded2 ? "1px solid #f5cccc" : "none" }}>
                 Folded size: <strong>{staticDim2.toFixed(1)}" × {panelSize2.toFixed(1)}"</strong> ({panels} panels)
                 {tooSmall2 && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
-                {throatExceeded2 && <span style={{marginLeft:8,fontWeight:700}}>— Exceeds 13" folder throat</span>}
+                {throatExceeded2 && <span style={{marginLeft:8,fontWeight:700}}>— Cannot fold, unfolded edge exceeds 13 inches</span>}
               </div>
               {sizeMode !== "custom" && <p style={{fontSize:10,color:CC.light,margin:"4px 0 0"}}>All folds assume the longest edge is being folded. Use custom size to fold the short edge.</p>}
             </>;
@@ -2035,7 +2035,7 @@ function App() {
                 <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall || throatExceeded ? "#fef2f2" : CK.cyanLight, borderRadius: 5, fontSize: 11, color: tooSmall || throatExceeded ? "#dc2626" : CC.mid, border: tooSmall || throatExceeded ? "1px solid #f5cccc" : "none" }}>
                   Folded size: <strong>{staticDim.toFixed(1)}" × {panelSize.toFixed(1)}"</strong> ({fold.panels} panels)
                   {tooSmall && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
-                  {throatExceeded && <span style={{marginLeft:8,fontWeight:700}}>— Exceeds 13" folder throat</span>}
+                  {throatExceeded && <span style={{marginLeft:8,fontWeight:700}}>— Cannot fold, unfolded edge exceeds 13 inches</span>}
                 </div>
                 {sizeMode !== "custom" && <p style={{fontSize:10,color:CC.light,margin:"4px 0 0"}}>All folds assume the longest edge is being folded. Use custom size to fold the short edge.</p>}
                 <p style={{fontSize:10,color:CC.light,margin:"4px 0 0"}}>You can preview the fold once artwork is uploaded.</p>
