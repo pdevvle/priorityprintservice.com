@@ -115,6 +115,7 @@ const PCF = Object.assign({
   easydiscount_max:1500, uvcoaterimpressionsperhour:250,
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
   art_pagesperhour:8, art_newdesignmodifier:0.5,
+  art_canva_fee:10, art_edit_rate:75, art_design_rate:75,
   sheetsforlowcosthardcopyproof:1500,
   minimum_turnaround_days:3,
   two_staple_threshold:5.25,     // binding edge > this = auto two staple
@@ -314,7 +315,7 @@ const isCardstockVal=v=>PAPERS_CS.some(p=>p.val===v);
 const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
 const BUNDLING=_CFG.bundling||[{label:"No Bundling",val:0,price:500},{label:"Bundle in 25s",val:750,price:25},{label:"Bundle in 50s",val:1500,price:50},{label:"Bundle in 100s",val:3000,price:100}];
 const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
-const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01,price:0},{label:"Email Art After Order",val:0.02,price:0},{label:"Artwork already discussed",val:0.03,price:0},{label:"I have a design in Canva",val:0.04,price:10},{label:"Artwork needs edits",val:2.01,price:75},{label:"Design from scratch",val:4.01,price:75}];
+const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01},{label:"Email Art After Order",val:0.02},{label:"Artwork already discussed",val:0.03},{label:"I have a design in Canva",val:0.04},{label:"Artwork needs edits",val:2.01},{label:"Design from scratch",val:4.01}];
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
 
 // ═══════════════════════════════════════════════════════════════
@@ -442,9 +443,10 @@ function calculate(c) {
   P.bundle=(bund.val>0&&q100)?Math.ceil(((tQ/bund.price)/mk)*(PCF.labor_bindery_hr/PCF.bundlesperhour))+PCF.bundling_base_fee:0;
   P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr):0;
 
-  let ndc=art.val>=4?(art.price*tP)*PCF.art_newdesignmodifier:0;
-  let aec=(art.val>=2&&art.val<4)?PCF.art_pagesperhour+((c.artEditPages/PCF.art_pagesperhour)*art.price):0;
-  const upc=art.val<2?art.price:0; // flat upload-tier fee (e.g. Canva)
+  // Artwork — fees live in PCF (Production tab → Artwork group)
+  let ndc=art.val>=4?(PCF.art_design_rate*tP)*PCF.art_newdesignmodifier:0;
+  let aec=(art.val>=2&&art.val<4)?PCF.art_pagesperhour+((c.artEditPages/PCF.art_pagesperhour)*PCF.art_edit_rate):0;
+  const upc=(art.val>0.03&&art.val<1)?PCF.art_canva_fee:0; // val 0.04 = Canva
   P.artwork=artWork?(ndc+aec)*N:upc;
   P.bleed=artWork?0:(bld.val>0?Math.max(bld.price*tP,PCF.bleed_minimum):0);
   P.proof=0;

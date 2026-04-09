@@ -42,6 +42,9 @@ function pps_default_config() {
             'addon_roundcornermaxdays'          => 30,
             'art_pagesperhour'                  => 8,
             'art_newdesignmodifier'             => 0.5,
+            'art_canva_fee'                     => 10,
+            'art_edit_rate'                     => 75,
+            'art_design_rate'                   => 75,
             'sheetsforlowcosthardcopyproof'     => 1500,
             'minimum_turnaround_days'           => 3,
             'two_staple_threshold'              => 5.25,
@@ -112,12 +115,12 @@ function pps_default_config() {
             array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 All 4",        'val' => 107, 'price' => 0.075 ),
         ),
         'art_opts' => array(
-            array( 'label' => 'Upload Art with Order',      'val' => 0.01, 'price' => 0 ),
-            array( 'label' => 'Email Art After Order',      'val' => 0.02, 'price' => 0 ),
-            array( 'label' => 'Artwork already discussed',  'val' => 0.03, 'price' => 0 ),
-            array( 'label' => 'I have a design in Canva',   'val' => 0.04, 'price' => 10 ),
-            array( 'label' => 'Artwork needs edits',        'val' => 2.01, 'price' => 75 ),
-            array( 'label' => 'Design from scratch',        'val' => 4.01, 'price' => 75 ),
+            array( 'label' => 'Upload Art with Order',      'val' => 0.01 ),
+            array( 'label' => 'Email Art After Order',      'val' => 0.02 ),
+            array( 'label' => 'Artwork already discussed',  'val' => 0.03 ),
+            array( 'label' => 'I have a design in Canva',   'val' => 0.04 ),
+            array( 'label' => 'Artwork needs edits',        'val' => 2.01 ),
+            array( 'label' => 'Design from scratch',        'val' => 4.01 ),
         ),
         'bleed_opts' => array(
             array( 'label' => 'My artwork has proper bleeds', 'val' => 0, 'price' => 0 ),
@@ -784,6 +787,9 @@ function pps_config_tab_production( $cfg ) {
         'Artwork' => array(
             'art_pagesperhour'       => array( 'Art Pages/Hour', 'pages' ),
             'art_newdesignmodifier'  => array( 'New Design Modifier', '×' ),
+            'art_canva_fee'          => array( 'Canva Design Fee', '$ flat' ),
+            'art_edit_rate'          => array( 'Art Edit Rate', '$/hr' ),
+            'art_design_rate'        => array( 'New Design Rate', '$/hr' ),
         ),
         'Shop Schedule' => array(
             'shop_timezone'        => array( 'Timezone', '' ),
@@ -871,14 +877,18 @@ function pps_config_tab_finishing( $cfg ) {
 // ═══════════════════════════════════════════════════════════════
 
 function pps_config_tab_artwork( $cfg ) {
-    $cols = array(
+    $art_cols = array(
+        array( 'field' => 'label', 'header' => 'Option', 'type' => 'text',   'width' => '70%' ),
+        array( 'field' => 'val',   'header' => 'Val',    'type' => 'number', 'width' => '80px' ),
+    );
+    $bleed_cols = array(
         array( 'field' => 'label', 'header' => 'Option', 'type' => 'text',   'width' => '50%' ),
         array( 'field' => 'val',   'header' => 'Val',    'type' => 'number', 'width' => '70px' ),
-        array( 'field' => 'price', 'header' => '$/hr',   'type' => 'number', 'width' => '80px' ),
+        array( 'field' => 'price', 'header' => '$/side', 'type' => 'number', 'width' => '80px' ),
     );
 
-    pps_render_spreadsheet( 'art_opts', 'Artwork Options', $cfg['art_opts'], $cols, '0.0x=free, 2.0x=edits, 4.0x=new' );
-    pps_render_spreadsheet( 'bleed_opts', 'Bleed Options', $cfg['bleed_opts'], $cols );
+    pps_render_spreadsheet( 'art_opts', 'Artwork Options', $cfg['art_opts'], $art_cols, '0.0x=free, 0.04=Canva, 2.0x=edits, 4.0x=new design. Fees set on Production tab → Artwork group.' );
+    pps_render_spreadsheet( 'bleed_opts', 'Bleed Options', $cfg['bleed_opts'], $bleed_cols );
 }
 
 // ═══════════════════════════════════════════════════════════════
