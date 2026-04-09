@@ -676,31 +676,39 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
 const FOLD_KEY_MAP = {
   bifold: "half-fold", trifold: "tri-fold", z3: "accordion-3",
   gate3: "gate-fold", accordion4: "accordion-4", roll4: "roll-fold",
-  dgate4: "double-gate", dparallel4: "accordion-4",
+  dgate4: "double-gate", dparallel4: "double-parallel",
 };
 
-// Verified fold configurations with anti-clipping translateZ factors
+// Verified fold configurations with anti-clipping translateZ factors.
+// swap=true: ff=backSrc, fb=frontSrc — used when the physical fold brings
+// fronts together so the FOLDED outside shows "front art" (= cover layout).
+// For swap=true folds, the "Inside (Open)" flat view looks at ff (back art =
+// inside layout) and the "Outside (Open)" flat view rotates the scene 180°
+// to look at fb (front art = outside layout).
+// "Folded (Front)" is the scene angle where the cover is visible — which for
+// swap=true folds is the angle with +180° Y-rotation (looking at what was
+// originally the "back" of the scene).
 const FOLDS_3D = {
-  "half-fold": { n:2, mode:"nested", views:[
-    {label:"Front (Open)",sc:[8,-6,0,0],f:[0]},
-    {label:"Folded (Front)",sc:[20,-30,60,0],f:[-175]},
-    {label:"Folded (Back)",sc:[20,150,60,0],f:[-175]},
-    {label:"Back (Open)",sc:[8,174,0,0],f:[0]}]},
+  "half-fold": { n:2, mode:"nested", swap:true, views:[
+    {label:"Inside (Open)",sc:[8,-6,0,0],f:[0]},
+    {label:"Folded (Back)",sc:[20,-30,60,0],f:[-175]},
+    {label:"Folded (Front)",sc:[20,150,60,0],f:[-175]},
+    {label:"Outside (Open)",sc:[8,174,0,0],f:[0]}]},
   "accordion-3": { n:3, mode:"nested", views:[
     {label:"Front (Open)",sc:[8,-6,0,0],f:[0,0]},
     {label:"Folded (Front)",sc:[20,-35,60,0],f:[-175,168]},
     {label:"Folded (Back)",sc:[20,145,60,0],f:[-175,168]},
     {label:"Back (Open)",sc:[8,174,0,0],f:[0,0]}]},
-  "accordion-4": { n:4, mode:"nested", views:[
-    {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0]},
-    {label:"Folded (Front)",sc:[20,-35,100,0],f:[-175,168,-162]},
-    {label:"Folded (Back)",sc:[20,145,100,0],f:[-175,168,-162]},
-    {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0]}]},
+  "accordion-4": { n:4, mode:"nested", swap:true, views:[
+    {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0]},
+    {label:"Folded (Back)",sc:[20,-35,100,0],f:[-175,168,-162]},
+    {label:"Folded (Front)",sc:[20,145,100,0],f:[-175,168,-162]},
+    {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0]}]},
   "tri-fold": { n:3, mode:"trifold", views:[
     {label:"Inside (Open)",sc:[8,-6,0,0],f:[0,0],tz:[0,0]},
     {label:"Right Tucks In",sc:[20,-35,50,0],f:[0,-179],tz:[0,0]},
-    {label:"Folded (Front)",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
-    {label:"Folded (Back)",sc:[20,155,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+    {label:"Folded (Back)",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+    {label:"Folded (Front)",sc:[20,155,60,0],f:[175,-179],tzf_tf:[0.04,0]},
     {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0],tz:[0,0]}]},
   "gate-fold": { n:4, mode:"gate3", views:[
     {label:"Front (Open)",sc:[8,-6,0,0],g:[0,0]},
@@ -710,16 +718,26 @@ const FOLDS_3D = {
   "double-gate": { n:4, mode:"dgate", views:[
     {label:"Inside (Open)",sc:[8,-5,0,0],dg:[0,0,0],tzf:[0,0,0]},
     {label:"Flaps In",sc:[20,-30,50,0],dg:[178,-178,0],tzf:[0.04,0.04,0]},
-    {label:"Folded (Front)",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
-    {label:"Folded (Back)",sc:[20,155,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+    {label:"Folded (Back)",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+    {label:"Folded (Front)",sc:[20,155,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
     {label:"Outside (Open)",sc:[8,174,0,0],dg:[0,0,0],tzf:[0,0,0]}]},
-  "roll-fold": { n:4, mode:"nested", views:[
-    {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
+  "roll-fold": { n:4, mode:"nested", swap:true, views:[
+    {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
     {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
     {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
-    {label:"Folded (Front)",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
-    {label:"Folded (Back)",sc:[20,150,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
-    {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
+    {label:"Folded (Back)",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+    {label:"Folded (Front)",sc:[20,150,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+    {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
+  // Double parallel: fold in half, then in half again (same direction).
+  // Uses nested DOM; fh3 stays at 0 (panels 2+3 fold together as the first
+  // "half"), fh2 is the first fold (half in half), fh1 is the second fold
+  // (half again onto panel 0).
+  "double-parallel": { n:4, mode:"nested", swap:true, views:[
+    {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
+    {label:"First Fold",sc:[20,-30,60,0],f:[0,-175,0],tzf:[0,0.08,0]},
+    {label:"Folded (Back)",sc:[20,-30,80,0],f:[-175,-175,0],tzf:[0.18,0.08,0]},
+    {label:"Folded (Front)",sc:[20,150,80,0],f:[-175,-175,0],tzf:[0.18,0.08,0]},
+    {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
 };
 
 // Sanitize src for innerHTML injection — only allow data: URIs
@@ -760,15 +778,15 @@ function foldMkFGate(startQ, spanQ, qw, qh, iW, iH, isP, totalQ, frontSrc, backS
 }
 
 // Recursive nested builder (accordion, half, roll)
-function foldBuildNest(idx, n, pw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH) {
+function foldBuildNest(idx, n, pw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH, swap) {
   const last = idx === n-1;
   let h = `<div class="fold-panel-wrap" style="left:0;top:0;width:${pw}px;height:${ph}px">`;
-  h += foldMkF(idx, n, pw, ph, iW, iH, isP, fSrc, bSrc, false, fRW, fRH, bRW, bRH);
+  h += foldMkF(idx, n, pw, ph, iW, iH, isP, fSrc, bSrc, !!swap, fRW, fRH, bRW, bRH);
   if (!last) {
     const hp = isP ? `left:0;top:${ph}px;` : `left:${pw}px;top:0;`;
     const og = isP ? "center top" : "left center";
     h += `<div class="fold-hinge" id="fh${idx+1}" style="${hp}width:${pw}px;height:${ph}px;transform-origin:${og}">`;
-    h += foldBuildNest(idx+1, n, pw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH);
+    h += foldBuildNest(idx+1, n, pw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH, swap);
     h += `</div>`;
   }
   h += `</div>`; return h;
@@ -907,22 +925,20 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdg
     if (!sceneRef.current || !fold) return;
     const fSrc = frontSrc || null, bSrc = backSrc || null;
     let html = "";
-    // Roll fold: panels fold inward onto the back/inside, so swap art
-    const swapArt = foldKey === "roll-fold";
-    const sf = swapArt ? bSrc : fSrc, sb = swapArt ? fSrc : bSrc;
-    const sfrw = swapArt ? bRW : fRW, sfrh = swapArt ? bRH : fRH;
-    const sbrw = swapArt ? fRW : bRW, sbrh = swapArt ? fRH : bRH;
+    // Per-fold swap: swap=true means ff=back, fb=front (so the FOLDED outside
+    // shows front art = "outside" = cover layout). Used for fold types where
+    // the physical fold brings fronts together.
+    const swap = !!fold.swap;
     if (fold.mode === "nested") {
-      html = foldBuildNest(0, fold.n, pw, ph, iW, iH, isP, sf, sb, sfrw, sfrh, sbrw, sbrh);
+      html = foldBuildNest(0, fold.n, pw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH, swap);
     }
     else if (fold.mode === "trifold") html = foldBuildTri(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc, fRW, fRH, bRW, bRH);
     else if (fold.mode === "gate3") html = foldBuildGate(qw, ph, iW, iH, isP, fSrc, bSrc, fRW, fRH, bRW, bRH);
     else if (fold.mode === "dgate") html = foldBuildDGate(pw, ph, iW, iH, isP, fold.n, fSrc, bSrc, fRW, fRH, bRW, bRH);
     sceneRef.current.innerHTML = html;
-    // Apply greyscale filters — ff=front face, fb=back face
-    // For roll fold, art is swapped so ff shows back art and fb shows front art
-    var ffGray = swapArt ? backGray : frontGray;
-    var fbGray = swapArt ? frontGray : backGray;
+    // Apply greyscale filters — ff and fb may be swapped per fold
+    var ffGray = swap ? backGray : frontGray;
+    var fbGray = swap ? frontGray : backGray;
     sceneRef.current.querySelectorAll(".ff img").forEach(function(img) { img.style.filter = ffGray ? "grayscale(1)" : "none"; });
     sceneRef.current.querySelectorAll(".fb img").forEach(function(img) { img.style.filter = fbGray ? "grayscale(1)" : "none"; });
     setTimeout(() => { if (sceneRef.current) foldApplyView(sceneRef.current, foldKey, viewIdx || 0, flipped ? -1 : 1); }, 50);
