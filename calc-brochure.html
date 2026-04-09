@@ -542,7 +542,7 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
       pdf.setLineWidth(0.008);
       drawDashedRect(pdf, bleed + safety, bleed + safety, trimW - safety * 2, trimH - safety * 2, 0.05, 0.03);
 
-      // Fold lines — orange dashed, with flap offset for nesting folds
+      // Fold lines — orange solid (thin), with flap offset for nesting folds
       if (panels > 1) {
         pdf.setDrawColor(245, 166, 35);
         pdf.setLineWidth(0.01);
@@ -553,12 +553,12 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
           const frac = tplFracs[i];
           if (foldingLong) {
             const x = bleed + trimW * frac;
-            drawDashedLine(pdf, x, bleed + 0.1, x, bleed + trimH - 0.1, 0.08, 0.04);
+            pdf.line(x, bleed + 0.1, x, bleed + trimH - 0.1);
             pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
             pdf.text("FOLD " + (i + 1), x + 0.04, bleed + 0.25);
           } else {
             const y = bleed + trimH * frac;
-            drawDashedLine(pdf, bleed + 0.1, y, bleed + trimW - 0.1, y, 0.08, 0.04);
+            pdf.line(bleed + 0.1, y, bleed + trimW - 0.1, y);
             pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
             pdf.text("FOLD " + (i + 1), bleed + 0.15, y - 0.04);
           }
@@ -651,7 +651,7 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
         pdf.text("- - Trim (cut line)", lx, ly - 0.16);
         pdf.setTextColor(56, 161, 105);
         pdf.text("- - Safety (keep text inside)", lx, ly - 0.08);
-        if (panels > 1) { pdf.setTextColor(245, 166, 35); pdf.text("- - Fold lines", lx, ly); }
+        if (panels > 1) { pdf.setTextColor(245, 166, 35); pdf.text("\u2014 Fold lines", lx, ly); }
         if (perfCount > 0) { pdf.setTextColor(139, 92, 246); pdf.text("- - Perf lines", lx, ly + 0.08); }
       }
     }
