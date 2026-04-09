@@ -1324,18 +1324,24 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
             }}>Remove uploads</button>
           </div>
 
-          {/* Proof button + info */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          {/* Proof button + info — gentle red box when proof not yet approved */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, marginBottom: 10,
+            padding: approved ? 0 : "10px 12px",
+            background: approved ? "transparent" : "#fef2f2",
+            border: approved ? "none" : "1px solid #fecaca",
+            borderRadius: 6,
+          }}>
             <button type="button" onClick={() => setProofOpen(true)} style={{
               padding: "10px 18px", fontSize: 13, fontWeight: 700, borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
-              border: "none", display: "flex", alignItems: "center", gap: 6,
+              display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
               background: approved ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)" : "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)",
               color: approved ? "#fff" : "#555", boxShadow: "0 1px 3px rgba(0,0,0,.08)",
               border: `1px solid ${approved ? "#16a34a" : CC.border}`,
             }}>
               {approved ? "✓ Proof Approved" : "🔍 Proof"} {!approved && <span style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 4 }}>required</span>}
             </button>
-            <div style={{ fontSize: 11, color: CC.light, lineHeight: 1.4 }}>Open proof to review bleed, trim, safety{panels > 1 ? ", fold lines" : ""} and approve artwork</div>
+            <div style={{ fontSize: 11, color: approved ? CC.light : "#b91c1c", lineHeight: 1.4 }}>Open proof to review bleed, trim, safety{panels > 1 ? ", fold lines" : ""} and approve artwork</div>
           </div>
 
           {/* Fold selection + 3D Preview */}
@@ -1350,7 +1356,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 padding: "10px 16px", fontSize: 12, fontWeight: 600, borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CC.border}`, background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
                 display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap",
-              }}>📖 3D Preview</button>
+              }}>📖 Preview Folds</button>
             )}
           </div>
           {panels > 1 && sizeMode === "custom" && (
