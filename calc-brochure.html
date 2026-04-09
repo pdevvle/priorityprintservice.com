@@ -683,35 +683,42 @@ const FOLD_KEY_MAP = {
 const FOLDS_3D = {
   "half-fold": { n:2, mode:"nested", views:[
     {label:"Front (Open)",sc:[8,-6,0,0],f:[0]},
-    {label:"Half Fold",sc:[20,-30,60,0],f:[-175]},
+    {label:"Folded (Front)",sc:[20,-30,60,0],f:[-175]},
+    {label:"Folded (Back)",sc:[20,150,60,0],f:[-175]},
     {label:"Back (Open)",sc:[8,174,0,0],f:[0]}]},
   "accordion-3": { n:3, mode:"nested", views:[
     {label:"Front (Open)",sc:[8,-6,0,0],f:[0,0]},
-    {label:"Accordion Fold",sc:[20,-35,60,0],f:[-175,168]},
+    {label:"Folded (Front)",sc:[20,-35,60,0],f:[-175,168]},
+    {label:"Folded (Back)",sc:[20,145,60,0],f:[-175,168]},
     {label:"Back (Open)",sc:[8,174,0,0],f:[0,0]}]},
   "accordion-4": { n:4, mode:"nested", views:[
     {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0]},
-    {label:"Accordion Fold",sc:[20,-35,100,0],f:[-175,168,-162]},
+    {label:"Folded (Front)",sc:[20,-35,100,0],f:[-175,168,-162]},
+    {label:"Folded (Back)",sc:[20,145,100,0],f:[-175,168,-162]},
     {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0]}]},
   "tri-fold": { n:3, mode:"trifold", views:[
     {label:"Inside (Open)",sc:[8,-6,0,0],f:[0,0],tz:[0,0]},
     {label:"Right Tucks In",sc:[20,-35,50,0],f:[0,-179],tz:[0,0]},
-    {label:"Tri-Fold",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+    {label:"Folded (Front)",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+    {label:"Folded (Back)",sc:[20,155,60,0],f:[175,-179],tzf_tf:[0.04,0]},
     {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0],tz:[0,0]}]},
   "gate-fold": { n:4, mode:"gate3", views:[
     {label:"Front (Open)",sc:[8,-6,0,0],g:[0,0]},
-    {label:"Gate Fold",sc:[20,-25,30,0],g:[175,-175]},
+    {label:"Folded (Front)",sc:[20,-25,30,0],g:[175,-175]},
+    {label:"Folded (Back)",sc:[20,155,30,0],g:[175,-175]},
     {label:"Back (Open)",sc:[8,174,0,0],g:[0,0]}]},
   "double-gate": { n:4, mode:"dgate", views:[
     {label:"Inside (Open)",sc:[8,-5,0,0],dg:[0,0,0],tzf:[0,0,0]},
     {label:"Flaps In",sc:[20,-30,50,0],dg:[178,-178,0],tzf:[0.04,0.04,0]},
-    {label:"Double Gate Fold",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+    {label:"Folded (Front)",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+    {label:"Folded (Back)",sc:[20,155,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
     {label:"Outside (Open)",sc:[8,174,0,0],dg:[0,0,0],tzf:[0,0,0]}]},
   "roll-fold": { n:4, mode:"nested", views:[
     {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
     {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
     {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
-    {label:"Roll Fold",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+    {label:"Folded (Front)",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+    {label:"Folded (Back)",sc:[20,150,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
     {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
 };
 
