@@ -33,9 +33,13 @@ function pps_default_config() {
             'horizonspf20_sheetsperhour'        => 4000,
             'cutterbasefee'                     => 7.5,
             'sheetsturnaround'                  => 2500,
-            'backend_maximummarkup'             => 9,
-            'backend_minimummarkup'             => 1.5,
-            'easydiscount_max'                  => 1500,
+            'backend_maximummarkup'             => 15.2,
+            'backend_minimummarkup'             => 3.5,
+            'easydiscount_max'                  => 0,
+            // Booklet-specific markup (separate from brochure backend_* values)
+            'booklet_maximummarkup'             => 8,
+            'booklet_minimummarkup'             => 1.5,
+            'booklet_size_discount'             => 0.15,
             'uvcoaterimpressionsperhour'        => 250,
             'roundcornerperhour'                => 75,
             'bundlesperhour'                    => 50,
@@ -48,7 +52,7 @@ function pps_default_config() {
             'non_inventory_fee'                 => 35,
             'bw_discount_rate'                  => 0.3,
             'easy_discount_rate'                => 0.05,
-            'common_discount_max'               => 1000,
+            'common_discount_max'               => 0,
             'bundling_base_fee'                 => 7,
             'proof_hardcopy_cost'               => 35,
             'proof_digital_cost'                => 10,
@@ -714,9 +718,16 @@ function pps_config_tab_production( $cfg ) {
             'roundcornerperhour'                 => array( 'Round Corner', '/hr' ),
             'bundlesperhour'                     => array( 'Bundler', '/hr' ),
         ),
-        'Markup & Discounts' => array(
+        'Brochure Markup' => array(
             'backend_maximummarkup'  => array( 'Max Markup', '×' ),
             'backend_minimummarkup'  => array( 'Min Markup', '×' ),
+        ),
+        'Booklet Markup' => array(
+            'booklet_maximummarkup'  => array( 'Max Markup', '×' ),
+            'booklet_minimummarkup'  => array( 'Min Markup', '×' ),
+            'booklet_size_discount'  => array( '8.5×11 Size Disc.', '×' ),
+        ),
+        'Discounts' => array(
             'easydiscount_max'       => array( 'Easy Size Cap', '$' ),
             'easy_discount_rate'     => array( 'Easy Size Rate', '×' ),
             'common_discount_max'    => array( 'Common Size Cap', '$' ),
