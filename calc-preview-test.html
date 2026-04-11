@@ -111,8 +111,8 @@ const PCF = Object.assign({
   press_printsperhour:600, bindery_morgana_impressionperhour:750,
   cutter_sheetsperhour:15000, horizonspf20_sheetsperhour:4000,
   cutterbasefee:7.5, sheetsturnaround:2500,
-  backend_maximummarkup:15.2, backend_minimummarkup:3.5,
-  easydiscount_max:0, size_8511_discount:0.30, uvcoaterimpressionsperhour:250,
+  backend_maximummarkup:8, backend_minimummarkup:1.5,
+  easydiscount_max:0, size_8511_discount:0.15, uvcoaterimpressionsperhour:250,
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
   art_pagesperhour:8, art_newdesignmodifier:0.5,
   sheetsforlowcosthardcopyproof:1500,
@@ -398,7 +398,7 @@ function calculate(c) {
   const tQ=sets.reduce((s,x)=>s+x.qty,0);
   const tP=sets.reduce((s,x)=>s+x.pages,0);
   const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/4,0)/(imp/2);
-  const dL=(1.85*Math.log(tS))-0.5;
+  const dL=0.80*Math.log(tS);
   const mk=Math.max(PCF.backend_maximummarkup-dL,PCF.backend_minimummarkup);
   const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
   const csOK=sets.every(s=>s.pages<=24);
