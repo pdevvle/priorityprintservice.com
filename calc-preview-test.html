@@ -77,6 +77,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
+<div style="position:fixed;bottom:4px;right:8px;font:10px/1 monospace;color:rgba(0,0,0,.25);pointer-events:none;z-index:9999">build 2026-04-11 · e95d714</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -111,8 +112,11 @@ const PCF = Object.assign({
   press_printsperhour:600, bindery_morgana_impressionperhour:750,
   cutter_sheetsperhour:15000, horizonspf20_sheetsperhour:4000,
   cutterbasefee:7.5, sheetsturnaround:2500,
-  backend_maximummarkup:9, backend_minimummarkup:1.5,
-  easydiscount_max:1500, uvcoaterimpressionsperhour:250,
+  backend_maximummarkup:15.2, backend_minimummarkup:3.5,
+  easydiscount_max:0, uvcoaterimpressionsperhour:250,
+  // Booklet-specific markup overrides (separate from brochure backend_* values)
+  booklet_maximummarkup:8, booklet_minimummarkup:1.5,
+  booklet_size_discount:0.15,
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
   art_pagesperhour:8, art_newdesignmodifier:0.5,
   sheetsforlowcosthardcopyproof:1500,
@@ -121,7 +125,7 @@ const PCF = Object.assign({
   non_inventory_fee:35,          // surcharge for non-stock papers
   bw_discount_rate:0.3,          // press cost reduction for B&W
   easy_discount_rate:0.05,       // materials discount for easy (imp≥4) sizes
-  common_discount_max:1000,      // max competitive discount for common sizes
+  common_discount_max:0,      // max competitive discount for common sizes
   bundling_base_fee:7,           // flat add-on for any bundling
   proof_hardcopy_cost:35,        // hardcopy proof base price
   proof_digital_cost:10,         // digital proof base price
@@ -398,8 +402,8 @@ function calculate(c) {
   const tQ=sets.reduce((s,x)=>s+x.qty,0);
   const tP=sets.reduce((s,x)=>s+x.pages,0);
   const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/4,0)/(imp/2);
-  const dL=(0.6*Math.log(tS))-0.1447;
-  const mk=Math.max(PCF.backend_maximummarkup-dL,PCF.backend_minimummarkup);
+  const dL=0.80*Math.log(tS);
+  const mk=Math.max(PCF.booklet_maximummarkup-dL,PCF.booklet_minimummarkup);
   const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
   const csOK=sets.every(s=>s.pages<=24);
 
@@ -422,8 +426,8 @@ function calculate(c) {
   const commonSize=!sz.isCustom?["5.5×8.5 (Opens to 8.5×11)","8.5×11 (Opens to 11×17)"].includes(c.sizeLabel):false;
 
   const P={};
-  P.insidePrint=c.insideColor==="bw"?((PCF.printing_black_cost*2)*tS)*mk:(((PCF.printing_black_cost*2)*tS)*mk)+((PCF.printing_fullcolor_cost*2)*tS);
-  P.coverPrint=c.coverColor==="bw"?((PCF.printing_black_cost*tS)*2)/imp:((PCF.printing_fullcolor_cost*tS)*2)/imp;
+  P.insidePrint=c.insideColor==="bw"?((PCF.printing_black_cost*2)*tS)*mk:((PCF.printing_black_cost*2+PCF.printing_fullcolor_cost*2)*tS)*mk;
+  P.coverPrint=c.coverColor==="bw"?(((PCF.printing_black_cost*tS)*2)/imp)*mk:(((PCF.printing_fullcolor_cost*tS)*2)/imp)*mk;
   P.insidePaper=(c.insidePaper.price*tS)*mk;
   P.coverPaper=((cvr.price*tQ)/imp)*mk;
   P.press=(tS/PCF.press_printsperhour)*PCF.labor_press_hr;
@@ -452,6 +456,8 @@ function calculate(c) {
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
   P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate,PCF.easydiscount_max):0;
   P.discCommon=(commonSize&&q250)?-Math.min(P.press+P.cutting+P.stitching,PCF.common_discount_max):0;
+  const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
+  P.discSize=imp<4?subBeforeSize*(-PCF.booklet_size_discount):0;
 
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
@@ -544,7 +550,7 @@ function calculate(c) {
     {l:"Round Cornering",v:P.rc,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Difficult Size",v:P.diffSize,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
-    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},
+    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 
   // CMYK-derived group colors
