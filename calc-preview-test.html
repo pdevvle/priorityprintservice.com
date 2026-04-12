@@ -2303,14 +2303,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   <div style={{ padding:"16px 20px" }}>
                     {/* Page nav with view toggle */}
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12 }}>
-                      <button type="button" disabled={proofIdx<=0} onClick={() => setProofIdx(i => { let n=i-1; while(n>=0 && displayPages[n]?.isBlank) n--; return n>=0?n:i; })} style={{
+                      <button type="button" disabled={proofIdx<=0} onClick={() => setProofIdx(i => i > 0 ? i-1 : i)} style={{
                         padding:"8px 16px", borderRadius:6, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit",
                         display:"flex", alignItems:"center", gap:4, transition:"all .2s",
                         border:"1px solid rgba(255,255,255,.2)", background:"rgba(255,255,255,.08)", color:"rgba(255,255,255,.7)",
                         opacity: proofIdx<=0 ? 0.2 : 1,
                       }}>‹ Prev</button>
                       <span style={{ fontSize:13, color:"rgba(255,255,255,.6)", minWidth:100, textAlign:"center", fontWeight:500 }}>{proofPage.label} ({proofIdx+1}/{displayPages.length})</span>
-                      <button type="button" disabled={proofIdx>=displayPages.length-1} onClick={() => setProofIdx(i => { let n=i+1; while(n<displayPages.length && displayPages[n]?.isBlank) n++; return n<displayPages.length?n:i; })} style={{
+                      <button type="button" disabled={proofIdx>=displayPages.length-1} onClick={() => setProofIdx(i => i < displayPages.length-1 ? i+1 : i)} style={{
                         padding:"8px 16px", borderRadius:6, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit",
                         display:"flex", alignItems:"center", gap:4, transition:"all .2s",
                         border:"1px solid rgba(255,255,255,.2)", background:"rgba(255,255,255,.08)", color:"rgba(255,255,255,.7)",
@@ -2484,8 +2484,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                     {/* Thumbnail strip */}
                     <div className="bp-thumbs" style={{ marginTop:12 }}>
                       {displayPages.map((p, i) => (
-                        <div key={i} className="bp-thumb" style={{ cursor:"pointer", outline: i===proofIdx ? `2px solid ${CK.cyan}` : "none", borderRadius:3 }} onClick={() => !p.isBlank && setProofIdx(i)}>
-                          <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.3 : i===proofIdx ? 1 : 0.7, border: p.isBlank ? "1px dashed rgba(255,255,255,.2)" : undefined }} />
+                        <div key={i} className="bp-thumb" style={{ cursor:"pointer", outline: i===proofIdx ? `2px solid ${CK.cyan}` : "none", borderRadius:3 }} onClick={() => setProofIdx(i)}>
+                          <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.5 : i===proofIdx ? 1 : 0.7, border: p.isBlank ? "1px dashed rgba(255,255,255,.3)" : undefined }} />
                           <span style={{ color: i===proofIdx ? CK.cyan : p.isBlank ? CK.yellow : "rgba(255,255,255,.4)" }}>{p.label}</span>
                         </div>
                       ))}
@@ -2511,7 +2511,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   </div>
                   <div style={{ display:"grid", gridTemplateColumns:`repeat(auto-fill, minmax(${mob ? 100 : 140}px, 1fr))`, gap:10 }}>
                     {displayPages.map((p, i) => (
-                      <div key={i} style={{ cursor: p.isBlank ? "default" : "pointer", textAlign:"center" }} onClick={() => { if (!p.isBlank) { setProofIdx(i); setProofView("single"); } }}>
+                      <div key={i} style={{ cursor:"pointer", textAlign:"center" }} onClick={() => { setProofIdx(i); setProofView("single"); }}>
                         <div style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", background:"#2a2e36", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
                           {p.isBlank
                             ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.2)", fontSize:10 }}>Blank</div>
