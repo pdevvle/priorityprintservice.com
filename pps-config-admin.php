@@ -27,34 +27,32 @@ function pps_default_config() {
             'labor_cutting_hr'                  => 45,
             'labor_horizonspf20_hr'             => 50,
             'labor_horizonspf20_setup'          => 35,
-            'labor_gw_hour'                     => 45,
-            'labor_gw_setup'                    => 50,
             'press_printsperhour'               => 600,
             'bindery_morgana_impressionperhour' => 750,
             'cutter_sheetsperhour'              => 15000,
             'horizonspf20_sheetsperhour'        => 4000,
-            'speed_gwperhr'                     => 250,
             'cutterbasefee'                     => 7.5,
             'sheetsturnaround'                  => 2500,
-            'backend_maximummarkup'             => 9,
-            'backend_minimummarkup'             => 1.5,
-            'easydiscount_max'                  => 1500,
+            'backend_maximummarkup'             => 15.2,
+            'backend_minimummarkup'             => 3.5,
+            'easydiscount_max'                  => 0,
+            // Booklet-specific markup (separate from brochure backend_* values)
+            'booklet_maximummarkup'             => 8,
+            'booklet_minimummarkup'             => 1.5,
+            'booklet_size_discount'             => 0.15,
             'uvcoaterimpressionsperhour'        => 250,
             'roundcornerperhour'                => 75,
             'bundlesperhour'                    => 50,
             'addon_roundcornermaxdays'          => 30,
             'art_pagesperhour'                  => 8,
             'art_newdesignmodifier'             => 0.5,
-            'art_canva_fee'                     => 10,
-            'art_edit_rate'                     => 75,
-            'art_design_rate'                   => 75,
             'sheetsforlowcosthardcopyproof'     => 1500,
             'minimum_turnaround_days'           => 3,
             'two_staple_threshold'              => 5.25,
             'non_inventory_fee'                 => 35,
             'bw_discount_rate'                  => 0.3,
             'easy_discount_rate'                => 0.05,
-            'common_discount_max'               => 1000,
+            'common_discount_max'               => 0,
             'bundling_base_fee'                 => 7,
             'proof_hardcopy_cost'               => 35,
             'proof_digital_cost'                => 10,
@@ -117,18 +115,13 @@ function pps_default_config() {
             array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 All 4",            'val' => 108, 'price' => 0.1 ),
             array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 All 4",        'val' => 107, 'price' => 0.075 ),
         ),
-        'perf_opts' => array(
-            array( 'label' => 'No Perforation',      'val' => 0,    'price' => 0,    'count' => 0 ),
-            array( 'label' => '1 Perforation Line',  'val' => 2000, 'price' => 0.03, 'count' => 1 ),
-            array( 'label' => '2 Perforation Lines', 'val' => 1000, 'price' => 0.03, 'count' => 2 ),
-        ),
         'art_opts' => array(
-            array( 'label' => 'Upload Art with Order',      'val' => 0.01 ),
-            array( 'label' => 'Email Art After Order',      'val' => 0.02 ),
-            array( 'label' => 'Artwork already discussed',  'val' => 0.03 ),
-            array( 'label' => 'I have a design in Canva',   'val' => 0.04 ),
-            array( 'label' => 'Artwork needs edits',        'val' => 2.01 ),
-            array( 'label' => 'Design from scratch',        'val' => 4.01 ),
+            array( 'label' => 'Upload Art with Order',      'val' => 0.01, 'price' => 0 ),
+            array( 'label' => 'Email Art After Order',      'val' => 0.02, 'price' => 0 ),
+            array( 'label' => 'Artwork already discussed',  'val' => 0.03, 'price' => 0 ),
+            array( 'label' => 'I have a design in Canva',   'val' => 0.04, 'price' => 0 ),
+            array( 'label' => 'Artwork needs edits',        'val' => 2.01, 'price' => 75 ),
+            array( 'label' => 'Design from scratch',        'val' => 4.01, 'price' => 75 ),
         ),
         'bleed_opts' => array(
             array( 'label' => 'My artwork has proper bleeds', 'val' => 0, 'price' => 0 ),
@@ -283,8 +276,6 @@ function pps_parse_ups_zone_csv( $raw ) {
             $parts = explode( '-', $dest );
             $lo = intval( trim( $parts[0] ) );
             $hi = intval( trim( $parts[1] ) );
-            if ( $hi > 999 ) $hi = 999; // ZIP prefixes are 000-999
-            if ( $lo < 0 ) $lo = 0;
             for ( $i = $lo; $i <= $hi; $i++ ) {
                 $map[ str_pad( $i, 3, '0', STR_PAD_LEFT ) ] = $days;
             }
@@ -317,7 +308,6 @@ function pps_config_render_page() {
 
     // Handle save
     if ( isset( $_POST['pps_config_save'] ) ) {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
         check_admin_referer( 'pps_config_save' );
         $cfg = pps_get_config();
 
@@ -339,7 +329,7 @@ function pps_config_render_page() {
         $json_keys = array(
             'papers_nc', 'papers_cs', 'cover_same',
             'cover_scoring_vals', 'inv_nc', 'inv_cs',
-            'coatings', 'bundling', 'corners', 'perf_opts',
+            'coatings', 'bundling', 'corners',
             'art_opts', 'bleed_opts',
             'size_presets', 'transit_days', 'closures', 'page_counts',
         );
@@ -405,44 +395,6 @@ function pps_config_render_page() {
         check_admin_referer( 'pps_config_save' );
         delete_option( PPS_CONFIG_OPTION );
         $saved_msg = '<div class="notice notice-warning is-dismissible"><p>Configuration reset to factory defaults.</p></div>';
-
-    } elseif ( isset( $_POST['pps_tooltips_save'] ) ) {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
-        check_admin_referer( 'pps_config_save' );
-        $tips = get_option( 'pps_tooltips', array() );
-        if ( empty( $tips ) ) $tips = function_exists( 'pps_default_tooltips' ) ? pps_default_tooltips() : array();
-
-        foreach ( $tips as $key => &$tip ) {
-            if ( isset( $_POST[ 'tip_title_' . $key ] ) ) {
-                $tip['title'] = sanitize_text_field( $_POST[ 'tip_title_' . $key ] );
-            }
-            // Rebuild content blocks from POST
-            $new_content = array();
-            $i = 0;
-            while ( isset( $_POST[ 'tip_' . $key . '_type_' . $i ] ) ) {
-                $type = sanitize_key( $_POST[ 'tip_' . $key . '_type_' . $i ] );
-                $b = array( 'type' => $type );
-                if ( $type === 'text' ) {
-                    $b['value'] = sanitize_textarea_field( $_POST[ 'tip_' . $key . '_value_' . $i ] ?? '' );
-                } elseif ( $type === 'image' ) {
-                    $b['src'] = esc_url_raw( $_POST[ 'tip_' . $key . '_src_' . $i ] ?? '' );
-                    $b['alt'] = sanitize_text_field( $_POST[ 'tip_' . $key . '_alt_' . $i ] ?? '' );
-                } elseif ( $type === 'video' ) {
-                    $b['src'] = esc_url_raw( $_POST[ 'tip_' . $key . '_src_' . $i ] ?? '' );
-                    $b['poster'] = esc_url_raw( $_POST[ 'tip_' . $key . '_poster_' . $i ] ?? '' );
-                } elseif ( $type === 'youtube' ) {
-                    $b['src'] = esc_url_raw( $_POST[ 'tip_' . $key . '_src_' . $i ] ?? '' );
-                }
-                if ( $type === 'text' ? ! empty( $b['value'] ) : ! empty( $b['src'] ) ) {
-                    $new_content[] = $b;
-                }
-                $i++;
-            }
-            if ( ! empty( $new_content ) ) $tip['content'] = $new_content;
-        }
-        unset( $tip );
-        update_option( 'pps_tooltips', $tips, false );
-        $saved_msg = '<div class="notice notice-success is-dismissible"><p><strong>Tooltips saved.</strong></p></div>';
     }
 
     $cfg = pps_get_config();
@@ -455,7 +407,6 @@ function pps_config_render_page() {
         'artwork'    => 'Artwork',
         'sizes'      => 'Sizes',
         'shipping'   => 'Shipping',
-        'tooltips'   => 'Tooltips',
     );
 
     ?>
@@ -486,7 +437,6 @@ function pps_config_render_page() {
                 case 'artwork':    pps_config_tab_artwork( $cfg ); break;
                 case 'sizes':      pps_config_tab_sizes( $cfg ); break;
                 case 'shipping':   pps_config_tab_shipping( $cfg ); break;
-                case 'tooltips':   pps_config_tab_tooltips(); break;
             }
             ?>
 
@@ -758,22 +708,26 @@ function pps_config_tab_production( $cfg ) {
             'labor_cutting_hr'          => array( 'Cutter', '$/hr' ),
             'labor_horizonspf20_hr'     => array( 'Stitcher (SPF-20)', '$/hr' ),
             'labor_horizonspf20_setup'  => array( 'Stitcher Setup', '$ flat' ),
-            'labor_gw_hour'             => array( 'GW Perf Operator', '$/hr' ),
-            'labor_gw_setup'            => array( 'GW Perf Setup', '$ flat' ),
         ),
         'Machine Speeds' => array(
             'press_printsperhour'               => array( 'Press', '/hr' ),
             'bindery_morgana_impressionperhour'  => array( 'Morgana', '/hr' ),
             'cutter_sheetsperhour'               => array( 'Cutter', '/hr' ),
             'horizonspf20_sheetsperhour'         => array( 'Stitcher', '/hr' ),
-            'speed_gwperhr'                      => array( 'GW Perf', '/hr' ),
             'uvcoaterimpressionsperhour'         => array( 'UV Coater', '/hr' ),
             'roundcornerperhour'                 => array( 'Round Corner', '/hr' ),
             'bundlesperhour'                     => array( 'Bundler', '/hr' ),
         ),
-        'Markup & Discounts' => array(
+        'Brochure Markup' => array(
             'backend_maximummarkup'  => array( 'Max Markup', '×' ),
             'backend_minimummarkup'  => array( 'Min Markup', '×' ),
+        ),
+        'Booklet Markup' => array(
+            'booklet_maximummarkup'  => array( 'Max Markup', '×' ),
+            'booklet_minimummarkup'  => array( 'Min Markup', '×' ),
+            'booklet_size_discount'  => array( '8.5×11 Size Disc.', '×' ),
+        ),
+        'Discounts' => array(
             'easydiscount_max'       => array( 'Easy Size Cap', '$' ),
             'easy_discount_rate'     => array( 'Easy Size Rate', '×' ),
             'common_discount_max'    => array( 'Common Size Cap', '$' ),
@@ -798,9 +752,6 @@ function pps_config_tab_production( $cfg ) {
         'Artwork' => array(
             'art_pagesperhour'       => array( 'Art Pages/Hour', 'pages' ),
             'art_newdesignmodifier'  => array( 'New Design Modifier', '×' ),
-            'art_canva_fee'          => array( 'Canva Design Fee', '$ flat' ),
-            'art_edit_rate'          => array( 'Art Edit Rate', '$/hr' ),
-            'art_design_rate'        => array( 'New Design Rate', '$/hr' ),
         ),
         'Shop Schedule' => array(
             'shop_timezone'        => array( 'Timezone', '' ),
@@ -878,17 +829,9 @@ function pps_config_tab_finishing( $cfg ) {
         array( 'field' => 'price', 'header' => 'Price',  'type' => 'number', 'width' => '80px' ),
     );
 
-    $perf_cols = array(
-        array( 'field' => 'label', 'header' => 'Option',  'type' => 'text',   'width' => '50%' ),
-        array( 'field' => 'val',   'header' => 'Val',     'type' => 'number', 'width' => '70px' ),
-        array( 'field' => 'price', 'header' => '$/sheet', 'type' => 'number', 'width' => '80px' ),
-        array( 'field' => 'count', 'header' => 'Lines',   'type' => 'number', 'width' => '60px' ),
-    );
-
     pps_render_spreadsheet( 'coatings', 'Coatings', $cfg['coatings'], $cols, 'val=imp/hr, 0=none' );
     pps_render_spreadsheet( 'bundling', 'Bundling', $cfg['bundling'], $cols, 'price=bundle size' );
     pps_render_spreadsheet( 'corners', 'Round Cornering', $cfg['corners'], $cols );
-    pps_render_spreadsheet( 'perf_opts', 'Perforation', $cfg['perf_opts'], $perf_cols, 'count = number of perf lines (drives per-line setup math). GW speed, labor rate, and setup fee set on Production tab.' );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -896,18 +839,14 @@ function pps_config_tab_finishing( $cfg ) {
 // ═══════════════════════════════════════════════════════════════
 
 function pps_config_tab_artwork( $cfg ) {
-    $art_cols = array(
-        array( 'field' => 'label', 'header' => 'Option', 'type' => 'text',   'width' => '70%' ),
-        array( 'field' => 'val',   'header' => 'Val',    'type' => 'number', 'width' => '80px' ),
-    );
-    $bleed_cols = array(
+    $cols = array(
         array( 'field' => 'label', 'header' => 'Option', 'type' => 'text',   'width' => '50%' ),
         array( 'field' => 'val',   'header' => 'Val',    'type' => 'number', 'width' => '70px' ),
-        array( 'field' => 'price', 'header' => '$/side', 'type' => 'number', 'width' => '80px' ),
+        array( 'field' => 'price', 'header' => '$/hr',   'type' => 'number', 'width' => '80px' ),
     );
 
-    pps_render_spreadsheet( 'art_opts', 'Artwork Options', $cfg['art_opts'], $art_cols, '0.0x=free, 0.04=Canva, 2.0x=edits, 4.0x=new design. Fees set on Production tab → Artwork group.' );
-    pps_render_spreadsheet( 'bleed_opts', 'Bleed Options', $cfg['bleed_opts'], $bleed_cols );
+    pps_render_spreadsheet( 'art_opts', 'Artwork Options', $cfg['art_opts'], $cols, '0.0x=free, 2.0x=edits, 4.0x=new' );
+    pps_render_spreadsheet( 'bleed_opts', 'Bleed Options', $cfg['bleed_opts'], $cols );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1016,70 +955,4 @@ function pps_config_tab_shipping( $cfg ) {
     echo '</div>';
 
     pps_render_chips( 'closures', 'Shop Closures', $cfg['closures'], 'MM-DD annual or YYYY-MM-DD one-off' );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TAB: TOOLTIPS
-// ═══════════════════════════════════════════════════════════════
-
-function pps_config_tab_tooltips() {
-    $tips = get_option( 'pps_tooltips', array() );
-    if ( empty( $tips ) && function_exists( 'pps_default_tooltips' ) ) {
-        $tips = pps_default_tooltips();
-    }
-    ?>
-    <div class="pps-cfg-section">
-        <h2>Rich Tooltips</h2>
-        <p style="color:#666;font-size:13px;margin-top:0">
-            These tooltips appear across all calculators when users click the <span style="display:inline-flex;width:16px;height:16px;border-radius:50%;background:#007eff22;color:#007eff;font-size:9px;font-weight:700;align-items:center;justify-content:center;border:1px solid #007eff44">?</span> icons.
-            Each tooltip supports text, images, video files, and YouTube embeds. Content blocks render in order.
-        </p>
-    </div>
-
-    <?php foreach ( $tips as $key => $tip ) : $title = $tip['title'] ?? $key; $blocks = $tip['content'] ?? array(); ?>
-    <div class="pps-cfg-section" style="border:1px solid #ddd;border-radius:6px;padding:16px;margin-bottom:12px;background:#fff">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <div>
-                <code style="background:#f0f0f0;padding:2px 8px;border-radius:3px;font-size:11px;color:#007eff"><?php echo esc_html( $key ); ?></code>
-            </div>
-        </div>
-        <div style="margin-bottom:10px">
-            <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:3px">Title</label>
-            <input type="text" name="tip_title_<?php echo esc_attr( $key ); ?>" value="<?php echo esc_attr( $title ); ?>" style="width:100%;max-width:400px" />
-        </div>
-        <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:6px">Content Blocks</label>
-        <?php foreach ( $blocks as $i => $block ) :
-            $type = $block['type'] ?? 'text';
-            $prefix = 'tip_' . $key . '_';
-        ?>
-        <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;padding:8px;background:#f9f9f9;border-radius:4px;border:1px solid #eee">
-            <select name="<?php echo esc_attr( $prefix . 'type_' . $i ); ?>" style="width:90px;font-size:12px">
-                <option value="text" <?php selected( $type, 'text' ); ?>>Text</option>
-                <option value="image" <?php selected( $type, 'image' ); ?>>Image</option>
-                <option value="video" <?php selected( $type, 'video' ); ?>>Video</option>
-                <option value="youtube" <?php selected( $type, 'youtube' ); ?>>YouTube</option>
-            </select>
-            <?php if ( $type === 'text' ) : ?>
-                <textarea name="<?php echo esc_attr( $prefix . 'value_' . $i ); ?>" rows="2" style="flex:1;font-size:12px;min-height:40px"><?php echo esc_textarea( $block['value'] ?? '' ); ?></textarea>
-            <?php elseif ( $type === 'image' ) : ?>
-                <div style="flex:1">
-                    <input type="text" name="<?php echo esc_attr( $prefix . 'src_' . $i ); ?>" value="<?php echo esc_attr( $block['src'] ?? '' ); ?>" placeholder="Image URL" style="width:100%;font-size:12px;margin-bottom:3px" />
-                    <input type="text" name="<?php echo esc_attr( $prefix . 'alt_' . $i ); ?>" value="<?php echo esc_attr( $block['alt'] ?? '' ); ?>" placeholder="Alt text" style="width:100%;font-size:12px" />
-                </div>
-            <?php elseif ( $type === 'video' ) : ?>
-                <div style="flex:1">
-                    <input type="text" name="<?php echo esc_attr( $prefix . 'src_' . $i ); ?>" value="<?php echo esc_attr( $block['src'] ?? '' ); ?>" placeholder="Video URL (.mp4)" style="width:100%;font-size:12px;margin-bottom:3px" />
-                    <input type="text" name="<?php echo esc_attr( $prefix . 'poster_' . $i ); ?>" value="<?php echo esc_attr( $block['poster'] ?? '' ); ?>" placeholder="Poster image URL (optional)" style="width:100%;font-size:12px" />
-                </div>
-            <?php elseif ( $type === 'youtube' ) : ?>
-                <input type="text" name="<?php echo esc_attr( $prefix . 'src_' . $i ); ?>" value="<?php echo esc_attr( $block['src'] ?? '' ); ?>" placeholder="YouTube embed URL (https://www.youtube.com/embed/...)" style="flex:1;font-size:12px" />
-            <?php endif; ?>
-        </div>
-        <?php endforeach; ?>
-        <p style="font-size:11px;color:#999;margin:4px 0 0">To add blocks, save first then edit. To remove a block, clear its content and save.</p>
-    </div>
-    <?php endforeach; ?>
-
-    <button type="submit" name="pps_tooltips_save" class="button button-primary">💾 Save Tooltips</button>
-    <?php
 }
