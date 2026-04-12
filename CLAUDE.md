@@ -85,7 +85,8 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 
 ## Branch & Deploy
 - Branch: `pps-pricing-config`
-- GitHub Pages: serves from this branch (may need re-enabling if repo visibility changed)
+- GitHub Pages: serves from this branch. ALL calculator changes and previews MUST be pushed here.
+- Do NOT push to `website`, `gh-pages`, `main`, or any other branch for deployment or preview.
 - Preview URLs:
   - calc-preview-test.html (saddle stitch)
   - calc-perfect-bound.html (perfect bound)
