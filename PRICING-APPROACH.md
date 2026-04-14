@@ -143,12 +143,27 @@ print markup:          uniform
 - 5.5×8.5: +3-53% (tighter for thicker books, hot for 8pp at high qty)
 - 8.5×11: +1-49% with size discount
 
+### Perfect Bound (`calc-perfect-bound.html`) — 2026-04-14
+
+```
+perfectbound_maximummarkup: 8
+perfectbound_minimummarkup: 1.5
+perfectbound_size_discount: 0.15  (15% off for imp<4 sizes)
+easydiscount_max:      0
+common_discount_max:   0
+markup curve:          dL = 0.80 * ln(tS)     // was two-branch: quadratic<1000, linear≥1000
+print markup:          uniform                // was asymmetric (mk only on BW inside)
+```
+
+Mirrors the saddle-stitch booklet architecture: new dedicated `perfectbound_*` PCF keys so it can be tuned independently of brochure (previously shared `backend_*` keys). Old two-branch curve and asymmetric print markup are preserved inline as commented-out `// ROLLBACK:` blocks for quick revert without a git operation.
+
 ### WordPress admin (`pps-config-admin.php`)
 
-Defaults updated to match both calculators:
+Defaults updated to match all calculators:
 - `backend_*` keys: brochure values (15.2 / 3.5)
 - `booklet_*` keys: booklet values (8 / 1.5 / 0.15)
-- Admin UI split into three sections: **Brochure Markup**, **Booklet Markup**, **Discounts**
+- `perfectbound_*` keys: perfect bound values (8 / 1.5 / 0.15)
+- Admin UI split into four sections: **Brochure Markup**, **Booklet Markup**, **Perfect Bound Markup**, **Discounts**
 
 ---
 

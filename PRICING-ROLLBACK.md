@@ -18,6 +18,7 @@ git push origin pps-pricing-config
 ## Files touched
 
 - `calc-preview-test.html` (booklet calculator)
+- `calc-perfect-bound.html` (perfect bound calculator — added 2026-04-14)
 - `pps-config-admin.php` (WordPress admin PCF defaults)
 
 ## Original values (pre-tune-up)
@@ -97,6 +98,55 @@ while(n<displayPages.length && displayPages[n]?.isBlank) n++;
 
 ---
 
+## Perfect Bound — original values (pre-2026-04-14 tune-up)
+
+### PCF defaults (`calc-perfect-bound.html`)
+
+```javascript
+backend_maximummarkup:9, backend_minimummarkup:1.5,
+easydiscount_max:1500,
+common_discount_max:1000,
+// No perfectbound_* keys existed
+// No perfectbound_size_discount existed
+```
+
+### Markup curve (two-branch, pre-tune-up)
+
+```javascript
+const dL = tS >= 1000
+  ? 1.1782 * Math.log(tS) - 5.5887
+  : 2.5003 * Math.pow(Math.log(tS), 2) - 21.9175 * Math.log(tS) + 34.6437;
+const mk = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup);
+```
+
+Both the old curve and the asymmetric print-markup code are preserved as `// ROLLBACK:` comment blocks inline in `calc-perfect-bound.html` for quick revert without a git operation.
+
+### Print markup (asymmetric — pre-tune-up)
+
+```javascript
+// insidePrint: BW pages get mk; fullcolor surcharge does NOT
+const bwCost = ((PCF.printing_black_cost * sp / imp) * mk) * st.qty;
+const colorCost = ((PCF.printing_fullcolor_cost / imp) * cp) * st.qty;  // no mk
+
+// coverPrint: no mk on either branch
+P.coverPrint = c.coverColor === "bw"
+  ? ((PCF.printing_black_cost * 2 * tQ) / imp)
+  : ((PCF.printing_fullcolor_cost * 2 * tQ) / imp);
+```
+
+### Size adjustment
+
+**Did not exist.** No `P.discSize` line, no "Size Adj." display entry.
+
+### WordPress admin defaults (`pps-config-admin.php`, pre-tune-up)
+
+```php
+// No perfectbound_* keys existed; perfect bound shared backend_* with brochure.
+// Admin UI had no 'Perfect Bound Markup' section.
+```
+
+---
+
 ## What changed (current live state)
 
 | Parameter | Before | After |
@@ -113,6 +163,12 @@ while(n<displayPages.length && displayPages[n]?.isBlank) n++;
 | Size discount | none | 15% off for 8.5×11 (imp<4) |
 | Standalone header | present | removed |
 | Blank pages in proof modal | not clickable | clickable (render as white) |
+| `perfectbound_maximummarkup` | (didn't exist — used `backend_*`) | 8 |
+| `perfectbound_minimummarkup` | (didn't exist — used `backend_*`) | 1.5 |
+| `perfectbound_size_discount` | (didn't exist) | 0.15 |
+| Perfect bound markup curve | two-branch quadratic<1000 / linear≥1000 | `0.80·ln(tS)` (old preserved as comment) |
+| Perfect bound print markup | asymmetric (mk only on BW inside) | uniform (mk on all print) |
+| Perfect bound size discount | none | 15% off for 8.5×11 (imp<4) |
 
 ## Note on competitor pricing data
 

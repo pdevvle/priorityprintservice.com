@@ -112,7 +112,11 @@ const PCF = Object.assign({
   cutter_sheetsperhour:15000, horizonspf20_sheetsperhour:4000,
   cutterbasefee:7.5, sheetsturnaround:2500,
   backend_maximummarkup:9, backend_minimummarkup:1.5,
-  easydiscount_max:1500, uvcoaterimpressionsperhour:250,
+  // Perfect bound markup (parallel to booklet_* / backend_*). Tune independently via WP admin.
+  perfectbound_maximummarkup:8, perfectbound_minimummarkup:1.5,
+  perfectbound_size_discount:0.15,    // 15% off when imp<4 (8.5×11 and larger)
+  // ROLLBACK: pre-2026-04-14 values were easydiscount_max:1500, common_discount_max:1000
+  easydiscount_max:0, uvcoaterimpressionsperhour:250,
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
   art_pagesperhour:8, art_newdesignmodifier:0.5,
   art_canva_fee:10, art_edit_rate:75, art_design_rate:75,
@@ -122,7 +126,7 @@ const PCF = Object.assign({
   bw_discount_rate:0.3,
   easy_discount_rate_1:0.07,       // 7% materials discount tier 1
   easy_discount_rate_2:0.05,       // 5% materials discount tier 2
-  common_discount_max:1000,
+  common_discount_max:0,              // ROLLBACK: was 1000 pre-2026-04-14
   bundling_base_fee:7,
   proof_hardcopy_cost:35,
   proof_digital_cost:10,
@@ -419,11 +423,15 @@ function calculate(c) {
   // Perfect bound: pages / 2 per sheet (each sheet = 2 pages front/back)
   const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/2,0)/imp;
 
-  // Discount limiter — two-branch logarithmic curve
-  const dL = tS >= 1000
-    ? 1.1782 * Math.log(tS) - 5.5887
-    : 2.5003 * Math.pow(Math.log(tS), 2) - 21.9175 * Math.log(tS) + 34.6437;
-  const mk=Math.max(PCF.backend_maximummarkup-dL,PCF.backend_minimummarkup);
+  // Markup curve — single slope, aligned with saddle-stitch booklet (2026-04-14)
+  // ROLLBACK: to restore the prior two-branch curve, comment out the two lines below
+  // and uncomment this block:
+  // const dL = tS >= 1000
+  //   ? 1.1782 * Math.log(tS) - 5.5887
+  //   : 2.5003 * Math.pow(Math.log(tS), 2) - 21.9175 * Math.log(tS) + 34.6437;
+  // const mk=Math.max(PCF.backend_maximummarkup-dL,PCF.backend_minimummarkup);
+  const dL = 0.80 * Math.log(tS);
+  const mk = Math.max(PCF.perfectbound_maximummarkup - dL, PCF.perfectbound_minimummarkup);
 
   // Spine proxy: used for bundling/corner turnaround estimates
   const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
@@ -449,20 +457,23 @@ function calculate(c) {
   const bwFraction = tP > 0 ? totalBwPages / tP : 0;
 
   // Inside print: per-set calculation to handle mixed color correctly
+  // Uniform print markup (2026-04-14): mk applied to BOTH BW and color surcharge.
+  // ROLLBACK: prior asymmetric behavior had mk on bwCost only; restore by removing
+  // `* mk` from colorCost and removing `* mk` from both coverPrint branches below.
   P.insidePrint = sets.reduce((sum, st) => {
     const cp = st.colorPages || 0;
     const bp = st.bwPages || 0;
     const sp = cp + bp; // set total pages
     if (sp <= 0 || st.qty <= 0) return sum;
-    // BW cost on ALL pages + full color surcharge on color pages only
+    // BW cost on ALL pages + full color surcharge on color pages only (both * mk)
     const bwCost = ((PCF.printing_black_cost * sp / imp) * mk) * st.qty;
-    const colorCost = ((PCF.printing_fullcolor_cost / imp) * cp) * st.qty;
+    const colorCost = (((PCF.printing_fullcolor_cost / imp) * cp) * mk) * st.qty;
     return sum + bwCost + colorCost;
   }, 0);
-  // Cover print: front + back = 2 sides
+  // Cover print: front + back = 2 sides (uniform mk)
   P.coverPrint = c.coverColor === "bw"
-    ? ((PCF.printing_black_cost * 2 * tQ) / imp)
-    : ((PCF.printing_fullcolor_cost * 2 * tQ) / imp);
+    ? (((PCF.printing_black_cost * 2 * tQ) / imp) * mk)
+    : (((PCF.printing_fullcolor_cost * 2 * tQ) / imp) * mk);
 
   // ── Paper ──
   const lowYield = imp < 1;
@@ -532,6 +543,10 @@ function calculate(c) {
   P.discBW = bwFraction > 0 ? -(P.press * PCF.bw_discount_rate * bwFraction) : 0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
   P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate_1,PCF.easydiscount_max):0;
+
+  // Size-based adjustment — 15% off when imp<4 (8.5×11 and larger). Mirrors saddle-stitch booklet.
+  const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
+  P.discSize=imp<4?subBeforeSize*(-PCF.perfectbound_size_discount):0;
 
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
@@ -630,7 +645,7 @@ function calculate(c) {
     {l:"Round Cornering",v:P.rc,g:"add"},{l:"Outfold",v:P.outfold,g:"add"},{l:"Perforation",v:P.perforation,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
-    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},
+    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 
   // CMYK-derived group colors
