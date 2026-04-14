@@ -77,7 +77,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-14b · SS-COMPARE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-14c · SS+MOBILE</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -4179,6 +4179,37 @@ function App(){
           </Sec>}
           */}
 
+        {/* TEMPORARY: mobile-visible qty pricing table with saddle-stitch comparison.
+            Remove this mobile duplicate when the SS comparison is no longer needed. */}
+        {mob && projections && <div style={{...ST.pnl,marginTop:10,marginBottom:100,overflow:"hidden"}}>
+          <div style={{padding:"10px 14px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
+            <div style={{fontSize:9,fontStyle:"italic",color:CC.light,marginTop:2}}>SS = saddle-stitch estimate (base printing only)</div>
+          </div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
+            <thead>
+              <tr style={{borderBottom:`1px solid ${CC.border}`}}>
+                <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Qty</th>
+                <th style={{padding:"6px 4px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Unit</th>
+                <th style={{padding:"6px 8px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Total</th>
+                <th style={{padding:"6px 4px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase",fontStyle:"italic"}}>SS $</th>
+                <th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase",fontStyle:"italic"}}>SS Tot</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projections.map((p,i) => p.total !== null && (
+                <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?"#f0f9ff":"transparent"}}
+                  onClick={() => {if(!p.current) upSet(0,{qty:p.qty})}}>
+                  <td style={{padding:"5px 10px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>{p.qty.toLocaleString()}{p.current&&" ●"}</td>
+                  <td style={{padding:"5px 4px",textAlign:"right",color:CC.mid}}>${p.perUnit.toFixed(2)}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toFixed(0)}</td>
+                  <td style={{padding:"5px 4px",textAlign:"right",color:CC.light,fontStyle:"italic"}}>{p.saddlePerUnit!=null?`$${p.saddlePerUnit.toFixed(2)}`:"—"}</td>
+                  <td style={{padding:"5px 10px",textAlign:"right",color:CC.light,fontStyle:"italic"}}>{p.saddleTotal!=null?`$${p.saddleTotal.toFixed(0)}`:"—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>}
         </div>
         {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18}}>
           <Panel result={result}/>
