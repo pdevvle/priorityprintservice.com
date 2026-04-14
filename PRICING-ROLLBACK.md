@@ -147,6 +147,37 @@ P.coverPrint = c.coverColor === "bw"
 
 ---
 
+## Saddle-stitch cover print formula bug fix — 2026-04-14
+
+**Bug:** saddle-stitch cover print cost scaled with `tS` (inside sheet count), which grows with page count. Covers are one sheet per book — cost should not depend on how many inside pages the book has. Resulted in saddle-stitch overcharging covers by 2–8× at 16–32pp configurations.
+
+**Old formula (calc-preview-test.html line 430 before fix):**
+```javascript
+P.coverPrint = c.coverColor === "bw"
+  ? (((PCF.printing_black_cost * tS) * 2) / imp) * mk
+  : (((PCF.printing_fullcolor_cost * tS) * 2) / imp) * mk;
+```
+
+**New formula:**
+```javascript
+P.coverPrint = c.coverColor === "bw"
+  ? (((PCF.printing_black_cost * 2) * tQ) / imp) * mk
+  : (((PCF.printing_fullcolor_cost * 2) * tQ) / imp) * mk;
+```
+
+**Impact at 5.5×8.5, fullcolor cover, imp=4:**
+| Qty × Pages | Before ($) | After ($) | Drop |
+|---|---|---|---|
+| 100 × 16pp | 19 | 9 | −$10 |
+| 500 × 16pp | 62 | 31 | −$31 |
+| 1000 × 32pp | 300 | 75 | −$225 |
+
+Re-tune `booklet_maximummarkup` upward (via WP admin, no code change) if competitor positioning now runs too low at high page counts.
+
+`calcSaddle()` in calc-perfect-bound.html was updated in the same commit to mirror the fix for the side-by-side comparison table.
+
+---
+
 ## What changed (current live state)
 
 | Parameter | Before | After |
