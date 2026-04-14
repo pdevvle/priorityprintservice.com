@@ -84,22 +84,15 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 - Edit mode atomicity (add before remove)
 
 ## Branch & Deploy
-- **Dev branch:** `pps-pricing-config` — source of truth. All code changes live here.
-- **Deploy branch:** `gh-pages` — GitHub Pages serves from this branch. After pushing to `pps-pricing-config`, copy the changed calculator files to `gh-pages` and push there too, otherwise the preview URL will not update.
-- Do NOT push to `website` for calculator preview — it is not the Pages source.
-- Do NOT create `claude/*` work branches for this project — commit directly to `pps-pricing-config`.
-- Deploy procedure for calculator changes:
-  ```bash
-  # on pps-pricing-config after committing your changes:
-  git checkout gh-pages
-  git checkout pps-pricing-config -- calc-preview-test.html calc-perfect-bound.html calc-brochure.html brochure-fold-previewer.html
-  git commit -m "Deploy <what changed>"
-  git push origin gh-pages
-  git checkout pps-pricing-config
-  ```
-- Preview URLs (served by GitHub Pages from `gh-pages`):
+
+- **Source branch:** `pps-pricing-config` — GitHub Pages serves directly from the root of this branch. All calculator changes must be pushed here. No separate deploy step.
+- **`.nojekyll` is MANDATORY** on `pps-pricing-config`. Without it, Pages runs Jekyll, which silently breaks the build because the inline JSX/Babel inside the calculator HTML contains `{{ }}` that Jekyll tries to parse as Liquid templates. Symptom: your pushes never appear on the preview URL even though the file on GitHub looks correct. **Never delete `.nojekyll`.**
+- Do NOT push to `gh-pages` — it's not the Pages source (despite the name).
+- Do NOT push to `website` — it's unrelated to the preview.
+- Do NOT create `claude/*` work branches — commit directly to `pps-pricing-config`.
+- **Preview URLs** (served by GitHub Pages from `pps-pricing-config`):
   - https://pdevvle.github.io/priorityprintservice.com/calc-preview-test.html (saddle stitch)
   - https://pdevvle.github.io/priorityprintservice.com/calc-perfect-bound.html (perfect bound)
   - https://pdevvle.github.io/priorityprintservice.com/calc-brochure.html (brochure)
-- Each calculator has a build-stamp chip in the bottom-right corner — if you don't see the expected build date after deploying, it's a browser/CDN cache issue, not a push failure. Hard-refresh with Cmd/Ctrl+Shift+R.
+- Each calculator has a build-stamp chip in the bottom-right corner. After a push, wait ~60 seconds for Pages to rebuild, then hard-refresh (Cmd/Ctrl+Shift+R) or use an Incognito window. If the chip still doesn't update, verify `.nojekyll` exists on the branch root — that's the #1 cause of "my push didn't show up."
 - Go private protocol: replace files with dummies, flip repo to private. Restore: `git checkout pps-real-backup -- <files>`
