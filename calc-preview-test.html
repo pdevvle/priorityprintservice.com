@@ -115,7 +115,8 @@ const PCF = Object.assign({
   backend_maximummarkup:15.2, backend_minimummarkup:3.5,
   easydiscount_max:0, uvcoaterimpressionsperhour:250,
   // Booklet-specific markup overrides (separate from brochure backend_* values)
-  booklet_maximummarkup:8, booklet_minimummarkup:1.5,
+  booklet_maximummarkup:3.6, booklet_minimummarkup:1.45,
+  booklet_markup_coef_tS:0.15, booklet_markup_coef_pages:0.30,
   booklet_size_discount:0.15,
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
   art_pagesperhour:8, art_newdesignmodifier:0.5,
@@ -402,7 +403,7 @@ function calculate(c) {
   const tQ=sets.reduce((s,x)=>s+x.qty,0);
   const tP=sets.reduce((s,x)=>s+x.pages,0);
   const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/4,0)/(imp/2);
-  const dL=0.80*Math.log(tS);
+  const dL=PCF.booklet_markup_coef_tS*Math.log(tS)+PCF.booklet_markup_coef_pages*Math.log(tP);
   const mk=Math.max(PCF.booklet_maximummarkup-dL,PCF.booklet_minimummarkup);
   const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
   const csOK=sets.every(s=>s.pages<=24);
