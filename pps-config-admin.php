@@ -37,8 +37,10 @@ function pps_default_config() {
             'backend_minimummarkup'             => 3.5,
             'easydiscount_max'                  => 0,
             // Booklet-specific markup (separate from brochure backend_* values)
-            'booklet_maximummarkup'             => 8,
-            'booklet_minimummarkup'             => 1.5,
+            'booklet_maximummarkup'             => 3.6,
+            'booklet_minimummarkup'             => 1.45,
+            'booklet_markup_coef_tS'            => 0.15,
+            'booklet_markup_coef_pages'         => 0.30,
             'booklet_size_discount'             => 0.15,
             // Perfect-bound-specific markup (separate from brochure backend_* and booklet_* values)
             'perfectbound_maximummarkup'        => 8,
@@ -727,9 +729,11 @@ function pps_config_tab_production( $cfg ) {
             'backend_minimummarkup'  => array( 'Min Markup', '×' ),
         ),
         'Booklet Markup' => array(
-            'booklet_maximummarkup'  => array( 'Max Markup', '×' ),
-            'booklet_minimummarkup'  => array( 'Min Markup', '×' ),
-            'booklet_size_discount'  => array( '8.5×11 Size Disc.', '×' ),
+            'booklet_maximummarkup'      => array( 'Max Markup', '×' ),
+            'booklet_minimummarkup'      => array( 'Min Markup', '×' ),
+            'booklet_markup_coef_tS'     => array( 'Sheet Decay Coef', '×' ),
+            'booklet_markup_coef_pages'  => array( 'Pages Decay Coef', '×' ),
+            'booklet_size_discount'      => array( '8.5×11 Size Disc.', '×' ),
         ),
         'Perfect Bound Markup' => array(
             'perfectbound_maximummarkup'  => array( 'Max Markup', '×' ),
