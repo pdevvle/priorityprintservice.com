@@ -46,6 +46,7 @@ function pps_default_config() {
             'perfectbound_maximummarkup'        => 8,
             'perfectbound_minimummarkup'        => 1.5,
             'perfectbound_size_discount'        => 0.15,
+            'perfectbound_discount_log_coef'    => 2.2,
             'uvcoaterimpressionsperhour'        => 250,
             'roundcornerperhour'                => 75,
             'bundlesperhour'                    => 50,
@@ -736,9 +737,10 @@ function pps_config_tab_production( $cfg ) {
             'booklet_size_discount'      => array( '8.5×11 Size Disc.', '×' ),
         ),
         'Perfect Bound Markup' => array(
-            'perfectbound_maximummarkup'  => array( 'Max Markup', '×' ),
-            'perfectbound_minimummarkup'  => array( 'Min Markup', '×' ),
-            'perfectbound_size_discount'  => array( '8.5×11 Size Disc.', '×' ),
+            'perfectbound_maximummarkup'     => array( 'Max Markup', '×' ),
+            'perfectbound_minimummarkup'     => array( 'Min Markup', '×' ),
+            'perfectbound_size_discount'     => array( '8.5×11 Size Disc.', '×' ),
+            'perfectbound_discount_log_coef' => array( 'Discount Curve Steepness', '×ln(tS)' ),
         ),
         'Discounts' => array(
             'easydiscount_max'       => array( 'Easy Size Cap', '$' ),
