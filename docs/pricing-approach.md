@@ -4,7 +4,7 @@ This document captures the pricing strategy applied to the PPS calculators, the 
 
 **Live branch:** `pps-pricing-config` (GitHub Pages deploys from here)
 **Last major tune:** 2026-04-11
-**Rollback reference:** `PRICING-ROLLBACK.md`
+**Rollback reference:** `pricing-rollback.md`
 
 ---
 
@@ -31,7 +31,7 @@ Each calculator HTML file has hardcoded PCF defaults. In production, WordPress i
 
 | File | Contains |
 |---|---|
-| `calc-preview-test.html` | Saddle-stitch booklet calculator + hardcoded PCF defaults |
+| `calc-preview.html` | Saddle-stitch booklet calculator + hardcoded PCF defaults |
 | `calc-brochure.html` | Brochure calculator + hardcoded PCF defaults |
 | `calc-perfect-bound.html` | Perfect-bound booklet calculator |
 | `pps-config-admin.php` | WordPress admin PCF defaults + admin UI |
@@ -127,7 +127,7 @@ baseCost:              removed ($35 was always added)
 
 **Expected positioning:** +1% to +12% above Vistaprint.
 
-### Booklet (`calc-preview-test.html`) — this session
+### Booklet (`calc-preview.html`) — this session
 
 ```
 booklet_maximummarkup: 8

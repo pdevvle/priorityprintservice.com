@@ -3,23 +3,31 @@
 WordPress/WooCommerce plugin for Priority Print Service — pricing calculators with integrated artwork proofing.
 
 ## Architecture
-- Self-contained React calculators (HTML files with inline Babel)
-- PHP plugin handles cart, orders, REST API, SEO, Google Drive, tooltips
+- Self-contained React calculators (HTML files with inline Babel) in `calculators/`
+- PHP plugin handles cart, orders, REST API, SEO, Google Drive, tooltips in `wp-plugins/`
 - All calculators share: shipping/rush engine, zone map, RichTip tooltips, debug panel, DatePicker
 - Logo loaded from PPS_CONFIG.logoUrl (injected by PHP, not embedded)
 - Zone map embedded in HTML for standalone testing, overridden by PHP in production
 
+## Repository Layout
+```
+calculators/    HTML calculators (GitHub Pages)
+wp-plugins/     WordPress plugin PHP (deployed to WP server)
+data/           Reference data (UPS zone map)
+docs/           Pricing strategy and rollback documentation
+```
+
 ## Files
 | File | Purpose |
 |------|---------|
-| `calc-preview-test.html` | Saddle stitch booklet calculator — most mature, has full proof/preview modals, approval package generation, magnifier, 3D book preview |
-| `calc-perfect-bound.html` | Perfect bound booklet calculator — mixed color per-set, perfect binding labor, outfold, perforation, finishing cuts |
-| `calc-brochure.html` | Brochure & flat printing calculator — 9 fold types, 3D fold preview (7 proven fold renderers), SheetPreview with front/back upload |
-| `brochure-fold-previewer.html` | Reference: standalone 3D fold previewer tool (vanilla JS, 1453 lines). Source for the proven fold rendering engine now integrated into calc-brochure.html |
-| `pps-calculators.php` | WP plugin: cart/orders, SEO schemas (Product/LocalBusiness/FAQ/WebApp), noscript fallback, llms.txt, reorder, edit mode, PPS-Spec/PPS-Production-Start for Missive, per-product defaults, tooltips injection, logo URL |
-| `pps-config-admin.php` | Admin config page with tabs: Production, Papers, Finishing, Artwork, Sizes, Shipping, Tooltips |
-| `pps-gdrive.php` | Google Drive OAuth (credentials in wp_options, not source code), artwork upload with idempotent retry, thumbnail generation |
-| `ups-zone-map-seed.json` | UPS Ground transit days by 3-digit ZIP prefix (1000 entries) |
+| `calculators/calc-preview.html` | Saddle stitch booklet calculator — most mature, has full proof/preview modals, approval package generation, magnifier, 3D book preview |
+| `calculators/calc-perfect-bound.html` | Perfect bound booklet calculator — mixed color per-set, perfect binding labor, outfold, perforation, finishing cuts |
+| `calculators/calc-brochure.html` | Brochure & flat printing calculator — 9 fold types, 3D fold preview (7 proven fold renderers), SheetPreview with front/back upload |
+| `calculators/brochure-fold-previewer.html` | Reference: standalone 3D fold previewer tool (vanilla JS, 1453 lines). Source for the proven fold rendering engine now integrated into calc-brochure.html |
+| `wp-plugins/pps-calculators.php` | WP plugin: cart/orders, SEO schemas (Product/LocalBusiness/FAQ/WebApp), noscript fallback, llms.txt, reorder, edit mode, PPS-Spec/PPS-Production-Start for Missive, per-product defaults, tooltips injection, logo URL |
+| `wp-plugins/pps-config-admin.php` | Admin config page with tabs: Production, Papers, Finishing, Artwork, Sizes, Shipping, Tooltips |
+| `wp-plugins/pps-gdrive.php` | Google Drive OAuth (credentials in wp_options, not source code), artwork upload with idempotent retry, thumbnail generation |
+| `data/ups-zone-map-seed.json` | UPS Ground transit days by 3-digit ZIP prefix (1000 entries) |
 
 ## Shared Components (in each calculator HTML)
 - `PCF` — pricing constants object, overridable via PPS_CONFIG.calc
@@ -34,7 +42,7 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 - `DebugPanel` — calculation breakdown with turnaround/shipping/SEO schema debug
 - Zone map (1000 entries) embedded inline, overridden by PHP
 
-## Saddle Stitch Calculator (calc-preview-test.html)
+## Saddle Stitch Calculator (calculators/calc-preview.html)
 - **Status:** Most complete. Full proof/preview system.
 - **Pricing:** Saddle stitch binding, stitching labor, two-staple auto/opt-in
 - **Proof modal:** Bleed/trim/safety/spine guides, magnifier with guides, hi-res 300 DPI render
@@ -42,13 +50,13 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 - **Art transforms:** Crop/Fill/Fit/Stretch/Scale/Rotate with approval package generation (4 deliverables: raw file, print-ready PDF, preview JPEGs with guides, manipulation manifest)
 - **Sets:** Mothballed (internal logic preserved, UI commented out)
 
-## Perfect Bound Calculator (calc-perfect-bound.html)
+## Perfect Bound Calculator (calculators/calc-perfect-bound.html)
 - **Status:** Pricing engine complete. Proof/preview inherited from saddle stitch.
 - **Pricing:** Perfect binding (2-up/1-up), 3 finishing cuts, outfold, perforation (GW machine)
 - **Unique:** Mixed color per-set (Full Color/Greyscale/Mixed with color+BW page inputs), two-branch logarithmic discount curve, $40 base rate
 - **Spine:** Calculated from page count (visible in 3D preview)
 
-## Brochure Calculator (calc-brochure.html)
+## Brochure Calculator (calculators/calc-brochure.html)
 - **Status:** Pricing engine complete. 3D fold preview integrated.
 - **Pricing:** 9 fold types, folding labor, 3 difficult fold surcharge tiers, coating with sides option
 - **SheetPreview:** Front/back upload slots, PDF auto-extraction (page 1=front, page 2=back)
@@ -85,14 +93,13 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 
 ## Branch & Deploy
 
-- **Source branch:** `pps-pricing-config` — GitHub Pages serves directly from the root of this branch. All calculator changes must be pushed here. No separate deploy step.
-- **`.nojekyll` is MANDATORY** on `pps-pricing-config`. Without it, Pages runs Jekyll, which silently breaks the build because the inline JSX/Babel inside the calculator HTML contains `{{ }}` that Jekyll tries to parse as Liquid templates. Symptom: your pushes never appear on the preview URL even though the file on GitHub looks correct. **Never delete `.nojekyll`.**
+- **Development branch:** `pps-pricing-config` — all work happens here.
+- **Deploy branch:** `website` — merge from `pps-pricing-config` when ready to go live. GitHub Pages serves from this branch.
+- **`.nojekyll` is MANDATORY** at the repo root. Without it, Pages runs Jekyll, which silently breaks the build because the inline JSX/Babel inside the calculator HTML contains `{{ }}` that Jekyll tries to parse as Liquid templates. Symptom: your pushes never appear on the preview URL even though the file on GitHub looks correct. **Never delete `.nojekyll`.**
 - Do NOT push to `gh-pages` — it's not the Pages source (despite the name).
-- Do NOT push to `website` — it's unrelated to the preview.
-- Do NOT create `claude/*` work branches — commit directly to `pps-pricing-config`.
-- **Preview URLs** (served by GitHub Pages from `pps-pricing-config`):
-  - https://pdevvle.github.io/priorityprintservice.com/calc-preview-test.html (saddle stitch)
-  - https://pdevvle.github.io/priorityprintservice.com/calc-perfect-bound.html (perfect bound)
-  - https://pdevvle.github.io/priorityprintservice.com/calc-brochure.html (brochure)
+- **Preview URLs** (served by GitHub Pages):
+  - https://pdevvle.github.io/priorityprintservice.com/calculators/calc-preview.html (saddle stitch)
+  - https://pdevvle.github.io/priorityprintservice.com/calculators/calc-perfect-bound.html (perfect bound)
+  - https://pdevvle.github.io/priorityprintservice.com/calculators/calc-brochure.html (brochure)
 - Each calculator has a build-stamp chip in the bottom-right corner. After a push, wait ~60 seconds for Pages to rebuild, then hard-refresh (Cmd/Ctrl+Shift+R) or use an Incognito window. If the chip still doesn't update, verify `.nojekyll` exists on the branch root — that's the #1 cause of "my push didn't show up."
 - Go private protocol: replace files with dummies, flip repo to private. Restore: `git checkout pps-real-backup -- <files>`

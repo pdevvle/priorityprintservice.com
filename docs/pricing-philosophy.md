@@ -12,7 +12,7 @@ chat as context when working on pricing changes.
 |---|---|---|
 | `calc-brochure.html` | Brochure & flat printing | Most recently refactored — reference implementation |
 | `calc-perfect-bound.html` | Perfect bound booklets | Shares proof/preview with saddle stitch |
-| `calc-preview-test.html` | Saddle stitch booklets | Oldest, most complete proof/preview system |
+| `calc-preview.html` | Saddle stitch booklets | Oldest, most complete proof/preview system |
 
 All three are self-contained HTML files with React+Babel inline. Each has its
 own `PCF`, `calculate()`, `ART_OPTS`, etc. They are **not** a shared module —
@@ -23,11 +23,11 @@ changes to pricing philosophy need to be re-applied in each file.
 ## Value flow: wp_options → calculate()
 
 ```
-pps-config-admin.php :: pps_default_config()
+wp-plugins/pps-config-admin.php :: pps_default_config()
         ↓  (seeds the defaults)
 wp_options row 'pps_calc_config'
         ↓  (loaded via pps_get_config())
-pps-calculators.php :: inline script tag on product page
+wp-plugins/pps-calculators.php :: inline script tag on product page
         ↓  window.PPS_CONFIG = { calc: {...} }
 calc-*.html :: const _CFG = (window.PPS_CONFIG||{}).calc || {}
         ↓
@@ -251,10 +251,10 @@ is self-contained and only depends on the PCF constants + input config.
 
 ```bash
 # Find the function start/end lines
-awk '/^function calculate/{s=NR; depth=0} s { n=gsub(/\{/,"{"); depth+=n; n=gsub(/\}/,"}"); depth-=n; if (depth==0 && NR>s) { print NR; exit } }' calc-brochure.html
+awk '/^function calculate/{s=NR; depth=0} s { n=gsub(/\{/,"{"); depth+=n; n=gsub(/\}/,"}"); depth-=n; if (depth==0 && NR>s) { print NR; exit } }' calculators/calc-brochure.html
 
 # Slice the relevant lines (including PCF definition) and run in Node
-awk 'NR>=33 && NR<=482' calc-brochure.html > /tmp/pricing-core.js
+awk 'NR>=33 && NR<=482' calculators/calc-brochure.html > /tmp/pricing-core.js
 node -e "
 global.window = { innerWidth: 1200, PPS_CONFIG: {} };
 global.React = { useState: () => [null, () => {}], useEffect: () => {}, useMemo: (f) => f(), useRef: () => ({ current: null }), useCallback: (f) => f };
@@ -279,7 +279,7 @@ done for the Canva fee verification in commit `3dd837a`).
 | Calculator | `ART_OPTS` line | `calculate()` artwork block |
 |---|---:|---:|
 | calc-brochure.html | ~150 | ~351-357 |
-| calc-preview-test.html (saddle) | ~317 | ~445-449 |
+| calc-preview.html (saddle) | ~317 | ~445-449 |
 | calc-perfect-bound.html | ~328 | ~508-512 |
 
 The shapes differ slightly — brochure's edit cost is flat `PCF.art_edit_rate`,
