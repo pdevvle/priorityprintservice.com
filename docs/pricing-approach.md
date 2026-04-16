@@ -279,18 +279,18 @@ function calc(qty, pages, imp, mkx, mkn, coef, sd) {
 
 | File | Change |
 |---|---|
-| `calc-preview-test.html` | Markup params, curve, uniform print markup, size discount, build timestamp, header removal, blank-page proofing |
+| `calc-preview.html` | Markup params, curve, uniform print markup, size discount, build timestamp, header removal, blank-page proofing |
 | `pps-config-admin.php` | Brochure defaults updated, booklet_* keys added, admin UI split |
 | `CLAUDE.md` | Added deployment instructions |
-| `PRICING-ROLLBACK.md` | New — pre-tune-up values for reverting |
-| `PRICING-APPROACH.md` | New — this document |
+| `pricing-rollback.md` | New — pre-tune-up values for reverting |
+| `pricing-approach.md` | New — this document |
 
 ## For a New Chat Session
 
 **To pick up where this left off, read:**
 1. `CLAUDE.md` — deployment branch + architecture
-2. `PRICING-APPROACH.md` — this file, the pricing strategy
-3. `PRICING-ROLLBACK.md` — what the old values were
+2. `pricing-approach.md` — this file, the pricing strategy
+3. `pricing-rollback.md` — what the old values were
 
 **Key facts to remember:**
 - Deploy to `pps-pricing-config` ONLY (GitHub Pages)

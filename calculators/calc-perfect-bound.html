@@ -406,7 +406,7 @@ function resolveSize(c) {
 
 // ──────────────────────────────────────────────────────────────────
 // TEMPORARY — Saddle-stitch price estimator for side-by-side comparison
-// in the Quantity Pricing table. Mirrors calc-preview-test.html's
+// in the Quantity Pricing table. Mirrors calc-preview.html's
 // calculate() core (print + paper + press + cutting + stitching + base
 // fees + discounts). Omits artwork/bleed/proof/addons so raw printing
 // cost can be compared cleanly against perfect bound. Remove this
@@ -444,7 +444,7 @@ function calcSaddle(c) {
   P.insidePrint = isBW
     ? ((PCF.printing_black_cost * 2) * tS) * mk
     : ((PCF.printing_black_cost * 2 + PCF.printing_fullcolor_cost * 2) * tS) * mk;
-  // Cover print uses tQ (matches fixed saddle-stitch formula; see calc-preview-test.html line 432 FIX)
+  // Cover print uses tQ (matches fixed saddle-stitch formula; see calc-preview.html line 432 FIX)
   P.coverPrint = c.coverColor === "bw"
     ? (((PCF.printing_black_cost * 2) * tQ) / imp) * mk
     : (((PCF.printing_fullcolor_cost * 2) * tQ) / imp) * mk;

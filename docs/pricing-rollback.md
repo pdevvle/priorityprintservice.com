@@ -17,13 +17,13 @@ git push origin pps-pricing-config
 
 ## Files touched
 
-- `calc-preview-test.html` (booklet calculator)
+- `calc-preview.html` (booklet calculator)
 - `calc-perfect-bound.html` (perfect bound calculator — added 2026-04-14)
 - `pps-config-admin.php` (WordPress admin PCF defaults)
 
 ## Original values (pre-tune-up)
 
-### Booklet calculator (`calc-preview-test.html`) — PCF defaults
+### Booklet calculator (`calc-preview.html`) — PCF defaults
 
 ```javascript
 backend_maximummarkup:9, backend_minimummarkup:1.5,
@@ -151,7 +151,7 @@ P.coverPrint = c.coverColor === "bw"
 
 **Bug:** saddle-stitch cover print cost scaled with `tS` (inside sheet count), which grows with page count. Covers are one sheet per book — cost should not depend on how many inside pages the book has. Resulted in saddle-stitch overcharging covers by 2–8× at 16–32pp configurations.
 
-**Old formula (calc-preview-test.html line 430 before fix):**
+**Old formula (calc-preview.html line 430 before fix):**
 ```javascript
 P.coverPrint = c.coverColor === "bw"
   ? (((PCF.printing_black_cost * tS) * 2) / imp) * mk
