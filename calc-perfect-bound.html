@@ -116,6 +116,7 @@ const PCF = Object.assign({
   // Perfect bound markup (parallel to booklet_* / backend_*). Tune independently via WP admin.
   perfectbound_maximummarkup:8, perfectbound_minimummarkup:1.5,
   perfectbound_size_discount:0.15,    // 15% off when imp<4 (8.5×11 and larger)
+  perfectbound_discount_log_coef:2.2, // steepness of markup decay vs ln(tS); higher = faster drop
   // ROLLBACK: pre-2026-04-14 values were easydiscount_max:1500, common_discount_max:1000
   easydiscount_max:0, uvcoaterimpressionsperhour:250,
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
@@ -496,7 +497,7 @@ function calculate(c) {
   //   ? 1.1782 * Math.log(tS) - 5.5887
   //   : 2.5003 * Math.pow(Math.log(tS), 2) - 21.9175 * Math.log(tS) + 34.6437;
   // const mk=Math.max(PCF.backend_maximummarkup-dL,PCF.backend_minimummarkup);
-  const dL = 0.80 * Math.log(tS);
+  const dL = PCF.perfectbound_discount_log_coef * Math.log(tS);
   const mk = Math.max(PCF.perfectbound_maximummarkup - dL, PCF.perfectbound_minimummarkup);
 
   // Spine proxy: used for bundling/corner turnaround estimates
