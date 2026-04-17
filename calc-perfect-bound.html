@@ -77,7 +77,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-17 · PB-COEF-ADMIN</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-17b · PB-MK-DEFAULTS</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -114,7 +114,7 @@ const PCF = Object.assign({
   cutterbasefee:7.5, sheetsturnaround:2500,
   backend_maximummarkup:9, backend_minimummarkup:1.5,
   // Perfect bound markup (parallel to booklet_* / backend_*). Tune independently via WP admin.
-  perfectbound_maximummarkup:8, perfectbound_minimummarkup:1.5,
+  perfectbound_maximummarkup:22, perfectbound_minimummarkup:3.2,
   perfectbound_size_discount:0.15,    // 15% off when imp<4 (8.5×11 and larger)
   perfectbound_discount_log_coef:2.2, // steepness of markup decay vs ln(tS); higher = faster drop
   // ROLLBACK: pre-2026-04-14 values were easydiscount_max:1500, common_discount_max:1000
