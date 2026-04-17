@@ -85,14 +85,13 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 
 ## Branch & Deploy
 
-- **Pages source branch:** `gh-pages` — GitHub Pages serves from this branch. To deploy calculator changes, push to `gh-pages`. The easiest workflow: develop on `pps-pricing-config`, then `git checkout gh-pages && git checkout pps-pricing-config -- <files> && git commit && git push`.
-- **Working branch:** `pps-pricing-config` — development happens here, but **this is NOT the Pages source**. Pushing here alone will NOT update the preview URLs.
-- **`.nojekyll` is MANDATORY** on `gh-pages`. Without it, Pages runs Jekyll, which silently breaks the build because the inline JSX/Babel inside the calculator HTML contains `{{ }}` that Jekyll tries to parse as Liquid templates. Symptom: your pushes never appear on the preview URL even though the file on GitHub looks correct. **Never delete `.nojekyll`.**
+- **Pages source branch:** `pps-pricing-config` — GitHub Pages serves directly from the root of this branch. All calculator changes must be pushed here. No separate deploy step.
+- **`.nojekyll` is MANDATORY** on `pps-pricing-config`. Without it, Pages runs Jekyll, which silently breaks the build because the inline JSX/Babel inside the calculator HTML contains `{{ }}` that Jekyll tries to parse as Liquid templates. Symptom: your pushes never appear on the preview URL even though the file on GitHub looks correct. **Never delete `.nojekyll`.**
 - Do NOT push to `website` — it's unrelated to the preview.
-- **Preview URLs** (served by GitHub Pages from `gh-pages`):
+- **Preview URLs** (served by GitHub Pages from `pps-pricing-config`):
   - https://pdevvle.github.io/priorityprintservice.com/calc-preview-test.html (saddle stitch)
   - https://pdevvle.github.io/priorityprintservice.com/calc-perfect-bound.html (perfect bound)
   - https://pdevvle.github.io/priorityprintservice.com/calc-brochure.html (brochure)
   - https://pdevvle.github.io/priorityprintservice.com/calc-coupon-book.html (coupon book)
-- Each calculator has a build-stamp chip in the bottom-right corner. After a push, wait ~60 seconds for Pages to rebuild, then hard-refresh (Cmd/Ctrl+Shift+R) or use an Incognito window. If the chip still doesn't update, verify `.nojekyll` exists on `gh-pages` root — that's the #1 cause of "my push didn't show up."
+- Each calculator has a build-stamp chip in the bottom-right corner. After a push, wait ~60 seconds for Pages to rebuild, then hard-refresh (Cmd/Ctrl+Shift+R) or use an Incognito window. If the chip still doesn't update, verify `.nojekyll` exists on `pps-pricing-config` root — that's the #1 cause of "my push didn't show up."
 - Go private protocol: replace files with dummies, flip repo to private. Restore: `git checkout pps-real-backup -- <files>`
