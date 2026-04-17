@@ -260,8 +260,8 @@ function toYMD(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
-// Perfect bound: even page counts, min 20 (needs enough pages for spine), max 350
-const PAGE_COUNTS = _CFG.page_counts || (() => { const a = []; for (let i = 20; i <= 100; i += 4) a.push(i); for (let i = 120; i <= 200; i += 20) a.push(i); for (let i = 250; i <= 350; i += 50) a.push(i); return a; })();
+// Perfect bound: even page counts, min 4, max 350
+const PAGE_COUNTS = _CFG.page_counts || (() => { const a = []; for (let i = 4; i <= 100; i += 2) a.push(i); for (let i = 120; i <= 200; i += 20) a.push(i); for (let i = 250; i <= 350; i += 50) a.push(i); return a; })();
 
 // bindEdge = dimension that stays constant when opened (spine/staple edge)
 const SIZE_PRESETS = _CFG.size_presets || [
@@ -2343,7 +2343,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       setRotateSteps(isMismatch ? 1 : 0);
       if (onCoverArt && extracted.pages.length >= 1) onCoverArt(extracted.pages[0].dataUrl);
       if (onPagesDetected && extracted.pages.length >= 2) {
-        // Perfect bound: round up to next even page count, min 20
+        // Perfect bound: round up to next even page count, min 4
         let pg = extracted.pages.length % 2 === 0 ? extracted.pages.length : extracted.pages.length + 1;
         if (pg < 20) pg = 20;
         onPagesDetected(pg);
@@ -3505,7 +3505,7 @@ function App(){
   })();
   const _findPaper = (list, val) => { const f = list.find(p => String(p.val) === String(val)); return f || list[2] || list[0]; };
 
-  const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||20, name:"", colorMode:D.insideColor==="bw"?"bw":"color", colorPages:D.pages||20, bwPages:0}]);
+  const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||8, name:"", colorMode:D.insideColor==="bw"?"bw":"color", colorPages:D.pages||8, bwPages:0}]);
   const[sizeLabel,setSizeLabel]=useState(D.sizeLabel || "5.5×8.5 (Opens to 8.5×11)");
   const[sizeMode,setSizeMode]=useState(D.sizeLabel==="Custom Size"?"custom":"preset");
   const[customLong,setCustomLong]=useState(D.customLong||8.5);
@@ -3877,7 +3877,7 @@ function App(){
               </div>
             ) : (
               <div style={{marginTop:6}}>
-                <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(20,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={20} max={350}/>
+                <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
               </div>
             )}
 
