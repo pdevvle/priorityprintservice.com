@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Perfect Bound Booklet Calculator · build 2026-04-14 · 5ab3e0b</title>
+<title>Coupon Book & Pad Calculator · build 2026-04-17</title>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
@@ -77,7 +77,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-14e · QTY-COLOR-FIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-17 · COUPON-BOOK</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -92,11 +92,14 @@ function useIsMobile(breakpoint=700){
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PRIORITY PRINT SERVICE — Perfect Bound Booklet Calculator v1
+// PRIORITY PRINT SERVICE — Coupon Book & Pad Calculator v1
 //
-// CMYK color scheme from "Printing in Full Color" logo
-// Binding edge > 5.25" = auto two staple (no single option)
-// Hardcopy proof always visible (warning if non-factory paper)
+// Adapted from Perfect Bound calculator. Key differences:
+// - Bind style: Open Faced (padded) or Wraparound Cover
+// - Single-sided or double-sided printing option
+// - Spine edge selector (short/long)
+// - Magnetic backer addon
+// - Perforation conditional on bind style
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
@@ -113,10 +116,11 @@ const PCF = Object.assign({
   cutter_sheetsperhour:15000, horizonspf20_sheetsperhour:4000,
   cutterbasefee:7.5, sheetsturnaround:2500,
   backend_maximummarkup:9, backend_minimummarkup:1.5,
-  // Perfect bound markup (parallel to booklet_* / backend_*). Tune independently via WP admin.
-  perfectbound_maximummarkup:8, perfectbound_minimummarkup:1.5,
-  perfectbound_size_discount:0.15,    // 15% off when imp<4 (8.5×11 and larger)
-  perfectbound_discount_log_coef:2.2, // steepness of markup decay vs ln(tS); higher = faster drop
+  // Coupon book markup — independent from perfect-bound. Tune via WP admin.
+  couponbook_maximummarkup:8, couponbook_minimummarkup:1.5,
+  couponbook_size_discount:0.15,
+  couponbook_discount_log_coef:2.2,
+  magneticstripapplication_perhour:120,
   // ROLLBACK: pre-2026-04-14 values were easydiscount_max:1500, common_discount_max:1000
   easydiscount_max:0, uvcoaterimpressionsperhour:250,
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
@@ -260,8 +264,8 @@ function toYMD(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
-// Perfect bound: even page counts, min 20 (needs enough pages for spine), max 350
-const PAGE_COUNTS = _CFG.page_counts || (() => { const a = []; for (let i = 20; i <= 100; i += 4) a.push(i); for (let i = 120; i <= 200; i += 20) a.push(i); for (let i = 250; i <= 350; i += 50) a.push(i); return a; })();
+// Coupon book: even page counts, min 4 (pads can be thin), max 350
+const PAGE_COUNTS = _CFG.page_counts || (() => { const a = []; for (let i = 4; i <= 100; i += 2) a.push(i); for (let i = 120; i <= 200; i += 20) a.push(i); for (let i = 250; i <= 350; i += 50) a.push(i); return a; })();
 
 // bindEdge = dimension that stays constant when opened (spine/staple edge)
 const SIZE_PRESETS = _CFG.size_presets || [
@@ -338,6 +342,10 @@ const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,p
 // Perfect bound specific options
 const OUTFOLD_OPTS=_CFG.outfold_opts||[{label:"No Outfold",val:0,price:0},{label:"1 Fold-Out Page (Bifold)",val:1000,price:0.02},{label:"2 Fold-Out Pages (Bifold)",val:500,price:0.04}];
 const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.03,count:1},{label:"2 Perforation Lines",val:1000,price:0.03,count:2}];
+// Coupon book specific
+const BIND_STYLE_OPTS=[{label:"Open Faced: Glued/Padded",val:"openface"},{label:"Wraparound Cover with Perforation(s)",val:"wraparound"}];
+const SIDES_OPTS=[{label:"Double-Sided (Printed on Both Sides)",val:"double"},{label:"Single-Sided (Printed on One Side)",val:"single"}];
+const MAGNET_OPTS=_CFG.magnet_opts||[{label:"No Magnetic Backer",val:0,price:0},{label:"Magnetic Backer Application",val:1,price:0.12}];
 
 // ═══════════════════════════════════════════════════════════════
 // SIZE + PRICING
@@ -484,21 +492,18 @@ function calculate(c) {
   const cvr=c.coverMode==="same"?COVER_SAME:c.coverPaper;
   const outfold=OUTFOLD_OPTS.find(x=>x.val===(c.outfold||0))||OUTFOLD_OPTS[0];
   const perf=PERF_OPTS.find(x=>x.val===(c.perforation||0))||PERF_OPTS[0];
+  const magnet=MAGNET_OPTS.find(x=>x.val===(c.magnetBacker||0))||MAGNET_OPTS[0];
+  const bindStyle=c.bindStyle||"openface";
+  const sidesPrinted=c.sidesPrinted||"double";
+  const sidesMult=sidesPrinted==="single"?2:1; // single-sided uses 2× sheets
 
   const tQ=sets.reduce((s,x)=>s+x.qty,0);
   const tP=sets.reduce((s,x)=>s+x.pages,0);
-  // Perfect bound: pages / 2 per sheet (each sheet = 2 pages front/back)
-  const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/2,0)/imp;
+  // Coupon book: pages / 2 per sheet (double-sided). Single-sided = 1 page per sheet = 2× tS.
+  const tS=(sets.reduce((s,x)=>s+(x.qty*x.pages)/2,0)/imp)*sidesMult;
 
-  // Markup curve — single slope, aligned with saddle-stitch booklet (2026-04-14)
-  // ROLLBACK: to restore the prior two-branch curve, comment out the two lines below
-  // and uncomment this block:
-  // const dL = tS >= 1000
-  //   ? 1.1782 * Math.log(tS) - 5.5887
-  //   : 2.5003 * Math.pow(Math.log(tS), 2) - 21.9175 * Math.log(tS) + 34.6437;
-  // const mk=Math.max(PCF.backend_maximummarkup-dL,PCF.backend_minimummarkup);
-  const dL = PCF.perfectbound_discount_log_coef * Math.log(tS);
-  const mk = Math.max(PCF.perfectbound_maximummarkup - dL, PCF.perfectbound_minimummarkup);
+  const dL = PCF.couponbook_discount_log_coef * Math.log(tS);
+  const mk = Math.max(PCF.couponbook_maximummarkup - dL, PCF.couponbook_minimummarkup);
 
   // Spine proxy: used for bundling/corner turnaround estimates
   const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
@@ -557,9 +562,14 @@ function calculate(c) {
   P.scoreCover=cvrScoring?(tQ/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
   P.scoreInsides=csInside?(((tS*(imp/2))-tQ)/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
 
-  // ── Perfect binding (replaces stitching) ──
-  const bindQty = imp >= 2 ? tQ / 2 : tQ; // 2-up or 1-up
-  P.perfectBind=((bindQty/PCF.perfect_binding_speedperhr)*PCF.labor_perf_bind_hr)+PCF.labor_perf_bind_setup;
+  // ── Binding — conditional on bind style ──
+  const bindQty = imp >= 2 ? tQ / 2 : tQ;
+  const isOpenFace = bindStyle === "openface";
+  // Open-faced pads: glue/pad binding is simpler (half the binding cost)
+  // Wraparound cover: full perfect binding
+  P.perfectBind = isOpenFace
+    ? ((bindQty/PCF.perfect_binding_speedperhr)*PCF.labor_perf_bind_hr*0.5)+PCF.labor_perf_bind_setup
+    : ((bindQty/PCF.perfect_binding_speedperhr)*PCF.labor_perf_bind_hr)+PCF.labor_perf_bind_setup;
   const perfBindTurnaround = Math.ceil(tQ / PCF.perfboundunitsperday);
 
   // ── Addons ──
@@ -591,6 +601,21 @@ function calculate(c) {
   }
   const perfTurnaround = perf.val > 0 ? Math.ceil(tS / perf.val) : 0;
 
+  // ── Magnetic backer ──
+  P.magnetBacker = 0;
+  if (magnet.val > 0) {
+    const magnetSheets = tQ / imp;
+    P.magnetBacker = Math.ceil(((magnetSheets * (18.5 / (sz.bindEdge || 5.5))) * magnet.price + (magnetSheets / PCF.magneticstripapplication_perhour) * PCF.labor_bindery_hr) * mk);
+  }
+  const magnetTurnaround = magnet.val > 0 ? Math.ceil(tQ / (PCF.magneticstripapplication_perhour * 8)) : 0;
+
+  // ── Wraparound cover perforation (cover gets perforated when wraparound style selected) ──
+  P.wraparoundPerf = 0;
+  if (bindStyle === "wraparound") {
+    P.wraparoundPerf = Math.ceil(((tQ / (sz.bindEdge || 5.5)) / PCF.speed_gwperhr) * PCF.labor_gw_hour * mk);
+  }
+  const wraparoundPerfTurnaround = bindStyle === "wraparound" ? Math.ceil(tQ / (PCF.speed_gwperhr * 8)) : 0;
+
   // ── Artwork ── fees live in PCF (Production tab → Artwork group)
   let ndc=art.val>=4?(PCF.art_design_rate*tP)*PCF.art_newdesignmodifier:0;
   let aec=(art.val>=2&&art.val<4)?PCF.art_pagesperhour+((c.artEditPages/PCF.art_pagesperhour)*PCF.art_edit_rate):0;
@@ -613,7 +638,7 @@ function calculate(c) {
 
   // Size-based adjustment — 15% off when imp<4 (8.5×11 and larger). Mirrors saddle-stitch booklet.
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
-  P.discSize=imp<4?subBeforeSize*(-PCF.perfectbound_size_discount):0;
+  P.discSize=imp<4?subBeforeSize*(-PCF.couponbook_size_discount):0;
 
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
@@ -623,7 +648,7 @@ function calculate(c) {
     (coat.val>0&&coatOK?Math.floor((tQ/(imp/2))/coat.val):0)+
     (bund.val>0&&q100?Math.floor(spine/bund.val):0)+
     (rc.val>0?Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)):0)+
-    outfoldTurnaround+perfTurnaround+perfBindTurnaround;
+    outfoldTurnaround+perfTurnaround+perfBindTurnaround+magnetTurnaround+wraparoundPerfTurnaround;
   const dT=art.val>=4?Math.ceil(art.val*(tP/4)):0;
   const eT=(art.val>=2&&art.val<4)?Math.ceil((c.artEditPages/PCF.art_pagesperhour)/2):0;
   const bT=(!artWork&&bld.val>0)?Math.floor(bld.val*tP)/12:0;
@@ -642,6 +667,8 @@ function calculate(c) {
     roundCorner: rc.val>0 ? Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)) : 0,
     outfold: outfoldTurnaround,
     perforation: perfTurnaround,
+    magnetBacker: magnetTurnaround,
+    wraparoundPerf: wraparoundPerfTurnaround,
     artDesign: dT,
     artEdits: eT,
     bleed: Math.round(bT*10)/10,
@@ -710,6 +737,7 @@ function calculate(c) {
     {l:"Vivid Print",v:P.vivid,g:"add"},
     {l:"UV Coating",v:P.coat,g:"add"},{l:"Bundling",v:P.bundle,g:"add"},
     {l:"Round Cornering",v:P.rc,g:"add"},{l:"Outfold",v:P.outfold,g:"add"},{l:"Perforation",v:P.perforation,g:"add"},
+    {l:"Magnetic Backer",v:P.magnetBacker,g:"add"},{l:"Wraparound Perf",v:P.wraparoundPerf,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
@@ -767,6 +795,10 @@ function calculate(c) {
     perfBindTurnaround,
     outfoldLabel: outfold.label,
     perforationLabel: perf.label,
+    bindStyle,
+    sidesPrinted,
+    sidesMult,
+    magnetBackerLabel: magnet.label,
     // Turnaround breakdown
     turnaround:{
       baseDays,
@@ -783,6 +815,8 @@ function calculate(c) {
         roundCorner:rc.val>0?Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)):0,
         outfold:outfoldTurnaround,
         perforation:perfTurnaround,
+        magnetBacker:magnetTurnaround,
+        wraparoundPerf:wraparoundPerfTurnaround,
       },
       artworkDays:artT,
       artBreakdown:{
@@ -3250,8 +3284,9 @@ function buildSummary(config, result) {
   }
 
   // Binding
-  const staple = "Perfect Bound";
-  lines.push(staple);
+  const bindLabel = config.bindStyle === "wraparound" ? "Wraparound Cover (Perfect Bound)" : "Open Faced: Glued/Padded";
+  lines.push(bindLabel);
+  if (config.sidesPrinted === "single") lines.push("Single Sided Printing");
 
   // Finishing — only if selected
   const coat = COATINGS.find(x => x.val === config.coating);
@@ -3296,6 +3331,9 @@ function buildMetadata(config, result) {
     coverMode: config.coverMode,
     coverPaper: config.coverPaper,
     coverPaperType: config.coverPaperType,
+    bindStyle: config.bindStyle,
+    sidesPrinted: config.sidesPrinted,
+    magnetBacker: config.magnetBacker,
     twoStaple: config.twoStaple,
     vividPrint: config.vividPrint,
     coating: config.coating,
@@ -3505,7 +3543,10 @@ function App(){
   })();
   const _findPaper = (list, val) => { const f = list.find(p => String(p.val) === String(val)); return f || list[2] || list[0]; };
 
-  const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||20, name:"", colorMode:D.insideColor==="bw"?"bw":"color", colorPages:D.pages||20, bwPages:0}]);
+  const[bindStyle,setBindStyle]=useState(D.bindStyle||"openface");
+  const[sidesPrinted,setSidesPrinted]=useState(D.sidesPrinted||"double");
+  const[magnetBacker,setMagnetBacker]=useState(Number(D.magnetBacker)||0);
+  const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||10, name:"", colorMode:D.insideColor==="bw"?"bw":"color", colorPages:D.pages||10, bwPages:0}]);
   const[sizeLabel,setSizeLabel]=useState(D.sizeLabel || "5.5×8.5 (Opens to 8.5×11)");
   const[sizeMode,setSizeMode]=useState(D.sizeLabel==="Custom Size"?"custom":"preset");
   const[customLong,setCustomLong]=useState(D.customLong||8.5);
@@ -3648,14 +3689,19 @@ function App(){
   const csOK=sets.every(s=>s.pages<=24);
 
   const shipZip=shipAddr.zip||"";
+  const effectiveCoverMode = bindStyle==="openface" ? "same" : coverMode;
   const result=useMemo(()=>calculate({
     sets,sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
-    insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
-    twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,artwork,artEditPages,bleed,proof,
+    insidePaperType,insidePaper,coverMode:effectiveCoverMode,coverPaperType,coverPaper,
+    twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,
+    bindStyle,sidesPrinted,magnetBacker,
+    artwork,artEditPages,bleed,proof,
     shipState,shipZip,needByDate,
   }),[sets,sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
-    insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
-    twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,artwork,artEditPages,bleed,proof,
+    insidePaperType,insidePaper,effectiveCoverMode,coverPaperType,coverPaper,
+    twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,
+    bindStyle,sidesPrinted,magnetBacker,
+    artwork,artEditPages,bleed,proof,
     shipState,shipZip,needByDate]);
 
   const r=result||{};
@@ -3670,7 +3716,7 @@ function App(){
     const sh = result?.shipping || {};
     return {
       product: {
-        name: `Custom Perfect Bound Booklet — ${sizeLabel}`,
+        name: `Custom Coupon Book / Pad — ${sizeLabel}`,
         description: `${tQ} qty, ${tP} pages, ${insidePaper.label} paper, ${insideColor === "bw" ? "greyscale" : "full color"} printing`,
         lowPrice: total.toFixed(2),
         perUnit: perUnit.toFixed(2),
@@ -3691,12 +3737,14 @@ function App(){
     if (!result || result.error?.length) return null;
     const baseConfig = {
       sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
-      insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
-      twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,artwork,artEditPages,bleed,proof,
+      insidePaperType,insidePaper,coverMode:effectiveCoverMode,coverPaperType,coverPaper,
+      twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,
+      bindStyle,sidesPrinted,magnetBacker,
+      artwork,artEditPages,bleed,proof,
       shipState,shipZip,needByDate,
     };
     const currentQty = sets[0]?.qty || 100;
-    const currentPages = sets[0]?.pages || 8;
+    const currentPages = sets[0]?.pages || 10;
     const breakpoints = [25,50,100,250,500,1000,2500,5000].filter(q => q !== currentQty);
     // Add current qty and sort
     const qtys = [...breakpoints, currentQty].sort((a,b) => a - b);
@@ -3724,21 +3772,17 @@ function App(){
       const projNeedBy = (result.shipping?.rushCost > 0) ? needByDate : null;
       const projCfg = {...baseConfig, needByDate: projNeedBy, sets: [buildProjSet(q)]};
       const pr = calculate(projCfg);
-      if (!pr || pr.error?.length) return {qty: q, total: null, perUnit: null, saddleTotal: null, saddlePerUnit: null, current: q === currentQty};
-      // TEMPORARY: saddle-stitch comparison price for same config (base printing only)
-      let sd = null;
-      try { sd = calcSaddle(projCfg); }
-      catch (e) { console.error("calcSaddle error", e); sd = null; }
+      if (!pr || pr.error?.length) return {qty: q, total: null, perUnit: null, current: q === currentQty};
       return {
         qty: q, total: pr.total, perUnit: pr.perUnit,
-        saddleTotal: sd ? sd.total : null,
-        saddlePerUnit: sd ? sd.perUnit : null,
         current: q === currentQty,
       };
     });
   }, [result, sets, sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
-    insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
-    twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,artwork,artEditPages,bleed,proof,
+    insidePaperType,insidePaper,effectiveCoverMode,coverPaperType,coverPaper,
+    twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,
+    bindStyle,sidesPrinted,magnetBacker,
+    artwork,artEditPages,bleed,proof,
     shipState,shipZip,needByDate]);
 
   useEffect(()=>{if(r.coatOK===false)setCoating(0)},[r.coatOK]);
@@ -3805,7 +3849,8 @@ function App(){
     const config = {
       sizeLabel, customLong, customShort, bindDir, sets,
       insideColor, coverColor, insidePaper, insidePaperType,
-      coverMode, coverPaper, coverPaperType,
+      coverMode: effectiveCoverMode, coverPaper, coverPaperType,
+      bindStyle, sidesPrinted, magnetBacker,
       twoStaple, vividPrint, coating, bundling, roundCorner,
       artwork, artEditPages, bleed, proof,
       shipState, shipAddr, shipZip, needByDate,
@@ -3836,7 +3881,7 @@ function App(){
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
           {/* SECTION 1: Size */}
-          <Sec title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
+          <Sec title="Coupon Book Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
             <div style={r2}>
               {isCustom
                 ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"10px 32px 10px 12px":"10px 32px 10px 12px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;return `${lo}×${sh}" — Opens to ${nonSpine*2}×${spine}"`})():"Enter dimensions below"}</option></select><span style={ST.selA}><Chev/></span></div></div>
@@ -3877,25 +3922,30 @@ function App(){
               </div>
             ) : (
               <div style={{marginTop:6}}>
-                <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(20,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={20} max={350}/>
+                <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
               </div>
             )}
 
-            {/* Perfect Binding — always applied, no toggle needed */}
-            <div style={ST.f}><label style={ST.lbl}>Binding</label><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Perfect Bound (Glue Spine)</div></div>
+            {/* Bind Style & Printing Sides */}
+            <div style={ST.hr}/>
+            <div style={r2}>
+              <Pil label="Bind Style" value={bindStyle} onChange={setBindStyle} options={[{t:"Open Faced / Padded",v:"openface"},{t:"Wraparound Cover",v:"wraparound"}]}/>
+              <Pil label="Printing Sides" value={sidesPrinted} onChange={setSidesPrinted} options={[{t:"Double Sided",v:"double"},{t:"Single Sided",v:"single"}]}/>
+            </div>
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
           <Sec title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
-            <div style={r2}>
+            {bindStyle==="wraparound"&&<div style={r2}>
               <Pil label="Cover Ink" value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
-            </div>
-            <div style={ST.hr}/>
+            </div>}
+            {bindStyle==="wraparound"&&<div style={ST.hr}/>}
             <div style={r2}>
               <Pil label="Inside Paper" value={insidePaperType} onChange={v=>{if(v==="cardstock"&&!csOK)return;setInsidePaperType(v);const pool=v==="cardstock"?PAPERS_CS:PAPERS_NC;setInsidePaper(pool[0])}} options={[{t:"Text Weight",v:"noncardstock"},{t:"Cardstock",v:"cardstock"}]}/>
               <Sel label="Select Paper" badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{p.label} (Cardstock)</option>)}</optgroup>}</Sel>
             </div>
             {insidePaperType==="cardstock"&&!csOK&&<p style={ST.err}>Cardstock requires all sets ≤ 24 pages</p>}
+            {bindStyle==="wraparound"&&<>
             <div style={ST.hr}/>
             <div style={r2}>
               <Pil label="Cover Paper" value={coverMode} onChange={setCoverMode} options={[{t:"Same as Inside",v:"same"},{t:"Different Cover",v:"separate"}]}/>
@@ -3904,6 +3954,8 @@ function App(){
                 : <div style={{...ST.f,marginTop:0}}><label style={ST.lbl}>&nbsp;</label><div style={{fontSize:14,color:CC.light,padding:"10px 0"}}>Uses same paper as inside pages</div></div>
               }
             </div>
+            </>}
+            {bindStyle==="openface"&&<div style={{fontSize:12,color:CC.light,padding:"6px 0",fontStyle:"italic"}}>Open-faced pads use the same paper throughout — no separate cover.</div>}
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
@@ -3933,9 +3985,10 @@ function App(){
               })()}
             </div>
 
-            {/* Perfect bound specific addons */}
+            {/* Coupon book specific addons */}
+            <Sel label={bindStyle==="openface"?"Coupon Perforation (tear-out)":"Cover Perforation"} badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+            <Sel label="Magnetic Backer" badge={<TurnBadge days={r.ti?.magnetBacker}/>} value={magnetBacker} onChange={v=>setMagnetBacker(Number(v))}>{MAGNET_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
             <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-            <Sel label="Perforation" badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
@@ -4212,8 +4265,6 @@ function App(){
                 <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Qty</th>
                 <th style={{padding:"6px 4px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Unit</th>
                 <th style={{padding:"6px 8px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Total</th>
-                <th style={{padding:"6px 4px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase",fontStyle:"italic"}}>SS $</th>
-                <th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase",fontStyle:"italic"}}>SS Tot</th>
               </tr>
             </thead>
             <tbody>
@@ -4223,8 +4274,6 @@ function App(){
                   <td style={{padding:"5px 10px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>{p.qty.toLocaleString()}{p.current&&" ●"}</td>
                   <td style={{padding:"5px 4px",textAlign:"right",color:CC.mid}}>${p.perUnit.toFixed(2)}</td>
                   <td style={{padding:"5px 8px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toFixed(0)}</td>
-                  <td style={{padding:"5px 4px",textAlign:"right",color:CC.light,fontStyle:"italic"}}>{p.saddlePerUnit!=null?`$${p.saddlePerUnit.toFixed(2)}`:"—"}</td>
-                  <td style={{padding:"5px 10px",textAlign:"right",color:CC.light,fontStyle:"italic"}}>{p.saddleTotal!=null?`$${p.saddleTotal.toFixed(0)}`:"—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -4245,9 +4294,6 @@ function App(){
                   <th style={{padding:"7px 14px",textAlign:"left",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Qty</th>
                   <th style={{padding:"7px 6px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Unit</th>
                   <th style={{padding:"7px 10px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Total</th>
-                  {/* TEMPORARY saddle-stitch comparison columns */}
-                  <th style={{padding:"7px 6px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px",fontStyle:"italic"}}>SS Unit</th>
-                  <th style={{padding:"7px 14px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px",fontStyle:"italic"}}>SS Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -4260,8 +4306,6 @@ function App(){
                     <td style={{padding:"6px 6px",textAlign:"right",color:CC.mid,fontWeight:500}}>${p.perUnit.toFixed(2)}</td>
                     <td style={{padding:"6px 10px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                     {/* TEMPORARY saddle-stitch comparison cells */}
-                    <td style={{padding:"6px 6px",textAlign:"right",color:CC.light,fontWeight:500,fontStyle:"italic"}}>{p.saddlePerUnit!=null?`$${p.saddlePerUnit.toFixed(2)}`:"—"}</td>
-                    <td style={{padding:"6px 14px",textAlign:"right",color:CC.light,fontWeight:500,fontStyle:"italic"}}>{p.saddleTotal!=null?`$${p.saddleTotal.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"}</td>
                   </tr>
                 ))}
               </tbody>
