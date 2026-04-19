@@ -77,7 +77,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-14 · COVER-FIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-19 · PROOF-SYNC</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1443,9 +1443,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [magPos, setMagPos] = useState(null); // {x, y, pctX, pctY} — cursor position on proof image
   const [hiResProof, setHiResProof] = useState(null); // {idx, dataUrl} — 300 DPI render of current proof page
   const pdfDocRef = useRef(null); // holds the pdf.js document for hi-res re-rendering
+  const rawFileRef = useRef(null); // holds the original uploaded File for the raw deliverable
   const slotFilesRef = useRef({}); // { slotIndex: File } — original files for per-slot uploads
   const fileInputRef = useRef(null);
   const dragRef = useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
+  const [approvalPkg, setApprovalPkg] = useState(null); // { printReadyBlob, previewBlobs[], manifestBlob, skippedGeneration }
+  const [generatingPdf, setGeneratingPdf] = useState(false); // true while building print-ready PDF
+  const [genProgress, setGenProgress] = useState(null); // { step, page, totalPages } during generation
   const [rot, setRot] = useState({ x: -15, y: -25 });
   const expanded = activeModal !== null; // backward compat for useEffects
 
@@ -1495,6 +1499,16 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     return artDims;
   }, [artDims, rotateSteps]);
 
+  // Clear approval when transforms change — forces re-approval with new print-ready PDF
+  const prevTransforms = useRef({ fitMode, artScale, rotateSteps });
+  useEffect(() => {
+    const prev = prevTransforms.current;
+    if (prev.fitMode !== fitMode || prev.artScale !== artScale || prev.rotateSteps !== rotateSteps) {
+      if (artApproved) { setArtApproved(false); setApprovalPkg(null); }
+      prevTransforms.current = { fitMode, artScale, rotateSteps };
+    }
+  }, [fitMode, artScale, rotateSteps]);
+
   // Rotate a dataUrl image by N steps of 90° clockwise (1=90°, 2=180°, 3=270°)
   function rotateImageBySteps(dataUrl, steps) {
     if (steps <= 0) return Promise.resolve(dataUrl);
@@ -1512,8 +1526,281 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
         resolve(c.toDataURL("image/jpeg", 0.85));
       };
+      img.onerror = () => resolve(dataUrl);
       img.src = dataUrl;
     });
+  }
+
+  // ── Generate 4 deliverables on approval ──
+  // 1. Print-ready PDF (300 DPI, transforms baked in) — or raw file if no transforms needed
+  // 2. Screen preview images (what the customer saw, ~150 DPI JPEGs)
+  // 3. Manipulation manifest (text describing all transforms)
+  // 4. Raw file is already in rawFileRef
+  // Returns { printReadyBlob, previewBlobs[], manifestBlob, skippedGeneration }
+  async function generateApprovalPackage() {
+    const BLEED = 0.125;
+    const SAFETY = 0.125;
+    const bleedW = dims.w + BLEED * 2;
+    const bleedH = dims.h + BLEED * 2;
+    const DPI = 300;
+    const canvasW = Math.round(bleedW * DPI);
+    const canvasH = Math.round(bleedH * DPI);
+    const ed = effectiveDims; // art dims after rotation
+
+    // Product-specific proof geometry — saddle stitch: spine alternates per page parity
+    const spineMode = "alternating";
+    const spineLabel = "Staple";
+    const foldLines = [];
+
+    // Draw template guide lines onto a preview canvas
+    function drawGuides(ctx, w, h, pageIdx) {
+      const trimX = (BLEED / bleedW) * w;
+      const trimY = (BLEED / bleedH) * h;
+      const safeX = ((BLEED + SAFETY) / bleedW) * w;
+      const safeY = ((BLEED + SAFETY) / bleedH) * h;
+      ctx.save();
+      ctx.lineWidth = Math.max(1, w / 400);
+
+      ctx.strokeStyle = "#ef4444";
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(1, 1, w - 2, h - 2);
+
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(trimX, trimY, w - trimX * 2, h - trimY * 2);
+
+      ctx.strokeStyle = "#38a169";
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(safeX, safeY, w - safeX * 2, h - safeY * 2);
+
+      const spineOnLeft = spineMode === "left" ? true
+        : spineMode === "alternating" ? (pageIdx % 2 === 0)
+        : null;
+      if (spineOnLeft !== null) {
+        const spineX = spineOnLeft ? trimX : w - trimX - 3;
+        ctx.fillStyle = "#3b82f6";
+        ctx.setLineDash([]);
+        ctx.fillRect(spineX, trimY + h * 0.02, 3, h - trimY * 2 - h * 0.04);
+      }
+
+      if (foldLines && foldLines.length) {
+        ctx.strokeStyle = "#f97316";
+        ctx.setLineDash([]);
+        ctx.lineWidth = Math.max(1, w / 500);
+        foldLines.forEach(f => {
+          const vertical = f.vertical !== false;
+          ctx.beginPath();
+          if (vertical) {
+            const x = (f.pct / 100) * w;
+            ctx.moveTo(x, trimY); ctx.lineTo(x, h - trimY);
+          } else {
+            const y = (f.pct / 100) * h;
+            ctx.moveTo(trimX, y); ctx.lineTo(w - trimX, y);
+          }
+          ctx.stroke();
+        });
+      }
+
+      ctx.font = `bold ${Math.max(9, Math.round(w / 100))}px sans-serif`;
+      ctx.textAlign = "center";
+      const labelY = h - 6;
+      ctx.fillStyle = "#ef4444"; ctx.fillText("Bleed", w * 0.15, labelY);
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillText("Trim", w * 0.38, labelY);
+      ctx.fillStyle = "#38a169"; ctx.fillText("Safety", w * 0.62, labelY);
+      if (spineOnLeft !== null && spineLabel) { ctx.fillStyle = "#3b82f6"; ctx.fillText(spineLabel, w * 0.85, labelY); }
+      else if (foldLines && foldLines.length) { ctx.fillStyle = "#f97316"; ctx.fillText("Fold", w * 0.85, labelY); }
+      ctx.restore();
+    }
+
+    const pageSources = displayPages || effectivePages;
+    const totalPages = pageSources.length;
+
+    // ── Skip generation when raw file is already print-ready ──
+    const artMatchesBleed = ed && Math.abs(ed.wIn - bleedW) < 0.25 && Math.abs(ed.hIn - bleedH) < 0.25;
+    const noTransforms = fitMode === "crop" && rotateSteps === 0 && artMatchesBleed;
+    const isSourcePdf = artDims?.source === "pdf";
+
+    let printReadyBlob = null;
+    const previewBlobs = [];
+
+    if (noTransforms && isSourcePdf && rawFileRef.current) {
+      printReadyBlob = rawFileRef.current;
+      for (let i = 0; i < totalPages; i++) {
+        setGenProgress({ step: "previews", page: i + 1, totalPages });
+        const page = pageSources[i];
+        if (page.isBlank) { previewBlobs.push(null); continue; }
+        const blob = await new Promise(resolve => {
+          const img = new Image();
+          img.onload = () => {
+            const pc = document.createElement("canvas");
+            pc.width = img.naturalWidth; pc.height = img.naturalHeight;
+            const pctx = pc.getContext("2d");
+            pctx.drawImage(img, 0, 0);
+            drawGuides(pctx, pc.width, pc.height, i);
+            pc.toBlob(resolve, "image/jpeg", 0.85);
+          };
+          img.onerror = () => resolve(null);
+          img.src = page.dataUrl;
+        });
+        previewBlobs.push(blob);
+      }
+    } else {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({
+        orientation: bleedW > bleedH ? "landscape" : "portrait",
+        unit: "in",
+        format: [bleedW, bleedH],
+      });
+
+      for (let i = 0; i < totalPages; i++) {
+        if (i > 0) pdf.addPage([bleedW, bleedH], bleedW > bleedH ? "landscape" : "portrait");
+        setGenProgress({ step: "print-ready", page: i + 1, totalPages });
+
+        const page = pageSources[i];
+        if (page.isBlank) { previewBlobs.push(null); continue; }
+
+        let srcCanvas = null;
+        if (pdfDocRef.current && isSourcePdf) {
+          const pdfPageNum = i + 1;
+          if (pdfPageNum <= pdfDocRef.current.numPages) {
+            const pg = await pdfDocRef.current.getPage(pdfPageNum);
+            const vp = pg.getViewport({ scale: DPI / 72 });
+            srcCanvas = document.createElement("canvas");
+            srcCanvas.width = Math.round(vp.width);
+            srcCanvas.height = Math.round(vp.height);
+            await pg.render({ canvasContext: srcCanvas.getContext("2d"), viewport: vp }).promise;
+
+            if (rotateSteps > 0) {
+              const s = ((rotateSteps % 4) + 4) % 4;
+              const swap = s % 2 === 1;
+              const rc = document.createElement("canvas");
+              rc.width = swap ? srcCanvas.height : srcCanvas.width;
+              rc.height = swap ? srcCanvas.width : srcCanvas.height;
+              const rctx = rc.getContext("2d");
+              rctx.translate(rc.width / 2, rc.height / 2);
+              rctx.rotate((s * Math.PI) / 2);
+              rctx.drawImage(srcCanvas, -srcCanvas.width / 2, -srcCanvas.height / 2);
+              srcCanvas = rc;
+            }
+          }
+        }
+        if (!srcCanvas) {
+          srcCanvas = await new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => {
+              const tc = document.createElement("canvas");
+              tc.width = img.naturalWidth; tc.height = img.naturalHeight;
+              tc.getContext("2d").drawImage(img, 0, 0);
+              resolve(tc);
+            };
+            img.onerror = () => resolve(null);
+            img.src = page.dataUrl;
+          });
+        }
+        if (!srcCanvas) continue;
+
+        const c = document.createElement("canvas");
+        c.width = canvasW; c.height = canvasH;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvasW, canvasH);
+
+        const srcW = srcCanvas.width, srcH = srcCanvas.height;
+        if (fitMode === "stretch") {
+          ctx.drawImage(srcCanvas, 0, 0, canvasW, canvasH);
+        } else if (fitMode === "crop" || fitMode === "scale") {
+          const mult = fitMode === "scale" ? artScale / 100 : 1;
+          const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
+          const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
+          const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
+          ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+        } else if (fitMode === "cover") {
+          const sc = Math.max(canvasW / srcW, canvasH / srcH);
+          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+        } else {
+          const sc = Math.min(canvasW / srcW, canvasH / srcH);
+          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+        }
+
+        pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, bleedW, bleedH);
+
+        setGenProgress({ step: "previews", page: i + 1, totalPages });
+        const prevW = Math.round(bleedW * 150);
+        const prevH = Math.round(bleedH * 150);
+        const pc = document.createElement("canvas");
+        pc.width = prevW; pc.height = prevH;
+        const pctx = pc.getContext("2d");
+        pctx.drawImage(c, 0, 0, prevW, prevH);
+        drawGuides(pctx, prevW, prevH, i);
+        const prevBlob = await new Promise(res => pc.toBlob(res, "image/jpeg", 0.85));
+        previewBlobs.push(prevBlob);
+      }
+
+      printReadyBlob = pdf.output("blob");
+    }
+
+    // ── Manipulation manifest ──
+    setGenProgress({ step: "manifest", page: totalPages, totalPages });
+    const fitLabels = { crop: "Crop (native size, centered)", cover: "Fill (cover, overflow cropped)", contain: "Fit (contain, letterboxed)", stretch: "Stretch to fill (distorted to fit bleed area)", scale: `Scale (${artScale}% of native size)` };
+    const manifestLines = [
+      "ARTWORK MANIPULATION MANIFEST",
+      "=" .repeat(50),
+      `Generated: ${new Date().toISOString()}`,
+      "",
+      "── Source File ──",
+      `Filename: ${fileName || "unknown"}`,
+      `Source type: ${artDims?.source === "pdf" ? "PDF" : "Image"}`,
+      `Original dimensions: ${artDims ? `${artDims.wIn}″ × ${artDims.hIn}″ (${artDims.wPx} × ${artDims.hPx} px)` : "unknown"}`,
+      `Pages detected: ${uploadPageCount}`,
+      "",
+      "── Booklet Specifications ──",
+      `Trim size: ${dims.w}″ × ${dims.h}″`,
+      `Bleed-inclusive size: ${bleedW}″ × ${bleedH}″`,
+      `Bleed margin: ${BLEED}″ per side`,
+      `Binding: Saddle Stitch`,
+      `Page count (with padding): ${totalPages}`,
+      "",
+      "── Customer Transforms ──",
+      `Fit mode: ${fitLabels[fitMode] || fitMode}`,
+      `Rotation: ${rotateSteps * 90}° clockwise${rotateSteps === 0 ? " (none)" : ""}`,
+      `Scale: ${artScale}%${fitMode !== "scale" ? " (only applies in Scale mode)" : ""}`,
+      "",
+      "── Edge Detection ──",
+      `Margins detected: ${edgeHasMargins === null ? "not analyzed" : edgeHasMargins ? "yes — white edges found (art may not bleed)" : "no — art extends to edges"}`,
+      "",
+      "── Effective Art Dimensions (after rotation) ──",
+      effectiveDims ? `${effectiveDims.wIn}″ × ${effectiveDims.hIn}″` : "N/A",
+      "",
+      "── Deliverables ──",
+      `1. Raw file: ${fileName || "original upload"} (unmodified customer upload)`,
+      noTransforms
+        ? `2. Print-ready PDF: SKIPPED — raw file is already print-ready (no transforms applied, art matches bleed size)`
+        : `2. Print-ready PDF: ${totalPages} pages at ${DPI} DPI, ${bleedW}″ × ${bleedH}″, JPEG quality 0.95`,
+      `3. Screen previews: ${previewBlobs.filter(b => b).length} page images at 150 DPI, JPEG quality 0.85`,
+      `4. This manifest`,
+      "",
+      "── Per-Page Detail ──",
+    ];
+    pageSources.forEach((p, i) => {
+      manifestLines.push(`  Page ${i + 1}: ${p.label}${p.isBlank ? " (blank — no art)" : ""}`);
+    });
+    manifestLines.push("", "── Notes ──");
+    if (noTransforms) manifestLines.push("No customer transforms were applied. The raw uploaded file is print-ready as-is — no rasterized print PDF was generated, preserving original vector/quality.");
+    if (rotateSteps > 0) manifestLines.push(`Art was rotated ${rotateSteps * 90}° clockwise by the customer to match booklet orientation.`);
+    if (fitMode === "crop" && effectiveDims) {
+      const coverageW = (effectiveDims.wIn / bleedW * 100).toFixed(1);
+      const coverageH = (effectiveDims.hIn / bleedH * 100).toFixed(1);
+      manifestLines.push(`In Crop mode, art covers ${coverageW}% width × ${coverageH}% height of the bleed area.`);
+      if (effectiveDims.wIn < bleedW || effectiveDims.hIn < bleedH) manifestLines.push("WARNING: Art does not fully cover the bleed area. White margins may be visible after trimming.");
+      if (effectiveDims.wIn > bleedW || effectiveDims.hIn > bleedH) manifestLines.push("Art extends beyond bleed boundary and will be clipped.");
+    }
+    if (fitMode === "cover") manifestLines.push("Fill mode: art scaled to cover entire bleed area. Some art content may be cropped at edges.");
+    if (fitMode === "stretch") manifestLines.push("Stretch mode: art distorted to fill entire bleed area. Aspect ratio NOT preserved — image may appear warped.");
+    if (fitMode === "contain") manifestLines.push("Fit mode: art scaled to fit within bleed area. White letterbox bars may appear.");
+
+    const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
+
+    return { printReadyBlob, previewBlobs, manifestBlob, skippedGeneration: noTransforms };
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -1813,6 +2100,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
   async function processFiles(fileList) {
     if (!fileList || !fileList.length) return;
+    rawFileRef.current = fileList[0];
     setLoading(true); setFileName(fileList[0].name); setLoadingProgress(null);
     try {
       const onProgress = (current, total) => setLoadingProgress({ current, total });
@@ -1861,8 +2149,9 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     setRawPages([]); setFileName(""); setUploadPageCount(0);
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
     setRotatedCache({ key: "", pages: [] }); setRotateSteps(0);
-    setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false);
+    setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setApprovalPkg(null);
     pdfDocRef.current = null;
+    rawFileRef.current = null;
     slotFilesRef.current = {};
     if (onArtwork) onArtwork({ type: "none" });
     if (onCoverArt) onCoverArt(null);
@@ -2237,14 +2526,51 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               <div style={{ width:"100%", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
                 <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", justifyContent:"space-between" }}>
                   <div style={{ display:"flex", borderRadius:6, border: artApproved && proof===0 ? "2px solid #22c55e" : "2px solid #ef4444", boxShadow: artApproved && proof===0 ? "0 2px 10px rgba(34,197,94,.3)" : "0 2px 10px rgba(239,68,68,.2)" }}>
-                    <button type="button" onClick={() => { if(proof===0 && !artApproved){ setArtApproved(true); } else if(proof!==0){ setProof(0); } }} style={{
+                    <button type="button" disabled={generatingPdf} onClick={async () => {
+                      if (proof===0 && !artApproved) {
+                        setGeneratingPdf(true);
+                        setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
+                        try {
+                          const pkg = await generateApprovalPackage();
+                          if (!pkg || !pkg.manifestBlob) throw new Error("Package generation returned empty result");
+                          setApprovalPkg(pkg);
+                          setArtApproved(true);
+                          if (onArtwork) {
+                            const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
+                            const files = [];
+                            if (rawFileRef.current) files.push(rawFileRef.current);
+                            if (!pkg.skippedGeneration && pkg.printReadyBlob) {
+                              files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
+                            }
+                            pkg.previewBlobs.forEach((b, i) => {
+                              if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
+                            });
+                            files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
+                            onArtwork({ type: "files", list: files });
+                          }
+                        } catch (err) {
+                          console.error("Approval package generation failed:", err);
+                          alert("Failed to generate print-ready package: " + (err.message || err));
+                        } finally {
+                          setGeneratingPdf(false);
+                          setGenProgress(null);
+                        }
+                      } else if (proof!==0) { setProof(0); }
+                    }} style={{
                       padding:"8px 18px", fontSize:12, fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em",
                       background: artApproved && proof===0
                         ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
                         : proof===0 ? "rgba(255,255,255,.04)" : "rgba(255,255,255,.04)",
                       color: artApproved && proof===0 ? "#fff" : proof===0 ? "#ef4444" : "rgba(255,255,255,.3)",
                       borderRight:"1px solid rgba(255,255,255,.08)",
-                    }}>{artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
+                    }}>{generatingPdf && genProgress ? (
+                      <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+                        <span>{genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… {genProgress.page}/{genProgress.totalPages}</span>
+                        <span style={{ display:"block", width:80, height:4, background:"rgba(255,255,255,.15)", borderRadius:2, overflow:"hidden" }}>
+                          <span style={{ display:"block", height:"100%", borderRadius:2, background: proof===0 ? "#ef4444" : "#3b82f6", transition:"width .15s", width: `${Math.round((genProgress.page / Math.max(1, genProgress.totalPages)) * 100)}%` }} />
+                        </span>
+                      </span>
+                    ) : artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
                     <button type="button" onClick={() => setProof(0.01)} style={{
                       padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
                       background: proof===0.01 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 40%, #60a5fa 50%, #2563eb 60%, #1d4ed8 100%)" : "rgba(255,255,255,.04)",
@@ -2264,6 +2590,70 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
                   {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
                 </div>
+                {artApproved && approvalPkg && (() => {
+                  const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
+                  const dlFile = (blob, name) => {
+                    if (!blob) return;
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url; a.download = name;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                  };
+                  const dlAll = async () => {
+                    const files = [];
+                    if (rawFileRef.current) files.push([rawFileRef.current, rawFileRef.current.name || baseName + "_raw"]);
+                    if (!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob) files.push([approvalPkg.printReadyBlob, baseName + "_print-ready.pdf"]);
+                    approvalPkg.previewBlobs.forEach((b, i) => {
+                      if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
+                    });
+                    if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
+                    for (let i = 0; i < files.length; i++) {
+                      dlFile(files[i][0], files[i][1]);
+                      if (i < files.length - 1) await new Promise(r => setTimeout(r, 500));
+                    }
+                  };
+                  const previewCount = approvalPkg.previewBlobs.filter(b => b).length;
+                  return (
+                    <div style={{ marginTop:8, padding:"8px 12px", borderRadius:6, background:"rgba(34,197,94,.08)", border:"1px solid rgba(34,197,94,.2)" }}>
+                      <div style={{ fontSize:10, fontWeight:700, color:"#4ade80", marginBottom:6, letterSpacing:".04em" }}>TEST DOWNLOAD — APPROVAL PACKAGE ({previewCount} previews{approvalPkg.skippedGeneration ? ", no transforms" : ", print-ready generated"})</div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+                        <button type="button" onClick={dlAll} style={{
+                          padding:"5px 12px", fontSize:10, fontWeight:700, border:"1px solid rgba(34,197,94,.5)",
+                          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(34,197,94,.15)",
+                          color:"#4ade80",
+                        }}>⬇ Download All</button>
+                        {rawFileRef.current && (
+                          <button type="button" onClick={() => dlFile(rawFileRef.current, rawFileRef.current.name || baseName + "_raw")} style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          }}>Raw file</button>
+                        )}
+                        {!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob && (
+                          <button type="button" onClick={() => dlFile(approvalPkg.printReadyBlob, baseName + "_print-ready.pdf")} style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          }}>Print-ready PDF</button>
+                        )}
+                        {previewCount > 0 && (
+                          <button type="button" onClick={() => approvalPkg.previewBlobs.forEach((b, i) => { if (b) dlFile(b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`); })} style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          }}>Previews ({previewCount})</button>
+                        )}
+                        <button type="button" onClick={() => dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt")} style={{
+                          padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                        }}>Manifest</button>
+                      </div>
+                      {approvalPkg.skippedGeneration && (
+                        <div style={{ fontSize:9, color:"rgba(255,255,255,.35)", marginTop:4 }}>No print-ready PDF generated — raw file is already print-ready (no transforms applied)</div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             {!artApproved && proof === 0 && (
