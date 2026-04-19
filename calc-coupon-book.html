@@ -77,7 +77,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-17 · COUPON-BOOK</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-19 · PROOF-SYNC</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1817,6 +1817,11 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     const canvasH = Math.round(bleedH * DPI);
     const ed = effectiveDims; // art dims after rotation
 
+    // Product-specific proof geometry — see plan: spineMode "left" | "alternating" | "none"
+    const spineMode = "left";
+    const spineLabel = "Spine";
+    const foldLines = [];
+
     // Draw template guide lines onto a preview canvas
     function drawGuides(ctx, w, h, pageIdx) {
       const trimX = (BLEED / bleedW) * w;
@@ -1841,11 +1846,35 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       ctx.setLineDash([4, 4]);
       ctx.strokeRect(safeX, safeY, w - safeX * 2, h - safeY * 2);
 
-      // Spine bar (blue) — perfect bound: always left edge (glued spine)
-      const spineX = trimX;
-      ctx.fillStyle = "#3b82f6";
-      ctx.setLineDash([]);
-      ctx.fillRect(spineX, trimY + h * 0.02, 3, h - trimY * 2 - h * 0.04);
+      // Spine bar (blue) — parameterized: "left" | "alternating" | "none"
+      const spineOnLeft = spineMode === "left" ? true
+        : spineMode === "alternating" ? (pageIdx % 2 === 0)
+        : null;
+      if (spineOnLeft !== null) {
+        const spineX = spineOnLeft ? trimX : w - trimX - 3;
+        ctx.fillStyle = "#3b82f6";
+        ctx.setLineDash([]);
+        ctx.fillRect(spineX, trimY + h * 0.02, 3, h - trimY * 2 - h * 0.04);
+      }
+
+      // Fold lines (orange solid) — brochure-style overlays
+      if (foldLines && foldLines.length) {
+        ctx.strokeStyle = "#f97316";
+        ctx.setLineDash([]);
+        ctx.lineWidth = Math.max(1, w / 500);
+        foldLines.forEach(f => {
+          const vertical = f.vertical !== false;
+          ctx.beginPath();
+          if (vertical) {
+            const x = (f.pct / 100) * w;
+            ctx.moveTo(x, trimY); ctx.lineTo(x, h - trimY);
+          } else {
+            const y = (f.pct / 100) * h;
+            ctx.moveTo(trimX, y); ctx.lineTo(w - trimX, y);
+          }
+          ctx.stroke();
+        });
+      }
 
       // Labels
       ctx.font = `bold ${Math.max(9, Math.round(w / 100))}px sans-serif`;
@@ -1854,7 +1883,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       ctx.fillStyle = "#ef4444"; ctx.fillText("Bleed", w * 0.15, labelY);
       ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillText("Trim", w * 0.38, labelY);
       ctx.fillStyle = "#38a169"; ctx.fillText("Safety", w * 0.62, labelY);
-      ctx.fillStyle = "#3b82f6"; ctx.fillText("Spine", w * 0.85, labelY);
+      if (spineOnLeft !== null && spineLabel) { ctx.fillStyle = "#3b82f6"; ctx.fillText(spineLabel, w * 0.85, labelY); }
+      else if (foldLines && foldLines.length) { ctx.fillStyle = "#f97316"; ctx.fillText("Fold", w * 0.85, labelY); }
       ctx.restore();
     }
 
