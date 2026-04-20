@@ -117,7 +117,7 @@ const PCF = Object.assign({
   // Booklet-specific markup overrides (separate from brochure backend_* values)
   booklet_maximummarkup:3.6, booklet_minimummarkup:1.45,
   booklet_markup_coef_tS:0.15, booklet_markup_coef_pages:0.30,
-  booklet_size_discount:0.15,
+  booklet_size_discount:0.15, booklet_surcharge:0.30,
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
   art_pagesperhour:8, art_newdesignmodifier:0.5,
   sheetsforlowcosthardcopyproof:1500,
@@ -126,7 +126,7 @@ const PCF = Object.assign({
   non_inventory_fee:35,          // surcharge for non-stock papers
   bw_discount_rate:0.3,          // press cost reduction for B&W
   easy_discount_rate:0.05,       // materials discount for easy (imp≥4) sizes
-  common_discount_max:0,      // max competitive discount for common sizes
+  common_discount_max:1500,   // max competitive discount for common sizes
   bundling_base_fee:7,           // flat add-on for any bundling
   proof_hardcopy_cost:35,        // hardcopy proof base price
   proof_digital_cost:10,         // digital proof base price
@@ -465,6 +465,8 @@ function calculate(c) {
   P.discCommon=(commonSize&&q250)?-Math.min(P.press+P.cutting+P.stitching,PCF.common_discount_max):0;
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
   P.discSize=imp<4?subBeforeSize*(-PCF.booklet_size_discount):0;
+  const subBeforeSurcharge=Object.values(P).reduce((s,v)=>s+v,0);
+  P.surcharge=subBeforeSurcharge*(PCF.booklet_surcharge||0);
 
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
@@ -556,7 +558,7 @@ function calculate(c) {
     {l:"UV Coating",v:P.coat,g:"add"},{l:"Bundling",v:P.bundle,g:"add"},
     {l:"Round Cornering",v:P.rc,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
-    {l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Difficult Size",v:P.diffSize,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
+    {l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Difficult Size",v:P.diffSize,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 

@@ -42,6 +42,7 @@ function pps_default_config() {
             'booklet_markup_coef_tS'            => 0.15,
             'booklet_markup_coef_pages'         => 0.30,
             'booklet_size_discount'             => 0.15,
+            'booklet_surcharge'                 => 0.30,
             // Perfect-bound-specific markup (separate from brochure backend_* and booklet_* values)
             'perfectbound_maximummarkup'        => 8,
             'perfectbound_minimummarkup'        => 1.5,
@@ -65,7 +66,7 @@ function pps_default_config() {
             'non_inventory_fee'                 => 35,
             'bw_discount_rate'                  => 0.3,
             'easy_discount_rate'                => 0.05,
-            'common_discount_max'               => 0,
+            'common_discount_max'               => 1500,
             'bundling_base_fee'                 => 7,
             'proof_hardcopy_cost'               => 35,
             'proof_digital_cost'                => 10,
@@ -741,6 +742,7 @@ function pps_config_tab_production( $cfg ) {
             'booklet_markup_coef_tS'     => array( 'Sheet Decay Coef', '×' ),
             'booklet_markup_coef_pages'  => array( 'Pages Decay Coef', '×' ),
             'booklet_size_discount'      => array( '8.5×11 Size Disc.', '×' ),
+            'booklet_surcharge'          => array( 'Pricing Surcharge', '×' ),
         ),
         'Perfect Bound Markup' => array(
             'perfectbound_maximummarkup'     => array( 'Max Markup', '×' ),
