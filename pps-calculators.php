@@ -980,14 +980,34 @@ function pps_build_reorder_url( $item ) {
     return add_query_arg( 'pps_reorder', $encoded, $product->get_permalink() );
 }
 
+function pps_build_single_item_reorder_url( $order, $item ) {
+    $product = wc_get_product( $item->get_product_id() );
+    if ( ! $product || ! $product->exists() ) return '';
+
+    $url = add_query_arg( array(
+        'pps_reorder_order' => $order->get_id(),
+        'pps_reorder_item'  => $item->get_id(),
+    ), wc_get_cart_url() );
+
+    return wp_nonce_url( $url, 'pps_reorder_item_' . $order->get_id() . '_' . $item->get_id() );
+}
+
 function pps_render_pps_item_card( $item, $order, $context = 'dashboard' ) {
     $metadata_json = $item->get_meta( '_pps_metadata' );
-    if ( ! $metadata_json ) return '';
+    $is_pps = (bool) $metadata_json;
 
-    $summary    = $item->get_meta( '_pps_summary' );
-    $delivery   = $item->get_meta( '_pps_delivery_date' );
-    $thumb_name = $item->get_meta( '_pps_artwork_thumb' );
-    $reorder    = pps_build_reorder_url( $item );
+    // Legacy (WCPA-era) fallback: skip cards for items whose product is gone
+    if ( ! $is_pps ) {
+        $product = wc_get_product( $item->get_product_id() );
+        if ( ! $product || ! $product->exists() ) return '';
+    }
+
+    $summary         = $is_pps ? $item->get_meta( '_pps_summary' ) : '';
+    $delivery        = $is_pps ? $item->get_meta( '_pps_delivery_date' ) : '';
+    $thumb_name      = $is_pps ? $item->get_meta( '_pps_artwork_thumb' ) : '';
+    $reorder         = $is_pps ? pps_build_reorder_url( $item ) : '';
+    $legacy_reorder  = $is_pps ? '' : pps_build_single_item_reorder_url( $order, $item );
+    $legacy_meta     = $is_pps ? array() : $item->get_formatted_meta_data( '' );
 
     $delivery_pretty = '';
     if ( $delivery ) {
@@ -1028,9 +1048,18 @@ function pps_render_pps_item_card( $item, $order, $context = 'dashboard' ) {
                 <?php endif; ?>
                 <?php if ( $summary ) : ?>
                     <pre style="background:#fff;padding:8px 10px;border:1px solid #ddd;border-radius:3px;font-size:12px;white-space:pre-wrap;margin:6px 0 8px;font-family:inherit"><?php echo esc_html( $summary ); ?></pre>
+                <?php elseif ( ! empty( $legacy_meta ) ) : ?>
+                    <div style="background:#fff;padding:8px 10px;border:1px solid #ddd;border-radius:3px;font-size:12px;margin:6px 0 8px">
+                        <?php foreach ( $legacy_meta as $m ) : ?>
+                            <div style="margin:0 0 2px"><strong><?php echo esc_html( wp_strip_all_tags( $m->display_key ) ); ?>:</strong> <?php echo esc_html( wp_strip_all_tags( $m->display_value ) ); ?></div>
+                        <?php endforeach; ?>
+                    </div>
                 <?php endif; ?>
                 <?php if ( $reorder ) : ?>
                     <a href="<?php echo esc_url( $reorder ); ?>" style="display:inline-block;margin-top:4px;padding:6px 14px;background:#007eff;color:#fff;text-decoration:none;border-radius:4px;font-size:13px">Reorder</a>
+                <?php elseif ( $legacy_reorder ) : ?>
+                    <a href="<?php echo esc_url( $legacy_reorder ); ?>" style="display:inline-block;margin-top:4px;padding:6px 14px;background:#007eff;color:#fff;text-decoration:none;border-radius:4px;font-size:13px">Reorder (same as before)</a>
+                    <span style="display:inline-block;margin-left:8px;font-size:12px;color:#666">Specs can't be changed &mdash; contact us for edits.</span>
                 <?php endif; ?>
             </div>
         </div>
@@ -1336,6 +1365,129 @@ function pps_order_lookup_render_orders( $email, $notice ) {
     </div>
     <?php
 }
+
+// ═══════════════════════════════════════════════════════════════
+// LEGACY (WCPA) SINGLE-ITEM REORDER HANDLER
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'template_redirect', 'pps_handle_single_item_reorder' );
+
+function pps_handle_single_item_reorder() {
+    if ( empty( $_GET['pps_reorder_item'] ) || empty( $_GET['pps_reorder_order'] ) ) return;
+    if ( empty( $_GET['_wpnonce'] ) ) return;
+
+    $order_id = absint( $_GET['pps_reorder_order'] );
+    $item_id  = absint( $_GET['pps_reorder_item'] );
+    $nonce    = sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) );
+
+    if ( ! $order_id || ! $item_id ) return;
+
+    $redirect = wc_get_cart_url();
+
+    if ( ! wp_verify_nonce( $nonce, 'pps_reorder_item_' . $order_id . '_' . $item_id ) ) {
+        wc_add_notice( 'That reorder link has expired. Please reload your orders page and try again.', 'error' );
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    $order = wc_get_order( $order_id );
+    if ( ! $order ) {
+        wc_add_notice( 'Order not found.', 'error' );
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    $allowed = false;
+    if ( is_user_logged_in() && (int) $order->get_customer_id() === get_current_user_id() ) {
+        $allowed = true;
+    }
+    $lookup_email = pps_order_lookup_active_email();
+    if ( $lookup_email && strtolower( (string) $order->get_billing_email() ) === strtolower( $lookup_email ) ) {
+        $allowed = true;
+    }
+    if ( ! $allowed ) {
+        wc_add_notice( 'You do not have access to that order.', 'error' );
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    $item = $order->get_item( $item_id );
+    if ( ! $item || ! is_a( $item, 'WC_Order_Item_Product' ) ) {
+        wc_add_notice( 'Order item not found.', 'error' );
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    $product_id   = $item->get_product_id();
+    $variation_id = $item->get_variation_id();
+    $quantity     = max( 1, (int) $item->get_quantity() );
+    $product      = wc_get_product( $variation_id ? $variation_id : $product_id );
+
+    if ( ! $product || ! $product->exists() ) {
+        wc_add_notice( 'That product is no longer available.', 'error' );
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    if ( ! WC()->cart ) {
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    $variations = array();
+    if ( $variation_id ) {
+        foreach ( $item->get_meta_data() as $meta ) {
+            if ( taxonomy_is_product_attribute( $meta->key ) ) {
+                $variations[ $meta->key ] = $meta->value;
+            } elseif ( meta_is_product_attribute( $meta->key, $meta->value, $product_id ) ) {
+                $variations[ $meta->key ] = $meta->value;
+            }
+        }
+    }
+
+    // Let WCPA (and any other add-ons) restore their cart item data from the line item
+    $cart_item_data = apply_filters( 'woocommerce_order_again_cart_item_data', array(), $item, $order );
+
+    // Preserve the original unit price so totals don't drift from the historical order
+    $unit_price = $quantity > 0 ? ( (float) $item->get_subtotal() / $quantity ) : (float) $item->get_subtotal();
+    $cart_item_data['pps_legacy_unit_price'] = $unit_price;
+    $cart_item_data['pps_legacy_source']     = array(
+        'order_id' => $order_id,
+        'item_id'  => $item_id,
+    );
+
+    $cart_key = WC()->cart->add_to_cart( $product_id, $quantity, $variation_id, $variations, $cart_item_data );
+
+    if ( ! $cart_key ) {
+        wc_add_notice( 'Could not add that item to your cart.', 'error' );
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    wc_add_notice( 'Added to your cart from order #' . $order->get_order_number() . '.', 'success' );
+    wp_safe_redirect( $redirect );
+    exit;
+}
+
+add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $values ) {
+    if ( isset( $values['pps_legacy_unit_price'] ) ) {
+        $cart_item['pps_legacy_unit_price'] = $values['pps_legacy_unit_price'];
+    }
+    if ( isset( $values['pps_legacy_source'] ) ) {
+        $cart_item['pps_legacy_source'] = $values['pps_legacy_source'];
+    }
+    return $cart_item;
+}, 10, 2 );
+
+add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
+    if ( is_admin() && ! defined( 'DOING_AJAX' ) ) return;
+    if ( ! $cart ) return;
+    foreach ( $cart->get_cart() as $cart_item ) {
+        if ( isset( $cart_item['pps_legacy_unit_price'] ) && isset( $cart_item['data'] ) ) {
+            $cart_item['data']->set_price( (float) $cart_item['pps_legacy_unit_price'] );
+        }
+    }
+}, 20 );
 
 // ═══════════════════════════════════════════════════════════════
 // ACTIVATION: CREATE UPLOAD DIRECTORY
