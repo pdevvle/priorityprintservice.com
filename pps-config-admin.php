@@ -41,7 +41,7 @@ function pps_default_config() {
             'booklet_minimummarkup'             => 1.45,
             'booklet_markup_coef_tS'            => 0.15,
             'booklet_markup_coef_pages'         => 0.30,
-            'booklet_size_discount'             => 0.15,
+            'booklet_size_discount'             => 0,
             'booklet_surcharge'                 => 0.30,
             // Perfect-bound-specific markup (separate from brochure backend_* and booklet_* values)
             'perfectbound_maximummarkup'        => 8,
