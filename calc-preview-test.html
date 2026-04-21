@@ -3242,8 +3242,38 @@ function App(){
   const[showDebug,setShowDebug]=useState(false);
   const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
 
-  // Per-product defaults from admin config
-  const D = (window.PPS_CONFIG || {}).defaults || {};
+  // Per-product defaults from admin config, optionally overridden by URL params (share link)
+  const D = (() => {
+    const base = Object.assign({}, (window.PPS_CONFIG || {}).defaults || {});
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const _int = (v) => { const n = parseInt(v, 10); return isNaN(n) ? undefined : n; };
+      const _float = (v) => { const n = parseFloat(v); return isNaN(n) ? undefined : n; };
+      if (p.has("qty") && _int(p.get("qty"))) base.qty = _int(p.get("qty"));
+      if (p.has("pages") && _int(p.get("pages"))) base.pages = _int(p.get("pages"));
+      if (p.has("size")) base.sizeLabel = p.get("size");
+      if (p.has("long") && _float(p.get("long"))) base.customLong = _float(p.get("long"));
+      if (p.has("short") && _float(p.get("short"))) base.customShort = _float(p.get("short"));
+      if (p.has("bind")) base.bindDir = p.get("bind");
+      if (p.has("color")) base.insideColor = p.get("color");
+      if (p.has("covercolor")) base.coverColor = p.get("covercolor");
+      if (p.has("paper")) base.insidePaperType = p.get("paper");
+      if (p.has("covermode")) base.coverMode = p.get("covermode");
+      if (p.has("coverpaper")) base.coverPaperType = p.get("coverpaper");
+      if (p.has("staple")) base.twoStaple = p.get("staple") === "true";
+      if (p.has("vivid")) base.vividPrint = p.get("vivid") === "true";
+      if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
+      if (p.has("bundling") && _float(p.get("bundling")) != null) base.bundling = _float(p.get("bundling"));
+      if (p.has("corner") && _float(p.get("corner")) != null) base.roundCorner = _float(p.get("corner"));
+      if (p.has("state")) base.shipState = p.get("state");
+      if (p.has("artwork") && _float(p.get("artwork")) != null) base.artwork = _float(p.get("artwork"));
+      if (p.has("artedit") && _int(p.get("artedit")) != null) base.artEditPages = _int(p.get("artedit"));
+      if (p.has("bleed") && _float(p.get("bleed")) != null) base.bleed = _float(p.get("bleed"));
+      if (p.has("proof") && _float(p.get("proof")) != null) base.proof = _float(p.get("proof"));
+      if (p.has("canva")) base.canvaLink = p.get("canva");
+    } catch(e) {}
+    return base;
+  })();
   const _findPaper = (list, val) => { const f = list.find(p => String(p.val) === String(val)); return f || list[2] || list[0]; };
 
   const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||8, name:""}]);
@@ -3278,7 +3308,7 @@ function App(){
   // Unified artwork file state — one variable, no priority logic
   // { type:"none" } | { type:"files", list:[File,...] } | { type:"existing", path:"/uploads/..." }
   const[artFiles,setArtFiles]=useState({type:"none"});
-  const[canvaLink,setCanvaLink]=useState("");
+  const[canvaLink,setCanvaLink]=useState(D.canvaLink||"");
   const[canvaInstructions,setCanvaInstructions]=useState("");
   const[referenceFiles,setReferenceFiles]=useState([]);
 
@@ -3455,6 +3485,13 @@ function App(){
     if (shipState !== "AZ") p.set("state", shipState);
     if (sets[0].qty !== 100) p.set("qty", sets[0].qty);
     if (sets[0].pages !== 8) p.set("pages", sets[0].pages);
+    // Art settings (file uploads themselves can't be shared via URL — binary data —
+    // but the art option choice, bleed, proof, and Canva link can be)
+    if (artwork !== 0.01) p.set("artwork", artwork);
+    if (artEditPages > 0) p.set("artedit", artEditPages);
+    if (bleed !== 0) p.set("bleed", bleed);
+    if (proof !== 0) p.set("proof", proof);
+    if (canvaLink) p.set("canva", canvaLink);
     const base = window.location.origin + window.location.pathname;
     const qs = p.toString();
     return qs ? base + "?" + qs : base;
