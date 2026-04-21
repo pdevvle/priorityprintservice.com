@@ -760,7 +760,7 @@ function pps_config_tab_production( $cfg ) {
         'Discounts' => array(
             'easydiscount_max'       => array( 'Easy Size Cap', '$' ),
             'easy_discount_rate'     => array( 'Easy Size Rate', '×' ),
-            'common_discount_max'    => array( 'Common Size Cap', '$' ),
+            'common_discount_max'    => array( 'Competitive Disc. (>0=on)', '' ),
             'bw_discount_rate'       => array( 'B&W Discount', '×' ),
         ),
         'Fees' => array(

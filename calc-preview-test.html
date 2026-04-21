@@ -126,7 +126,7 @@ const PCF = Object.assign({
   non_inventory_fee:35,          // surcharge for non-stock papers
   bw_discount_rate:0.3,          // press cost reduction for B&W
   easy_discount_rate:0.05,       // materials discount for easy (imp≥4) sizes
-  common_discount_max:1500,   // max competitive discount for common sizes
+  common_discount_max:1500,   // competitive discount toggle (any value >0 enables full labor discount for common sizes at qty>250; 0 disables). Legacy name — no longer a $ cap.
   bundling_base_fee:7,           // flat add-on for any bundling
   proof_hardcopy_cost:35,        // hardcopy proof base price
   proof_digital_cost:10,         // digital proof base price
@@ -462,7 +462,7 @@ function calculate(c) {
   P.discBW=c.insideColor==="bw"?-(P.press*PCF.bw_discount_rate):0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
   P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate,PCF.easydiscount_max):0;
-  P.discCommon=(commonSize&&q250)?-Math.min(P.press+P.cutting+P.stitching,PCF.common_discount_max):0;
+  P.discCommon=(commonSize&&q250&&PCF.common_discount_max>0)?-(P.press+P.cutting+P.stitching):0;
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
   P.discSize=imp<4?subBeforeSize*(-PCF.booklet_size_discount):0;
   const subBeforeSurcharge=Object.values(P).reduce((s,v)=>s+v,0);

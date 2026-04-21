@@ -464,7 +464,7 @@ function calcSaddle(c) {
   P.discBW = isBW ? -(P.press * PCF.bw_discount_rate) : 0;
   const pComp = P.insidePaper + P.coverPaper + P.insidePrint + P.coverPrint;
   P.discEasy = easySize ? -Math.min(pComp * EASY_RATE, PCF.easydiscount_max) : 0;
-  P.discCommon = (commonSize && q250) ? -Math.min(P.press + P.cutting + P.stitching, PCF.common_discount_max) : 0;
+  P.discCommon = (commonSize && q250 && PCF.common_discount_max > 0) ? -(P.press + P.cutting + P.stitching) : 0;
   const subBeforeSize = Object.values(P).reduce((s,v) => s + v, 0);
   P.discSize = imp < 4 ? subBeforeSize * (-SIZE_DISC) : 0;
   const total = Object.values(P).reduce((s,v) => s + v, 0);
