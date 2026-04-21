@@ -3435,6 +3435,40 @@ function App(){
 
   const[submitting,setSubmitting]=useState(false);
   const[uploadProgress,setUploadProgress]=useState(null); // null | {phase, pct, fileName, fileIdx, fileCount}
+  const[shareCopied,setShareCopied]=useState(false);
+
+  const buildShareUrl = () => {
+    const p = new URLSearchParams();
+    if (sizeLabel !== "5.5×8.5 (Opens to 8.5×11)") p.set("size", sizeLabel);
+    if (sizeLabel === "Custom Size") { p.set("long", customLong); p.set("short", customShort); }
+    if (bindDir !== "short") p.set("bind", bindDir);
+    if (insideColor !== "color") p.set("color", insideColor);
+    if (coverColor !== "color") p.set("covercolor", coverColor);
+    if (insidePaperType !== "noncardstock") p.set("paper", insidePaperType);
+    if (coverMode !== "same") p.set("covermode", coverMode);
+    if (coverPaperType !== "cardstock") p.set("coverpaper", coverPaperType);
+    if (twoStaple) p.set("staple", "true");
+    if (vividPrint) p.set("vivid", "true");
+    if (coating > 0) p.set("coating", coating);
+    if (bundling > 0) p.set("bundling", bundling);
+    if (roundCorner > 0) p.set("corner", roundCorner);
+    if (shipState !== "AZ") p.set("state", shipState);
+    if (sets[0].qty !== 100) p.set("qty", sets[0].qty);
+    if (sets[0].pages !== 8) p.set("pages", sets[0].pages);
+    const base = window.location.origin + window.location.pathname;
+    const qs = p.toString();
+    return qs ? base + "?" + qs : base;
+  };
+
+  const handleShareLink = () => {
+    const url = buildShareUrl();
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    }).catch(() => {
+      prompt("Copy this link:", url);
+    });
+  };
 
   const handleAddToOrder = async () => {
     if (!result || result.error?.length || submitting) return;
@@ -3873,6 +3907,9 @@ function App(){
                 )}
               </div>
             ) : submitting ? "Uploading artwork…" : "Add to Order"}
+          </button>
+          <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+            {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
           <button type="button" onClick={()=>setShowDebug(p=>!p)} style={{width:"100%",marginTop:8,padding:"6px",borderRadius:4,border:`1px solid ${showDebug?"#555":"#ddd"}`,background:showDebug?"#1a1a1a":"#fafafa",color:showDebug?"#888":"#bbb",fontSize:10,fontWeight:600,letterSpacing:".5px",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {showDebug?"▼ Hide":"▶ Show"} Debug Panel
