@@ -942,41 +942,114 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// SHARED: PPS ORDER VIEW HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+function pps_reorder_field_whitelist() {
+    return array(
+        'sizeLabel', 'customLong', 'customShort', 'bindDir',
+        'sets',
+        'insideColor', 'coverColor',
+        'insidePaper', 'insidePaperType',
+        'coverMode', 'coverPaper', 'coverPaperType',
+        'twoStaple', 'vividPrint',
+        'coating', 'bundling', 'roundCorner',
+        'artwork', 'artEditPages', 'bleed', 'proof',
+        'shipState',
+    );
+}
+
+function pps_build_reorder_url( $item ) {
+    $metadata_json = $item->get_meta( '_pps_metadata' );
+    if ( ! $metadata_json ) return '';
+
+    $product = wc_get_product( $item->get_product_id() );
+    if ( ! $product ) return '';
+
+    $full = json_decode( $metadata_json, true );
+    if ( ! is_array( $full ) ) return '';
+
+    $reorder_config = array();
+    foreach ( pps_reorder_field_whitelist() as $key ) {
+        if ( isset( $full[ $key ] ) ) {
+            $reorder_config[ $key ] = $full[ $key ];
+        }
+    }
+
+    $encoded = rtrim( strtr( base64_encode( json_encode( $reorder_config ) ), '+/', '-_' ), '=' );
+    return add_query_arg( 'pps_reorder', $encoded, $product->get_permalink() );
+}
+
+function pps_render_pps_item_card( $item, $order, $context = 'dashboard' ) {
+    $metadata_json = $item->get_meta( '_pps_metadata' );
+    if ( ! $metadata_json ) return '';
+
+    $summary    = $item->get_meta( '_pps_summary' );
+    $delivery   = $item->get_meta( '_pps_delivery_date' );
+    $thumb_name = $item->get_meta( '_pps_artwork_thumb' );
+    $reorder    = pps_build_reorder_url( $item );
+
+    $delivery_pretty = '';
+    if ( $delivery ) {
+        try {
+            $d = new DateTime( $delivery );
+            $delivery_pretty = $d->format( 'l, M j, Y' );
+        } catch ( Exception $e ) {
+            $delivery_pretty = $delivery;
+        }
+    }
+
+    $thumb_url = '';
+    if ( $thumb_name && function_exists( 'pps_thumb_url' ) ) {
+        $thumb_url = trailingslashit( pps_thumb_url() ) . $thumb_name;
+    }
+
+    $date_created = $order->get_date_created();
+    $date_str = $date_created ? wc_format_datetime( $date_created, get_option( 'date_format' ) ) : '';
+
+    ob_start();
+    ?>
+    <div class="pps-order-card" style="margin:0 0 18px;padding:14px;background:#f0faff;border:1px solid #b8e0f5;border-radius:6px">
+        <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+            <?php if ( $thumb_url ) : ?>
+                <div style="flex:0 0 auto">
+                    <img src="<?php echo esc_url( $thumb_url ); ?>" alt="Artwork preview" style="max-width:140px;max-height:140px;border:1px solid #ddd;border-radius:4px;background:#fff" />
+                </div>
+            <?php endif; ?>
+            <div style="flex:1 1 240px;min-width:0">
+                <h4 style="margin:0 0 6px;color:#007eff;font-size:16px"><?php echo esc_html( $item->get_name() ); ?></h4>
+                <p style="margin:0 0 4px;color:#555;font-size:13px">
+                    Order #<?php echo esc_html( $order->get_order_number() ); ?>
+                    <?php if ( $date_str ) : ?> &middot; <?php echo esc_html( $date_str ); ?><?php endif; ?>
+                    &middot; <?php echo esc_html( wc_get_order_status_name( $order->get_status() ) ); ?>
+                </p>
+                <?php if ( $delivery_pretty ) : ?>
+                    <p style="margin:0 0 4px;font-size:13px"><strong>Estimated delivery:</strong> <?php echo esc_html( $delivery_pretty ); ?></p>
+                <?php endif; ?>
+                <?php if ( $summary ) : ?>
+                    <pre style="background:#fff;padding:8px 10px;border:1px solid #ddd;border-radius:3px;font-size:12px;white-space:pre-wrap;margin:6px 0 8px;font-family:inherit"><?php echo esc_html( $summary ); ?></pre>
+                <?php endif; ?>
+                <?php if ( $reorder ) : ?>
+                    <a href="<?php echo esc_url( $reorder ); ?>" style="display:inline-block;margin-top:4px;padding:6px 14px;background:#007eff;color:#fff;text-decoration:none;border-radius:4px;font-size:13px">Reorder</a>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+// ═══════════════════════════════════════════════════════════════
 // REORDER: BUTTON ON MY ACCOUNT → ORDERS
 // ═══════════════════════════════════════════════════════════════
 
 add_filter( 'woocommerce_my_account_my_orders_actions', function( $actions, $order ) {
     foreach ( $order->get_items() as $item ) {
-        $metadata_json = $item->get_meta( '_pps_metadata' );
-        if ( ! $metadata_json ) continue;
+        $url = pps_build_reorder_url( $item );
+        if ( ! $url ) continue;
 
-        $product_id = $item->get_product_id();
-        $product    = wc_get_product( $product_id );
+        $product = wc_get_product( $item->get_product_id() );
         if ( ! $product ) continue;
-
-        $full = json_decode( $metadata_json, true );
-        if ( ! $full ) continue;
-
-        $reorder_fields = array(
-            'sizeLabel', 'customLong', 'customShort', 'bindDir',
-            'sets',
-            'insideColor', 'coverColor',
-            'insidePaper', 'insidePaperType',
-            'coverMode', 'coverPaper', 'coverPaperType',
-            'twoStaple', 'vividPrint',
-            'coating', 'bundling', 'roundCorner',
-            'artwork', 'artEditPages', 'bleed', 'proof',
-            'shipState',
-        );
-        $reorder_config = array();
-        foreach ( $reorder_fields as $key ) {
-            if ( isset( $full[ $key ] ) ) {
-                $reorder_config[ $key ] = $full[ $key ];
-            }
-        }
-
-        $encoded = rtrim( strtr( base64_encode( json_encode( $reorder_config ) ), '+/', '-_' ), '=' );
-        $url     = add_query_arg( 'pps_reorder', $encoded, $product->get_permalink() );
 
         $label = 'Reorder';
         $pps_count = 0;
@@ -997,6 +1070,274 @@ add_filter( 'woocommerce_my_account_my_orders_actions', function( $actions, $ord
 }, 10, 2 );
 
 // ═══════════════════════════════════════════════════════════════
+// MY ACCOUNT: PRINT ORDERS DASHBOARD
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'init', function() {
+    add_rewrite_endpoint( 'print-orders', EP_ROOT | EP_PAGES );
+});
+
+add_filter( 'woocommerce_account_menu_items', function( $items ) {
+    $new = array();
+    $inserted = false;
+    foreach ( $items as $k => $v ) {
+        $new[ $k ] = $v;
+        if ( $k === 'orders' ) {
+            $new['print-orders'] = 'Print Orders';
+            $inserted = true;
+        }
+    }
+    if ( ! $inserted ) {
+        $new['print-orders'] = 'Print Orders';
+    }
+    return $new;
+});
+
+add_filter( 'woocommerce_endpoint_print-orders_title', function() {
+    return 'Print Orders';
+});
+
+add_action( 'woocommerce_account_print-orders_endpoint', 'pps_render_print_orders_endpoint' );
+
+function pps_render_print_orders_endpoint() {
+    $user_id = get_current_user_id();
+    if ( ! $user_id ) {
+        echo '<p>Please log in to view your print orders.</p>';
+        return;
+    }
+
+    $per_page = 10;
+    $raw_page = get_query_var( 'print-orders' );
+    $page = max( 1, (int) $raw_page );
+
+    $orders = wc_get_orders( array(
+        'customer_id' => $user_id,
+        'limit'       => $per_page,
+        'paged'       => $page,
+        'orderby'     => 'date',
+        'order'       => 'DESC',
+        'type'        => 'shop_order',
+        'status'      => array_keys( wc_get_order_statuses() ),
+    ) );
+
+    $buffer = '';
+    $rendered = 0;
+    foreach ( $orders as $order ) {
+        foreach ( $order->get_items() as $item ) {
+            $card = pps_render_pps_item_card( $item, $order, 'dashboard' );
+            if ( $card ) {
+                $buffer .= $card;
+                $rendered++;
+            }
+        }
+    }
+
+    if ( $rendered === 0 && $page === 1 ) {
+        echo '<p>You haven\'t placed any print orders yet.</p>';
+        return;
+    }
+
+    echo $buffer; // already-escaped per-card
+
+    $has_next = count( $orders ) >= $per_page;
+    if ( $page > 1 || $has_next ) {
+        $base = wc_get_page_permalink( 'myaccount' );
+        echo '<div class="pps-pagination" style="margin-top:16px;display:flex;gap:12px;justify-content:space-between">';
+        if ( $page > 1 ) {
+            echo '<a href="' . esc_url( wc_get_endpoint_url( 'print-orders', (string) ( $page - 1 ), $base ) ) . '">&larr; Previous</a>';
+        } else {
+            echo '<span></span>';
+        }
+        if ( $has_next ) {
+            echo '<a href="' . esc_url( wc_get_endpoint_url( 'print-orders', (string) ( $page + 1 ), $base ) ) . '">Next &rarr;</a>';
+        }
+        echo '</div>';
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GUEST ORDER LOOKUP (shortcode + handler)
+// ═══════════════════════════════════════════════════════════════
+
+function pps_order_lookup_rate_key() {
+    $ip = isset( $_SERVER['REMOTE_ADDR'] ) ? $_SERVER['REMOTE_ADDR'] : '';
+    $salt = defined( 'AUTH_SALT' ) ? AUTH_SALT : 'pps';
+    return 'pps_lookup_' . substr( hash( 'sha256', $ip . $salt ), 0, 24 );
+}
+
+function pps_order_lookup_is_rate_limited() {
+    return (int) get_transient( pps_order_lookup_rate_key() ) >= 5;
+}
+
+function pps_order_lookup_record_attempt() {
+    $key = pps_order_lookup_rate_key();
+    $attempts = (int) get_transient( $key );
+    set_transient( $key, $attempts + 1, 15 * MINUTE_IN_SECONDS );
+}
+
+function pps_order_lookup_grant( $email ) {
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        WC()->session->set( 'pps_lookup_email', sanitize_email( $email ) );
+        WC()->session->set( 'pps_lookup_granted_at', time() );
+    }
+}
+
+function pps_order_lookup_revoke() {
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        WC()->session->set( 'pps_lookup_email', null );
+        WC()->session->set( 'pps_lookup_granted_at', null );
+    }
+}
+
+function pps_order_lookup_active_email() {
+    if ( ! function_exists( 'WC' ) || ! WC()->session ) return '';
+    $email = WC()->session->get( 'pps_lookup_email' );
+    $granted = (int) WC()->session->get( 'pps_lookup_granted_at' );
+    if ( ! $email || ! $granted ) return '';
+    if ( ( time() - $granted ) > 30 * MINUTE_IN_SECONDS ) {
+        pps_order_lookup_revoke();
+        return '';
+    }
+    return $email;
+}
+
+add_shortcode( 'pps_order_lookup', 'pps_order_lookup_shortcode' );
+
+function pps_order_lookup_shortcode() {
+    $error  = '';
+    $notice = '';
+
+    if ( isset( $_POST['pps_lookup_signout'] ) ) {
+        pps_order_lookup_revoke();
+    }
+
+    if ( isset( $_POST['pps_lookup_submit'] )
+         && isset( $_POST['pps_lookup_nonce'] )
+         && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['pps_lookup_nonce'] ) ), 'pps_order_lookup' ) ) {
+
+        $honey = isset( $_POST['pps_lookup_hp'] ) ? sanitize_text_field( wp_unslash( $_POST['pps_lookup_hp'] ) ) : '';
+
+        if ( $honey !== '' ) {
+            $error = "We couldn't find a matching order.";
+        } elseif ( pps_order_lookup_is_rate_limited() ) {
+            $error = 'Too many attempts. Please try again later.';
+        } else {
+            pps_order_lookup_record_attempt();
+
+            $num_raw   = absint( $_POST['pps_lookup_order'] ?? 0 );
+            $email_raw = sanitize_email( wp_unslash( $_POST['pps_lookup_email'] ?? '' ) );
+            $date_raw  = sanitize_text_field( wp_unslash( $_POST['pps_lookup_date'] ?? '' ) );
+
+            $order = $num_raw ? wc_get_order( $num_raw ) : null;
+            $ok = false;
+            $matched_email = '';
+
+            if ( $order ) {
+                $order_email = strtolower( (string) $order->get_billing_email() );
+                $sub_email   = strtolower( $email_raw );
+                $created     = $order->get_date_created();
+                $order_date  = $created ? $created->format( 'Y-m-d' ) : '';
+
+                $email_match = ( $sub_email !== '' ) && hash_equals( $order_email, $sub_email );
+                $date_match  = ( $date_raw !== '' ) && hash_equals( $order_date, $date_raw );
+                $ok = $email_match && $date_match;
+                if ( $ok ) $matched_email = $order->get_billing_email();
+            }
+
+            if ( $ok ) {
+                pps_order_lookup_grant( $matched_email );
+                $notice = 'Welcome back. Here are your print orders.';
+            } else {
+                $error = "We couldn't find a matching order.";
+            }
+        }
+    }
+
+    ob_start();
+    $active_email = pps_order_lookup_active_email();
+    if ( $active_email ) {
+        pps_order_lookup_render_orders( $active_email, $notice );
+    } else {
+        pps_order_lookup_render_form( $error );
+    }
+    return ob_get_clean();
+}
+
+function pps_order_lookup_render_form( $error ) {
+    ?>
+    <div class="pps-order-lookup" style="max-width:520px">
+        <?php if ( $error ) : ?>
+            <div class="woocommerce-error" role="alert" style="margin-bottom:14px"><?php echo esc_html( $error ); ?></div>
+        <?php endif; ?>
+        <p>Enter your order details to view your print orders. All three fields must match.</p>
+        <form method="post">
+            <?php wp_nonce_field( 'pps_order_lookup', 'pps_lookup_nonce' ); ?>
+            <p style="position:absolute;left:-10000px" aria-hidden="true">
+                <label>Leave blank <input type="text" name="pps_lookup_hp" value="" autocomplete="off" tabindex="-1" /></label>
+            </p>
+            <p>
+                <label for="pps_lookup_order">Order number</label><br>
+                <input type="text" id="pps_lookup_order" name="pps_lookup_order" inputmode="numeric" pattern="[0-9]*" required>
+            </p>
+            <p>
+                <label for="pps_lookup_email">Billing email</label><br>
+                <input type="email" id="pps_lookup_email" name="pps_lookup_email" required>
+            </p>
+            <p>
+                <label for="pps_lookup_date">Order date</label><br>
+                <input type="date" id="pps_lookup_date" name="pps_lookup_date" required>
+            </p>
+            <p>
+                <button type="submit" name="pps_lookup_submit" value="1" class="button">View my orders</button>
+            </p>
+        </form>
+    </div>
+    <?php
+}
+
+function pps_order_lookup_render_orders( $email, $notice ) {
+    $orders = wc_get_orders( array(
+        'billing_email' => $email,
+        'limit'         => 20,
+        'orderby'       => 'date',
+        'order'         => 'DESC',
+        'type'          => 'shop_order',
+        'status'        => array_keys( wc_get_order_statuses() ),
+    ) );
+
+    $buffer = '';
+    $rendered = 0;
+    foreach ( $orders as $order ) {
+        foreach ( $order->get_items() as $item ) {
+            $card = pps_render_pps_item_card( $item, $order, 'guest' );
+            if ( $card ) {
+                $buffer .= $card;
+                $rendered++;
+            }
+        }
+    }
+    ?>
+    <div class="pps-order-lookup-results">
+        <?php if ( $notice ) : ?>
+            <div class="woocommerce-message" role="alert" style="margin-bottom:14px"><?php echo esc_html( $notice ); ?></div>
+        <?php endif; ?>
+        <p style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+            <span>Showing orders for <strong><?php echo esc_html( $email ); ?></strong></span>
+            <form method="post" style="margin:0">
+                <button type="submit" name="pps_lookup_signout" value="1" class="button" style="font-size:12px">Sign out of lookup</button>
+            </form>
+        </p>
+        <?php if ( $rendered === 0 ) : ?>
+            <p>You don't have any print orders on this account yet.</p>
+        <?php else : ?>
+            <?php echo $buffer; // already-escaped per-card ?>
+            <p style="font-size:13px;color:#666;margin-top:18px">Want to edit a pending order? Sign in to your account.</p>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ACTIVATION: CREATE UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
 
@@ -1006,6 +1347,8 @@ register_activation_hook( __FILE__, function() {
     if ( ! get_option( 'pps_ups_zone_map' ) ) {
         pps_seed_zone_map();
     }
+    add_rewrite_endpoint( 'print-orders', EP_ROOT | EP_PAGES );
+    flush_rewrite_rules();
 });
 
 /**
