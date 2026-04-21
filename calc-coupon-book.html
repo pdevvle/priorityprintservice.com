@@ -118,7 +118,7 @@ const PCF = Object.assign({
   backend_maximummarkup:9, backend_minimummarkup:1.5,
   // Coupon book markup — independent from perfect-bound. Tune via WP admin.
   couponbook_maximummarkup:22, couponbook_minimummarkup:3.2,
-  couponbook_size_discount:0.15,
+  couponbook_size_discount:0,        // disabled — sheet decay in markup curve already differentiates imp<4 sizes
   couponbook_discount_log_coef:2.2,
   magneticstripapplication_perhour:120,
   // ROLLBACK: pre-2026-04-14 values were easydiscount_max:1500, common_discount_max:1000

@@ -46,12 +46,12 @@ function pps_default_config() {
             // Perfect-bound-specific markup (separate from brochure backend_* and booklet_* values)
             'perfectbound_maximummarkup'        => 8,
             'perfectbound_minimummarkup'        => 1.5,
-            'perfectbound_size_discount'        => 0.15,
+            'perfectbound_size_discount'        => 0,
             'perfectbound_discount_log_coef'    => 2.2,
             // Coupon book markup (separate from perfect-bound; pads/coupon books)
             'couponbook_maximummarkup'          => 8,
             'couponbook_minimummarkup'          => 1.5,
-            'couponbook_size_discount'          => 0.15,
+            'couponbook_size_discount'          => 0,
             'couponbook_discount_log_coef'      => 2.2,
             'magneticstripapplication_perhour'   => 120,
             'uvcoaterimpressionsperhour'        => 250,

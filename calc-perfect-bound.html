@@ -116,7 +116,7 @@ const PCF = Object.assign({
   backend_maximummarkup:9, backend_minimummarkup:1.5,
   // Perfect bound markup (parallel to booklet_* / backend_*). Tune independently via WP admin.
   perfectbound_maximummarkup:22, perfectbound_minimummarkup:3.2,
-  perfectbound_size_discount:0.15,    // 15% off when imp<4 (8.5×11 and larger)
+  perfectbound_size_discount:0,       // disabled — sheet decay in markup curve already differentiates imp<4 sizes
   perfectbound_discount_log_coef:2.2, // steepness of markup decay vs ln(tS); higher = faster drop
   // ROLLBACK: pre-2026-04-14 values were easydiscount_max:1500, common_discount_max:1000
   easydiscount_max:0, uvcoaterimpressionsperhour:250,
