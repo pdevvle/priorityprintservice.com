@@ -2062,10 +2062,14 @@ function Panel({ result, compact }) {
   }
   const r = result;
   const sh = r.shipping || {};
+  const moneyStr = Math.max(0, r.total).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const [dPart, cPart] = moneyStr.split(".");
   if (compact) {
     return (
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span style={{ fontSize: 20, fontWeight: 800, color: CC.dark }}>${r.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+        <span style={{ fontSize: 20, fontWeight: 800, color: CC.dark, display: "inline-flex", alignItems: "baseline" }}>
+          ${dPart}<span style={{ fontSize: 13, fontWeight: 600, color: CC.mid, marginLeft: 1 }}>.{cPart}</span>
+        </span>
         <span style={{ fontSize: 11, color: CC.mid }}>${r.perUnit.toFixed(2)}/ea</span>
         <span style={{ fontSize: 10, color: CC.light }}>{r.days}d</span>
       </div>
@@ -2075,7 +2079,10 @@ function Panel({ result, compact }) {
     <div style={{ background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden" }}>
       <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}` }}>
         <div style={{ fontSize: 11, color: CC.light, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 2 }}>Estimated Total</div>
-        <div style={{ fontSize: 28, fontWeight: 800, color: CC.dark }}>${r.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}</div>
+        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: CC.dark }}>
+          <span style={{ fontSize: 28, fontWeight: 800 }}>${dPart}</span>
+          <span style={{ fontSize: 18, fontWeight: 700, color: CC.light, marginLeft: 1 }}>.{cPart}</span>
+        </div>
       </div>
       <div style={{ display: "flex", borderBottom: `1px solid ${CC.border}` }}>
         {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], ["Days", r.days + " biz"]].map(([l, v], i) => (
@@ -2125,9 +2132,10 @@ function TurnBadge({days}){
   return <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,fontWeight:600,color:CK.magenta,background:"#fdf2f8",padding:"1px 6px",borderRadius:8,marginLeft:6,whiteSpace:"nowrap",verticalAlign:"middle"}}>⏱ {label}</span>;
 }
 
-function Sec({title,open,onToggle,children,badge}){
+function Sec({title,open,onToggle,children,badge,num}){
   const m=useIsMobile();
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><span style={{fontWeight:600,color:CC.dark,fontSize:"inherit"}}>{title}</span><div style={{display:"flex",alignItems:"center",gap:8}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  const numStr=num!=null?String(num).padStart(2,"0"):null;
+  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"baseline",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{numStr&&<span style={ST.secNum}>{numStr}</span>}<span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
 function DatePicker({value, onChange, earliestDate, freeDate}) {
@@ -2375,7 +2383,7 @@ function App() {
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sec title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
+          <Sec num={1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
@@ -2416,7 +2424,7 @@ function App() {
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
-          <Sec title="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
+          <Sec num={2} title="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
             <Pil label="Sides Printed" value={sides} onChange={v => setSides(Number(v))} options={[{ t: "Both Sides", v: 2 }, { t: "Front Only", v: 1 }]} />
             <div style={{ ...r2, marginTop: 10 }}>
               <Pil label={frontLabel + " Color"} value={frontColor} onChange={setFrontColor} options={[
@@ -2436,7 +2444,7 @@ function App() {
           </Sec>
 
           {/* SECTION 3: Addons */}
-          <Sec title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
+          <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
             <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
               {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
@@ -2487,7 +2495,7 @@ function App() {
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
-          <Sec title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          <Sec num={4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
             <Sel label="Artwork & Design" badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
 
@@ -2624,7 +2632,7 @@ function App() {
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
-          <Sec title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          <Sec num={5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
             <form autoComplete="on" onSubmit={e=>e.preventDefault()}>
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>
@@ -2828,6 +2836,7 @@ const ST = {
   card:{background:CC.white,borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",marginBottom:10},
   cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"#fafafa",border:"none",borderBottom:"1px solid #eee",cursor:"pointer",fontFamily:"inherit",fontSize:15},
   pnl:{background:CC.white,borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden"},
+  secNum:{fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",fontSize:11,fontWeight:600,color:CC.light,letterSpacing:".08em",flexShrink:0,minWidth:18},
 };
 
 ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<App />);
