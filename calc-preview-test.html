@@ -982,7 +982,7 @@ function Panel({result,compact}){
   );
 }
 
-function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt}){
+function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt,onOpenPreview}){
   // Parse "W×H" out of the size label (handles "5.5×8.5 (Opens to 8.5×11)", "Square 4×4", "6×4 Landscape", "Custom Size").
   const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
   const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
@@ -1040,14 +1040,22 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
     {dataUrl:coverArt||placeholder,isBlank:false},
     {dataUrl:backCoverArt||coverArt||backCover,isBlank:false},
   ],[coverArt,backCoverArt,placeholder,backCover]);
+  const clickable=hasArt&&typeof onOpenPreview==="function";
   return (
     <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
-      <div className="bp-viewport" style={{height:190,borderRadius:0,border:"none",cursor:"default"}}>
+      <div
+        className="bp-viewport"
+        role={clickable?"button":undefined}
+        tabIndex={clickable?0:undefined}
+        onClick={clickable?onOpenPreview:undefined}
+        onKeyDown={clickable?(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onOpenPreview();}}:undefined}
+        title={clickable?"Open full preview":undefined}
+        style={{height:190,borderRadius:0,border:"none",cursor:clickable?"zoom-in":"default"}}>
         {/* drop shadow */}
         <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
         <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
         {/* top-left eyebrow overlay */}
-        <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em"}}>
+        <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
           <span style={{display:"inline-flex",gap:3}}>
             <span style={{width:5,height:5,borderRadius:"50%",background:CK.cyan}}/>
             <span style={{width:5,height:5,borderRadius:"50%",background:CK.magenta}}/>
@@ -1056,8 +1064,10 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
           </span>
           <span>{hasArt?"YOUR ARTWORK · LIVE":"3D PREVIEW · LIVE"}</span>
         </div>
+        {/* top-right "open" chip — only when clickable */}
+        {clickable&&<div style={{position:"absolute",top:10,right:12,fontSize:9,fontWeight:700,letterSpacing:".1em",color:"rgba(255,255,255,.75)",background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.18)",padding:"3px 7px",borderRadius:4,pointerEvents:"none"}}>OPEN ⤢</div>}
         {/* bottom caption overlay — size + pages + qty */}
-        <div style={{position:"absolute",bottom:10,left:14,right:14,display:"flex",justifyContent:"space-between",fontSize:9.5,fontWeight:600,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:".08em"}}>
+        <div style={{position:"absolute",bottom:10,left:14,right:14,display:"flex",justifyContent:"space-between",fontSize:9.5,fontWeight:600,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:".08em",pointerEvents:"none"}}>
           <span>{wIn}×{hIn}″</span>
           <span>{pages}pp · {quantity.toLocaleString()} qty</span>
         </div>
@@ -1566,7 +1576,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2156,7 +2166,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
   // ── Reconcile effectivePages against pageCount ──
   const { displayPages, reconcileInfo } = useMemo(() => {
-    if (effectivePages.length < 2) {
+    if (effectivePages.length === 0) {
       // No file yet — generate empty slot grid from pageCount
       const slots = Array.from({ length: pageCount }, (_, i) => ({
         dataUrl: blankPage,
@@ -2164,6 +2174,16 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         isBlank: true,
       }));
       return { displayPages: slots, reconcileInfo: null };
+    }
+    if (effectivePages.length === 1) {
+      // Single-page upload — drop it into the front-cover slot, pad the rest.
+      const single = effectivePages[0];
+      const slots = Array.from({ length: pageCount }, (_, i) =>
+        i === 0
+          ? { ...single, label: pageLabel(0, pageCount), isBlank: false }
+          : { dataUrl: blankPage, label: pageLabel(i, pageCount), isBlank: true }
+      );
+      return { displayPages: slots, reconcileInfo: { type: "padded", count: pageCount - 1, raw: 1, target: pageCount } };
     }
     const target = pageCount, raw = effectivePages.length;
     const frontCover = effectivePages[0], backCover = effectivePages[effectivePages.length - 1];
@@ -2350,6 +2370,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
   const hasFile = rawPages.length >= 2 || rawPages.some(p => !p.isBlank);
   const PF = { pass: { dot: "#4ade80", text: "#3a7124" }, warn: { dot: "#fbbf24", text: "#b8860b" }, fail: { dot: "#f87171", text: "#c2185b" }, info: { dot: "#60a5fa", text: "#2563eb" } };
+
+  // Expose an imperative open-preview hook for the sidebar preview card.
+  useEffect(() => {
+    if (!openPreviewModalRef) return;
+    openPreviewModalRef.current = hasFile ? () => setActiveModal("preview") : null;
+    return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
+  }, [hasFile, openPreviewModalRef]);
 
   // ── Per-slot upload logic ──
   const slotInputRef = useRef(null);
@@ -3493,6 +3520,7 @@ function App(){
   const[needByDate,setNeedByDate]=useState("");
   const[coverArt,setCoverArt]=useState(null);
   const[backCoverArt,setBackCoverArt]=useState(null);
+  const openPreviewModalRef=useRef(null);
   // Unified artwork file state — one variable, no priority logic
   // { type:"none" } | { type:"files", list:[File,...] } | { type:"existing", path:"/uploads/..." }
   const[artFiles,setArtFiles]=useState({type:"none"});
@@ -3882,6 +3910,7 @@ function App(){
                 onPagesDetected={(pg) => upSet(0, { pages: pg })}
                 onCoverArt={setCoverArt}
                 onBackCoverArt={setBackCoverArt}
+                openPreviewModalRef={openPreviewModalRef}
                 onArtwork={setArtFiles}
                 onBleedDetected={(has) => { if(has) setBleed(0); else setBleed(1); }}
                 onSizeOverride={(w, h) => {
@@ -4087,7 +4116,7 @@ function App(){
         </div>
         {!mob&&<div style={{width:320,flexShrink:0}}>
           <div style={{position:"sticky",top:18,marginBottom:10,zIndex:2}}>
-            <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt}/>
+            <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
           </div>
           <Panel result={result}/>
           <SpecSheet result={result} pages={sets[0]?.pages} sizeLabel={sizeLabel}/>
