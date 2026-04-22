@@ -1137,14 +1137,13 @@ function MobilePreviewBar(props){
             {wIn}×{hIn}″ · {pages}pp · {quantity.toLocaleString()} qty
           </div>
         </div>
-        {/* CMYK dots + open chip (clickable only when art uploaded) */}
+        {/* CMYK dots — taps anywhere on the strip still open the preview modal when art is uploaded */}
         <div style={{display:"inline-flex",gap:3,alignSelf:"center"}} aria-hidden="true">
           <span style={{width:6,height:6,borderRadius:"50%",background:CK.cyan}}/>
           <span style={{width:6,height:6,borderRadius:"50%",background:CK.magenta}}/>
           <span style={{width:6,height:6,borderRadius:"50%",background:CK.yellow}}/>
           <span style={{width:6,height:6,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
         </div>
-        {clickable&&<span style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:"rgba(255,255,255,.85)",padding:"4px 8px",borderRadius:4,border:"1px solid rgba(255,255,255,.2)",flexShrink:0}}>OPEN ⤢</span>}
       </div>
     </>
   );
