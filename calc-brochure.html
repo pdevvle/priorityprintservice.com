@@ -28,7 +28,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-19 · PROOF-SYNC</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22 · BR-PER-SIDE-TX</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1041,9 +1041,9 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const [dropHover, setDropHover] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState("");
-  const [fitMode, setFitMode] = useState("crop");
-  const [artScale, setArtScale] = useState(100);
-  const [rotateSteps, setRotateSteps] = useState(0);
+  // Per-side transforms — front/back each get their own fit/scale/rotate.
+  // Proof modal edits getTx(side) via compat aliases below.
+  const [pageTransforms, setPageTransforms] = useState({});
   const [draggingPerf, setDraggingPerf] = useState(null);
   const [editingPerf, setEditingPerf] = useState(null); // index of perf being edited via text input
   const [editPerfVal, setEditPerfVal] = useState("");
@@ -1059,15 +1059,36 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const [magPos, setMagPos] = useState(null);
   const [hiResProof, setHiResProof] = useState(null);
 
-  // Clear approval when transforms change
-  const prevTransforms = useRef({ fitMode, artScale, rotateSteps });
+  // Per-side transform helpers
+  const DEFAULT_TX = { fitMode: "crop", artScale: 100, rotateSteps: 0 };
+  const getTx = (idx) => pageTransforms[idx] || DEFAULT_TX;
+  const setTx = (idx, patch) => {
+    setPageTransforms(p => {
+      const cur = p[idx] || DEFAULT_TX;
+      const resolved = {};
+      for (const k in patch) resolved[k] = typeof patch[k] === "function" ? patch[k](cur[k]) : patch[k];
+      return { ...p, [idx]: { ...cur, ...resolved } };
+    });
+  };
+  const txHash = useMemo(() => JSON.stringify(pageTransforms), [pageTransforms]);
+
+  // Compat aliases: proof-modal code reads/writes the CURRENT side's transform
+  const currentTx = getTx(side);
+  const fitMode = currentTx.fitMode;
+  const artScale = currentTx.artScale;
+  const rotateSteps = currentTx.rotateSteps;
+  const setFitMode = (v) => setTx(side, { fitMode: v });
+  const setArtScale = (v) => setTx(side, { artScale: v });
+  const setRotateSteps = (v) => setTx(side, { rotateSteps: v });
+
+  // Clear approval when ANY side's transform changes
+  const prevTxHash = useRef(txHash);
   useEffect(() => {
-    const prev = prevTransforms.current;
-    if (prev.fitMode !== fitMode || prev.artScale !== artScale || prev.rotateSteps !== rotateSteps) {
+    if (prevTxHash.current !== txHash) {
       if (approved) { setApproved(false); setApprovalPkg(null); }
-      prevTransforms.current = { fitMode, artScale, rotateSteps };
+      prevTxHash.current = txHash;
     }
-  }, [fitMode, artScale, rotateSteps]);
+  }, [txHash]);
 
   // Rotate a dataUrl image by N steps of 90° clockwise
   function rotateImageBySteps(dataUrl, steps) {
@@ -1109,6 +1130,77 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     rotateImageBySteps(currentArtRaw.dataUrl, rotateSteps).then(url => { if (!cancelled) setRotatedUrl(url); });
     return () => { cancelled = true; };
   }, [currentArtRaw?.dataUrl, rotateSteps]);
+
+  // Trimmed front/back for 3D fold preview — per-side transforms applied, bleed cropped.
+  // Fold preview shows FINISHED look; proof modal keeps the full bleed view with guides.
+  const [trimmedFrontUrl, setTrimmedFrontUrl] = useState(null);
+  const [trimmedBackUrl, setTrimmedBackUrl] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function renderTrimmed(art, tx) {
+      if (!art?.dataUrl) return null;
+      const BLEED = 0.125;
+      const bleedW = longEdge + BLEED * 2;
+      const bleedH = shortEdge + BLEED * 2;
+      const DPI = 200;
+      const canvasW = Math.round(bleedW * DPI);
+      const canvasH = Math.round(bleedH * DPI);
+      const trimPxX = Math.round(BLEED * DPI);
+      const trimPxY = Math.round(BLEED * DPI);
+      const outW = canvasW - trimPxX * 2;
+      const outH = canvasH - trimPxY * 2;
+
+      // Source is already-uploaded art (no pdf re-render needed); apply rotation first
+      const srcUrl = tx.rotateSteps > 0 ? await rotateImageBySteps(art.dataUrl, tx.rotateSteps) : art.dataUrl;
+      const img = await new Promise(res => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = () => res(null);
+        im.src = srcUrl;
+      });
+      if (!img) return null;
+
+      const d = art.dims;
+      const ed = (tx.rotateSteps % 2 === 1) ? { wIn: d.h, hIn: d.w } : { wIn: d.w, hIn: d.h };
+
+      const c = document.createElement("canvas");
+      c.width = canvasW; c.height = canvasH;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvasW, canvasH);
+      const srcW = img.naturalWidth, srcH = img.naturalHeight;
+      if (tx.fitMode === "stretch") {
+        ctx.drawImage(img, 0, 0, canvasW, canvasH);
+      } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
+        const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
+        const nativeW = (ed.wIn / bleedW) * mult;
+        const nativeH = (ed.hIn / bleedH) * mult;
+        const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
+        ctx.drawImage(img, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+      } else if (tx.fitMode === "cover") {
+        const sc = Math.max(canvasW / srcW, canvasH / srcH);
+        ctx.drawImage(img, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+      } else {
+        const sc = Math.min(canvasW / srcW, canvasH / srcH);
+        ctx.drawImage(img, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+      }
+
+      const tc = document.createElement("canvas");
+      tc.width = outW; tc.height = outH;
+      tc.getContext("2d").drawImage(c, trimPxX, trimPxY, outW, outH, 0, 0, outW, outH);
+      return tc.toDataURL("image/jpeg", 0.85);
+    }
+    (async () => {
+      const [f, b] = await Promise.all([
+        renderTrimmed(frontArt, getTx("front")),
+        renderTrimmed(backArt, getTx("back")),
+      ]);
+      if (cancelled) return;
+      setTrimmedFrontUrl(f);
+      setTrimmedBackUrl(b);
+    })();
+    return () => { cancelled = true; };
+  }, [frontArt?.dataUrl, backArt?.dataUrl, longEdge, shortEdge, txHash]);
 
   // FitToggle component
   const FitToggle = () => (
@@ -1219,7 +1311,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     const DPI = 300;
     const canvasW = Math.round(bleedW * DPI);
     const canvasH = Math.round(bleedH * DPI);
-    const ed = effectiveDims ? { wIn: effectiveDims.w, hIn: effectiveDims.h } : null;
+
+    // Helper: produce { wIn, hIn } for a given side's source dims under a rotation
+    function sideEd(art, steps) {
+      if (!art?.dims) return null;
+      const d = art.dims;
+      return (steps % 2 === 1) ? { wIn: d.h, hIn: d.w } : { wIn: d.w, hIn: d.h };
+    }
 
     // Product-specific proof geometry — brochure: no spine, render fold lines instead
     const spineMode = "none";
@@ -1274,18 +1372,20 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       ctx.restore();
     }
 
-    // Pages-shim — pre-rotate both sides deterministically so the output isn't tied to `side`
-    const frontUrl = frontArt ? await rotateImageBySteps(frontArt.dataUrl, rotateSteps) : null;
-    const backUrl  = backArt  ? await rotateImageBySteps(backArt.dataUrl,  rotateSteps) : null;
+    // Pages-shim — pre-rotate each side with its OWN rotateSteps
+    const frontTx = getTx("front");
+    const backTx  = getTx("back");
+    const frontUrl = frontArt ? await rotateImageBySteps(frontArt.dataUrl, frontTx.rotateSteps) : null;
+    const backUrl  = backArt  ? await rotateImageBySteps(backArt.dataUrl,  backTx.rotateSteps)  : null;
     const pageSources = [
-      frontArt ? { dataUrl: frontUrl, isBlank: false, label: "Front (Outside)" } : { isBlank: true, label: "Front (Outside)" },
-      backArt  ? { dataUrl: backUrl,  isBlank: false, label: "Back (Inside)"   } : null,
+      frontArt ? { dataUrl: frontUrl, isBlank: false, label: "Front (Outside)", tx: frontTx, ed: sideEd(frontArt, frontTx.rotateSteps) } : { isBlank: true, label: "Front (Outside)" },
+      backArt  ? { dataUrl: backUrl,  isBlank: false, label: "Back (Inside)",   tx: backTx,  ed: sideEd(backArt,  backTx.rotateSteps)  } : null,
     ].filter(p => p && !p.isBlank);
     if (!pageSources.length) throw new Error("No artwork uploaded");
     const totalPages = pageSources.length;
 
-    const artMatchesBleed = ed && Math.abs(ed.wIn - bleedW) < 0.25 && Math.abs(ed.hIn - bleedH) < 0.25;
-    const noTransforms = fitMode === "crop" && rotateSteps === 0 && artMatchesBleed;
+    // "No transforms" skip — currently brochure always rasterizes, but keep the flag for manifest
+    const noTransforms = pageSources.every(p => p.tx.fitMode === "crop" && p.tx.rotateSteps === 0 && p.tx.artScale === 100);
     const isSourcePdf = false; // brochure doesn't preserve pdfDoc; always rasterize
 
     let printReadyBlob = null;
@@ -1304,6 +1404,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
         setGenProgress({ step: "print-ready", page: i + 1, totalPages });
 
         const page = pageSources[i];
+        const tx = page.tx;
+        const ed = page.ed;
 
         const srcCanvas = await new Promise(resolve => {
           const img = new Image();
@@ -1325,15 +1427,15 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
         ctx.fillRect(0, 0, canvasW, canvasH);
 
         const srcW = srcCanvas.width, srcH = srcCanvas.height;
-        if (fitMode === "stretch") {
+        if (tx.fitMode === "stretch") {
           ctx.drawImage(srcCanvas, 0, 0, canvasW, canvasH);
-        } else if (fitMode === "crop" || fitMode === "scale") {
-          const mult = fitMode === "scale" ? artScale / 100 : 1;
+        } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
+          const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
           const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
           const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
           const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
           ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
-        } else if (fitMode === "cover") {
+        } else if (tx.fitMode === "cover") {
           const sc = Math.max(canvasW / srcW, canvasH / srcH);
           ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
         } else {
@@ -1360,7 +1462,20 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
 
     // ── Manipulation manifest ──
     setGenProgress({ step: "manifest", page: totalPages, totalPages });
-    const fitLabels = { crop: "Crop (native size, centered)", cover: "Fill (cover, overflow cropped)", contain: "Fit (contain, letterboxed)", stretch: "Stretch to fill (distorted to fit bleed area)", scale: `Scale (${artScale}% of native size)` };
+    const fitLabel = (fm, as) => ({
+      crop: "Crop (native size, centered)",
+      cover: "Fill (cover, overflow cropped)",
+      contain: "Fit (contain, letterboxed)",
+      stretch: "Stretch to fill (distorted to fit bleed area)",
+      scale: `Scale (${as}% of native size)`,
+    })[fm] || fm;
+    const sameFit = pageSources.every(p => p.tx.fitMode === pageSources[0].tx.fitMode);
+    const sameRot = pageSources.every(p => p.tx.rotateSteps === pageSources[0].tx.rotateSteps);
+    const sameScale = pageSources.every(p => p.tx.artScale === pageSources[0].tx.artScale);
+    const txSummaryFit = sameFit ? fitLabel(pageSources[0].tx.fitMode, pageSources[0].tx.artScale) : "mixed (see Per-Side Detail)";
+    const txSummaryRot = sameRot ? `${pageSources[0].tx.rotateSteps * 90}° clockwise${pageSources[0].tx.rotateSteps === 0 ? " (none)" : ""}` : "mixed (see Per-Side Detail)";
+    const txSummaryScale = sameScale ? `${pageSources[0].tx.artScale}%` : "mixed (see Per-Side Detail)";
+
     const manifestLines = [
       "ARTWORK MANIPULATION MANIFEST",
       "=" .repeat(50),
@@ -1368,7 +1483,6 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       "",
       "── Source File ──",
       `Filename: ${fileName || "unknown"}`,
-      `Original dimensions: ${ed ? `${ed.wIn}″ × ${ed.hIn}″` : "unknown"}`,
       `Sides uploaded: ${pageSources.map(p => p.label).join(" + ")}`,
       "",
       "── Brochure Specifications ──",
@@ -1378,10 +1492,10 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       `Fold: ${foldType}, ${panels} panels (${foldDir} edge)`,
       `Fold lines: ${foldLines.length}`,
       "",
-      "── Customer Transforms ──",
-      `Fit mode: ${fitLabels[fitMode] || fitMode}`,
-      `Rotation: ${rotateSteps * 90}° clockwise${rotateSteps === 0 ? " (none)" : ""}`,
-      `Scale: ${artScale}%${fitMode !== "scale" ? " (only applies in Scale mode)" : ""}`,
+      "── Customer Transforms (summary) ──",
+      `Fit mode: ${txSummaryFit}`,
+      `Rotation: ${txSummaryRot}`,
+      `Scale: ${txSummaryScale}`,
       "",
       "── Deliverables ──",
       `1. Raw file: ${fileName || "original upload"} (unmodified customer upload)`,
@@ -1391,12 +1505,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       "",
       "── Per-Side Detail ──",
     ];
-    pageSources.forEach((p, i) => { manifestLines.push(`  ${i + 1}: ${p.label}`); });
+    pageSources.forEach((p, i) => {
+      const dimsStr = p.ed ? `${p.ed.wIn}″ × ${p.ed.hIn}″ post-rotation` : "N/A";
+      manifestLines.push(`  ${i + 1}: ${p.label}`);
+      manifestLines.push(`    fit=${p.tx.fitMode} rotate=${p.tx.rotateSteps * 90}° scale=${p.tx.artScale}%  [${dimsStr}]`);
+    });
     manifestLines.push("", "── Notes ──");
-    if (rotateSteps > 0) manifestLines.push(`Art was rotated ${rotateSteps * 90}° clockwise by the customer.`);
-    if (fitMode === "cover") manifestLines.push("Fill mode: art scaled to cover entire bleed area. Some art content may be cropped at edges.");
-    if (fitMode === "stretch") manifestLines.push("Stretch mode: art distorted to fill entire bleed area. Aspect ratio NOT preserved — image may appear warped.");
-    if (fitMode === "contain") manifestLines.push("Fit mode: art scaled to fit within bleed area. White letterbox bars may appear.");
+    if (noTransforms) manifestLines.push("No customer transforms were applied on either side.");
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
@@ -2025,10 +2140,10 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                   <div style={{ width: "100%", maxWidth: 700, margin: "0 auto" }}>
                     <FoldRenderer
                       foldKey={foldKey}
-                      frontSrc={frontArt?.dataUrl}
-                      backSrc={backArt?.dataUrl}
-                      frontDims={frontArt?.dims}
-                      backDims={backArt?.dims}
+                      frontSrc={trimmedFrontUrl || frontArt?.dataUrl}
+                      backSrc={trimmedBackUrl || backArt?.dataUrl}
+                      frontDims={trimmedFrontUrl ? { w: longEdge, h: shortEdge } : frontArt?.dims}
+                      backDims={trimmedBackUrl ? { w: longEdge, h: shortEdge } : backArt?.dims}
                       longEdge={longEdge}
                       shortEdge={shortEdge}
                       viewIdx={previewAngle}

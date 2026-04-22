@@ -77,7 +77,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-19 · PROOF-SYNC</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22 · SS-PER-PAGE-TX</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1661,9 +1661,9 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [fileName, setFileName] = useState("");
   const [uploadPageCount, setUploadPageCount] = useState(0);
   const [artDims, setArtDims] = useState(null); // {wIn, hIn, wPx, hPx, source}
-  const [fitMode, setFitMode] = useState("crop"); // "crop" | "cover" | "contain" | "scale"
-  const [artScale, setArtScale] = useState(100); // percentage for scale mode
-  const [rotateSteps, setRotateSteps] = useState(0); // 0=0°, 1=90°, 2=180°, 3=270° clockwise
+  // Per-page transforms — each page gets its own { fitMode, artScale, rotateSteps }.
+  // Proof modal edits getTx(proofIdx) via compat aliases below.
+  const [pageTransforms, setPageTransforms] = useState({});
   const [dropHover, setDropHover] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [slotsOpen, setSlotsOpen] = useState(false);
@@ -1685,6 +1685,28 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [genProgress, setGenProgress] = useState(null); // { step, page, totalPages } during generation
   const [rot, setRot] = useState({ x: -15, y: -25 });
   const expanded = activeModal !== null; // backward compat for useEffects
+
+  // Per-page transform helpers
+  const DEFAULT_TX = { fitMode: "crop", artScale: 100, rotateSteps: 0 };
+  const getTx = (idx) => pageTransforms[idx] || DEFAULT_TX;
+  const setTx = (idx, patch) => {
+    setPageTransforms(p => {
+      const cur = p[idx] || DEFAULT_TX;
+      const resolved = {};
+      for (const k in patch) resolved[k] = typeof patch[k] === "function" ? patch[k](cur[k]) : patch[k];
+      return { ...p, [idx]: { ...cur, ...resolved } };
+    });
+  };
+  const txHash = useMemo(() => JSON.stringify(pageTransforms), [pageTransforms]);
+
+  // Compat aliases: proof-modal code reads/writes the CURRENT page's transform
+  const currentTx = getTx(proofIdx);
+  const fitMode = currentTx.fitMode;
+  const artScale = currentTx.artScale;
+  const rotateSteps = currentTx.rotateSteps;
+  const setFitMode = (v) => setTx(proofIdx, { fitMode: v });
+  const setArtScale = (v) => setTx(proofIdx, { artScale: v });
+  const setRotateSteps = (v) => setTx(proofIdx, { rotateSteps: v });
 
   // Blank page — plain off-white, no text
   const blankPage = useMemo(() => {
@@ -1725,22 +1747,23 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
   const shouldRotate = rotateSteps > 0;
 
-  // Effective art dimensions (after rotation — w/h swap at 90° and 270°)
-  const effectiveDims = useMemo(() => {
-    if (!artDims) return null;
-    if (rotateSteps % 2 === 1) return { ...artDims, wIn: artDims.hIn, hIn: artDims.wIn, wPx: artDims.hPx, hPx: artDims.wPx };
-    return artDims;
-  }, [artDims, rotateSteps]);
+  // Effective art dimensions after rotation — pure helper so the generator loop
+  // can compute per-page without a hook.
+  function effectiveDimsFor(ad, steps) {
+    if (!ad) return null;
+    if (steps % 2 === 1) return { ...ad, wIn: ad.hIn, hIn: ad.wIn, wPx: ad.hPx, hPx: ad.wPx };
+    return ad;
+  }
+  const effectiveDims = useMemo(() => effectiveDimsFor(artDims, rotateSteps), [artDims, rotateSteps]);
 
-  // Clear approval when transforms change — forces re-approval with new print-ready PDF
-  const prevTransforms = useRef({ fitMode, artScale, rotateSteps });
+  // Clear approval when ANY page's transform changes — forces re-approval
+  const prevTxHash = useRef(txHash);
   useEffect(() => {
-    const prev = prevTransforms.current;
-    if (prev.fitMode !== fitMode || prev.artScale !== artScale || prev.rotateSteps !== rotateSteps) {
+    if (prevTxHash.current !== txHash) {
       if (artApproved) { setArtApproved(false); setApprovalPkg(null); }
-      prevTransforms.current = { fitMode, artScale, rotateSteps };
+      prevTxHash.current = txHash;
     }
-  }, [fitMode, artScale, rotateSteps]);
+  }, [txHash]);
 
   // Rotate a dataUrl image by N steps of 90° clockwise (1=90°, 2=180°, 3=270°)
   function rotateImageBySteps(dataUrl, steps) {
@@ -1778,7 +1801,6 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     const DPI = 300;
     const canvasW = Math.round(bleedW * DPI);
     const canvasH = Math.round(bleedH * DPI);
-    const ed = effectiveDims; // art dims after rotation
 
     // Product-specific proof geometry — saddle stitch: spine alternates per page parity
     const spineMode = "alternating";
@@ -1849,8 +1871,16 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     const totalPages = pageSources.length;
 
     // ── Skip generation when raw file is already print-ready ──
-    const artMatchesBleed = ed && Math.abs(ed.wIn - bleedW) < 0.25 && Math.abs(ed.hIn - bleedH) < 0.25;
-    const noTransforms = fitMode === "crop" && rotateSteps === 0 && artMatchesBleed;
+    // Conditions: EVERY page has default transform AND art matches bleed size
+    const artMatchesBleed = (() => {
+      const ed0 = effectiveDimsFor(artDims, 0);
+      return ed0 && Math.abs(ed0.wIn - bleedW) < 0.25 && Math.abs(ed0.hIn - bleedH) < 0.25;
+    })();
+    const everyPageDefault = pageSources.every((_, i) => {
+      const tx = getTx(i);
+      return tx.fitMode === "crop" && tx.rotateSteps === 0 && tx.artScale === 100;
+    });
+    const noTransforms = everyPageDefault && artMatchesBleed;
     const isSourcePdf = artDims?.source === "pdf";
 
     let printReadyBlob = null;
@@ -1892,6 +1922,10 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         const page = pageSources[i];
         if (page.isBlank) { previewBlobs.push(null); continue; }
 
+        // Per-page transform
+        const tx = getTx(i);
+        const ed = effectiveDimsFor(artDims, tx.rotateSteps);
+
         let srcCanvas = null;
         if (pdfDocRef.current && isSourcePdf) {
           const pdfPageNum = i + 1;
@@ -1903,8 +1937,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
             srcCanvas.height = Math.round(vp.height);
             await pg.render({ canvasContext: srcCanvas.getContext("2d"), viewport: vp }).promise;
 
-            if (rotateSteps > 0) {
-              const s = ((rotateSteps % 4) + 4) % 4;
+            if (tx.rotateSteps > 0) {
+              const s = ((tx.rotateSteps % 4) + 4) % 4;
               const swap = s % 2 === 1;
               const rc = document.createElement("canvas");
               rc.width = swap ? srcCanvas.height : srcCanvas.width;
@@ -1939,15 +1973,15 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         ctx.fillRect(0, 0, canvasW, canvasH);
 
         const srcW = srcCanvas.width, srcH = srcCanvas.height;
-        if (fitMode === "stretch") {
+        if (tx.fitMode === "stretch") {
           ctx.drawImage(srcCanvas, 0, 0, canvasW, canvasH);
-        } else if (fitMode === "crop" || fitMode === "scale") {
-          const mult = fitMode === "scale" ? artScale / 100 : 1;
+        } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
+          const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
           const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
           const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
           const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
           ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
-        } else if (fitMode === "cover") {
+        } else if (tx.fitMode === "cover") {
           const sc = Math.max(canvasW / srcW, canvasH / srcH);
           ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
         } else {
@@ -1974,7 +2008,21 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
     // ── Manipulation manifest ──
     setGenProgress({ step: "manifest", page: totalPages, totalPages });
-    const fitLabels = { crop: "Crop (native size, centered)", cover: "Fill (cover, overflow cropped)", contain: "Fit (contain, letterboxed)", stretch: "Stretch to fill (distorted to fit bleed area)", scale: `Scale (${artScale}% of native size)` };
+    const fitLabel = (fm, as) => ({
+      crop: "Crop (native size, centered)",
+      cover: "Fill (cover, overflow cropped)",
+      contain: "Fit (contain, letterboxed)",
+      stretch: "Stretch to fill (distorted to fit bleed area)",
+      scale: `Scale (${as}% of native size)`,
+    })[fm] || fm;
+    const allTx = pageSources.map((_, i) => getTx(i));
+    const sameFit = allTx.every(t => t.fitMode === allTx[0].fitMode);
+    const sameRot = allTx.every(t => t.rotateSteps === allTx[0].rotateSteps);
+    const sameScale = allTx.every(t => t.artScale === allTx[0].artScale);
+    const txSummaryFit = sameFit ? fitLabel(allTx[0].fitMode, allTx[0].artScale) : "mixed (see Per-Page Detail)";
+    const txSummaryRot = sameRot ? `${allTx[0].rotateSteps * 90}° clockwise${allTx[0].rotateSteps === 0 ? " (none)" : ""}` : "mixed (see Per-Page Detail)";
+    const txSummaryScale = sameScale ? `${allTx[0].artScale}%` : "mixed (see Per-Page Detail)";
+
     const manifestLines = [
       "ARTWORK MANIPULATION MANIFEST",
       "=" .repeat(50),
@@ -1993,16 +2041,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       `Binding: Saddle Stitch`,
       `Page count (with padding): ${totalPages}`,
       "",
-      "── Customer Transforms ──",
-      `Fit mode: ${fitLabels[fitMode] || fitMode}`,
-      `Rotation: ${rotateSteps * 90}° clockwise${rotateSteps === 0 ? " (none)" : ""}`,
-      `Scale: ${artScale}%${fitMode !== "scale" ? " (only applies in Scale mode)" : ""}`,
+      "── Customer Transforms (summary) ──",
+      `Fit mode: ${txSummaryFit}`,
+      `Rotation: ${txSummaryRot}`,
+      `Scale: ${txSummaryScale}`,
       "",
       "── Edge Detection ──",
       `Margins detected: ${edgeHasMargins === null ? "not analyzed" : edgeHasMargins ? "yes — white edges found (art may not bleed)" : "no — art extends to edges"}`,
-      "",
-      "── Effective Art Dimensions (after rotation) ──",
-      effectiveDims ? `${effectiveDims.wIn}″ × ${effectiveDims.hIn}″` : "N/A",
       "",
       "── Deliverables ──",
       `1. Raw file: ${fileName || "original upload"} (unmodified customer upload)`,
@@ -2015,21 +2060,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       "── Per-Page Detail ──",
     ];
     pageSources.forEach((p, i) => {
+      const t = getTx(i);
+      const ped = effectiveDimsFor(artDims, t.rotateSteps);
+      const pdims = ped ? `${ped.wIn}″ × ${ped.hIn}″ post-rotation` : "N/A";
       manifestLines.push(`  Page ${i + 1}: ${p.label}${p.isBlank ? " (blank — no art)" : ""}`);
+      manifestLines.push(`    fit=${t.fitMode} rotate=${t.rotateSteps * 90}° scale=${t.artScale}%  [${pdims}]`);
     });
     manifestLines.push("", "── Notes ──");
-    if (noTransforms) manifestLines.push("No customer transforms were applied. The raw uploaded file is print-ready as-is — no rasterized print PDF was generated, preserving original vector/quality.");
-    if (rotateSteps > 0) manifestLines.push(`Art was rotated ${rotateSteps * 90}° clockwise by the customer to match booklet orientation.`);
-    if (fitMode === "crop" && effectiveDims) {
-      const coverageW = (effectiveDims.wIn / bleedW * 100).toFixed(1);
-      const coverageH = (effectiveDims.hIn / bleedH * 100).toFixed(1);
-      manifestLines.push(`In Crop mode, art covers ${coverageW}% width × ${coverageH}% height of the bleed area.`);
-      if (effectiveDims.wIn < bleedW || effectiveDims.hIn < bleedH) manifestLines.push("WARNING: Art does not fully cover the bleed area. White margins may be visible after trimming.");
-      if (effectiveDims.wIn > bleedW || effectiveDims.hIn > bleedH) manifestLines.push("Art extends beyond bleed boundary and will be clipped.");
-    }
-    if (fitMode === "cover") manifestLines.push("Fill mode: art scaled to cover entire bleed area. Some art content may be cropped at edges.");
-    if (fitMode === "stretch") manifestLines.push("Stretch mode: art distorted to fill entire bleed area. Aspect ratio NOT preserved — image may appear warped.");
-    if (fitMode === "contain") manifestLines.push("Fit mode: art scaled to fit within bleed area. White letterbox bars may appear.");
+    if (noTransforms) manifestLines.push("No customer transforms were applied on any page. The raw uploaded file is print-ready as-is — no rasterized print PDF was generated, preserving original vector/quality.");
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
@@ -2040,28 +2078,37 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [rotatedCache, setRotatedCache] = useState({ key: "", pages: [] });
 
   useEffect(() => {
-    if (rotateSteps === 0 || rawPages.length < 2) {
+    if (rawPages.length < 2) {
       setRotatedCache({ key: "", pages: [] });
       return;
     }
-    const cacheKey = `rot${rotateSteps}_${rawPages.length}_${rawPages[0]?.dataUrl?.length || 0}`;
+    const rotSig = rawPages.map((_, i) => getTx(i).rotateSteps).join(",");
+    const allZero = rawPages.every((_, i) => getTx(i).rotateSteps === 0);
+    if (allZero) {
+      if (rotatedCache.key !== "") setRotatedCache({ key: "", pages: [] });
+      return;
+    }
+    const cacheKey = `rot${rotSig}_${rawPages.length}_${rawPages[0]?.dataUrl?.length || 0}`;
     if (rotatedCache.key === cacheKey) return;
 
     let cancelled = false;
     (async () => {
       const rotated = [];
-      for (const p of rawPages) {
+      for (let i = 0; i < rawPages.length; i++) {
         if (cancelled) return;
-        const rotUrl = await rotateImageBySteps(p.dataUrl, rotateSteps);
+        const p = rawPages[i];
+        const steps = getTx(i).rotateSteps;
+        const rotUrl = steps > 0 ? await rotateImageBySteps(p.dataUrl, steps) : p.dataUrl;
         rotated.push({ ...p, dataUrl: rotUrl });
       }
       if (!cancelled) setRotatedCache({ key: cacheKey, pages: rotated });
     })();
     return () => { cancelled = true; };
-  }, [rotateSteps, rawPages]);
+  }, [txHash, rawPages]);
 
-  // The pages we actually use for preview — rotated or raw
-  const effectivePages = rotateSteps > 0 && rotatedCache.pages.length === rawPages.length
+  // The pages we actually use for preview — rotated (mixed) or raw (all 0°)
+  const anyRotated = useMemo(() => rawPages.some((_, i) => getTx(i).rotateSteps > 0), [txHash, rawPages]);
+  const effectivePages = anyRotated && rotatedCache.pages.length === rawPages.length
     ? rotatedCache.pages : rawPages;
 
   // ── Edge margin detection: sample pixels along all 4 edges of first page ──
@@ -2285,6 +2332,83 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     return { displayPages: result, reconcileInfo: info };
   }, [effectivePages, pageCount, blankPage]);
 
+  // Trimmed pages for 3D book preview — each page rendered with its transforms applied,
+  // then cropped to strip the 0.125" bleed off every edge. 3D preview shows finished
+  // trimmed book; proof modal keeps the bleed-inclusive view with guides.
+  const [trimmedPages, setTrimmedPages] = useState([]);
+  useEffect(() => {
+    if (displayPages.length === 0) { setTrimmedPages([]); return; }
+    let cancelled = false;
+    (async () => {
+      const BLEED = 0.125;
+      const bleedW = dims.w + BLEED * 2;
+      const bleedH = dims.h + BLEED * 2;
+      const DPI = 200;
+      const canvasW = Math.round(bleedW * DPI);
+      const canvasH = Math.round(bleedH * DPI);
+      const trimPxX = Math.round(BLEED * DPI);
+      const trimPxY = Math.round(BLEED * DPI);
+      const outW = canvasW - trimPxX * 2;
+      const outH = canvasH - trimPxY * 2;
+
+      const results = [];
+      for (let i = 0; i < displayPages.length; i++) {
+        if (cancelled) return;
+        const page = displayPages[i];
+        if (page.isBlank || !page.dataUrl) {
+          const bc = document.createElement("canvas");
+          bc.width = outW; bc.height = outH;
+          const bctx = bc.getContext("2d");
+          bctx.fillStyle = "#f8f5f0";
+          bctx.fillRect(0, 0, outW, outH);
+          results.push({ ...page, dataUrl: bc.toDataURL("image/jpeg", 0.85) });
+          continue;
+        }
+        const tx = getTx(i);
+        const ed = effectiveDimsFor(artDims, tx.rotateSteps);
+        const img = await new Promise(res => {
+          const im = new Image();
+          im.onload = () => res(im);
+          im.onerror = () => res(null);
+          im.src = page.dataUrl;
+        });
+        if (!img) { results.push(page); continue; }
+
+        const c = document.createElement("canvas");
+        c.width = canvasW; c.height = canvasH;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvasW, canvasH);
+        const srcW = img.naturalWidth, srcH = img.naturalHeight;
+        if (tx.fitMode === "stretch") {
+          ctx.drawImage(img, 0, 0, canvasW, canvasH);
+        } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
+          const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
+          const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
+          const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
+          const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
+          ctx.drawImage(img, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+        } else if (tx.fitMode === "cover") {
+          const sc = Math.max(canvasW / srcW, canvasH / srcH);
+          ctx.drawImage(img, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+        } else {
+          const sc = Math.min(canvasW / srcW, canvasH / srcH);
+          ctx.drawImage(img, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+        }
+
+        const tc = document.createElement("canvas");
+        tc.width = outW; tc.height = outH;
+        tc.getContext("2d").drawImage(c, trimPxX, trimPxY, outW, outH, 0, 0, outW, outH);
+        results.push({ ...page, dataUrl: tc.toDataURL("image/jpeg", 0.85) });
+      }
+      if (!cancelled) {
+        setTrimmedPages(results);
+        if (onCoverArt && results[0] && !results[0].isBlank) onCoverArt(results[0].dataUrl);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [displayPages, artDims, dims.w, dims.h, txHash]);
+
   // Pixel dimensions
   const compactH = 160, pxPerInch = compactH / dims.h;
   const cBookW = Math.round(dims.w * pxPerInch), cBookH = compactH;
@@ -2370,11 +2494,17 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       setPreviewMode("closed"); setSpread(0); setRot({ x: -15, y: -25 });
       // Full file upload replaces any per-slot files
       slotFilesRef.current = {};
-      // Auto-enable rotation if orientation mismatch detected
+      // Auto-enable rotation if orientation mismatch detected — seed ALL pages uniformly
       const { wIn, hIn } = extracted.dims;
       const artIsPortrait = hIn > wIn, bookIsPortrait = dims.h > dims.w;
       const isMismatch = Math.abs(wIn - hIn) > 0.5 && Math.abs(dims.w - dims.h) > 0.5 && artIsPortrait !== bookIsPortrait;
-      setRotateSteps(isMismatch ? 1 : 0);
+      if (isMismatch) {
+        const seed = {};
+        for (let i = 0; i < extracted.pages.length; i++) seed[i] = { ...DEFAULT_TX, rotateSteps: 1 };
+        setPageTransforms(seed);
+      } else {
+        setPageTransforms({});
+      }
       if (onCoverArt && extracted.pages.length >= 1) onCoverArt(extracted.pages[0].dataUrl);
       if (onBackCoverArt && extracted.pages.length >= 2) onBackCoverArt(extracted.pages[extracted.pages.length - 1].dataUrl);
       if (onPagesDetected && extracted.pages.length >= 2) {
@@ -2408,7 +2538,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   function handleClear() {
     setRawPages([]); setFileName(""); setUploadPageCount(0);
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
-    setRotatedCache({ key: "", pages: [] }); setRotateSteps(0);
+    setRotatedCache({ key: "", pages: [] }); setPageTransforms({});
     setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setApprovalPkg(null);
     pdfDocRef.current = null;
     rawFileRef.current = null;
@@ -2758,7 +2888,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   position: "relative", transition: "border-color .2s",
                 }}>
                 {isUserPage ? (
-                  <img src={p.dataUrl} alt={p.label} style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:fitMode==="contain"?"contain":"cover", display:"block", background:"#e8e8e8", filter:gsFilter }} />
+                  <img src={p.dataUrl} alt={p.label} style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", background:"#e8e8e8", filter:gsFilter }} />
                 ) : (
                   <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, padding:4 }}>
                     <span style={{ fontSize:16, opacity:.3 }}>+</span>
@@ -2858,7 +2988,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                       color: proof>=3 ? "#000" : "rgba(255,255,255,.4)",
                     }}>Hardcopy Proof</button>
                   </div>
-                  {/* FitToggle hidden until Phase 2: server-side print-ready rendering */}
+                  <FitToggle dark />
                 </div>
                 <div style={{ fontSize:10, color:"rgba(255,255,255,.45)", marginTop:6, lineHeight:1.4 }}>
                   {proof === 0 && !artApproved && "Review each page, then click Approve Now to confirm your artwork is print-ready. Your approval means we print exactly what you see."}
@@ -3188,7 +3318,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         <div style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", background:"#2a2e36", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
                           {p.isBlank
                             ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.2)", fontSize:10 }}>Blank</div>
-                            : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
+                            : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
                           }
                         </div>
                         <span style={{ fontSize:9, color: p.isBlank ? "rgba(255,255,255,.3)" : "rgba(255,255,255,.5)", marginTop:3, display:"block" }}>{p.label}</span>
@@ -3236,8 +3366,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
             <div className="bp-modal-body">
               <div className="bp-viewport expanded" onMouseDown={previewMode === "closed" ? onPointerDown : undefined} style={{ cursor: previewMode === "closed" ? "grab" : "default", filter:gsFilter }}>
                 {previewMode === "closed"
-                  ? <BookClosed3D pages={displayPages} bookW={exBookW} bookH={exBookH} spineW={spineW} rotateX={rot.x} rotateY={rot.y} scale={exScale} fitMode={fitMode} />
-                  : <BookOpen3D pages={displayPages} bookW={exBookW} bookH={exBookH} spread={spread} scale={exScale} rotateX={-5} rotateY={0} fitMode={fitMode} />
+                  ? <BookClosed3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spineW={spineW} rotateX={rot.x} rotateY={rot.y} scale={exScale} fitMode="stretch" />
+                  : <BookOpen3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spread={spread} scale={exScale} rotateX={-5} rotateY={0} fitMode="stretch" />
                 }
                 {previewMode === "closed" && <div style={{ position:"absolute", bottom:10, left:"50%", transform:"translateX(-50%)", fontSize:10, color:"rgba(255,255,255,.3)", letterSpacing:".08em" }}>↔ Drag to rotate</div>}
               </div>
