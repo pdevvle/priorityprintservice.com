@@ -1076,6 +1076,80 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
   );
 }
 
+// Mobile: inline full-card preview below the hero that collapses into a
+// small sticky top-of-viewport strip once it scrolls out of view.
+function MobilePreviewBar(props){
+  const {sizeLabel,pages,quantity,coverArt,onOpenPreview}=props;
+  const hostRef=useRef(null);
+  const [collapsed,setCollapsed]=useState(false);
+  useEffect(()=>{
+    const el=hostRef.current;
+    if(!el||typeof IntersectionObserver==="undefined")return;
+    const obs=new IntersectionObserver(([entry])=>{
+      // When the bottom of the full card has scrolled above the viewport, collapse.
+      setCollapsed(!entry.isIntersecting && entry.boundingClientRect.top < 0);
+    },{threshold:0,rootMargin:"0px 0px 0px 0px"});
+    obs.observe(el);
+    return ()=>obs.disconnect();
+  },[]);
+  const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
+  const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
+  const hasArt=!!coverArt;
+  const clickable=hasArt&&typeof onOpenPreview==="function";
+  return (
+    <>
+      {/* Inline full card — shows by default above the sections */}
+      <div ref={hostRef} style={{margin:"6px 10px 10px"}}>
+        <SidebarBookPreview {...props}/>
+      </div>
+
+      {/* Sticky top strip — slides down when the full card scrolls out */}
+      <div
+        role={clickable?"button":undefined}
+        tabIndex={clickable?0:undefined}
+        onClick={clickable?onOpenPreview:undefined}
+        onKeyDown={clickable?(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onOpenPreview();}}:undefined}
+        style={{
+          position:"fixed",top:0,left:0,right:0,zIndex:45,
+          transform:collapsed?"translateY(0)":"translateY(-110%)",
+          transition:"transform .22s ease-out",
+          background:"linear-gradient(135deg,#1a1d23,#2a2e36)",
+          borderBottom:"1px solid rgba(255,255,255,.08)",
+          boxShadow:"0 6px 18px rgba(0,0,0,.25)",
+          padding:"7px 12px",
+          display:"flex",alignItems:"center",gap:10,
+          cursor:clickable?"pointer":"default",
+          color:"#fff",
+        }}>
+        {/* Thumbnail — aspect ratio preserved */}
+        <div style={{width:32,height:Math.max(24,Math.min(48,(32*hIn)/wIn)),borderRadius:3,overflow:"hidden",flexShrink:0,background:"#2a2e36",boxShadow:"0 0 0 1px rgba(255,255,255,.12)"}}>
+          {hasArt
+            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+            : <div style={{width:"100%",height:"100%",background:"linear-gradient(135deg,#e0edff,#f7f3e8)"}}/>
+          }
+        </div>
+        {/* Params — size · pages · qty */}
+        <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:1}}>
+          <div style={{fontSize:8,fontWeight:700,letterSpacing:".12em",opacity:.6,textTransform:"uppercase"}}>
+            {hasArt?"Your Artwork":"3D Preview"}
+          </div>
+          <div style={{fontSize:12,fontWeight:700,letterSpacing:".01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            {wIn}×{hIn}″ · {pages}pp · {quantity.toLocaleString()} qty
+          </div>
+        </div>
+        {/* CMYK dots + open chip (clickable only when art uploaded) */}
+        <div style={{display:"inline-flex",gap:3,alignSelf:"center"}} aria-hidden="true">
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.cyan}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.magenta}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.yellow}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
+        </div>
+        {clickable&&<span style={{fontSize:10,fontWeight:700,letterSpacing:".1em",color:"rgba(255,255,255,.85)",padding:"4px 8px",borderRadius:4,border:"1px solid rgba(255,255,255,.2)",flexShrink:0}}>OPEN ⤢</span>}
+      </div>
+    </>
+  );
+}
+
 function SpecSheet({result,pages,sizeLabel}){
   if(!result||result.error?.length>0)return null;
   const sz=result.sz;
@@ -3777,6 +3851,9 @@ function App(){
           </div>}
         </div>
       </section>
+
+      {/* MOBILE-ONLY: product preview card + collapsing sticky top strip */}
+      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
 
       <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
