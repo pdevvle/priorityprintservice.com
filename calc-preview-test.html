@@ -982,7 +982,7 @@ function Panel({result,compact}){
   );
 }
 
-function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode}){
+function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt}){
   // Parse "W×H" out of the size label (handles "5.5×8.5 (Opens to 8.5×11)", "Square 4×4", "6×4 Landscape", "Custom Size").
   const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
   const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
@@ -1032,10 +1032,14 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
 </svg>`;
     return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   },[coverTone]);
+  const hasArt=!!coverArt;
+  // When real art is uploaded we use it for the front; back cover falls back
+  // to the front image if a back hasn't been detected yet (most uploads are
+  // single-file print-ready PDFs where the back is the last page).
   const previewPages=useMemo(()=>[
-    {dataUrl:placeholder,isBlank:false},
-    {dataUrl:backCover,isBlank:false},
-  ],[placeholder,backCover]);
+    {dataUrl:coverArt||placeholder,isBlank:false},
+    {dataUrl:backCoverArt||coverArt||backCover,isBlank:false},
+  ],[coverArt,backCoverArt,placeholder,backCover]);
   return (
     <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
       <div className="bp-viewport" style={{height:190,borderRadius:0,border:"none",cursor:"default"}}>
@@ -1050,7 +1054,7 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
             <span style={{width:5,height:5,borderRadius:"50%",background:CK.yellow}}/>
             <span style={{width:5,height:5,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
           </span>
-          <span>3D PREVIEW · LIVE</span>
+          <span>{hasArt?"YOUR ARTWORK · LIVE":"3D PREVIEW · LIVE"}</span>
         </div>
         {/* bottom caption overlay — size + pages + qty */}
         <div style={{position:"absolute",bottom:10,left:14,right:14,display:"flex",justifyContent:"space-between",fontSize:9.5,fontWeight:600,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:".08em"}}>
@@ -1562,7 +1566,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1577,6 +1581,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [artScale, setArtScale] = useState(100); // percentage for scale mode
   const [rotateSteps, setRotateSteps] = useState(0); // 0=0°, 1=90°, 2=180°, 3=270° clockwise
   const [dropHover, setDropHover] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const [slotsOpen, setSlotsOpen] = useState(false);
   const [edgeHasMargins, setEdgeHasMargins] = useState(null); // null=unknown, true=margins, false=edge-to-edge
   const [proofIdx, setProofIdx] = useState(0);
@@ -2244,12 +2249,24 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
   async function processFiles(fileList) {
     if (!fileList || !fileList.length) return;
-    rawFileRef.current = fileList[0];
-    setLoading(true); setFileName(fileList[0].name); setLoadingProgress(null);
+    const f0 = fileList[0];
+    const isPdf = f0.type === "application/pdf" || /\.pdf$/i.test(f0.name);
+    const isImage = f0.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(f0.name);
+    if (!isPdf && !isImage) {
+      setUploadError(`Unsupported file type: ${f0.type || f0.name.split(".").pop()}. Upload a PDF or image (PNG, JPG, TIFF).`);
+      return;
+    }
+    if (f0.size === 0) {
+      setUploadError(`File is empty (0 bytes): ${f0.name}`);
+      return;
+    }
+    setUploadError("");
+    rawFileRef.current = f0;
+    setLoading(true); setFileName(f0.name); setLoadingProgress(null);
     try {
       const onProgress = (current, total) => setLoadingProgress({ current, total });
-      const extracted = fileList[0].type === "application/pdf"
-        ? await extractPdfPages(fileList[0], onProgress)
+      const extracted = isPdf
+        ? await extractPdfPages(f0, onProgress)
         : await extractImagePages(fileList, onProgress);
       setRawPages(extracted.pages);
       setArtDims(extracted.dims);
@@ -2265,6 +2282,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       const isMismatch = Math.abs(wIn - hIn) > 0.5 && Math.abs(dims.w - dims.h) > 0.5 && artIsPortrait !== bookIsPortrait;
       setRotateSteps(isMismatch ? 1 : 0);
       if (onCoverArt && extracted.pages.length >= 1) onCoverArt(extracted.pages[0].dataUrl);
+      if (onBackCoverArt && extracted.pages.length >= 2) onBackCoverArt(extracted.pages[extracted.pages.length - 1].dataUrl);
       if (onPagesDetected && extracted.pages.length >= 2) {
         let pg = Math.ceil(extracted.pages.length / 4) * 4;
         if (pg < 8) pg = 8;
@@ -2274,7 +2292,11 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       if (onArtwork) onArtwork({ type: "files", list: [fileList[0]] });
       setSlotsOpen(true);
       setArtApproved(false);
-    } catch (err) { console.error("Extraction error:", err); }
+    } catch (err) {
+      console.error("Extraction error:", err);
+      setUploadError(`Couldn't read ${f0.name}: ${err?.message || "the file may be corrupt or password-protected"}. Try re-exporting as PDF or PNG.`);
+      setFileName("");
+    }
     setLoading(false); setLoadingProgress(null);
   }
 
@@ -2299,6 +2321,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     slotFilesRef.current = {};
     if (onArtwork) onArtwork({ type: "none" });
     if (onCoverArt) onCoverArt(null);
+    if (onBackCoverArt) onBackCoverArt(null);
   }
 
   // Drag rotation
@@ -2386,6 +2409,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     if (!fileName) setFileName(`${pageCount} individual pages`);
     setUploadPageCount(prev => Math.max(prev, idx + 1));
     if (idx === 0 && onCoverArt) onCoverArt(dataUrl);
+    if (onBackCoverArt && idx === pageCount - 1) onBackCoverArt(dataUrl);
   }
 
   function handleSlotRemove(idx) {
@@ -2417,6 +2441,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       return next;
     });
     if (idx === 0 && onCoverArt) onCoverArt(null);
+    if (onBackCoverArt && idx === pageCount - 1) onBackCoverArt(null);
   }
 
   function handleSlotDrop(e, idx) {
@@ -2474,7 +2499,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       {!hasFile ? (
         /* ── No file yet: dropzone ── */
         <>
-          <div className={`bp-dropzone${loading ? " has-file" : ""}${dropHover ? " drag-active" : ""}`}
+          <div data-pps-dropzone="1" className={`bp-dropzone${loading ? " has-file" : ""}${dropHover ? " drag-active" : ""}`}
             onClick={() => !loading && fileInputRef.current && fileInputRef.current.click()}
             onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
             {loading
@@ -2495,6 +2520,12 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   <div style={{ fontSize: 10, color: CC.light, marginTop: 2 }}>Drop a file or click to browse</div></>
             }
           </div>
+          {uploadError && (
+            <div role="alert" style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, border: "1px solid #f5cccc", background: "#fef2f2", fontSize: 12, color: "#8b2e2e", display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <span style={{ flex: 1 }}>{uploadError}</span>
+              <button type="button" onClick={() => setUploadError("")} style={{ border: "none", background: "transparent", color: "#8b2e2e", fontSize: 14, cursor: "pointer", fontFamily: "inherit", padding: 0, lineHeight: 1 }}>✕</button>
+            </div>
+          )}
           <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner)} style={{
             width: "100%", marginTop: 6, padding: "8px", borderRadius: 4, border: `1px dashed ${CC.border}`,
             background: "#fafafa", color: CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
@@ -2613,7 +2644,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
           const isEmpty = p.isBlank;
           const isUserPage = !isEmpty;
           return (
-            <div key={i} style={{ position:"relative", textAlign:"center" }}
+            <div key={i} data-pps-dropzone="1" style={{ position:"relative", textAlign:"center" }}
               onDragOver={e => { e.preventDefault(); e.currentTarget.style.outline = `2px solid ${CK.cyan}`; }}
               onDragLeave={e => { e.currentTarget.style.outline = "none"; }}
               onDrop={e => { e.currentTarget.style.outline = "none"; handleSlotDrop(e, i); }}>
@@ -3384,6 +3415,20 @@ function App(){
   const[showDebug,setShowDebug]=useState(false);
   const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
 
+  // Global safety net: if the user drops a file ANYWHERE outside a dropzone,
+  // the browser's default is to navigate to the file, wiping all config.
+  // Swallow those drops instead — only the real dropzones (data-pps-dropzone)
+  // opt back in via their own handlers.
+  useEffect(() => {
+    const block = (e) => {
+      if (e.target && e.target.closest && e.target.closest("[data-pps-dropzone='1']")) return;
+      e.preventDefault();
+    };
+    window.addEventListener("dragover", block);
+    window.addEventListener("drop", block);
+    return () => { window.removeEventListener("dragover", block); window.removeEventListener("drop", block); };
+  }, []);
+
   // Per-product defaults from admin config, optionally overridden by URL params (share link)
   const D = (() => {
     const base = Object.assign({}, (window.PPS_CONFIG || {}).defaults || {});
@@ -3447,6 +3492,7 @@ function App(){
   const[shipAddr,setShipAddr]=useState({name:"",company:"",street1:"",street2:"",city:"",zip:""});
   const[needByDate,setNeedByDate]=useState("");
   const[coverArt,setCoverArt]=useState(null);
+  const[backCoverArt,setBackCoverArt]=useState(null);
   // Unified artwork file state — one variable, no priority logic
   // { type:"none" } | { type:"files", list:[File,...] } | { type:"existing", path:"/uploads/..." }
   const[artFiles,setArtFiles]=useState({type:"none"});
@@ -3835,6 +3881,7 @@ function App(){
                 proof={proof} setProof={setProof}
                 onPagesDetected={(pg) => upSet(0, { pages: pg })}
                 onCoverArt={setCoverArt}
+                onBackCoverArt={setBackCoverArt}
                 onArtwork={setArtFiles}
                 onBleedDetected={(has) => { if(has) setBleed(0); else setBleed(1); }}
                 onSizeOverride={(w, h) => {
@@ -4038,9 +4085,9 @@ function App(){
           </Sec>}
 
         </div>
-        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18}}>
-          <div style={{marginBottom:10}}>
-            <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode}/>
+        {!mob&&<div style={{width:320,flexShrink:0}}>
+          <div style={{position:"sticky",top:18,marginBottom:10,zIndex:2}}>
+            <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt}/>
           </div>
           <Panel result={result}/>
           <SpecSheet result={result} pages={sets[0]?.pages} sizeLabel={sizeLabel}/>
