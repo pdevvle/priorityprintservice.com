@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "priority-print": {
+      "type": "http",
+      "url": "https://woocommerce-70867-4915293.cloudwaysapps.com/wp-json/mcp/v1/http/41ikjbiyhvuijhbp55326dzf6541hg65d1f6gb541df96"
+    }
+  }
+}
