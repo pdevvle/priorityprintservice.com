@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#f6f4ef" />
+<title>Header preview — Priority Print Service</title>
+<link rel="stylesheet" href="assets/css/main.css" />
+<style>
+  /* Preview-only page styles (would not exist in theme) */
+  .demo-hero {
+    max-width: var(--pps-max-w);
+    margin: 0 auto;
+    padding: var(--pps-space-9) var(--pps-gutter) var(--pps-space-8);
+  }
+  .demo-hero h1 {
+    margin: 0 0 var(--pps-space-5);
+    font-size: clamp(44px, 7vw, 96px);
+    line-height: 0.98;
+    letter-spacing: -0.035em;
+    font-weight: 700;
+  }
+  .demo-hero p {
+    max-width: 62ch;
+    margin: 0 0 var(--pps-space-6);
+    font-size: clamp(17px, 1.6vw, 20px);
+    line-height: 1.55;
+    color: var(--pps-slate);
+  }
+  .demo-filler {
+    max-width: var(--pps-max-w);
+    margin: 0 auto;
+    padding: 0 var(--pps-gutter) var(--pps-space-9);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--pps-space-5);
+  }
+  .demo-card {
+    aspect-ratio: 4 / 5;
+    background: var(--pps-white);
+    border: 1px solid var(--pps-border);
+    border-radius: var(--pps-radius-md);
+    padding: var(--pps-space-5);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .demo-card h3 {
+    margin: 0;
+    font-size: 18px;
+    letter-spacing: -0.01em;
+  }
+  .demo-card p {
+    margin: 0;
+    color: var(--pps-text-muted);
+    font-size: 13px;
+  }
+  .demo-note {
+    max-width: var(--pps-max-w);
+    margin: 0 auto;
+    padding: var(--pps-space-5) var(--pps-gutter) var(--pps-space-7);
+    color: var(--pps-text-muted);
+    font-size: 13px;
+    border-top: 1px solid var(--pps-hairline);
+  }
+  .screen-reader-text {
+    position: absolute !important; clip: rect(1px,1px,1px,1px); width: 1px; height: 1px; overflow: hidden;
+  }
+</style>
+</head>
+<body>
+
+<a class="pps-skip" href="#pps-main">Skip to content</a>
+
+<header class="pps-header" role="banner">
+  <div class="pps-header__inner">
+    <a class="pps-brand" href="#" aria-label="Priority Print Service — home">
+      <span class="pps-brand__mark" aria-hidden="true">P</span>
+      <span class="pps-brand__text">Priority Print <em>Service</em></span>
+    </a>
+
+    <div class="pps-header__mid" aria-hidden="true"></div>
+
+    <div class="pps-header__actions">
+      <a class="pps-header__phone" href="tel:+16025551234">
+        <span class="label">Call&nbsp;</span>(602) 555-1234
+      </a>
+      <button
+        class="pps-menu-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="pps-overlay"
+        aria-label="Open menu"
+        data-pps-menu-toggle
+      >
+        <span class="pps-menu-toggle__bars" aria-hidden="true"></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<div
+  id="pps-overlay"
+  class="pps-overlay"
+  data-pps-overlay
+  data-open="false"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="pps-overlay-title"
+>
+  <div class="pps-overlay__inner">
+    <button
+      class="pps-overlay__close"
+      type="button"
+      aria-label="Close menu"
+      data-pps-menu-close
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    </button>
+
+    <h2 id="pps-overlay-title" class="screen-reader-text">Menu</h2>
+
+    <div class="pps-overlay__grid">
+      <nav aria-label="Services">
+        <span class="pps-nav__eyebrow">Print services</span>
+        <ul class="pps-nav__list">
+          <li class="pps-nav__item">
+            <a class="pps-nav__link" href="#">
+              <span class="pps-nav__num" aria-hidden="true">01</span>
+              <span class="pps-nav__label">Saddle stitch booklets</span>
+              <span class="pps-nav__meta">8–200pg · stapled</span>
+            </a>
+          </li>
+          <li class="pps-nav__item">
+            <a class="pps-nav__link" href="#">
+              <span class="pps-nav__num" aria-hidden="true">02</span>
+              <span class="pps-nav__label">Perfect bound booklets</span>
+              <span class="pps-nav__meta">40–500pg · glued spine</span>
+            </a>
+          </li>
+          <li class="pps-nav__item">
+            <a class="pps-nav__link" href="#">
+              <span class="pps-nav__num" aria-hidden="true">03</span>
+              <span class="pps-nav__label">Brochures &amp; flyers</span>
+              <span class="pps-nav__meta">9 fold types · flats</span>
+            </a>
+          </li>
+          <li class="pps-nav__item">
+            <a class="pps-nav__link" href="#">
+              <span class="pps-nav__num" aria-hidden="true">04</span>
+              <span class="pps-nav__label">Coupon books</span>
+              <span class="pps-nav__meta">perforated · numbered</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+
+      <nav aria-label="About and support" class="pps-nav--secondary">
+        <span class="pps-nav__eyebrow">The shop</span>
+        <ul class="pps-nav__list">
+          <li class="pps-nav__item"><a class="pps-nav__link" href="#"><span class="pps-nav__label">About</span></a></li>
+          <li class="pps-nav__item"><a class="pps-nav__link" href="#"><span class="pps-nav__label">Pricing guide</span></a></li>
+          <li class="pps-nav__item"><a class="pps-nav__link" href="#"><span class="pps-nav__label">FAQ</span></a></li>
+          <li class="pps-nav__item"><a class="pps-nav__link" href="#"><span class="pps-nav__label">Contact</span></a></li>
+        </ul>
+      </nav>
+    </div>
+
+    <div class="pps-overlay__foot">
+      <div class="pps-contact__row">
+        <div class="pps-contact__group">
+          <span class="pps-contact__label">Call</span>
+          <a class="pps-contact__value" href="tel:+16025551234">(602) 555-1234</a>
+        </div>
+        <div class="pps-contact__group">
+          <span class="pps-contact__label">Email</span>
+          <a class="pps-contact__value" href="mailto:hello@priorityprintservice.com">hello@priorityprintservice.com</a>
+        </div>
+        <div class="pps-contact__group">
+          <span class="pps-contact__label">Hours</span>
+          <span class="pps-contact__value">Mon–Fri 8a–5p</span>
+        </div>
+      </div>
+      <a class="pps-cta" href="#">
+        Start an order
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M5 12h14M13 5l7 7-7 7" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</div>
+
+<main id="pps-main" tabindex="-1">
+  <section class="demo-hero">
+    <h1>Priority Print Service<br />booklets, brochures, books.</h1>
+    <p>Instant pricing, live calculators, in-thread proofing. The header here is strict grayscale — brand accents land on product pages and the calculator, not on the chrome.</p>
+  </section>
+
+  <section class="demo-filler" aria-label="Filler cards to demonstrate scroll">
+    <div class="demo-card"><h3>Saddle stitch</h3><p>Stapled on the spine. Best for 8–200 page booklets.</p></div>
+    <div class="demo-card"><h3>Perfect bound</h3><p>Glued spine, square edge. 40–500 pages.</p></div>
+    <div class="demo-card"><h3>Brochures</h3><p>Nine fold types. Flat cards on request.</p></div>
+    <div class="demo-card"><h3>Coupon books</h3><p>Perforated. Numbered on demand.</p></div>
+    <div class="demo-card"><h3>Rush</h3><p>Same-week turnarounds, often same-day.</p></div>
+    <div class="demo-card"><h3>Finishing</h3><p>Scoring, UV coating, die cutting, numbering.</p></div>
+  </section>
+
+  <p class="demo-note">This is a preview page — open it directly in a browser to see the header and fold-out menu behavior. The WordPress version lives at <code>pps-theme/template-parts/site-header.php</code>.</p>
+</main>
+
+<script src="assets/js/main.js" defer></script>
+</body>
+</html>
