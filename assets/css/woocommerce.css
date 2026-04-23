@@ -1,0 +1,215 @@
+/*
+ * WooCommerce overrides.
+ *
+ * Scope: visual surface of product grids, product cards, buttons, messages,
+ * pagination, and cart/checkout buttons. We deliberately do NOT touch
+ * layout-critical WC structures (form fields on checkout, cart table rows,
+ * variation selectors) — those are left to WC core styles so checkout
+ * keeps working across plugin updates.
+ *
+ * WooCommerce's own shop stylesheets are allowed to load (add_theme_support
+ * 'woocommerce' is enabled in functions.php). These rules layer on top.
+ */
+
+/* ---------- Shop loop header area ---------- */
+.archive-header h1 { margin-bottom: var(--pp-s-3); }
+.archive-header__desc { max-width: 720px; color: var(--pp-ink-soft); }
+
+.woocommerce-notices-wrapper:empty { display: none; }
+
+.woocommerce-result-count {
+	font-family: var(--pp-font-head);
+	text-transform: uppercase;
+	font-size: var(--pp-fs-sm);
+	letter-spacing: 0.05em;
+	color: var(--pp-muted);
+	margin: 0 0 var(--pp-s-5);
+	float: none;
+}
+
+.woocommerce-ordering {
+	float: right;
+	margin-bottom: var(--pp-s-5);
+}
+.woocommerce-ordering select {
+	font-family: var(--pp-font-head);
+	text-transform: uppercase;
+	font-size: var(--pp-fs-sm);
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--pp-rule);
+	background: var(--pp-white);
+	border-radius: var(--pp-radius);
+}
+
+/* ---------- Product grid ---------- */
+.woocommerce ul.products,
+.woocommerce-page ul.products {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: var(--pp-s-6);
+	margin: var(--pp-s-6) 0 var(--pp-s-7);
+	padding: 0;
+	list-style: none;
+	clear: both;
+}
+
+@media (max-width: 960px) {
+	.woocommerce ul.products,
+	.woocommerce-page ul.products { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+	.woocommerce ul.products,
+	.woocommerce-page ul.products { grid-template-columns: 1fr; }
+}
+
+/* Neutralize WC's default float/width on list items */
+.woocommerce ul.products li.product,
+.woocommerce-page ul.products li.product {
+	float: none;
+	width: auto;
+	margin: 0;
+	padding: 0;
+	background: var(--pp-white);
+	border: 1px solid var(--pp-rule);
+	display: flex;
+	flex-direction: column;
+	transition: border-color .15s var(--pp-ease), transform .15s var(--pp-ease);
+}
+.woocommerce ul.products li.product:hover {
+	border-color: var(--pp-blue);
+	transform: translateY(-2px);
+}
+
+.woocommerce ul.products li.product a img {
+	width: 100%;
+	height: auto;
+	aspect-ratio: 4 / 3;
+	object-fit: cover;
+	margin: 0;
+}
+
+.woocommerce ul.products li.product .woocommerce-loop-product__title {
+	font-family: var(--pp-font-head);
+	text-transform: uppercase;
+	font-size: var(--pp-fs-xl);
+	font-weight: 700;
+	padding: var(--pp-s-4) var(--pp-s-5) 0;
+	margin: 0;
+	color: var(--pp-ink);
+	letter-spacing: 0.01em;
+}
+
+.woocommerce ul.products li.product .price {
+	padding: var(--pp-s-2) var(--pp-s-5) var(--pp-s-4);
+	color: var(--pp-ink-soft);
+	font-size: var(--pp-fs-base);
+}
+.woocommerce ul.products li.product .price .amount {
+	color: var(--pp-ink);
+	font-weight: 600;
+}
+
+.woocommerce ul.products li.product .button {
+	margin: auto var(--pp-s-5) var(--pp-s-5);
+	align-self: stretch;
+	text-align: center;
+	display: block;
+}
+
+/* ---------- Buttons ---------- */
+.woocommerce a.button,
+.woocommerce button.button,
+.woocommerce input.button,
+.woocommerce #respond input#submit,
+.woocommerce-page a.button,
+.woocommerce-page button.button,
+.woocommerce-page input.button {
+	font-family: var(--pp-font-head);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	background: var(--pp-blue);
+	color: var(--pp-white);
+	padding: 0.85em 1.6em;
+	border-radius: var(--pp-radius);
+	border: 2px solid var(--pp-blue);
+	transition: background .15s var(--pp-ease), border-color .15s var(--pp-ease);
+}
+.woocommerce a.button:hover,
+.woocommerce button.button:hover,
+.woocommerce a.button.alt,
+.woocommerce button.button.alt,
+.woocommerce #respond input#submit.alt {
+	background: var(--pp-blue-dark);
+	border-color: var(--pp-blue-dark);
+	color: var(--pp-white);
+}
+
+/* ---------- Single product add-to-cart CTA ---------- */
+.woocommerce div.product form.cart .button {
+	background: var(--pp-orange);
+	border-color: var(--pp-orange);
+}
+.woocommerce div.product form.cart .button:hover {
+	background: var(--pp-orange-dark);
+	border-color: var(--pp-orange-dark);
+}
+
+/* ---------- Pagination ---------- */
+.woocommerce nav.woocommerce-pagination ul,
+.woocommerce-pagination ul {
+	border: 0;
+	display: flex;
+	gap: var(--pp-s-2);
+	justify-content: center;
+	margin: var(--pp-s-6) 0;
+	padding: 0;
+}
+.woocommerce nav.woocommerce-pagination ul li,
+.woocommerce-pagination ul li {
+	border: 0;
+}
+.woocommerce nav.woocommerce-pagination ul li a,
+.woocommerce nav.woocommerce-pagination ul li span,
+.woocommerce-pagination ul li a,
+.woocommerce-pagination ul li span {
+	font-family: var(--pp-font-head);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	padding: 0.6em 1em;
+	border: 1px solid var(--pp-rule);
+	border-radius: var(--pp-radius);
+	color: var(--pp-ink);
+	background: var(--pp-white);
+	text-decoration: none;
+}
+.woocommerce nav.woocommerce-pagination ul li a:hover,
+.woocommerce nav.woocommerce-pagination ul li span.current,
+.woocommerce-pagination ul li span.current {
+	background: var(--pp-blue);
+	color: var(--pp-white);
+	border-color: var(--pp-blue);
+}
+
+/* ---------- Messages (notices) ---------- */
+.woocommerce-message,
+.woocommerce-info,
+.woocommerce-error {
+	border-top: 0;
+	border-left: 4px solid var(--pp-blue);
+	background: var(--pp-bg-light);
+	padding: var(--pp-s-4) var(--pp-s-5);
+	border-radius: var(--pp-radius);
+}
+.woocommerce-error { border-left-color: #C0392B; }
+.woocommerce-message { border-left-color: var(--pp-blue); }
+
+/* ---------- Cart / Checkout light touch ---------- */
+.woocommerce table.shop_table { border-collapse: collapse; border: 1px solid var(--pp-rule); }
+.woocommerce table.shop_table th {
+	font-family: var(--pp-font-head);
+	text-transform: uppercase;
+	background: var(--pp-bg-light);
+	color: var(--pp-ink);
+}

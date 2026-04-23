@@ -1,73 +1,84 @@
-# Deployment: GitHub → Cloudways
+# Deployment: GitHub → Cloudways (theme branch)
 
-This repo auto-deploys to the Cloudways WordPress app via Cloudways' native **Deploy via Git** (pull-based). No GitHub Actions, no secrets stored in GitHub.
+The Priority Print theme lives on branch `theme-v1` of the existing `pdevvle/priorityprintservice.com` repository — not in its own repo. The existing `pps-calculators` plugin lives on the `production` branch of the same repository. Two separate Cloudways deploy slots pull the two branches into two separate paths on the live server. The branches never merge and never share files — they're entirely independent histories that happen to live in the same GitHub repo for operational simplicity.
 
-## Branch roles
+## Branch map
 
-| Branch | Purpose |
-|--------|---------|
-| `production` | What Cloudways pulls. Live site mirrors this branch. Merge here only code you're willing to ship. |
-| `pps-pricing-config` | GitHub Pages preview source. Must keep `.nojekyll` at its root. See `CLAUDE.md` → Branch & Deploy. |
-| feature branches | Work-in-progress. Never pulled by Cloudways. |
+| Branch | What it holds | Cloudways deploys to |
+|--------|---------------|----------------------|
+| `production` | `pps-calculators` plugin source | `public_html/wp-content/plugins/pps-calculators/` |
+| `theme-v1` | Priority Print theme source | `public_html/wp-content/themes/priority-print/` |
+| `main`, `claude/*`, `pps-pricing-config` | plugin development branches | — (not deployed) |
 
-## Deploy target on Cloudways
+Do **not** merge `theme-v1` into any other branch, and do not merge other branches into `theme-v1`. It is a standalone, parallel history.
 
-Cloudways clones the repo into **one** path. We deploy the whole repo into:
+## One-time Cloudways setup for the theme
 
-```
-<application root>/public_html/wp-content/plugins/pps-calculators/
-```
-
-The repo root *is* the plugin (`pps-calculators.php` carries the WP plugin header at line 1). `pps-theme/` rides along inside the plugin folder and stays dormant — the live site runs Astra, and WordPress only loads themes from `wp-content/themes/`. Markdown docs and `.git/` metadata are inert on the server.
-
-## One-time GitHub setup
-
-1. Go to `https://github.com/pdevvle/priorityprintservice.com/settings/keys`.
-2. Click **Add deploy key**.
-3. Title: `Cloudways — priorityprintservice.com app`.
-4. Paste the public key that Cloudways generated (Application → Deployment via Git → Generate SSH Key → Copy).
-5. Leave **Allow write access** **unchecked**. Cloudways only needs to pull.
-6. Save.
-
-## One-time Cloudways setup
-
-1. Cloudways dashboard → pick the application that serves priorityprintservice.com.
-2. **Application Management → Deployment via Git → SSH Keys** — confirm the key generated in the step above is still listed. (Once the matching public key is on GitHub, the handshake works.)
-3. **Deployment via Git → Git Remote Address**:
+1. Cloudways dashboard → your existing application (the one serving priorityprintservice.com).
+2. **Application Management → Deployment via Git** → click **Add another remote** (or equivalent — the slot for the plugin already exists; this creates a second).
+3. **Git Remote Address**:
    ```
    git@github.com:pdevvle/priorityprintservice.com.git
    ```
-4. **Branch**: `production`.
-5. **Deployment Path**: `public_html/wp-content/plugins/pps-calculators`.
-   - The path must be empty the first time, or Cloudways will refuse to clone. If the plugin dir already has a hand-uploaded copy, rename it to `pps-calculators.bak` first.
-6. **Start Deployment**.
-7. Watch the deployment log until it reports success.
-8. In WordPress admin → Plugins, confirm **PPS Product Calculators** is active. If WordPress deactivated it during the swap, reactivate.
+4. **Branch**: `theme-v1`
+5. **Deployment Path**: `public_html/wp-content/themes/priority-print`
+   - This directory must not exist yet (Cloudways will create it on first deploy).
+6. **SSH key**: Cloudways generates a new public key for this slot. Copy it.
+7. Back on GitHub: https://github.com/pdevvle/priorityprintservice.com/settings/keys → **Add deploy key** → title "Cloudways — theme slot" → paste → leave "Allow write access" unchecked → save. Adding a second deploy key to the same repo is supported and does not interfere with the first.
+8. In Cloudways, click **Start Deployment**.
+9. After deploy completes, WordPress admin → Appearance → Themes → the **Priority Print** theme should appear. **Do not activate yet** — activation is the cutover step.
+
+## Going live (cutover)
+
+Deliberate and manual. Do in this order, ideally during a low-traffic window:
+
+1. Cloudways → **take a full application backup** (one button; restores later if needed).
+2. WordPress admin → Plugins → confirm `pps-calculators` is still active and Yoast is still active. Do not change yet.
+3. WordPress admin → Appearance → Themes → hover over **Priority Print** → **Activate**.
+4. Click through the live site in a private/incognito browser window:
+   - Homepage renders hero + services + values + CTA banner.
+   - `/shop/` renders the product grid (three cards per row on desktop).
+   - A calculator product page loads; pricing still updates via WCPA.
+   - Cart → Checkout completes end-to-end with a test card.
+5. View-source the homepage. Confirm exactly one `<meta name="description">`, one canonical, one Organization JSON-LD. If you see duplicates, Yoast is still emitting — proceed to step 6 to clean it up.
+6. WordPress admin → Plugins → Yoast SEO → **Deactivate** → **Delete**. The theme's `PP_SEO` class already emits the head tags Yoast was emitting.
+7. WordPress admin → Appearance → Themes → hover over Astra / Astra Pro if present → **Delete** (they're inactive at this point; Delete removes them from disk).
+8. View-source the homepage one more time. Should still show clean single-source head tags.
+
+If anything in step 4 looks broken, immediately: Appearance → Themes → activate Astra (or whatever was active before), and send a screenshot of the broken behavior.
 
 ## Day-to-day deploys
 
+For theme edits Claude Code makes in future sessions:
+
 ```
-# on a feature branch, merged and tested
-git checkout production
-git pull origin production
-git merge --no-ff <your-branch>
-git push origin production
+# in a session scoped to this repo
+git checkout theme-v1
+# make edits
+git add -A
+git commit -m "Theme: ..."
+git push origin theme-v1
 ```
 
-Then in Cloudways → Deployment via Git → **Pull Latest Code**. The deploy log will show the new commit SHA; confirm it matches your push.
+Then in Cloudways → Deployment via Git → **Pull Latest Code** on the theme deploy slot.
 
-### Optional: auto-pull on push
+For plugin edits, that's `production` branch as before — unchanged by this setup.
 
-Cloudways exposes a "deployment webhook URL" on the same screen. Paste it into `https://github.com/pdevvle/priorityprintservice.com/settings/hooks` as a webhook with content-type `application/json` and trigger on `push` only. Every push to `production` will then auto-pull. **Recommended only after you've watched a few manual pulls go cleanly** — an auto-pull with a bad commit ships a bad commit.
+### MCP write + Git mirror model
+
+When the AI Engine MCP connection is active, theme-editing sessions should:
+
+1. Read the live file on the Cloudways server via MCP before editing.
+2. Write the new version via MCP **and** commit the same change to Git (branch `theme-v1`) in the same session.
+3. Update `CHANGELOG.md` with the full previous version inline.
+4. Update `CURRENT-STATE.md` to reflect the new live state.
+
+If MCP write succeeds but Git commit fails, the repo and server diverge. Catch it via occasional `git diff` live-server vs repo.
 
 ## Rollback
 
-Fastest: in Cloudways → Deployment via Git, change the **Branch** field to a known-good commit SHA, pull, then revert back to `production` once the hotfix is on that branch.
+**Inline** (fastest for a single-file bad change): `CHANGELOG.md` on the theme branch stores the previous version of every edited file in a `<details>` block. Copy that block's content, paste it over the live file via MCP or SFTP.
 
-Cleaner: `git revert <bad-sha>` on `production`, push, pull in Cloudways. Preferred when more than one commit is on the live branch since the bad deploy.
+**Git revert** (cleaner for multi-file change): on `theme-v1`, `git revert <bad-sha>`, push, pull in Cloudways.
 
-## What this pipeline does not cover
-
-- **`pps-theme/`** — preview-only, lives in this repo for GitHub Pages. If it ever becomes the live WordPress theme, wire a second Cloudways deployment (same repo, same `production` branch, different deployment path: `public_html/wp-content/themes/pps-theme`) or split the theme into its own repo.
-- **Database / wp_options** — OAuth credentials, tooltips, zone map, per-product defaults all live in `wp_options` and are not part of this pipeline. They stay on the server across deploys.
-- **Uploaded calculator HTML assignments** — the WooCommerce product ↔ calculator mappings live in `wp_options` (`pps_calculators_registry`) and persist across deploys. If a calculator HTML filename changes, re-assign via PPS Calculators admin.
+**Full previous deploy**: Cloudways → Deployment via Git → point the theme slot's Branch field at a known-good commit SHA, pull, fix forward when ready. Plugin deployment is unaffected because it runs from a different branch / path.
