@@ -1,0 +1,14 @@
+.DS_Store
+Thumbs.db
+*.log
+
+# Editor cruft
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local-only
+/node_modules/
+/vendor/
+/.env

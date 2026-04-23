@@ -1,0 +1,501 @@
+/*
+Theme Name: Priority Print
+Theme URI: https://priorityprintservice.com/
+Author: Priority Print Service
+Author URI: https://priorityprintservice.com/
+Description: Custom standalone WordPress theme for Priority Print Service — Peoria, AZ. Industrial-professional aesthetic for a commercial print shop. Replaces Astra + Yoast with a lightweight, Claude-Code-maintainable codebase.
+Version: 1.0.0
+Requires at least: 6.0
+Requires PHP: 8.0
+License: Proprietary — all rights reserved.
+Text Domain: priority-print
+Tags: custom, woocommerce, print-shop
+*/
+
+/* =========================================================================
+   1. CSS VARIABLES — single source of brand truth
+   Update hex codes / font names here; the rest of the theme inherits.
+   ========================================================================= */
+
+:root {
+  /* Brand colors */
+  --pp-blue:        #007EFF;   /* Primary — confirmed */
+  --pp-blue-dark:   #005FCC;   /* Hover/active */
+  --pp-orange:      #E05C1A;   /* Accent — placeholder, awaiting confirmation */
+  --pp-orange-dark: #B84912;
+
+  /* Neutrals */
+  --pp-ink:         #101114;   /* Body text, headings */
+  --pp-ink-soft:    #3C4049;
+  --pp-muted:       #6B7280;
+  --pp-rule:        #D8D8D4;
+  --pp-bg-light:    #F5F5F3;
+  --pp-white:       #FFFFFF;
+
+  /* Typography */
+  --pp-font-body:   'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --pp-font-head:   'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
+
+  --pp-fs-xs:   0.75rem;
+  --pp-fs-sm:   0.875rem;
+  --pp-fs-base: 1rem;
+  --pp-fs-lg:   1.125rem;
+  --pp-fs-xl:   1.375rem;
+  --pp-fs-h4:   1.5rem;
+  --pp-fs-h3:   2rem;
+  --pp-fs-h2:   2.75rem;
+  --pp-fs-h1:   4rem;
+  --pp-fs-hero: 5.25rem;
+
+  --pp-lh-tight: 1.05;
+  --pp-lh-body:  1.6;
+
+  /* Layout */
+  --pp-max:        1200px;
+  --pp-max-narrow: 900px;
+  --pp-gutter:     clamp(1rem, 3vw, 2rem);
+
+  /* Spacing scale */
+  --pp-s-1: 0.25rem;
+  --pp-s-2: 0.5rem;
+  --pp-s-3: 0.75rem;
+  --pp-s-4: 1rem;
+  --pp-s-5: 1.5rem;
+  --pp-s-6: 2rem;
+  --pp-s-7: 3rem;
+  --pp-s-8: 4.5rem;
+  --pp-s-9: 6rem;
+
+  /* Motion / radius */
+  --pp-radius: 2px;
+  --pp-ease:   cubic-bezier(.2,.7,.2,1);
+}
+
+/* =========================================================================
+   2. RESET + BASE
+   ========================================================================= */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--pp-font-body);
+  font-size: var(--pp-fs-base);
+  line-height: var(--pp-lh-body);
+  color: var(--pp-ink);
+  background: var(--pp-white);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+img, svg, video { max-width: 100%; height: auto; display: block; }
+
+a {
+  color: var(--pp-blue);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: color .15s var(--pp-ease);
+}
+a:hover { color: var(--pp-blue-dark); }
+
+button { font: inherit; cursor: pointer; }
+
+/* =========================================================================
+   3. TYPOGRAPHY
+   Headings use the condensed industrial face; body is editorial serif.
+   ========================================================================= */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--pp-font-head);
+  font-weight: 700;
+  line-height: var(--pp-lh-tight);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  margin: 0 0 var(--pp-s-4);
+  color: var(--pp-ink);
+}
+
+h1 { font-size: clamp(2.5rem, 6vw, var(--pp-fs-h1)); }
+h2 { font-size: clamp(2rem, 4.5vw, var(--pp-fs-h2)); }
+h3 { font-size: var(--pp-fs-h3); }
+h4 { font-size: var(--pp-fs-h4); }
+
+p { margin: 0 0 var(--pp-s-5); }
+
+.eyebrow {
+  font-family: var(--pp-font-head);
+  font-size: var(--pp-fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--pp-orange);
+  font-weight: 600;
+  margin: 0 0 var(--pp-s-3);
+}
+
+/* =========================================================================
+   4. LAYOUT PRIMITIVES
+   ========================================================================= */
+
+.container {
+  width: 100%;
+  max-width: var(--pp-max);
+  margin-inline: auto;
+  padding-inline: var(--pp-gutter);
+}
+
+.container--narrow { max-width: var(--pp-max-narrow); }
+
+.section         { padding-block: var(--pp-s-8); }
+.section--tight  { padding-block: var(--pp-s-6); }
+.section--hero   { padding-block: var(--pp-s-9); }
+.section--light  { background: var(--pp-bg-light); }
+.section--ink    { background: var(--pp-ink); color: var(--pp-white); }
+.section--ink h1, .section--ink h2, .section--ink h3 { color: var(--pp-white); }
+
+hr, .rule {
+  border: 0;
+  height: 1px;
+  background: var(--pp-rule);
+  margin: var(--pp-s-6) 0;
+}
+
+/* =========================================================================
+   5. BUTTONS
+   ========================================================================= */
+
+.btn {
+  display: inline-block;
+  font-family: var(--pp-font-head);
+  font-weight: 700;
+  font-size: var(--pp-fs-lg);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.85em 1.6em;
+  border: 2px solid transparent;
+  border-radius: var(--pp-radius);
+  text-decoration: none;
+  transition: background .15s var(--pp-ease), color .15s var(--pp-ease), border-color .15s var(--pp-ease);
+  cursor: pointer;
+}
+
+.btn--primary {
+  background: var(--pp-blue);
+  color: var(--pp-white);
+  border-color: var(--pp-blue);
+}
+.btn--primary:hover {
+  background: var(--pp-blue-dark);
+  border-color: var(--pp-blue-dark);
+  color: var(--pp-white);
+}
+
+.btn--accent {
+  background: var(--pp-orange);
+  color: var(--pp-white);
+  border-color: var(--pp-orange);
+}
+.btn--accent:hover {
+  background: var(--pp-orange-dark);
+  border-color: var(--pp-orange-dark);
+  color: var(--pp-white);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--pp-ink);
+  border-color: var(--pp-ink);
+}
+.btn--ghost:hover { background: var(--pp-ink); color: var(--pp-white); }
+
+.section--ink .btn--ghost { color: var(--pp-white); border-color: var(--pp-white); }
+.section--ink .btn--ghost:hover { background: var(--pp-white); color: var(--pp-ink); }
+
+/* =========================================================================
+   6. HEADER / NAV
+   ========================================================================= */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--pp-white);
+  border-bottom: 1px solid var(--pp-rule);
+}
+
+.topbar {
+  background: var(--pp-ink);
+  color: var(--pp-white);
+  font-family: var(--pp-font-head);
+  font-size: var(--pp-fs-sm);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.topbar__inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--pp-s-4);
+  padding: var(--pp-s-2) 0;
+}
+.topbar a { color: var(--pp-white); text-decoration: none; }
+.topbar a:hover { color: var(--pp-orange); }
+.topbar__cta {
+  background: var(--pp-orange);
+  color: var(--pp-white);
+  padding: 0.35em 0.9em;
+  border-radius: var(--pp-radius);
+  font-weight: 700;
+}
+.topbar__cta:hover { background: var(--pp-orange-dark); color: var(--pp-white); }
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pp-s-5);
+  padding-block: var(--pp-s-4);
+}
+
+.masthead__logo img { max-height: 56px; width: auto; }
+
+.primary-nav { display: flex; align-items: center; }
+.primary-nav ul {
+  list-style: none;
+  display: flex;
+  gap: var(--pp-s-6);
+  margin: 0;
+  padding: 0;
+}
+.primary-nav a {
+  font-family: var(--pp-font-head);
+  text-transform: uppercase;
+  font-weight: 600;
+  font-size: var(--pp-fs-lg);
+  letter-spacing: 0.04em;
+  color: var(--pp-ink);
+  text-decoration: none;
+  padding: var(--pp-s-2) 0;
+  border-bottom: 2px solid transparent;
+}
+.primary-nav a:hover,
+.primary-nav .current-menu-item > a {
+  color: var(--pp-blue);
+  border-bottom-color: var(--pp-blue);
+}
+
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 0;
+  padding: var(--pp-s-2);
+  color: var(--pp-ink);
+}
+.nav-toggle svg { width: 28px; height: 28px; }
+
+/* =========================================================================
+   7. HERO (homepage)
+   ========================================================================= */
+
+.hero {
+  padding-block: var(--pp-s-9);
+  background: var(--pp-ink);
+  color: var(--pp-white);
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: auto -10% -20% auto;
+  width: 60%;
+  aspect-ratio: 1;
+  background: radial-gradient(closest-side, rgba(0,126,255,.35), transparent 70%);
+  pointer-events: none;
+}
+.hero__inner { position: relative; z-index: 1; max-width: 820px; }
+.hero h1 {
+  color: var(--pp-white);
+  font-size: clamp(2.75rem, 7vw, var(--pp-fs-hero));
+  margin-bottom: var(--pp-s-5);
+}
+.hero__sub {
+  font-size: var(--pp-fs-xl);
+  color: rgba(255,255,255,.82);
+  margin-bottom: var(--pp-s-6);
+  max-width: 60ch;
+}
+.hero__ctas { display: flex; flex-wrap: wrap; gap: var(--pp-s-4); }
+
+/* =========================================================================
+   8. SERVICE GRID / CARD GRID
+   ========================================================================= */
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--pp-s-5);
+}
+
+.card {
+  background: var(--pp-white);
+  border: 1px solid var(--pp-rule);
+  padding: var(--pp-s-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pp-s-3);
+  transition: border-color .15s var(--pp-ease), transform .15s var(--pp-ease);
+}
+.card:hover { border-color: var(--pp-blue); transform: translateY(-2px); }
+.card h3 { margin: 0; font-size: var(--pp-fs-xl); }
+.card p { margin: 0; color: var(--pp-ink-soft); }
+.card__link {
+  margin-top: auto;
+  font-family: var(--pp-font-head);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: var(--pp-fs-sm);
+  letter-spacing: 0.08em;
+  color: var(--pp-blue);
+  text-decoration: none;
+}
+.card__link::after { content: " →"; }
+
+/* =========================================================================
+   9. WHY-CHOOSE / VALUE PROPS
+   ========================================================================= */
+
+.values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--pp-s-6);
+}
+.values__item { text-align: left; }
+.values__num {
+  font-family: var(--pp-font-head);
+  font-size: var(--pp-fs-h2);
+  color: var(--pp-blue);
+  line-height: 1;
+  margin-bottom: var(--pp-s-3);
+}
+.values__item h3 { margin-bottom: var(--pp-s-2); }
+
+/* =========================================================================
+   10. CTA BANNER
+   ========================================================================= */
+
+.cta-banner {
+  background: var(--pp-blue);
+  color: var(--pp-white);
+  padding-block: var(--pp-s-7);
+  text-align: center;
+}
+.cta-banner h2 { color: var(--pp-white); margin-bottom: var(--pp-s-5); }
+.cta-banner .btn--ghost { color: var(--pp-white); border-color: var(--pp-white); }
+.cta-banner .btn--ghost:hover { background: var(--pp-white); color: var(--pp-blue); }
+
+/* =========================================================================
+   11. FOOTER
+   ========================================================================= */
+
+.site-footer {
+  background: var(--pp-ink);
+  color: rgba(255,255,255,.78);
+  padding-top: var(--pp-s-8);
+}
+.site-footer a { color: rgba(255,255,255,.78); text-decoration: none; }
+.site-footer a:hover { color: var(--pp-white); }
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: var(--pp-s-7);
+  padding-bottom: var(--pp-s-7);
+}
+.footer-col h4 {
+  color: var(--pp-white);
+  font-size: var(--pp-fs-lg);
+  margin-bottom: var(--pp-s-4);
+}
+.footer-col ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--pp-s-2); }
+.footer-col__logo { max-height: 52px; width: auto; margin-bottom: var(--pp-s-4); filter: brightness(0) invert(1); }
+.footer-col__tagline { font-size: var(--pp-fs-sm); color: rgba(255,255,255,.65); }
+
+.footer-bottom {
+  border-top: 1px solid rgba(255,255,255,.12);
+  padding-block: var(--pp-s-4);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--pp-s-3);
+  font-size: var(--pp-fs-sm);
+  color: rgba(255,255,255,.55);
+}
+
+/* =========================================================================
+   12. BLOCK EDITOR / GUTENBERG PASSTHROUGH
+   Keeps Preston's page content rendering sensibly in the_content().
+   ========================================================================= */
+
+.entry-content { max-width: var(--pp-max-narrow); margin-inline: auto; }
+.entry-content > * + * { margin-top: var(--pp-s-5); }
+.entry-content h2, .entry-content h3 { margin-top: var(--pp-s-6); }
+.entry-content .wp-block-image figcaption { font-size: var(--pp-fs-sm); color: var(--pp-muted); }
+
+/* =========================================================================
+   13. RESPONSIVE
+   ========================================================================= */
+
+@media (max-width: 840px) {
+  .primary-nav {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--pp-white);
+    border-bottom: 1px solid var(--pp-rule);
+    display: none;
+  }
+  .primary-nav.is-open { display: block; }
+  .primary-nav ul {
+    flex-direction: column;
+    gap: 0;
+  }
+  .primary-nav li { border-bottom: 1px solid var(--pp-rule); }
+  .primary-nav a {
+    display: block;
+    padding: var(--pp-s-4) var(--pp-gutter);
+    border-bottom: 0;
+  }
+  .nav-toggle { display: inline-flex; }
+
+  .footer-grid { grid-template-columns: 1fr; gap: var(--pp-s-6); }
+  .topbar__inner { flex-direction: column; gap: var(--pp-s-2); padding: var(--pp-s-3) 0; }
+}
+
+/* =========================================================================
+   14. ACCESSIBILITY
+   ========================================================================= */
+
+.screen-reader-text {
+  clip: rect(1px,1px,1px,1px);
+  position: absolute !important;
+  height: 1px; width: 1px; overflow: hidden;
+  word-wrap: normal !important;
+}
+
+:focus-visible {
+  outline: 3px solid var(--pp-blue);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  html { scroll-behavior: auto; }
+}
