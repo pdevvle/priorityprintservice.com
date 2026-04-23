@@ -956,22 +956,6 @@ function Panel({result,compact}){
           <div style={{fontSize:10,color:CC.light,marginTop:1}}>{sh.freeDeliveryBizDays}d · included</div>
         </div>
       </div>}
-      <div style={{padding:"14px 18px"}}>
-        <div style={ST.brkBar} aria-hidden="true">
-          {grouped.filter(r=>r.val>0).map((r,i)=>(
-            <div key={i} title={`${r.label}: $${r.val.toFixed(2)}`} style={{width:`${(r.val/brkDen)*100}%`,background:r.c,height:"100%"}}/>
-          ))}
-          {hasRush&&<div title={`Rush surcharge: $${sh.rushCost.toFixed(2)}`} style={{width:`${(sh.rushCost/brkDen)*100}%`,background:CK.rush,height:"100%"}}/>}
-        </div>
-        {grouped.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0"}}>
-          <div style={{display:"flex",alignItems:"center",gap:7}}><span style={{width:7,height:7,borderRadius:"50%",background:r.c}}/><span style={{fontSize:13,color:CC.mid}}>{r.label}</span></div>
-          <span style={{fontSize:13,fontWeight:600,color:r.val<0?CK.cyan:CC.dark}}>{r.val<0?"−":""}${Math.abs(r.val).toFixed(2)}</span>
-        </div>))}
-        {hasRush&&<div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderTop:`1px dashed ${CC.border}`,marginTop:4,paddingTop:8}}>
-          <div style={{display:"flex",alignItems:"center",gap:7}}><span style={{width:7,height:7,borderRadius:"50%",background:CK.rush}}/><span style={{fontSize:13,color:CC.mid}}>Rush Surcharge</span></div>
-          <span style={{fontSize:13,fontWeight:600,color:CK.rush}}>+${sh.rushCost.toFixed(2)}</span>
-        </div>}
-      </div>
       <details style={{borderTop:`1px solid ${CC.border}`}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
         <div style={{padding:"0 18px 14px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
           <span style={{fontSize:11.5,color:CC.light}}>{r.l}</span>
@@ -4341,11 +4325,10 @@ function App(){
 
         </div>
         {!mob&&<div style={{width:320,flexShrink:0}}>
-          <div style={{position:"sticky",top:18,marginBottom:10,zIndex:2}}>
+          <div style={{position:"sticky",top:18,zIndex:2,display:"flex",flexDirection:"column",gap:10}}>
             <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+            <Panel result={result}/>
           </div>
-          <Panel result={result}/>
-          <SpecSheet result={result} pages={sets[0]?.pages} sizeLabel={sizeLabel}/>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
