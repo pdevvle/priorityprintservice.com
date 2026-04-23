@@ -85,6 +85,7 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 
 ## Branch & Deploy
 
+- **Live site deploy branch:** `production` — Cloudways pulls this branch into `wp-content/plugins/pps-calculators/`. See `DEPLOYMENT.md` for the full GitHub ↔ Cloudways pipeline setup and day-to-day flow. Do NOT treat `production` like a working branch — merge only tested code.
 - **Pages source branch:** `pps-pricing-config` — GitHub Pages serves directly from the root of this branch. All calculator changes must be pushed here. No separate deploy step.
 - **`.nojekyll` is MANDATORY** on `pps-pricing-config`. Without it, Pages runs Jekyll, which silently breaks the build because the inline JSX/Babel inside the calculator HTML contains `{{ }}` that Jekyll tries to parse as Liquid templates. Symptom: your pushes never appear on the preview URL even though the file on GitHub looks correct. **Never delete `.nojekyll`.**
 - Do NOT push to `website` — it's unrelated to the preview.
