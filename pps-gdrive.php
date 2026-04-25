@@ -14,9 +14,17 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 // ═══════════════════════════════════════════════════════════════
 
 define( 'PPS_GDRIVE_CLIENT_ID',     '252905040113-l48t7hu7skhph823p6haavephfjk4qnq.apps.googleusercontent.com' );
-define( 'PPS_GDRIVE_CLIENT_SECRET', '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' );
 define( 'PPS_GDRIVE_PARENT_FOLDER', '1bIBOS7_CXfoE4ei7Y7MN9M-OUz_4fVeX' );
 define( 'PPS_GDRIVE_SCOPE',         'https://www.googleapis.com/auth/drive.file' );
+
+// Client secret: prefers PPS_GDRIVE_CLIENT_SECRET defined in wp-config.php,
+// falls back to the pps_gdrive_client_secret option set on the admin page.
+function pps_gdrive_client_secret() {
+    if ( defined( 'PPS_GDRIVE_CLIENT_SECRET' ) && PPS_GDRIVE_CLIENT_SECRET ) {
+        return PPS_GDRIVE_CLIENT_SECRET;
+    }
+    return (string) get_option( 'pps_gdrive_client_secret', '' );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // THUMBNAIL DIRECTORY
@@ -51,11 +59,17 @@ function pps_gdrive_get_access_token() {
         return false;
     }
 
+    $client_secret = pps_gdrive_client_secret();
+    if ( ! $client_secret ) {
+        error_log( 'PPS Drive: Client secret not configured. Define PPS_GDRIVE_CLIENT_SECRET in wp-config.php or set it on the Google Drive admin page.' );
+        return false;
+    }
+
     $response = wp_remote_post( 'https://oauth2.googleapis.com/token', array(
         'timeout' => 15,
         'body'    => array(
             'client_id'     => PPS_GDRIVE_CLIENT_ID,
-            'client_secret' => PPS_GDRIVE_CLIENT_SECRET,
+            'client_secret' => $client_secret,
             'refresh_token' => $refresh_token,
             'grant_type'    => 'refresh_token',
         ),
@@ -114,7 +128,8 @@ add_action( 'admin_menu', function() {
 function pps_gdrive_auth_page() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
 
-    $redirect_uri = admin_url( 'admin.php?page=pps-gdrive-auth' );
+    $redirect_uri    = admin_url( 'admin.php?page=pps-gdrive-auth' );
+    $secret_via_const = defined( 'PPS_GDRIVE_CLIENT_SECRET' ) && PPS_GDRIVE_CLIENT_SECRET;
 
     // Handle disconnect
     if ( isset( $_POST['pps_gdrive_disconnect'] ) ) {
@@ -125,50 +140,72 @@ function pps_gdrive_auth_page() {
         echo '<div class="notice notice-warning is-dismissible"><p>Google Drive disconnected.</p></div>';
     }
 
-    // Handle OAuth callback
-    if ( isset( $_GET['code'] ) && ! isset( $_POST['pps_gdrive_disconnect'] ) ) {
-        $code = sanitize_text_field( $_GET['code'] );
-
-        $response = wp_remote_post( 'https://oauth2.googleapis.com/token', array(
-            'timeout' => 15,
-            'body'    => array(
-                'code'          => $code,
-                'client_id'     => PPS_GDRIVE_CLIENT_ID,
-                'client_secret' => PPS_GDRIVE_CLIENT_SECRET,
-                'redirect_uri'  => $redirect_uri,
-                'grant_type'    => 'authorization_code',
-            ),
-        ) );
-
-        if ( is_wp_error( $response ) ) {
-            echo '<div class="notice notice-error"><p>OAuth error: ' . esc_html( $response->get_error_message() ) . '</p></div>';
+    // Handle client secret save (only when not set via wp-config.php)
+    if ( isset( $_POST['pps_gdrive_save_secret'] ) && ! $secret_via_const ) {
+        check_admin_referer( 'pps_gdrive_auth' );
+        $new_secret = isset( $_POST['pps_gdrive_client_secret'] ) ? trim( wp_unslash( $_POST['pps_gdrive_client_secret'] ) ) : '';
+        if ( $new_secret === '' ) {
+            delete_option( 'pps_gdrive_client_secret' );
+            echo '<div class="notice notice-warning is-dismissible"><p>Client secret cleared.</p></div>';
         } else {
-            $body = json_decode( wp_remote_retrieve_body( $response ), true );
+            update_option( 'pps_gdrive_client_secret', sanitize_text_field( $new_secret ), false );
+            echo '<div class="notice notice-success is-dismissible"><p>Client secret saved.</p></div>';
+        }
+    }
 
-            if ( ! empty( $body['refresh_token'] ) ) {
-                update_option( 'pps_gdrive_refresh_token', $body['refresh_token'], false );
+    $client_secret = pps_gdrive_client_secret();
 
-                if ( ! empty( $body['access_token'] ) ) {
-                    $expires = isset( $body['expires_in'] ) ? intval( $body['expires_in'] ) - 60 : 3500;
-                    set_transient( 'pps_gdrive_access_token', $body['access_token'], $expires );
+    // Handle OAuth callback
+    if ( isset( $_GET['code'] ) && ! isset( $_POST['pps_gdrive_disconnect'] ) && ! isset( $_POST['pps_gdrive_save_secret'] ) ) {
+        if ( ! $client_secret ) {
+            echo '<div class="notice notice-error"><p>OAuth error: Client secret is not configured. Add it below or define PPS_GDRIVE_CLIENT_SECRET in wp-config.php, then reconnect.</p></div>';
+            $code = '';
+        } else {
+            $code = sanitize_text_field( $_GET['code'] );
+        }
 
-                    // Get user email for display
-                    $info = wp_remote_get( 'https://www.googleapis.com/oauth2/v2/userinfo', array(
-                        'headers' => array( 'Authorization' => 'Bearer ' . $body['access_token'] ),
-                    ) );
-                    if ( ! is_wp_error( $info ) ) {
-                        $user = json_decode( wp_remote_retrieve_body( $info ), true );
-                        if ( ! empty( $user['email'] ) ) {
-                            update_option( 'pps_gdrive_user_email', $user['email'], false );
+        if ( $code ) {
+            $response = wp_remote_post( 'https://oauth2.googleapis.com/token', array(
+                'timeout' => 15,
+                'body'    => array(
+                    'code'          => $code,
+                    'client_id'     => PPS_GDRIVE_CLIENT_ID,
+                    'client_secret' => $client_secret,
+                    'redirect_uri'  => $redirect_uri,
+                    'grant_type'    => 'authorization_code',
+                ),
+            ) );
+
+            if ( is_wp_error( $response ) ) {
+                echo '<div class="notice notice-error"><p>OAuth error: ' . esc_html( $response->get_error_message() ) . '</p></div>';
+            } else {
+                $body = json_decode( wp_remote_retrieve_body( $response ), true );
+
+                if ( ! empty( $body['refresh_token'] ) ) {
+                    update_option( 'pps_gdrive_refresh_token', $body['refresh_token'], false );
+
+                    if ( ! empty( $body['access_token'] ) ) {
+                        $expires = isset( $body['expires_in'] ) ? intval( $body['expires_in'] ) - 60 : 3500;
+                        set_transient( 'pps_gdrive_access_token', $body['access_token'], $expires );
+
+                        // Get user email for display
+                        $info = wp_remote_get( 'https://www.googleapis.com/oauth2/v2/userinfo', array(
+                            'headers' => array( 'Authorization' => 'Bearer ' . $body['access_token'] ),
+                        ) );
+                        if ( ! is_wp_error( $info ) ) {
+                            $user = json_decode( wp_remote_retrieve_body( $info ), true );
+                            if ( ! empty( $user['email'] ) ) {
+                                update_option( 'pps_gdrive_user_email', $user['email'], false );
+                            }
                         }
                     }
-                }
 
-                echo '<div class="notice notice-success is-dismissible"><p><strong>Google Drive connected!</strong> Artwork uploads will now go to Drive automatically.</p></div>';
-            } elseif ( ! empty( $body['error'] ) ) {
-                echo '<div class="notice notice-error"><p>OAuth error: ' . esc_html( $body['error'] ) . ' — ' . esc_html( $body['error_description'] ?? '' ) . '</p></div>';
-            } else {
-                echo '<div class="notice notice-error"><p>No refresh token received. Try disconnecting and reconnecting with the "prompt=consent" flow.</p></div>';
+                    echo '<div class="notice notice-success is-dismissible"><p><strong>Google Drive connected!</strong> Artwork uploads will now go to Drive automatically.</p></div>';
+                } elseif ( ! empty( $body['error'] ) ) {
+                    echo '<div class="notice notice-error"><p>OAuth error: ' . esc_html( $body['error'] ) . ' — ' . esc_html( $body['error_description'] ?? '' ) . '</p></div>';
+                } else {
+                    echo '<div class="notice notice-error"><p>No refresh token received. Try disconnecting and reconnecting with the "prompt=consent" flow.</p></div>';
+                }
             }
         }
     }
@@ -183,14 +220,47 @@ function pps_gdrive_auth_page() {
         'prompt'        => 'consent',
     ) );
 
-    $connected = pps_gdrive_is_connected();
-    $email     = get_option( 'pps_gdrive_user_email', '' );
+    $connected     = pps_gdrive_is_connected();
+    $email         = get_option( 'pps_gdrive_user_email', '' );
+    $has_secret    = (bool) $client_secret;
+    $stored_secret = get_option( 'pps_gdrive_client_secret', '' );
 
     ?>
     <div class="wrap" style="max-width:600px">
         <h1>📁 Google Drive Integration</h1>
 
-        <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:24px;margin-top:16px">
+        <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:24px;margin-top:16px;margin-bottom:16px">
+            <h2 style="margin:0 0 8px;font-size:14px;color:#1d2327">OAuth Credentials</h2>
+            <p style="font-size:12px;color:#666;margin:0 0 12px">
+                Client ID: <code style="font-size:11px"><?php echo esc_html( PPS_GDRIVE_CLIENT_ID ); ?></code>
+            </p>
+            <?php if ( $secret_via_const ) : ?>
+                <p style="font-size:13px;color:#1d2327;margin:0">
+                    <span style="display:inline-block;width:8px;height:8px;background:#4ade80;border-radius:50%;margin-right:6px"></span>
+                    Client secret is managed via <code>PPS_GDRIVE_CLIENT_SECRET</code> in <code>wp-config.php</code>.
+                </p>
+            <?php else : ?>
+                <form method="post">
+                    <?php wp_nonce_field( 'pps_gdrive_auth' ); ?>
+                    <label for="pps_gdrive_client_secret" style="display:block;font-size:13px;font-weight:600;color:#1d2327;margin-bottom:4px">
+                        Client Secret
+                    </label>
+                    <input type="password" id="pps_gdrive_client_secret" name="pps_gdrive_client_secret"
+                        value="<?php echo esc_attr( $stored_secret ); ?>" autocomplete="new-password"
+                        style="width:100%;padding:6px 8px;font-family:monospace;font-size:12px;border:1px solid #ccd0d4;border-radius:3px"
+                        placeholder="GOCSPX-…">
+                    <p style="font-size:12px;color:#666;margin:6px 0 10px">
+                        Stored in the <code>pps_gdrive_client_secret</code> option. For better security, define
+                        <code>PPS_GDRIVE_CLIENT_SECRET</code> in <code>wp-config.php</code> instead — that takes precedence.
+                    </p>
+                    <button type="submit" name="pps_gdrive_save_secret" class="button button-secondary">
+                        Save Client Secret
+                    </button>
+                </form>
+            <?php endif; ?>
+        </div>
+
+        <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:24px">
             <?php if ( $connected ) : ?>
                 <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
                     <span style="width:12px;height:12px;background:#4ade80;border-radius:50%;display:inline-block"></span>
@@ -221,9 +291,19 @@ function pps_gdrive_auth_page() {
                 <p style="font-size:13px;color:#555;margin:0 0 16px">
                     Connect your Google account to automatically upload artwork to Drive when orders are placed.
                 </p>
-                <a href="<?php echo esc_url( $auth_url ); ?>" class="button button-primary" style="font-size:14px;padding:8px 24px;height:auto">
-                    🔗 Connect Google Drive
-                </a>
+                <?php if ( $has_secret ) : ?>
+                    <a href="<?php echo esc_url( $auth_url ); ?>" class="button button-primary" style="font-size:14px;padding:8px 24px;height:auto">
+                        🔗 Connect Google Drive
+                    </a>
+                <?php else : ?>
+                    <button type="button" class="button button-primary" disabled
+                        style="font-size:14px;padding:8px 24px;height:auto;opacity:0.5;cursor:not-allowed">
+                        🔗 Connect Google Drive
+                    </button>
+                    <p style="font-size:12px;color:#b32d2e;margin:8px 0 0">
+                        Set the OAuth client secret above before connecting.
+                    </p>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
     </div>
