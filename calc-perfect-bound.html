@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22b · PB-CHECKER-CTA</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22c · PB-HERO-PREVIEW</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1366,6 +1366,126 @@ function BookOpen3D({ pages, bookW, bookH, spread, scale, rotateX: rX, rotateY: 
   );
 }
 
+function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt,onOpenPreview}){
+  const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
+  const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
+  const maxDim=150, longSide=Math.max(wIn,hIn), px=maxDim/longSide;
+  const bookW=wIn*px, bookH=hIn*px;
+  const displayCover=coverMode==="same"?insidePaper:coverPaper;
+  const coverTone=displayCover?.tone||"#f7f3e8";
+  const inkColor=coverColor==="bw"?"#2b2b2b":CK.cyan;
+  const placeholder=useMemo(()=>{
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450" preserveAspectRatio="xMidYMid slice">
+<rect width="300" height="450" fill="${coverTone}"/>
+<rect x="36" y="58" width="110" height="4" fill="${inkColor}"/>
+<text x="36" y="140" font-family="Segoe UI, sans-serif" font-size="42" font-weight="800" fill="#2b2b2b" letter-spacing="-1">YOUR</text>
+<text x="36" y="186" font-family="Segoe UI, sans-serif" font-size="42" font-weight="800" fill="#2b2b2b" letter-spacing="-1">BOOKLET</text>
+<g transform="translate(36,372)">
+<circle cx="0" cy="0" r="6" fill="${CK.cyan}"/>
+<circle cx="18" cy="0" r="6" fill="${CK.magenta}"/>
+<circle cx="36" cy="0" r="6" fill="${CK.yellow}"/>
+<circle cx="54" cy="0" r="6" fill="${CK.key}"/>
+</g>
+<text x="36" y="412" font-family="Segoe UI, sans-serif" font-size="10" font-weight="600" fill="#555" letter-spacing="2">PRIORITY PRINT</text>
+</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  },[coverTone,inkColor]);
+  const backCover=useMemo(()=>{
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450">
+<rect width="300" height="450" fill="${coverTone}"/>
+<g transform="translate(150,220)">
+<rect x="-30" y="-30" width="60" height="60" fill="#fff" stroke="#2b2b2b" stroke-width="1.5"/>
+<rect x="-22" y="-22" width="44" height="44" fill="#2b2b2b"/>
+<rect x="-16" y="-16" width="4" height="4" fill="#fff"/><rect x="-8" y="-16" width="4" height="4" fill="#fff"/><rect x="0" y="-16" width="4" height="4" fill="#fff"/><rect x="12" y="-16" width="4" height="4" fill="#fff"/>
+<rect x="-16" y="-4" width="4" height="4" fill="#fff"/><rect x="0" y="-4" width="4" height="4" fill="#fff"/><rect x="8" y="-4" width="4" height="4" fill="#fff"/>
+<rect x="-16" y="4" width="4" height="4" fill="#fff"/><rect x="-8" y="4" width="4" height="4" fill="#fff"/><rect x="8" y="4" width="4" height="4" fill="#fff"/>
+<rect x="-16" y="12" width="4" height="4" fill="#fff"/><rect x="8" y="12" width="4" height="4" fill="#fff"/>
+</g>
+<text x="150" y="300" font-family="Segoe UI, sans-serif" font-size="9" font-weight="600" fill="#555" text-anchor="middle" letter-spacing="1">PRIORITYPRINTSERVICE.COM</text>
+</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  },[coverTone]);
+  const hasArt=!!coverArt;
+  const previewPages=useMemo(()=>[
+    {dataUrl:coverArt||placeholder,isBlank:false},
+    {dataUrl:backCoverArt||coverArt||backCover,isBlank:false},
+  ],[coverArt,backCoverArt,placeholder,backCover]);
+  const clickable=hasArt&&typeof onOpenPreview==="function";
+  return (
+    <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
+      <div className="bp-viewport"
+        role={clickable?"button":undefined} tabIndex={clickable?0:undefined}
+        onClick={clickable?onOpenPreview:undefined}
+        onKeyDown={clickable?(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onOpenPreview();}}:undefined}
+        title={clickable?"Open full preview":undefined}
+        style={{height:190,borderRadius:0,border:"none",cursor:clickable?"zoom-in":"default"}}>
+        <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
+        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={Math.max(2,Math.min(8,(pages||40)*0.06))} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
+        <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
+          <span style={{display:"inline-flex",gap:3}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:CK.cyan}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:CK.magenta}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:CK.yellow}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
+          </span>
+          <span>{hasArt?"YOUR ARTWORK · LIVE":"3D PREVIEW · LIVE"}</span>
+        </div>
+        {clickable&&<div style={{position:"absolute",top:10,right:12,fontSize:9,fontWeight:700,letterSpacing:".1em",color:"rgba(255,255,255,.75)",background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.18)",padding:"3px 7px",borderRadius:4,pointerEvents:"none"}}>OPEN ⤢</div>}
+        <div style={{position:"absolute",bottom:10,left:14,right:14,display:"flex",justifyContent:"space-between",fontSize:9.5,fontWeight:600,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:".08em",pointerEvents:"none"}}>
+          <span>{wIn}×{hIn}″</span>
+          <span>{pages}pp · {quantity.toLocaleString()} qty</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobilePreviewBar(props){
+  const {sizeLabel,pages,quantity,coverArt,onOpenPreview}=props;
+  const hostRef=useRef(null);
+  const [collapsed,setCollapsed]=useState(false);
+  useEffect(()=>{
+    const el=hostRef.current;
+    if(!el||typeof IntersectionObserver==="undefined")return;
+    const obs=new IntersectionObserver(([entry])=>{
+      setCollapsed(!entry.isIntersecting && entry.boundingClientRect.top < 0);
+    },{threshold:0,rootMargin:"0px 0px 0px 0px"});
+    obs.observe(el);
+    return ()=>obs.disconnect();
+  },[]);
+  const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
+  const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
+  const hasArt=!!coverArt;
+  const clickable=hasArt&&typeof onOpenPreview==="function";
+  return (
+    <>
+      <div ref={hostRef} style={{margin:"6px 10px 10px"}}>
+        <SidebarBookPreview {...props}/>
+      </div>
+      <div role={clickable?"button":undefined} tabIndex={clickable?0:undefined}
+        onClick={clickable?onOpenPreview:undefined}
+        onKeyDown={clickable?(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onOpenPreview();}}:undefined}
+        style={{position:"fixed",top:0,left:0,right:0,zIndex:45,transform:collapsed?"translateY(0)":"translateY(-110%)",transition:"transform .22s ease-out",background:"linear-gradient(135deg,#1a1d23,#2a2e36)",borderBottom:"1px solid rgba(255,255,255,.08)",boxShadow:"0 6px 18px rgba(0,0,0,.25)",padding:"7px 12px",display:"flex",alignItems:"center",gap:10,cursor:clickable?"pointer":"default",color:"#fff"}}>
+        <div style={{width:32,height:Math.max(24,Math.min(48,(32*hIn)/wIn)),borderRadius:3,overflow:"hidden",flexShrink:0,background:"#2a2e36",boxShadow:"0 0 0 1px rgba(255,255,255,.12)"}}>
+          {hasArt
+            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+            : <div style={{width:"100%",height:"100%",background:"linear-gradient(135deg,#e0edff,#f7f3e8)"}}/>}
+        </div>
+        <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:1}}>
+          <div style={{fontSize:8,fontWeight:700,letterSpacing:".12em",opacity:.6,textTransform:"uppercase"}}>{hasArt?"Your Artwork":"3D Preview"}</div>
+          <div style={{fontSize:12,fontWeight:700,letterSpacing:".01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{wIn}×{hIn}″ · {pages}pp · {quantity.toLocaleString()} qty</div>
+        </div>
+        <div style={{display:"inline-flex",gap:3,alignSelf:"center"}} aria-hidden="true">
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.cyan}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.magenta}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.yellow}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function InfoTip({ children, text, dark }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -1689,7 +1809,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2606,6 +2726,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
   const hasFile = rawPages.length >= 2 || rawPages.some(p => !p.isBlank);
   const PF = { pass: { dot: "#4ade80", text: "#3a7124" }, warn: { dot: "#fbbf24", text: "#b8860b" }, fail: { dot: "#f87171", text: "#c2185b" }, info: { dot: "#60a5fa", text: "#2563eb" } };
+
+  // Expose an imperative open-preview hook for the sidebar preview card.
+  useEffect(() => {
+    if (!openPreviewModalRef) return;
+    openPreviewModalRef.current = hasFile ? () => { setActiveModal("preview"); setPreviewMode("closed"); setRot({ x: -15, y: -25 }); } : null;
+    return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
+  }, [hasFile, openPreviewModalRef]);
 
   // ── Per-slot upload logic ──
   const slotInputRef = useRef(null);
@@ -3754,6 +3881,8 @@ function App(){
   const[shipAddr,setShipAddr]=useState({name:"",company:"",street1:"",street2:"",city:"",zip:""});
   const[needByDate,setNeedByDate]=useState("");
   const[coverArt,setCoverArt]=useState(null);
+  const[backCoverArt,setBackCoverArt]=useState(null);
+  const openPreviewModalRef=useRef(null);
   // Unified artwork file state — one variable, no priority logic
   // { type:"none" } | { type:"files", list:[File,...] } | { type:"existing", path:"/uploads/..." }
   const[artFiles,setArtFiles]=useState({type:"none"});
@@ -4048,8 +4177,31 @@ function App(){
           .pps-ship-box{font-size:10px!important}
         }
       `}</style>
+      {/* Hero header — eyebrow + display + tagline */}
+      <section style={{maxWidth:1180,margin:"0 auto",padding:mob?"18px 14px 6px":"34px 28px 18px"}}>
+        <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:mob?10:20}}>
+          <div style={{flex:"1 1 320px",minWidth:0}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:CK.magenta}}>Configure · Perfect-bound Booklet</div>
+            <h1 style={{fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",fontWeight:800,lineHeight:1,letterSpacing:"-0.02em",color:CC.dark,textTransform:"uppercase",margin:mob?"8px 0 0":"10px 0 0",maxWidth:720,fontSize:mob?28:44}}>
+              Perfect-bound Booklet<br/>
+              <span style={{color:CK.cyan}}>Instant Quote</span>
+            </h1>
+            <p style={{maxWidth:560,margin:mob?"10px 0 0":"14px 0 0",color:CC.mid,fontSize:mob?12.5:14,lineHeight:1.55}}>
+              Live pricing from our Phoenix floor. No RFQs, no sales calls — configure it, see the number, pick a delivery date.
+            </p>
+          </div>
+          {!mob&&<div style={{display:"inline-flex",gap:4,alignSelf:"flex-end",paddingBottom:8}} aria-hidden="true">
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.cyan,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.magenta,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.yellow,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.key,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+          </div>}
+        </div>
+      </section>
 
-      <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"10px 10px 140px":"18px 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
+      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+
+      <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
           {/* SECTION 1: Size */}
@@ -4212,6 +4364,7 @@ function App(){
                 onPagesDetected={(pg) => upSet(0, { pages: pg })}
                 onCoverArt={setCoverArt}
                 onArtwork={setArtFiles}
+                openPreviewModalRef={openPreviewModalRef}
                 onBleedDetected={(has) => { if(has) setBleed(0); else setBleed(1); }}
                 onSizeOverride={(w, h) => {
                   setSizeMode("custom"); setSizeLabel("Custom Size");
@@ -4448,7 +4601,8 @@ function App(){
           </table>
         </div>}
         </div>
-        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18}}>
+        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18,display:"flex",flexDirection:"column",gap:10}}>
+          <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
           <Panel result={result}/>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>

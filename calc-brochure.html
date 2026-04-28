@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22b · BR-CHECKER-CTA</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22c · BR-HERO-PREVIEW</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1040,17 +1040,134 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdg
 }
 
 
+// Sidebar brochure preview — flat sheet mockup with subtle perspective tilt.
+// Designed to mirror saddle stitch's SidebarBookPreview visual language: 190px viewport,
+// CMYK eyebrow, OPEN chip, size/qty caption.
+function SidebarBrochurePreview({ longEdge, shortEdge, quantity, panels, foldType, frontArt, frontColor, sides, onOpenPreview }){
+  const wIn = Number(longEdge) || 11;
+  const hIn = Number(shortEdge) || 8.5;
+  const maxDim = 150, longSide = Math.max(wIn, hIn), px = maxDim / longSide;
+  const sheetW = wIn * px, sheetH = hIn * px;
+  const inkColor = frontColor === "bw" ? "#2b2b2b" : CK.cyan;
+  const placeholder = useMemo(() => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" preserveAspectRatio="xMidYMid slice">
+<rect width="600" height="400" fill="#f7f3e8"/>
+<rect x="40" y="50" width="120" height="4" fill="${inkColor}"/>
+<text x="40" y="120" font-family="Segoe UI, sans-serif" font-size="36" font-weight="800" fill="#2b2b2b" letter-spacing="-1">YOUR</text>
+<text x="40" y="160" font-family="Segoe UI, sans-serif" font-size="36" font-weight="800" fill="#2b2b2b" letter-spacing="-1">BROCHURE</text>
+<g transform="translate(40,330)">
+<circle cx="0" cy="0" r="6" fill="${CK.cyan}"/>
+<circle cx="18" cy="0" r="6" fill="${CK.magenta}"/>
+<circle cx="36" cy="0" r="6" fill="${CK.yellow}"/>
+<circle cx="54" cy="0" r="6" fill="${CK.key}"/>
+</g>
+<text x="40" y="370" font-family="Segoe UI, sans-serif" font-size="11" font-weight="600" fill="#555" letter-spacing="2">PRIORITY PRINT</text>
+</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }, [inkColor]);
+  const hasArt = !!frontArt?.dataUrl;
+  const imgSrc = frontArt?.dataUrl || placeholder;
+  const grayFilter = frontColor === "bw" ? "grayscale(1)" : "none";
+  const clickable = hasArt && typeof onOpenPreview === "function";
+  return (
+    <div style={{ borderRadius: 6, border: `1px solid ${CC.border}`, overflow: "hidden", background: CC.white }}>
+      <div className="fold-viewport"
+        role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
+        onClick={clickable ? onOpenPreview : undefined}
+        onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenPreview(); } } : undefined}
+        title={clickable ? "Open full preview" : undefined}
+        style={{ height: 190, borderRadius: 0, border: "none", cursor: clickable ? "zoom-in" : "default", perspective: 1200 }}>
+        {/* drop shadow */}
+        <div style={{ position: "absolute", bottom: 22, width: "60%", height: 12, background: "radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)", filter: "blur(6px)", pointerEvents: "none" }} />
+        {/* Tilted sheet — gives it dimension without a full FoldRenderer */}
+        <div style={{ width: sheetW, height: sheetH, transform: "rotateX(-8deg) rotateY(22deg)", transformStyle: "preserve-3d", boxShadow: "0 12px 28px rgba(0,0,0,.4)", borderRadius: 2, overflow: "hidden", background: "#f7f3e8" }}>
+          <img src={imgSrc} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", filter: grayFilter }} />
+        </div>
+        {/* Top-left eyebrow */}
+        <div style={{ position: "absolute", top: 10, left: 14, display: "flex", alignItems: "center", gap: 6, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,.65)", letterSpacing: ".12em", pointerEvents: "none" }}>
+          <span style={{ display: "inline-flex", gap: 3 }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: CK.cyan }} />
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: CK.magenta }} />
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: CK.yellow }} />
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(255,255,255,.7)" }} />
+          </span>
+          <span>{hasArt ? "YOUR ARTWORK · LIVE" : "3D PREVIEW · LIVE"}</span>
+        </div>
+        {clickable && <div style={{ position: "absolute", top: 10, right: 12, fontSize: 9, fontWeight: 700, letterSpacing: ".1em", color: "rgba(255,255,255,.75)", background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", padding: "3px 7px", borderRadius: 4, pointerEvents: "none" }}>OPEN ⤢</div>}
+        {/* Bottom caption */}
+        <div style={{ position: "absolute", bottom: 10, left: 14, right: 14, display: "flex", justifyContent: "space-between", fontSize: 9.5, fontWeight: 600, color: "rgba(255,255,255,.6)", textTransform: "uppercase", letterSpacing: ".08em", pointerEvents: "none" }}>
+          <span>{wIn}×{hIn}″</span>
+          <span>{panels}-panel · {(quantity || 0).toLocaleString()} qty</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobilePreviewBar(props){
+  const {longEdge,shortEdge,quantity,panels,frontArt,onOpenPreview}=props;
+  const hostRef = useRef(null);
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(([entry]) => {
+      setCollapsed(!entry.isIntersecting && entry.boundingClientRect.top < 0);
+    }, { threshold: 0, rootMargin: "0px 0px 0px 0px" });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  const wIn = Number(longEdge) || 11, hIn = Number(shortEdge) || 8.5;
+  const hasArt = !!frontArt?.dataUrl;
+  const clickable = hasArt && typeof onOpenPreview === "function";
+  return (
+    <>
+      <div ref={hostRef} style={{ margin: "6px 10px 10px" }}>
+        <SidebarBrochurePreview {...props} />
+      </div>
+      <div role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
+        onClick={clickable ? onOpenPreview : undefined}
+        onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenPreview(); } } : undefined}
+        style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 45, transform: collapsed ? "translateY(0)" : "translateY(-110%)", transition: "transform .22s ease-out", background: "linear-gradient(135deg,#1a1d23,#2a2e36)", borderBottom: "1px solid rgba(255,255,255,.08)", boxShadow: "0 6px 18px rgba(0,0,0,.25)", padding: "7px 12px", display: "flex", alignItems: "center", gap: 10, cursor: clickable ? "pointer" : "default", color: "#fff" }}>
+        <div style={{ width: 32, height: Math.max(24, Math.min(48, (32 * hIn) / wIn)), borderRadius: 3, overflow: "hidden", flexShrink: 0, background: "#2a2e36", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }}>
+          {hasArt
+            ? <img src={frontArt.dataUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            : <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#e0edff,#f7f3e8)" }} />}
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+          <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".12em", opacity: .6, textTransform: "uppercase" }}>{hasArt ? "Your Artwork" : "3D Preview"}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{wIn}×{hIn}″ · {panels}-panel · {(quantity || 0).toLocaleString()} qty</div>
+        </div>
+        <div style={{ display: "inline-flex", gap: 3, alignSelf: "center" }} aria-hidden="true">
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CK.cyan }} />
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CK.magenta }} />
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CK.yellow }} />
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,.7)" }} />
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork }) {
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
   const bLabel = hasIO ? "Back / Inside" : "Back";
   const [frontArt, setFrontArt] = useState(null); // {dataUrl, file, dims:{w,h}}
   const [backArt, setBackArt] = useState(null);
+  // Push frontArt up to the parent so the sidebar preview can mirror it
+  useEffect(() => { if (onCoverArt) onCoverArt(frontArt); }, [frontArt, onCoverArt]);
+  // Expose imperative open-preview hook for the sidebar preview card
+  useEffect(() => {
+    if (!openPreviewModalRef) return;
+    openPreviewModalRef.current = frontArt ? () => setPreviewOpen(true) : null;
+    return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
+  }, [frontArt, openPreviewModalRef]);
   const [side, setSide] = useState("front"); // "front" | "back"
   const [foldFlipped, setFoldFlipped] = useState(false);
   const canFlip = panels > 1 && !["gate3","dgate4"].includes(foldType);
@@ -2405,6 +2522,8 @@ function App() {
   const [artEditPages, setArtEditPages] = useState(0);
   const [bleed, setBleed] = useState(0);
   const [proof, setProof] = useState(0);
+  const [coverArt, setCoverArt] = useState(null); // mirrors SheetPreview's frontArt for the sidebar preview
+  const openPreviewModalRef = useRef(null);
   const [proofAddrSame, setProofAddrSame] = useState(true);
   const [proofAddr, setProofAddr] = useState({name:"",street:"",city:"",state:"",zip:""});
   const [canvaLink, setCanvaLink] = useState("");
@@ -2520,7 +2639,31 @@ function App() {
     <div style={{ minHeight: "100vh", background: CC.bg, fontFamily: "'Segoe UI','Helvetica Neue',Arial,sans-serif", color: CC.dark }}>
       <style>{`@media(max-width:700px){.pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}.pps-sec-body{padding:12px 14px!important}}`}</style>
 
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "10px" : "20px 24px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
+      {/* Hero header — eyebrow + display + tagline */}
+      <section style={{maxWidth:1180,margin:"0 auto",padding:mob?"18px 14px 6px":"34px 28px 18px"}}>
+        <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:mob?10:20}}>
+          <div style={{flex:"1 1 320px",minWidth:0}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:CK.magenta}}>Configure · Brochure & Flat Print</div>
+            <h1 style={{fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",fontWeight:800,lineHeight:1,letterSpacing:"-0.02em",color:CC.dark,textTransform:"uppercase",margin:mob?"8px 0 0":"10px 0 0",maxWidth:720,fontSize:mob?28:44}}>
+              Brochures & Flat<br/>
+              <span style={{color:CK.cyan}}>Instant Quote</span>
+            </h1>
+            <p style={{maxWidth:560,margin:mob?"10px 0 0":"14px 0 0",color:CC.mid,fontSize:mob?12.5:14,lineHeight:1.55}}>
+              Live pricing from our Phoenix floor. No RFQs, no sales calls — configure it, see the number, pick a delivery date.
+            </p>
+          </div>
+          {!mob&&<div style={{display:"inline-flex",gap:4,alignSelf:"flex-end",paddingBottom:8}} aria-hidden="true">
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.cyan,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.magenta,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.yellow,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.key,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+          </div>}
+        </div>
+      </section>
+
+      {mob && <MobilePreviewBar longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "0 10px 140px" : "0 24px 80px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
@@ -2689,6 +2832,8 @@ function App() {
                     setShortEdge(parseFloat(short.toFixed(3)));
                   }}
                   onArtwork={(a) => {/* artFiles state if needed */}}
+                  onCoverArt={setCoverArt}
+                  openPreviewModalRef={openPreviewModalRef}
                 />
               </div>
             )}
@@ -2839,7 +2984,8 @@ function App() {
         </div>
 
         {/* Desktop sidebar */}
-        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18 }}>
+        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+          <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
           <Panel result={result} />
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
