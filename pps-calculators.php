@@ -1193,117 +1193,6 @@ add_filter( 'woocommerce_my_account_my_orders_actions', function( $actions, $ord
 }, 10, 2 );
 
 // ═══════════════════════════════════════════════════════════════
-// MY ACCOUNT: PRINT ORDERS DASHBOARD
-// ═══════════════════════════════════════════════════════════════
-
-add_action( 'init', function() {
-    add_rewrite_endpoint( 'print-orders', EP_ROOT | EP_PAGES );
-});
-
-add_filter( 'woocommerce_account_menu_items', function( $items ) {
-    $new = array();
-    $inserted = false;
-    foreach ( $items as $k => $v ) {
-        $new[ $k ] = $v;
-        if ( $k === 'orders' ) {
-            $new['print-orders'] = 'Print Orders';
-            $inserted = true;
-        }
-    }
-    if ( ! $inserted ) {
-        $new['print-orders'] = 'Print Orders';
-    }
-    return $new;
-});
-
-add_filter( 'woocommerce_endpoint_print-orders_title', function() {
-    return 'Print Orders';
-});
-
-add_action( 'woocommerce_account_print-orders_endpoint', 'pps_render_print_orders_endpoint' );
-
-function pps_render_print_orders_endpoint() {
-    $user_id = get_current_user_id();
-    if ( ! $user_id ) {
-        echo '<div class="pps-acct"><p>Please log in to view your print orders.</p></div>';
-        return;
-    }
-
-    $per_page = 10;
-    $raw_page = get_query_var( 'print-orders' );
-    $page = max( 1, (int) $raw_page );
-
-    $query = wc_get_orders( array(
-        'customer_id' => $user_id,
-        'limit'       => $per_page,
-        'paged'       => $page,
-        'orderby'     => 'date',
-        'order'       => 'DESC',
-        'type'        => 'shop_order',
-        'status'      => array_keys( wc_get_order_statuses() ),
-        'paginate'    => true,
-    ) );
-
-    $orders        = is_object( $query ) && isset( $query->orders ) ? $query->orders : array();
-    $total_orders  = is_object( $query ) && isset( $query->total ) ? (int) $query->total : count( $orders );
-    $max_num_pages = is_object( $query ) && isset( $query->max_num_pages ) ? (int) $query->max_num_pages : 1;
-
-    $buffer = '';
-    $rendered = 0;
-    foreach ( $orders as $order ) {
-        foreach ( $order->get_items() as $item ) {
-            $card = pps_render_pps_item_card( $item, $order, 'dashboard' );
-            if ( $card ) {
-                $buffer .= $card;
-                $rendered++;
-            }
-        }
-    }
-
-    $browse_url = wc_get_page_permalink( 'shop' );
-
-    echo '<div class="pps-acct">';
-    echo '<h2 class="h-page">Your Print Orders</h2>';
-    echo '<p class="h-sub">Re-order the same job, grab a proof, or check delivery.</p>';
-
-    if ( $rendered === 0 && $page === 1 ) {
-        echo '<div class="empty">';
-        echo '<span>No print orders yet.</span>';
-        if ( $browse_url ) {
-            echo '<a href="' . esc_url( $browse_url ) . '" class="btn btn-primary">Browse calculators</a>';
-        }
-        echo '</div>';
-        echo '</div>'; // .pps-acct
-        return;
-    }
-
-    echo $buffer; // already-escaped per-card
-
-    if ( $max_num_pages > 1 || $page > 1 ) {
-        $base = wc_get_page_permalink( 'myaccount' );
-        echo '<div class="pager">';
-        if ( $page > 1 ) {
-            echo '<a href="' . esc_url( wc_get_endpoint_url( 'print-orders', (string) ( $page - 1 ), $base ) ) . '">&larr; Previous</a>';
-        } else {
-            echo '<span class="disabled">&larr; Previous</span>';
-        }
-        echo '<span>Page ' . esc_html( (string) $page ) . ' of ' . esc_html( (string) max( 1, $max_num_pages ) );
-        if ( $total_orders > 0 ) {
-            echo ' &middot; ' . esc_html( (string) $total_orders ) . ' ' . ( $total_orders === 1 ? 'order' : 'orders' );
-        }
-        echo '</span>';
-        if ( $page < $max_num_pages ) {
-            echo '<a href="' . esc_url( wc_get_endpoint_url( 'print-orders', (string) ( $page + 1 ), $base ) ) . '">Next &rarr;</a>';
-        } else {
-            echo '<span class="disabled">Next &rarr;</span>';
-        }
-        echo '</div>';
-    }
-
-    echo '</div>'; // .pps-acct
-}
-
-// ═══════════════════════════════════════════════════════════════
 // GUEST ORDER LOOKUP (shortcode + handler)
 // ═══════════════════════════════════════════════════════════════
 
@@ -1651,7 +1540,6 @@ add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
 // ═══════════════════════════════════════════════════════════════
 
 function pps_should_load_acct_styles() {
-    if ( function_exists( 'is_account_page' ) && is_account_page() ) return true;
     if ( is_singular() ) {
         $post = get_post();
         if ( $post && has_shortcode( (string) $post->post_content, 'pps_order_lookup' ) ) return true;
@@ -1862,8 +1750,6 @@ register_activation_hook( __FILE__, function() {
     if ( ! get_option( 'pps_ups_zone_map' ) ) {
         pps_seed_zone_map();
     }
-    add_rewrite_endpoint( 'print-orders', EP_ROOT | EP_PAGES );
-    flush_rewrite_rules();
 });
 
 /**
