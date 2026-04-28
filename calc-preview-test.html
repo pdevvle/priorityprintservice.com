@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22b · SS-CHECKER-CTA</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22d · SS-LOUPE-FIX</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -3216,62 +3216,44 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           const bgW = magPos.cw * zoom, bgH = magPos.ch * zoom;
                           const bgX = -(magPos.pctX / 100 * bgW) + magSize / 2;
                           const bgY = -(magPos.pctY / 100 * bgH) + magSize / 2;
-                          // Helper: convert a container percentage to magnifier pixel position
-                          const toMX = (pct) => (pct / 100 * bgW) + bgX;
-                          const toMY = (pct) => (pct / 100 * bgH) + bgY;
-                          // Guide rectangles as {top,left,width,height} in magnifier pixels
-                          const magGuides = showGuides ? [
-                            { // Bleed — at container edge
-                              l: toMX(0), t: toMY(0), w: bgW, h: bgH,
-                              border: "2px dashed #ef4444", opacity: 0.8
-                            },
-                            { // Trim — inset by bleed
-                              l: toMX(bleedPctX), t: toMY(bleedPctY),
-                              w: (100 - bleedPctX * 2) / 100 * bgW,
-                              h: (100 - bleedPctY * 2) / 100 * bgH,
-                              border: "2px dashed #e2e8f0", opacity: 1
-                            },
-                            { // Safety — inset by bleed + safety
-                              l: toMX(safetyPctX), t: toMY(safetyPctY),
-                              w: (100 - safetyPctX * 2) / 100 * bgW,
-                              h: (100 - safetyPctY * 2) / 100 * bgH,
-                              border: "2px dashed #38a169", opacity: 1
-                            },
-                          ] : [];
-                          // Spine bar position
+                          const proofTx = getTx(proofIdx);
+                          const ed = effectiveDimsFor(artDims, proofTx.rotateSteps);
+                          const nativeW = ed ? ed.wIn / bleedW : (dims.w / bleedW);
+                          const cropStyle = (mult) => ({
+                            width: `${nativeW * mult * 100}%`, height: "auto",
+                            position: "absolute", top: "50%", left: "50%",
+                            transform: "translate(-50%, -50%)", display: "block", filter: gsFilter,
+                          });
                           const spineLeft = proofIdx % 2 === 0;
-                          const spineMX = toMX(spineLeft ? bleedPctX : (100 - bleedPctX));
-                          const spineMYtop = toMY(bleedPctY + 2);
-                          const spineMYbot = toMY(100 - bleedPctY - 2);
                           return (
                             <div style={{
                               position:"absolute", pointerEvents:"none", zIndex:10,
                               left: magPos.x - magSize / 2, top: magPos.y - magSize / 2,
                               width: magSize, height: magSize, borderRadius:"50%",
                               border:"3px solid rgba(255,255,255,.8)", boxShadow:"0 4px 20px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.3)",
-                              backgroundImage: `url(${imgSrc})`,
-                              backgroundSize: `${bgW}px ${bgH}px`,
-                              backgroundPosition: `${bgX}px ${bgY}px`,
-                              backgroundRepeat: "no-repeat",
-                              backgroundColor: "#1a1d23",
                               overflow: "hidden",
                             }}>
-                              {/* Guide lines inside magnifier */}
-                              {magGuides.map((g, gi) => (
-                                <div key={gi} style={{
-                                  position:"absolute", left:g.l, top:g.t, width:g.w, height:g.h,
-                                  border:g.border, opacity:g.opacity, boxSizing:"border-box", pointerEvents:"none",
-                                }}/>
-                              ))}
-                              {/* Spine inside magnifier */}
-                              {showGuides && (
-                                <div style={{
-                                  position:"absolute", left: spineMX - 1.5, top: spineMYtop,
-                                  width: 3, height: spineMYbot - spineMYtop,
-                                  background:"#3b82f6", borderRadius:1, pointerEvents:"none",
-                                }}/>
-                              )}
-                              {/* Crosshair */}
+                              {/* Bleed-zoomed proof viewport — mirrors the main proof container at zoom× scale */}
+                              <div className="bp-checker" style={{ position:"absolute", left: bgX, top: bgY, width: bgW, height: bgH, overflow: "hidden" }}>
+                                <img src={imgSrc} style={{
+                                  ...(proofTx.fitMode === "crop" ? cropStyle(1)
+                                    : proofTx.fitMode === "scale" ? cropStyle(proofTx.artScale / 100)
+                                    : proofTx.fitMode === "stretch" ? { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit:"fill", position:"absolute", inset:0 }
+                                    : { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit: proofTx.fitMode === "contain" ? "contain" : "cover" }
+                                  )
+                                }} />
+                                {showGuides && <>
+                                  {/* Bleed — red dashed at container edge */}
+                                  <div style={{ position:"absolute", inset:0, border:"2px dashed #ef4444", boxSizing:"border-box", opacity:0.8, pointerEvents:"none" }}/>
+                                  {/* Trim — light dashed inset by bleed (rounded corners if set) */}
+                                  <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2px dashed #e2e8f0", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
+                                  {/* Safety — green dashed further inset */}
+                                  <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2px dashed #38a169", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
+                                  {/* Spine — alternating per page parity for saddle stitch */}
+                                  <div style={{ position:"absolute", [spineLeft?"left":"right"]:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2, pointerEvents:"none" }}/>
+                                </>}
+                              </div>
+                              {/* Crosshair — anchored to lens centre */}
                               <div style={{ position:"absolute", left:"50%", top:0, bottom:0, width:1, background:"rgba(255,255,255,.3)", transform:"translateX(-50%)" }}/>
                               <div style={{ position:"absolute", top:"50%", left:0, right:0, height:1, background:"rgba(255,255,255,.3)", transform:"translateY(-50%)" }}/>
                             </div>
