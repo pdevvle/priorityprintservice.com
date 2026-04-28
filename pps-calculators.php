@@ -992,6 +992,41 @@ function pps_build_single_item_reorder_url( $order, $item ) {
     return wp_nonce_url( $url, 'pps_reorder_item_' . $order->get_id() . '_' . $item->get_id() );
 }
 
+function pps_status_to_pill_kind( $status ) {
+    $status = (string) $status;
+    if ( strpos( $status, 'wc-' ) === 0 ) $status = substr( $status, 3 );
+    switch ( $status ) {
+        case 'completed':
+            return 'delivered';
+        case 'cancelled':
+            return 'cancelled';
+        case 'refunded':
+            return 'refunded';
+        case 'failed':
+            return 'cancelled';
+        case 'pending':
+        case 'on-hold':
+        case 'processing':
+        default:
+            return 'processing';
+    }
+}
+
+function pps_get_order_refund_date( $order ) {
+    if ( ! $order ) return null;
+    if ( ! function_exists( 'wc_get_order_refunds' ) ) return null;
+    $refunds = wc_get_order_refunds( $order );
+    if ( empty( $refunds ) ) return null;
+    $latest = null;
+    foreach ( $refunds as $refund ) {
+        $d = $refund->get_date_created();
+        if ( $d && ( ! $latest || $d->getTimestamp() > $latest->getTimestamp() ) ) {
+            $latest = $d;
+        }
+    }
+    return $latest;
+}
+
 function pps_render_pps_item_card( $item, $order, $context = 'dashboard' ) {
     $metadata_json = $item->get_meta( '_pps_metadata' );
     $is_pps = (bool) $metadata_json;
@@ -1000,22 +1035,40 @@ function pps_render_pps_item_card( $item, $order, $context = 'dashboard' ) {
     if ( ! $is_pps ) {
         $product = wc_get_product( $item->get_product_id() );
         if ( ! $product || ! $product->exists() ) return '';
+    } else {
+        $product = wc_get_product( $item->get_product_id() );
     }
 
-    $summary         = $is_pps ? $item->get_meta( '_pps_summary' ) : '';
-    $delivery        = $is_pps ? $item->get_meta( '_pps_delivery_date' ) : '';
-    $thumb_name      = $is_pps ? $item->get_meta( '_pps_artwork_thumb' ) : '';
+    $product_url = ( $product && $product->exists() ) ? $product->get_permalink() : '';
+
+    $summary         = $is_pps ? (string) $item->get_meta( '_pps_summary' ) : '';
+    $delivery        = $is_pps ? (string) $item->get_meta( '_pps_delivery_date' ) : '';
+    $thumb_name      = $is_pps ? (string) $item->get_meta( '_pps_artwork_thumb' ) : '';
+    $rush            = $is_pps ? (float) $item->get_meta( '_pps_rush' ) : 0;
     $reorder         = $is_pps ? pps_build_reorder_url( $item ) : '';
     $legacy_reorder  = $is_pps ? '' : pps_build_single_item_reorder_url( $order, $item );
     $legacy_meta     = $is_pps ? array() : $item->get_formatted_meta_data( '' );
 
+    $status      = $order->get_status();
+    $is_inactive = in_array( $status, array( 'cancelled', 'refunded', 'failed' ), true );
+    $pill_kind   = pps_status_to_pill_kind( $status );
+    $status_lbl  = wc_get_order_status_name( $status );
+
     $delivery_pretty = '';
-    if ( $delivery ) {
+    if ( $delivery && ! $is_inactive ) {
         try {
             $d = new DateTime( $delivery );
             $delivery_pretty = $d->format( 'l, M j, Y' );
         } catch ( Exception $e ) {
             $delivery_pretty = $delivery;
+        }
+    }
+
+    $refund_pretty = '';
+    if ( $is_inactive ) {
+        $refund_dt = pps_get_order_refund_date( $order );
+        if ( $refund_dt ) {
+            $refund_pretty = wc_format_datetime( $refund_dt, get_option( 'date_format' ) );
         }
     }
 
@@ -1027,43 +1080,84 @@ function pps_render_pps_item_card( $item, $order, $context = 'dashboard' ) {
     $date_created = $order->get_date_created();
     $date_str = $date_created ? wc_format_datetime( $date_created, get_option( 'date_format' ) ) : '';
 
+    $card_classes = 'order-card';
+    if ( $is_inactive ) {
+        $card_classes .= ' cancelled';
+    } elseif ( ! $is_pps ) {
+        $card_classes .= ' legacy';
+    }
+
     ob_start();
     ?>
-    <div class="pps-order-card" style="margin:0 0 18px;padding:14px;background:#f0faff;border:1px solid #b8e0f5;border-radius:6px">
-        <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
-            <?php if ( $thumb_url ) : ?>
-                <div style="flex:0 0 auto">
-                    <img src="<?php echo esc_url( $thumb_url ); ?>" alt="Artwork preview" style="max-width:140px;max-height:140px;border:1px solid #ddd;border-radius:4px;background:#fff" />
-                </div>
-            <?php endif; ?>
-            <div style="flex:1 1 240px;min-width:0">
-                <h4 style="margin:0 0 6px;color:#007eff;font-size:16px"><?php echo esc_html( $item->get_name() ); ?></h4>
-                <p style="margin:0 0 4px;color:#555;font-size:13px">
-                    Order #<?php echo esc_html( $order->get_order_number() ); ?>
-                    <?php if ( $date_str ) : ?> &middot; <?php echo esc_html( $date_str ); ?><?php endif; ?>
-                    &middot; <?php echo esc_html( wc_get_order_status_name( $order->get_status() ) ); ?>
-                </p>
-                <?php if ( $delivery_pretty ) : ?>
-                    <p style="margin:0 0 4px;font-size:13px"><strong>Estimated delivery:</strong> <?php echo esc_html( $delivery_pretty ); ?></p>
-                <?php endif; ?>
-                <?php if ( $summary ) : ?>
-                    <pre style="background:#fff;padding:8px 10px;border:1px solid #ddd;border-radius:3px;font-size:12px;white-space:pre-wrap;margin:6px 0 8px;font-family:inherit"><?php echo esc_html( $summary ); ?></pre>
-                <?php elseif ( ! empty( $legacy_meta ) ) : ?>
-                    <div style="background:#fff;padding:8px 10px;border:1px solid #ddd;border-radius:3px;font-size:12px;margin:6px 0 8px">
-                        <?php foreach ( $legacy_meta as $m ) : ?>
-                            <div style="margin:0 0 2px"><strong><?php echo esc_html( wp_strip_all_tags( $m->display_key ) ); ?>:</strong> <?php echo esc_html( wp_strip_all_tags( $m->display_value ) ); ?></div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
-                <?php if ( $reorder ) : ?>
-                    <a href="<?php echo esc_url( $reorder ); ?>" style="display:inline-block;margin-top:4px;padding:6px 14px;background:#007eff;color:#fff;text-decoration:none;border-radius:4px;font-size:13px">Reorder</a>
-                <?php elseif ( $legacy_reorder ) : ?>
-                    <a href="<?php echo esc_url( $legacy_reorder ); ?>" style="display:inline-block;margin-top:4px;padding:6px 14px;background:#007eff;color:#fff;text-decoration:none;border-radius:4px;font-size:13px">Reorder (same as before)</a>
-                    <span style="display:inline-block;margin-left:8px;font-size:12px;color:#666">Specs can't be changed &mdash; contact us for edits.</span>
+    <article class="<?php echo esc_attr( $card_classes ); ?>">
+        <?php if ( $is_pps ) : ?>
+            <div class="oc-thumb">
+                <?php if ( $thumb_url ) : ?>
+                    <img src="<?php echo esc_url( $thumb_url ); ?>" alt="" loading="lazy" />
                 <?php endif; ?>
             </div>
+        <?php else : ?>
+            <div class="oc-thumb-empty" aria-hidden="true"></div>
+        <?php endif; ?>
+
+        <div class="oc-body">
+            <?php if ( $product_url ) : ?>
+                <a href="<?php echo esc_url( $product_url ); ?>" class="oc-title"><?php echo esc_html( $item->get_name() ); ?></a>
+            <?php else : ?>
+                <span class="oc-title"><?php echo esc_html( $item->get_name() ); ?></span>
+            <?php endif; ?>
+
+            <div class="oc-meta">
+                <span>Order #<?php echo esc_html( $order->get_order_number() ); ?></span>
+                <?php if ( $date_str ) : ?>
+                    <span class="dot">&middot;</span>
+                    <span><?php echo esc_html( $date_str ); ?></span>
+                <?php endif; ?>
+                <span class="dot">&middot;</span>
+                <span class="pill pill-<?php echo esc_attr( $pill_kind ); ?>"><?php echo esc_html( $status_lbl ); ?></span>
+                <?php if ( $rush > 0 ) : ?>
+                    <span class="pill pill-rush">Rush</span>
+                <?php endif; ?>
+            </div>
+
+            <?php if ( $is_inactive ) : ?>
+                <div class="oc-eta" style="color:var(--mid)">
+                    <?php if ( $refund_pretty ) : ?>
+                        Refunded on <?php echo esc_html( $refund_pretty ); ?> &middot; No further action needed.
+                    <?php else : ?>
+                        No further action needed.
+                    <?php endif; ?>
+                </div>
+            <?php elseif ( $delivery_pretty ) : ?>
+                <div class="oc-eta">Estimated delivery: <strong><?php echo esc_html( $delivery_pretty ); ?></strong></div>
+            <?php endif; ?>
+
+            <?php if ( $summary ) : ?>
+                <pre class="oc-specs"><?php echo esc_html( $summary ); ?></pre>
+            <?php elseif ( ! empty( $legacy_meta ) ) : ?>
+                <div class="oc-specs">
+                    <?php foreach ( $legacy_meta as $m ) : ?>
+                        <div><strong><?php echo esc_html( wp_strip_all_tags( $m->display_key ) ); ?>:</strong> <?php echo esc_html( wp_strip_all_tags( $m->display_value ) ); ?></div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
         </div>
-    </div>
+
+        <div class="oc-actions">
+            <?php if ( $is_inactive ) : ?>
+                <button type="button" class="btn btn-ghost" disabled style="opacity:.6;cursor:not-allowed">Reorder unavailable</button>
+            <?php elseif ( $reorder ) : ?>
+                <a href="<?php echo esc_url( $reorder ); ?>" class="btn btn-primary">Reorder</a>
+            <?php elseif ( $legacy_reorder ) : ?>
+                <a href="<?php echo esc_url( $legacy_reorder ); ?>" class="btn btn-primary">Reorder (same as before)</a>
+                <p class="oc-caveat">Specs can&rsquo;t be changed &mdash; contact us for edits.</p>
+            <?php endif; ?>
+
+            <?php if ( ! $is_inactive && $is_pps && $context === 'dashboard' ) : ?>
+                <a href="<?php echo esc_url( $order->get_view_order_url() ); ?>" class="btn-link" style="font-size:12px;font-weight:500">View details &rarr;</a>
+            <?php endif; ?>
+        </div>
+    </article>
     <?php
     return ob_get_clean();
 }
@@ -1131,7 +1225,7 @@ add_action( 'woocommerce_account_print-orders_endpoint', 'pps_render_print_order
 function pps_render_print_orders_endpoint() {
     $user_id = get_current_user_id();
     if ( ! $user_id ) {
-        echo '<p>Please log in to view your print orders.</p>';
+        echo '<div class="pps-acct"><p>Please log in to view your print orders.</p></div>';
         return;
     }
 
@@ -1139,7 +1233,7 @@ function pps_render_print_orders_endpoint() {
     $raw_page = get_query_var( 'print-orders' );
     $page = max( 1, (int) $raw_page );
 
-    $orders = wc_get_orders( array(
+    $query = wc_get_orders( array(
         'customer_id' => $user_id,
         'limit'       => $per_page,
         'paged'       => $page,
@@ -1147,7 +1241,12 @@ function pps_render_print_orders_endpoint() {
         'order'       => 'DESC',
         'type'        => 'shop_order',
         'status'      => array_keys( wc_get_order_statuses() ),
+        'paginate'    => true,
     ) );
+
+    $orders        = is_object( $query ) && isset( $query->orders ) ? $query->orders : array();
+    $total_orders  = is_object( $query ) && isset( $query->total ) ? (int) $query->total : count( $orders );
+    $max_num_pages = is_object( $query ) && isset( $query->max_num_pages ) ? (int) $query->max_num_pages : 1;
 
     $buffer = '';
     $rendered = 0;
@@ -1161,27 +1260,47 @@ function pps_render_print_orders_endpoint() {
         }
     }
 
+    $browse_url = wc_get_page_permalink( 'shop' );
+
+    echo '<div class="pps-acct">';
+    echo '<h2 class="h-page">Your Print Orders</h2>';
+    echo '<p class="h-sub">Re-order the same job, grab a proof, or check delivery.</p>';
+
     if ( $rendered === 0 && $page === 1 ) {
-        echo '<p>You haven\'t placed any print orders yet.</p>';
+        echo '<div class="empty">';
+        echo '<span>No print orders yet.</span>';
+        if ( $browse_url ) {
+            echo '<a href="' . esc_url( $browse_url ) . '" class="btn btn-primary">Browse calculators</a>';
+        }
+        echo '</div>';
+        echo '</div>'; // .pps-acct
         return;
     }
 
     echo $buffer; // already-escaped per-card
 
-    $has_next = count( $orders ) >= $per_page;
-    if ( $page > 1 || $has_next ) {
+    if ( $max_num_pages > 1 || $page > 1 ) {
         $base = wc_get_page_permalink( 'myaccount' );
-        echo '<div class="pps-pagination" style="margin-top:16px;display:flex;gap:12px;justify-content:space-between">';
+        echo '<div class="pager">';
         if ( $page > 1 ) {
             echo '<a href="' . esc_url( wc_get_endpoint_url( 'print-orders', (string) ( $page - 1 ), $base ) ) . '">&larr; Previous</a>';
         } else {
-            echo '<span></span>';
+            echo '<span class="disabled">&larr; Previous</span>';
         }
-        if ( $has_next ) {
+        echo '<span>Page ' . esc_html( (string) $page ) . ' of ' . esc_html( (string) max( 1, $max_num_pages ) );
+        if ( $total_orders > 0 ) {
+            echo ' &middot; ' . esc_html( (string) $total_orders ) . ' ' . ( $total_orders === 1 ? 'order' : 'orders' );
+        }
+        echo '</span>';
+        if ( $page < $max_num_pages ) {
             echo '<a href="' . esc_url( wc_get_endpoint_url( 'print-orders', (string) ( $page + 1 ), $base ) ) . '">Next &rarr;</a>';
+        } else {
+            echo '<span class="disabled">Next &rarr;</span>';
         }
         echo '</div>';
     }
+
+    echo '</div>'; // .pps-acct
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1233,8 +1352,8 @@ function pps_order_lookup_active_email() {
 add_shortcode( 'pps_order_lookup', 'pps_order_lookup_shortcode' );
 
 function pps_order_lookup_shortcode() {
-    $error  = '';
-    $notice = '';
+    $error_kind = '';
+    $notice     = '';
 
     if ( isset( $_POST['pps_lookup_signout'] ) ) {
         pps_order_lookup_revoke();
@@ -1247,9 +1366,9 @@ function pps_order_lookup_shortcode() {
         $honey = isset( $_POST['pps_lookup_hp'] ) ? sanitize_text_field( wp_unslash( $_POST['pps_lookup_hp'] ) ) : '';
 
         if ( $honey !== '' ) {
-            $error = "We couldn't find a matching order.";
+            $error_kind = 'mismatch';
         } elseif ( pps_order_lookup_is_rate_limited() ) {
-            $error = 'Too many attempts. Please try again later.';
+            $error_kind = 'rate';
         } else {
             pps_order_lookup_record_attempt();
 
@@ -1277,7 +1396,7 @@ function pps_order_lookup_shortcode() {
                 pps_order_lookup_grant( $matched_email );
                 $notice = 'Welcome back. Here are your print orders.';
             } else {
-                $error = "We couldn't find a matching order.";
+                $error_kind = 'mismatch';
             }
         }
     }
@@ -1287,39 +1406,73 @@ function pps_order_lookup_shortcode() {
     if ( $active_email ) {
         pps_order_lookup_render_orders( $active_email, $notice );
     } else {
-        pps_order_lookup_render_form( $error );
+        pps_order_lookup_render_form( $error_kind );
     }
     return ob_get_clean();
 }
 
-function pps_order_lookup_render_form( $error ) {
+function pps_order_lookup_render_banner( $kind ) {
+    if ( ! $kind ) return;
+    $is_rate = ( $kind === 'rate' );
     ?>
-    <div class="pps-order-lookup" style="max-width:520px">
-        <?php if ( $error ) : ?>
-            <div class="woocommerce-error" role="alert" style="margin-bottom:14px"><?php echo esc_html( $error ); ?></div>
-        <?php endif; ?>
-        <p>Enter your order details to view your print orders. All three fields must match.</p>
-        <form method="post">
-            <?php wp_nonce_field( 'pps_order_lookup', 'pps_lookup_nonce' ); ?>
-            <p style="position:absolute;left:-10000px" aria-hidden="true">
-                <label>Leave blank <input type="text" name="pps_lookup_hp" value="" autocomplete="off" tabindex="-1" /></label>
-            </p>
-            <p>
-                <label for="pps_lookup_order">Order number</label><br>
-                <input type="text" id="pps_lookup_order" name="pps_lookup_order" inputmode="numeric" pattern="[0-9]*" required>
-            </p>
-            <p>
-                <label for="pps_lookup_email">Billing email</label><br>
-                <input type="email" id="pps_lookup_email" name="pps_lookup_email" required>
-            </p>
-            <p>
-                <label for="pps_lookup_date">Order date</label><br>
-                <input type="date" id="pps_lookup_date" name="pps_lookup_date" required>
-            </p>
-            <p>
-                <button type="submit" name="pps_lookup_submit" value="1" class="button">View my orders</button>
-            </p>
-        </form>
+    <div class="banner banner-error" role="alert">
+        <svg class="banner-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M8 4v5M8 11.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <div>
+            <?php if ( $is_rate ) : ?>
+                <strong>Too many attempts.</strong>
+                <div style="font-size:12px;margin-top:2px;color:var(--mid)">Please try again in 15 minutes.</div>
+            <?php else : ?>
+                <strong>We couldn&rsquo;t find a matching order.</strong>
+                <div style="font-size:12px;margin-top:2px;color:var(--mid)">Double-check the order number, billing email, and order date.</div>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}
+
+function pps_order_lookup_render_form( $error_kind = '' ) {
+    $err_class  = ( $error_kind === 'mismatch' ) ? ' has-error' : '';
+    $signin_url = wc_get_page_permalink( 'myaccount' );
+    ?>
+    <div class="pps-acct">
+        <div class="lookup-shell">
+            <p class="lookup-eyebrow">Guest order lookup</p>
+            <h2 class="lookup-title">Find your print orders</h2>
+
+            <form class="form" method="post" novalidate>
+                <?php pps_order_lookup_render_banner( $error_kind ); ?>
+
+                <p class="form-intro">Enter your order details to view your print orders. <strong style="color:var(--key)">All three fields must match.</strong></p>
+
+                <?php wp_nonce_field( 'pps_order_lookup', 'pps_lookup_nonce' ); ?>
+                <input class="honeypot" type="text" tabindex="-1" autocomplete="off" name="pps_lookup_hp" value="" aria-hidden="true" />
+
+                <div class="field<?php echo esc_attr( $err_class ); ?>">
+                    <label for="pps_lookup_order">Order number <span class="req">*</span></label>
+                    <input type="text" id="pps_lookup_order" name="pps_lookup_order" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 2204" required>
+                </div>
+
+                <div class="field<?php echo esc_attr( $err_class ); ?>">
+                    <label for="pps_lookup_email">Billing email <span class="req">*</span></label>
+                    <input type="email" id="pps_lookup_email" name="pps_lookup_email" placeholder="you@example.com" required>
+                </div>
+
+                <div class="field<?php echo esc_attr( $err_class ); ?>">
+                    <label for="pps_lookup_date">Order date <span class="req">*</span></label>
+                    <input type="date" id="pps_lookup_date" name="pps_lookup_date" required>
+                    <span class="field-hint">The date the order was placed.</span>
+                </div>
+
+                <button type="submit" name="pps_lookup_submit" value="1" class="btn btn-primary btn-submit">View my orders</button>
+
+                <?php if ( $signin_url ) : ?>
+                    <p class="form-foot">Have an account? <a href="<?php echo esc_url( $signin_url ); ?>">Sign in</a> for the full dashboard.</p>
+                <?php endif; ?>
+            </form>
+        </div>
     </div>
     <?php
 }
@@ -1345,23 +1498,27 @@ function pps_order_lookup_render_orders( $email, $notice ) {
             }
         }
     }
+
+    $signin_url = wc_get_page_permalink( 'myaccount' );
     ?>
-    <div class="pps-order-lookup-results">
-        <?php if ( $notice ) : ?>
-            <div class="woocommerce-message" role="alert" style="margin-bottom:14px"><?php echo esc_html( $notice ); ?></div>
-        <?php endif; ?>
-        <p style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-            <span>Showing orders for <strong><?php echo esc_html( $email ); ?></strong></span>
-            <form method="post" style="margin:0">
-                <button type="submit" name="pps_lookup_signout" value="1" class="button" style="font-size:12px">Sign out of lookup</button>
-            </form>
-        </p>
-        <?php if ( $rendered === 0 ) : ?>
-            <p>You don't have any print orders on this account yet.</p>
-        <?php else : ?>
-            <?php echo $buffer; // already-escaped per-card ?>
-            <p style="font-size:13px;color:#666;margin-top:18px">Want to edit a pending order? Sign in to your account.</p>
-        <?php endif; ?>
+    <div class="pps-acct">
+        <div style="max-width:760px;margin:0 auto">
+            <div class="auth-strip">
+                <div>Showing orders for <strong><?php echo esc_html( $email ); ?></strong></div>
+                <form method="post" style="margin:0">
+                    <button type="submit" name="pps_lookup_signout" value="1" class="btn btn-ghost" style="padding:6px 12px;font-size:12px">Sign out of lookup</button>
+                </form>
+            </div>
+
+            <?php if ( $rendered === 0 ) : ?>
+                <div class="empty"><span>No print orders found for this email.</span></div>
+            <?php else : ?>
+                <?php echo $buffer; // already-escaped per-card ?>
+                <?php if ( $signin_url ) : ?>
+                    <p class="results-foot">Want to edit a pending order? <a href="<?php echo esc_url( $signin_url ); ?>">Sign in to your account.</a></p>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
     </div>
     <?php
 }
@@ -1488,6 +1645,212 @@ add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
         }
     }
 }, 20 );
+
+// ═══════════════════════════════════════════════════════════════
+// ACCOUNT UI: SCOPED STYLES (My Account + /order-lookup/)
+// ═══════════════════════════════════════════════════════════════
+
+function pps_should_load_acct_styles() {
+    if ( function_exists( 'is_account_page' ) && is_account_page() ) return true;
+    if ( is_singular() ) {
+        $post = get_post();
+        if ( $post && has_shortcode( (string) $post->post_content, 'pps_order_lookup' ) ) return true;
+    }
+    return false;
+}
+
+add_action( 'wp_enqueue_scripts', function() {
+    if ( ! pps_should_load_acct_styles() ) return;
+    wp_register_style( 'pps-acct-ui', false, array(), PPS_CALC_VERSION );
+    wp_enqueue_style( 'pps-acct-ui' );
+    wp_add_inline_style( 'pps-acct-ui', pps_acct_ui_css() );
+});
+
+function pps_acct_ui_css() {
+    return <<<'CSS'
+.pps-acct {
+  --process-cyan: #007eff;
+  --process-cyan-light: #e0edff;
+  --process-cyan-dark: #0062c4;
+  --process-magenta: #d1246a;
+  --process-magenta-light: #fce8ef;
+  --process-yellow: #f0a830;
+  --process-yellow-light: #fef5e0;
+  --key: #2b2b2b;
+  --mid: #555;
+  --light: #999;
+  --bg: #f4f4f4;
+  --card-bg: #f0faff;
+  --card-border: #b8e0f5;
+  --border: #d8d8d8;
+  --white: #ffffff;
+  --error: #c25050;
+  --error-bg: #fbeded;
+  --font-ui: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-ui);
+  color: var(--key);
+  -webkit-font-smoothing: antialiased;
+}
+.pps-acct *, .pps-acct *::before, .pps-acct *::after { box-sizing: border-box; }
+
+.pps-acct .h-page { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; color: var(--key); margin: 0 0 6px; }
+.pps-acct .h-sub { color: var(--mid); font-size: 13px; margin: 0 0 22px; }
+
+.pps-acct .order-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 18px;
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  gap: 20px;
+  margin-bottom: 14px;
+  align-items: start;
+}
+.pps-acct .order-card.legacy { background: var(--white); border-color: var(--border); }
+.pps-acct .order-card.cancelled { background: var(--white); border-color: var(--border); opacity: 0.65; }
+
+.pps-acct .oc-thumb {
+  width: 140px; height: 140px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.pps-acct .oc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pps-acct .oc-thumb-empty { width: 140px; height: 140px; }
+
+.pps-acct .oc-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.pps-acct .oc-title { font-size: 16px; font-weight: 600; color: var(--process-cyan); margin: 0; text-decoration: none; }
+.pps-acct .oc-title:hover { text-decoration: underline; }
+.pps-acct .oc-meta { font-size: 13px; color: var(--mid); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pps-acct .oc-meta .dot { color: var(--light); }
+.pps-acct .oc-eta { font-size: 13px; color: var(--key); margin-top: 2px; }
+.pps-acct .oc-eta strong { font-weight: 600; }
+
+.pps-acct .oc-specs {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.6);
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--mid);
+  white-space: pre-wrap;
+}
+.pps-acct .order-card.legacy .oc-specs { background: var(--bg); }
+.pps-acct .oc-specs > div { margin: 0 0 2px; }
+.pps-acct .oc-specs strong { color: var(--key); font-weight: 600; }
+
+.pps-acct .oc-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; min-width: 160px; }
+
+.pps-acct .pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: 10px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+}
+.pps-acct .pill-processing { background: var(--process-cyan-light); color: var(--process-cyan-dark); }
+.pps-acct .pill-printing   { background: var(--process-yellow-light); color: #8a5e10; }
+.pps-acct .pill-shipped    { background: #e6f3e0; color: #4a7a2c; }
+.pps-acct .pill-delivered  { background: #e8e8e8; color: var(--mid); }
+.pps-acct .pill-rush       { background: var(--process-magenta-light); color: var(--process-magenta); }
+.pps-acct .pill-cancelled  { background: #f0e0e0; color: var(--error); }
+.pps-acct .pill-refunded   { background: #f0e0e0; color: var(--error); }
+
+.pps-acct .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 9px 16px; border-radius: 6px;
+  font-size: 13px; font-weight: 600;
+  border: 1px solid transparent; cursor: pointer; text-decoration: none; white-space: nowrap;
+  font-family: var(--font-ui);
+  transition: background .12s, border-color .12s, color .12s, box-shadow .12s;
+}
+.pps-acct .btn-primary { background: var(--process-cyan); color: var(--white); }
+.pps-acct .btn-primary:hover { background: var(--process-cyan-dark); color: var(--white); }
+.pps-acct .btn-primary:focus-visible { background: var(--process-cyan-dark); outline: 3px solid rgba(0,126,255,0.32); outline-offset: 1px; }
+.pps-acct .btn-ghost { background: transparent; color: var(--mid); border-color: var(--border); }
+.pps-acct .btn-ghost:hover { color: var(--key); border-color: var(--light); }
+.pps-acct .btn-link { background: none; border: none; color: var(--process-cyan); padding: 0; font-weight: 600; text-decoration: none; }
+.pps-acct .btn-link:hover { text-decoration: underline; }
+
+.pps-acct .oc-caveat { font-size: 11px; color: var(--light); text-align: right; max-width: 180px; line-height: 1.45; margin: 0; }
+
+.pps-acct .pager {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 18px 4px 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  font-size: 13px; color: var(--mid);
+}
+.pps-acct .pager a, .pps-acct .pager span { color: var(--mid); text-decoration: none; font-weight: 600; }
+.pps-acct .pager a:hover { color: var(--process-cyan); }
+.pps-acct .pager .disabled { color: var(--light); cursor: default; }
+
+.pps-acct .empty {
+  padding: 36px 4px;
+  font-size: 14px;
+  color: var(--mid);
+  display: flex; align-items: center; gap: 14px;
+}
+.pps-acct .empty .btn { margin-left: auto; }
+
+.pps-acct .form { background: var(--white); border: 1px solid var(--border); border-radius: 6px; padding: 24px; }
+.pps-acct .form-intro { font-size: 13px; color: var(--mid); margin: 0 0 18px; line-height: 1.55; }
+.pps-acct .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.pps-acct .field label { font-size: 12px; font-weight: 600; color: var(--key); }
+.pps-acct .field .req { color: var(--process-magenta); }
+.pps-acct .field input {
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: 4px;
+  font-size: 14px; font-family: var(--font-ui); background: var(--white); color: var(--key);
+  outline: none;
+}
+.pps-acct .field input:focus { border-color: var(--process-cyan); box-shadow: 0 0 0 3px rgba(0,126,255,0.18); }
+.pps-acct .field.has-error input { border-color: var(--error); }
+.pps-acct .field-hint { font-size: 11px; color: var(--light); }
+.pps-acct .honeypot { position: absolute; left: -9999px; width: 1px; height: 1px; }
+
+.pps-acct .banner { padding: 11px 13px; border-radius: 4px; font-size: 13px; margin-bottom: 16px; display: flex; align-items: flex-start; gap: 10px; }
+.pps-acct .banner-error { background: var(--error-bg); border: 1px solid #e8c5c5; color: var(--error); }
+.pps-acct .banner-error strong { font-weight: 700; }
+.pps-acct .banner-icon { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+
+.pps-acct .form-foot { margin-top: 6px; font-size: 12px; color: var(--light); text-align: center; }
+.pps-acct .form-foot a { color: var(--process-cyan); text-decoration: none; }
+.pps-acct .form-foot a:hover { text-decoration: underline; }
+
+.pps-acct .btn-submit { width: 100%; padding: 11px 16px; font-size: 14px; }
+
+.pps-acct .lookup-shell { max-width: 480px; margin: 0 auto; }
+.pps-acct .lookup-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--process-magenta); margin: 0 0 6px; }
+.pps-acct .lookup-title { font-size: 24px; font-weight: 700; margin: 0 0 18px; color: var(--key); }
+
+.pps-acct .auth-strip {
+  background: var(--white); border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 18px; font-size: 13px; color: var(--mid);
+  flex-wrap: wrap; gap: 10px;
+}
+.pps-acct .auth-strip strong { color: var(--key); font-weight: 600; }
+.pps-acct .results-foot { margin-top: 10px; font-size: 12px; color: var(--light); text-align: center; }
+.pps-acct .results-foot a { color: var(--process-cyan); text-decoration: none; }
+.pps-acct .results-foot a:hover { text-decoration: underline; }
+
+@media (max-width: 639px) {
+  .pps-acct .order-card { grid-template-columns: 96px 1fr; padding: 14px; gap: 14px; }
+  .pps-acct .oc-thumb,
+  .pps-acct .oc-thumb-empty { width: 96px; height: 96px; }
+  .pps-acct .oc-actions { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; min-width: 0; gap: 12px; }
+  .pps-acct .oc-actions .btn { flex: 1; }
+  .pps-acct .oc-caveat { max-width: none; text-align: left; }
+  .pps-acct .h-page { font-size: 22px; }
+  .pps-acct .lookup-title { font-size: 20px; }
+  .pps-acct .lookup-shell { max-width: 100%; }
+}
+CSS;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // ACTIVATION: CREATE UPLOAD DIRECTORY
