@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22d · PB-LOUPE-FIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22e · PB-SPINE-CALC</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -350,6 +350,54 @@ const COVER_SAME=_CFG.cover_same||{label:"Same as Inside Pages",val:0.001,days:0
 const COVER_SCORING_VALS=_CFG.cover_scoring_vals||[0.01,0.02,0.03,1.01,1.02,2.21,2.22,2.23,2.24,2.25];
 const _INV_NC=_CFG.inv_nc||[0.001,0.002,0.003], _INV_CS=_CFG.inv_cs||[0.01,0.02,0.03,1.01,1.02];
 const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_CS];
+
+// ── Spine math ──
+// Approximate caliper (inches per single sheet) inferred from the paper's label.
+// Uses standard book paper conversions: text grades round to ~0.0046", offset
+// runs slightly thicker, cardstock and points map directly to thousandths.
+function getPaperCaliper(paper) {
+  if (!paper || !paper.label) return 0.0046;
+  if (paper.caliper) return paper.caliper; // explicit override wins if present
+  const s = paper.label.toLowerCase();
+  // Point cardstock — direct mapping (12pt = 0.012", 14pt = 0.014", etc.)
+  const ptMatch = s.match(/(\d+)\s*pt/);
+  if (ptMatch) return parseInt(ptMatch[1], 10) / 1000;
+  // Cardstock weights
+  if (/cardstock|cover|c1s|c2s/.test(s)) {
+    if (/100lb/.test(s)) return 0.0085;
+    if (/80lb/.test(s)) return 0.0085;
+    if (/65lb/.test(s)) return 0.0070;
+    return 0.009;
+  }
+  // Text/offset weights
+  if (/100lb.*gloss/.test(s)) return 0.0036;
+  if (/100lb/.test(s)) return 0.0046;
+  if (/80lb.*offset/.test(s)) return 0.0050;
+  if (/80lb/.test(s)) return 0.0046;
+  if (/70lb/.test(s)) return 0.0048;
+  if (/60lb/.test(s)) return 0.0040;
+  if (/50lb/.test(s)) return 0.0033;
+  return 0.0046;
+}
+
+// Perfect bound spine thickness in inches.
+// pageCount counts ALL pages including the 4-page cover wrap; only the interior
+// leaves contribute to text caliper. The cover wraps both faces of the spine
+// plus a small glue allowance.
+function calcSpineInches({ pageCount, insidePaper, coverPaper, coverMode }) {
+  const interiorPages = Math.max(0, (pageCount || 0) - 4);
+  const textLeaves = interiorPages / 2;
+  const textCaliper = getPaperCaliper(insidePaper);
+  const cover = coverMode === "same" ? insidePaper : (coverPaper || insidePaper);
+  const coverCaliper = getPaperCaliper(cover);
+  const glueAllowance = 0.005;
+  return textLeaves * textCaliper + 2 * coverCaliper + glueAllowance;
+}
+function fmtSpine(inches) {
+  if (!inches || inches < 0.001) return "0″";
+  if (inches < 1) return `${(inches).toFixed(3)}″`;
+  return `${inches.toFixed(2)}″`;
+}
 // Combined paper lists: text weight first, then cardstock with suffix
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
 const isCardstockVal=v=>PAPERS_CS.some(p=>p.val===v);
@@ -1371,6 +1419,10 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
   const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
   const maxDim=150, longSide=Math.max(wIn,hIn), px=maxDim/longSide;
   const bookW=wIn*px, bookH=hIn*px;
+  // Real spine in pixels — scales with page count + paper caliper. Floor at 2px so
+  // very thin books still read as a book, not a flat sheet.
+  const spineInches=calcSpineInches({pageCount:pages,insidePaper,coverPaper,coverMode});
+  const spineWPx=Math.max(2,Math.round(spineInches*px));
   const displayCover=coverMode==="same"?insidePaper:coverPaper;
   const coverTone=displayCover?.tone||"#f7f3e8";
   const inkColor=coverColor==="bw"?"#2b2b2b":CK.cyan;
@@ -1420,7 +1472,7 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
         title={clickable?"Open full preview":undefined}
         style={{height:190,borderRadius:0,border:"none",cursor:clickable?"zoom-in":"default"}}>
         <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
-        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={Math.max(2,Math.min(8,(pages||40)*0.06))} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
+        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={spineWPx} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
         <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
           <span style={{display:"inline-flex",gap:3}}>
             <span style={{width:5,height:5,borderRadius:"50%",background:CK.cyan}}/>
@@ -1809,7 +1861,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, insidePaper, coverPaper, coverMode, coverWrap }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2579,8 +2631,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // Pixel dimensions
   const compactH = 160, pxPerInch = compactH / dims.h;
   const cBookW = Math.round(dims.w * pxPerInch), cBookH = compactH;
-  // Perfect bound spine: ~0.004" per text leaf + 0.06" for cover wrap. Scaled to preview pixels.
-  const spineInches = ((pageCount - 4) / 2) * 0.004 + 0.06;
+  // Perfect bound spine — uses paper caliper from the chosen inside / cover paper
+  const spineInches = calcSpineInches({ pageCount, insidePaper, coverPaper, coverMode });
   const spineW = Math.max(4, Math.round(spineInches * pxPerInch)), cScale = Math.min(1, 200 / ((cBookW + spineW) * 1.8));
   const exH = 360, exPPI = exH / dims.h;
   const exBookW = Math.round(dims.w * exPPI), exBookH = exH;
@@ -3864,6 +3916,8 @@ function App(){
   const[needByDate,setNeedByDate]=useState("");
   const[coverArt,setCoverArt]=useState(null);
   const[backCoverArt,setBackCoverArt]=useState(null);
+  const[coverWrap,setCoverWrap]=useState("separate"); // "separate" | "wraparound"
+  const[wraparoundCoverArt,setWraparoundCoverArt]=useState(null); // {dataUrl, file, dims} for wraparound mode
   const openPreviewModalRef=useRef(null);
   // Unified artwork file state — one variable, no priority logic
   // { type:"none" } | { type:"files", list:[File,...] } | { type:"existing", path:"/uploads/..." }
@@ -4255,6 +4309,30 @@ function App(){
                 : <div style={{...ST.f,marginTop:0}}><label style={ST.lbl}>&nbsp;</label><div style={{fontSize:14,color:CC.light,padding:"10px 0"}}>Uses same paper as inside pages</div></div>
               }
             </div>
+            <div style={ST.hr}/>
+            {/* Cover Layout — separate or wraparound. Wraparound expects a single wide image
+                (front + spine + back) sized to (2W + spine + bleed×2) × (H + bleed×2). */}
+            <div style={r2}>
+              <Pil label="Cover Layout" value={coverWrap} onChange={setCoverWrap} options={[{t:"Separate Front/Back",v:"separate"},{t:"Wraparound (front+spine+back)",v:"wraparound"}]}/>
+              <div style={{...ST.f,marginTop:0}}>
+                <label style={ST.lbl}>Spine Thickness <InfoTip text={<>Calculated from page count and paper caliper. Formula: <code>(interior leaves × text caliper) + (2 × cover caliper) + 0.005″ glue</code>. Used for the 3D preview, the print-ready PDF spine width, and to size wraparound covers.</>}/></label>
+                <div style={{fontSize:14,fontWeight:700,color:CC.dark,padding:"10px 0",fontVariantNumeric:"tabular-nums"}}>
+                  ≈ {fmtSpine(calcSpineInches({pageCount:sets[0]?.pages||0,insidePaper,coverPaper,coverMode}))}
+                </div>
+              </div>
+            </div>
+            {coverWrap==="wraparound" && (() => {
+              const spineIn = calcSpineInches({pageCount:sets[0]?.pages||0,insidePaper,coverPaper,coverMode});
+              const trimW = isCustom ? Math.max(customLong||0,customShort||0) : (parseFloat((sizeLabel.match(/([\d.]+)×/)||[])[1])||5.5);
+              const trimH = isCustom ? Math.min(customLong||0,customShort||0) : (parseFloat((sizeLabel.match(/×([\d.]+)/)||[])[1])||8.5);
+              const wrapW = (2*trimW + spineIn + 0.25).toFixed(3);
+              const wrapH = (trimH + 0.25).toFixed(3);
+              return (
+                <div style={{padding:"10px 12px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:5,marginTop:8,fontSize:11.5,color:"#1e40af",lineHeight:1.55}}>
+                  <strong style={{color:"#1e3a8a"}}>Wraparound cover dimensions</strong> — upload one image at <strong>{wrapW}″ × {wrapH}″</strong> (back panel + spine + front panel + 0.125″ bleed all around). The proof modal will show spine guides at the panel boundaries.
+                </div>
+              );
+            })()}
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
@@ -4343,6 +4421,7 @@ function App(){
                 sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir}
                 pageCount={sets[0]?.pages||8} roundCorner={roundCorner} insideColor={insideColor}
                 proof={proof} setProof={setProof}
+                insidePaper={insidePaper} coverPaper={coverPaper} coverMode={coverMode} coverWrap={coverWrap}
                 onPagesDetected={(pg) => upSet(0, { pages: pg })}
                 onCoverArt={setCoverArt}
                 onArtwork={setArtFiles}
