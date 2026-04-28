@@ -1027,7 +1027,7 @@ function pps_get_order_refund_date( $order ) {
     return $latest;
 }
 
-function pps_render_pps_item_card( $item, $order, $context = 'dashboard' ) {
+function pps_render_pps_item_card( $item, $order ) {
     $metadata_json = $item->get_meta( '_pps_metadata' );
     $is_pps = (bool) $metadata_json;
 
@@ -1090,11 +1090,9 @@ function pps_render_pps_item_card( $item, $order, $context = 'dashboard' ) {
     ob_start();
     ?>
     <article class="<?php echo esc_attr( $card_classes ); ?>">
-        <?php if ( $is_pps ) : ?>
+        <?php if ( $is_pps && $thumb_url ) : ?>
             <div class="oc-thumb">
-                <?php if ( $thumb_url ) : ?>
-                    <img src="<?php echo esc_url( $thumb_url ); ?>" alt="" loading="lazy" />
-                <?php endif; ?>
+                <img src="<?php echo esc_url( $thumb_url ); ?>" alt="" loading="lazy" />
             </div>
         <?php else : ?>
             <div class="oc-thumb-empty" aria-hidden="true"></div>
@@ -1151,10 +1149,6 @@ function pps_render_pps_item_card( $item, $order, $context = 'dashboard' ) {
             <?php elseif ( $legacy_reorder ) : ?>
                 <a href="<?php echo esc_url( $legacy_reorder ); ?>" class="btn btn-primary">Reorder (same as before)</a>
                 <p class="oc-caveat">Specs can&rsquo;t be changed &mdash; contact us for edits.</p>
-            <?php endif; ?>
-
-            <?php if ( ! $is_inactive && $is_pps && $context === 'dashboard' ) : ?>
-                <a href="<?php echo esc_url( $order->get_view_order_url() ); ?>" class="btn-link" style="font-size:12px;font-weight:500">View details &rarr;</a>
             <?php endif; ?>
         </div>
     </article>
@@ -1242,9 +1236,10 @@ add_shortcode( 'pps_order_lookup', 'pps_order_lookup_shortcode' );
 
 function pps_order_lookup_shortcode() {
     $error_kind = '';
-    $notice     = '';
 
-    if ( isset( $_POST['pps_lookup_signout'] ) ) {
+    if ( isset( $_POST['pps_lookup_signout'] )
+         && isset( $_POST['pps_lookup_signout_nonce'] )
+         && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['pps_lookup_signout_nonce'] ) ), 'pps_order_lookup_signout' ) ) {
         pps_order_lookup_revoke();
     }
 
@@ -1283,7 +1278,6 @@ function pps_order_lookup_shortcode() {
 
             if ( $ok ) {
                 pps_order_lookup_grant( $matched_email );
-                $notice = 'Welcome back. Here are your print orders.';
             } else {
                 $error_kind = 'mismatch';
             }
@@ -1293,7 +1287,7 @@ function pps_order_lookup_shortcode() {
     ob_start();
     $active_email = pps_order_lookup_active_email();
     if ( $active_email ) {
-        pps_order_lookup_render_orders( $active_email, $notice );
+        pps_order_lookup_render_orders( $active_email );
     } else {
         pps_order_lookup_render_form( $error_kind );
     }
@@ -1366,7 +1360,7 @@ function pps_order_lookup_render_form( $error_kind = '' ) {
     <?php
 }
 
-function pps_order_lookup_render_orders( $email, $notice ) {
+function pps_order_lookup_render_orders( $email ) {
     $orders = wc_get_orders( array(
         'billing_email' => $email,
         'limit'         => 20,
@@ -1380,7 +1374,7 @@ function pps_order_lookup_render_orders( $email, $notice ) {
     $rendered = 0;
     foreach ( $orders as $order ) {
         foreach ( $order->get_items() as $item ) {
-            $card = pps_render_pps_item_card( $item, $order, 'guest' );
+            $card = pps_render_pps_item_card( $item, $order );
             if ( $card ) {
                 $buffer .= $card;
                 $rendered++;
@@ -1395,6 +1389,7 @@ function pps_order_lookup_render_orders( $email, $notice ) {
             <div class="auth-strip">
                 <div>Showing orders for <strong><?php echo esc_html( $email ); ?></strong></div>
                 <form method="post" style="margin:0">
+                    <?php wp_nonce_field( 'pps_order_lookup_signout', 'pps_lookup_signout_nonce' ); ?>
                     <button type="submit" name="pps_lookup_signout" value="1" class="btn btn-ghost" style="padding:6px 12px;font-size:12px">Sign out of lookup</button>
                 </form>
             </div>
@@ -1536,7 +1531,7 @@ add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
 }, 20 );
 
 // ═══════════════════════════════════════════════════════════════
-// ACCOUNT UI: SCOPED STYLES (My Account + /order-lookup/)
+// ACCOUNT UI: SCOPED STYLES (loaded on pages with [pps_order_lookup])
 // ═══════════════════════════════════════════════════════════════
 
 function pps_should_load_acct_styles() {
