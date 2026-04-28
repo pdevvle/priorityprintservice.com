@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22e · PB-SPINE-CALC</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22f · PB-WRAPAROUND</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -3310,8 +3310,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                 const artW = ed ? ed.wIn : dims.w;
                 const artH = ed ? ed.hIn : dims.h;
                 const bleed = 0.125, safety = 0.125;
+                // Spine math drives wraparound geometry
+                const spineInchesNow = calcSpineInches({ pageCount, insidePaper, coverPaper, coverMode });
+                // Wraparound mode treats the cover page (idx 0) as a wide flat sheet:
+                // back panel + spine + front panel + bleed all around
+                const isWrapCover = coverWrap === "wraparound" && proofIdx === 0;
+                const trimW = isWrapCover ? (dims.w * 2 + spineInchesNow) : dims.w;
                 // Container is now bleed-inclusive size
-                const bleedW = dims.w + bleed * 2;
+                const bleedW = trimW + bleed * 2;
                 const bleedH = dims.h + bleed * 2;
                 // Guide positions as percentages of the bleed-inclusive container
                 const bleedPctX = (bleed / bleedW) * 100;  // trim inset from container edge
@@ -3408,7 +3414,11 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"rgba(255,255,255,.4)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>300 DPI</div>
                         )}
                         {/* Guide overlays — togglable */}
-                        {showGuides && !proofPage.isBlank && (
+                        {showGuides && !proofPage.isBlank && (() => {
+                          // Spine boundary positions in container % (only meaningful in wraparound)
+                          const spineLeftPct = isWrapCover ? ((bleed + dims.w) / bleedW) * 100 : null;
+                          const spineRightPct = isWrapCover ? ((bleed + dims.w + spineInchesNow) / bleedW) * 100 : null;
+                          return (
                           <div style={{ position:"absolute", inset:0, pointerEvents:"none", zIndex:1 }}>
                             {/* Bleed — red dashed at container edge (art must extend to here) */}
                             <div style={{ position:"absolute", inset:0, border:"2.5px dashed #ef4444", boxSizing:"border-box", opacity:0.8 }}/>
@@ -3416,11 +3426,22 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2.5px dashed #e2e8f0", boxSizing:"border-box", borderRadius:rcCSS }}/>
                             {/* Safety — green dashed further inset (keep text inside) */}
                             <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2.5px dashed #38a169", boxSizing:"border-box", borderRadius:rcCSS }}/>
-                            {/* Spine — perfect bound: binding edge always on left (glued spine) */}
-                            <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2 }}/>
-                            <div style={{ position:"absolute", left:`${bleedPctX + 1.2}%`, top:"50%", transform:"translateY(-50%) rotate(-90deg)", transformOrigin:"center center", fontSize:8, fontWeight:700, color:"#3b82f6", letterSpacing:".06em", whiteSpace:"nowrap", textTransform:"uppercase", opacity:0.7 }}>Spine</div>
+                            {isWrapCover ? <>
+                              {/* Wraparound spine boundaries — back panel | spine | front panel */}
+                              <div style={{ position:"absolute", left:`${spineLeftPct}%`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, background:"#3b82f6", boxShadow:"0 0 0 1px rgba(59,130,246,.2)" }}/>
+                              <div style={{ position:"absolute", left:`${spineRightPct}%`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, background:"#3b82f6", boxShadow:"0 0 0 1px rgba(59,130,246,.2)" }}/>
+                              {/* Panel labels */}
+                              <div style={{ position:"absolute", left:`${(bleedPctX + spineLeftPct)/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"rgba(255,255,255,.7)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Back</div>
+                              <div style={{ position:"absolute", left:`${(spineLeftPct + spineRightPct)/2}%`, top:"50%", transform:"translate(-50%, -50%) rotate(-90deg)", fontSize:9, fontWeight:700, color:"#3b82f6", letterSpacing:".08em", textTransform:"uppercase", whiteSpace:"nowrap", textShadow:"0 1px 2px rgba(0,0,0,.5)" }}>Spine · {fmtSpine(spineInchesNow)}</div>
+                              <div style={{ position:"absolute", left:`${(spineRightPct + (100 - bleedPctX))/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"rgba(255,255,255,.7)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Front</div>
+                            </> : <>
+                              {/* Spine — perfect bound: binding edge always on left (glued spine) */}
+                              <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2 }}/>
+                              <div style={{ position:"absolute", left:`${bleedPctX + 1.2}%`, top:"50%", transform:"translateY(-50%) rotate(-90deg)", transformOrigin:"center center", fontSize:8, fontWeight:700, color:"#3b82f6", letterSpacing:".06em", whiteSpace:"nowrap", textTransform:"uppercase", opacity:0.7 }}>Spine</div>
+                            </>}
                           </div>
-                        )}
+                          );
+                        })()}
                         {rcRadius > 0 && !proofPage.isBlank && (
                           <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, borderRadius:rcCSS, boxShadow:"0 0 0 200px rgba(0,0,0,0.15)", pointerEvents:"none", zIndex:0 }}/>
                         )}
