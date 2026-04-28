@@ -25,10 +25,33 @@
   @media(max-width:700px){
     select,input[type="text"],input[type="number"]{font-size:16px!important;padding:10px!important;min-height:44px!important}
   }
+  /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
+  .bp-checker{
+    background-color:#3a3e46;
+    background-image:
+      linear-gradient(45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(-45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#2a2e36 75%),
+      linear-gradient(-45deg,transparent 75%,#2a2e36 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0;
+  }
+  /* Approve Now CTA — strong call-to-action when art needs approval */
+  @keyframes bp-approve-pulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55),0 4px 14px rgba(239,68,68,.35)}
+    50%{box-shadow:0 0 0 6px rgba(239,68,68,0),0 4px 14px rgba(239,68,68,.35)}
+  }
+  .bp-approve-cta{
+    background:linear-gradient(135deg,#ef4444 0%,#dc2626 40%,#f87171 50%,#dc2626 60%,#b91c1c 100%) !important;
+    color:#fff !important;
+    text-shadow:0 1px 2px rgba(0,0,0,.25);
+    animation:bp-approve-pulse 2s ease-in-out infinite;
+  }
+  .bp-approve-cta:hover{filter:brightness(1.08)}
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22 · BR-PER-SIDE-TX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22b · BR-CHECKER-CTA</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1814,10 +1837,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                     setGeneratingPdf(false);
                     setGenProgress(null);
                   }
-                }} style={{
-                  padding: "5px 14px", fontSize: 11, fontWeight: 700, borderRadius: 4, cursor: generatingPdf ? "wait" : "pointer", fontFamily: "inherit",
-                  background: approved ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)" : "rgba(255,255,255,.04)",
-                  color: approved ? "#fff" : "#ef4444", border: approved ? "none" : "2px solid #ef4444",
+                }} className={!approved && !generatingPdf ? "bp-approve-cta" : ""} style={{
+                  padding: !approved ? "9px 22px" : "5px 14px",
+                  fontSize: !approved ? 13 : 11,
+                  fontWeight: 800, borderRadius: 4, cursor: generatingPdf ? "wait" : "pointer", fontFamily: "inherit", letterSpacing: ".04em", textTransform: "uppercase",
+                  background: approved ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)" : undefined,
+                  color: approved ? "#fff" : undefined,
+                  border: approved ? "none" : "2px solid #b91c1c",
                 }}>{generatingPdf && genProgress ? `${genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… ${genProgress.page}/${genProgress.totalPages}` : approved ? "✓ Approved" : "Approve Now"}</button>
                 <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} title="Magnifier loupe" style={{
                   padding: "5px 10px", fontSize: 12, border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
@@ -1877,7 +1903,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
 
           {/* Proof view — bleed-inclusive container like saddle stitch */}
           <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            <div ref={proofContainerRef} style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#1a1d23", borderRadius: 4, overflow: "hidden", cursor: showMagnifier ? "none" : "default", ...(draggingPerf !== null ? { touchAction: "none" } : {}) }}
+            <div ref={proofContainerRef} className="bp-checker" style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, borderRadius: 4, overflow: "hidden", cursor: showMagnifier ? "none" : "default", ...(draggingPerf !== null ? { touchAction: "none" } : {}) }}
               onPointerMove={handlePerfDrag}
               onPointerUp={() => setDraggingPerf(null)}
               onMouseMove={e => { if (!showMagnifier) return; const r = e.currentTarget.getBoundingClientRect(); const x = e.clientX - r.left; const y = e.clientY - r.top; setMagPos({ x, y, pctX: (x / r.width) * 100, pctY: (y / r.height) * 100, cw: r.width, ch: r.height }); }}
@@ -1898,7 +1924,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 const sideColor = side === "front" ? frontColor : backColor;
                 const grayFilter = sideColor === "bw" ? "grayscale(1)" : "none";
                 return (
-                  <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#2a2e36" }}>
+                  <div className="bp-checker" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
                     <img src={artSrc} style={{
                       filter: grayFilter,
                       ...(fitMode === "crop" ? cropStyle(1)
@@ -2044,7 +2070,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 const grayFilter = sideColor === "bw" ? "grayscale(1)" : "none";
                 return (
                   <div style={{ position: "absolute", left: lensX, top: lensY, width: lensSize, height: lensSize, borderRadius: "50%", overflow: "hidden", border: "2px solid rgba(255,255,255,.8)", boxShadow: "0 4px 20px rgba(0,0,0,.6)", pointerEvents: "none", zIndex: 10 }}>
-                    <div style={{ position: "absolute", inset: 0, background: "#2a2e36" }} />
+                    <div className="bp-checker" style={{ position: "absolute", inset: 0 }} />
                     <img src={imgSrc} style={{ position: "absolute", width: magPos.cw * zoom, height: magPos.ch * zoom, left: bgX, top: bgY, filter: grayFilter, objectFit: "fill" }} />
                     <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
                       {/* Bleed — red dashed at container edge */}
