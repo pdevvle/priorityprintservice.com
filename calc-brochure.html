@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22c · BR-HERO-PREVIEW</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22d · BR-LOUPE-FIX</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -2172,37 +2172,54 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 );
               })}
 
-              {/* Magnifier loupe — 3× zoom with guides & fold overlays */}
+              {/* Magnifier loupe — 3× zoom mirroring the proof viewport (same fit mode + same guide geometry) */}
               {showMagnifier && magPos && currentArt && (() => {
                 const lensSize = 160;
                 const zoom = 3;
                 const lensX = Math.max(8, Math.min(magPos.cw - lensSize - 8, magPos.x - lensSize / 2));
                 const lensY = Math.max(8, Math.min(magPos.ch - lensSize - 8, magPos.y - lensSize / 2));
-                const toMX = pct => (pct / 100) * magPos.cw * zoom;
-                const toMY = pct => (pct / 100) * magPos.ch * zoom;
                 const bgX = -(magPos.x * zoom - lensSize / 2);
                 const bgY = -(magPos.y * zoom - lensSize / 2);
                 const imgSrc = (hiResProof && hiResProof.dataUrl) || rotatedUrl || currentArt.dataUrl;
                 const sideColor = side === "front" ? frontColor : backColor;
                 const grayFilter = sideColor === "bw" ? "grayscale(1)" : "none";
+                const ed = effectiveDims;
+                const nativeW = ed ? ed.w / bleedW : 1;
+                const cropStyle = (mult) => ({
+                  width: `${nativeW * mult * 100}%`, height: "auto",
+                  position: "absolute", top: "50%", left: "50%",
+                  transform: "translate(-50%, -50%)", display: "block",
+                });
                 return (
                   <div style={{ position: "absolute", left: lensX, top: lensY, width: lensSize, height: lensSize, borderRadius: "50%", overflow: "hidden", border: "2px solid rgba(255,255,255,.8)", boxShadow: "0 4px 20px rgba(0,0,0,.6)", pointerEvents: "none", zIndex: 10 }}>
-                    <div className="bp-checker" style={{ position: "absolute", inset: 0 }} />
-                    <img src={imgSrc} style={{ position: "absolute", width: magPos.cw * zoom, height: magPos.ch * zoom, left: bgX, top: bgY, filter: grayFilter, objectFit: "fill" }} />
-                    <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                    {/* Bleed-zoomed proof viewport — mirrors the main proof container at zoom× scale, offset so the cursor point lands at the lens centre */}
+                    <div className="bp-checker" style={{ position: "absolute", left: bgX, top: bgY, width: magPos.cw * zoom, height: magPos.ch * zoom, overflow: "hidden" }}>
+                      <img src={imgSrc} style={{
+                        filter: grayFilter,
+                        ...(fitMode === "crop" ? cropStyle(1)
+                          : fitMode === "scale" ? cropStyle(artScale / 100)
+                          : fitMode === "stretch" ? { display: "block", width: "100%", height: "100%", objectFit: "fill", position: "absolute", inset: 0 }
+                          : { display: "block", width: "100%", height: "100%", objectFit: fitMode === "contain" ? "contain" : "cover" }
+                        )
+                      }} />
                       {/* Bleed — red dashed at container edge */}
-                      <div style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 - 1, top: -magPos.y * zoom + lensSize / 2 - 1, width: magPos.cw * zoom, height: magPos.ch * zoom, border: "1px dashed #ef4444", boxSizing: "border-box" }} />
-                      {/* Trim — white dashed */}
-                      <div style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 + toMX(bleedPctX), top: -magPos.y * zoom + lensSize / 2 + toMY(bleedPctY), width: toMX(100 - 2 * bleedPctX), height: toMY(100 - 2 * bleedPctY), border: "1px dashed rgba(255,255,255,.85)", boxSizing: "border-box" }} />
-                      {/* Safety — green dashed */}
-                      <div style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 + toMX(safetyPctX), top: -magPos.y * zoom + lensSize / 2 + toMY(safetyPctY), width: toMX(100 - 2 * safetyPctX), height: toMY(100 - 2 * safetyPctY), border: "1px dashed #38a169", boxSizing: "border-box" }} />
-                      {/* Fold lines — orange solid */}
-                      {foldLines.map((fl, i) => fl.vertical
-                        ? <div key={i} style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 + toMX(fl.pct), top: -magPos.y * zoom + lensSize / 2 + toMY(bleedPctY), width: 1, height: toMY(100 - 2 * bleedPctY), background: "#f97316" }} />
-                        : <div key={i} style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 + toMX(bleedPctX), top: -magPos.y * zoom + lensSize / 2 + toMY(fl.pct), width: toMX(100 - 2 * bleedPctX), height: 1, background: "#f97316" }} />
-                      )}
+                      <div style={{ position: "absolute", inset: 0, border: "1px dashed #ef4444", boxSizing: "border-box", pointerEvents: "none" }} />
+                      {/* Trim — white dashed, inset by bleed */}
+                      <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "1px dashed rgba(255,255,255,.85)", boxSizing: "border-box", pointerEvents: "none" }} />
+                      {/* Safety — green dashed, further inset */}
+                      <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "1px dashed #38a169", boxSizing: "border-box", pointerEvents: "none" }} />
+                      {/* Fold lines — orange solid, positioned relative to the trim window (same math as main proof view) */}
+                      {foldLines.map((fl, i) => (
+                        <div key={i} style={{
+                          position: "absolute", pointerEvents: "none",
+                          ...(fl.vertical
+                            ? { left: `${bleedPctX + (100 - bleedPctX * 2) * fl.pct / 100}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 1, background: "#f97316" }
+                            : { top: `${bleedPctY + (100 - bleedPctY * 2) * fl.pct / 100}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 1, background: "#f97316" }
+                          ),
+                        }} />
+                      ))}
                     </div>
-                    {/* Crosshair */}
+                    {/* Crosshair — anchored to lens centre */}
                     <div style={{ position: "absolute", top: 0, left: lensSize / 2, width: 1, height: lensSize, background: "rgba(255,255,255,.3)" }} />
                     <div style={{ position: "absolute", left: 0, top: lensSize / 2, width: lensSize, height: 1, background: "rgba(255,255,255,.3)" }} />
                   </div>
