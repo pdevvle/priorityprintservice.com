@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22i · PB-PERF-POS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22j · PB-PERF-YELLOW</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -3535,8 +3535,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                                 const hitW = mob ? 36 : 20;
                                 return (
                                   <React.Fragment key={i}>
-                                    <div style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:`2px dotted ${isDragging ? "#fb7185" : "#ec008c"}`, filter:`drop-shadow(0 0 ${isDragging ? 4 : 2}px rgba(236,0,140,.5))`, pointerEvents:"none" }}/>
-                                    <div style={{ position:"absolute", left:`${leftPct}%`, top:"50%", transform:`translate(${isRecto ? "8px" : "-100%"}, -50%) rotate(${isRecto ? -90 : 90}deg)`, transformOrigin:"left center", fontSize:8, fontWeight:700, color:"#ec008c", letterSpacing:".08em", whiteSpace:"nowrap", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.5)", pointerEvents:"none" }}>Perf {(perfPositions.length > 1 ? (i+1) + " · " : "")}{dIn}″</div>
+                                    <div style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:`2px dotted ${isDragging ? "#fde047" : "#facc15"}`, filter:`drop-shadow(0 0 ${isDragging ? 4 : 2}px rgba(250,204,21,.55))`, pointerEvents:"none" }}/>
+                                    <div style={{ position:"absolute", left:`${leftPct}%`, top:"50%", transform:`translate(${isRecto ? "8px" : "-100%"}, -50%) rotate(${isRecto ? -90 : 90}deg)`, transformOrigin:"left center", fontSize:8, fontWeight:700, color:"#facc15", letterSpacing:".08em", whiteSpace:"nowrap", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)", pointerEvents:"none" }}>Perf {(perfPositions.length > 1 ? (i+1) + " · " : "")}{dIn}″</div>
                                     {/* Drag hit zone — wider invisible band over the perf line */}
                                     <div
                                       title="Drag to reposition perforation"
@@ -3600,7 +3600,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                                       const isRecto = proofIdx % 2 === 0;
                                       const perfPct = ((bleed + dIn) / bleedW) * 100;
                                       const leftPct = isRecto ? perfPct : (100 - perfPct);
-                                      return <div key={i} style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:"2px dotted #ec008c", pointerEvents:"none" }}/>;
+                                      return <div key={i} style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:"2px dotted #facc15", pointerEvents:"none" }}/>;
                                     })
                                   }
                                 </>}
@@ -4560,8 +4560,8 @@ function App(){
             <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
             <Sel label="Perforation" badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
             {perfCount > 0 && (
-              <div style={{ marginTop:8, padding:"10px 12px", background:"rgba(236,0,140,.06)", border:"1px solid rgba(236,0,140,.18)", borderRadius:6 }}>
-                <div style={{ fontSize:10.5, fontWeight:700, color:"#ec008c", letterSpacing:".06em", textTransform:"uppercase", marginBottom:8 }}>Perforation Position</div>
+              <div style={{ marginTop:8, padding:"10px 12px", background:"rgba(250,204,21,.08)", border:"1px solid rgba(250,204,21,.28)", borderRadius:6 }}>
+                <div style={{ fontSize:10.5, fontWeight:700, color:"#b45309", letterSpacing:".06em", textTransform:"uppercase", marginBottom:8 }}>Perforation Position</div>
                 <div style={r2}>
                   {perfPositions.map((d, i) => (
                     <TxtNum key={i}
