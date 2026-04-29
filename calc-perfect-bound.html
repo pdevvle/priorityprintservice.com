@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22f · PB-WRAPAROUND</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22g · PB-PROOF-DEBUG</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1861,7 +1861,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, insidePaper, coverPaper, coverMode, coverWrap }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, insidePaper, coverPaper, coverMode, coverWrap, debug }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -3059,6 +3059,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               borderRight:`1px solid ${CC.border}`,
             }}>
               🔍 Proof {proof===0 && !artApproved && <span style={{ fontSize:9, fontWeight:700, background:"#fee2e2", color:"#dc2626", padding:"1px 6px", borderRadius:4 }}>required</span>}
+              {debug && <span title="Proof debug mode is on (?debug=1). The approval-package generator can be triggered without locking approval, and downloads stay visible after each generate." style={{ marginLeft:8, fontSize:9, fontWeight:700, background:"rgba(251,191,36,.18)", color:"#fbbf24", padding:"2px 8px", borderRadius:4, letterSpacing:".06em", textTransform:"uppercase", border:"1px solid rgba(251,191,36,.4)" }}>🔧 Debug</span>}
             </button>
             <button type="button" onClick={() => { setActiveModal("preview"); setPreviewMode("closed"); setRot({x:-15,y:-25}); }} style={{
               flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
@@ -3219,7 +3220,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
                   {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
                 </div>
-                {artApproved && approvalPkg && (() => {
+                {approvalPkg && (artApproved || debug) && (() => {
                   const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                   const dlFile = (blob, name) => {
                     if (!blob) return;
@@ -3357,6 +3358,23 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
                         color: showMagnifier ? "#3b82f6" : "rgba(255,255,255,.4)",
                       }}>🔍</button>
+                      {debug && <button type="button" disabled={generatingPdf} title="Debug: regenerate the approval package without locking approval" onClick={async () => {
+                        setGeneratingPdf(true);
+                        setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
+                        try {
+                          const pkg = await generateApprovalPackage();
+                          if (pkg && pkg.manifestBlob) setApprovalPkg(pkg);
+                        } catch (err) {
+                          console.error("Debug generate failed:", err);
+                          alert("Generation failed: " + (err.message || err));
+                        } finally {
+                          setGeneratingPdf(false);
+                          setGenProgress(null);
+                        }
+                      }} style={{
+                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(251,191,36,.4)", borderRadius:6, cursor: generatingPdf ? "wait" : "pointer", fontFamily:"inherit",
+                        background:"rgba(251,191,36,.12)", color:"#fbbf24",
+                      }}>🔧 {generatingPdf ? "Generating…" : "Generate"}</button>}
                       <div style={{ marginLeft:4, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
                         {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (
                           <button type="button" key={o.v} onClick={() => setProofView(o.v)} title={o.v === "single" ? "Single page view" : "Grid view — all pages"} style={{
@@ -3874,6 +3892,19 @@ function App(){
   const[showDebug,setShowDebug]=useState(false);
   const[shareCopied,setShareCopied]=useState(false);
   const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
+  // Proof-debug mode — toggled by `?debug=1` (or `pps_debug=1` in localStorage). When on,
+  // the proof modal exposes a "Generate Package" button that runs the approval generator
+  // without locking the approval state, and the TEST DOWNLOAD bar appears as soon as a
+  // package exists. Lets us iterate on transforms and re-download the deliverables for
+  // hands-on troubleshooting without committing to an order.
+  const proofDebug = useMemo(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get("debug") === "1") return true;
+      if (typeof localStorage !== "undefined" && localStorage.getItem("pps_debug") === "1") return true;
+    } catch {}
+    return false;
+  }, []);
 
   // Per-product defaults from admin config, then URL params override
   const D = (() => {
@@ -4447,6 +4478,7 @@ function App(){
                 onCoverArt={setCoverArt}
                 onArtwork={setArtFiles}
                 openPreviewModalRef={openPreviewModalRef}
+                debug={proofDebug}
                 onBleedDetected={(has) => { if(has) setBleed(0); else setBleed(1); }}
                 onSizeOverride={(w, h) => {
                   setSizeMode("custom"); setSizeLabel("Custom Size");

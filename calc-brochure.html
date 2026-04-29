@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22d · BR-LOUPE-FIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22g · BR-PROOF-DEBUG</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1153,7 +1153,7 @@ function MobilePreviewBar(props){
 // SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef }) {
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
@@ -1796,6 +1796,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
               border: `1px solid ${approved ? "#16a34a" : CC.border}`,
             }}>
               {approved ? "✓ Proof Approved" : "🔍 Proof"} {!approved && <span style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 4 }}>required</span>}
+              {debug && <span title="Proof debug mode is on (?debug=1)." style={{ marginLeft: 8, fontSize: 9, fontWeight: 700, background: "rgba(251,191,36,.18)", color: "#fbbf24", padding: "2px 8px", borderRadius: 4, letterSpacing: ".06em", textTransform: "uppercase", border: "1px solid rgba(251,191,36,.4)" }}>🔧 Debug</span>}
             </button>
             <div style={{ fontSize: 11, color: approved ? CC.light : "#b91c1c", lineHeight: 1.4 }}>Open proof to review bleed, trim, safety{panels > 1 ? ", fold lines" : ""} and approve artwork</div>
           </div>
@@ -1967,6 +1968,23 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                   background: showMagnifier ? CK.cyan : "rgba(255,255,255,.06)",
                   color: showMagnifier ? "#000" : "rgba(255,255,255,.5)",
                 }}>🔍</button>
+                {debug && <button type="button" disabled={generatingPdf} title="Debug: regenerate the approval package without locking approval" onClick={async () => {
+                  setGeneratingPdf(true);
+                  setGenProgress({ step: "starting", page: 0, totalPages: 2 });
+                  try {
+                    const pkg = await generateApprovalPackage();
+                    if (pkg && pkg.manifestBlob) setApprovalPkg(pkg);
+                  } catch (err) {
+                    console.error("Debug generate failed:", err);
+                    alert("Generation failed: " + (err.message || err));
+                  } finally {
+                    setGeneratingPdf(false);
+                    setGenProgress(null);
+                  }
+                }} style={{
+                  padding: "5px 10px", fontSize: 11, fontWeight: 700, border: "1px solid rgba(251,191,36,.4)", borderRadius: 4, cursor: generatingPdf ? "wait" : "pointer", fontFamily: "inherit",
+                  background: "rgba(251,191,36,.12)", color: "#fbbf24",
+                }}>🔧 {generatingPdf ? "Generating…" : "Generate"}</button>}
                 <button type="button" onClick={() => setProofOpen(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,.15)", color: "rgba(255,255,255,.5)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
               </div>
             </div>
@@ -1980,7 +1998,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 }}>↔ Match size to art</button>
               )}
             </div>
-            {approved && approvalPkg && (() => {
+            {approvalPkg && (approved || debug) && (() => {
               const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
               const sideNames = ["front", "back"];
               const dlFile = (blob, name) => {
@@ -2512,6 +2530,15 @@ function RichTip({ children, tipKey, title, content, dark }) {
 function App() {
   const mob = useIsMobile();
   const [op, setOp] = useState({ s1: true, s2: true, s3: false, s4: false, s5: false });
+  // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
+  const proofDebug = useMemo(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get("debug") === "1") return true;
+      if (typeof localStorage !== "undefined" && localStorage.getItem("pps_debug") === "1") return true;
+    } catch {}
+    return false;
+  }, []);
   const tog = k => setOp(p => ({ ...p, [k]: !p[k] }));
   const [showDebug, setShowDebug] = useState(false);
 
@@ -2851,6 +2878,7 @@ function App() {
                   onArtwork={(a) => {/* artFiles state if needed */}}
                   onCoverArt={setCoverArt}
                   openPreviewModalRef={openPreviewModalRef}
+                  debug={proofDebug}
                 />
               </div>
             )}
