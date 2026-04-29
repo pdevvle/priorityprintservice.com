@@ -44,6 +44,10 @@ if ( file_exists( PPS_CALC_DIR . 'pps-gdrive.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-gdrive.php';
 }
 
+if ( file_exists( PPS_CALC_DIR . 'pps-approval.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-approval.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
