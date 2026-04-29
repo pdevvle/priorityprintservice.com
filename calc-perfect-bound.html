@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22g · PB-PROOF-DEBUG</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22h · PB-PERF-LINE</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -410,6 +410,10 @@ const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,p
 // Perfect bound specific options
 const OUTFOLD_OPTS=_CFG.outfold_opts||[{label:"No Outfold",val:0,price:0},{label:"1 Fold-Out Page (Bifold)",val:1000,price:0.02},{label:"2 Fold-Out Pages (Bifold)",val:500,price:0.04}];
 const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.03,count:1},{label:"2 Perforation Lines",val:1000,price:0.03,count:2}];
+
+// Perforation runs alongside the spine on interior pages — typical tear-stub width
+// from the bind edge so coupons / pages tear cleanly without ripping the binding.
+const PERF_FROM_SPINE_INCHES = 0.375;
 
 // ═══════════════════════════════════════════════════════════════
 // SIZE + PRICING
@@ -1631,7 +1635,7 @@ function RichTip({ children, tipKey, title, content, dark }) {
 
 const PPS_LOGO_B64 = (window.PPS_CONFIG || {}).logoUrl || "";
 
-function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner) {
+function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner, perforation) {
   try {
     if (!window.jspdf) { alert("PDF library not loaded. Please refresh the page."); return; }
     const { jsPDF } = window.jspdf;
@@ -1704,6 +1708,23 @@ function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner) {
       pdf.setTextColor(59, 130, 246);
       var labelX = bleed - 0.06;
       pdf.text("SPINE / GLUE EDGE", labelX, bleed + trimH / 2, { angle: 90, align: "center" });
+
+      // Perforation line — bright magenta dotted, on interior pages only.
+      // Recto pages (even pg index, idx > 0) carry the spine on the LEFT, so the
+      // perf sits 0.375″ in from the left trim edge; verso pages (odd pg) mirror
+      // it to the right. Front/back covers (idx 0 and idx pageCount-1) skip.
+      var isInterior = pg > 0 && pg < pageCount - 1;
+      if (perforation && perforation > 0 && isInterior) {
+        var isRecto = pg % 2 === 0;
+        var perfX = isRecto ? (bleed + PERF_FROM_SPINE_INCHES) : (bleed + trimW - PERF_FROM_SPINE_INCHES);
+        pdf.setDrawColor(236, 0, 140); // bright magenta — distinct from bleed/trim/safety/spine
+        pdf.setLineWidth(0.012);
+        drawDashedLine(pdf, perfX, bleed + 0.05, perfX, bleed + trimH - 0.05, 0.04, 0.03);
+        // PERF label
+        pdf.setFontSize(5.5);
+        pdf.setTextColor(236, 0, 140);
+        pdf.text("PERFORATION", perfX + (isRecto ? 0.04 : -0.04), bleed + trimH / 2, { angle: isRecto ? 90 : -90, align: "center" });
+      }
 
       // Logo watermark — tiled step-repeat across the page within safety area
       var tileSize = Math.min(trimW * 0.18, 1.0); // each tile ~1" or 18% of trim width
@@ -1861,7 +1882,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, insidePaper, coverPaper, coverMode, coverWrap, debug }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, insidePaper, coverPaper, coverMode, coverWrap, perforation, debug }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2977,7 +2998,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   <div style={{ fontSize: 10, color: CC.light, marginTop: 2 }}>Drop a file or click to browse</div></>
             }
           </div>
-          <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner)} style={{
+          <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner, perforation)} style={{
             width: "100%", marginTop: 6, padding: "8px", borderRadius: 4, border: `1px dashed ${CC.border}`,
             background: "#fafafa", color: CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
           }}>📐 Download Artwork Template ({dims.w}×{dims.h}″ · {pageCount}pg)</button>
@@ -3014,7 +3035,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               📄 {fileName} · {filledCount}/{pageCount}pg
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner)} style={{
+              <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner, perforation)} style={{
                 padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CC.border}`, background: CC.white, color: CC.mid,
               }}>📐 Download Template</button>
@@ -3457,6 +3478,20 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                               <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2 }}/>
                               <div style={{ position:"absolute", left:`${bleedPctX + 1.2}%`, top:"50%", transform:"translateY(-50%) rotate(-90deg)", transformOrigin:"center center", fontSize:8, fontWeight:700, color:"#3b82f6", letterSpacing:".06em", whiteSpace:"nowrap", textTransform:"uppercase", opacity:0.7 }}>Spine</div>
                             </>}
+                            {/* Perforation — bright magenta dotted on interior pages near the spine when the perf
+                                add-on is enabled. Even idx (recto/front) → left; odd idx (verso/back) → right.
+                                Skip front cover (idx 0) and back cover (idx N-1). */}
+                            {perforation > 0 && proofIdx > 0 && proofIdx < displayPages.length - 1 && !isWrapCover && (() => {
+                              const isRecto = proofIdx % 2 === 0;
+                              const perfPct = ((bleed + PERF_FROM_SPINE_INCHES) / bleedW) * 100;
+                              const leftPct = isRecto ? perfPct : (100 - perfPct);
+                              return (
+                                <>
+                                  <div style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:"2px dotted #ec008c", filter:"drop-shadow(0 0 2px rgba(236,0,140,.5))" }}/>
+                                  <div style={{ position:"absolute", left:`${leftPct}%`, top:"50%", transform:`translate(${isRecto ? "8px" : "-100%"}, -50%) rotate(${isRecto ? -90 : 90}deg)`, transformOrigin:"left center", fontSize:8, fontWeight:700, color:"#ec008c", letterSpacing:".08em", whiteSpace:"nowrap", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.5)" }}>Perforation</div>
+                                </>
+                              );
+                            })()}
                           </div>
                           );
                         })()}
@@ -3504,6 +3539,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                                   <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2px dashed #38a169", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
                                   {/* Spine — perfect bound: always left */}
                                   <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2, pointerEvents:"none" }}/>
+                                  {/* Perforation — same rule as main view: interior pages only */}
+                                  {perforation > 0 && proofIdx > 0 && proofIdx < displayPages.length - 1 && (() => {
+                                    const isRecto = proofIdx % 2 === 0;
+                                    const perfPct = ((bleed + PERF_FROM_SPINE_INCHES) / bleedW) * 100;
+                                    const leftPct = isRecto ? perfPct : (100 - perfPct);
+                                    return <div style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:"2px dotted #ec008c", pointerEvents:"none" }}/>;
+                                  })()}
                                 </>}
                               </div>
                               {/* Crosshair — anchored to lens centre */}
@@ -4474,6 +4516,7 @@ function App(){
                 pageCount={sets[0]?.pages||8} roundCorner={roundCorner} insideColor={insideColor}
                 proof={proof} setProof={setProof}
                 insidePaper={insidePaper} coverPaper={coverPaper} coverMode={coverMode} coverWrap={coverWrap}
+                perforation={perforation}
                 onPagesDetected={(pg) => upSet(0, { pages: pg })}
                 onCoverArt={setCoverArt}
                 onArtwork={setArtFiles}
