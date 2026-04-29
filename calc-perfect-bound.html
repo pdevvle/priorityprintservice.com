@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22h · PB-PERF-LINE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22i · PB-PERF-POS</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -413,7 +413,26 @@ const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},
 
 // Perforation runs alongside the spine on interior pages — typical tear-stub width
 // from the bind edge so coupons / pages tear cleanly without ripping the binding.
+// Positions are stored as inches FROM the spine (bind edge) so the recto/verso
+// mirror logic stays direct — the proof / template handle the side-flip per parity.
 const PERF_FROM_SPINE_INCHES = 0.375;
+
+// Constrain a single perf position (inches from spine) so it stays inside the
+// page, away from the glue line, and at least 0.5″ from any sibling. Snaps to
+// the nearest 1/8″ to match brochure's perf granularity.
+function clampPerfFromSpine(inches, idx, trimW, positions) {
+  let minIn = 0.25;
+  let maxIn = (trimW || 100) - 0.25;
+  (positions || []).forEach((p, j) => {
+    if (j === idx) return;
+    if (inches < p) maxIn = Math.min(maxIn, p - 0.5);
+    else            minIn = Math.max(minIn, p + 0.5);
+  });
+  if (maxIn < minIn) maxIn = minIn;
+  const clamped = Math.max(minIn, Math.min(maxIn, inches));
+  const snapped = Math.round(clamped * 8) / 8;
+  return Math.max(minIn, Math.min(maxIn, snapped));
+}
 
 // ═══════════════════════════════════════════════════════════════
 // SIZE + PRICING
@@ -1635,7 +1654,7 @@ function RichTip({ children, tipKey, title, content, dark }) {
 
 const PPS_LOGO_B64 = (window.PPS_CONFIG || {}).logoUrl || "";
 
-function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner, perforation) {
+function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner, perforation, perfPositions) {
   try {
     if (!window.jspdf) { alert("PDF library not loaded. Please refresh the page."); return; }
     const { jsPDF } = window.jspdf;
@@ -1709,21 +1728,27 @@ function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner, perfo
       var labelX = bleed - 0.06;
       pdf.text("SPINE / GLUE EDGE", labelX, bleed + trimH / 2, { angle: 90, align: "center" });
 
-      // Perforation line — bright magenta dotted, on interior pages only.
-      // Recto pages (even pg index, idx > 0) carry the spine on the LEFT, so the
-      // perf sits 0.375″ in from the left trim edge; verso pages (odd pg) mirror
-      // it to the right. Front/back covers (idx 0 and idx pageCount-1) skip.
+      // Perforation lines — bright magenta dotted, on interior pages only.
+      // Recto pages (even pg index, idx > 0) carry the spine on the LEFT so the
+      // perf sits at (bleed + dIn) inches from the left edge; verso pages mirror
+      // each entry across the trim. Front/back covers (idx 0 and idx pageCount-1)
+      // skip. Loops over each perfPositions[i] so 2-line configs render both.
       var isInterior = pg > 0 && pg < pageCount - 1;
+      var perfPosList = (Array.isArray(perfPositions) && perfPositions.length) ? perfPositions : [PERF_FROM_SPINE_INCHES];
       if (perforation && perforation > 0 && isInterior) {
         var isRecto = pg % 2 === 0;
-        var perfX = isRecto ? (bleed + PERF_FROM_SPINE_INCHES) : (bleed + trimW - PERF_FROM_SPINE_INCHES);
-        pdf.setDrawColor(236, 0, 140); // bright magenta — distinct from bleed/trim/safety/spine
-        pdf.setLineWidth(0.012);
-        drawDashedLine(pdf, perfX, bleed + 0.05, perfX, bleed + trimH - 0.05, 0.04, 0.03);
-        // PERF label
-        pdf.setFontSize(5.5);
-        pdf.setTextColor(236, 0, 140);
-        pdf.text("PERFORATION", perfX + (isRecto ? 0.04 : -0.04), bleed + trimH / 2, { angle: isRecto ? 90 : -90, align: "center" });
+        for (var pi = 0; pi < perfPosList.length; pi++) {
+          var dIn = perfPosList[pi];
+          var perfX = isRecto ? (bleed + dIn) : (bleed + trimW - dIn);
+          pdf.setDrawColor(236, 0, 140); // bright magenta — distinct from bleed/trim/safety/spine
+          pdf.setLineWidth(0.012);
+          drawDashedLine(pdf, perfX, bleed + 0.05, perfX, bleed + trimH - 0.05, 0.04, 0.03);
+          // PERF label — include the index when there are multiple lines
+          pdf.setFontSize(5.5);
+          pdf.setTextColor(236, 0, 140);
+          var label = perfPosList.length > 1 ? ("PERFORATION " + (pi + 1)) : "PERFORATION";
+          pdf.text(label, perfX + (isRecto ? 0.04 : -0.04), bleed + trimH / 2, { angle: isRecto ? 90 : -90, align: "center" });
+        }
       }
 
       // Logo watermark — tiled step-repeat across the page within safety area
@@ -1882,7 +1907,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, insidePaper, coverPaper, coverMode, coverWrap, perforation, debug }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, insidePaper, coverPaper, coverMode, coverWrap, perforation, perfPositions, onPerfPositions, debug }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1907,6 +1932,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [showMagnifier, setShowMagnifier] = useState(false); // magnifier loupe active
   const [magPos, setMagPos] = useState(null); // {x, y, pctX, pctY} — cursor position on proof image
   const [hiResProof, setHiResProof] = useState(null); // {idx, dataUrl} — 300 DPI render of current proof page
+  const [draggingPerf, setDraggingPerf] = useState(null); // index of perf line being dragged in the proof, or null
+  const proofContainerRef = useRef(null); // bleed-inclusive proof container, used for the perf-drag math
   const pdfDocRef = useRef(null); // holds the pdf.js document for hi-res re-rendering
   const slotFilesRef = useRef({}); // { slotIndex: File } — original files for per-slot uploads
   const rawFileRef = useRef(null); // holds the original uploaded File for the raw deliverable
@@ -2998,7 +3025,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   <div style={{ fontSize: 10, color: CC.light, marginTop: 2 }}>Drop a file or click to browse</div></>
             }
           </div>
-          <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner, perforation)} style={{
+          <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner, perforation, perfPositions)} style={{
             width: "100%", marginTop: 6, padding: "8px", borderRadius: 4, border: `1px dashed ${CC.border}`,
             background: "#fafafa", color: CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
           }}>📐 Download Artwork Template ({dims.w}×{dims.h}″ · {pageCount}pg)</button>
@@ -3035,7 +3062,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               📄 {fileName} · {filledCount}/{pageCount}pg
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner, perforation)} style={{
+              <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner, perforation, perfPositions)} style={{
                 padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CC.border}`, background: CC.white, color: CC.mid,
               }}>📐 Download Template</button>
@@ -3352,6 +3379,19 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                 const rcPct = rcRadius > 0 ? ((rcRadius / artW) * 100).toFixed(2) + "%" : "0";
                 const rcCSS = rcRadius > 0 ? rcAll4 ? rcPct : `0 ${rcPct} ${rcPct} 0` : "0";
                 const hiResValid = hiResProof && hiResProof.idx === proofIdx && hiResProof.rotated === rotateSteps;
+                // Drag handler for perf lines — converts cursor x → inches from spine,
+                // mirroring across the trim for verso pages so dragging on either parity
+                // updates the same perfPositions[i] in absolute "from-spine" terms.
+                const handlePerfDrag = (e) => {
+                  if (draggingPerf == null || !proofContainerRef.current || !onPerfPositions) return;
+                  const rect = proofContainerRef.current.getBoundingClientRect();
+                  const cursorIn = (e.clientX - rect.left) / rect.width * bleedW;
+                  const isRecto = proofIdx % 2 === 0;
+                  const fromSpine = isRecto ? (cursorIn - bleed) : (bleed + dims.w - cursorIn);
+                  const next = (perfPositions || []).slice();
+                  next[draggingPerf] = clampPerfFromSpine(fromSpine, draggingPerf, dims.w, next);
+                  onPerfPositions(next);
+                };
                 return (
                   <div style={{ padding:"16px 20px" }}>
                     {/* Page nav with view toggle */}
@@ -3408,7 +3448,10 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                     </div>
                     {/* Proof image with guide overlays — container sized to include bleed area */}
                     <div style={{ maxWidth:520, margin:"0 auto" }}>
-                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "default" }}
+                      <div ref={proofContainerRef} className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "default", ...(draggingPerf != null ? { touchAction:"none" } : {}) }}
+                        onPointerMove={handlePerfDrag}
+                        onPointerUp={() => setDraggingPerf(null)}
+                        onPointerCancel={() => setDraggingPerf(null)}
                         onMouseMove={showMagnifier ? (e) => {
                           const r = e.currentTarget.getBoundingClientRect();
                           setMagPos({ x: e.clientX - r.left, y: e.clientY - r.top, pctX: (e.clientX - r.left) / r.width * 100, pctY: (e.clientY - r.top) / r.height * 100, cw: r.width, ch: r.height });
@@ -3480,18 +3523,30 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             </>}
                             {/* Perforation — bright magenta dotted on interior pages near the spine when the perf
                                 add-on is enabled. Even idx (recto/front) → left; odd idx (verso/back) → right.
-                                Skip front cover (idx 0) and back cover (idx N-1). */}
-                            {perforation > 0 && proofIdx > 0 && proofIdx < displayPages.length - 1 && !isWrapCover && (() => {
-                              const isRecto = proofIdx % 2 === 0;
-                              const perfPct = ((bleed + PERF_FROM_SPINE_INCHES) / bleedW) * 100;
-                              const leftPct = isRecto ? perfPct : (100 - perfPct);
-                              return (
-                                <>
-                                  <div style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:"2px dotted #ec008c", filter:"drop-shadow(0 0 2px rgba(236,0,140,.5))" }}/>
-                                  <div style={{ position:"absolute", left:`${leftPct}%`, top:"50%", transform:`translate(${isRecto ? "8px" : "-100%"}, -50%) rotate(${isRecto ? -90 : 90}deg)`, transformOrigin:"left center", fontSize:8, fontWeight:700, color:"#ec008c", letterSpacing:".08em", whiteSpace:"nowrap", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.5)" }}>Perforation</div>
-                                </>
-                              );
-                            })()}
+                                Skip front cover (idx 0) and back cover (idx N-1). Loops over each
+                                perfPositions[i] (inches from spine) so 2-line configurations render both.
+                                Each line carries a wider invisible hit zone for drag-to-reposition. */}
+                            {perforation > 0 && proofIdx > 0 && proofIdx < displayPages.length - 1 && !isWrapCover &&
+                              (perfPositions || []).map((dIn, i) => {
+                                const isRecto = proofIdx % 2 === 0;
+                                const perfPct = ((bleed + dIn) / bleedW) * 100;
+                                const leftPct = isRecto ? perfPct : (100 - perfPct);
+                                const isDragging = draggingPerf === i;
+                                const hitW = mob ? 36 : 20;
+                                return (
+                                  <React.Fragment key={i}>
+                                    <div style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:`2px dotted ${isDragging ? "#fb7185" : "#ec008c"}`, filter:`drop-shadow(0 0 ${isDragging ? 4 : 2}px rgba(236,0,140,.5))`, pointerEvents:"none" }}/>
+                                    <div style={{ position:"absolute", left:`${leftPct}%`, top:"50%", transform:`translate(${isRecto ? "8px" : "-100%"}, -50%) rotate(${isRecto ? -90 : 90}deg)`, transformOrigin:"left center", fontSize:8, fontWeight:700, color:"#ec008c", letterSpacing:".08em", whiteSpace:"nowrap", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.5)", pointerEvents:"none" }}>Perf {(perfPositions.length > 1 ? (i+1) + " · " : "")}{dIn}″</div>
+                                    {/* Drag hit zone — wider invisible band over the perf line */}
+                                    <div
+                                      title="Drag to reposition perforation"
+                                      onPointerDown={(e) => { e.preventDefault(); setDraggingPerf(i); try { e.target.setPointerCapture(e.pointerId); } catch {} }}
+                                      style={{ position:"absolute", left:`calc(${leftPct}% - ${hitW/2}px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:hitW, cursor:"col-resize", touchAction:"none", zIndex:6 }}
+                                    />
+                                  </React.Fragment>
+                                );
+                              })
+                            }
                           </div>
                           );
                         })()}
@@ -3539,13 +3594,15 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                                   <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2px dashed #38a169", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
                                   {/* Spine — perfect bound: always left */}
                                   <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2, pointerEvents:"none" }}/>
-                                  {/* Perforation — same rule as main view: interior pages only */}
-                                  {perforation > 0 && proofIdx > 0 && proofIdx < displayPages.length - 1 && (() => {
-                                    const isRecto = proofIdx % 2 === 0;
-                                    const perfPct = ((bleed + PERF_FROM_SPINE_INCHES) / bleedW) * 100;
-                                    const leftPct = isRecto ? perfPct : (100 - perfPct);
-                                    return <div style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:"2px dotted #ec008c", pointerEvents:"none" }}/>;
-                                  })()}
+                                  {/* Perforation — same rule as main view: interior pages only, loop over positions */}
+                                  {perforation > 0 && proofIdx > 0 && proofIdx < displayPages.length - 1 &&
+                                    (perfPositions || []).map((dIn, i) => {
+                                      const isRecto = proofIdx % 2 === 0;
+                                      const perfPct = ((bleed + dIn) / bleedW) * 100;
+                                      const leftPct = isRecto ? perfPct : (100 - perfPct);
+                                      return <div key={i} style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:"2px dotted #ec008c", pointerEvents:"none" }}/>;
+                                    })
+                                  }
                                 </>}
                               </div>
                               {/* Crosshair — anchored to lens centre */}
@@ -3971,6 +4028,11 @@ function App(){
       if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
       if (p.has("bundling") && _float(p.get("bundling")) != null) base.bundling = _float(p.get("bundling"));
       if (p.has("corner") && _float(p.get("corner")) != null) base.roundCorner = _float(p.get("corner"));
+      if (p.has("perf") && _float(p.get("perf")) != null) base.perforation = _float(p.get("perf"));
+      if (p.has("perfpos")) {
+        const arr = p.get("perfpos").split(",").map(s => parseFloat(s)).filter(n => !isNaN(n) && n > 0);
+        if (arr.length) base.perfPositions = arr.slice(0, 2);
+      }
       if (p.has("state")) base.shipState = p.get("state");
     } catch(e) {}
     return base;
@@ -3998,6 +4060,10 @@ function App(){
   const[roundCorner,setRoundCorner]=useState(Number(D.roundCorner)||0);
   const[outfold,setOutfold]=useState(Number(D.outfold)||0);
   const[perforation,setPerforation]=useState(Number(D.perforation)||0);
+  const[perfPositions,setPerfPositions]=useState(()=>{
+    if (Array.isArray(D.perfPositions) && D.perfPositions.length) return D.perfPositions.slice(0, 2);
+    return [PERF_FROM_SPINE_INCHES];
+  });
   const[artwork,setArtwork]=useState(Number(D.artwork)||0.01);
   const[artEditPages,setArtEditPages]=useState(Number(D.artEditPages)||0);
   const[bleed,setBleed]=useState(Number(D.bleed)||0);
@@ -4122,6 +4188,36 @@ function App(){
   // Keep lastPreset in sync when user changes the dropdown
   const handleSizeLabel=(v)=>{setSizeLabel(v);if(v!=="Custom Size")lastPreset.current=v;};
   const csOK=sets.every(s=>s.pages<=24);
+
+  // Trim width in App scope — used to clamp perfPositions when count or size changes.
+  const trimW = useMemo(() => {
+    if (sizeLabel === "Custom Size") {
+      const lo = Math.max(customLong || 0, customShort || 0);
+      const sh = Math.min(customLong || 0, customShort || 0);
+      return bindDir === "long" ? lo : sh;
+    }
+    const m = (sizeLabel || "").match(/([\d.]+)×([\d.]+)/);
+    return m ? parseFloat(m[1]) : 5.5;
+  }, [sizeLabel, customLong, customShort, bindDir]);
+
+  // Keep perfPositions valid when count, trim width, or peer positions change.
+  // Match the array length to the current count and clamp every entry through
+  // clampPerfFromSpine so the user can't end up with a stale invalid value.
+  const perfCount = useMemo(() => (PERF_OPTS.find(o => o.val === perforation)?.count) || 0, [perforation]);
+  useEffect(() => {
+    if (perfCount === 0) return;
+    setPerfPositions(prev => {
+      const out = prev.slice(0, perfCount);
+      while (out.length < perfCount) {
+        // Place subsequent perfs ~1.5″ further from the spine, clamped to fit
+        const seed = (out.length ? out[out.length - 1] + 1.5 : PERF_FROM_SPINE_INCHES);
+        out.push(seed);
+      }
+      const fixed = out.map((p, i) => clampPerfFromSpine(p, i, trimW, out));
+      const same = fixed.length === prev.length && fixed.every((v, i) => v === prev[i]);
+      return same ? prev : fixed;
+    });
+  }, [perfCount, trimW]);
 
   const shipZip=shipAddr.zip||"";
   const result=useMemo(()=>calculate({
@@ -4255,6 +4351,10 @@ function App(){
     if (coating > 0) p.set("coating", coating);
     if (bundling > 0) p.set("bundling", bundling);
     if (roundCorner > 0) p.set("corner", roundCorner);
+    if (perforation > 0) {
+      p.set("perf", perforation);
+      if (perfPositions && perfPositions.length) p.set("perfpos", perfPositions.slice(0, perfCount).join(","));
+    }
     if (shipState !== "AZ") p.set("state", shipState);
     if (sets[0].qty !== 100) p.set("qty", sets[0].qty);
     if (sets[0].pages !== 8) p.set("pages", sets[0].pages);
@@ -4459,6 +4559,31 @@ function App(){
             {/* Perfect bound specific addons */}
             <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
             <Sel label="Perforation" badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+            {perfCount > 0 && (
+              <div style={{ marginTop:8, padding:"10px 12px", background:"rgba(236,0,140,.06)", border:"1px solid rgba(236,0,140,.18)", borderRadius:6 }}>
+                <div style={{ fontSize:10.5, fontWeight:700, color:"#ec008c", letterSpacing:".06em", textTransform:"uppercase", marginBottom:8 }}>Perforation Position</div>
+                <div style={r2}>
+                  {perfPositions.map((d, i) => (
+                    <TxtNum key={i}
+                      label={`Perf ${i + 1} — ″ from spine`}
+                      value={d}
+                      min={0.25}
+                      max={Math.max(0.25, trimW - 0.25)}
+                      step={0.125}
+                      onChange={v => {
+                        setPerfPositions(prev => {
+                          const next = prev.slice();
+                          next[i] = clampPerfFromSpine(parseFloat(v) || 0, i, trimW, next);
+                          return next;
+                        });
+                      }}/>
+                  ))}
+                </div>
+                <div style={{ fontSize:10.5, color:CC.light, marginTop:6, lineHeight:1.5 }}>
+                  Inches from the bind edge. Recto pages mirror to the open edge automatically — drag the magenta line in the proof to reposition live.
+                </div>
+              </div>
+            )}
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
@@ -4516,7 +4641,7 @@ function App(){
                 pageCount={sets[0]?.pages||8} roundCorner={roundCorner} insideColor={insideColor}
                 proof={proof} setProof={setProof}
                 insidePaper={insidePaper} coverPaper={coverPaper} coverMode={coverMode} coverWrap={coverWrap}
-                perforation={perforation}
+                perforation={perforation} perfPositions={perfPositions} onPerfPositions={setPerfPositions}
                 onPagesDetected={(pg) => upSet(0, { pages: pg })}
                 onCoverArt={setCoverArt}
                 onArtwork={setArtFiles}
