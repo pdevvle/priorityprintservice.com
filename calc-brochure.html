@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · BR-GUIDES-LABEL</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · BR-GUIDES-PERF</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -2105,8 +2105,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 </div>
               ))}
 
-              {/* Perf lines (purple dashed, draggable) */}
-              {perfLines.map((pl) => {
+              {/* Perf lines (purple dashed, draggable) — togglable with the Guides button */}
+              {showGuides && perfLines.map((pl) => {
                 const bPct = pl.vertical ? bleedPctX : bleedPctY;
                 const pos = bPct + (100 - bPct * 2) * pl.pct / 100;
                 const trimDim = pl.vertical ? longEdge : shortEdge;
