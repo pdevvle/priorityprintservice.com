@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22k · PB-PROOF-CTA</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · PB-GUIDES-LABEL</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -3435,7 +3435,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
                         color: showGuides ? "#38a169" : "rgba(255,255,255,.4)",
-                      }}>{showGuides ? "Guides: Hide" : "Guides: Hidden"}</button>
+                      }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
                       <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
