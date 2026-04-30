@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22g · BR-PROOF-DEBUG</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · BR-GUIDES-LABEL</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1197,6 +1197,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const [genProgress, setGenProgress] = useState(null);
   const [showMagnifier, setShowMagnifier] = useState(false);
   const [magPos, setMagPos] = useState(null);
+  const [showGuides, setShowGuides] = useState(true); // toggle bleed/trim/safety/fold/perf overlays in proof
   const [hiResProof, setHiResProof] = useState(null);
 
   // Per-side transform helpers
@@ -1963,6 +1964,11 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                   color: approved ? "#fff" : undefined,
                   border: approved ? "none" : "2px solid #b91c1c",
                 }}>{generatingPdf && genProgress ? `${genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… ${genProgress.page}/${genProgress.totalPages}` : approved ? "✓ Approved" : "Approve Now"}</button>
+                <button type="button" onClick={() => setShowGuides(g => !g)} title="Toggle bleed / trim / safety / fold guides" style={{
+                  padding: "5px 10px", fontSize: 11, fontWeight: 600, border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                  background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
+                  color: showGuides ? "#38a169" : "rgba(255,255,255,.5)",
+                }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
                 <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} title="Magnifier loupe" style={{
                   padding: "5px 10px", fontSize: 12, border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                   background: showMagnifier ? CK.cyan : "rgba(255,255,255,.06)",
@@ -2072,15 +2078,18 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 );
               })()}
 
-              {/* Bleed guide (red dashed) — at container edge */}
-              <div style={{ position: "absolute", inset: 0, border: "2.5px dashed #ef4444", pointerEvents: "none", zIndex: 1, opacity: 0.8 }} />
-              {/* Trim guide (white/light dashed) — inset by bleed */}
-              <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "2.5px dashed #e2e8f0", pointerEvents: "none", zIndex: 1 }} />
-              {/* Safety guide (green dashed) — further inset */}
-              <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "2.5px dashed #38a169", pointerEvents: "none", zIndex: 1 }} />
+              {/* Bleed/trim/safety overlays — togglable via the Guides button */}
+              {showGuides && <>
+                {/* Bleed guide (red dashed) — at container edge */}
+                <div style={{ position: "absolute", inset: 0, border: "2.5px dashed #ef4444", pointerEvents: "none", zIndex: 1, opacity: 0.8 }} />
+                {/* Trim guide (white/light dashed) — inset by bleed */}
+                <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "2.5px dashed #e2e8f0", pointerEvents: "none", zIndex: 1 }} />
+                {/* Safety guide (green dashed) — further inset */}
+                <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "2.5px dashed #38a169", pointerEvents: "none", zIndex: 1 }} />
+              </>}
 
-              {/* Fold lines (orange solid, thin) */}
-              {foldLines.map((fl, i) => (
+              {/* Fold lines (orange solid, thin) — togglable */}
+              {showGuides && foldLines.map((fl, i) => (
                 <div key={i} style={{
                   position: "absolute", pointerEvents: "none", zIndex: 4,
                   ...(fl.vertical
@@ -2220,22 +2229,24 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                           : { display: "block", width: "100%", height: "100%", objectFit: fitMode === "contain" ? "contain" : "cover" }
                         )
                       }} />
-                      {/* Bleed — red dashed at container edge */}
-                      <div style={{ position: "absolute", inset: 0, border: "1px dashed #ef4444", boxSizing: "border-box", pointerEvents: "none" }} />
-                      {/* Trim — white dashed, inset by bleed */}
-                      <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "1px dashed rgba(255,255,255,.85)", boxSizing: "border-box", pointerEvents: "none" }} />
-                      {/* Safety — green dashed, further inset */}
-                      <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "1px dashed #38a169", boxSizing: "border-box", pointerEvents: "none" }} />
-                      {/* Fold lines — orange solid, positioned relative to the trim window (same math as main proof view) */}
-                      {foldLines.map((fl, i) => (
-                        <div key={i} style={{
-                          position: "absolute", pointerEvents: "none",
-                          ...(fl.vertical
-                            ? { left: `${bleedPctX + (100 - bleedPctX * 2) * fl.pct / 100}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 1, background: "#f97316" }
-                            : { top: `${bleedPctY + (100 - bleedPctY * 2) * fl.pct / 100}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 1, background: "#f97316" }
-                          ),
-                        }} />
-                      ))}
+                      {showGuides && <>
+                        {/* Bleed — red dashed at container edge */}
+                        <div style={{ position: "absolute", inset: 0, border: "1px dashed #ef4444", boxSizing: "border-box", pointerEvents: "none" }} />
+                        {/* Trim — white dashed, inset by bleed */}
+                        <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "1px dashed rgba(255,255,255,.85)", boxSizing: "border-box", pointerEvents: "none" }} />
+                        {/* Safety — green dashed, further inset */}
+                        <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "1px dashed #38a169", boxSizing: "border-box", pointerEvents: "none" }} />
+                        {/* Fold lines — orange solid, positioned relative to the trim window (same math as main proof view) */}
+                        {foldLines.map((fl, i) => (
+                          <div key={i} style={{
+                            position: "absolute", pointerEvents: "none",
+                            ...(fl.vertical
+                              ? { left: `${bleedPctX + (100 - bleedPctX * 2) * fl.pct / 100}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 1, background: "#f97316" }
+                              : { top: `${bleedPctY + (100 - bleedPctY * 2) * fl.pct / 100}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 1, background: "#f97316" }
+                            ),
+                          }} />
+                        ))}
+                      </>}
                     </div>
                     {/* Crosshair — anchored to lens centre */}
                     <div style={{ position: "absolute", top: 0, left: lensSize / 2, width: 1, height: lensSize, background: "rgba(255,255,255,.3)" }} />
