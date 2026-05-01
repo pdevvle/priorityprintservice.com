@@ -17,7 +17,7 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 | `calc-brochure.html` | Brochure & flat printing calculator — 9 fold types, 3D fold preview (7 proven fold renderers), SheetPreview with front/back upload |
 | `brochure-fold-previewer.html` | Reference: standalone 3D fold previewer tool (vanilla JS, 1453 lines). Source for the proven fold rendering engine now integrated into calc-brochure.html |
 | `pps-calculators.php` | WP plugin: cart/orders, SEO schemas (Product/LocalBusiness/FAQ/WebApp), noscript fallback, llms.txt, reorder, edit mode, PPS-Spec/PPS-Production-Start for Missive, per-product defaults, tooltips injection, logo URL |
-| `pps-config-admin.php` | Admin config page with tabs: Production, Papers, Finishing, Artwork, Sizes, Shipping, Tooltips |
+| `pps-config-admin.php` | Admin config page with tabs: Production, Papers, Finishing, Artwork, Sizes, Shipping, SEO (GBP rating + per-calc-type FAQs) |
 | `pps-gdrive.php` | Google Drive OAuth (credentials in wp_options, not source code), artwork upload with idempotent retry, thumbnail generation |
 | `ups-zone-map-seed.json` | UPS Ground transit days by 3-digit ZIP prefix (1000 entries) |
 
@@ -57,14 +57,16 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 - **Template:** jsPDF with drawDashedLine/drawDashedRect, grey bleed zone, fold lines
 
 ## PHP Plugin Key Features
-- SEO: suppresses WooCommerce/Yoast Product schemas on calculator pages, injects own Product+LocalBusiness+FAQ+WebApp schemas
+- SEO: suppresses WooCommerce/Yoast/Rank Math/AIOSEO/SEOPress Product schemas on calculator pages, injects own Product+LocalBusiness+FAQ+WebApp schemas via `pps_emit_*_schema()` helpers (parameterized; ready for preset call sites in Phase 2)
+- LocalBusiness `aggregateRating` populated from Google Business Profile rating mirrored manually in the SEO admin tab (`seo.gbp_rating_value`, `seo.gbp_review_count`, `seo.gbp_url`); only emitted when both rating and review count are valid (rating in (0, 5], count > 0). FTC/Google policy: ratings must reflect real users — mirror the live GBP value, never fabricate.
+- FAQ schema is calc-type-aware (saddle/perfect-bound/brochure/coupon). Defaults live in `pps_default_faqs()`; admin overrides stored in `wp_options['pps_faqs']` keyed by calc type. Calc types with no defaults and no saved entries emit no FAQ `<script>` (better than emitting wrong-calc FAQs).
 - Noscript fallback with static content for crawlers
 - llms.txt endpoint at /llms.txt for AI search engines
 - Order meta: PPS-Spec (pipe-delimited spec string) and PPS-Production-Start for Missive parsing
 - Edit mode: atomic add-before-remove for cart item updates
 - Reorder: base64-encoded config in URL, restores all settings including artwork path
 - Per-product defaults: "PPS Defaults" tab in WooCommerce product editor
-- Tooltips: centralized in wp_options, editable via admin Tooltips tab, injected as PPS_CONFIG.tips
+- Tooltips: centralized in `wp_options['pps_tooltips']`, AJAX-saved (no admin tab UI in this repo), injected as PPS_CONFIG.tips
 - GDrive: credentials in wp_options (not source), idempotent upload with retry, artwork path preserved for reorder
 
 ## Security (audited, 33+ bugs fixed)

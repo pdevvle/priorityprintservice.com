@@ -1569,6 +1569,351 @@ add_action( 'wp_head', function() {
 // ═══════════════════════════════════════════════════════════════
 
 /**
+ * JSON encoding flags used for every JSON-LD <script> we emit.
+ *
+ * JSON_UNESCAPED_SLASHES keeps https:// readable and matches the existing
+ * output verbatim. We do NOT add JSON_HEX_TAG here even though it would
+ * harden against '</script>' breakout, because all current call sites
+ * sanitize input upstream:
+ *   - FAQ Q field    → sanitize_text_field (strips tags)
+ *   - FAQ A field    → wp_strip_all_tags before emit
+ *   - GBP URL field  → esc_url_raw with http/https allowlist
+ *   - GBP numerics   → float/int casts
+ *
+ * Future PRs that add user-pasted raw schema input (Tier 2/3 overrides)
+ * should reintroduce JSON_HEX_TAG (or post-process '</' → '<\/') as part
+ * of that work, with a deliberate diff.
+ */
+if ( ! defined( 'PPS_SCHEMA_JSON_FLAGS' ) ) {
+    define( 'PPS_SCHEMA_JSON_FLAGS', JSON_UNESCAPED_SLASHES );
+}
+
+/**
+ * Map a calculator HTML filename to a calc type slug used by FAQs and
+ * (in later PRs) preset routing.
+ */
+function pps_get_calc_type_for_filename( $filename ) {
+    $map = array(
+        'calc-preview-test.html'  => 'saddle',
+        'calc-perfect-bound.html' => 'perfect-bound',
+        'calc-brochure.html'      => 'brochure',
+        'calc-coupon-book.html'   => 'coupon',
+    );
+    return isset( $map[ $filename ] ) ? $map[ $filename ] : '';
+}
+
+/**
+ * Default FAQs per calc type. Used as a fallback before admin saves any.
+ *
+ * Saddle defaults preserve the strings previously emitted inline so existing
+ * installs see identical FAQ schema until the admin edits them. Other calc
+ * types start empty — better to omit FAQ schema than emit saddle-flavored
+ * answers on a perfect-bound or brochure product page.
+ *
+ * Note: the turnaround-days lookup uses the same key path as the original
+ * inline emitter (which read $config['minimum_turnaround_days']); the actual
+ * value lives at $config['pcf']['minimum_turnaround_days']. The fallback
+ * resolves to 3 either way, and admins can override the FAQ text via the
+ * SEO admin tab.
+ */
+function pps_default_faqs() {
+    $config   = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    $min_days = intval( $config['minimum_turnaround_days'] ?? 3 );
+
+    return array(
+        'saddle' => array(
+            array( 'q' => 'What is saddle stitch booklet binding?',
+                   'a' => 'Saddle stitch binding uses staples along the spine fold to hold pages together. It\'s the most cost-effective binding method for booklets up to 64 pages.' ),
+            array( 'q' => 'What is the minimum page count for a saddle stitch booklet?',
+                   'a' => 'The minimum page count is 8 pages (including the cover). Page counts must be in multiples of 4 since each sheet creates 4 pages when folded.' ),
+            array( 'q' => 'What paper options are available?',
+                   'a' => 'We offer text weight papers (70lb Uncoated, 80lb Matte, 100lb Gloss) and cardstock options (80lb through 18pt) for both inside pages and covers. Cardstock insides are available for booklets of 24 pages or less.' ),
+            array( 'q' => 'What is the turnaround time for booklet printing?',
+                   'a' => 'Minimum turnaround is ' . $min_days . ' business days. Turnaround varies based on quantity, paper selection, and finishing options. Rush options are available.' ),
+            array( 'q' => 'What sizes of booklets can you print?',
+                   'a' => 'We print standard sizes from 3.5x5.5 up to 12x9, including square formats (4x4 through 12x12) and landscape orientations. Custom sizes are also available.' ),
+            array( 'q' => 'Do I need to add bleeds to my artwork?',
+                   'a' => 'For edge-to-edge printing, artwork should include 0.125 inch (1/8") bleed on all sides. If your artwork doesn\'t have bleeds, we offer a bleed setup service.' ),
+            array( 'q' => 'What finishing options are available?',
+                   'a' => 'Available options include UV Gloss or UV Matte coating on covers, round cornering, bundling in groups of 25/50/100, two-staple binding, and enhanced vivid quality printing.' ),
+        ),
+        'perfect-bound' => array(),
+        'brochure'      => array(),
+        'coupon'        => array(),
+    );
+}
+
+/**
+ * Resolve the FAQ list for a calc type — admin override first, then defaults.
+ * Returns an array of ['q' => ..., 'a' => ...] entries, possibly empty.
+ */
+function pps_get_faqs( $calc_type ) {
+    $saved = get_option( 'pps_faqs', array() );
+    if ( is_array( $saved ) && isset( $saved[ $calc_type ] ) && is_array( $saved[ $calc_type ] ) ) {
+        return $saved[ $calc_type ];
+    }
+    $defaults = pps_default_faqs();
+    return isset( $defaults[ $calc_type ] ) ? $defaults[ $calc_type ] : array();
+}
+
+/**
+ * Emit a Product JSON-LD <script> block.
+ *
+ * Args:
+ *   id                    DOM id (default 'pps-schema-product')
+ *   name                  Product name (required)
+ *   description           Plain-text description
+ *   brand_name            Brand display name (default site name)
+ *   category              Schema category string
+ *   image                 Single image URL (string) or array of URLs
+ *   url                   Canonical URL of this Product
+ *   sku                   SKU (optional; emitted only when non-empty)
+ *   offers                Array shaped per schema.org Offer/AggregateOffer, or null
+ *   additional_properties Array of ['name' => ..., 'value' => ...] — empty entries skipped
+ */
+function pps_emit_product_schema( array $args ) {
+    $defaults = array(
+        'id'                    => 'pps-schema-product',
+        'name'                  => '',
+        'description'           => '',
+        'brand_name'            => get_bloginfo( 'name' ),
+        'category'              => '',
+        'image'                 => '',
+        'url'                   => '',
+        'sku'                   => '',
+        'offers'                => null,
+        'additional_properties' => array(),
+    );
+    $a = wp_parse_args( $args, $defaults );
+
+    $schema = array(
+        '@context'    => 'https://schema.org',
+        '@type'       => 'Product',
+        'name'        => $a['name'],
+        'description' => $a['description'],
+        'brand'       => array( '@type' => 'Brand', 'name' => $a['brand_name'] ),
+        'category'    => $a['category'],
+        'image'       => $a['image'],
+        'url'         => $a['url'],
+    );
+    if ( $a['sku'] !== '' ) {
+        $schema['sku'] = $a['sku'];
+    }
+    if ( is_array( $a['offers'] ) ) {
+        $schema['offers'] = $a['offers'];
+    }
+
+    if ( ! empty( $a['additional_properties'] ) && is_array( $a['additional_properties'] ) ) {
+        $props = array();
+        foreach ( $a['additional_properties'] as $p ) {
+            if ( ! is_array( $p ) ) continue;
+            $name  = isset( $p['name'] )  ? trim( (string) $p['name'] )  : '';
+            $value = isset( $p['value'] ) ? trim( (string) $p['value'] ) : '';
+            if ( $name === '' || $value === '' ) continue;
+            $props[] = array( '@type' => 'PropertyValue', 'name' => $name, 'value' => $value );
+        }
+        if ( $props ) {
+            $schema['additionalProperty'] = $props;
+        }
+    }
+
+    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Emit a LocalBusiness JSON-LD <script> block.
+ *
+ * Args:
+ *   id                DOM id (default 'pps-schema-business')
+ *   name              Business name (default site name)
+ *   description       Plain-text description
+ *   url               Site URL
+ *   telephone, email, street, city, state, zip, country
+ *   price_range       Schema.org priceRange (default '$$')
+ *   area_served       Country name string (default 'United States')
+ *   knows_about       Array of topic strings
+ *   lat, lng          Optional coordinates; both required to emit geo
+ *   aggregate_rating  Optional ['rating_value' => float, 'review_count' => int, 'url' => string]
+ *                     Emitted only when rating_value > 0 and rating_value <= 5 and review_count > 0.
+ */
+function pps_emit_localbusiness_schema( array $args ) {
+    $defaults = array(
+        'id'               => 'pps-schema-business',
+        'name'             => get_bloginfo( 'name' ),
+        'description'      => '',
+        'url'              => home_url( '/' ),
+        'telephone'        => '',
+        'email'            => '',
+        'street'           => '',
+        'city'             => '',
+        'state'            => '',
+        'zip'              => '',
+        'country'          => 'US',
+        'price_range'      => '$$',
+        'area_served'      => 'United States',
+        'knows_about'      => array(),
+        'lat'              => '',
+        'lng'              => '',
+        'aggregate_rating' => null,
+    );
+    $a = wp_parse_args( $args, $defaults );
+
+    $email = $a['email'] !== '' ? $a['email'] : get_option( 'admin_email' );
+
+    $schema = array(
+        '@context'       => 'https://schema.org',
+        '@type'          => 'LocalBusiness',
+        'additionalType' => 'https://schema.org/ProfessionalService',
+        'name'           => $a['name'],
+        'description'    => $a['description'],
+        'url'            => $a['url'],
+        'telephone'      => $a['telephone'],
+        'email'          => $email,
+        'address'        => array(
+            '@type'           => 'PostalAddress',
+            'streetAddress'   => $a['street'],
+            'addressLocality' => $a['city'],
+            'addressRegion'   => $a['state'],
+            'postalCode'      => $a['zip'],
+            'addressCountry'  => $a['country'],
+        ),
+        'priceRange' => $a['price_range'],
+        'areaServed' => array( '@type' => 'Country', 'name' => $a['area_served'] ),
+        'knowsAbout' => $a['knows_about'],
+    );
+
+    // Only emit aggregateRating when both rating and count are valid.
+    // Defense-in-depth: re-validate at emit time even though admin save also validates.
+    if ( is_array( $a['aggregate_rating'] ) ) {
+        $rv = isset( $a['aggregate_rating']['rating_value'] ) ? floatval( $a['aggregate_rating']['rating_value'] ) : 0.0;
+        $rc = isset( $a['aggregate_rating']['review_count'] ) ? intval( $a['aggregate_rating']['review_count'] ) : 0;
+        if ( $rv > 0 && $rv <= 5 && $rc > 0 ) {
+            $rating = array(
+                '@type'       => 'AggregateRating',
+                'ratingValue' => number_format( $rv, 1, '.', '' ),
+                'reviewCount' => (string) $rc,
+                'bestRating'  => '5',
+                'worstRating' => '1',
+            );
+            if ( ! empty( $a['aggregate_rating']['url'] ) ) {
+                $url = esc_url_raw( $a['aggregate_rating']['url'], array( 'http', 'https' ) );
+                if ( $url ) $rating['url'] = $url;
+            }
+            $schema['aggregateRating'] = $rating;
+        }
+    }
+
+    if ( $a['lat'] !== '' && $a['lng'] !== '' ) {
+        $schema['geo'] = array( '@type' => 'GeoCoordinates', 'latitude' => $a['lat'], 'longitude' => $a['lng'] );
+    }
+
+    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Emit a FAQPage JSON-LD <script> block.
+ *
+ * Args:
+ *   id    DOM id (default 'pps-schema-faq')
+ *   faqs  Array of ['q' => string, 'a' => string] entries. Empty entries are
+ *         skipped. If no valid entries remain, no <script> tag is emitted.
+ *
+ * Answer text is run through wp_strip_all_tags so the schema 'text' field
+ * stays plain text even if admin pastes HTML — schema.org Answer.text is
+ * meant to be plain text.
+ */
+function pps_emit_faq_schema( array $args ) {
+    $defaults = array(
+        'id'   => 'pps-schema-faq',
+        'faqs' => array(),
+    );
+    $a = wp_parse_args( $args, $defaults );
+
+    if ( empty( $a['faqs'] ) || ! is_array( $a['faqs'] ) ) return;
+
+    $entities = array();
+    foreach ( $a['faqs'] as $faq ) {
+        if ( ! is_array( $faq ) ) continue;
+        $q = isset( $faq['q'] ) ? trim( (string) $faq['q'] ) : '';
+        $ans = isset( $faq['a'] ) ? trim( (string) $faq['a'] ) : '';
+        if ( $q === '' || $ans === '' ) continue;
+        $entities[] = array(
+            '@type'          => 'Question',
+            'name'           => $q,
+            'acceptedAnswer' => array( '@type' => 'Answer', 'text' => wp_strip_all_tags( $ans ) ),
+        );
+    }
+    if ( empty( $entities ) ) return;
+
+    $schema = array(
+        '@context'   => 'https://schema.org',
+        '@type'      => 'FAQPage',
+        'mainEntity' => $entities,
+    );
+
+    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Emit a WebApplication JSON-LD <script> block.
+ *
+ * Args:
+ *   id                    DOM id (default 'pps-schema-webapp')
+ *   name                  Application name
+ *   description           Plain-text description
+ *   url                   Canonical URL
+ *   application_category  Schema.org applicationCategory (default 'BusinessApplication')
+ *   operating_system      Default 'Any'
+ *   browser_requirements  Default 'Requires JavaScript'
+ *   free_to_use           bool — when true, includes a $0 Offer block (default true)
+ */
+function pps_emit_webapp_schema( array $args ) {
+    $defaults = array(
+        'id'                   => 'pps-schema-webapp',
+        'name'                 => '',
+        'description'          => '',
+        'url'                  => '',
+        'application_category' => 'BusinessApplication',
+        'operating_system'     => 'Any',
+        'browser_requirements' => 'Requires JavaScript',
+        'free_to_use'          => true,
+    );
+    $a = wp_parse_args( $args, $defaults );
+
+    $schema = array(
+        '@context'            => 'https://schema.org',
+        '@type'               => 'WebApplication',
+        'name'                => $a['name'],
+        'description'         => $a['description'],
+        'url'                 => $a['url'],
+        'applicationCategory' => $a['application_category'],
+        'operatingSystem'     => $a['operating_system'],
+        'browserRequirements' => $a['browser_requirements'],
+    );
+
+    if ( $a['free_to_use'] ) {
+        $schema['offers'] = array(
+            '@type'         => 'Offer',
+            'price'         => '0',
+            'priceCurrency' => function_exists( 'get_woocommerce_currency' ) ? get_woocommerce_currency() : 'USD',
+            'description'   => 'Free to use',
+        );
+    }
+
+    $schema['creator'] = array( '@type' => 'Organization', 'name' => get_bloginfo( 'name' ) );
+
+    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
  * Inject structured data schemas on calculator product pages.
  * Runs via wp_head so schemas appear before page content.
  */
@@ -1577,21 +1922,20 @@ add_action( 'wp_head', function() {
     global $product;
     if ( ! $product ) return;
     $product_id = $product->get_id();
-    if ( ! pps_get_calculator_for_product( $product_id ) ) return;
+    $filename   = pps_get_calculator_for_product( $product_id );
+    if ( ! $filename ) return;
 
-    $site_url    = home_url( '/' );
-    $product_url = get_permalink( $product_id );
-    $product_img = wp_get_attachment_url( $product->get_image_id() ) ?: '';
+    $product_url  = get_permalink( $product_id );
+    $product_img  = wp_get_attachment_url( $product->get_image_id() ) ?: '';
     $product_name = $product->get_name();
-    $config      = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    $config       = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    $seo          = isset( $config['seo'] ) && is_array( $config['seo'] ) ? $config['seo'] : array();
+    $calc_type    = pps_get_calc_type_for_filename( $filename );
 
     // ── Product + AggregateOffer ──
-    $product_schema = array(
-        '@context'    => 'https://schema.org',
-        '@type'       => 'Product',
+    pps_emit_product_schema( array(
         'name'        => $product_name,
         'description' => 'Custom printed saddle-stitched booklets with full color or greyscale printing, multiple paper options, and finishing services including UV coating, round cornering, and bundling.',
-        'brand'       => array( '@type' => 'Brand', 'name' => get_bloginfo( 'name' ) ),
         'category'    => 'Printing Services > Booklets',
         'image'       => $product_img,
         'url'         => $product_url,
@@ -1605,80 +1949,42 @@ add_action( 'wp_head', function() {
             'priceValidUntil' => date( 'Y-12-31', strtotime( '+1 year' ) ),
             'seller'          => array( '@type' => 'Organization', 'name' => get_bloginfo( 'name' ) ),
         ),
-        'additionalProperty' => array(
-            array( '@type' => 'PropertyValue', 'name' => 'Binding', 'value' => 'Saddle Stitch (Stapled)' ),
-            array( '@type' => 'PropertyValue', 'name' => 'Page Count', 'value' => '8 to 64 pages' ),
-            array( '@type' => 'PropertyValue', 'name' => 'Minimum Quantity', 'value' => '1' ),
-            array( '@type' => 'PropertyValue', 'name' => 'Turnaround', 'value' => ( $config['minimum_turnaround_days'] ?? 3 ) . '+ business days' ),
+        'additional_properties' => array(
+            array( 'name' => 'Binding',          'value' => 'Saddle Stitch (Stapled)' ),
+            array( 'name' => 'Page Count',       'value' => '8 to 64 pages' ),
+            array( 'name' => 'Minimum Quantity', 'value' => '1' ),
+            array( 'name' => 'Turnaround',       'value' => ( $config['minimum_turnaround_days'] ?? 3 ) . '+ business days' ),
         ),
-    );
-    echo '<script type="application/ld+json" id="pps-schema-product">' . wp_json_encode( $product_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+    ) );
 
-    // ── LocalBusiness ──
-    $seo = $config['seo'] ?? array();
-    $business_schema = array(
-        '@context'       => 'https://schema.org',
-        '@type'          => 'LocalBusiness',
-        'additionalType' => 'https://schema.org/ProfessionalService',
-        'name'           => get_bloginfo( 'name' ),
-        'description'    => 'Full-service commercial print shop specializing in saddle-stitch booklets, brochures, and custom printing with fast turnaround.',
-        'url'            => $site_url,
-        'telephone'      => $seo['phone'] ?? '',
-        'email'          => $seo['email'] ?? get_option( 'admin_email' ),
-        'address'        => array(
-            '@type'           => 'PostalAddress',
-            'streetAddress'   => $seo['street'] ?? '',
-            'addressLocality' => $seo['city'] ?? 'Phoenix',
-            'addressRegion'   => $seo['state'] ?? 'AZ',
-            'postalCode'      => $seo['zip'] ?? '85027',
-            'addressCountry'  => 'US',
+    // ── LocalBusiness (with optional GBP aggregate rating) ──
+    pps_emit_localbusiness_schema( array(
+        'description' => 'Full-service commercial print shop specializing in saddle-stitch booklets, brochures, and custom printing with fast turnaround.',
+        'telephone'   => $seo['phone'] ?? '',
+        'email'       => $seo['email'] ?? '',
+        'street'      => $seo['street'] ?? '',
+        'city'        => $seo['city'] ?? 'Phoenix',
+        'state'       => $seo['state'] ?? 'AZ',
+        'zip'         => $seo['zip'] ?? '85027',
+        'lat'         => $seo['lat'] ?? '',
+        'lng'         => $seo['lng'] ?? '',
+        'knows_about' => array( 'Saddle Stitch Booklets', 'Digital Printing', 'Offset Printing', 'UV Coating', 'Booklet Binding' ),
+        'aggregate_rating' => array(
+            'rating_value' => $seo['gbp_rating_value'] ?? 0,
+            'review_count' => $seo['gbp_review_count'] ?? 0,
+            'url'          => $seo['gbp_url'] ?? '',
         ),
-        'priceRange'  => '$$',
-        'areaServed'  => array( '@type' => 'Country', 'name' => 'United States' ),
-        'knowsAbout'  => array( 'Saddle Stitch Booklets', 'Digital Printing', 'Offset Printing', 'UV Coating', 'Booklet Binding' ),
-    );
-    if ( ! empty( $seo['lat'] ) && ! empty( $seo['lng'] ) ) {
-        $business_schema['geo'] = array( '@type' => 'GeoCoordinates', 'latitude' => $seo['lat'], 'longitude' => $seo['lng'] );
-    }
-    echo '<script type="application/ld+json" id="pps-schema-business">' . wp_json_encode( $business_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+    ) );
 
-    // ── FAQPage ──
-    $faq_schema = array(
-        '@context'   => 'https://schema.org',
-        '@type'      => 'FAQPage',
-        'mainEntity' => array(
-            array( '@type' => 'Question', 'name' => 'What is saddle stitch booklet binding?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'Saddle stitch binding uses staples along the spine fold to hold pages together. It\'s the most cost-effective binding method for booklets up to 64 pages.' ) ),
-            array( '@type' => 'Question', 'name' => 'What is the minimum page count for a saddle stitch booklet?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'The minimum page count is 8 pages (including the cover). Page counts must be in multiples of 4 since each sheet creates 4 pages when folded.' ) ),
-            array( '@type' => 'Question', 'name' => 'What paper options are available?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'We offer text weight papers (70lb Uncoated, 80lb Matte, 100lb Gloss) and cardstock options (80lb through 18pt) for both inside pages and covers. Cardstock insides are available for booklets of 24 pages or less.' ) ),
-            array( '@type' => 'Question', 'name' => 'What is the turnaround time for booklet printing?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'Minimum turnaround is ' . intval( $config['minimum_turnaround_days'] ?? 3 ) . ' business days. Turnaround varies based on quantity, paper selection, and finishing options. Rush options are available.' ) ),
-            array( '@type' => 'Question', 'name' => 'What sizes of booklets can you print?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'We print standard sizes from 3.5x5.5 up to 12x9, including square formats (4x4 through 12x12) and landscape orientations. Custom sizes are also available.' ) ),
-            array( '@type' => 'Question', 'name' => 'Do I need to add bleeds to my artwork?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'For edge-to-edge printing, artwork should include 0.125 inch (1/8") bleed on all sides. If your artwork doesn\'t have bleeds, we offer a bleed setup service.' ) ),
-            array( '@type' => 'Question', 'name' => 'What finishing options are available?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'Available options include UV Gloss or UV Matte coating on covers, round cornering, bundling in groups of 25/50/100, two-staple binding, and enhanced vivid quality printing.' ) ),
-        ),
-    );
-    echo '<script type="application/ld+json" id="pps-schema-faq">' . wp_json_encode( $faq_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+    // ── FAQPage (calc-type-aware; emits nothing for calc types without saved or default FAQs) ──
+    pps_emit_faq_schema( array( 'faqs' => pps_get_faqs( $calc_type ) ) );
 
     // ── WebApplication ──
-    $webapp_schema = array(
-        '@context'            => 'https://schema.org',
-        '@type'               => 'WebApplication',
-        'name'                => $product_name . ' Price Calculator',
-        'description'         => 'Instant online pricing calculator for custom saddle-stitched booklets. Configure size, paper, quantity, and finishing options for a real-time quote.',
-        'url'                 => $product_url,
-        'applicationCategory' => 'BusinessApplication',
-        'operatingSystem'     => 'Any',
-        'browserRequirements' => 'Requires JavaScript',
-        'offers'              => array( '@type' => 'Offer', 'price' => '0', 'priceCurrency' => get_woocommerce_currency(), 'description' => 'Free to use' ),
-        'creator'             => array( '@type' => 'Organization', 'name' => get_bloginfo( 'name' ) ),
-    );
-    echo '<script type="application/ld+json" id="pps-schema-webapp">' . wp_json_encode( $webapp_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+    pps_emit_webapp_schema( array(
+        'name'        => $product_name . ' Price Calculator',
+        'description' => 'Instant online pricing calculator for custom saddle-stitched booklets. Configure size, paper, quantity, and finishing options for a real-time quote.',
+        'url'         => $product_url,
+    ) );
 }, 5 );
 
 /**
