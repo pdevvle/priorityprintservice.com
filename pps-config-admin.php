@@ -186,6 +186,25 @@ function pps_default_config() {
         'closures' => array( '01-01', '07-04', '12-24', '12-25', '11-28', '11-29' ),
 
         'page_counts' => array( 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64 ),
+
+        // SEO / business info read by the LocalBusiness schema emitter.
+        // Address fields are public anyway (LocalBusiness schema), so
+        // broadcasting them via PPS_CONFIG to the browser is acceptable.
+        // GBP fields are only emitted into aggregateRating when both rating
+        // and review_count are > 0.
+        'seo' => array(
+            'phone'             => '',
+            'email'             => '',
+            'street'            => '',
+            'city'              => 'Phoenix',
+            'state'             => 'AZ',
+            'zip'               => '85027',
+            'lat'               => '',
+            'lng'               => '',
+            'gbp_url'           => '',
+            'gbp_rating_value' => 0,
+            'gbp_review_count'  => 0,
+        ),
     );
 }
 
@@ -359,7 +378,71 @@ function pps_config_render_page() {
             }
         }
 
+        // ── SEO section (GBP fields) ──
+        // Merge into existing seo so other seo fields (phone/email/address
+        // populated outside this UI) are not wiped. Only update keys we own.
+        if ( isset( $_POST['seo'] ) && is_array( $_POST['seo'] ) ) {
+            $seo_in   = wp_unslash( $_POST['seo'] );
+            $seo_curr = isset( $cfg['seo'] ) && is_array( $cfg['seo'] ) ? $cfg['seo'] : array();
+
+            // GBP URL — must be http/https; reject other schemes silently
+            if ( isset( $seo_in['gbp_url'] ) ) {
+                $url = esc_url_raw( trim( (string) $seo_in['gbp_url'] ), array( 'http', 'https' ) );
+                $seo_curr['gbp_url'] = $url;
+            }
+            // GBP rating value — float clamped to [0.0, 5.0]
+            if ( isset( $seo_in['gbp_rating_value'] ) ) {
+                $rv = floatval( $seo_in['gbp_rating_value'] );
+                if ( $rv < 0 ) $rv = 0;
+                if ( $rv > 5 ) $rv = 5;
+                $seo_curr['gbp_rating_value'] = $rv;
+            }
+            // GBP review count — int clamped to [0, 10_000_000]
+            if ( isset( $seo_in['gbp_review_count'] ) ) {
+                $rc = intval( $seo_in['gbp_review_count'] );
+                if ( $rc < 0 ) $rc = 0;
+                if ( $rc > 10000000 ) $rc = 10000000;
+                $seo_curr['gbp_review_count'] = $rc;
+            }
+            $cfg['seo'] = $seo_curr;
+        }
+
         pps_save_config( $cfg );
+
+        // ── FAQs (separate option from main config) ──
+        if ( isset( $_POST['pps_faqs_json'] ) ) {
+            $faq_raw = wp_unslash( $_POST['pps_faqs_json'] );
+            // Hard size cap to prevent DoS via giant POST
+            if ( strlen( $faq_raw ) > 524288 ) {
+                $json_errors[] = 'FAQs: payload too large (max 512KB).';
+            } else {
+                $decoded = json_decode( $faq_raw, true );
+                if ( json_last_error() !== JSON_ERROR_NONE || ! is_array( $decoded ) ) {
+                    $json_errors[] = 'FAQs: ' . json_last_error_msg();
+                } else {
+                    $allowed_calcs = array( 'saddle', 'perfect-bound', 'brochure', 'coupon' );
+                    $clean = array();
+                    foreach ( $decoded as $calc => $faqs ) {
+                        if ( ! in_array( $calc, $allowed_calcs, true ) ) continue;
+                        if ( ! is_array( $faqs ) ) continue;
+                        $clean[ $calc ] = array();
+                        $count = 0;
+                        foreach ( $faqs as $entry ) {
+                            if ( ++$count > 50 ) break; // 50 FAQs per calc max
+                            if ( ! is_array( $entry ) ) continue;
+                            $q = isset( $entry['q'] ) ? sanitize_text_field( (string) $entry['q'] ) : '';
+                            $a = isset( $entry['a'] ) ? wp_kses_post( (string) $entry['a'] ) : '';
+                            // Per-entry size caps
+                            if ( strlen( $q ) > 512 )  $q = substr( $q, 0, 512 );
+                            if ( strlen( $a ) > 4096 ) $a = substr( $a, 0, 4096 );
+                            if ( $q === '' || $a === '' ) continue;
+                            $clean[ $calc ][] = array( 'q' => $q, 'a' => $a );
+                        }
+                    }
+                    update_option( 'pps_faqs', $clean, false );
+                }
+            }
+        }
 
         // ── Zone Map (separate wp_option) ──
         $zone_updated = false;
@@ -421,6 +504,7 @@ function pps_config_render_page() {
         'artwork'    => 'Artwork',
         'sizes'      => 'Sizes',
         'shipping'   => 'Shipping',
+        'seo'        => 'SEO',
     );
 
     ?>
@@ -451,6 +535,7 @@ function pps_config_render_page() {
                 case 'artwork':    pps_config_tab_artwork( $cfg ); break;
                 case 'sizes':      pps_config_tab_sizes( $cfg ); break;
                 case 'shipping':   pps_config_tab_shipping( $cfg ); break;
+                case 'seo':        pps_config_tab_seo( $cfg ); break;
             }
             ?>
 
@@ -505,6 +590,26 @@ function pps_config_render_page() {
 
         /* Hidden JSON fields */
         .pps-json-hidden { display:none; }
+
+        /* SEO tab — GBP fields */
+        .pps-seo-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px 24px; margin-bottom:14px; }
+        .pps-seo-field { display:flex; flex-direction:column; gap:3px; font-size:12px; }
+        .pps-seo-field label { font-weight:600; color:#1d2327; }
+        .pps-seo-field input { padding:5px 8px; border:1px solid #ccc; border-radius:3px; font-size:13px; box-sizing:border-box; }
+        .pps-seo-field .hint { color:#888; font-size:11px; }
+
+        /* SEO tab — FAQs */
+        .pps-faq-calc { background:#fafafa; border:1px solid #ddd; border-radius:4px; padding:10px 12px; margin-bottom:14px; }
+        .pps-faq-calc-title { font-size:13px; font-weight:600; color:#1d2327; margin-bottom:6px; }
+        .pps-faq-rows { display:flex; flex-direction:column; gap:6px; }
+        .pps-faq-row { display:grid; grid-template-columns:1fr 16px; gap:6px; align-items:start; padding:6px; background:#fff; border:1px solid #e0e0e0; border-radius:3px; }
+        .pps-faq-row input, .pps-faq-row textarea { width:100%; padding:4px 6px; border:1px solid #ccc; border-radius:2px; font-size:12px; box-sizing:border-box; font-family:inherit; }
+        .pps-faq-row textarea { resize:vertical; min-height:48px; margin-top:4px; }
+        .pps-faq-row .pps-faq-q-a { display:flex; flex-direction:column; gap:4px; }
+        .pps-faq-del { cursor:pointer; color:#b32d2e; font-size:16px; text-align:center; line-height:24px; user-select:none; }
+        .pps-faq-del:hover { background:#fce4e4; border-radius:2px; }
+        .pps-faq-add { font-size:11px; color:#007eff; cursor:pointer; display:inline-block; margin-top:8px; padding:3px 10px; border:1px dashed #007eff; border-radius:3px; background:none; }
+        .pps-faq-add:hover { background:#e8f4ff; }
     </style>
 
     <script>
@@ -590,6 +695,25 @@ function pps_config_render_page() {
                 });
                 coverHidden.value = JSON.stringify(obj);
             }
+
+            // FAQs (per calc type → array of {q, a})
+            var faqHidden = document.querySelector('textarea[name="pps_faqs_json"]');
+            if (faqHidden) {
+                var faqOut = {};
+                document.querySelectorAll('[data-pps-faq-calc]').forEach(function(group) {
+                    var calc = group.dataset.ppsFaqCalc;
+                    var entries = [];
+                    group.querySelectorAll('[data-pps-faq-row]').forEach(function(row) {
+                        var qEl = row.querySelector('[data-faq-field="q"]');
+                        var aEl = row.querySelector('[data-faq-field="a"]');
+                        var q = qEl ? qEl.value.trim() : '';
+                        var a = aEl ? aEl.value.trim() : '';
+                        if (q !== '' && a !== '') entries.push({ q: q, a: a });
+                    });
+                    faqOut[calc] = entries;
+                });
+                faqHidden.value = JSON.stringify(faqOut);
+            }
         });
 
         // ── Add row buttons ──
@@ -634,6 +758,50 @@ function pps_config_render_page() {
         // ── Delete chip ──
         document.addEventListener('click', function(e) {
             if (e.target.classList.contains('chip-del')) e.target.closest('.pps-chip').remove();
+        });
+
+        // ── FAQ: add row ──
+        document.querySelectorAll('.pps-faq-add').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var group = this.closest('[data-pps-faq-calc]');
+                if (!group) return;
+                var rowsWrap = group.querySelector('.pps-faq-rows');
+                if (!rowsWrap) return;
+                var template = rowsWrap.querySelector('[data-pps-faq-row]');
+                var newRow;
+                if (template) {
+                    newRow = template.cloneNode(true);
+                    newRow.querySelectorAll('input, textarea').forEach(function(el) { el.value = ''; });
+                } else {
+                    newRow = document.createElement('div');
+                    newRow.setAttribute('data-pps-faq-row', '1');
+                    newRow.className = 'pps-faq-row';
+                    newRow.innerHTML =
+                        '<input type="text" data-faq-field="q" placeholder="Question" maxlength="512">' +
+                        '<textarea data-faq-field="a" placeholder="Answer" rows="3" maxlength="4096"></textarea>' +
+                        '<span class="pps-faq-del" title="Delete FAQ">×</span>';
+                }
+                rowsWrap.appendChild(newRow);
+                var firstInput = newRow.querySelector('input,textarea');
+                if (firstInput) firstInput.focus();
+            });
+        });
+
+        // ── FAQ: delete row ──
+        document.addEventListener('click', function(e) {
+            var del = e.target.closest('.pps-faq-del');
+            if (!del) return;
+            var row = del.closest('[data-pps-faq-row]');
+            var rowsWrap = row && row.parentNode;
+            if (row && rowsWrap) {
+                // Always leave at least one (possibly empty) row so the
+                // template clone above keeps working.
+                if (rowsWrap.querySelectorAll('[data-pps-faq-row]').length > 1) {
+                    row.remove();
+                } else {
+                    row.querySelectorAll('input, textarea').forEach(function(el) { el.value = ''; });
+                }
+            }
         });
     });
     </script>
@@ -985,4 +1153,88 @@ function pps_config_tab_shipping( $cfg ) {
     echo '</div>';
 
     pps_render_chips( 'closures', 'Shop Closures', $cfg['closures'], 'MM-DD annual or YYYY-MM-DD one-off' );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TAB: SEO  (GBP rating + per-calc-type FAQs)
+// ═══════════════════════════════════════════════════════════════
+
+function pps_config_tab_seo( $cfg ) {
+    $seo = isset( $cfg['seo'] ) && is_array( $cfg['seo'] ) ? $cfg['seo'] : array();
+
+    // ── Google Business Profile (aggregateRating on LocalBusiness) ──
+    echo '<div class="pps-ss-section">Google Business Profile (aggregateRating on LocalBusiness) <span class="pps-ss-hint">stars next to your brand in SERPs</span></div>';
+    echo '<div class="pps-seo-grid">';
+
+    echo '<div class="pps-seo-field">';
+    echo '<label for="pps-gbp-url">Google Business Profile URL</label>';
+    echo '<input id="pps-gbp-url" type="url" name="seo[gbp_url]" value="' . esc_attr( $seo['gbp_url'] ?? '' ) . '" placeholder="https://maps.app.goo.gl/...">';
+    echo '<span class="hint">Optional. Linked from aggregateRating.</span>';
+    echo '</div>';
+
+    echo '<div class="pps-seo-field">';
+    echo '<label for="pps-gbp-rating">Average rating (0.0&ndash;5.0)</label>';
+    echo '<input id="pps-gbp-rating" type="number" name="seo[gbp_rating_value]" value="' . esc_attr( $seo['gbp_rating_value'] ?? 0 ) . '" min="0" max="5" step="0.1">';
+    echo '<span class="hint">From your live GBP. Update quarterly.</span>';
+    echo '</div>';
+
+    echo '<div class="pps-seo-field">';
+    echo '<label for="pps-gbp-count">Review count</label>';
+    echo '<input id="pps-gbp-count" type="number" name="seo[gbp_review_count]" value="' . esc_attr( $seo['gbp_review_count'] ?? 0 ) . '" min="0" step="1">';
+    echo '<span class="hint">Total review count on your GBP.</span>';
+    echo '</div>';
+
+    echo '</div>';
+    echo '<p style="font-size:11px;color:#888;margin:0 0 18px">aggregateRating is only emitted when both rating &gt; 0 and review count &gt; 0. Schema.org policy: ratings must be from real users — these mirror your live Google Business Profile, do not fabricate.</p>';
+
+    // ── FAQs per calc type ──
+    echo '<div class="pps-ss-section">FAQ Schema (per calculator type) <span class="pps-ss-hint">emitted as FAQPage JSON-LD on calculator product pages</span></div>';
+
+    // Hidden JSON field — JS serializes form into this on submit
+    $current_faqs = get_option( 'pps_faqs', array() );
+    if ( ! is_array( $current_faqs ) ) $current_faqs = array();
+    echo '<textarea name="pps_faqs_json" class="pps-json-hidden">' . esc_textarea( wp_json_encode( $current_faqs, JSON_UNESCAPED_UNICODE ) ) . '</textarea>';
+
+    $calcs = array(
+        'saddle'        => 'Saddle Stitch Booklets',
+        'perfect-bound' => 'Perfect Bound Booklets',
+        'brochure'      => 'Brochures',
+        'coupon'        => 'Coupon Books',
+    );
+
+    $defaults = function_exists( 'pps_default_faqs' ) ? pps_default_faqs() : array();
+
+    foreach ( $calcs as $calc_key => $calc_label ) {
+        // Use saved if present, else fall back to default content (so admin sees something to edit)
+        $entries = array();
+        if ( isset( $current_faqs[ $calc_key ] ) && is_array( $current_faqs[ $calc_key ] ) ) {
+            $entries = $current_faqs[ $calc_key ];
+        } elseif ( isset( $defaults[ $calc_key ] ) && is_array( $defaults[ $calc_key ] ) ) {
+            $entries = $defaults[ $calc_key ];
+        }
+        if ( empty( $entries ) ) {
+            // Provide one blank row so the JS template-clone has something to copy
+            $entries = array( array( 'q' => '', 'a' => '' ) );
+        }
+
+        echo '<div class="pps-faq-calc" data-pps-faq-calc="' . esc_attr( $calc_key ) . '">';
+        echo '<div class="pps-faq-calc-title">' . esc_html( $calc_label ) . '</div>';
+        echo '<div class="pps-faq-rows">';
+        foreach ( $entries as $entry ) {
+            $q = isset( $entry['q'] ) ? (string) $entry['q'] : '';
+            $a = isset( $entry['a'] ) ? (string) $entry['a'] : '';
+            echo '<div class="pps-faq-row" data-pps-faq-row="1">';
+            echo '<div class="pps-faq-q-a">';
+            echo '<input type="text" data-faq-field="q" value="' . esc_attr( $q ) . '" placeholder="Question" maxlength="512">';
+            echo '<textarea data-faq-field="a" rows="3" placeholder="Answer" maxlength="4096">' . esc_textarea( $a ) . '</textarea>';
+            echo '</div>';
+            echo '<span class="pps-faq-del" title="Delete FAQ">&times;</span>';
+            echo '</div>';
+        }
+        echo '</div>';
+        echo '<button type="button" class="pps-faq-add">+ Add FAQ</button>';
+        echo '</div>';
+    }
+
+    echo '<p style="font-size:11px;color:#888;margin:0">Empty entries are not emitted. Per-calc cap: 50 FAQs. Q max 512 chars, A max 4096 chars. HTML in answers is stripped at emit time (schema.org Answer.text is plain text).</p>';
 }

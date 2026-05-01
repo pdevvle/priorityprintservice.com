@@ -44,6 +44,10 @@ if ( file_exists( PPS_CALC_DIR . 'pps-gdrive.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-gdrive.php';
 }
 
+if ( file_exists( PPS_CALC_DIR . 'pps-presets-admin.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-presets-admin.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
@@ -1512,21 +1516,554 @@ register_activation_hook( __FILE__, function() {
 } );
 
 // ═══════════════════════════════════════════════════════════════
+// PRESET ROUTING (Phase 1)
+//
+// Each entry in wp_options['pps_presets'] registers a public URL at
+// /booklets/{slug}/ that renders the appropriate calculator HTML with
+// the preset's defaults pre-filled into PPS_CONFIG.defaults.
+//
+// Preset row shape:
+//   [
+//     'slug'        => 'kebab-case-string',
+//     'calc'        => 'saddle' | 'perfect-bound' | 'brochure' | 'coupon',
+//     'title'       => 'Display title',
+//     'description' => '1-2 sentences, ≤160 chars recommended',
+//     'image'       => 'https://… absolute URL or empty string',
+//     'defaults'    => [...],          // shape: same as _pps_defaults postmeta
+//     'price_from'  => 187.50,         // float|null
+//     'currency'    => 'USD',          // ISO 4217
+//     // (override fields added in a later commit; absent here for v1)
+//   ]
+// ═══════════════════════════════════════════════════════════════
+
+define( 'PPS_PRESETS_OPTION', 'pps_presets' );
+define( 'PPS_PRESET_URL_PREFIX', 'booklets' );
+
+/**
+ * Map calc type slug → calculator HTML filename. Inverse of
+ * pps_get_calc_type_for_filename() defined earlier.
+ */
+function pps_get_filename_for_calc_type( $calc_type ) {
+    $map = array(
+        'saddle'        => 'calc-preview-test.html',
+        'perfect-bound' => 'calc-perfect-bound.html',
+        'brochure'      => 'calc-brochure.html',
+        'coupon'        => 'calc-coupon-book.html',
+    );
+    return isset( $map[ $calc_type ] ) ? $map[ $calc_type ] : '';
+}
+
+/**
+ * Read the full preset registry. Always returns an array (possibly empty).
+ */
+function pps_get_presets() {
+    $raw = get_option( PPS_PRESETS_OPTION, array() );
+    return is_array( $raw ) ? $raw : array();
+}
+
+/**
+ * Look up a single preset by slug. Returns null if missing.
+ * Slug is validated against [a-z0-9-]+ before lookup.
+ */
+function pps_get_preset( $slug ) {
+    if ( ! is_string( $slug ) || $slug === '' ) return null;
+    if ( ! preg_match( '/^[a-z0-9\-]+$/', $slug ) ) return null;
+    $presets = pps_get_presets();
+    return isset( $presets[ $slug ] ) && is_array( $presets[ $slug ] ) ? $presets[ $slug ] : null;
+}
+
+/**
+ * Sanitize and persist a preset row. Returns the cleaned row on success
+ * or WP_Error on validation failure.
+ *
+ * Used by the admin CRUD save handler in pps-presets-admin.php.
+ */
+function pps_save_preset( $slug, $data ) {
+    $slug = sanitize_key( $slug );
+    if ( ! preg_match( '/^[a-z0-9\-]+$/', $slug ) || strlen( $slug ) > 80 ) {
+        return new WP_Error( 'pps_preset_bad_slug', 'Slug must be kebab-case [a-z0-9-]+ and ≤80 chars.' );
+    }
+
+    $allowed_calcs = array( 'saddle', 'perfect-bound', 'brochure', 'coupon' );
+    $calc = isset( $data['calc'] ) ? (string) $data['calc'] : '';
+    if ( ! in_array( $calc, $allowed_calcs, true ) ) {
+        return new WP_Error( 'pps_preset_bad_calc', 'Calc must be one of: ' . implode( ', ', $allowed_calcs ) );
+    }
+
+    $title = isset( $data['title'] ) ? sanitize_text_field( (string) $data['title'] ) : '';
+    if ( $title === '' || strlen( $title ) > 200 ) {
+        return new WP_Error( 'pps_preset_bad_title', 'Title is required and must be ≤200 chars.' );
+    }
+
+    $description = isset( $data['description'] ) ? sanitize_textarea_field( (string) $data['description'] ) : '';
+    if ( strlen( $description ) > 500 ) $description = substr( $description, 0, 500 );
+
+    $image = '';
+    if ( ! empty( $data['image'] ) ) {
+        $image = esc_url_raw( (string) $data['image'], array( 'http', 'https' ) );
+    }
+
+    // Defaults: must be a JSON-decoded array. Recursively scrub strings.
+    $defaults = array();
+    if ( isset( $data['defaults'] ) && is_array( $data['defaults'] ) ) {
+        $defaults = pps_sanitize_defaults_blob( $data['defaults'] );
+    }
+
+    $price_from = null;
+    if ( isset( $data['price_from'] ) && $data['price_from'] !== '' ) {
+        $pf = floatval( $data['price_from'] );
+        if ( $pf >= 0 && $pf < 1000000 ) $price_from = $pf;
+    }
+
+    $currency = isset( $data['currency'] ) ? strtoupper( sanitize_text_field( (string) $data['currency'] ) ) : 'USD';
+    if ( ! preg_match( '/^[A-Z]{3}$/', $currency ) ) $currency = 'USD';
+
+    // ── Tier 1: simple field overrides ──
+    $allowed_overrides = array( 'meta_title', 'meta_description', 'og_image', 'schema_name', 'schema_sku', 'breadcrumb_label' );
+    $overrides = array();
+    if ( isset( $data['overrides'] ) && is_array( $data['overrides'] ) ) {
+        foreach ( $allowed_overrides as $k ) {
+            $v = isset( $data['overrides'][ $k ] ) ? trim( (string) $data['overrides'][ $k ] ) : '';
+            if ( $v === '' ) continue;
+            switch ( $k ) {
+                case 'og_image':
+                    $u = esc_url_raw( $v, array( 'http', 'https' ) );
+                    if ( $u ) $overrides[ $k ] = $u;
+                    break;
+                case 'meta_description':
+                    $s = sanitize_textarea_field( $v );
+                    if ( strlen( $s ) > 320 ) $s = substr( $s, 0, 320 );
+                    $overrides[ $k ] = $s;
+                    break;
+                case 'schema_sku':
+                    $s = preg_replace( '/[^a-zA-Z0-9_\-]/', '', $v );
+                    if ( $s !== '' && strlen( $s ) <= 80 ) $overrides[ $k ] = $s;
+                    break;
+                default:
+                    $s = sanitize_text_field( $v );
+                    if ( strlen( $s ) > 200 ) $s = substr( $s, 0, 200 );
+                    $overrides[ $k ] = $s;
+                    break;
+            }
+        }
+    }
+
+    // ── Tier 2: schema block overrides (per-block JSON-LD) ──
+    $allowed_blocks  = array( 'product', 'faq', 'breadcrumb', 'localbusiness', 'webapp' );
+    $schema_overrides = array();
+    $block_errors     = array();
+    if ( isset( $data['schema_overrides'] ) && is_array( $data['schema_overrides'] ) ) {
+        foreach ( $allowed_blocks as $bk ) {
+            $raw = isset( $data['schema_overrides'][ $bk ] ) ? trim( (string) $data['schema_overrides'][ $bk ] ) : '';
+            if ( $raw === '' ) continue;
+            $clean = pps_sanitize_jsonld_override( $raw );
+            if ( is_wp_error( $clean ) ) {
+                $block_errors[] = $bk . ': ' . $clean->get_error_message();
+                continue;
+            }
+            $schema_overrides[ $bk ] = $clean;
+        }
+    }
+
+    // ── Tier 3: extra schema blocks (array of JSON-LD) ──
+    $schema_extras = array();
+    $extra_errors  = array();
+    if ( isset( $data['schema_extras'] ) && is_array( $data['schema_extras'] ) ) {
+        $i = 0;
+        foreach ( $data['schema_extras'] as $raw ) {
+            if ( ! is_string( $raw ) ) continue;
+            $raw = trim( $raw );
+            if ( $raw === '' ) continue;
+            if ( ++$i > 12 ) break; // hard cap on extras
+            $clean = pps_sanitize_jsonld_override( $raw );
+            if ( is_wp_error( $clean ) ) {
+                $extra_errors[] = 'extra ' . $i . ': ' . $clean->get_error_message();
+                continue;
+            }
+            $schema_extras[] = $clean;
+        }
+    }
+
+    // ── Per-preset FAQs (overrides calc-type defaults; same shape as wp_options['pps_faqs'][calc]) ──
+    $faqs = array();
+    if ( isset( $data['faqs'] ) && is_array( $data['faqs'] ) ) {
+        $i = 0;
+        foreach ( $data['faqs'] as $entry ) {
+            if ( ! is_array( $entry ) ) continue;
+            if ( ++$i > 50 ) break; // per-preset cap
+            $q = isset( $entry['q'] ) ? sanitize_text_field( (string) $entry['q'] ) : '';
+            $a = isset( $entry['a'] ) ? wp_kses_post( (string) $entry['a'] ) : '';
+            if ( strlen( $q ) > 512 )  $q = substr( $q, 0, 512 );
+            if ( strlen( $a ) > 4096 ) $a = substr( $a, 0, 4096 );
+            if ( $q === '' || $a === '' ) continue;
+            $faqs[] = array( 'q' => $q, 'a' => $a );
+        }
+    }
+
+    // Surface validation failures so admin can fix them
+    if ( ! empty( $block_errors ) || ! empty( $extra_errors ) ) {
+        return new WP_Error( 'pps_preset_jsonld_invalid', 'JSON-LD override(s) invalid: ' . implode( '; ', array_merge( $block_errors, $extra_errors ) ) );
+    }
+
+    $clean = array(
+        'slug'             => $slug,
+        'calc'             => $calc,
+        'title'            => $title,
+        'description'      => $description,
+        'image'            => $image,
+        'defaults'         => $defaults,
+        'price_from'       => $price_from,
+        'currency'         => $currency,
+        'overrides'        => $overrides,
+        'schema_overrides' => $schema_overrides,
+        'schema_extras'    => $schema_extras,
+        'faqs'             => $faqs,
+        'modified_at'      => time(), // sitemap <lastmod>; updated on every save
+    );
+
+    $presets = pps_get_presets();
+    $presets[ $slug ] = $clean;
+    update_option( PPS_PRESETS_OPTION, $presets, false );
+
+    // Rewrite rules don't depend on slug list (the regex catches all slugs),
+    // but flush anyway so newly-added presets are discoverable on first hit
+    // without a manual "Settings → Permalinks" save.
+    flush_rewrite_rules( false );
+
+    return $clean;
+}
+
+/**
+ * Recursively sanitize a defaults blob.
+ *  - String values → sanitize_text_field
+ *  - Numeric values → kept as-is (cast to float/int by callers)
+ *  - Boolean values → kept
+ *  - Arrays → recursed
+ *  - Objects / closures / resources → dropped (json_decode never produces these,
+ *    but defense in depth)
+ *  - Keys → sanitize_key
+ *
+ * Cap: 200 keys total at any depth to prevent admin-side DoS.
+ */
+function pps_sanitize_defaults_blob( $data, &$key_count = null ) {
+    if ( $key_count === null ) $key_count = 0;
+    if ( ! is_array( $data ) ) return array();
+    $out = array();
+    foreach ( $data as $k => $v ) {
+        if ( $key_count++ > 200 ) break;
+        $clean_key = is_int( $k ) ? $k : sanitize_key( (string) $k );
+        if ( is_array( $v ) ) {
+            $out[ $clean_key ] = pps_sanitize_defaults_blob( $v, $key_count );
+        } elseif ( is_string( $v ) ) {
+            $s = sanitize_text_field( $v );
+            if ( strlen( $s ) > 1000 ) $s = substr( $s, 0, 1000 );
+            $out[ $clean_key ] = $s;
+        } elseif ( is_bool( $v ) || is_int( $v ) || is_float( $v ) ) {
+            $out[ $clean_key ] = $v;
+        } elseif ( is_null( $v ) ) {
+            $out[ $clean_key ] = null;
+        }
+        // objects/resources: silently dropped
+    }
+    return $out;
+}
+
+/**
+ * Delete a preset by slug. Returns true if it existed.
+ */
+function pps_delete_preset( $slug ) {
+    $slug = sanitize_key( $slug );
+    $presets = pps_get_presets();
+    if ( ! isset( $presets[ $slug ] ) ) return false;
+    unset( $presets[ $slug ] );
+    update_option( PPS_PRESETS_OPTION, $presets, false );
+    flush_rewrite_rules( false );
+    return true;
+}
+
+/**
+ * Resolve a preset request — set $GLOBALS['pps_active_preset'] when the
+ * request matches a real preset slug, or trigger 404 otherwise.
+ *
+ * Hooks into 'parse_request' (very early in the WP lifecycle) so the 404
+ * fires before the_posts injection or template rendering.
+ */
+add_action( 'parse_request', function( $wp ) {
+    if ( empty( $wp->query_vars['pps_preset'] ) ) return;
+
+    $slug   = sanitize_key( $wp->query_vars['pps_preset'] );
+    $preset = pps_get_preset( $slug );
+
+    if ( $preset === null ) {
+        // Unknown slug → 404 (real, not pretty redirect)
+        $wp->query_vars['error'] = '404';
+        unset( $wp->query_vars['pps_preset'] );
+        return;
+    }
+
+    // Stash the resolved preset row for later hooks (the_posts, the_content,
+    // wp_head SEO emission added in PR 3, sitemap etc.). The slug is also
+    // pinned so downstream code never has to re-validate.
+    $GLOBALS['pps_active_preset'] = $preset;
+} );
+
+/**
+ * Inject a virtual WP_Post for preset URLs so the theme's standard
+ * single-page template runs and our the_content filter (below) gets a
+ * chance to output the calculator.
+ */
+add_filter( 'the_posts', function( $posts, $query ) {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return $posts;
+    if ( ! ( $query instanceof WP_Query ) ) return $posts;
+    if ( ! $query->is_main_query() ) return $posts;
+
+    $preset = $GLOBALS['pps_active_preset'];
+    $slug   = $preset['slug'];
+
+    $post                 = new stdClass();
+    $post->ID             = -1; // virtual
+    $post->post_author    = 0;
+    $post->post_date      = current_time( 'mysql' );
+    $post->post_date_gmt  = current_time( 'mysql', 1 );
+    $post->post_content   = ''; // populated by the_content filter
+    $post->post_title     = $preset['title'];
+    $post->post_excerpt   = '';
+    $post->post_status    = 'publish';
+    $post->comment_status = 'closed';
+    $post->ping_status    = 'closed';
+    $post->post_password  = '';
+    $post->post_name      = $slug;
+    $post->to_ping        = '';
+    $post->pinged         = '';
+    $post->post_modified  = current_time( 'mysql' );
+    $post->post_modified_gmt = current_time( 'mysql', 1 );
+    $post->post_content_filtered = '';
+    $post->post_parent    = 0;
+    $post->guid           = home_url( '/' . PPS_PRESET_URL_PREFIX . '/' . $slug . '/' );
+    $post->menu_order     = 0;
+    $post->post_type      = 'page';
+    $post->post_mime_type = '';
+    $post->comment_count  = 0;
+    $post->filter         = 'raw';
+
+    $wp_post = new WP_Post( $post );
+
+    // Tell the loop this is a real single-page result
+    $query->is_singular   = true;
+    $query->is_single     = false;
+    $query->is_page       = true;
+    $query->is_home       = false;
+    $query->is_archive    = false;
+    $query->is_404        = false;
+    $query->found_posts   = 1;
+    $query->post_count    = 1;
+    $query->max_num_pages = 1;
+    $query->post          = $wp_post;
+    $query->posts         = array( $wp_post );
+
+    return array( $wp_post );
+}, 10, 2 );
+
+/**
+ * Enqueue the calculator's JS deps on preset URLs.
+ * Mirrors the existing per-WC-product enqueue at top of pps-calculators.php.
+ */
+add_action( 'wp_enqueue_scripts', function() {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
+    wp_enqueue_script( 'pps-react',     'https://unpkg.com/react@18.3.1/umd/react.production.min.js', array(), '18.3.1', true );
+    wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
+    wp_enqueue_script( 'pps-pdfjs',     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
+    wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
+    wp_enqueue_script( 'pps-babel',     'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs' ), '7.26.9', true );
+} );
+
+/**
+ * Render the calculator + its config inline as the page content.
+ *
+ * Returns a string (not echoed) because the_content filter expects that.
+ * Extracts <style> and <script type="text/babel"> from the calculator HTML
+ * via the existing pps_parse_calculator_html() helper.
+ */
+function pps_render_preset_calculator( $preset ) {
+    $filename = pps_get_filename_for_calc_type( $preset['calc'] );
+    if ( ! $filename ) return '';
+
+    $filepath = trailingslashit( pps_upload_dir() ) . $filename;
+    if ( ! file_exists( $filepath ) ) return '';
+
+    $html  = file_get_contents( $filepath );
+    $parts = pps_parse_calculator_html( $html );
+
+    // Build PPS_CONFIG, parallel to the WC-product render path
+    $config = array(
+        'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
+        'cartUrl'     => function_exists( 'wc_get_cart_url' ) ? wc_get_cart_url() : home_url( '/cart/' ),
+        'cartNonce'   => wp_create_nonce( 'pps_add_to_cart' ),
+        'uploadNonce' => wp_create_nonce( 'pps_upload_artwork' ),
+        // No productId — preset render does not target a single WC product.
+        // The cart layer should fall back to a calc-type → product map; that
+        // mapping is wired in a follow-up PR alongside per-line preset slug
+        // capture in order meta. For now the preset-URL calculator renders
+        // and computes prices but add-to-cart goes through the existing
+        // calculator's own product binding (when present).
+        'presetSlug'  => $preset['slug'],
+    );
+
+    if ( function_exists( 'pps_get_config' ) ) {
+        $config['calc'] = pps_get_config();
+    }
+
+    $tips = get_option( 'pps_tooltips', array() );
+    if ( ! empty( $tips ) ) $config['tips'] = $tips;
+
+    $logo_url = get_option( 'pps_logo_url', '' );
+    if ( ! $logo_url ) {
+        $custom_logo_id = get_theme_mod( 'custom_logo' );
+        if ( $custom_logo_id ) $logo_url = wp_get_attachment_image_url( $custom_logo_id, 'medium' );
+    }
+    if ( $logo_url ) $config['logoUrl'] = $logo_url;
+
+    $zone_map = get_option( 'pps_ups_zone_map', array() );
+    if ( ! empty( $zone_map ) && is_array( $zone_map ) ) $config['zoneMap'] = $zone_map;
+
+    // Preset's own defaults override central calc defaults — calculator JS
+    // reads PPS_CONFIG.defaults to pre-fill the form.
+    if ( ! empty( $preset['defaults'] ) && is_array( $preset['defaults'] ) ) {
+        $config['defaults'] = $preset['defaults'];
+    }
+
+    // Build output buffer — we have to return a string, not echo.
+    ob_start();
+
+    echo '<script>window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+
+    // Scoped styles (mirror existing logic at line ~537)
+    if ( $parts['styles'] ) {
+        $css = $parts['styles'];
+        $css = str_replace(
+            '* {',
+            '#pps-calculator-wrap, #pps-calculator-wrap *, #pps-calculator-wrap *::before, #pps-calculator-wrap *::after {',
+            $css
+        );
+        $css = str_replace( 'body {', '#pps-calculator-wrap {', $css );
+        echo '<style>' . $css . '</style>';
+    }
+
+    echo '<div id="pps-calculator-wrap" style="margin:-20px 0 40px;clear:both">';
+    echo '<div id="pps-calculator-root"></div>';
+    echo '</div>';
+
+    if ( $parts['app_code'] ) {
+        echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+    }
+
+    return ob_get_clean();
+}
+
+/**
+ * Replace the_content with the calculator on preset URLs.
+ *
+ * Gated on:
+ *   - $GLOBALS['pps_active_preset'] is set (preset request)
+ *   - in the main loop on the main query (so secondary queries don't get hijacked)
+ *   - filter has not already run for this request (single-fire guard)
+ */
+add_filter( 'the_content', function( $content ) {
+    static $rendered = false;
+    if ( $rendered ) return $content;
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return $content;
+    if ( ! is_main_query() || ! in_the_loop() ) return $content;
+
+    $rendered = true;
+    return pps_render_preset_calculator( $GLOBALS['pps_active_preset'] );
+}, 5 );
+
+/**
+ * Forward the preset slug to the cart so it can be persisted on the order.
+ *
+ * The calculator's existing add-to-cart flow accepts arbitrary metadata.
+ * When PPS_CONFIG.presetSlug is set, the JS-side payload is expected to
+ * include it; this PHP handler stores it on the cart line item.
+ */
+add_filter( 'woocommerce_add_cart_item_data', function( $cart_item_data, $product_id, $variation_id ) {
+    if ( ! empty( $_POST['pps_preset_slug'] ) ) {
+        $slug = sanitize_key( wp_unslash( $_POST['pps_preset_slug'] ) );
+        if ( preg_match( '/^[a-z0-9\-]+$/', $slug ) ) {
+            $cart_item_data['pps_preset_slug'] = $slug;
+        }
+    }
+    return $cart_item_data;
+}, 10, 3 );
+
+/**
+ * Persist the preset slug onto the order line item at checkout.
+ * Visible in WC admin under the line item meta as "Preset".
+ */
+add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $cart_item_key, $values, $order ) {
+    if ( ! empty( $values['pps_preset_slug'] ) ) {
+        $item->add_meta_data( '_pps_preset_slug', sanitize_key( $values['pps_preset_slug'] ), true );
+        $item->add_meta_data( 'Preset', sanitize_key( $values['pps_preset_slug'] ), true );
+    }
+}, 10, 4 );
+
+/**
+ * Routing: register rewrite rule + query var for /booklets/{slug}/.
+ */
+add_action( 'init', function() {
+    add_rewrite_rule(
+        '^' . PPS_PRESET_URL_PREFIX . '/([a-z0-9\-]+)/?$',
+        'index.php?pps_preset=$matches[1]',
+        'top'
+    );
+} );
+add_filter( 'query_vars', function( $vars ) {
+    $vars[] = 'pps_preset';
+    return $vars;
+} );
+
+/**
+ * Flush rewrite rules on plugin activation so the rewrite rule is live
+ * immediately. (Other rewrite changes — e.g. preset add/edit/delete —
+ * also call flush_rewrite_rules() in pps_save_preset/pps_delete_preset.)
+ */
+register_activation_hook( __FILE__, function() {
+    add_rewrite_rule(
+        '^' . PPS_PRESET_URL_PREFIX . '/([a-z0-9\-]+)/?$',
+        'index.php?pps_preset=$matches[1]',
+        'top'
+    );
+    flush_rewrite_rules( false );
+} );
+
+// ═══════════════════════════════════════════════════════════════
 // SEO: SUPPRESS THIRD-PARTY SCHEMAS ON CALCULATOR PAGES
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Remove WooCommerce and SEO plugin structured data on PPS calculator product pages.
- * Our plugin injects its own schemas tailored to the calculator.
+ * True when the current request is either a calculator-bearing WC product
+ * page or a preset URL — i.e., a page whose Product schema is owned by
+ * this plugin and where third-party SEO schemas should be suppressed.
+ */
+function pps_is_calculator_owned_url() {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return true;
+    if ( function_exists( 'is_product' ) && is_product() ) {
+        global $product;
+        if ( $product && pps_get_calculator_for_product( $product->get_id() ) ) return true;
+    }
+    return false;
+}
+
+/**
+ * Remove WooCommerce and SEO plugin structured data on PPS calculator product pages
+ * AND on preset URLs. Our plugin injects its own schemas tailored to the calculator
+ * (existing emitter at priority 5 for WC products; new per-preset emitter at the
+ * same priority gated on $GLOBALS['pps_active_preset']).
  */
 add_action( 'wp_head', function() {
-    if ( ! is_product() ) return;
-    global $product;
-    if ( ! $product ) return;
-    if ( ! pps_get_calculator_for_product( $product->get_id() ) ) return;
+    if ( ! pps_is_calculator_owned_url() ) return;
 
-    // WooCommerce native structured data
-    if ( WC() && isset( WC()->structured_data ) ) {
+    // WooCommerce native structured data — only relevant on WC product pages
+    if ( function_exists( 'WC' ) && WC() && isset( WC()->structured_data ) ) {
         remove_action( 'wp_footer', array( WC()->structured_data, 'output_structured_data' ), 10 );
         remove_action( 'woocommerce_email_order_details', array( WC()->structured_data, 'output_email_structured_data' ), 30 );
     }
@@ -1569,6 +2106,510 @@ add_action( 'wp_head', function() {
 // ═══════════════════════════════════════════════════════════════
 
 /**
+ * JSON encoding flags used for every JSON-LD <script> we emit.
+ *
+ * JSON_UNESCAPED_SLASHES keeps https:// readable and matches the existing
+ * output verbatim. We do NOT add JSON_HEX_TAG here even though it would
+ * harden against '</script>' breakout, because all current call sites
+ * sanitize input upstream:
+ *   - FAQ Q field    → sanitize_text_field (strips tags)
+ *   - FAQ A field    → wp_strip_all_tags before emit
+ *   - GBP URL field  → esc_url_raw with http/https allowlist
+ *   - GBP numerics   → float/int casts
+ *
+ * Future PRs that add user-pasted raw schema input (Tier 2/3 overrides)
+ * should reintroduce JSON_HEX_TAG (or post-process '</' → '<\/') as part
+ * of that work, with a deliberate diff.
+ */
+if ( ! defined( 'PPS_SCHEMA_JSON_FLAGS' ) ) {
+    define( 'PPS_SCHEMA_JSON_FLAGS', JSON_UNESCAPED_SLASHES );
+}
+
+/**
+ * Map a calculator HTML filename to a calc type slug used by FAQs and
+ * (in later PRs) preset routing.
+ */
+function pps_get_calc_type_for_filename( $filename ) {
+    $map = array(
+        'calc-preview-test.html'  => 'saddle',
+        'calc-perfect-bound.html' => 'perfect-bound',
+        'calc-brochure.html'      => 'brochure',
+        'calc-coupon-book.html'   => 'coupon',
+    );
+    return isset( $map[ $filename ] ) ? $map[ $filename ] : '';
+}
+
+/**
+ * Default FAQs per calc type. Used as a fallback before admin saves any.
+ *
+ * Saddle defaults preserve the strings previously emitted inline so existing
+ * installs see identical FAQ schema until the admin edits them. Other calc
+ * types start empty — better to omit FAQ schema than emit saddle-flavored
+ * answers on a perfect-bound or brochure product page.
+ *
+ * Note: the turnaround-days lookup uses the same key path as the original
+ * inline emitter (which read $config['minimum_turnaround_days']); the actual
+ * value lives at $config['pcf']['minimum_turnaround_days']. The fallback
+ * resolves to 3 either way, and admins can override the FAQ text via the
+ * SEO admin tab.
+ */
+function pps_default_faqs() {
+    $config   = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    $min_days = intval( $config['minimum_turnaround_days'] ?? 3 );
+
+    return array(
+        'saddle' => array(
+            array( 'q' => 'What is saddle stitch booklet binding?',
+                   'a' => 'Saddle stitch binding uses staples along the spine fold to hold pages together. It\'s the most cost-effective binding method for booklets up to 64 pages.' ),
+            array( 'q' => 'What is the minimum page count for a saddle stitch booklet?',
+                   'a' => 'The minimum page count is 8 pages (including the cover). Page counts must be in multiples of 4 since each sheet creates 4 pages when folded.' ),
+            array( 'q' => 'What paper options are available?',
+                   'a' => 'We offer text weight papers (70lb Uncoated, 80lb Matte, 100lb Gloss) and cardstock options (80lb through 18pt) for both inside pages and covers. Cardstock insides are available for booklets of 24 pages or less.' ),
+            array( 'q' => 'What is the turnaround time for booklet printing?',
+                   'a' => 'Minimum turnaround is ' . $min_days . ' business days. Turnaround varies based on quantity, paper selection, and finishing options. Rush options are available.' ),
+            array( 'q' => 'What sizes of booklets can you print?',
+                   'a' => 'We print standard sizes from 3.5x5.5 up to 12x9, including square formats (4x4 through 12x12) and landscape orientations. Custom sizes are also available.' ),
+            array( 'q' => 'Do I need to add bleeds to my artwork?',
+                   'a' => 'For edge-to-edge printing, artwork should include 0.125 inch (1/8") bleed on all sides. If your artwork doesn\'t have bleeds, we offer a bleed setup service.' ),
+            array( 'q' => 'What finishing options are available?',
+                   'a' => 'Available options include UV Gloss or UV Matte coating on covers, round cornering, bundling in groups of 25/50/100, two-staple binding, and enhanced vivid quality printing.' ),
+        ),
+        'perfect-bound' => array(),
+        'brochure'      => array(),
+        'coupon'        => array(),
+    );
+}
+
+/**
+ * Resolve the FAQ list for a calc type — admin override first, then defaults.
+ * Returns an array of ['q' => ..., 'a' => ...] entries, possibly empty.
+ */
+function pps_get_faqs( $calc_type ) {
+    $saved = get_option( 'pps_faqs', array() );
+    if ( is_array( $saved ) && isset( $saved[ $calc_type ] ) && is_array( $saved[ $calc_type ] ) ) {
+        return $saved[ $calc_type ];
+    }
+    $defaults = pps_default_faqs();
+    return isset( $defaults[ $calc_type ] ) ? $defaults[ $calc_type ] : array();
+}
+
+/**
+ * Emit a Product JSON-LD <script> block.
+ *
+ * Args:
+ *   id                    DOM id (default 'pps-schema-product')
+ *   name                  Product name (required)
+ *   description           Plain-text description
+ *   brand_name            Brand display name (default site name)
+ *   category              Schema category string
+ *   image                 Single image URL (string) or array of URLs
+ *   url                   Canonical URL of this Product
+ *   sku                   SKU (optional; emitted only when non-empty)
+ *   offers                Array shaped per schema.org Offer/AggregateOffer, or null
+ *   additional_properties Array of ['name' => ..., 'value' => ...] — empty entries skipped
+ */
+function pps_emit_product_schema( array $args ) {
+    $defaults = array(
+        'id'                    => 'pps-schema-product',
+        'name'                  => '',
+        'description'           => '',
+        'brand_name'            => get_bloginfo( 'name' ),
+        'category'              => '',
+        'image'                 => '',
+        'url'                   => '',
+        'sku'                   => '',
+        'offers'                => null,
+        'additional_properties' => array(),
+    );
+    $a = wp_parse_args( $args, $defaults );
+
+    $schema = array(
+        '@context'    => 'https://schema.org',
+        '@type'       => 'Product',
+        'name'        => $a['name'],
+        'description' => $a['description'],
+        'brand'       => array( '@type' => 'Brand', 'name' => $a['brand_name'] ),
+        'category'    => $a['category'],
+        'image'       => $a['image'],
+        'url'         => $a['url'],
+    );
+    if ( $a['sku'] !== '' ) {
+        $schema['sku'] = $a['sku'];
+    }
+    if ( is_array( $a['offers'] ) ) {
+        $schema['offers'] = $a['offers'];
+    }
+
+    if ( ! empty( $a['additional_properties'] ) && is_array( $a['additional_properties'] ) ) {
+        $props = array();
+        foreach ( $a['additional_properties'] as $p ) {
+            if ( ! is_array( $p ) ) continue;
+            $name  = isset( $p['name'] )  ? trim( (string) $p['name'] )  : '';
+            $value = isset( $p['value'] ) ? trim( (string) $p['value'] ) : '';
+            if ( $name === '' || $value === '' ) continue;
+            $props[] = array( '@type' => 'PropertyValue', 'name' => $name, 'value' => $value );
+        }
+        if ( $props ) {
+            $schema['additionalProperty'] = $props;
+        }
+    }
+
+    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Emit a LocalBusiness JSON-LD <script> block.
+ *
+ * Args:
+ *   id                DOM id (default 'pps-schema-business')
+ *   name              Business name (default site name)
+ *   description       Plain-text description
+ *   url               Site URL
+ *   telephone, email, street, city, state, zip, country
+ *   price_range       Schema.org priceRange (default '$$')
+ *   area_served       Country name string (default 'United States')
+ *   knows_about       Array of topic strings
+ *   lat, lng          Optional coordinates; both required to emit geo
+ *   aggregate_rating  Optional ['rating_value' => float, 'review_count' => int, 'url' => string]
+ *                     Emitted only when rating_value > 0 and rating_value <= 5 and review_count > 0.
+ */
+function pps_emit_localbusiness_schema( array $args ) {
+    $defaults = array(
+        'id'               => 'pps-schema-business',
+        'name'             => get_bloginfo( 'name' ),
+        'description'      => '',
+        'url'              => home_url( '/' ),
+        'telephone'        => '',
+        'email'            => '',
+        'street'           => '',
+        'city'             => '',
+        'state'            => '',
+        'zip'              => '',
+        'country'          => 'US',
+        'price_range'      => '$$',
+        'area_served'      => 'United States',
+        'knows_about'      => array(),
+        'lat'              => '',
+        'lng'              => '',
+        'aggregate_rating' => null,
+    );
+    $a = wp_parse_args( $args, $defaults );
+
+    $email = $a['email'] !== '' ? $a['email'] : get_option( 'admin_email' );
+
+    $schema = array(
+        '@context'       => 'https://schema.org',
+        '@type'          => 'LocalBusiness',
+        'additionalType' => 'https://schema.org/ProfessionalService',
+        'name'           => $a['name'],
+        'description'    => $a['description'],
+        'url'            => $a['url'],
+        'telephone'      => $a['telephone'],
+        'email'          => $email,
+        'address'        => array(
+            '@type'           => 'PostalAddress',
+            'streetAddress'   => $a['street'],
+            'addressLocality' => $a['city'],
+            'addressRegion'   => $a['state'],
+            'postalCode'      => $a['zip'],
+            'addressCountry'  => $a['country'],
+        ),
+        'priceRange' => $a['price_range'],
+        'areaServed' => array( '@type' => 'Country', 'name' => $a['area_served'] ),
+        'knowsAbout' => $a['knows_about'],
+    );
+
+    // Only emit aggregateRating when both rating and count are valid.
+    // Defense-in-depth: re-validate at emit time even though admin save also validates.
+    if ( is_array( $a['aggregate_rating'] ) ) {
+        $rv = isset( $a['aggregate_rating']['rating_value'] ) ? floatval( $a['aggregate_rating']['rating_value'] ) : 0.0;
+        $rc = isset( $a['aggregate_rating']['review_count'] ) ? intval( $a['aggregate_rating']['review_count'] ) : 0;
+        if ( $rv > 0 && $rv <= 5 && $rc > 0 ) {
+            $rating = array(
+                '@type'       => 'AggregateRating',
+                'ratingValue' => number_format( $rv, 1, '.', '' ),
+                'reviewCount' => (string) $rc,
+                'bestRating'  => '5',
+                'worstRating' => '1',
+            );
+            if ( ! empty( $a['aggregate_rating']['url'] ) ) {
+                $url = esc_url_raw( $a['aggregate_rating']['url'], array( 'http', 'https' ) );
+                if ( $url ) $rating['url'] = $url;
+            }
+            $schema['aggregateRating'] = $rating;
+        }
+    }
+
+    if ( $a['lat'] !== '' && $a['lng'] !== '' ) {
+        $schema['geo'] = array( '@type' => 'GeoCoordinates', 'latitude' => $a['lat'], 'longitude' => $a['lng'] );
+    }
+
+    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Emit a FAQPage JSON-LD <script> block.
+ *
+ * Args:
+ *   id    DOM id (default 'pps-schema-faq')
+ *   faqs  Array of ['q' => string, 'a' => string] entries. Empty entries are
+ *         skipped. If no valid entries remain, no <script> tag is emitted.
+ *
+ * Answer text is run through wp_strip_all_tags so the schema 'text' field
+ * stays plain text even if admin pastes HTML — schema.org Answer.text is
+ * meant to be plain text.
+ */
+function pps_emit_faq_schema( array $args ) {
+    $defaults = array(
+        'id'   => 'pps-schema-faq',
+        'faqs' => array(),
+    );
+    $a = wp_parse_args( $args, $defaults );
+
+    if ( empty( $a['faqs'] ) || ! is_array( $a['faqs'] ) ) return;
+
+    $entities = array();
+    foreach ( $a['faqs'] as $faq ) {
+        if ( ! is_array( $faq ) ) continue;
+        $q = isset( $faq['q'] ) ? trim( (string) $faq['q'] ) : '';
+        $ans = isset( $faq['a'] ) ? trim( (string) $faq['a'] ) : '';
+        if ( $q === '' || $ans === '' ) continue;
+        $entities[] = array(
+            '@type'          => 'Question',
+            'name'           => $q,
+            'acceptedAnswer' => array( '@type' => 'Answer', 'text' => wp_strip_all_tags( $ans ) ),
+        );
+    }
+    if ( empty( $entities ) ) return;
+
+    $schema = array(
+        '@context'   => 'https://schema.org',
+        '@type'      => 'FAQPage',
+        'mainEntity' => $entities,
+    );
+
+    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Emit a WebApplication JSON-LD <script> block.
+ *
+ * Args:
+ *   id                    DOM id (default 'pps-schema-webapp')
+ *   name                  Application name
+ *   description           Plain-text description
+ *   url                   Canonical URL
+ *   application_category  Schema.org applicationCategory (default 'BusinessApplication')
+ *   operating_system      Default 'Any'
+ *   browser_requirements  Default 'Requires JavaScript'
+ *   free_to_use           bool — when true, includes a $0 Offer block (default true)
+ */
+function pps_emit_webapp_schema( array $args ) {
+    $defaults = array(
+        'id'                   => 'pps-schema-webapp',
+        'name'                 => '',
+        'description'          => '',
+        'url'                  => '',
+        'application_category' => 'BusinessApplication',
+        'operating_system'     => 'Any',
+        'browser_requirements' => 'Requires JavaScript',
+        'free_to_use'          => true,
+    );
+    $a = wp_parse_args( $args, $defaults );
+
+    $schema = array(
+        '@context'            => 'https://schema.org',
+        '@type'               => 'WebApplication',
+        'name'                => $a['name'],
+        'description'         => $a['description'],
+        'url'                 => $a['url'],
+        'applicationCategory' => $a['application_category'],
+        'operatingSystem'     => $a['operating_system'],
+        'browserRequirements' => $a['browser_requirements'],
+    );
+
+    if ( $a['free_to_use'] ) {
+        $schema['offers'] = array(
+            '@type'         => 'Offer',
+            'price'         => '0',
+            'priceCurrency' => function_exists( 'get_woocommerce_currency' ) ? get_woocommerce_currency() : 'USD',
+            'description'   => 'Free to use',
+        );
+    }
+
+    $schema['creator'] = array( '@type' => 'Organization', 'name' => get_bloginfo( 'name' ) );
+
+    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Emit a BreadcrumbList JSON-LD <script> block.
+ *
+ * Args:
+ *   id     DOM id (default 'pps-schema-breadcrumb')
+ *   items  Array of ['name' => string, 'url' => string|null] entries.
+ *          The last item's url may be null/empty (current page).
+ */
+function pps_emit_breadcrumb_schema( array $args ) {
+    $defaults = array(
+        'id'    => 'pps-schema-breadcrumb',
+        'items' => array(),
+    );
+    $a = wp_parse_args( $args, $defaults );
+
+    if ( empty( $a['items'] ) || ! is_array( $a['items'] ) ) return;
+
+    $list = array();
+    $pos  = 0;
+    foreach ( $a['items'] as $item ) {
+        if ( ! is_array( $item ) ) continue;
+        $name = isset( $item['name'] ) ? trim( (string) $item['name'] ) : '';
+        if ( $name === '' ) continue;
+        $pos++;
+        $entry = array(
+            '@type'    => 'ListItem',
+            'position' => $pos,
+            'name'     => $name,
+        );
+        if ( ! empty( $item['url'] ) ) {
+            $url = esc_url_raw( (string) $item['url'], array( 'http', 'https' ) );
+            if ( $url ) $entry['item'] = $url;
+        }
+        $list[] = $entry;
+    }
+    if ( empty( $list ) ) return;
+
+    $schema = array(
+        '@context'        => 'https://schema.org',
+        '@type'           => 'BreadcrumbList',
+        'itemListElement' => $list,
+    );
+
+    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Build the canonical URL for a preset.
+ */
+function pps_get_preset_url( $slug ) {
+    return home_url( '/' . PPS_PRESET_URL_PREFIX . '/' . $slug . '/' );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SCHEMA OVERRIDES: validation, sanitization, raw emission
+//
+// Tier 2 (block override) and Tier 3 (extra block) accept admin-pasted
+// JSON-LD. The validation pipeline:
+//
+//   1. JSON parse — must succeed
+//   2. Root must be associative array (object) with @type, OR array of
+//      such objects (we accept either; Tier 3 wraps singletons)
+//   3. Recursive sanitize: string values → wp_kses with empty allowlist
+//      (strips ALL HTML); strip null bytes; cap individual strings at
+//      8KB. Arrays kept; primitives kept; objects/closures dropped.
+//   4. Total size cap 50KB per block at storage; secondary check at
+//      emission time
+//
+// Emission uses pps_emit_raw_jsonld() with PPS_SCHEMA_JSON_FLAGS_RAW —
+// adds JSON_HEX_TAG to the standard flags so any '<' or '>' that
+// survives sanitization (it shouldn't, but defense-in-depth) cannot
+// break out of the <script> container.
+// ═══════════════════════════════════════════════════════════════
+
+if ( ! defined( 'PPS_SCHEMA_JSON_FLAGS_RAW' ) ) {
+    define( 'PPS_SCHEMA_JSON_FLAGS_RAW', JSON_UNESCAPED_SLASHES | JSON_HEX_TAG );
+}
+if ( ! defined( 'PPS_SCHEMA_OVERRIDE_MAX_BYTES' ) ) {
+    define( 'PPS_SCHEMA_OVERRIDE_MAX_BYTES', 51200 ); // 50KB per override
+}
+
+/**
+ * Recursively sanitize a JSON-decoded value for safe re-emission as
+ * JSON-LD. Strips HTML and null bytes from strings, caps string length,
+ * recurses into arrays, drops resources/objects.
+ */
+function pps_sanitize_jsonld_value( $value, $depth = 0 ) {
+    if ( $depth > 24 ) return null; // bound recursion
+    if ( is_string( $value ) ) {
+        $s = wp_kses( $value, array() ); // strip ALL HTML
+        $s = str_replace( "\0", '', $s ); // null bytes out
+        if ( strlen( $s ) > 8192 ) $s = substr( $s, 0, 8192 );
+        return $s;
+    }
+    if ( is_int( $value ) || is_float( $value ) || is_bool( $value ) || is_null( $value ) ) {
+        return $value;
+    }
+    if ( is_array( $value ) ) {
+        $out = array();
+        foreach ( $value as $k => $v ) {
+            $clean_k = is_int( $k ) ? $k : wp_kses( (string) $k, array() );
+            if ( is_string( $clean_k ) && strlen( $clean_k ) > 100 ) continue; // absurd keys out
+            $out[ $clean_k ] = pps_sanitize_jsonld_value( $v, $depth + 1 );
+        }
+        return $out;
+    }
+    // objects, resources, closures: drop
+    return null;
+}
+
+/**
+ * Validate + sanitize a raw JSON-LD override string. Returns the cleaned
+ * decoded array on success or WP_Error.
+ *
+ * Acceptance criteria:
+ *   - Decodes successfully
+ *   - Root is an associative array (object)
+ *   - Has @type key
+ *   - ≤ PPS_SCHEMA_OVERRIDE_MAX_BYTES raw size
+ */
+function pps_sanitize_jsonld_override( $raw ) {
+    $raw = (string) $raw;
+    if ( strlen( $raw ) > PPS_SCHEMA_OVERRIDE_MAX_BYTES ) {
+        return new WP_Error( 'pps_jsonld_too_large', 'JSON-LD override exceeds ' . PPS_SCHEMA_OVERRIDE_MAX_BYTES . ' bytes.' );
+    }
+    $decoded = json_decode( $raw, true );
+    if ( json_last_error() !== JSON_ERROR_NONE ) {
+        return new WP_Error( 'pps_jsonld_invalid_json', 'Invalid JSON: ' . json_last_error_msg() );
+    }
+    if ( ! is_array( $decoded ) ) {
+        return new WP_Error( 'pps_jsonld_not_object', 'Root must be a JSON object/array.' );
+    }
+    // Permit either a single schema object or a graph array; require @type
+    // somewhere obvious so blank/garbage rows don't slip through.
+    $has_type = isset( $decoded['@type'] )
+              || ( isset( $decoded[0] ) && is_array( $decoded[0] ) && isset( $decoded[0]['@type'] ) )
+              || ( isset( $decoded['@graph'] ) && is_array( $decoded['@graph'] ) );
+    if ( ! $has_type ) {
+        return new WP_Error( 'pps_jsonld_no_type', 'Root must include @type (or @graph or be an array of objects with @type).' );
+    }
+    return pps_sanitize_jsonld_value( $decoded );
+}
+
+/**
+ * Emit a pre-built (override-derived) JSON-LD block.
+ *
+ * Used by Tier 2 (block override) and Tier 3 (extras) emission. Uses the
+ * RAW flags variant which escapes < and > so override content cannot
+ * break out of the <script> container.
+ */
+function pps_emit_raw_jsonld( $id, $data ) {
+    if ( ! is_array( $data ) || empty( $data ) ) return;
+    echo '<script type="application/ld+json" id="' . esc_attr( $id ) . '">'
+       . wp_json_encode( $data, PPS_SCHEMA_JSON_FLAGS_RAW )
+       . "</script>\n";
+}
+
+/**
  * Inject structured data schemas on calculator product pages.
  * Runs via wp_head so schemas appear before page content.
  */
@@ -1577,21 +2618,20 @@ add_action( 'wp_head', function() {
     global $product;
     if ( ! $product ) return;
     $product_id = $product->get_id();
-    if ( ! pps_get_calculator_for_product( $product_id ) ) return;
+    $filename   = pps_get_calculator_for_product( $product_id );
+    if ( ! $filename ) return;
 
-    $site_url    = home_url( '/' );
-    $product_url = get_permalink( $product_id );
-    $product_img = wp_get_attachment_url( $product->get_image_id() ) ?: '';
+    $product_url  = get_permalink( $product_id );
+    $product_img  = wp_get_attachment_url( $product->get_image_id() ) ?: '';
     $product_name = $product->get_name();
-    $config      = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    $config       = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    $seo          = isset( $config['seo'] ) && is_array( $config['seo'] ) ? $config['seo'] : array();
+    $calc_type    = pps_get_calc_type_for_filename( $filename );
 
     // ── Product + AggregateOffer ──
-    $product_schema = array(
-        '@context'    => 'https://schema.org',
-        '@type'       => 'Product',
+    pps_emit_product_schema( array(
         'name'        => $product_name,
         'description' => 'Custom printed saddle-stitched booklets with full color or greyscale printing, multiple paper options, and finishing services including UV coating, round cornering, and bundling.',
-        'brand'       => array( '@type' => 'Brand', 'name' => get_bloginfo( 'name' ) ),
         'category'    => 'Printing Services > Booklets',
         'image'       => $product_img,
         'url'         => $product_url,
@@ -1605,80 +2645,405 @@ add_action( 'wp_head', function() {
             'priceValidUntil' => date( 'Y-12-31', strtotime( '+1 year' ) ),
             'seller'          => array( '@type' => 'Organization', 'name' => get_bloginfo( 'name' ) ),
         ),
-        'additionalProperty' => array(
-            array( '@type' => 'PropertyValue', 'name' => 'Binding', 'value' => 'Saddle Stitch (Stapled)' ),
-            array( '@type' => 'PropertyValue', 'name' => 'Page Count', 'value' => '8 to 64 pages' ),
-            array( '@type' => 'PropertyValue', 'name' => 'Minimum Quantity', 'value' => '1' ),
-            array( '@type' => 'PropertyValue', 'name' => 'Turnaround', 'value' => ( $config['minimum_turnaround_days'] ?? 3 ) . '+ business days' ),
+        'additional_properties' => array(
+            array( 'name' => 'Binding',          'value' => 'Saddle Stitch (Stapled)' ),
+            array( 'name' => 'Page Count',       'value' => '8 to 64 pages' ),
+            array( 'name' => 'Minimum Quantity', 'value' => '1' ),
+            array( 'name' => 'Turnaround',       'value' => ( $config['minimum_turnaround_days'] ?? 3 ) . '+ business days' ),
         ),
-    );
-    echo '<script type="application/ld+json" id="pps-schema-product">' . wp_json_encode( $product_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+    ) );
 
-    // ── LocalBusiness ──
-    $seo = $config['seo'] ?? array();
-    $business_schema = array(
-        '@context'       => 'https://schema.org',
-        '@type'          => 'LocalBusiness',
-        'additionalType' => 'https://schema.org/ProfessionalService',
-        'name'           => get_bloginfo( 'name' ),
-        'description'    => 'Full-service commercial print shop specializing in saddle-stitch booklets, brochures, and custom printing with fast turnaround.',
-        'url'            => $site_url,
-        'telephone'      => $seo['phone'] ?? '',
-        'email'          => $seo['email'] ?? get_option( 'admin_email' ),
-        'address'        => array(
-            '@type'           => 'PostalAddress',
-            'streetAddress'   => $seo['street'] ?? '',
-            'addressLocality' => $seo['city'] ?? 'Phoenix',
-            'addressRegion'   => $seo['state'] ?? 'AZ',
-            'postalCode'      => $seo['zip'] ?? '85027',
-            'addressCountry'  => 'US',
+    // ── LocalBusiness (with optional GBP aggregate rating) ──
+    pps_emit_localbusiness_schema( array(
+        'description' => 'Full-service commercial print shop specializing in saddle-stitch booklets, brochures, and custom printing with fast turnaround.',
+        'telephone'   => $seo['phone'] ?? '',
+        'email'       => $seo['email'] ?? '',
+        'street'      => $seo['street'] ?? '',
+        'city'        => $seo['city'] ?? 'Phoenix',
+        'state'       => $seo['state'] ?? 'AZ',
+        'zip'         => $seo['zip'] ?? '85027',
+        'lat'         => $seo['lat'] ?? '',
+        'lng'         => $seo['lng'] ?? '',
+        'knows_about' => array( 'Saddle Stitch Booklets', 'Digital Printing', 'Offset Printing', 'UV Coating', 'Booklet Binding' ),
+        'aggregate_rating' => array(
+            'rating_value' => $seo['gbp_rating_value'] ?? 0,
+            'review_count' => $seo['gbp_review_count'] ?? 0,
+            'url'          => $seo['gbp_url'] ?? '',
         ),
-        'priceRange'  => '$$',
-        'areaServed'  => array( '@type' => 'Country', 'name' => 'United States' ),
-        'knowsAbout'  => array( 'Saddle Stitch Booklets', 'Digital Printing', 'Offset Printing', 'UV Coating', 'Booklet Binding' ),
-    );
-    if ( ! empty( $seo['lat'] ) && ! empty( $seo['lng'] ) ) {
-        $business_schema['geo'] = array( '@type' => 'GeoCoordinates', 'latitude' => $seo['lat'], 'longitude' => $seo['lng'] );
-    }
-    echo '<script type="application/ld+json" id="pps-schema-business">' . wp_json_encode( $business_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+    ) );
 
-    // ── FAQPage ──
-    $faq_schema = array(
-        '@context'   => 'https://schema.org',
-        '@type'      => 'FAQPage',
-        'mainEntity' => array(
-            array( '@type' => 'Question', 'name' => 'What is saddle stitch booklet binding?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'Saddle stitch binding uses staples along the spine fold to hold pages together. It\'s the most cost-effective binding method for booklets up to 64 pages.' ) ),
-            array( '@type' => 'Question', 'name' => 'What is the minimum page count for a saddle stitch booklet?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'The minimum page count is 8 pages (including the cover). Page counts must be in multiples of 4 since each sheet creates 4 pages when folded.' ) ),
-            array( '@type' => 'Question', 'name' => 'What paper options are available?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'We offer text weight papers (70lb Uncoated, 80lb Matte, 100lb Gloss) and cardstock options (80lb through 18pt) for both inside pages and covers. Cardstock insides are available for booklets of 24 pages or less.' ) ),
-            array( '@type' => 'Question', 'name' => 'What is the turnaround time for booklet printing?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'Minimum turnaround is ' . intval( $config['minimum_turnaround_days'] ?? 3 ) . ' business days. Turnaround varies based on quantity, paper selection, and finishing options. Rush options are available.' ) ),
-            array( '@type' => 'Question', 'name' => 'What sizes of booklets can you print?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'We print standard sizes from 3.5x5.5 up to 12x9, including square formats (4x4 through 12x12) and landscape orientations. Custom sizes are also available.' ) ),
-            array( '@type' => 'Question', 'name' => 'Do I need to add bleeds to my artwork?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'For edge-to-edge printing, artwork should include 0.125 inch (1/8") bleed on all sides. If your artwork doesn\'t have bleeds, we offer a bleed setup service.' ) ),
-            array( '@type' => 'Question', 'name' => 'What finishing options are available?',
-                'acceptedAnswer' => array( '@type' => 'Answer', 'text' => 'Available options include UV Gloss or UV Matte coating on covers, round cornering, bundling in groups of 25/50/100, two-staple binding, and enhanced vivid quality printing.' ) ),
-        ),
-    );
-    echo '<script type="application/ld+json" id="pps-schema-faq">' . wp_json_encode( $faq_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+    // ── FAQPage (calc-type-aware; emits nothing for calc types without saved or default FAQs) ──
+    pps_emit_faq_schema( array( 'faqs' => pps_get_faqs( $calc_type ) ) );
 
     // ── WebApplication ──
-    $webapp_schema = array(
-        '@context'            => 'https://schema.org',
-        '@type'               => 'WebApplication',
-        'name'                => $product_name . ' Price Calculator',
-        'description'         => 'Instant online pricing calculator for custom saddle-stitched booklets. Configure size, paper, quantity, and finishing options for a real-time quote.',
-        'url'                 => $product_url,
-        'applicationCategory' => 'BusinessApplication',
-        'operatingSystem'     => 'Any',
-        'browserRequirements' => 'Requires JavaScript',
-        'offers'              => array( '@type' => 'Offer', 'price' => '0', 'priceCurrency' => get_woocommerce_currency(), 'description' => 'Free to use' ),
-        'creator'             => array( '@type' => 'Organization', 'name' => get_bloginfo( 'name' ) ),
-    );
-    echo '<script type="application/ld+json" id="pps-schema-webapp">' . wp_json_encode( $webapp_schema, JSON_UNESCAPED_SLASHES ) . "</script>\n";
+    pps_emit_webapp_schema( array(
+        'name'        => $product_name . ' Price Calculator',
+        'description' => 'Instant online pricing calculator for custom saddle-stitched booklets. Configure size, paper, quantity, and finishing options for a real-time quote.',
+        'url'         => $product_url,
+    ) );
+}, 5 );
+
+// ═══════════════════════════════════════════════════════════════
+// SEO: PER-PRESET HEAD TAGS, SCHEMAS, AND DEDUPE FILTERS
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Compute meta-description for the active preset, with sensible truncation
+ * for SERP. Returns empty string if no preset.
+ */
+function pps_preset_meta_description( $preset ) {
+    $desc = isset( $preset['description'] ) ? trim( (string) $preset['description'] ) : '';
+    if ( $desc === '' ) {
+        // Fall back to the title if there's no description; better than empty.
+        $desc = isset( $preset['title'] ) ? (string) $preset['title'] : '';
+    }
+    if ( strlen( $desc ) > 320 ) $desc = substr( $desc, 0, 317 ) . '...';
+    return $desc;
+}
+
+/**
+ * Per-preset head tags (title, description, canonical, OG, Twitter, robots)
+ * + per-preset Product/Breadcrumb/LocalBusiness/FAQ/WebApp JSON-LD.
+ *
+ * Runs at priority 5 so schema appears alongside (or before) plugins that
+ * hook later. Gated on $GLOBALS['pps_active_preset'] — completely silent
+ * on non-preset requests.
+ */
+add_action( 'wp_head', function() {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
+
+    $preset    = $GLOBALS['pps_active_preset'];
+    $slug      = $preset['slug'];
+    $url       = pps_get_preset_url( $slug );
+    $ovr       = isset( $preset['overrides'] )       && is_array( $preset['overrides'] )       ? $preset['overrides']       : array();
+    $blocks    = isset( $preset['schema_overrides'] ) && is_array( $preset['schema_overrides'] ) ? $preset['schema_overrides'] : array();
+    $extras    = isset( $preset['schema_extras'] )    && is_array( $preset['schema_extras'] )    ? $preset['schema_extras']    : array();
+
+    // Tier 1 resolution — override → fall back to computed
+    $title         = $ovr['meta_title']        ?? (string) ( $preset['title'] ?? '' );
+    $desc          = $ovr['meta_description']  ?? pps_preset_meta_description( $preset );
+    $image         = $ovr['og_image']          ?? (string) ( $preset['image'] ?? '' );
+    $schema_name   = $ovr['schema_name']       ?? $title;
+    $schema_sku    = $ovr['schema_sku']        ?? $slug;
+    $crumb_label   = $ovr['breadcrumb_label']  ?? $title;
+
+    $calc_type = (string) ( $preset['calc'] ?? '' );
+    $config    = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    $seo       = isset( $config['seo'] ) && is_array( $config['seo'] ) ? $config['seo'] : array();
+    $site_name = get_bloginfo( 'name' );
+
+    // ── Meta description ──
+    echo '<meta name="description" content="' . esc_attr( $desc ) . "\">\n";
+
+    // ── Canonical ──
+    echo '<link rel="canonical" href="' . esc_url( $url ) . "\">\n";
+
+    // ── Robots ──
+    echo "<meta name=\"robots\" content=\"index, follow, max-image-preview:large\">\n";
+
+    // ── Open Graph ──
+    echo "<meta property=\"og:type\" content=\"product\">\n";
+    echo '<meta property="og:title" content="' . esc_attr( $title ) . "\">\n";
+    echo '<meta property="og:description" content="' . esc_attr( $desc ) . "\">\n";
+    echo '<meta property="og:url" content="' . esc_url( $url ) . "\">\n";
+    echo '<meta property="og:site_name" content="' . esc_attr( $site_name ) . "\">\n";
+    if ( $image !== '' ) {
+        echo '<meta property="og:image" content="' . esc_url( $image ) . "\">\n";
+    }
+
+    // ── Twitter Card ──
+    $twitter_card = $image !== '' ? 'summary_large_image' : 'summary';
+    echo '<meta name="twitter:card" content="' . esc_attr( $twitter_card ) . "\">\n";
+    echo '<meta name="twitter:title" content="' . esc_attr( $title ) . "\">\n";
+    echo '<meta name="twitter:description" content="' . esc_attr( $desc ) . "\">\n";
+    if ( $image !== '' ) {
+        echo '<meta name="twitter:image" content="' . esc_url( $image ) . "\">\n";
+    }
+
+    // ── Product JSON-LD ── (Tier 2 override wins wholesale; otherwise compute)
+    if ( isset( $blocks['product'] ) ) {
+        pps_emit_raw_jsonld( 'pps-schema-product', $blocks['product'] );
+    } else {
+        $product_args = array(
+            'name'        => $schema_name,
+            'description' => $desc,
+            'category'    => 'Print services',
+            'image'       => $image,
+            'url'         => $url,
+            'sku'         => $schema_sku,
+        );
+
+        if ( isset( $preset['price_from'] ) && $preset['price_from'] !== null ) {
+            $price_from = (float) $preset['price_from'];
+            if ( $price_from >= 0 ) {
+                $currency = isset( $preset['currency'] ) && preg_match( '/^[A-Z]{3}$/', (string) $preset['currency'] )
+                            ? $preset['currency']
+                            : 'USD';
+                $product_args['offers'] = array(
+                    '@type'           => 'Offer',
+                    'url'             => $url,
+                    'priceCurrency'   => $currency,
+                    'lowPrice'        => number_format( $price_from, 2, '.', '' ),
+                    'availability'    => 'https://schema.org/InStock',
+                    'priceValidUntil' => date( 'Y-12-31', strtotime( '+1 year' ) ),
+                );
+            }
+        }
+
+        $defaults = isset( $preset['defaults'] ) && is_array( $preset['defaults'] ) ? $preset['defaults'] : array();
+        $props = array();
+        foreach ( array(
+            'qty'   => 'Quantity',
+            'pages' => 'Pages',
+            'size'  => 'Size',
+        ) as $field => $label ) {
+            if ( isset( $defaults[ $field ] ) && $defaults[ $field ] !== '' && ! is_array( $defaults[ $field ] ) ) {
+                $props[] = array( 'name' => $label, 'value' => (string) $defaults[ $field ] );
+            }
+        }
+        if ( $props ) $product_args['additional_properties'] = $props;
+
+        pps_emit_product_schema( $product_args );
+    }
+
+    // ── BreadcrumbList ── (Tier 2 override wins)
+    if ( isset( $blocks['breadcrumb'] ) ) {
+        pps_emit_raw_jsonld( 'pps-schema-breadcrumb', $blocks['breadcrumb'] );
+    } else {
+        pps_emit_breadcrumb_schema( array(
+            'items' => array(
+                array( 'name' => $site_name,   'url' => home_url( '/' ) ),
+                array( 'name' => 'Booklets',   'url' => home_url( '/' . PPS_PRESET_URL_PREFIX . '/' ) ),
+                array( 'name' => $crumb_label ),
+            ),
+        ) );
+    }
+
+    // ── LocalBusiness ── (Tier 2 override wins; otherwise emit with GBP rating)
+    if ( isset( $blocks['localbusiness'] ) ) {
+        pps_emit_raw_jsonld( 'pps-schema-business', $blocks['localbusiness'] );
+    } else {
+        pps_emit_localbusiness_schema( array(
+            'description' => 'Full-service commercial print shop specializing in saddle-stitch booklets, brochures, and custom printing with fast turnaround.',
+            'telephone'   => $seo['phone'] ?? '',
+            'email'       => $seo['email'] ?? '',
+            'street'      => $seo['street'] ?? '',
+            'city'        => $seo['city'] ?? 'Phoenix',
+            'state'       => $seo['state'] ?? 'AZ',
+            'zip'         => $seo['zip'] ?? '85027',
+            'lat'         => $seo['lat'] ?? '',
+            'lng'         => $seo['lng'] ?? '',
+            'knows_about' => array( 'Saddle Stitch Booklets', 'Digital Printing', 'Offset Printing', 'UV Coating', 'Booklet Binding' ),
+            'aggregate_rating' => array(
+                'rating_value' => $seo['gbp_rating_value'] ?? 0,
+                'review_count' => $seo['gbp_review_count'] ?? 0,
+                'url'          => $seo['gbp_url'] ?? '',
+            ),
+        ) );
+    }
+
+    // ── FAQPage ── (Tier 2 override > per-preset faqs > calc-type defaults)
+    if ( isset( $blocks['faq'] ) ) {
+        pps_emit_raw_jsonld( 'pps-schema-faq', $blocks['faq'] );
+    } else {
+        $preset_faqs = isset( $preset['faqs'] ) && is_array( $preset['faqs'] ) && ! empty( $preset['faqs'] )
+                       ? $preset['faqs']
+                       : pps_get_faqs( $calc_type );
+        pps_emit_faq_schema( array( 'faqs' => $preset_faqs ) );
+    }
+
+    // ── WebApplication ── (Tier 2 override wins)
+    if ( isset( $blocks['webapp'] ) ) {
+        pps_emit_raw_jsonld( 'pps-schema-webapp', $blocks['webapp'] );
+    } else {
+        pps_emit_webapp_schema( array(
+            'name'        => $title . ' Price Calculator',
+            'description' => 'Instant online pricing calculator for ' . $title . '. Configure size, paper, quantity, and finishing options for a real-time quote.',
+            'url'         => $url,
+        ) );
+    }
+
+    // ── Tier 3: extra schema blocks ──
+    if ( ! empty( $extras ) ) {
+        $i = 0;
+        foreach ( $extras as $extra ) {
+            pps_emit_raw_jsonld( 'pps-schema-extra-' . $i, $extra );
+            $i++;
+        }
+    }
+}, 5 );
+
+/**
+ * Resolve a Tier 1 override field for the active preset; returns the
+ * computed fallback when the override is absent.
+ */
+function pps_preset_resolved_field( $field ) {
+    $preset = $GLOBALS['pps_active_preset'] ?? null;
+    if ( ! $preset ) return null;
+    $ovr = isset( $preset['overrides'] ) && is_array( $preset['overrides'] ) ? $preset['overrides'] : array();
+    switch ( $field ) {
+        case 'title':       return $ovr['meta_title']       ?? (string) ( $preset['title'] ?? '' );
+        case 'description': return $ovr['meta_description'] ?? pps_preset_meta_description( $preset );
+        case 'og_image':    return $ovr['og_image']         ?? (string) ( $preset['image'] ?? '' );
+    }
+    return null;
+}
+
+/**
+ * Filter <title> on preset URLs. Priority 999 to win against Yoast/RM/theme.
+ */
+add_filter( 'pre_get_document_title', function( $title ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) {
+        return pps_preset_resolved_field( 'title' );
+    }
+    return $title;
+}, 999 );
+
+/**
+ * Yoast/Rank Math title dedupe — feed our title through their pipeline so
+ * the SEO plugin doesn't emit a competing <title>.
+ */
+add_filter( 'wpseo_title', function( $title ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return pps_preset_resolved_field( 'title' );
+    return $title;
+}, 999 );
+add_filter( 'rank_math/frontend/title', function( $title ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return pps_preset_resolved_field( 'title' );
+    return $title;
+}, 999 );
+
+/**
+ * Yoast/Rank Math meta-description dedupe.
+ */
+add_filter( 'wpseo_metadesc', function( $desc ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return pps_preset_resolved_field( 'description' );
+    return $desc;
+}, 999 );
+add_filter( 'rank_math/frontend/description', function( $desc ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return pps_preset_resolved_field( 'description' );
+    return $desc;
+}, 999 );
+
+/**
+ * Canonical URL: filter WP core's get_canonical_url + Yoast/RM equivalents
+ * so all three converge on our preset URL. (We also emit our own
+ * <link rel="canonical"> in the wp_head action above; downstream filters
+ * keep WP's rel_canonical action and SEO plugins from emitting a conflict.)
+ */
+add_filter( 'get_canonical_url', function( $canonical, $post = null ) {
+    if ( ! empty( $GLOBALS['pps_active_preset']['slug'] ) ) {
+        return pps_get_preset_url( $GLOBALS['pps_active_preset']['slug'] );
+    }
+    return $canonical;
+}, 999, 2 );
+add_filter( 'wpseo_canonical', function( $canonical ) {
+    if ( ! empty( $GLOBALS['pps_active_preset']['slug'] ) ) {
+        return pps_get_preset_url( $GLOBALS['pps_active_preset']['slug'] );
+    }
+    return $canonical;
+}, 999 );
+add_filter( 'rank_math/frontend/canonical', function( $canonical ) {
+    if ( ! empty( $GLOBALS['pps_active_preset']['slug'] ) ) {
+        return pps_get_preset_url( $GLOBALS['pps_active_preset']['slug'] );
+    }
+    return $canonical;
+}, 999 );
+
+/**
+ * Robots dedupe — Yoast/RM emit their own robots meta. Force ours.
+ */
+add_filter( 'wpseo_robots', function( $robots ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return 'index, follow, max-image-preview:large';
+    return $robots;
+}, 999 );
+add_filter( 'rank_math/frontend/robots', function( $robots ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) {
+        return array( 'index', 'follow', 'max-image-preview:large' );
+    }
+    return $robots;
+}, 999 );
+
+/**
+ * OG/Twitter dedupe — when a SEO plugin tries to emit its own OG/Twitter
+ * tags, override their values to match ours. Cheaper than trying to
+ * disable their emission entirely; net effect is a single set of tags
+ * with our values regardless of which plugin (if any) is active.
+ */
+add_filter( 'wpseo_opengraph_title', function( $v ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return pps_preset_resolved_field( 'title' );
+    return $v;
+}, 999 );
+add_filter( 'wpseo_opengraph_desc', function( $v ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return pps_preset_resolved_field( 'description' );
+    return $v;
+}, 999 );
+add_filter( 'wpseo_opengraph_url', function( $v ) {
+    if ( ! empty( $GLOBALS['pps_active_preset']['slug'] ) ) return pps_get_preset_url( $GLOBALS['pps_active_preset']['slug'] );
+    return $v;
+}, 999 );
+add_filter( 'wpseo_opengraph_image', function( $v ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) {
+        $img = pps_preset_resolved_field( 'og_image' );
+        if ( $img ) return $img;
+    }
+    return $v;
+}, 999 );
+add_filter( 'wpseo_twitter_title', function( $v ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return pps_preset_resolved_field( 'title' );
+    return $v;
+}, 999 );
+add_filter( 'wpseo_twitter_description', function( $v ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) return pps_preset_resolved_field( 'description' );
+    return $v;
+}, 999 );
+add_filter( 'wpseo_twitter_image', function( $v ) {
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) ) {
+        $img = pps_preset_resolved_field( 'og_image' );
+        if ( $img ) return $img;
+    }
+    return $v;
+}, 999 );
+
+/**
+ * Noscript fallback for preset URLs — static HTML in the page footer for
+ * crawlers that don't render JS. The calculator markup itself is JS-driven;
+ * this gives indexers something solid to read.
+ *
+ * Hooked at wp_footer (priority 5) instead of woocommerce_after_single_product_summary
+ * (which doesn't fire on virtual posts).
+ */
+add_action( 'wp_footer', function() {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
+
+    $preset    = $GLOBALS['pps_active_preset'];
+    $title     = (string) ( $preset['title'] ?? '' );
+    $desc      = pps_preset_meta_description( $preset );
+    $defaults  = isset( $preset['defaults'] ) && is_array( $preset['defaults'] ) ? $preset['defaults'] : array();
+    $email     = get_option( 'admin_email' );
+
+    echo "<noscript>\n";
+    echo '<div style="max-width:800px;margin:40px auto;padding:20px;font-family:sans-serif;color:#333">';
+    echo '<h1>' . esc_html( $title ) . '</h1>';
+    if ( $desc !== '' ) echo '<p>' . esc_html( $desc ) . '</p>';
+
+    // Spec table from defaults (Quantity / Pages / Size if present)
+    $rows = array();
+    if ( isset( $defaults['qty'] )   && $defaults['qty']   !== '' ) $rows['Quantity'] = (string) $defaults['qty'];
+    if ( isset( $defaults['pages'] ) && $defaults['pages'] !== '' ) $rows['Pages']    = (string) $defaults['pages'];
+    if ( isset( $defaults['size'] )  && $defaults['size']  !== '' ) $rows['Size']     = (string) $defaults['size'];
+    if ( $rows ) {
+        echo '<h2>Specs</h2>';
+        echo '<table style="border-collapse:collapse;margin-bottom:14px"><tbody>';
+        foreach ( $rows as $k => $v ) {
+            echo '<tr><th style="text-align:left;padding:4px 12px 4px 0">' . esc_html( $k ) . '</th><td style="padding:4px 0">' . esc_html( $v ) . '</td></tr>';
+        }
+        echo '</tbody></table>';
+    }
+
+    echo '<p><strong>Enable JavaScript for the interactive price calculator.</strong></p>';
+    echo '<p>Contact: <a href="mailto:' . esc_attr( $email ) . '">' . esc_html( $email ) . '</a></p>';
+    echo '</div>';
+    echo "</noscript>\n";
 }, 5 );
 
 /**
@@ -1764,5 +3129,195 @@ add_action( 'template_redirect', function() {
     echo "- Website: {$url}\n";
     echo "- Email: {$email}\n";
 
+    // Presets section — explicit catalog of preset URLs so AI search engines
+    // have a structured list. Each entry: ## title, URL, description.
+    $presets = function_exists( 'pps_get_presets' ) ? pps_get_presets() : array();
+    if ( ! empty( $presets ) ) {
+        echo "\n## Presets\n";
+        ksort( $presets );
+        foreach ( $presets as $slug => $row ) {
+            if ( ! is_array( $row ) ) continue;
+            $title = isset( $row['title'] )       ? trim( (string) $row['title'] )       : '';
+            $desc  = isset( $row['description'] ) ? trim( (string) $row['description'] ) : '';
+            if ( $title === '' ) continue;
+            $purl = pps_get_preset_url( $slug );
+            echo "\n### {$title}\n";
+            echo "- URL: {$purl}\n";
+            if ( $desc !== '' ) echo "- {$desc}\n";
+        }
+    }
+
     exit;
 } );
+
+// ═══════════════════════════════════════════════════════════════
+// SITEMAP: PRESET URLS
+//
+// Three exposure paths so we cover all three SEO-plugin states:
+//   1. WP core sitemaps active → register a provider; URLs auto-included
+//      under /wp-sitemap.xml index
+//   2. Yoast active (disables WP core sitemaps) → add reference to our
+//      custom XML at /pps-presets-sitemap.xml in wpseo_sitemap_index
+//   3. Rank Math active (disables WP core sitemaps) → add reference to
+//      our custom XML in rank_math/sitemap/index/entries
+//
+// The custom XML at /pps-presets-sitemap.xml is the single source of
+// truth; both Yoast and RM hooks just point at it.
+// ═══════════════════════════════════════════════════════════════
+
+define( 'PPS_PRESETS_SITEMAP_SLUG', 'pps-presets-sitemap.xml' );
+
+/**
+ * Build the preset URL list for sitemap consumers. Returns an array of
+ *   ['loc' => string, 'lastmod' => string-ISO]
+ * One entry per preset. Skipped if title is empty (incomplete preset).
+ */
+function pps_get_preset_sitemap_entries() {
+    $presets = pps_get_presets();
+    $entries = array();
+    $now_iso = gmdate( 'c' );
+    foreach ( $presets as $slug => $row ) {
+        if ( ! is_array( $row ) ) continue;
+        if ( empty( $row['title'] ) ) continue;
+        $lastmod = isset( $row['modified_at'] ) && is_int( $row['modified_at'] )
+                   ? gmdate( 'c', $row['modified_at'] )
+                   : $now_iso;
+        $entries[] = array(
+            'loc'     => pps_get_preset_url( $slug ),
+            'lastmod' => $lastmod,
+        );
+    }
+    return $entries;
+}
+
+/**
+ * Custom sitemap endpoint: /pps-presets-sitemap.xml
+ *
+ * Used by Yoast/RM index references; also serves any request that hits
+ * this URL directly. Standard sitemaps.org urlset XML.
+ */
+add_action( 'init', function() {
+    add_rewrite_rule( '^' . preg_quote( PPS_PRESETS_SITEMAP_SLUG, '/' ) . '$', 'index.php?pps_presets_sitemap=1', 'top' );
+} );
+add_filter( 'query_vars', function( $vars ) {
+    $vars[] = 'pps_presets_sitemap';
+    return $vars;
+} );
+add_action( 'template_redirect', function() {
+    if ( ! get_query_var( 'pps_presets_sitemap' ) ) return;
+
+    $entries = pps_get_preset_sitemap_entries();
+
+    header( 'Content-Type: application/xml; charset=utf-8' );
+    header( 'Cache-Control: public, max-age=3600' );
+
+    echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+    echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+    foreach ( $entries as $e ) {
+        echo '  <url>' . "\n";
+        echo '    <loc>' . esc_url( $e['loc'] ) . '</loc>' . "\n";
+        echo '    <lastmod>' . esc_html( $e['lastmod'] ) . '</lastmod>' . "\n";
+        echo '    <changefreq>weekly</changefreq>' . "\n";
+        echo '  </url>' . "\n";
+    }
+    echo '</urlset>' . "\n";
+    exit;
+} );
+
+/**
+ * WP core sitemap provider — fires when Yoast/RM aren't disabling
+ * WP core sitemaps. Standard provider class returning paginated URL lists.
+ */
+if ( class_exists( 'WP_Sitemaps_Provider' ) ) {
+    class PPS_Presets_Sitemap_Provider extends WP_Sitemaps_Provider {
+        public function __construct() {
+            $this->name        = 'presets';
+            $this->object_type = 'pps_preset';
+        }
+
+        public function get_url_list( $page_num, $object_subtype = '' ) {
+            $entries = pps_get_preset_sitemap_entries();
+            $per_page = wp_sitemaps_get_max_urls( $this->object_type );
+            $offset   = ( max( 1, intval( $page_num ) ) - 1 ) * $per_page;
+            $page     = array_slice( $entries, $offset, $per_page );
+            // WP wants ['loc' => ..., 'lastmod' => ...] format; we already do that.
+            return $page;
+        }
+
+        public function get_max_num_pages( $object_subtype = '' ) {
+            $entries  = pps_get_preset_sitemap_entries();
+            $per_page = wp_sitemaps_get_max_urls( $this->object_type );
+            if ( empty( $entries ) ) return 0;
+            return (int) ceil( count( $entries ) / max( 1, $per_page ) );
+        }
+    }
+}
+
+add_filter( 'wp_sitemaps_add_provider', function( $provider, $name ) {
+    if ( $name !== 'pps_presets' ) return $provider;
+    if ( ! class_exists( 'PPS_Presets_Sitemap_Provider' ) ) return $provider;
+    return new PPS_Presets_Sitemap_Provider();
+}, 10, 2 );
+
+add_action( 'init', function() {
+    if ( function_exists( 'wp_register_sitemap_provider' ) && class_exists( 'PPS_Presets_Sitemap_Provider' ) ) {
+        // Skip when no presets exist — avoid an empty sitemap entry confusing
+        // crawlers (also avoids generating an empty <urlset>).
+        $presets = pps_get_presets();
+        if ( ! empty( $presets ) ) {
+            wp_register_sitemap_provider( 'pps_presets', new PPS_Presets_Sitemap_Provider() );
+        }
+    }
+}, 20 );
+
+/**
+ * Yoast sitemap index reference. Only fires when Yoast is active
+ * (defined check). Yoast's index XML lists external sitemaps via this
+ * filter; we add ours.
+ */
+add_filter( 'wpseo_sitemap_index', function( $index ) {
+    if ( ! defined( 'WPSEO_VERSION' ) ) return $index;
+    $entries = pps_get_preset_sitemap_entries();
+    if ( empty( $entries ) ) return $index;
+    $loc     = home_url( '/' . PPS_PRESETS_SITEMAP_SLUG );
+    $lastmod = $entries[0]['lastmod'];
+    $index .= "<sitemap>\n";
+    $index .= "  <loc>" . esc_url( $loc ) . "</loc>\n";
+    $index .= "  <lastmod>" . esc_html( $lastmod ) . "</lastmod>\n";
+    $index .= "</sitemap>\n";
+    return $index;
+}, 10 );
+
+/**
+ * Rank Math sitemap index entry. Only fires when RM is active. RM exposes
+ * a filter on the sitemap index XML where we can append <sitemap>…</sitemap>
+ * elements pointing to external sitemaps.
+ */
+add_filter( 'rank_math/sitemap/index/entries', function( $entries ) {
+    if ( ! defined( 'RANK_MATH_VERSION' ) ) return $entries;
+    $preset_entries = pps_get_preset_sitemap_entries();
+    if ( empty( $preset_entries ) ) return $entries;
+    if ( ! is_array( $entries ) ) $entries = array();
+    $entries[] = array(
+        'loc'     => home_url( '/' . PPS_PRESETS_SITEMAP_SLUG ),
+        'lastmod' => $preset_entries[0]['lastmod'],
+    );
+    return $entries;
+}, 10 );
+
+/**
+ * Older Rank Math versions emit the index XML differently; cover both
+ * paths by also filtering rank_math/sitemap/index where it's a string.
+ */
+add_filter( 'rank_math/sitemap/index', function( $xml ) {
+    if ( ! defined( 'RANK_MATH_VERSION' ) ) return $xml;
+    $preset_entries = pps_get_preset_sitemap_entries();
+    if ( empty( $preset_entries ) ) return $xml;
+    $loc     = home_url( '/' . PPS_PRESETS_SITEMAP_SLUG );
+    $lastmod = $preset_entries[0]['lastmod'];
+    $append  = "<sitemap>\n";
+    $append .= "  <loc>" . esc_url( $loc ) . "</loc>\n";
+    $append .= "  <lastmod>" . esc_html( $lastmod ) . "</lastmod>\n";
+    $append .= "</sitemap>\n";
+    return is_string( $xml ) ? $xml . $append : $xml;
+}, 10 );
