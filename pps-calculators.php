@@ -1627,6 +1627,7 @@ function pps_save_preset( $slug, $data ) {
         'defaults'    => $defaults,
         'price_from'  => $price_from,
         'currency'    => $currency,
+        'modified_at' => time(), // sitemap <lastmod>; updated on every save
     );
 
     $presets = pps_get_presets();
@@ -2877,5 +2878,195 @@ add_action( 'template_redirect', function() {
     echo "- Website: {$url}\n";
     echo "- Email: {$email}\n";
 
+    // Presets section — explicit catalog of preset URLs so AI search engines
+    // have a structured list. Each entry: ## title, URL, description.
+    $presets = function_exists( 'pps_get_presets' ) ? pps_get_presets() : array();
+    if ( ! empty( $presets ) ) {
+        echo "\n## Presets\n";
+        ksort( $presets );
+        foreach ( $presets as $slug => $row ) {
+            if ( ! is_array( $row ) ) continue;
+            $title = isset( $row['title'] )       ? trim( (string) $row['title'] )       : '';
+            $desc  = isset( $row['description'] ) ? trim( (string) $row['description'] ) : '';
+            if ( $title === '' ) continue;
+            $purl = pps_get_preset_url( $slug );
+            echo "\n### {$title}\n";
+            echo "- URL: {$purl}\n";
+            if ( $desc !== '' ) echo "- {$desc}\n";
+        }
+    }
+
     exit;
 } );
+
+// ═══════════════════════════════════════════════════════════════
+// SITEMAP: PRESET URLS
+//
+// Three exposure paths so we cover all three SEO-plugin states:
+//   1. WP core sitemaps active → register a provider; URLs auto-included
+//      under /wp-sitemap.xml index
+//   2. Yoast active (disables WP core sitemaps) → add reference to our
+//      custom XML at /pps-presets-sitemap.xml in wpseo_sitemap_index
+//   3. Rank Math active (disables WP core sitemaps) → add reference to
+//      our custom XML in rank_math/sitemap/index/entries
+//
+// The custom XML at /pps-presets-sitemap.xml is the single source of
+// truth; both Yoast and RM hooks just point at it.
+// ═══════════════════════════════════════════════════════════════
+
+define( 'PPS_PRESETS_SITEMAP_SLUG', 'pps-presets-sitemap.xml' );
+
+/**
+ * Build the preset URL list for sitemap consumers. Returns an array of
+ *   ['loc' => string, 'lastmod' => string-ISO]
+ * One entry per preset. Skipped if title is empty (incomplete preset).
+ */
+function pps_get_preset_sitemap_entries() {
+    $presets = pps_get_presets();
+    $entries = array();
+    $now_iso = gmdate( 'c' );
+    foreach ( $presets as $slug => $row ) {
+        if ( ! is_array( $row ) ) continue;
+        if ( empty( $row['title'] ) ) continue;
+        $lastmod = isset( $row['modified_at'] ) && is_int( $row['modified_at'] )
+                   ? gmdate( 'c', $row['modified_at'] )
+                   : $now_iso;
+        $entries[] = array(
+            'loc'     => pps_get_preset_url( $slug ),
+            'lastmod' => $lastmod,
+        );
+    }
+    return $entries;
+}
+
+/**
+ * Custom sitemap endpoint: /pps-presets-sitemap.xml
+ *
+ * Used by Yoast/RM index references; also serves any request that hits
+ * this URL directly. Standard sitemaps.org urlset XML.
+ */
+add_action( 'init', function() {
+    add_rewrite_rule( '^' . preg_quote( PPS_PRESETS_SITEMAP_SLUG, '/' ) . '$', 'index.php?pps_presets_sitemap=1', 'top' );
+} );
+add_filter( 'query_vars', function( $vars ) {
+    $vars[] = 'pps_presets_sitemap';
+    return $vars;
+} );
+add_action( 'template_redirect', function() {
+    if ( ! get_query_var( 'pps_presets_sitemap' ) ) return;
+
+    $entries = pps_get_preset_sitemap_entries();
+
+    header( 'Content-Type: application/xml; charset=utf-8' );
+    header( 'Cache-Control: public, max-age=3600' );
+
+    echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+    echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+    foreach ( $entries as $e ) {
+        echo '  <url>' . "\n";
+        echo '    <loc>' . esc_url( $e['loc'] ) . '</loc>' . "\n";
+        echo '    <lastmod>' . esc_html( $e['lastmod'] ) . '</lastmod>' . "\n";
+        echo '    <changefreq>weekly</changefreq>' . "\n";
+        echo '  </url>' . "\n";
+    }
+    echo '</urlset>' . "\n";
+    exit;
+} );
+
+/**
+ * WP core sitemap provider — fires when Yoast/RM aren't disabling
+ * WP core sitemaps. Standard provider class returning paginated URL lists.
+ */
+if ( class_exists( 'WP_Sitemaps_Provider' ) ) {
+    class PPS_Presets_Sitemap_Provider extends WP_Sitemaps_Provider {
+        public function __construct() {
+            $this->name        = 'presets';
+            $this->object_type = 'pps_preset';
+        }
+
+        public function get_url_list( $page_num, $object_subtype = '' ) {
+            $entries = pps_get_preset_sitemap_entries();
+            $per_page = wp_sitemaps_get_max_urls( $this->object_type );
+            $offset   = ( max( 1, intval( $page_num ) ) - 1 ) * $per_page;
+            $page     = array_slice( $entries, $offset, $per_page );
+            // WP wants ['loc' => ..., 'lastmod' => ...] format; we already do that.
+            return $page;
+        }
+
+        public function get_max_num_pages( $object_subtype = '' ) {
+            $entries  = pps_get_preset_sitemap_entries();
+            $per_page = wp_sitemaps_get_max_urls( $this->object_type );
+            if ( empty( $entries ) ) return 0;
+            return (int) ceil( count( $entries ) / max( 1, $per_page ) );
+        }
+    }
+}
+
+add_filter( 'wp_sitemaps_add_provider', function( $provider, $name ) {
+    if ( $name !== 'pps_presets' ) return $provider;
+    if ( ! class_exists( 'PPS_Presets_Sitemap_Provider' ) ) return $provider;
+    return new PPS_Presets_Sitemap_Provider();
+}, 10, 2 );
+
+add_action( 'init', function() {
+    if ( function_exists( 'wp_register_sitemap_provider' ) && class_exists( 'PPS_Presets_Sitemap_Provider' ) ) {
+        // Skip when no presets exist — avoid an empty sitemap entry confusing
+        // crawlers (also avoids generating an empty <urlset>).
+        $presets = pps_get_presets();
+        if ( ! empty( $presets ) ) {
+            wp_register_sitemap_provider( 'pps_presets', new PPS_Presets_Sitemap_Provider() );
+        }
+    }
+}, 20 );
+
+/**
+ * Yoast sitemap index reference. Only fires when Yoast is active
+ * (defined check). Yoast's index XML lists external sitemaps via this
+ * filter; we add ours.
+ */
+add_filter( 'wpseo_sitemap_index', function( $index ) {
+    if ( ! defined( 'WPSEO_VERSION' ) ) return $index;
+    $entries = pps_get_preset_sitemap_entries();
+    if ( empty( $entries ) ) return $index;
+    $loc     = home_url( '/' . PPS_PRESETS_SITEMAP_SLUG );
+    $lastmod = $entries[0]['lastmod'];
+    $index .= "<sitemap>\n";
+    $index .= "  <loc>" . esc_url( $loc ) . "</loc>\n";
+    $index .= "  <lastmod>" . esc_html( $lastmod ) . "</lastmod>\n";
+    $index .= "</sitemap>\n";
+    return $index;
+}, 10 );
+
+/**
+ * Rank Math sitemap index entry. Only fires when RM is active. RM exposes
+ * a filter on the sitemap index XML where we can append <sitemap>…</sitemap>
+ * elements pointing to external sitemaps.
+ */
+add_filter( 'rank_math/sitemap/index/entries', function( $entries ) {
+    if ( ! defined( 'RANK_MATH_VERSION' ) ) return $entries;
+    $preset_entries = pps_get_preset_sitemap_entries();
+    if ( empty( $preset_entries ) ) return $entries;
+    if ( ! is_array( $entries ) ) $entries = array();
+    $entries[] = array(
+        'loc'     => home_url( '/' . PPS_PRESETS_SITEMAP_SLUG ),
+        'lastmod' => $preset_entries[0]['lastmod'],
+    );
+    return $entries;
+}, 10 );
+
+/**
+ * Older Rank Math versions emit the index XML differently; cover both
+ * paths by also filtering rank_math/sitemap/index where it's a string.
+ */
+add_filter( 'rank_math/sitemap/index', function( $xml ) {
+    if ( ! defined( 'RANK_MATH_VERSION' ) ) return $xml;
+    $preset_entries = pps_get_preset_sitemap_entries();
+    if ( empty( $preset_entries ) ) return $xml;
+    $loc     = home_url( '/' . PPS_PRESETS_SITEMAP_SLUG );
+    $lastmod = $preset_entries[0]['lastmod'];
+    $append  = "<sitemap>\n";
+    $append .= "  <loc>" . esc_url( $loc ) . "</loc>\n";
+    $append .= "  <lastmod>" . esc_html( $lastmod ) . "</lastmod>\n";
+    $append .= "</sitemap>\n";
+    return is_string( $xml ) ? $xml . $append : $xml;
+}, 10 );
