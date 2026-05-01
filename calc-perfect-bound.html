@@ -604,6 +604,7 @@ function calculate(c) {
   const artWork=art.val>=2;
   const q100=sets.some(s=>s.qty>=100);
   const q250=sets.some(s=>s.qty>250);
+  const commonSize = !sz.isCustom ? ["5.5×8.5 (Opens to 8.5×11)","8.5×11 (Opens to 11×17)"].includes(c.sizeLabel) : false;
   const coatPaper=c.coverMode==="same"?c.insidePaper:cvr;
   const coatOK=coatPaper.coatable;
   const hcOK=c.insidePaper.factory;
@@ -705,6 +706,7 @@ function calculate(c) {
   P.discBW = bwFraction > 0 ? -(P.press * PCF.bw_discount_rate * bwFraction) : 0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
   P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate_1,PCF.easydiscount_max):0;
+  P.discCommon=(commonSize&&q250)?-Math.min(P.press+P.cutting+P.perfectBind,PCF.common_discount_max):0;
 
   // Size-based adjustment — 15% off when imp<4 (8.5×11 and larger). Mirrors saddle-stitch booklet.
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
@@ -807,7 +809,7 @@ function calculate(c) {
     {l:"Round Cornering",v:P.rc,g:"add"},{l:"Outfold",v:P.outfold,g:"add"},{l:"Perforation",v:P.perforation,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
-    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
+    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 
   // CMYK-derived group colors
