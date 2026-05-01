@@ -44,6 +44,10 @@ if ( file_exists( PPS_CALC_DIR . 'pps-gdrive.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-gdrive.php';
 }
 
+if ( file_exists( PPS_CALC_DIR . 'pps-presets-admin.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-presets-admin.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
@@ -1509,6 +1513,434 @@ register_activation_hook( __FILE__, function() {
     if ( ! get_option( 'pps_tooltips' ) ) {
         update_option( 'pps_tooltips', pps_default_tooltips(), false );
     }
+} );
+
+// ═══════════════════════════════════════════════════════════════
+// PRESET ROUTING (Phase 1)
+//
+// Each entry in wp_options['pps_presets'] registers a public URL at
+// /booklets/{slug}/ that renders the appropriate calculator HTML with
+// the preset's defaults pre-filled into PPS_CONFIG.defaults.
+//
+// Preset row shape:
+//   [
+//     'slug'        => 'kebab-case-string',
+//     'calc'        => 'saddle' | 'perfect-bound' | 'brochure' | 'coupon',
+//     'title'       => 'Display title',
+//     'description' => '1-2 sentences, ≤160 chars recommended',
+//     'image'       => 'https://… absolute URL or empty string',
+//     'defaults'    => [...],          // shape: same as _pps_defaults postmeta
+//     'price_from'  => 187.50,         // float|null
+//     'currency'    => 'USD',          // ISO 4217
+//     // (override fields added in a later commit; absent here for v1)
+//   ]
+// ═══════════════════════════════════════════════════════════════
+
+define( 'PPS_PRESETS_OPTION', 'pps_presets' );
+define( 'PPS_PRESET_URL_PREFIX', 'booklets' );
+
+/**
+ * Map calc type slug → calculator HTML filename. Inverse of
+ * pps_get_calc_type_for_filename() defined earlier.
+ */
+function pps_get_filename_for_calc_type( $calc_type ) {
+    $map = array(
+        'saddle'        => 'calc-preview-test.html',
+        'perfect-bound' => 'calc-perfect-bound.html',
+        'brochure'      => 'calc-brochure.html',
+        'coupon'        => 'calc-coupon-book.html',
+    );
+    return isset( $map[ $calc_type ] ) ? $map[ $calc_type ] : '';
+}
+
+/**
+ * Read the full preset registry. Always returns an array (possibly empty).
+ */
+function pps_get_presets() {
+    $raw = get_option( PPS_PRESETS_OPTION, array() );
+    return is_array( $raw ) ? $raw : array();
+}
+
+/**
+ * Look up a single preset by slug. Returns null if missing.
+ * Slug is validated against [a-z0-9-]+ before lookup.
+ */
+function pps_get_preset( $slug ) {
+    if ( ! is_string( $slug ) || $slug === '' ) return null;
+    if ( ! preg_match( '/^[a-z0-9\-]+$/', $slug ) ) return null;
+    $presets = pps_get_presets();
+    return isset( $presets[ $slug ] ) && is_array( $presets[ $slug ] ) ? $presets[ $slug ] : null;
+}
+
+/**
+ * Sanitize and persist a preset row. Returns the cleaned row on success
+ * or WP_Error on validation failure.
+ *
+ * Used by the admin CRUD save handler in pps-presets-admin.php.
+ */
+function pps_save_preset( $slug, $data ) {
+    $slug = sanitize_key( $slug );
+    if ( ! preg_match( '/^[a-z0-9\-]+$/', $slug ) || strlen( $slug ) > 80 ) {
+        return new WP_Error( 'pps_preset_bad_slug', 'Slug must be kebab-case [a-z0-9-]+ and ≤80 chars.' );
+    }
+
+    $allowed_calcs = array( 'saddle', 'perfect-bound', 'brochure', 'coupon' );
+    $calc = isset( $data['calc'] ) ? (string) $data['calc'] : '';
+    if ( ! in_array( $calc, $allowed_calcs, true ) ) {
+        return new WP_Error( 'pps_preset_bad_calc', 'Calc must be one of: ' . implode( ', ', $allowed_calcs ) );
+    }
+
+    $title = isset( $data['title'] ) ? sanitize_text_field( (string) $data['title'] ) : '';
+    if ( $title === '' || strlen( $title ) > 200 ) {
+        return new WP_Error( 'pps_preset_bad_title', 'Title is required and must be ≤200 chars.' );
+    }
+
+    $description = isset( $data['description'] ) ? sanitize_textarea_field( (string) $data['description'] ) : '';
+    if ( strlen( $description ) > 500 ) $description = substr( $description, 0, 500 );
+
+    $image = '';
+    if ( ! empty( $data['image'] ) ) {
+        $image = esc_url_raw( (string) $data['image'], array( 'http', 'https' ) );
+    }
+
+    // Defaults: must be a JSON-decoded array. Recursively scrub strings.
+    $defaults = array();
+    if ( isset( $data['defaults'] ) && is_array( $data['defaults'] ) ) {
+        $defaults = pps_sanitize_defaults_blob( $data['defaults'] );
+    }
+
+    $price_from = null;
+    if ( isset( $data['price_from'] ) && $data['price_from'] !== '' ) {
+        $pf = floatval( $data['price_from'] );
+        if ( $pf >= 0 && $pf < 1000000 ) $price_from = $pf;
+    }
+
+    $currency = isset( $data['currency'] ) ? strtoupper( sanitize_text_field( (string) $data['currency'] ) ) : 'USD';
+    if ( ! preg_match( '/^[A-Z]{3}$/', $currency ) ) $currency = 'USD';
+
+    $clean = array(
+        'slug'        => $slug,
+        'calc'        => $calc,
+        'title'       => $title,
+        'description' => $description,
+        'image'       => $image,
+        'defaults'    => $defaults,
+        'price_from'  => $price_from,
+        'currency'    => $currency,
+    );
+
+    $presets = pps_get_presets();
+    $presets[ $slug ] = $clean;
+    update_option( PPS_PRESETS_OPTION, $presets, false );
+
+    // Rewrite rules don't depend on slug list (the regex catches all slugs),
+    // but flush anyway so newly-added presets are discoverable on first hit
+    // without a manual "Settings → Permalinks" save.
+    flush_rewrite_rules( false );
+
+    return $clean;
+}
+
+/**
+ * Recursively sanitize a defaults blob.
+ *  - String values → sanitize_text_field
+ *  - Numeric values → kept as-is (cast to float/int by callers)
+ *  - Boolean values → kept
+ *  - Arrays → recursed
+ *  - Objects / closures / resources → dropped (json_decode never produces these,
+ *    but defense in depth)
+ *  - Keys → sanitize_key
+ *
+ * Cap: 200 keys total at any depth to prevent admin-side DoS.
+ */
+function pps_sanitize_defaults_blob( $data, &$key_count = null ) {
+    if ( $key_count === null ) $key_count = 0;
+    if ( ! is_array( $data ) ) return array();
+    $out = array();
+    foreach ( $data as $k => $v ) {
+        if ( $key_count++ > 200 ) break;
+        $clean_key = is_int( $k ) ? $k : sanitize_key( (string) $k );
+        if ( is_array( $v ) ) {
+            $out[ $clean_key ] = pps_sanitize_defaults_blob( $v, $key_count );
+        } elseif ( is_string( $v ) ) {
+            $s = sanitize_text_field( $v );
+            if ( strlen( $s ) > 1000 ) $s = substr( $s, 0, 1000 );
+            $out[ $clean_key ] = $s;
+        } elseif ( is_bool( $v ) || is_int( $v ) || is_float( $v ) ) {
+            $out[ $clean_key ] = $v;
+        } elseif ( is_null( $v ) ) {
+            $out[ $clean_key ] = null;
+        }
+        // objects/resources: silently dropped
+    }
+    return $out;
+}
+
+/**
+ * Delete a preset by slug. Returns true if it existed.
+ */
+function pps_delete_preset( $slug ) {
+    $slug = sanitize_key( $slug );
+    $presets = pps_get_presets();
+    if ( ! isset( $presets[ $slug ] ) ) return false;
+    unset( $presets[ $slug ] );
+    update_option( PPS_PRESETS_OPTION, $presets, false );
+    flush_rewrite_rules( false );
+    return true;
+}
+
+/**
+ * Resolve a preset request — set $GLOBALS['pps_active_preset'] when the
+ * request matches a real preset slug, or trigger 404 otherwise.
+ *
+ * Hooks into 'parse_request' (very early in the WP lifecycle) so the 404
+ * fires before the_posts injection or template rendering.
+ */
+add_action( 'parse_request', function( $wp ) {
+    if ( empty( $wp->query_vars['pps_preset'] ) ) return;
+
+    $slug   = sanitize_key( $wp->query_vars['pps_preset'] );
+    $preset = pps_get_preset( $slug );
+
+    if ( $preset === null ) {
+        // Unknown slug → 404 (real, not pretty redirect)
+        $wp->query_vars['error'] = '404';
+        unset( $wp->query_vars['pps_preset'] );
+        return;
+    }
+
+    // Stash the resolved preset row for later hooks (the_posts, the_content,
+    // wp_head SEO emission added in PR 3, sitemap etc.). The slug is also
+    // pinned so downstream code never has to re-validate.
+    $GLOBALS['pps_active_preset'] = $preset;
+} );
+
+/**
+ * Inject a virtual WP_Post for preset URLs so the theme's standard
+ * single-page template runs and our the_content filter (below) gets a
+ * chance to output the calculator.
+ */
+add_filter( 'the_posts', function( $posts, $query ) {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return $posts;
+    if ( ! ( $query instanceof WP_Query ) ) return $posts;
+    if ( ! $query->is_main_query() ) return $posts;
+
+    $preset = $GLOBALS['pps_active_preset'];
+    $slug   = $preset['slug'];
+
+    $post                 = new stdClass();
+    $post->ID             = -1; // virtual
+    $post->post_author    = 0;
+    $post->post_date      = current_time( 'mysql' );
+    $post->post_date_gmt  = current_time( 'mysql', 1 );
+    $post->post_content   = ''; // populated by the_content filter
+    $post->post_title     = $preset['title'];
+    $post->post_excerpt   = '';
+    $post->post_status    = 'publish';
+    $post->comment_status = 'closed';
+    $post->ping_status    = 'closed';
+    $post->post_password  = '';
+    $post->post_name      = $slug;
+    $post->to_ping        = '';
+    $post->pinged         = '';
+    $post->post_modified  = current_time( 'mysql' );
+    $post->post_modified_gmt = current_time( 'mysql', 1 );
+    $post->post_content_filtered = '';
+    $post->post_parent    = 0;
+    $post->guid           = home_url( '/' . PPS_PRESET_URL_PREFIX . '/' . $slug . '/' );
+    $post->menu_order     = 0;
+    $post->post_type      = 'page';
+    $post->post_mime_type = '';
+    $post->comment_count  = 0;
+    $post->filter         = 'raw';
+
+    $wp_post = new WP_Post( $post );
+
+    // Tell the loop this is a real single-page result
+    $query->is_singular   = true;
+    $query->is_single     = false;
+    $query->is_page       = true;
+    $query->is_home       = false;
+    $query->is_archive    = false;
+    $query->is_404        = false;
+    $query->found_posts   = 1;
+    $query->post_count    = 1;
+    $query->max_num_pages = 1;
+    $query->post          = $wp_post;
+    $query->posts         = array( $wp_post );
+
+    return array( $wp_post );
+}, 10, 2 );
+
+/**
+ * Enqueue the calculator's JS deps on preset URLs.
+ * Mirrors the existing per-WC-product enqueue at top of pps-calculators.php.
+ */
+add_action( 'wp_enqueue_scripts', function() {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
+    wp_enqueue_script( 'pps-react',     'https://unpkg.com/react@18.3.1/umd/react.production.min.js', array(), '18.3.1', true );
+    wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
+    wp_enqueue_script( 'pps-pdfjs',     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
+    wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
+    wp_enqueue_script( 'pps-babel',     'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs' ), '7.26.9', true );
+} );
+
+/**
+ * Render the calculator + its config inline as the page content.
+ *
+ * Returns a string (not echoed) because the_content filter expects that.
+ * Extracts <style> and <script type="text/babel"> from the calculator HTML
+ * via the existing pps_parse_calculator_html() helper.
+ */
+function pps_render_preset_calculator( $preset ) {
+    $filename = pps_get_filename_for_calc_type( $preset['calc'] );
+    if ( ! $filename ) return '';
+
+    $filepath = trailingslashit( pps_upload_dir() ) . $filename;
+    if ( ! file_exists( $filepath ) ) return '';
+
+    $html  = file_get_contents( $filepath );
+    $parts = pps_parse_calculator_html( $html );
+
+    // Build PPS_CONFIG, parallel to the WC-product render path
+    $config = array(
+        'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
+        'cartUrl'     => function_exists( 'wc_get_cart_url' ) ? wc_get_cart_url() : home_url( '/cart/' ),
+        'cartNonce'   => wp_create_nonce( 'pps_add_to_cart' ),
+        'uploadNonce' => wp_create_nonce( 'pps_upload_artwork' ),
+        // No productId — preset render does not target a single WC product.
+        // The cart layer should fall back to a calc-type → product map; that
+        // mapping is wired in a follow-up PR alongside per-line preset slug
+        // capture in order meta. For now the preset-URL calculator renders
+        // and computes prices but add-to-cart goes through the existing
+        // calculator's own product binding (when present).
+        'presetSlug'  => $preset['slug'],
+    );
+
+    if ( function_exists( 'pps_get_config' ) ) {
+        $config['calc'] = pps_get_config();
+    }
+
+    $tips = get_option( 'pps_tooltips', array() );
+    if ( ! empty( $tips ) ) $config['tips'] = $tips;
+
+    $logo_url = get_option( 'pps_logo_url', '' );
+    if ( ! $logo_url ) {
+        $custom_logo_id = get_theme_mod( 'custom_logo' );
+        if ( $custom_logo_id ) $logo_url = wp_get_attachment_image_url( $custom_logo_id, 'medium' );
+    }
+    if ( $logo_url ) $config['logoUrl'] = $logo_url;
+
+    $zone_map = get_option( 'pps_ups_zone_map', array() );
+    if ( ! empty( $zone_map ) && is_array( $zone_map ) ) $config['zoneMap'] = $zone_map;
+
+    // Preset's own defaults override central calc defaults — calculator JS
+    // reads PPS_CONFIG.defaults to pre-fill the form.
+    if ( ! empty( $preset['defaults'] ) && is_array( $preset['defaults'] ) ) {
+        $config['defaults'] = $preset['defaults'];
+    }
+
+    // Build output buffer — we have to return a string, not echo.
+    ob_start();
+
+    echo '<script>window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+
+    // Scoped styles (mirror existing logic at line ~537)
+    if ( $parts['styles'] ) {
+        $css = $parts['styles'];
+        $css = str_replace(
+            '* {',
+            '#pps-calculator-wrap, #pps-calculator-wrap *, #pps-calculator-wrap *::before, #pps-calculator-wrap *::after {',
+            $css
+        );
+        $css = str_replace( 'body {', '#pps-calculator-wrap {', $css );
+        echo '<style>' . $css . '</style>';
+    }
+
+    echo '<div id="pps-calculator-wrap" style="margin:-20px 0 40px;clear:both">';
+    echo '<div id="pps-calculator-root"></div>';
+    echo '</div>';
+
+    if ( $parts['app_code'] ) {
+        echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+    }
+
+    return ob_get_clean();
+}
+
+/**
+ * Replace the_content with the calculator on preset URLs.
+ *
+ * Gated on:
+ *   - $GLOBALS['pps_active_preset'] is set (preset request)
+ *   - in the main loop on the main query (so secondary queries don't get hijacked)
+ *   - filter has not already run for this request (single-fire guard)
+ */
+add_filter( 'the_content', function( $content ) {
+    static $rendered = false;
+    if ( $rendered ) return $content;
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return $content;
+    if ( ! is_main_query() || ! in_the_loop() ) return $content;
+
+    $rendered = true;
+    return pps_render_preset_calculator( $GLOBALS['pps_active_preset'] );
+}, 5 );
+
+/**
+ * Forward the preset slug to the cart so it can be persisted on the order.
+ *
+ * The calculator's existing add-to-cart flow accepts arbitrary metadata.
+ * When PPS_CONFIG.presetSlug is set, the JS-side payload is expected to
+ * include it; this PHP handler stores it on the cart line item.
+ */
+add_filter( 'woocommerce_add_cart_item_data', function( $cart_item_data, $product_id, $variation_id ) {
+    if ( ! empty( $_POST['pps_preset_slug'] ) ) {
+        $slug = sanitize_key( wp_unslash( $_POST['pps_preset_slug'] ) );
+        if ( preg_match( '/^[a-z0-9\-]+$/', $slug ) ) {
+            $cart_item_data['pps_preset_slug'] = $slug;
+        }
+    }
+    return $cart_item_data;
+}, 10, 3 );
+
+/**
+ * Persist the preset slug onto the order line item at checkout.
+ * Visible in WC admin under the line item meta as "Preset".
+ */
+add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $cart_item_key, $values, $order ) {
+    if ( ! empty( $values['pps_preset_slug'] ) ) {
+        $item->add_meta_data( '_pps_preset_slug', sanitize_key( $values['pps_preset_slug'] ), true );
+        $item->add_meta_data( 'Preset', sanitize_key( $values['pps_preset_slug'] ), true );
+    }
+}, 10, 4 );
+
+/**
+ * Routing: register rewrite rule + query var for /booklets/{slug}/.
+ */
+add_action( 'init', function() {
+    add_rewrite_rule(
+        '^' . PPS_PRESET_URL_PREFIX . '/([a-z0-9\-]+)/?$',
+        'index.php?pps_preset=$matches[1]',
+        'top'
+    );
+} );
+add_filter( 'query_vars', function( $vars ) {
+    $vars[] = 'pps_preset';
+    return $vars;
+} );
+
+/**
+ * Flush rewrite rules on plugin activation so the rewrite rule is live
+ * immediately. (Other rewrite changes — e.g. preset add/edit/delete —
+ * also call flush_rewrite_rules() in pps_save_preset/pps_delete_preset.)
+ */
+register_activation_hook( __FILE__, function() {
+    add_rewrite_rule(
+        '^' . PPS_PRESET_URL_PREFIX . '/([a-z0-9\-]+)/?$',
+        'index.php?pps_preset=$matches[1]',
+        'top'
+    );
+    flush_rewrite_rules( false );
 } );
 
 // ═══════════════════════════════════════════════════════════════
