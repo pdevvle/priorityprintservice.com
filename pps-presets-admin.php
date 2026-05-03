@@ -548,8 +548,10 @@ function pps_presets_render_override_subsection( $title, $fields, $current, $gri
 }
 
 /**
- * Tier 2 — per-block JSON-LD textarea. If filled, replaces the
- * auto-generated block wholesale.
+ * Tier 2 — per-block JSON-LD textarea. Top-level keys present in the
+ * pasted object override the auto-generated block; absent keys fall
+ * back to the auto-generated value (shallow merge — no need to
+ * re-paste the whole schema).
  */
 function pps_presets_render_schema_block_overrides( $current ) {
     $blocks = array(
@@ -566,7 +568,7 @@ function pps_presets_render_schema_block_overrides( $current ) {
     echo '<details class="pps-preset-collapse">';
     echo '<summary>Schema block overrides <span class="pps-preset-collapse-count">' . $set_count . ' set</span></summary>';
     echo '<div class="pps-preset-collapse-body">';
-    echo '<p class="pps-preset-collapse-hint">Paste a complete JSON-LD object. If filled, the auto-generated block is replaced. Validated on save (root must be an object with @type; ≤50KB; HTML stripped from string values; renders with extra escaping for &lt; and &gt; to prevent script-tag breakout).</p>';
+    echo '<p class="pps-preset-collapse-hint">Paste a partial or full JSON-LD object. <strong>Top-level keys you supply replace the auto-generated value; missing keys fall through to the auto-generated default</strong> — so you can paste just <code>{"aggregateRating": {…}}</code> without losing name/description/offers/etc. Nested objects are not deep-merged: if you supply <code>offers</code>, you must supply the full Offer object. Validated on save (root must be an object with @type; ≤50KB; HTML stripped from string values; renders with extra escaping for &lt; and &gt; to prevent script-tag breakout).</p>';
 
     foreach ( $blocks as $key => $label ) {
         $val = isset( $current[ $key ] ) && is_array( $current[ $key ] )
@@ -574,7 +576,7 @@ function pps_presets_render_schema_block_overrides( $current ) {
                : '';
         echo '<div class="pps-preset-field pps-preset-wide" style="margin-bottom:10px">';
         echo '<label>' . esc_html( $label ) . '</label>';
-        echo '<textarea name="preset_schema_overrides[' . esc_attr( $key ) . ']" rows="6" placeholder="Leave empty to use auto-generated &quot;' . esc_attr( $label ) . '&quot; schema.">' . esc_textarea( $val ) . '</textarea>';
+        echo '<textarea name="preset_schema_overrides[' . esc_attr( $key ) . ']" rows="6" placeholder="Leave empty to use 100% auto-generated &quot;' . esc_attr( $label ) . '&quot; — or paste a partial object to override specific top-level keys.">' . esc_textarea( $val ) . '</textarea>';
         echo '</div>';
     }
 
