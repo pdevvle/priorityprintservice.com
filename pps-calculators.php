@@ -44,6 +44,10 @@ if ( file_exists( PPS_CALC_DIR . 'pps-gdrive.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-gdrive.php';
 }
 
+if ( file_exists( PPS_CALC_DIR . 'pps-reorder.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-reorder.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
