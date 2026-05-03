@@ -246,38 +246,111 @@ add_action( 'admin_menu', function() {
 }, 20 );
 
 // ═══════════════════════════════════════════════════════════════
-// UPS ZONE CHART CSV PARSER
+// UPS ZONE CHART CSV / XLSX PARSER
 // ═══════════════════════════════════════════════════════════════
+
+/**
+ * Convert an XLSX file (Office 2007+, ZIP container) into CSV text.
+ * Returns false if the file cannot be opened or has no sheet1.
+ * Reads the first worksheet only; that's the layout UPS publishes.
+ */
+function pps_xlsx_to_csv( $path ) {
+    if ( ! class_exists( 'ZipArchive' ) ) return false;
+    $zip = new ZipArchive();
+    if ( $zip->open( $path ) !== true ) return false;
+
+    $shared = array();
+    $ss_xml = $zip->getFromName( 'xl/sharedStrings.xml' );
+    if ( $ss_xml ) {
+        $sx = @simplexml_load_string( $ss_xml );
+        if ( $sx ) {
+            foreach ( $sx->si as $si ) {
+                $text = '';
+                if ( isset( $si->t ) ) {
+                    $text = (string) $si->t;
+                } elseif ( isset( $si->r ) ) {
+                    foreach ( $si->r as $r ) $text .= (string) $r->t;
+                }
+                $shared[] = $text;
+            }
+        }
+    }
+
+    $sheet_xml = $zip->getFromName( 'xl/worksheets/sheet1.xml' );
+    $zip->close();
+    if ( ! $sheet_xml ) return false;
+
+    $sx = @simplexml_load_string( $sheet_xml );
+    if ( ! $sx || ! isset( $sx->sheetData ) ) return false;
+
+    $out = '';
+    foreach ( $sx->sheetData->row as $row ) {
+        $cells = array();
+        $max = -1;
+        foreach ( $row->c as $c ) {
+            $ref = (string) $c['r'];
+            if ( ! preg_match( '/^([A-Z]+)/', $ref, $m ) ) continue;
+            $col_idx = 0;
+            foreach ( str_split( $m[1] ) as $ch ) $col_idx = $col_idx * 26 + ( ord( $ch ) - 64 );
+            $col_idx--;
+            $val = isset( $c->v ) ? (string) $c->v : '';
+            $type = (string) $c['t'];
+            if ( $type === 's' ) {
+                $val = $shared[ intval( $val ) ] ?? '';
+            } elseif ( $type === 'inlineStr' && isset( $c->is->t ) ) {
+                $val = (string) $c->is->t;
+            }
+            $cells[ $col_idx ] = $val;
+            if ( $col_idx > $max ) $max = $col_idx;
+        }
+        $line = array();
+        for ( $i = 0; $i <= $max; $i++ ) {
+            $v = $cells[ $i ] ?? '';
+            $line[] = ( strpbrk( $v, ",\"\n\r" ) !== false )
+                ? '"' . str_replace( '"', '""', $v ) . '"'
+                : $v;
+        }
+        $out .= implode( ',', $line ) . "\n";
+    }
+    return $out;
+}
 
 /**
  * Parse a UPS zone chart CSV into a 3-digit ZIP prefix → transit days map.
  *
  * UPS CSV format:
  *   Row 1: "ZONE CHART"
- *   Row 2: service names
+ *   Row 2: service names (e.g. "UPS Ground/UPS 3 Day Select/...")
  *   Row 3: origin info
- *   Row 4: "ZONES"
- *   Row 5: header — "Dest. ZIP", "Ground", "3 Day Select", ...
- *   Row 6+: data  — "004-005", "5", "305", ...  or  "420", "6", ...
+ *   Row 4: instructions
+ *   Row 5: "ZONES"
+ *   Row 6: header — "Dest. ZIP", "Ground", "3 Day Select", ...
+ *   Row 7+: data  — "004-005", "5", "305", ...  or  "420", "6", ...
  *
- * Zone → transit days: 2=1d, 3=2d, 4=3d, 5=4d, 6=5d, 7=6d, 8=7d
+ * Zone → transit days: 2=1d, 3=2d, 4=3d, 5=4d, 6=5d, 7=6d, 8=7d.
+ * HI/AK Ground zones (44-46) are air-only routings; mapped to 7d.
+ *
+ * Returns array( 'map' => [pfx => days], 'skipped' => int ).
  */
 function pps_parse_ups_zone_csv( $raw ) {
     $zone_to_days = array( 2 => 1, 3 => 2, 4 => 3, 5 => 4, 6 => 5, 7 => 6, 8 => 7 );
     $map = array();
+    $skipped = 0;
 
     // Normalize line endings
     $raw = str_replace( array( "\r\n", "\r" ), "\n", $raw );
     $lines = explode( "\n", $raw );
 
-    // Find the header row (contains "Dest" or "Ground")
+    // Find the header row — must contain BOTH "Dest" AND "Ground". The
+    // service-description row in UPS files contains "Ground" alone (in a
+    // long slash-separated string); requiring both tokens skips it.
     $header_idx = -1;
     $ground_col = 1; // default: second column
     foreach ( $lines as $idx => $line ) {
-        if ( stripos( $line, 'Dest' ) !== false || stripos( $line, 'Ground' ) !== false ) {
+        if ( stripos( $line, 'Dest' ) !== false && stripos( $line, 'Ground' ) !== false ) {
             $cols = str_getcsv( $line );
             foreach ( $cols as $ci => $ch ) {
-                if ( stripos( trim( $ch ), 'Ground' ) !== false ) {
+                if ( strcasecmp( trim( $ch, " \t\"" ), 'Ground' ) === 0 ) {
                     $ground_col = $ci;
                     break;
                 }
@@ -286,6 +359,13 @@ function pps_parse_ups_zone_csv( $raw ) {
             break;
         }
     }
+
+    $set_pfx = function( $zip, $days ) use ( &$map ) {
+        if ( $zip < 0 ) return;
+        if ( $zip > 999 ) $zip = intdiv( $zip, 100 ); // 5-digit ZIP → 3-digit prefix
+        if ( $zip < 0 || $zip > 999 ) return;
+        $map[ str_pad( $zip, 3, '0', STR_PAD_LEFT ) ] = $days;
+    };
 
     // Parse data rows
     $start = ( $header_idx >= 0 ) ? $header_idx + 1 : 0;
@@ -299,22 +379,36 @@ function pps_parse_ups_zone_csv( $raw ) {
         $dest = trim( $cols[0], ' "' );
         $zone_raw = trim( $cols[ $ground_col ] ?? $cols[1] ?? '', ' "' );
 
-        // Skip non-numeric zones (dashes, empty)
+        // Skip non-numeric zones (dashes, empty, header text)
         if ( ! is_numeric( $zone_raw ) ) continue;
         $zone = intval( $zone_raw );
-        $days = isset( $zone_to_days[ $zone ] ) ? $zone_to_days[ $zone ] : max( 1, $zone - 1 );
+
+        if ( isset( $zone_to_days[ $zone ] ) ) {
+            $days = $zone_to_days[ $zone ];
+        } elseif ( $zone >= 44 && $zone <= 46 ) {
+            // HI/AK Ground codes: no surface route, treat as 7-day fallback
+            $days = 7;
+        } elseif ( $zone > 999 ) {
+            // Likely a ZIP-enumeration row (HI/AK sub-table lists 5-digit ZIPs
+            // grouped under a Zone 44/46 header). Gap-fill handles those 3-digit
+            // prefixes correctly, so skip silently rather than alarming the user.
+            continue;
+        } else {
+            $skipped++;
+            continue;
+        }
 
         // Parse dest — could be "004-005" range or "420" single
         if ( strpos( $dest, '-' ) !== false ) {
             $parts = explode( '-', $dest );
             $lo = intval( trim( $parts[0] ) );
             $hi = intval( trim( $parts[1] ) );
-            for ( $i = $lo; $i <= $hi; $i++ ) {
-                $map[ str_pad( $i, 3, '0', STR_PAD_LEFT ) ] = $days;
-            }
+            if ( $hi < $lo ) continue;
+            // Cap range to a sane upper bound to avoid runaway loops on malformed input
+            if ( $hi - $lo > 100000 ) continue;
+            for ( $i = $lo; $i <= $hi; $i++ ) $set_pfx( $i, $days );
         } else {
-            $pfx = str_pad( intval( $dest ), 3, '0', STR_PAD_LEFT );
-            $map[ $pfx ] = $days;
+            $set_pfx( intval( $dest ), $days );
         }
     }
 
@@ -327,7 +421,7 @@ function pps_parse_ups_zone_csv( $raw ) {
         ksort( $map );
     }
 
-    return $map;
+    return array( 'map' => $map, 'skipped' => $skipped );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -447,16 +541,42 @@ function pps_config_render_page() {
         // ── Zone Map (separate wp_option) ──
         $zone_updated = false;
 
-        // CSV file upload
+        // Zone chart upload — accepts CSV, XLSX, or .xls-named-but-XLSX (UPS default)
         if ( ! empty( $_FILES['ups_zone_csv']['tmp_name'] ) && $_FILES['ups_zone_csv']['error'] === UPLOAD_ERR_OK ) {
-            $csv_data = file_get_contents( $_FILES['ups_zone_csv']['tmp_name'] );
-            $zone_result = pps_parse_ups_zone_csv( $csv_data );
-            if ( ! empty( $zone_result ) ) {
-                update_option( 'pps_ups_zone_map', $zone_result, false );
-                update_option( 'pps_ups_zone_map_updated', current_time( 'mysql' ), false );
-                $zone_updated = true;
-            } else {
-                $json_errors[] = 'Zone CSV: Could not parse — ensure it is a UPS zone chart saved as CSV';
+            $tmp = $_FILES['ups_zone_csv']['tmp_name'];
+            $csv_data = file_get_contents( $tmp );
+            $head4 = substr( (string) $csv_data, 0, 4 );
+
+            if ( $head4 === "PK\x03\x04" ) {
+                // XLSX (Office 2007+, ZIP container) — convert in-process
+                $converted = pps_xlsx_to_csv( $tmp );
+                if ( $converted === false ) {
+                    $json_errors[] = 'Zone upload: XLSX detected but could not be parsed';
+                    $csv_data = '';
+                } else {
+                    $csv_data = $converted;
+                }
+            } elseif ( $head4 === "\xD0\xCF\x11\xE0" ) {
+                // Legacy BIFF/OLE2 .xls — not supported (would need a heavy parser)
+                $json_errors[] = 'Zone upload: legacy .xls (BIFF) is not supported — open in Excel and save as .xlsx or .csv';
+                $csv_data = '';
+            }
+
+            if ( $csv_data !== '' ) {
+                $zone_result = pps_parse_ups_zone_csv( $csv_data );
+                $zone_map = isset( $zone_result['map'] ) ? $zone_result['map'] : array();
+                $zone_skipped = isset( $zone_result['skipped'] ) ? intval( $zone_result['skipped'] ) : 0;
+
+                if ( count( $zone_map ) > 50 ) {
+                    update_option( 'pps_ups_zone_map', $zone_map, false );
+                    update_option( 'pps_ups_zone_map_updated', current_time( 'mysql' ), false );
+                    $zone_updated = true;
+                    if ( $zone_skipped > 0 ) {
+                        $json_errors[] = sprintf( 'Zone upload: %d row(s) skipped (zone out of range or non-numeric)', $zone_skipped );
+                    }
+                } else {
+                    $json_errors[] = 'Zone upload: could not parse — confirm this is a UPS zone chart (CSV or XLSX)';
+                }
             }
         }
 
@@ -1097,8 +1217,11 @@ function pps_config_tab_shipping( $cfg ) {
         echo '<div style="margin-bottom:10px;padding:8px 12px;background:#f7fbff;border:1px solid #d0e3f1;border-radius:4px;font-size:12px">';
         echo '<strong style="color:#0073aa">✓ Zone map loaded</strong> — ' . count( $zone_map ) . ' prefixes &nbsp;·&nbsp; ';
         foreach ( $dist as $d => $cnt ) {
-            $bg = $colors[ $d ] ?? '#f0f0f1';
-            echo '<span style="display:inline-block;background:' . $bg . ';padding:1px 6px;border-radius:3px;margin-right:4px;font-size:11px">' . $d . 'd: ' . $cnt . '</span>';
+            $d_int = is_numeric( $d ) ? intval( $d ) : -1;
+            $is_valid = $d_int >= 1 && $d_int <= 14;
+            $bg = $is_valid ? ( $colors[ $d_int ] ?? '#f0f0f1' ) : '#fce4e4';
+            $label = $is_valid ? ( $d_int . 'd' ) : ( '?(' . esc_html( (string) $d ) . ')' );
+            echo '<span style="display:inline-block;background:' . $bg . ';padding:1px 6px;border-radius:3px;margin-right:4px;font-size:11px">' . $label . ': ' . intval( $cnt ) . '</span>';
         }
         $updated = get_option( 'pps_ups_zone_map_updated', '' );
         if ( $updated ) echo '<br><span style="color:#888;font-size:11px">Last updated: ' . esc_html( $updated ) . '</span>';
@@ -1112,11 +1235,11 @@ function pps_config_tab_shipping( $cfg ) {
     echo '<div style="margin-bottom:14px;padding:10px 14px;background:#fafafa;border:1px solid #ddd;border-radius:4px">';
     echo '<div style="font-size:11px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Update Zone Map</div>';
 
-    // Upload CSV
+    // Upload zone chart — accepts the raw file UPS provides (XLS/XLSX) or CSV
     echo '<div style="margin-bottom:8px">';
-    echo '<label style="font-size:12px;font-weight:600;color:#333">Upload UPS Zone Chart (CSV or XLS saved as CSV):</label><br>';
-    echo '<input type="file" name="ups_zone_csv" accept=".csv,.txt" style="margin-top:4px">';
-    echo '<div style="font-size:11px;color:#888;margin-top:2px">Go to <a href="https://www.ups.com/us/en/support/shipping-support/shipping-costs-rates/daily-rates" target="_blank">UPS Daily Rates</a> → Download Zone Chart for your origin ZIP → Open in Excel → Save As CSV → Upload here.</div>';
+    echo '<label style="font-size:12px;font-weight:600;color:#333">Upload UPS Zone Chart (XLS, XLSX, or CSV):</label><br>';
+    echo '<input type="file" name="ups_zone_csv" accept=".csv,.txt,.xls,.xlsx" style="margin-top:4px">';
+    echo '<div style="font-size:11px;color:#888;margin-top:2px">Go to <a href="https://www.ups.com/us/en/support/shipping-support/shipping-costs-rates/daily-rates" target="_blank">UPS Daily Rates</a> → Download Zone Chart for your origin ZIP → Upload the file here as-is. No conversion needed.</div>';
     echo '</div>';
 
     // Or paste JSON
