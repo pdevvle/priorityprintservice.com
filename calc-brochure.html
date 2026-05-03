@@ -2386,7 +2386,7 @@ function Panel({ result, compact }) {
   }
   return (
     <div style={{ background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden" }}>
-      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}` }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}`, pointerEvents: "none" }}>
         <div style={{ fontSize: 11, color: CC.light, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 2 }}>Estimated Total</div>
         <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: CC.dark }}>
           <span style={{ fontSize: 28, fontWeight: 800 }}>${dPart}</span>
@@ -2401,7 +2401,7 @@ function Panel({ result, compact }) {
           </div>
         ))}
       </div>
-      {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#fafafa", fontSize: 11, color: CC.mid }}>
+      {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#fafafa", fontSize: 11, color: CC.mid, pointerEvents: "none" }}>
         Free delivery est: <strong>{sh.freeDeliveryDate}</strong> ({sh.freeDeliveryBizDays} biz days)
       </div>}
       {r.grouped.length > 0 && <div style={{ padding: "10px 18px" }}>
