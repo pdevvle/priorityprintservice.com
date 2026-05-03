@@ -943,7 +943,7 @@ function Panel({result,compact}){
   const brkDen=Math.max(0.01,grouped.reduce((s,r)=>s+Math.max(0,r.val),0)+(hasRush?sh.rushCost:0));
   return(
     <div style={ST.pnl}>
-      <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:`linear-gradient(135deg, ${CK.cyan} 0%, ${CK.cyan}dd 100%)`,color:hasRush?"#333":"#fff"}}>
+      <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:`linear-gradient(135deg, ${CK.cyan} 0%, ${CK.cyan}dd 100%)`,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
           <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol}}>{hasRush?"Rush Total":"Estimated Total"}</div>
           <span style={ST.cmykDots} aria-hidden="true">
@@ -967,7 +967,7 @@ function Panel({result,compact}){
           </div>
         ))}
       </div>
-      {sh&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",borderBottom:`1px solid ${CC.border}`,background:"#fafafa"}}>
+      {sh&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",borderBottom:`1px solid ${CC.border}`,background:"#fafafa",pointerEvents:"none"}}>
         <div style={{padding:"10px 14px 10px 18px",borderRight:`1px solid ${CC.border}`}}>
           <div style={{fontSize:9,fontWeight:700,letterSpacing:".9px",color:CC.light,textTransform:"uppercase",marginBottom:2}}>Earliest</div>
           <div style={{fontSize:12.5,fontWeight:700,color:CC.dark,lineHeight:1.15}}>{sh.earliestDate}</div>
@@ -1656,7 +1656,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug, pageTransforms, setPageTransforms, artDims, setArtDims }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1666,10 +1666,10 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [spread, setSpread] = useState(0);
   const [fileName, setFileName] = useState("");
   const [uploadPageCount, setUploadPageCount] = useState(0);
-  const [artDims, setArtDims] = useState(null); // {wIn, hIn, wPx, hPx, source}
+  // artDims and pageTransforms are now lifted to App so handleAddToOrder can
+  // serialize them into WC order metadata. Received via props.
   // Per-page transforms — each page gets its own { fitMode, artScale, rotateSteps }.
   // Proof modal edits getTx(proofIdx) via compat aliases below.
-  const [pageTransforms, setPageTransforms] = useState({});
   const [dropHover, setDropHover] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [slotsOpen, setSlotsOpen] = useState(false);
@@ -3508,11 +3508,13 @@ function buildMetadata(config, result) {
     artEditPages: config.artEditPages,
     bleed: config.bleed,
     proof: config.proof,
-    // Art transforms — what the customer approved in the proof modal
-    // (Phase 2: server-side rendering will use these to produce print-ready files)
-    fitMode: config.fitMode,
-    artScale: config.artScale,
-    rotateSteps: config.rotateSteps,
+    // Per-page art transforms — what the customer approved per page in the
+    // proof modal. Keyed by page index → { fitMode, artScale, rotateSteps }.
+    // (Phase 2: server-side rendering will use these to produce print-ready
+    // files. Earlier code stored these as four flat scalars, which both
+    // crashed handleAddToOrder via ReferenceError and silently lost the
+    // per-page distinction.)
+    pageTransforms: config.pageTransforms || {},
     artDims: config.artDims || null,
     shipState: config.shipState,
     shipZip: config.shipZip || '',
@@ -3769,6 +3771,11 @@ function App(){
   const[canvaLink,setCanvaLink]=useState(D.canvaLink||"");
   const[canvaInstructions,setCanvaInstructions]=useState("");
   const[referenceFiles,setReferenceFiles]=useState([]);
+  // Lifted from SetPreview so handleAddToOrder/buildMetadata can serialize per-page
+  // art transforms into WC order metadata. Source of truth lives here; SetPreview
+  // receives them as props and threads them through getTx/setTx.
+  const[pageTransforms,setPageTransforms]=useState({});
+  const[artDims,setArtDims]=useState(null); // {wIn, hIn, wPx, hPx, source}
 
   const iP=insidePaperType==="cardstock"?PAPERS_CS:PAPERS_NC;
   const cP=coverPaperType==="cardstock"?PAPERS_CS:PAPERS_NC;
@@ -3799,11 +3806,13 @@ function App(){
       }
       if (rc.bindDir) setBindDir(rc.bindDir);
 
-      // Sets (quantity & pages)
+      // Sets (quantity & pages) — clamp to MIN_QTY=1, MIN_PAGES=8 to prevent
+      // crashes from malformed payloads (e.g. qty=-100) that previously caused
+      // React render to throw silently and leave an empty calc root.
       if (rc.sets && Array.isArray(rc.sets)) {
         setSets(rc.sets.map(s => ({
-          qty: s.qty || 100,
-          pages: s.pages || 8,
+          qty: Math.max(1, Number(s.qty) || 100),
+          pages: Math.max(8, Number(s.pages) || 8),
           name: s.name || "",
         })));
       }
@@ -3848,6 +3857,15 @@ function App(){
       if (rc.artworkPath) setArtFiles({ type: "existing", path: rc.artworkPath });
       else if (PPS.existingArtwork && PPS.existingArtwork.path) {
         setArtFiles({ type: "existing", path: PPS.existingArtwork.path });
+      }
+
+      // Per-page art transforms — restore so reorder reproduces the customer's
+      // exact proof-modal choices. Artwork fidelity is business-critical.
+      if (rc.pageTransforms && typeof rc.pageTransforms === "object") {
+        setPageTransforms(rc.pageTransforms);
+      }
+      if (rc.artDims && typeof rc.artDims === "object") {
+        setArtDims(rc.artDims);
       }
 
       // Open all sections so customer can see everything
@@ -3967,6 +3985,14 @@ function App(){
 
   const handleAddToOrder = async () => {
     if (!result || result.error?.length || submitting) return;
+    // Artwork integrity guard: pageTransforms must be a real object before we
+    // serialize order metadata. An empty {} is fine (customer didn't open the
+    // proof transform UI); undefined/non-object means something is wrong with
+    // the lifted state and we'd corrupt the order. Bail rather than submit.
+    if (pageTransforms == null || typeof pageTransforms !== "object") {
+      console.error("PPS: refusing to submit — pageTransforms is missing or invalid", pageTransforms);
+      return;
+    }
     setSubmitting(true);
     setUploadProgress(null);
     const config = {
@@ -3976,7 +4002,7 @@ function App(){
       twoStaple, vividPrint, coating, bundling, roundCorner,
       artwork, artEditPages, bleed, proof,
       shipState, shipAddr, shipZip, needByDate,
-      fitMode, artScale, rotateSteps, artDims,
+      pageTransforms, artDims,
     };
     const summary = buildSummary(config, result);
     const metadata = buildMetadata(config, result);
@@ -4172,6 +4198,8 @@ function App(){
                 sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir}
                 pageCount={sets[0]?.pages||8} roundCorner={roundCorner} insideColor={insideColor}
                 proof={proof} setProof={setProof}
+                pageTransforms={pageTransforms} setPageTransforms={setPageTransforms}
+                artDims={artDims} setArtDims={setArtDims}
                 onPagesDetected={(pg) => upSet(0, { pages: pg })}
                 onCoverArt={setCoverArt}
                 onBackCoverArt={setBackCoverArt}
