@@ -1618,34 +1618,81 @@ function pps_save_preset( $slug, $data ) {
     $currency = isset( $data['currency'] ) ? strtoupper( sanitize_text_field( (string) $data['currency'] ) ) : 'USD';
     if ( ! preg_match( '/^[A-Z]{3}$/', $currency ) ) $currency = 'USD';
 
-    // ── Tier 1: simple field overrides ──
-    $allowed_overrides = array( 'meta_title', 'meta_description', 'og_image', 'schema_name', 'schema_sku', 'breadcrumb_label' );
+    // ── Tier 1: simple field overrides (spec-table dispatcher) ──
+    // Each key declares its sanitization strategy. pps_sanitize_override_value()
+    // returns null to signal "drop this field"; we only store non-null results.
+    $override_specs = array(
+        // Existing — shape preserved.
+        'meta_title'        => array( 'sanitize' => 'text',     'max' => 200 ),
+        'meta_description'  => array( 'sanitize' => 'textarea', 'max' => 320 ),
+        'og_image'          => array( 'sanitize' => 'url' ),
+        'schema_name'       => array( 'sanitize' => 'text',     'max' => 200 ),
+        'schema_sku'        => array( 'sanitize' => 'regex',    'pattern' => '/[^a-zA-Z0-9_\-]/', 'max' => 80 ),
+        'breadcrumb_label'  => array( 'sanitize' => 'text',     'max' => 200 ),
+
+        // Group A — Basic Product
+        'schema_description'                => array( 'sanitize' => 'textarea', 'max' => 500 ),
+        'schema_brand'                      => array( 'sanitize' => 'text',     'max' => 120 ),
+        'schema_category'                   => array( 'sanitize' => 'text',     'max' => 200 ),
+        'schema_image'                      => array( 'sanitize' => 'url_csv',  'max_items' => 6 ),
+        'schema_url'                        => array( 'sanitize' => 'url' ),
+        'schema_additional_type'            => array( 'sanitize' => 'url' ),
+        'schema_audience'                   => array( 'sanitize' => 'text',     'max' => 200 ),
+        'schema_color'                      => array( 'sanitize' => 'text',     'max' => 120 ),
+        'schema_material'                   => array( 'sanitize' => 'text',     'max' => 120 ),
+        'schema_disambiguating_description' => array( 'sanitize' => 'text',     'max' => 200 ),
+
+        // Group B — Identifiers
+        'schema_gtin' => array( 'sanitize' => 'regex', 'pattern' => '/[^a-zA-Z0-9]/',     'max' => 32 ),
+        'schema_mpn'  => array( 'sanitize' => 'regex', 'pattern' => '/[^a-zA-Z0-9_\-]/',  'max' => 64 ),
+
+        // Group C — Offer
+        'offer_price'             => array( 'sanitize' => 'decimal',  'min' => 0, 'max_value' => 1000000 ),
+        'offer_price_high'        => array( 'sanitize' => 'decimal',  'min' => 0, 'max_value' => 1000000 ),
+        'offer_price_currency'    => array( 'sanitize' => 'currency' ),
+        'offer_availability'      => array( 'sanitize' => 'enum',     'allowed' => array( 'InStock', 'OutOfStock', 'PreOrder', 'Discontinued', 'SoldOut' ) ),
+        'offer_price_valid_until' => array( 'sanitize' => 'date_iso' ),
+        'offer_item_condition'    => array( 'sanitize' => 'enum',     'allowed' => array( 'NewCondition', 'RefurbishedCondition', 'UsedCondition', 'DamagedCondition' ) ),
+        'offer_url'               => array( 'sanitize' => 'url' ),
+
+        // Group D — AggregateRating
+        'rating_value' => array( 'sanitize' => 'decimal', 'min' => 0, 'max_value' => 5,       'precision' => 1 ),
+        'rating_count' => array( 'sanitize' => 'int',     'min' => 1, 'max_value' => 1000000 ),
+        'rating_best'  => array( 'sanitize' => 'decimal', 'min' => 0, 'max_value' => 5,       'precision' => 1 ),
+        'rating_worst' => array( 'sanitize' => 'decimal', 'min' => 0, 'max_value' => 5,       'precision' => 1 ),
+    );
     $overrides = array();
+    $warnings  = array();
     if ( isset( $data['overrides'] ) && is_array( $data['overrides'] ) ) {
-        foreach ( $allowed_overrides as $k ) {
-            $v = isset( $data['overrides'][ $k ] ) ? trim( (string) $data['overrides'][ $k ] ) : '';
-            if ( $v === '' ) continue;
-            switch ( $k ) {
-                case 'og_image':
-                    $u = esc_url_raw( $v, array( 'http', 'https' ) );
-                    if ( $u ) $overrides[ $k ] = $u;
-                    break;
-                case 'meta_description':
-                    $s = sanitize_textarea_field( $v );
-                    if ( strlen( $s ) > 320 ) $s = substr( $s, 0, 320 );
-                    $overrides[ $k ] = $s;
-                    break;
-                case 'schema_sku':
-                    $s = preg_replace( '/[^a-zA-Z0-9_\-]/', '', $v );
-                    if ( $s !== '' && strlen( $s ) <= 80 ) $overrides[ $k ] = $s;
-                    break;
-                default:
-                    $s = sanitize_text_field( $v );
-                    if ( strlen( $s ) > 200 ) $s = substr( $s, 0, 200 );
-                    $overrides[ $k ] = $s;
-                    break;
-            }
+        foreach ( $override_specs as $k => $spec ) {
+            if ( ! isset( $data['overrides'][ $k ] ) ) continue;
+            $raw = trim( (string) $data['overrides'][ $k ] );
+            if ( $raw === '' ) continue;
+            $clean_v = pps_sanitize_override_value( $raw, $spec );
+            if ( $clean_v === null || $clean_v === '' ) continue;
+            $overrides[ $k ] = $clean_v;
         }
+    }
+
+    // Cross-field validation post-pass: drop offending fields and surface a
+    // non-blocking warning so the save still succeeds.
+    if ( isset( $overrides['rating_value'] ) xor isset( $overrides['rating_count'] ) ) {
+        unset( $overrides['rating_value'], $overrides['rating_count'] );
+        $warnings[] = 'AggregateRating requires both rating_value and rating_count — dropped.';
+    }
+    if ( isset( $overrides['offer_price_high'] ) && ! isset( $overrides['offer_price'] ) ) {
+        unset( $overrides['offer_price_high'] );
+        $warnings[] = 'offer_price_high requires offer_price — dropped high price.';
+    }
+    if ( isset( $overrides['offer_price_high'], $overrides['offer_price'] )
+         && (float) $overrides['offer_price_high'] <= (float) $overrides['offer_price'] ) {
+        unset( $overrides['offer_price_high'] );
+        $warnings[] = 'offer_price_high must be greater than offer_price — dropped high price.';
+    }
+    if ( isset( $overrides['rating_best'], $overrides['rating_worst'] )
+         && (float) $overrides['rating_worst'] > (float) $overrides['rating_best'] ) {
+        unset( $overrides['rating_worst'] );
+        $warnings[] = 'rating_worst cannot exceed rating_best — dropped rating_worst.';
     }
 
     // ── Tier 2: schema block overrides (per-block JSON-LD) ──
@@ -1729,6 +1776,13 @@ function pps_save_preset( $slug, $data ) {
     // but flush anyway so newly-added presets are discoverable on first hit
     // without a manual "Settings → Permalinks" save.
     flush_rewrite_rules( false );
+
+    // Warnings (cross-field drops) ride along the return value but are NOT
+    // persisted to the option — admin form handler reads them once, then
+    // surfaces them as notices on the redirect.
+    if ( ! empty( $warnings ) ) {
+        $clean['_warnings'] = $warnings;
+    }
 
     return $clean;
 }
@@ -2197,29 +2251,58 @@ function pps_get_faqs( $calc_type ) {
  * Emit a Product JSON-LD <script> block.
  *
  * Args:
- *   id                    DOM id (default 'pps-schema-product')
- *   name                  Product name (required)
- *   description           Plain-text description
- *   brand_name            Brand display name (default site name)
- *   category              Schema category string
- *   image                 Single image URL (string) or array of URLs
- *   url                   Canonical URL of this Product
- *   sku                   SKU (optional; emitted only when non-empty)
- *   offers                Array shaped per schema.org Offer/AggregateOffer, or null
- *   additional_properties Array of ['name' => ..., 'value' => ...] — empty entries skipped
+ *   id                          DOM id (default 'pps-schema-product')
+ *   name                        Product name (required)
+ *   description                 Plain-text description
+ *   brand_name                  Brand display name (default site name)
+ *   category                    Schema category string
+ *   image                       Single image URL (string) or array of URLs
+ *   url                         Canonical URL of this Product
+ *   sku                         SKU (optional; emitted only when non-empty)
+ *   offers                      Array shaped per schema.org Offer/AggregateOffer, or null
+ *   additional_properties       Array of ['name' => ..., 'value' => ...] — empty entries skipped
+ *   additional_type             URL string, e.g. https://schema.org/Booklet (optional)
+ *   audience                    Audience type string, emitted as Audience/audienceType (optional)
+ *   color                       Color string (optional)
+ *   material                    Material string (optional)
+ *   disambiguating_description  Short distinguishing description (optional)
+ *   gtin                        Global Trade Item Number (optional)
+ *   mpn                         Manufacturer Part Number (optional)
+ *   aggregate_rating            Array ['value' => float, 'count' => int, 'best' => float, 'worst' => float] or null
  */
 function pps_emit_product_schema( array $args ) {
+    $id     = isset( $args['id'] ) && is_string( $args['id'] ) && $args['id'] !== '' ? $args['id'] : 'pps-schema-product';
+    $schema = pps_build_product_schema( $args );
+    if ( empty( $schema ) ) return;
+    echo '<script type="application/ld+json" id="' . esc_attr( $id ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Build (but do not emit) the Product JSON-LD schema array. Same arg
+ * shape as pps_emit_product_schema(); used for partial-merge with Tier
+ * 2 overrides on preset URLs.
+ */
+function pps_build_product_schema( array $args ) {
     $defaults = array(
-        'id'                    => 'pps-schema-product',
-        'name'                  => '',
-        'description'           => '',
-        'brand_name'            => get_bloginfo( 'name' ),
-        'category'              => '',
-        'image'                 => '',
-        'url'                   => '',
-        'sku'                   => '',
-        'offers'                => null,
-        'additional_properties' => array(),
+        'name'                       => '',
+        'description'                => '',
+        'brand_name'                 => get_bloginfo( 'name' ),
+        'category'                   => '',
+        'image'                      => '',
+        'url'                        => '',
+        'sku'                        => '',
+        'offers'                     => null,
+        'additional_properties'      => array(),
+        'additional_type'            => '',
+        'audience'                   => '',
+        'color'                      => '',
+        'material'                   => '',
+        'disambiguating_description' => '',
+        'gtin'                       => '',
+        'mpn'                        => '',
+        'aggregate_rating'           => null,
     );
     $a = wp_parse_args( $args, $defaults );
 
@@ -2236,8 +2319,49 @@ function pps_emit_product_schema( array $args ) {
     if ( $a['sku'] !== '' ) {
         $schema['sku'] = $a['sku'];
     }
+    if ( $a['additional_type'] !== '' ) {
+        $schema['additionalType'] = $a['additional_type'];
+    }
+    if ( $a['gtin'] !== '' ) {
+        $schema['gtin'] = $a['gtin'];
+    }
+    if ( $a['mpn'] !== '' ) {
+        $schema['mpn'] = $a['mpn'];
+    }
+    if ( $a['color'] !== '' ) {
+        $schema['color'] = $a['color'];
+    }
+    if ( $a['material'] !== '' ) {
+        $schema['material'] = $a['material'];
+    }
+    if ( $a['disambiguating_description'] !== '' ) {
+        $schema['disambiguatingDescription'] = $a['disambiguating_description'];
+    }
+    if ( $a['audience'] !== '' ) {
+        $schema['audience'] = array( '@type' => 'Audience', 'audienceType' => $a['audience'] );
+    }
     if ( is_array( $a['offers'] ) ) {
         $schema['offers'] = $a['offers'];
+    }
+
+    // AggregateRating: only emit when value+count are valid.
+    // Defense-in-depth: re-validate at build time even though admin save also validates.
+    if ( is_array( $a['aggregate_rating'] ) ) {
+        $rv = isset( $a['aggregate_rating']['value'] ) ? floatval( $a['aggregate_rating']['value'] ) : 0.0;
+        $rc = isset( $a['aggregate_rating']['count'] ) ? intval( $a['aggregate_rating']['count'] ) : 0;
+        if ( $rv > 0 && $rv <= 5 && $rc > 0 ) {
+            $best  = isset( $a['aggregate_rating']['best'] )  ? floatval( $a['aggregate_rating']['best'] )  : 5.0;
+            $worst = isset( $a['aggregate_rating']['worst'] ) ? floatval( $a['aggregate_rating']['worst'] ) : 1.0;
+            if ( $best <= 0 || $best > 5 )   $best  = 5.0;
+            if ( $worst < 0 || $worst > 5 )  $worst = 1.0;
+            $schema['aggregateRating'] = array(
+                '@type'       => 'AggregateRating',
+                'ratingValue' => number_format( $rv, 1, '.', '' ),
+                'reviewCount' => (string) $rc,
+                'bestRating'  => number_format( $best, 1, '.', '' ),
+                'worstRating' => number_format( $worst, 1, '.', '' ),
+            );
+        }
     }
 
     if ( ! empty( $a['additional_properties'] ) && is_array( $a['additional_properties'] ) ) {
@@ -2254,9 +2378,7 @@ function pps_emit_product_schema( array $args ) {
         }
     }
 
-    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
-       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
-       . "</script>\n";
+    return $schema;
 }
 
 /**
@@ -2276,8 +2398,19 @@ function pps_emit_product_schema( array $args ) {
  *                     Emitted only when rating_value > 0 and rating_value <= 5 and review_count > 0.
  */
 function pps_emit_localbusiness_schema( array $args ) {
+    $id     = isset( $args['id'] ) && is_string( $args['id'] ) && $args['id'] !== '' ? $args['id'] : 'pps-schema-business';
+    $schema = pps_build_localbusiness_schema( $args );
+    if ( empty( $schema ) ) return;
+    echo '<script type="application/ld+json" id="' . esc_attr( $id ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Build (but do not emit) the LocalBusiness JSON-LD schema array.
+ */
+function pps_build_localbusiness_schema( array $args ) {
     $defaults = array(
-        'id'               => 'pps-schema-business',
         'name'             => get_bloginfo( 'name' ),
         'description'      => '',
         'url'              => home_url( '/' ),
@@ -2322,7 +2455,7 @@ function pps_emit_localbusiness_schema( array $args ) {
     );
 
     // Only emit aggregateRating when both rating and count are valid.
-    // Defense-in-depth: re-validate at emit time even though admin save also validates.
+    // Defense-in-depth: re-validate at build time even though admin save also validates.
     if ( is_array( $a['aggregate_rating'] ) ) {
         $rv = isset( $a['aggregate_rating']['rating_value'] ) ? floatval( $a['aggregate_rating']['rating_value'] ) : 0.0;
         $rc = isset( $a['aggregate_rating']['review_count'] ) ? intval( $a['aggregate_rating']['review_count'] ) : 0;
@@ -2346,9 +2479,7 @@ function pps_emit_localbusiness_schema( array $args ) {
         $schema['geo'] = array( '@type' => 'GeoCoordinates', 'latitude' => $a['lat'], 'longitude' => $a['lng'] );
     }
 
-    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
-       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
-       . "</script>\n";
+    return $schema;
 }
 
 /**
@@ -2364,13 +2495,25 @@ function pps_emit_localbusiness_schema( array $args ) {
  * meant to be plain text.
  */
 function pps_emit_faq_schema( array $args ) {
+    $id     = isset( $args['id'] ) && is_string( $args['id'] ) && $args['id'] !== '' ? $args['id'] : 'pps-schema-faq';
+    $schema = pps_build_faq_schema( $args );
+    if ( empty( $schema ) ) return;
+    echo '<script type="application/ld+json" id="' . esc_attr( $id ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Build (but do not emit) the FAQPage JSON-LD schema array. Returns an
+ * empty array if no valid Q&A entries are present.
+ */
+function pps_build_faq_schema( array $args ) {
     $defaults = array(
-        'id'   => 'pps-schema-faq',
         'faqs' => array(),
     );
     $a = wp_parse_args( $args, $defaults );
 
-    if ( empty( $a['faqs'] ) || ! is_array( $a['faqs'] ) ) return;
+    if ( empty( $a['faqs'] ) || ! is_array( $a['faqs'] ) ) return array();
 
     $entities = array();
     foreach ( $a['faqs'] as $faq ) {
@@ -2384,17 +2527,13 @@ function pps_emit_faq_schema( array $args ) {
             'acceptedAnswer' => array( '@type' => 'Answer', 'text' => wp_strip_all_tags( $ans ) ),
         );
     }
-    if ( empty( $entities ) ) return;
+    if ( empty( $entities ) ) return array();
 
-    $schema = array(
+    return array(
         '@context'   => 'https://schema.org',
         '@type'      => 'FAQPage',
         'mainEntity' => $entities,
     );
-
-    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
-       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
-       . "</script>\n";
 }
 
 /**
@@ -2411,8 +2550,19 @@ function pps_emit_faq_schema( array $args ) {
  *   free_to_use           bool — when true, includes a $0 Offer block (default true)
  */
 function pps_emit_webapp_schema( array $args ) {
+    $id     = isset( $args['id'] ) && is_string( $args['id'] ) && $args['id'] !== '' ? $args['id'] : 'pps-schema-webapp';
+    $schema = pps_build_webapp_schema( $args );
+    if ( empty( $schema ) ) return;
+    echo '<script type="application/ld+json" id="' . esc_attr( $id ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Build (but do not emit) the WebApplication JSON-LD schema array.
+ */
+function pps_build_webapp_schema( array $args ) {
     $defaults = array(
-        'id'                   => 'pps-schema-webapp',
         'name'                 => '',
         'description'          => '',
         'url'                  => '',
@@ -2445,9 +2595,7 @@ function pps_emit_webapp_schema( array $args ) {
 
     $schema['creator'] = array( '@type' => 'Organization', 'name' => get_bloginfo( 'name' ) );
 
-    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
-       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
-       . "</script>\n";
+    return $schema;
 }
 
 /**
@@ -2459,13 +2607,25 @@ function pps_emit_webapp_schema( array $args ) {
  *          The last item's url may be null/empty (current page).
  */
 function pps_emit_breadcrumb_schema( array $args ) {
+    $id     = isset( $args['id'] ) && is_string( $args['id'] ) && $args['id'] !== '' ? $args['id'] : 'pps-schema-breadcrumb';
+    $schema = pps_build_breadcrumb_schema( $args );
+    if ( empty( $schema ) ) return;
+    echo '<script type="application/ld+json" id="' . esc_attr( $id ) . '">'
+       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
+       . "</script>\n";
+}
+
+/**
+ * Build (but do not emit) the BreadcrumbList JSON-LD schema array.
+ * Returns an empty array if no valid items remain.
+ */
+function pps_build_breadcrumb_schema( array $args ) {
     $defaults = array(
-        'id'    => 'pps-schema-breadcrumb',
         'items' => array(),
     );
     $a = wp_parse_args( $args, $defaults );
 
-    if ( empty( $a['items'] ) || ! is_array( $a['items'] ) ) return;
+    if ( empty( $a['items'] ) || ! is_array( $a['items'] ) ) return array();
 
     $list = array();
     $pos  = 0;
@@ -2485,17 +2645,13 @@ function pps_emit_breadcrumb_schema( array $args ) {
         }
         $list[] = $entry;
     }
-    if ( empty( $list ) ) return;
+    if ( empty( $list ) ) return array();
 
-    $schema = array(
+    return array(
         '@context'        => 'https://schema.org',
         '@type'           => 'BreadcrumbList',
         'itemListElement' => $list,
     );
-
-    echo '<script type="application/ld+json" id="' . esc_attr( $a['id'] ) . '">'
-       . wp_json_encode( $schema, PPS_SCHEMA_JSON_FLAGS )
-       . "</script>\n";
 }
 
 /**
@@ -2607,6 +2763,102 @@ function pps_emit_raw_jsonld( $id, $data ) {
     echo '<script type="application/ld+json" id="' . esc_attr( $id ) . '">'
        . wp_json_encode( $data, PPS_SCHEMA_JSON_FLAGS_RAW )
        . "</script>\n";
+}
+
+/**
+ * Sanitize a single Tier 1 override value against a per-field spec.
+ *
+ * Strategy is selected by $spec['sanitize']. Returns a cleaned scalar,
+ * an array (for url_csv with >1 item), or null to signal "drop this
+ * field" (caller should not store).
+ *
+ * Strategies:
+ *   text      sanitize_text_field, cap to $spec['max']
+ *   textarea  sanitize_textarea_field, cap to $spec['max']
+ *   url       esc_url_raw with http/https allowlist; null if empty
+ *   url_csv   split on commas; sanitize each as url; cap to $spec['max_items']
+ *             (default 6); returns string if 1 item, array if >1, null if 0
+ *   regex     preg_replace($spec['pattern'], '', $v); cap to $spec['max'];
+ *             null if empty post-strip
+ *   decimal   floatval; range check $spec['min']..$spec['max_value'];
+ *             format with $spec['precision'] dp (default 2); null if OOR
+ *   int       intval; range check; cast to string; null if OOR
+ *   enum      check $spec['allowed']; null if not in list
+ *   currency  strtoupper; require ^[A-Z]{3}$; null if invalid
+ *   date_iso  require ^\d{4}-\d{2}-\d{2}$ AND checkdate(); null if invalid
+ */
+function pps_sanitize_override_value( $raw, $spec ) {
+    $strategy = isset( $spec['sanitize'] ) ? $spec['sanitize'] : 'text';
+    $raw = (string) $raw;
+
+    switch ( $strategy ) {
+        case 'text':
+            $s = sanitize_text_field( $raw );
+            $max = isset( $spec['max'] ) ? (int) $spec['max'] : 200;
+            if ( strlen( $s ) > $max ) $s = substr( $s, 0, $max );
+            return $s === '' ? null : $s;
+
+        case 'textarea':
+            $s = sanitize_textarea_field( $raw );
+            $max = isset( $spec['max'] ) ? (int) $spec['max'] : 500;
+            if ( strlen( $s ) > $max ) $s = substr( $s, 0, $max );
+            return $s === '' ? null : $s;
+
+        case 'url':
+            $u = esc_url_raw( $raw, array( 'http', 'https' ) );
+            return $u ? $u : null;
+
+        case 'url_csv':
+            $max_items = isset( $spec['max_items'] ) ? (int) $spec['max_items'] : 6;
+            $parts = array_map( 'trim', explode( ',', $raw ) );
+            $urls  = array();
+            foreach ( $parts as $p ) {
+                if ( $p === '' ) continue;
+                $u = esc_url_raw( $p, array( 'http', 'https' ) );
+                if ( $u ) $urls[] = $u;
+                if ( count( $urls ) >= $max_items ) break;
+            }
+            if ( ! $urls ) return null;
+            return count( $urls ) === 1 ? $urls[0] : $urls;
+
+        case 'regex':
+            $pattern = isset( $spec['pattern'] ) ? $spec['pattern'] : '/[^a-zA-Z0-9_\-]/';
+            $s = preg_replace( $pattern, '', $raw );
+            $max = isset( $spec['max'] ) ? (int) $spec['max'] : 80;
+            if ( strlen( $s ) > $max ) $s = substr( $s, 0, $max );
+            return $s === '' ? null : $s;
+
+        case 'decimal':
+            if ( ! is_numeric( $raw ) ) return null;
+            $f = floatval( $raw );
+            $min = isset( $spec['min'] )       ? (float) $spec['min']       : 0.0;
+            $max = isset( $spec['max_value'] ) ? (float) $spec['max_value'] : 1000000.0;
+            if ( $f < $min || $f > $max ) return null;
+            $prec = isset( $spec['precision'] ) ? (int) $spec['precision'] : 2;
+            return number_format( $f, $prec, '.', '' );
+
+        case 'int':
+            if ( ! is_numeric( $raw ) ) return null;
+            $i = intval( $raw );
+            $min = isset( $spec['min'] )       ? (int) $spec['min']       : 0;
+            $max = isset( $spec['max_value'] ) ? (int) $spec['max_value'] : 1000000;
+            if ( $i < $min || $i > $max ) return null;
+            return (string) $i;
+
+        case 'enum':
+            $allowed = isset( $spec['allowed'] ) && is_array( $spec['allowed'] ) ? $spec['allowed'] : array();
+            return in_array( $raw, $allowed, true ) ? $raw : null;
+
+        case 'currency':
+            $s = strtoupper( sanitize_text_field( $raw ) );
+            return preg_match( '/^[A-Z]{3}$/', $s ) ? $s : null;
+
+        case 'date_iso':
+            if ( ! preg_match( '/^(\d{4})-(\d{2})-(\d{2})$/', $raw, $m ) ) return null;
+            if ( ! checkdate( (int) $m[2], (int) $m[3], (int) $m[1] ) ) return null;
+            return $raw;
+    }
+    return null;
 }
 
 /**
@@ -2760,108 +3012,157 @@ add_action( 'wp_head', function() {
         echo '<meta name="twitter:image" content="' . esc_url( $image ) . "\">\n";
     }
 
-    // ── Product JSON-LD ── (Tier 2 override wins wholesale; otherwise compute)
-    if ( isset( $blocks['product'] ) ) {
-        pps_emit_raw_jsonld( 'pps-schema-product', $blocks['product'] );
-    } else {
-        $product_args = array(
-            'name'        => $schema_name,
-            'description' => $desc,
-            'category'    => 'Print services',
-            'image'       => $image,
-            'url'         => $url,
-            'sku'         => $schema_sku,
+    // ── Tier 2 partial-merge helper ──
+    // For each block: build the auto schema array, then if a Tier 2 override
+    // is present, shallow-merge it on top — keys in the override win, keys
+    // absent from the override fall back to auto. If the auto is empty AND
+    // no override is set, nothing emits. (`@type`, `@context`, etc are part
+    // of auto and survive unless the override explicitly sets them.)
+    $emit_merged = function ( $id, $auto, $tier2_key ) use ( $blocks ) {
+        $override = isset( $blocks[ $tier2_key ] ) && is_array( $blocks[ $tier2_key ] ) ? $blocks[ $tier2_key ] : null;
+        if ( $override !== null ) {
+            $final = is_array( $auto ) ? array_merge( $auto, $override ) : $override;
+        } else {
+            $final = $auto;
+        }
+        if ( ! is_array( $final ) || empty( $final ) ) return;
+        pps_emit_raw_jsonld( $id, $final );
+    };
+
+    // ── Product JSON-LD ──
+    // Helper: read a Tier 1 override or fall back to a default. Treats
+    // empty string and null identically so blank overrides fall through.
+    $ovr_get = function ( $key, $default = null ) use ( $ovr ) {
+        return ( isset( $ovr[ $key ] ) && $ovr[ $key ] !== '' ) ? $ovr[ $key ] : $default;
+    };
+
+    $product_args = array(
+        'name'                       => $schema_name,
+        'description'                => $ovr_get( 'schema_description', $desc ),
+        'brand_name'                 => $ovr_get( 'schema_brand', get_bloginfo( 'name' ) ),
+        'category'                   => $ovr_get( 'schema_category', 'Print services' ),
+        'image'                      => $ovr_get( 'schema_image', $image ),
+        'url'                        => $ovr_get( 'schema_url', $url ),
+        'sku'                        => $schema_sku,
+        'additional_type'            => (string) $ovr_get( 'schema_additional_type', '' ),
+        'audience'                   => (string) $ovr_get( 'schema_audience', '' ),
+        'color'                      => (string) $ovr_get( 'schema_color', '' ),
+        'material'                   => (string) $ovr_get( 'schema_material', '' ),
+        'disambiguating_description' => (string) $ovr_get( 'schema_disambiguating_description', '' ),
+        'gtin'                       => (string) $ovr_get( 'schema_gtin', '' ),
+        'mpn'                        => (string) $ovr_get( 'schema_mpn', '' ),
+    );
+
+    // ── Offer / AggregateOffer ──
+    // Resolve each Offer attribute with override-then-default precedence.
+    $preset_price = ( isset( $preset['price_from'] ) && $preset['price_from'] !== null )
+                    ? (float) $preset['price_from'] : null;
+    $offer_low_raw  = $ovr_get( 'offer_price', $preset_price );
+    $offer_high_raw = $ovr_get( 'offer_price_high', null );
+    $preset_curr    = ( isset( $preset['currency'] ) && preg_match( '/^[A-Z]{3}$/', (string) $preset['currency'] ) )
+                      ? $preset['currency'] : 'USD';
+    $offer_currency = (string) $ovr_get( 'offer_price_currency', $preset_curr );
+    $offer_avail    = 'https://schema.org/' . (string) $ovr_get( 'offer_availability',   'InStock' );
+    $offer_cond     = 'https://schema.org/' . (string) $ovr_get( 'offer_item_condition', 'NewCondition' );
+    $offer_pvu      = (string) $ovr_get( 'offer_price_valid_until', date( 'Y-12-31', strtotime( '+1 year' ) ) );
+    $offer_url      = (string) $ovr_get( 'offer_url', $url );
+
+    if ( $offer_low_raw !== null && (float) $offer_low_raw >= 0 ) {
+        $low = (float) $offer_low_raw;
+        if ( $offer_high_raw !== null && (float) $offer_high_raw > $low ) {
+            $product_args['offers'] = array(
+                '@type'           => 'AggregateOffer',
+                'url'             => $offer_url,
+                'priceCurrency'   => $offer_currency,
+                'lowPrice'        => number_format( $low, 2, '.', '' ),
+                'highPrice'       => number_format( (float) $offer_high_raw, 2, '.', '' ),
+                'offerCount'      => '1',
+                'availability'    => $offer_avail,
+                'itemCondition'   => $offer_cond,
+                'priceValidUntil' => $offer_pvu,
+            );
+        } else {
+            $product_args['offers'] = array(
+                '@type'           => 'Offer',
+                'url'             => $offer_url,
+                'priceCurrency'   => $offer_currency,
+                'price'           => number_format( $low, 2, '.', '' ),
+                'availability'    => $offer_avail,
+                'itemCondition'   => $offer_cond,
+                'priceValidUntil' => $offer_pvu,
+            );
+        }
+    }
+
+    // ── AggregateRating ── (only when both value+count are set; cross-field
+    // validation in pps_save_preset() guarantees this cohort is intact)
+    $rv = $ovr_get( 'rating_value' );
+    $rc = $ovr_get( 'rating_count' );
+    if ( $rv !== null && $rc !== null ) {
+        $product_args['aggregate_rating'] = array(
+            'value' => (float) $rv,
+            'count' => (int)   $rc,
+            'best'  => $ovr_get( 'rating_best',  5 ),
+            'worst' => $ovr_get( 'rating_worst', 1 ),
         );
+    }
 
-        if ( isset( $preset['price_from'] ) && $preset['price_from'] !== null ) {
-            $price_from = (float) $preset['price_from'];
-            if ( $price_from >= 0 ) {
-                $currency = isset( $preset['currency'] ) && preg_match( '/^[A-Z]{3}$/', (string) $preset['currency'] )
-                            ? $preset['currency']
-                            : 'USD';
-                $product_args['offers'] = array(
-                    '@type'           => 'Offer',
-                    'url'             => $url,
-                    'priceCurrency'   => $currency,
-                    'lowPrice'        => number_format( $price_from, 2, '.', '' ),
-                    'availability'    => 'https://schema.org/InStock',
-                    'priceValidUntil' => date( 'Y-12-31', strtotime( '+1 year' ) ),
-                );
-            }
+    // ── additionalProperty (Quantity/Pages/Size from defaults) ──
+    $preset_defaults = isset( $preset['defaults'] ) && is_array( $preset['defaults'] ) ? $preset['defaults'] : array();
+    $props = array();
+    foreach ( array(
+        'qty'   => 'Quantity',
+        'pages' => 'Pages',
+        'size'  => 'Size',
+    ) as $field => $label ) {
+        if ( isset( $preset_defaults[ $field ] ) && $preset_defaults[ $field ] !== '' && ! is_array( $preset_defaults[ $field ] ) ) {
+            $props[] = array( 'name' => $label, 'value' => (string) $preset_defaults[ $field ] );
         }
-
-        $defaults = isset( $preset['defaults'] ) && is_array( $preset['defaults'] ) ? $preset['defaults'] : array();
-        $props = array();
-        foreach ( array(
-            'qty'   => 'Quantity',
-            'pages' => 'Pages',
-            'size'  => 'Size',
-        ) as $field => $label ) {
-            if ( isset( $defaults[ $field ] ) && $defaults[ $field ] !== '' && ! is_array( $defaults[ $field ] ) ) {
-                $props[] = array( 'name' => $label, 'value' => (string) $defaults[ $field ] );
-            }
-        }
-        if ( $props ) $product_args['additional_properties'] = $props;
-
-        pps_emit_product_schema( $product_args );
     }
+    if ( $props ) $product_args['additional_properties'] = $props;
 
-    // ── BreadcrumbList ── (Tier 2 override wins)
-    if ( isset( $blocks['breadcrumb'] ) ) {
-        pps_emit_raw_jsonld( 'pps-schema-breadcrumb', $blocks['breadcrumb'] );
-    } else {
-        pps_emit_breadcrumb_schema( array(
-            'items' => array(
-                array( 'name' => $site_name,   'url' => home_url( '/' ) ),
-                array( 'name' => 'Booklets',   'url' => home_url( '/' . PPS_PRESET_URL_PREFIX . '/' ) ),
-                array( 'name' => $crumb_label ),
-            ),
-        ) );
-    }
+    $emit_merged( 'pps-schema-product', pps_build_product_schema( $product_args ), 'product' );
 
-    // ── LocalBusiness ── (Tier 2 override wins; otherwise emit with GBP rating)
-    if ( isset( $blocks['localbusiness'] ) ) {
-        pps_emit_raw_jsonld( 'pps-schema-business', $blocks['localbusiness'] );
-    } else {
-        pps_emit_localbusiness_schema( array(
-            'description' => 'Full-service commercial print shop specializing in saddle-stitch booklets, brochures, and custom printing with fast turnaround.',
-            'telephone'   => $seo['phone'] ?? '',
-            'email'       => $seo['email'] ?? '',
-            'street'      => $seo['street'] ?? '',
-            'city'        => $seo['city'] ?? 'Phoenix',
-            'state'       => $seo['state'] ?? 'AZ',
-            'zip'         => $seo['zip'] ?? '85027',
-            'lat'         => $seo['lat'] ?? '',
-            'lng'         => $seo['lng'] ?? '',
-            'knows_about' => array( 'Saddle Stitch Booklets', 'Digital Printing', 'Offset Printing', 'UV Coating', 'Booklet Binding' ),
-            'aggregate_rating' => array(
-                'rating_value' => $seo['gbp_rating_value'] ?? 0,
-                'review_count' => $seo['gbp_review_count'] ?? 0,
-                'url'          => $seo['gbp_url'] ?? '',
-            ),
-        ) );
-    }
+    // ── BreadcrumbList ──
+    $emit_merged( 'pps-schema-breadcrumb', pps_build_breadcrumb_schema( array(
+        'items' => array(
+            array( 'name' => $site_name,   'url' => home_url( '/' ) ),
+            array( 'name' => 'Booklets',   'url' => home_url( '/' . PPS_PRESET_URL_PREFIX . '/' ) ),
+            array( 'name' => $crumb_label ),
+        ),
+    ) ), 'breadcrumb' );
 
-    // ── FAQPage ── (Tier 2 override > per-preset faqs > calc-type defaults)
-    if ( isset( $blocks['faq'] ) ) {
-        pps_emit_raw_jsonld( 'pps-schema-faq', $blocks['faq'] );
-    } else {
-        $preset_faqs = isset( $preset['faqs'] ) && is_array( $preset['faqs'] ) && ! empty( $preset['faqs'] )
-                       ? $preset['faqs']
-                       : pps_get_faqs( $calc_type );
-        pps_emit_faq_schema( array( 'faqs' => $preset_faqs ) );
-    }
+    // ── LocalBusiness ──
+    $emit_merged( 'pps-schema-business', pps_build_localbusiness_schema( array(
+        'description' => 'Full-service commercial print shop specializing in saddle-stitch booklets, brochures, and custom printing with fast turnaround.',
+        'telephone'   => $seo['phone'] ?? '',
+        'email'       => $seo['email'] ?? '',
+        'street'      => $seo['street'] ?? '',
+        'city'        => $seo['city'] ?? 'Phoenix',
+        'state'       => $seo['state'] ?? 'AZ',
+        'zip'         => $seo['zip'] ?? '85027',
+        'lat'         => $seo['lat'] ?? '',
+        'lng'         => $seo['lng'] ?? '',
+        'knows_about' => array( 'Saddle Stitch Booklets', 'Digital Printing', 'Offset Printing', 'UV Coating', 'Booklet Binding' ),
+        'aggregate_rating' => array(
+            'rating_value' => $seo['gbp_rating_value'] ?? 0,
+            'review_count' => $seo['gbp_review_count'] ?? 0,
+            'url'          => $seo['gbp_url'] ?? '',
+        ),
+    ) ), 'localbusiness' );
 
-    // ── WebApplication ── (Tier 2 override wins)
-    if ( isset( $blocks['webapp'] ) ) {
-        pps_emit_raw_jsonld( 'pps-schema-webapp', $blocks['webapp'] );
-    } else {
-        pps_emit_webapp_schema( array(
-            'name'        => $title . ' Price Calculator',
-            'description' => 'Instant online pricing calculator for ' . $title . '. Configure size, paper, quantity, and finishing options for a real-time quote.',
-            'url'         => $url,
-        ) );
-    }
+    // ── FAQPage ── (Tier 2 override merges; per-preset faqs > calc-type defaults)
+    $preset_faqs = isset( $preset['faqs'] ) && is_array( $preset['faqs'] ) && ! empty( $preset['faqs'] )
+                   ? $preset['faqs']
+                   : pps_get_faqs( $calc_type );
+    $emit_merged( 'pps-schema-faq', pps_build_faq_schema( array( 'faqs' => $preset_faqs ) ), 'faq' );
+
+    // ── WebApplication ──
+    $emit_merged( 'pps-schema-webapp', pps_build_webapp_schema( array(
+        'name'        => $title . ' Price Calculator',
+        'description' => 'Instant online pricing calculator for ' . $title . '. Configure size, paper, quantity, and finishing options for a real-time quote.',
+        'url'         => $url,
+    ) ), 'webapp' );
 
     // ── Tier 3: extra schema blocks ──
     if ( ! empty( $extras ) ) {

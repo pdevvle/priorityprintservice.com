@@ -118,13 +118,19 @@ function pps_presets_render_page() {
                 if ( $orig !== '' && $orig !== $slug ) {
                     pps_delete_preset( $orig );
                 }
-                $notice = pps_presets_notice( 'success', 'Preset saved.' );
-                // Redirect to edit view of the saved preset (POST → GET)
-                wp_safe_redirect( add_query_arg( array(
+                // Stash cross-field validation warnings (if any) in a one-shot
+                // user-scoped transient so they survive the POST → GET redirect.
+                $redirect_args = array(
                     'page' => 'pps-presets',
                     'edit' => $slug,
                     'msg'  => 'saved',
-                ), admin_url( 'admin.php' ) ) );
+                );
+                if ( ! empty( $result['_warnings'] ) && is_array( $result['_warnings'] ) ) {
+                    $tkey = 'pps_preset_warn_' . get_current_user_id() . '_' . $slug;
+                    set_transient( $tkey, $result['_warnings'], 60 );
+                    $redirect_args['warn'] = 1;
+                }
+                wp_safe_redirect( add_query_arg( $redirect_args, admin_url( 'admin.php' ) ) );
                 exit;
             }
         }
@@ -150,6 +156,23 @@ function pps_presets_render_page() {
 
     $editing_slug = isset( $_GET['edit'] ) ? sanitize_key( $_GET['edit'] ) : '';
     $is_new       = ! empty( $_GET['new'] );
+
+    // Surface cross-field validation warnings stashed by the save handler.
+    if ( ! empty( $_GET['warn'] ) && $editing_slug !== '' ) {
+        $tkey  = 'pps_preset_warn_' . get_current_user_id() . '_' . $editing_slug;
+        $warns = get_transient( $tkey );
+        if ( is_array( $warns ) && $warns ) {
+            delete_transient( $tkey );
+            $items = '';
+            foreach ( $warns as $w ) {
+                $items .= '<li>' . esc_html( (string) $w ) . '</li>';
+            }
+            $notice .= '<div class="notice notice-warning is-dismissible">'
+                     . '<p><strong>Some override fields were dropped during save:</strong></p>'
+                     . '<ul style="margin:0 0 8px 22px;list-style:disc">' . $items . '</ul>'
+                     . '</div>';
+        }
+    }
 
     echo '<div class="wrap pps-presets-wrap">';
     echo $notice;
@@ -378,46 +401,157 @@ function pps_presets_render_edit_form( $preset ) {
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Tier 1 — six text fields. Empty values fall back to computed defaults
- * at emit time.
+ * Tier 1 — discrete field-level overrides. Each Product schema field
+ * (and existing meta/SEO fields) gets its own input. Empty values fall
+ * back to the computed value at emit time.
+ *
+ * UI groups (one accordion, four labeled sub-sections):
+ *   - SEO meta + breadcrumb
+ *   - Product schema — basic
+ *   - Product schema — identifiers
+ *   - Offer
+ *   - Aggregate rating
  */
 function pps_presets_render_override_fields( $current ) {
-    $fields = array(
-        'meta_title'        => array( 'Meta title',         'Overrides <title>, og:title, twitter:title.' ),
-        'meta_description'  => array( 'Meta description',   'Overrides meta description, og:description, twitter:description. ≤320 chars.' ),
-        'og_image'          => array( 'OG image URL',       'Overrides og:image, twitter:image. http/https only.' ),
-        'schema_name'       => array( 'Product schema name', 'Overrides Product.name. Defaults to title.' ),
-        'schema_sku'        => array( 'Product schema SKU', 'Overrides Product.sku. Defaults to slug. [a-zA-Z0-9_-] ≤80.' ),
-        'breadcrumb_label'  => array( 'Breadcrumb label',    'Overrides the leaf node text in BreadcrumbList. Defaults to title.' ),
+    if ( ! is_array( $current ) ) $current = array();
+
+    // Field schema: render config per key. Strategy maps to input type.
+    //   text        -> <input type="text">
+    //   textarea    -> <textarea>
+    //   url         -> <input type="url">
+    //   url_csv     -> <input type="text"> with CSV placeholder
+    //   number      -> <input type="number">  (use min/max/step/precision attrs from $opts)
+    //   date        -> <input type="date">
+    //   select      -> <select> with options from $opts['options']
+    $sec_meta = array(
+        'meta_title'        => array( 'text',     'Meta title',        'Overrides <title>, og:title, twitter:title.', array( 'maxlength' => 200 ) ),
+        'breadcrumb_label'  => array( 'text',     'Breadcrumb label',  'Overrides the leaf node in BreadcrumbList. Defaults to title.', array( 'maxlength' => 200 ) ),
+        'meta_description'  => array( 'textarea', 'Meta description',  'Overrides meta description, og:description, twitter:description. ≤320 chars.', array( 'maxlength' => 320, 'rows' => 2, 'wide' => true ) ),
+        'og_image'          => array( 'url',      'OG image URL',      'Overrides og:image, twitter:image. http/https only.', array( 'wide' => true ) ),
+    );
+    $sec_basic = array(
+        'schema_name'                       => array( 'text',     'Product.name',                'Overrides Product.name. Defaults to title.', array( 'maxlength' => 200 ) ),
+        'schema_sku'                        => array( 'text',     'Product.sku',                 'Defaults to slug. [a-zA-Z0-9_-] ≤80.', array( 'maxlength' => 80 ) ),
+        'schema_brand'                      => array( 'text',     'Product.brand.name',          'Defaults to site name.', array( 'maxlength' => 120 ) ),
+        'schema_category'                   => array( 'text',     'Product.category',            'Defaults to "Print services". e.g., "Printing Services > Booklets".', array( 'maxlength' => 200 ) ),
+        'schema_description'                => array( 'textarea', 'Product.description',         'Distinct from meta description if you want SERP copy ≠ schema copy. ≤500.', array( 'maxlength' => 500, 'rows' => 3, 'wide' => true ) ),
+        'schema_image'                      => array( 'url_csv',  'Product.image (CSV)',         'Comma-separated http/https URLs (max 6). Defaults to OG image when blank.', array( 'wide' => true ) ),
+        'schema_url'                        => array( 'url',      'Product.url',                 'Override canonical URL on Product node only. Rare.', array() ),
+        'schema_additional_type'            => array( 'url',      'Product.additionalType',      'e.g., https://schema.org/Booklet. Adds a more specific subtype.', array() ),
+        'schema_audience'                   => array( 'text',     'Product.audience',            'audienceType, e.g. "Small businesses".', array( 'maxlength' => 200 ) ),
+        'schema_disambiguating_description' => array( 'text',     'disambiguatingDescription',   'Short distinguishing line vs. similar products.', array( 'maxlength' => 200 ) ),
+        'schema_color'                      => array( 'text',     'Product.color',               'e.g., "Full color CMYK".', array( 'maxlength' => 120 ) ),
+        'schema_material'                   => array( 'text',     'Product.material',            'e.g., "100lb gloss text stock".', array( 'maxlength' => 120 ) ),
+    );
+    $sec_ident = array(
+        'schema_gtin' => array( 'text', 'Product.gtin', 'UPC/EAN/ISBN. Alphanumeric only, ≤32. Leave blank if not assigned.', array( 'maxlength' => 32 ) ),
+        'schema_mpn'  => array( 'text', 'Product.mpn',  'Manufacturer part number. [a-zA-Z0-9_-] ≤64.', array( 'maxlength' => 64 ) ),
+    );
+    $avail_opts = array( '' => '— default (InStock) —', 'InStock' => 'InStock', 'OutOfStock' => 'OutOfStock', 'PreOrder' => 'PreOrder', 'Discontinued' => 'Discontinued', 'SoldOut' => 'SoldOut' );
+    $cond_opts  = array( '' => '— default (NewCondition) —', 'NewCondition' => 'NewCondition', 'RefurbishedCondition' => 'RefurbishedCondition', 'UsedCondition' => 'UsedCondition', 'DamagedCondition' => 'DamagedCondition' );
+    $sec_offer = array(
+        'offer_price'             => array( 'number', 'Offer.price',           'Overrides "Price from". If only this is set → Offer.price.',    array( 'min' => 0, 'step' => '0.01' ) ),
+        'offer_price_high'        => array( 'number', 'Offer.highPrice',       'If set with offer_price → switches to AggregateOffer with range.', array( 'min' => 0, 'step' => '0.01' ) ),
+        'offer_price_currency'    => array( 'text',   'Offer.priceCurrency',   'ISO 4217 (3 letters). Overrides preset currency.', array( 'maxlength' => 3, 'placeholder' => 'USD' ) ),
+        'offer_availability'      => array( 'select', 'Offer.availability',    'Default InStock when blank.', array( 'options' => $avail_opts ) ),
+        'offer_item_condition'    => array( 'select', 'Offer.itemCondition',   'Default NewCondition when blank.', array( 'options' => $cond_opts ) ),
+        'offer_price_valid_until' => array( 'date',   'Offer.priceValidUntil', 'YYYY-MM-DD. Default = Dec 31 next year.', array() ),
+        'offer_url'               => array( 'url',    'Offer.url',             'Defaults to canonical preset URL.', array( 'wide' => true ) ),
+    );
+    $sec_rating = array(
+        'rating_value' => array( 'number', 'ratingValue', 'Average rating, 0–5.',                  array( 'min' => 0, 'max' => 5, 'step' => '0.1' ) ),
+        'rating_count' => array( 'number', 'reviewCount', 'Total reviews, integer ≥1.',           array( 'min' => 1, 'step' => '1' ) ),
+        'rating_best'  => array( 'number', 'bestRating',  'Default 5. Change only for non-5-star.', array( 'min' => 0, 'max' => 5, 'step' => '0.1', 'placeholder' => '5' ) ),
+        'rating_worst' => array( 'number', 'worstRating', 'Default 1. Change only for non-5-star.', array( 'min' => 0, 'max' => 5, 'step' => '0.1', 'placeholder' => '1' ) ),
     );
 
+    $set_count = count( array_filter( $current, function ( $v ) { return $v !== '' && $v !== null; } ) );
+
     echo '<details class="pps-preset-collapse">';
-    echo '<summary>SEO field overrides <span class="pps-preset-collapse-count">' . count( array_filter( $current ) ) . ' set</span></summary>';
+    echo '<summary>SEO field overrides <span class="pps-preset-collapse-count">' . (int) $set_count . ' set</span></summary>';
     echo '<div class="pps-preset-collapse-body">';
-    echo '<p class="pps-preset-collapse-hint">Leave any field blank to use the computed value.</p>';
-    echo '<div class="pps-preset-grid">';
-    foreach ( $fields as $key => $meta ) {
-        $val = isset( $current[ $key ] ) ? $current[ $key ] : '';
-        $is_textarea = $key === 'meta_description';
-        $type = $key === 'og_image' ? 'url' : 'text';
-        echo '<div class="pps-preset-field' . ( $is_textarea ? ' pps-preset-wide' : '' ) . '">';
-        echo '<label>' . esc_html( $meta[0] ) . '</label>';
-        if ( $is_textarea ) {
-            echo '<textarea name="preset_overrides[' . esc_attr( $key ) . ']" rows="2" maxlength="320">' . esc_textarea( $val ) . '</textarea>';
-        } else {
-            echo '<input type="' . $type . '" name="preset_overrides[' . esc_attr( $key ) . ']" value="' . esc_attr( $val ) . '" maxlength="200">';
-        }
-        echo '<span class="hint">' . esc_html( $meta[1] ) . '</span>';
-        echo '</div>';
-    }
-    echo '</div>';
+    echo '<p class="pps-preset-collapse-hint">Leave any field blank to use the computed value. Tier 2 (full block override) takes precedence over Tier 1 fields.</p>';
+
+    pps_presets_render_override_subsection( 'SEO meta + breadcrumb',           $sec_meta,   $current, 'pps-preset-grid' );
+    pps_presets_render_override_subsection( 'Product schema — basic',          $sec_basic,  $current, 'pps-preset-grid' );
+    pps_presets_render_override_subsection( 'Product schema — identifiers',    $sec_ident,  $current, 'pps-preset-grid' );
+    pps_presets_render_override_subsection( 'Offer',                           $sec_offer,  $current, 'pps-preset-grid pps-preset-grid--3col' );
+    pps_presets_render_override_subsection( 'Aggregate rating',                $sec_rating, $current, 'pps-preset-grid pps-preset-grid--4col',
+        'All four fields required for aggregateRating to emit. Use only for verifiable on-page reviews.' );
+
     echo '</div>';
     echo '</details>';
 }
 
 /**
- * Tier 2 — per-block JSON-LD textarea. If filled, replaces the
- * auto-generated block wholesale.
+ * Render a single sub-section: <h4> header + grid of fields.
+ */
+function pps_presets_render_override_subsection( $title, $fields, $current, $grid_class, $hint = '' ) {
+    echo '<h4 class="pps-preset-subsection">' . esc_html( $title ) . '</h4>';
+    if ( $hint !== '' ) {
+        echo '<p class="pps-preset-collapse-hint" style="margin-top:-2px">' . esc_html( $hint ) . '</p>';
+    }
+    echo '<div class="' . esc_attr( $grid_class ) . '">';
+    foreach ( $fields as $key => $field ) {
+        list( $strategy, $label, $hint, $opts ) = $field;
+        $val  = isset( $current[ $key ] ) ? $current[ $key ] : '';
+        // url_csv: stored as string OR array; flatten for the input.
+        if ( is_array( $val ) ) $val = implode( ', ', $val );
+        $wide = ! empty( $opts['wide'] );
+        echo '<div class="pps-preset-field' . ( $wide ? ' pps-preset-wide' : '' ) . '">';
+        echo '<label>' . esc_html( $label ) . '</label>';
+        $name_attr = 'preset_overrides[' . esc_attr( $key ) . ']';
+
+        switch ( $strategy ) {
+            case 'textarea':
+                $rows = isset( $opts['rows'] ) ? (int) $opts['rows'] : 2;
+                $maxl = isset( $opts['maxlength'] ) ? ' maxlength="' . (int) $opts['maxlength'] . '"' : '';
+                echo '<textarea name="' . $name_attr . '" rows="' . (int) $rows . '"' . $maxl . '>' . esc_textarea( (string) $val ) . '</textarea>';
+                break;
+            case 'select':
+                $options = isset( $opts['options'] ) ? $opts['options'] : array();
+                echo '<select name="' . $name_attr . '">';
+                foreach ( $options as $ov => $ol ) {
+                    echo '<option value="' . esc_attr( $ov ) . '"' . selected( (string) $val, (string) $ov, false ) . '>' . esc_html( $ol ) . '</option>';
+                }
+                echo '</select>';
+                break;
+            case 'number':
+                $attrs = '';
+                if ( isset( $opts['min'] ) )  $attrs .= ' min="' . esc_attr( $opts['min'] ) . '"';
+                if ( isset( $opts['max'] ) )  $attrs .= ' max="' . esc_attr( $opts['max'] ) . '"';
+                if ( isset( $opts['step'] ) ) $attrs .= ' step="' . esc_attr( $opts['step'] ) . '"';
+                if ( isset( $opts['placeholder'] ) ) $attrs .= ' placeholder="' . esc_attr( $opts['placeholder'] ) . '"';
+                echo '<input type="number" name="' . $name_attr . '" value="' . esc_attr( (string) $val ) . '"' . $attrs . '>';
+                break;
+            case 'date':
+                echo '<input type="date" name="' . $name_attr . '" value="' . esc_attr( (string) $val ) . '">';
+                break;
+            case 'url':
+                $maxl = isset( $opts['maxlength'] ) ? ' maxlength="' . (int) $opts['maxlength'] . '"' : '';
+                echo '<input type="url" name="' . $name_attr . '" value="' . esc_attr( (string) $val ) . '"' . $maxl . '>';
+                break;
+            case 'url_csv':
+                echo '<input type="text" name="' . $name_attr . '" value="' . esc_attr( (string) $val ) . '" placeholder="https://a.com/1.jpg, https://b.com/2.jpg">';
+                break;
+            case 'text':
+            default:
+                $maxl = isset( $opts['maxlength'] ) ? ' maxlength="' . (int) $opts['maxlength'] . '"' : '';
+                $ph   = isset( $opts['placeholder'] ) ? ' placeholder="' . esc_attr( $opts['placeholder'] ) . '"' : '';
+                echo '<input type="text" name="' . $name_attr . '" value="' . esc_attr( (string) $val ) . '"' . $maxl . $ph . '>';
+                break;
+        }
+        echo '<span class="hint">' . esc_html( $hint ) . '</span>';
+        echo '</div>';
+    }
+    echo '</div>';
+}
+
+/**
+ * Tier 2 — per-block JSON-LD textarea. Top-level keys present in the
+ * pasted object override the auto-generated block; absent keys fall
+ * back to the auto-generated value (shallow merge — no need to
+ * re-paste the whole schema).
  */
 function pps_presets_render_schema_block_overrides( $current ) {
     $blocks = array(
@@ -434,7 +568,7 @@ function pps_presets_render_schema_block_overrides( $current ) {
     echo '<details class="pps-preset-collapse">';
     echo '<summary>Schema block overrides <span class="pps-preset-collapse-count">' . $set_count . ' set</span></summary>';
     echo '<div class="pps-preset-collapse-body">';
-    echo '<p class="pps-preset-collapse-hint">Paste a complete JSON-LD object. If filled, the auto-generated block is replaced. Validated on save (root must be an object with @type; ≤50KB; HTML stripped from string values; renders with extra escaping for &lt; and &gt; to prevent script-tag breakout).</p>';
+    echo '<p class="pps-preset-collapse-hint">Paste a partial or full JSON-LD object. <strong>Top-level keys you supply replace the auto-generated value; missing keys fall through to the auto-generated default</strong> — so you can paste just <code>{"aggregateRating": {…}}</code> without losing name/description/offers/etc. Nested objects are not deep-merged: if you supply <code>offers</code>, you must supply the full Offer object. Validated on save (root must be an object with @type; ≤50KB; HTML stripped from string values; renders with extra escaping for &lt; and &gt; to prevent script-tag breakout).</p>';
 
     foreach ( $blocks as $key => $label ) {
         $val = isset( $current[ $key ] ) && is_array( $current[ $key ] )
@@ -442,7 +576,7 @@ function pps_presets_render_schema_block_overrides( $current ) {
                : '';
         echo '<div class="pps-preset-field pps-preset-wide" style="margin-bottom:10px">';
         echo '<label>' . esc_html( $label ) . '</label>';
-        echo '<textarea name="preset_schema_overrides[' . esc_attr( $key ) . ']" rows="6" placeholder="Leave empty to use auto-generated &quot;' . esc_attr( $label ) . '&quot; schema.">' . esc_textarea( $val ) . '</textarea>';
+        echo '<textarea name="preset_schema_overrides[' . esc_attr( $key ) . ']" rows="6" placeholder="Leave empty to use 100% auto-generated &quot;' . esc_attr( $label ) . '&quot; — or paste a partial object to override specific top-level keys.">' . esc_textarea( $val ) . '</textarea>';
         echo '</div>';
     }
 
@@ -546,6 +680,10 @@ function pps_presets_render_styles() {
 
         .pps-preset-form { background:#fff; border:1px solid #ddd; padding:18px 22px; border-radius:4px; margin-top:8px; }
         .pps-preset-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px 24px; }
+        .pps-preset-grid.pps-preset-grid--3col { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+        .pps-preset-grid.pps-preset-grid--4col { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+        .pps-preset-subsection { margin:14px 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#555; font-weight:600; }
+        .pps-preset-collapse-body > .pps-preset-subsection:first-child { margin-top:0; }
         .pps-preset-field { display:flex; flex-direction:column; gap:4px; font-size:12px; }
         .pps-preset-field.pps-preset-wide { grid-column:1 / -1; }
         .pps-preset-field label { font-weight:600; color:#1d2327; }
