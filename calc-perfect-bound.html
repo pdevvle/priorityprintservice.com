@@ -74,11 +74,34 @@
   .bp-nav-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit}
   .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.15);border-color:#007eff;color:#007eff}
   .bp-nav-btn:disabled{opacity:.25;cursor:not-allowed}
+  /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
+  .bp-checker{
+    background-color:#3a3e46;
+    background-image:
+      linear-gradient(45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(-45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#2a2e36 75%),
+      linear-gradient(-45deg,transparent 75%,#2a2e36 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0;
+  }
+  /* Approve Now CTA — strong call-to-action when art needs approval */
+  @keyframes bp-approve-pulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55),0 4px 14px rgba(239,68,68,.35)}
+    50%{box-shadow:0 0 0 6px rgba(239,68,68,0),0 4px 14px rgba(239,68,68,.35)}
+  }
+  .bp-approve-cta{
+    background:linear-gradient(135deg,#ef4444 0%,#dc2626 40%,#f87171 50%,#dc2626 60%,#b91c1c 100%) !important;
+    color:#fff !important;
+    text-shadow:0 1px 2px rgba(0,0,0,.25);
+    animation:bp-approve-pulse 2s ease-in-out infinite;
+  }
+  .bp-approve-cta:hover{filter:brightness(1.08)}
 </style>
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-19c · PB-PER-PAGE-TX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · PB-GUIDES-LABEL</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -327,6 +350,54 @@ const COVER_SAME=_CFG.cover_same||{label:"Same as Inside Pages",val:0.001,days:0
 const COVER_SCORING_VALS=_CFG.cover_scoring_vals||[0.01,0.02,0.03,1.01,1.02,2.21,2.22,2.23,2.24,2.25];
 const _INV_NC=_CFG.inv_nc||[0.001,0.002,0.003], _INV_CS=_CFG.inv_cs||[0.01,0.02,0.03,1.01,1.02];
 const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_CS];
+
+// ── Spine math ──
+// Approximate caliper (inches per single sheet) inferred from the paper's label.
+// Uses standard book paper conversions: text grades round to ~0.0046", offset
+// runs slightly thicker, cardstock and points map directly to thousandths.
+function getPaperCaliper(paper) {
+  if (!paper || !paper.label) return 0.0046;
+  if (paper.caliper) return paper.caliper; // explicit override wins if present
+  const s = paper.label.toLowerCase();
+  // Point cardstock — direct mapping (12pt = 0.012", 14pt = 0.014", etc.)
+  const ptMatch = s.match(/(\d+)\s*pt/);
+  if (ptMatch) return parseInt(ptMatch[1], 10) / 1000;
+  // Cardstock weights
+  if (/cardstock|cover|c1s|c2s/.test(s)) {
+    if (/100lb/.test(s)) return 0.0085;
+    if (/80lb/.test(s)) return 0.0085;
+    if (/65lb/.test(s)) return 0.0070;
+    return 0.009;
+  }
+  // Text/offset weights
+  if (/100lb.*gloss/.test(s)) return 0.0036;
+  if (/100lb/.test(s)) return 0.0046;
+  if (/80lb.*offset/.test(s)) return 0.0050;
+  if (/80lb/.test(s)) return 0.0046;
+  if (/70lb/.test(s)) return 0.0048;
+  if (/60lb/.test(s)) return 0.0040;
+  if (/50lb/.test(s)) return 0.0033;
+  return 0.0046;
+}
+
+// Perfect bound spine thickness in inches.
+// pageCount counts ALL pages including the 4-page cover wrap; only the interior
+// leaves contribute to text caliper. The cover wraps both faces of the spine
+// plus a small glue allowance.
+function calcSpineInches({ pageCount, insidePaper, coverPaper, coverMode }) {
+  const interiorPages = Math.max(0, (pageCount || 0) - 4);
+  const textLeaves = interiorPages / 2;
+  const textCaliper = getPaperCaliper(insidePaper);
+  const cover = coverMode === "same" ? insidePaper : (coverPaper || insidePaper);
+  const coverCaliper = getPaperCaliper(cover);
+  const glueAllowance = 0.005;
+  return textLeaves * textCaliper + 2 * coverCaliper + glueAllowance;
+}
+function fmtSpine(inches) {
+  if (!inches || inches < 0.001) return "0″";
+  if (inches < 1) return `${(inches).toFixed(3)}″`;
+  return `${inches.toFixed(2)}″`;
+}
 // Combined paper lists: text weight first, then cardstock with suffix
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
 const isCardstockVal=v=>PAPERS_CS.some(p=>p.val===v);
@@ -339,6 +410,29 @@ const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,p
 // Perfect bound specific options
 const OUTFOLD_OPTS=_CFG.outfold_opts||[{label:"No Outfold",val:0,price:0},{label:"1 Fold-Out Page (Bifold)",val:1000,price:0.02},{label:"2 Fold-Out Pages (Bifold)",val:500,price:0.04}];
 const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.03,count:1},{label:"2 Perforation Lines",val:1000,price:0.03,count:2}];
+
+// Perforation runs alongside the spine on interior pages — typical tear-stub width
+// from the bind edge so coupons / pages tear cleanly without ripping the binding.
+// Positions are stored as inches FROM the spine (bind edge) so the recto/verso
+// mirror logic stays direct — the proof / template handle the side-flip per parity.
+const PERF_FROM_SPINE_INCHES = 0.375;
+
+// Constrain a single perf position (inches from spine) so it stays inside the
+// page, away from the glue line, and at least 0.5″ from any sibling. Snaps to
+// the nearest 1/8″ to match brochure's perf granularity.
+function clampPerfFromSpine(inches, idx, trimW, positions) {
+  let minIn = 0.25;
+  let maxIn = (trimW || 100) - 0.25;
+  (positions || []).forEach((p, j) => {
+    if (j === idx) return;
+    if (inches < p) maxIn = Math.min(maxIn, p - 0.5);
+    else            minIn = Math.max(minIn, p + 0.5);
+  });
+  if (maxIn < minIn) maxIn = minIn;
+  const clamped = Math.max(minIn, Math.min(maxIn, inches));
+  const snapped = Math.round(clamped * 8) / 8;
+  return Math.max(minIn, Math.min(maxIn, snapped));
+}
 
 // ═══════════════════════════════════════════════════════════════
 // SIZE + PRICING
@@ -510,6 +604,7 @@ function calculate(c) {
   const artWork=art.val>=2;
   const q100=sets.some(s=>s.qty>=100);
   const q250=sets.some(s=>s.qty>250);
+  const commonSize = !sz.isCustom ? ["5.5×8.5 (Opens to 8.5×11)","8.5×11 (Opens to 11×17)"].includes(c.sizeLabel) : false;
   const coatPaper=c.coverMode==="same"?c.insidePaper:cvr;
   const coatOK=coatPaper.coatable;
   const hcOK=c.insidePaper.factory;
@@ -611,6 +706,7 @@ function calculate(c) {
   P.discBW = bwFraction > 0 ? -(P.press * PCF.bw_discount_rate * bwFraction) : 0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
   P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate_1,PCF.easydiscount_max):0;
+  P.discCommon=(commonSize&&q250)?-Math.min(P.press+P.cutting+P.perfectBind,PCF.common_discount_max):0;
 
   // Size-based adjustment — 15% off when imp<4 (8.5×11 and larger). Mirrors saddle-stitch booklet.
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
@@ -713,7 +809,7 @@ function calculate(c) {
     {l:"Round Cornering",v:P.rc,g:"add"},{l:"Outfold",v:P.outfold,g:"add"},{l:"Perforation",v:P.perforation,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
-    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
+    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 
   // CMYK-derived group colors
@@ -1343,6 +1439,130 @@ function BookOpen3D({ pages, bookW, bookH, spread, scale, rotateX: rX, rotateY: 
   );
 }
 
+function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt,onOpenPreview}){
+  const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
+  const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
+  const maxDim=150, longSide=Math.max(wIn,hIn), px=maxDim/longSide;
+  const bookW=wIn*px, bookH=hIn*px;
+  // Real spine in pixels — scales with page count + paper caliper. Floor at 2px so
+  // very thin books still read as a book, not a flat sheet.
+  const spineInches=calcSpineInches({pageCount:pages,insidePaper,coverPaper,coverMode});
+  const spineWPx=Math.max(2,Math.round(spineInches*px));
+  const displayCover=coverMode==="same"?insidePaper:coverPaper;
+  const coverTone=displayCover?.tone||"#f7f3e8";
+  const inkColor=coverColor==="bw"?"#2b2b2b":CK.cyan;
+  const placeholder=useMemo(()=>{
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450" preserveAspectRatio="xMidYMid slice">
+<rect width="300" height="450" fill="${coverTone}"/>
+<rect x="36" y="58" width="110" height="4" fill="${inkColor}"/>
+<text x="36" y="140" font-family="Segoe UI, sans-serif" font-size="42" font-weight="800" fill="#2b2b2b" letter-spacing="-1">YOUR</text>
+<text x="36" y="186" font-family="Segoe UI, sans-serif" font-size="42" font-weight="800" fill="#2b2b2b" letter-spacing="-1">BOOKLET</text>
+<g transform="translate(36,372)">
+<circle cx="0" cy="0" r="6" fill="${CK.cyan}"/>
+<circle cx="18" cy="0" r="6" fill="${CK.magenta}"/>
+<circle cx="36" cy="0" r="6" fill="${CK.yellow}"/>
+<circle cx="54" cy="0" r="6" fill="${CK.key}"/>
+</g>
+<text x="36" y="412" font-family="Segoe UI, sans-serif" font-size="10" font-weight="600" fill="#555" letter-spacing="2">PRIORITY PRINT</text>
+</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  },[coverTone,inkColor]);
+  const backCover=useMemo(()=>{
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450">
+<rect width="300" height="450" fill="${coverTone}"/>
+<g transform="translate(150,220)">
+<rect x="-30" y="-30" width="60" height="60" fill="#fff" stroke="#2b2b2b" stroke-width="1.5"/>
+<rect x="-22" y="-22" width="44" height="44" fill="#2b2b2b"/>
+<rect x="-16" y="-16" width="4" height="4" fill="#fff"/><rect x="-8" y="-16" width="4" height="4" fill="#fff"/><rect x="0" y="-16" width="4" height="4" fill="#fff"/><rect x="12" y="-16" width="4" height="4" fill="#fff"/>
+<rect x="-16" y="-4" width="4" height="4" fill="#fff"/><rect x="0" y="-4" width="4" height="4" fill="#fff"/><rect x="8" y="-4" width="4" height="4" fill="#fff"/>
+<rect x="-16" y="4" width="4" height="4" fill="#fff"/><rect x="-8" y="4" width="4" height="4" fill="#fff"/><rect x="8" y="4" width="4" height="4" fill="#fff"/>
+<rect x="-16" y="12" width="4" height="4" fill="#fff"/><rect x="8" y="12" width="4" height="4" fill="#fff"/>
+</g>
+<text x="150" y="300" font-family="Segoe UI, sans-serif" font-size="9" font-weight="600" fill="#555" text-anchor="middle" letter-spacing="1">PRIORITYPRINTSERVICE.COM</text>
+</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  },[coverTone]);
+  const hasArt=!!coverArt;
+  const previewPages=useMemo(()=>[
+    {dataUrl:coverArt||placeholder,isBlank:false},
+    {dataUrl:backCoverArt||coverArt||backCover,isBlank:false},
+  ],[coverArt,backCoverArt,placeholder,backCover]);
+  const clickable=hasArt&&typeof onOpenPreview==="function";
+  return (
+    <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
+      <div className="bp-viewport"
+        role={clickable?"button":undefined} tabIndex={clickable?0:undefined}
+        onClick={clickable?onOpenPreview:undefined}
+        onKeyDown={clickable?(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onOpenPreview();}}:undefined}
+        title={clickable?"Open full preview":undefined}
+        style={{height:190,borderRadius:0,border:"none",cursor:clickable?"zoom-in":"default"}}>
+        <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
+        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={spineWPx} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
+        <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
+          <span style={{display:"inline-flex",gap:3}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:CK.cyan}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:CK.magenta}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:CK.yellow}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
+          </span>
+          <span>{hasArt?"YOUR ARTWORK · LIVE":"3D PREVIEW · LIVE"}</span>
+        </div>
+        {clickable&&<div style={{position:"absolute",top:10,right:12,fontSize:9,fontWeight:700,letterSpacing:".1em",color:"rgba(255,255,255,.75)",background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.18)",padding:"3px 7px",borderRadius:4,pointerEvents:"none"}}>OPEN ⤢</div>}
+        <div style={{position:"absolute",bottom:10,left:14,right:14,display:"flex",justifyContent:"space-between",fontSize:9.5,fontWeight:600,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:".08em",pointerEvents:"none"}}>
+          <span>{wIn}×{hIn}″</span>
+          <span>{pages}pp · {quantity.toLocaleString()} qty</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobilePreviewBar(props){
+  const {sizeLabel,pages,quantity,coverArt,onOpenPreview}=props;
+  const hostRef=useRef(null);
+  const [collapsed,setCollapsed]=useState(false);
+  useEffect(()=>{
+    const el=hostRef.current;
+    if(!el||typeof IntersectionObserver==="undefined")return;
+    const obs=new IntersectionObserver(([entry])=>{
+      setCollapsed(!entry.isIntersecting && entry.boundingClientRect.top < 0);
+    },{threshold:0,rootMargin:"0px 0px 0px 0px"});
+    obs.observe(el);
+    return ()=>obs.disconnect();
+  },[]);
+  const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
+  const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
+  const hasArt=!!coverArt;
+  const clickable=hasArt&&typeof onOpenPreview==="function";
+  return (
+    <>
+      <div ref={hostRef} style={{margin:"6px 10px 10px"}}>
+        <SidebarBookPreview {...props}/>
+      </div>
+      <div role={clickable?"button":undefined} tabIndex={clickable?0:undefined}
+        onClick={clickable?onOpenPreview:undefined}
+        onKeyDown={clickable?(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onOpenPreview();}}:undefined}
+        style={{position:"fixed",top:0,left:0,right:0,zIndex:45,transform:collapsed?"translateY(0)":"translateY(-110%)",transition:"transform .22s ease-out",background:"linear-gradient(135deg,#1a1d23,#2a2e36)",borderBottom:"1px solid rgba(255,255,255,.08)",boxShadow:"0 6px 18px rgba(0,0,0,.25)",padding:"7px 12px",display:"flex",alignItems:"center",gap:10,cursor:clickable?"pointer":"default",color:"#fff"}}>
+        <div style={{width:32,height:Math.max(24,Math.min(48,(32*hIn)/wIn)),borderRadius:3,overflow:"hidden",flexShrink:0,background:"#2a2e36",boxShadow:"0 0 0 1px rgba(255,255,255,.12)"}}>
+          {hasArt
+            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+            : <div style={{width:"100%",height:"100%",background:"linear-gradient(135deg,#e0edff,#f7f3e8)"}}/>}
+        </div>
+        <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:1}}>
+          <div style={{fontSize:8,fontWeight:700,letterSpacing:".12em",opacity:.6,textTransform:"uppercase"}}>{hasArt?"Your Artwork":"3D Preview"}</div>
+          <div style={{fontSize:12,fontWeight:700,letterSpacing:".01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{wIn}×{hIn}″ · {pages}pp · {quantity.toLocaleString()} qty</div>
+        </div>
+        <div style={{display:"inline-flex",gap:3,alignSelf:"center"}} aria-hidden="true">
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.cyan}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.magenta}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.yellow}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function InfoTip({ children, text, dark }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -1436,7 +1656,7 @@ function RichTip({ children, tipKey, title, content, dark }) {
 
 const PPS_LOGO_B64 = (window.PPS_CONFIG || {}).logoUrl || "";
 
-function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner) {
+function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner, perforation, perfPositions) {
   try {
     if (!window.jspdf) { alert("PDF library not loaded. Please refresh the page."); return; }
     const { jsPDF } = window.jspdf;
@@ -1509,6 +1729,29 @@ function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner) {
       pdf.setTextColor(59, 130, 246);
       var labelX = bleed - 0.06;
       pdf.text("SPINE / GLUE EDGE", labelX, bleed + trimH / 2, { angle: 90, align: "center" });
+
+      // Perforation lines — bright magenta dotted, on interior pages only.
+      // Recto pages (even pg index, idx > 0) carry the spine on the LEFT so the
+      // perf sits at (bleed + dIn) inches from the left edge; verso pages mirror
+      // each entry across the trim. Front/back covers (idx 0 and idx pageCount-1)
+      // skip. Loops over each perfPositions[i] so 2-line configs render both.
+      var isInterior = pg > 0 && pg < pageCount - 1;
+      var perfPosList = (Array.isArray(perfPositions) && perfPositions.length) ? perfPositions : [PERF_FROM_SPINE_INCHES];
+      if (perforation && perforation > 0 && isInterior) {
+        var isRecto = pg % 2 === 0;
+        for (var pi = 0; pi < perfPosList.length; pi++) {
+          var dIn = perfPosList[pi];
+          var perfX = isRecto ? (bleed + dIn) : (bleed + trimW - dIn);
+          pdf.setDrawColor(236, 0, 140); // bright magenta — distinct from bleed/trim/safety/spine
+          pdf.setLineWidth(0.012);
+          drawDashedLine(pdf, perfX, bleed + 0.05, perfX, bleed + trimH - 0.05, 0.04, 0.03);
+          // PERF label — include the index when there are multiple lines
+          pdf.setFontSize(5.5);
+          pdf.setTextColor(236, 0, 140);
+          var label = perfPosList.length > 1 ? ("PERFORATION " + (pi + 1)) : "PERFORATION";
+          pdf.text(label, perfX + (isRecto ? 0.04 : -0.04), bleed + trimH / 2, { angle: isRecto ? 90 : -90, align: "center" });
+        }
+      }
 
       // Logo watermark — tiled step-repeat across the page within safety area
       var tileSize = Math.min(trimW * 0.18, 1.0); // each tile ~1" or 18% of trim width
@@ -1666,7 +1909,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, insidePaper, coverPaper, coverMode, coverWrap, perforation, perfPositions, onPerfPositions, debug }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1691,6 +1934,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [showMagnifier, setShowMagnifier] = useState(false); // magnifier loupe active
   const [magPos, setMagPos] = useState(null); // {x, y, pctX, pctY} — cursor position on proof image
   const [hiResProof, setHiResProof] = useState(null); // {idx, dataUrl} — 300 DPI render of current proof page
+  const [draggingPerf, setDraggingPerf] = useState(null); // index of perf line being dragged in the proof, or null
+  const proofContainerRef = useRef(null); // bleed-inclusive proof container, used for the perf-drag math
   const pdfDocRef = useRef(null); // holds the pdf.js document for hi-res re-rendering
   const slotFilesRef = useRef({}); // { slotIndex: File } — original files for per-slot uploads
   const rawFileRef = useRef(null); // holds the original uploaded File for the raw deliverable
@@ -2436,8 +2681,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // Pixel dimensions
   const compactH = 160, pxPerInch = compactH / dims.h;
   const cBookW = Math.round(dims.w * pxPerInch), cBookH = compactH;
-  // Perfect bound spine: ~0.004" per text leaf + 0.06" for cover wrap. Scaled to preview pixels.
-  const spineInches = ((pageCount - 4) / 2) * 0.004 + 0.06;
+  // Perfect bound spine — uses paper caliper from the chosen inside / cover paper
+  const spineInches = calcSpineInches({ pageCount, insidePaper, coverPaper, coverMode });
   const spineW = Math.max(4, Math.round(spineInches * pxPerInch)), cScale = Math.min(1, 200 / ((cBookW + spineW) * 1.8));
   const exH = 360, exPPI = exH / dims.h;
   const exBookW = Math.round(dims.w * exPPI), exBookH = exH;
@@ -2583,6 +2828,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
   const hasFile = rawPages.length >= 2 || rawPages.some(p => !p.isBlank);
   const PF = { pass: { dot: "#4ade80", text: "#3a7124" }, warn: { dot: "#fbbf24", text: "#b8860b" }, fail: { dot: "#f87171", text: "#c2185b" }, info: { dot: "#60a5fa", text: "#2563eb" } };
+
+  // Expose an imperative open-preview hook for the sidebar preview card.
+  useEffect(() => {
+    if (!openPreviewModalRef) return;
+    openPreviewModalRef.current = hasFile ? () => { setActiveModal("preview"); setPreviewMode("closed"); setRot({ x: -15, y: -25 }); } : null;
+    return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
+  }, [hasFile, openPreviewModalRef]);
 
   // ── Per-slot upload logic ──
   const slotInputRef = useRef(null);
@@ -2775,7 +3027,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   <div style={{ fontSize: 10, color: CC.light, marginTop: 2 }}>Drop a file or click to browse</div></>
             }
           </div>
-          <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner)} style={{
+          <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner, perforation, perfPositions)} style={{
             width: "100%", marginTop: 6, padding: "8px", borderRadius: 4, border: `1px dashed ${CC.border}`,
             background: "#fafafa", color: CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
           }}>📐 Download Artwork Template ({dims.w}×{dims.h}″ · {pageCount}pg)</button>
@@ -2812,7 +3064,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               📄 {fileName} · {filledCount}/{pageCount}pg
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner)} style={{
+              <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, sizeLabel, roundCorner, perforation, perfPositions)} style={{
                 padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CC.border}`, background: CC.white, color: CC.mid,
               }}>📐 Download Template</button>
@@ -2848,24 +3100,47 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
             </div>
           )}
 
-          {/* ── Pill Selector: Proof | Preview ── */}
-          <div style={{ display:"flex", borderRadius:8, overflow:"hidden", border:`1px solid ${CC.border}`, marginBottom:8, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
-            <button type="button" onClick={() => { setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
-              flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-              background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
-              borderRight:`1px solid ${CC.border}`,
-            }}>
-              🔍 Proof {proof===0 && !artApproved && <span style={{ fontSize:9, fontWeight:700, background:"#fee2e2", color:"#dc2626", padding:"1px 6px", borderRadius:4 }}>required</span>}
-            </button>
-            <button type="button" onClick={() => { setActiveModal("preview"); setPreviewMode("closed"); setRot({x:-15,y:-25}); }} style={{
-              flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-              background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
-            }}>
-              📖 Preview
-            </button>
-          </div>
+          {/* ── Pill Selector: Proof | Preview ── (wrapped brochure-style: gentle red box +
+                description text when proof approval is still required) */}
+          {(() => {
+            const needsApproval = proof === 0 && !artApproved;
+            return (
+              <div style={{
+                display:"flex", flexDirection:"column", gap:6, marginBottom:8,
+                padding: needsApproval ? "10px 12px" : 0,
+                background: needsApproval ? "#fef2f2" : "transparent",
+                border: needsApproval ? "1px solid #fecaca" : "none",
+                borderRadius: 6,
+              }}>
+                <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:`1px solid ${CC.border}`, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+                  <button type="button" onClick={() => { setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
+                    flex:1, padding:"11px 10px", fontSize:13, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                    background: artApproved && proof===0
+                      ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)"
+                      : "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)",
+                    color: artApproved && proof===0 ? "#fff" : "#555",
+                    borderRight:`1px solid ${CC.border}`,
+                  }}>
+                    {artApproved && proof===0 ? "✓ Proof Approved" : "🔍 Proof"} {needsApproval && <span style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 4 }}>required</span>}
+                    {debug && <span title="Proof debug mode is on (?debug=1). The approval-package generator can be triggered without locking approval, and downloads stay visible after each generate." style={{ marginLeft:8, fontSize:9, fontWeight:700, background:"rgba(251,191,36,.18)", color:"#fbbf24", padding:"2px 8px", borderRadius:4, letterSpacing:".06em", textTransform:"uppercase", border:"1px solid rgba(251,191,36,.4)" }}>🔧 Debug</span>}
+                  </button>
+                  <button type="button" onClick={() => { setActiveModal("preview"); setPreviewMode("closed"); setRot({x:-15,y:-25}); }} style={{
+                    flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                    background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
+                  }}>
+                    📖 Preview
+                  </button>
+                </div>
+                {needsApproval && (
+                  <div style={{ fontSize: 11, color: "#b91c1c", lineHeight: 1.4 }}>
+                    Open proof to review bleed, trim, safety {(perforation > 0 || coverWrap === "wraparound") ? "and " : ""}{perforation > 0 ? "perforation" : ""}{(perforation > 0 && coverWrap === "wraparound") ? ", " : ""}{coverWrap === "wraparound" ? "spine layout" : ""} and approve artwork
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Proof messages for non-online-proof modes */}
           {proof === 0.01 && (
@@ -2981,12 +3256,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           setGenProgress(null);
                         }
                       } else if (proof!==0) { setProof(0); }
-                    }} style={{
-                      padding:"8px 18px", fontSize:12, fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em",
+                    }} className={proof===0 && !artApproved && !generatingPdf ? "bp-approve-cta" : ""} style={{
+                      padding: proof===0 && !artApproved ? "10px 24px" : "8px 18px",
+                      fontSize: proof===0 && !artApproved ? 13 : 12,
+                      fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em", textTransform:"uppercase",
                       background: artApproved && proof===0
                         ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
-                        : proof===0 ? "rgba(255,255,255,.04)" : "rgba(255,255,255,.04)",
-                      color: artApproved && proof===0 ? "#fff" : proof===0 ? "#ef4444" : "rgba(255,255,255,.3)",
+                        : proof===0 ? undefined : "rgba(255,255,255,.04)",
+                      color: artApproved && proof===0 ? "#fff" : proof===0 ? undefined : "rgba(255,255,255,.3)",
                       borderRight:"1px solid rgba(255,255,255,.08)",
                     }}>{generatingPdf && genProgress ? (
                       <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
@@ -3015,7 +3292,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
                   {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
                 </div>
-                {artApproved && approvalPkg && (() => {
+                {approvalPkg && (artApproved || debug) && (() => {
                   const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                   const dlFile = (blob, name) => {
                     if (!blob) return;
@@ -3106,8 +3383,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                 const artW = ed ? ed.wIn : dims.w;
                 const artH = ed ? ed.hIn : dims.h;
                 const bleed = 0.125, safety = 0.125;
+                // Spine math drives wraparound geometry
+                const spineInchesNow = calcSpineInches({ pageCount, insidePaper, coverPaper, coverMode });
+                // Wraparound mode treats the cover page (idx 0) as a wide flat sheet:
+                // back panel + spine + front panel + bleed all around
+                const isWrapCover = coverWrap === "wraparound" && proofIdx === 0;
+                const trimW = isWrapCover ? (dims.w * 2 + spineInchesNow) : dims.w;
                 // Container is now bleed-inclusive size
-                const bleedW = dims.w + bleed * 2;
+                const bleedW = trimW + bleed * 2;
                 const bleedH = dims.h + bleed * 2;
                 // Guide positions as percentages of the bleed-inclusive container
                 const bleedPctX = (bleed / bleedW) * 100;  // trim inset from container edge
@@ -3120,6 +3403,19 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                 const rcPct = rcRadius > 0 ? ((rcRadius / artW) * 100).toFixed(2) + "%" : "0";
                 const rcCSS = rcRadius > 0 ? rcAll4 ? rcPct : `0 ${rcPct} ${rcPct} 0` : "0";
                 const hiResValid = hiResProof && hiResProof.idx === proofIdx && hiResProof.rotated === rotateSteps;
+                // Drag handler for perf lines — converts cursor x → inches from spine,
+                // mirroring across the trim for verso pages so dragging on either parity
+                // updates the same perfPositions[i] in absolute "from-spine" terms.
+                const handlePerfDrag = (e) => {
+                  if (draggingPerf == null || !proofContainerRef.current || !onPerfPositions) return;
+                  const rect = proofContainerRef.current.getBoundingClientRect();
+                  const cursorIn = (e.clientX - rect.left) / rect.width * bleedW;
+                  const isRecto = proofIdx % 2 === 0;
+                  const fromSpine = isRecto ? (cursorIn - bleed) : (bleed + dims.w - cursorIn);
+                  const next = (perfPositions || []).slice();
+                  next[draggingPerf] = clampPerfFromSpine(fromSpine, draggingPerf, dims.w, next);
+                  onPerfPositions(next);
+                };
                 return (
                   <div style={{ padding:"16px 20px" }}>
                     {/* Page nav with view toggle */}
@@ -3141,12 +3437,29 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
                         color: showGuides ? "#38a169" : "rgba(255,255,255,.4)",
-                      }}>{showGuides ? "Guides: Hide" : "Guides: Hidden"}</button>
+                      }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
                       <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
                         color: showMagnifier ? "#3b82f6" : "rgba(255,255,255,.4)",
                       }}>🔍</button>
+                      {debug && <button type="button" disabled={generatingPdf} title="Debug: regenerate the approval package without locking approval" onClick={async () => {
+                        setGeneratingPdf(true);
+                        setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
+                        try {
+                          const pkg = await generateApprovalPackage();
+                          if (pkg && pkg.manifestBlob) setApprovalPkg(pkg);
+                        } catch (err) {
+                          console.error("Debug generate failed:", err);
+                          alert("Generation failed: " + (err.message || err));
+                        } finally {
+                          setGeneratingPdf(false);
+                          setGenProgress(null);
+                        }
+                      }} style={{
+                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(251,191,36,.4)", borderRadius:6, cursor: generatingPdf ? "wait" : "pointer", fontFamily:"inherit",
+                        background:"rgba(251,191,36,.12)", color:"#fbbf24",
+                      }}>🔧 {generatingPdf ? "Generating…" : "Generate"}</button>}
                       <div style={{ marginLeft:4, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
                         {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (
                           <button type="button" key={o.v} onClick={() => setProofView(o.v)} title={o.v === "single" ? "Single page view" : "Grid view — all pages"} style={{
@@ -3159,7 +3472,10 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                     </div>
                     {/* Proof image with guide overlays — container sized to include bleed area */}
                     <div style={{ maxWidth:520, margin:"0 auto" }}>
-                      <div style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", background:"#1a1d23", cursor: showMagnifier ? "none" : "default" }}
+                      <div ref={proofContainerRef} className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "default", ...(draggingPerf != null ? { touchAction:"none" } : {}) }}
+                        onPointerMove={handlePerfDrag}
+                        onPointerUp={() => setDraggingPerf(null)}
+                        onPointerCancel={() => setDraggingPerf(null)}
                         onMouseMove={showMagnifier ? (e) => {
                           const r = e.currentTarget.getBoundingClientRect();
                           setMagPos({ x: e.clientX - r.left, y: e.clientY - r.top, pctX: (e.clientX - r.left) / r.width * 100, pctY: (e.clientY - r.top) / r.height * 100, cw: r.width, ch: r.height });
@@ -3183,7 +3499,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             transform: "translate(-50%, -50%)", display: "block", filter: gsFilter,
                           });
                           return (
-                            <div style={{ position:"absolute", inset:0, overflow:"hidden", background:"#2a2e36" }}>
+                            <div className="bp-checker" style={{ position:"absolute", inset:0, overflow:"hidden" }}>
                               {proofPage.isBlank
                                 ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.3)", fontSize:14 }}>Blank page</div>
                                 : <img src={hiResValid ? hiResProof.dataUrl : proofPage.dataUrl} style={{
@@ -3204,7 +3520,11 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"rgba(255,255,255,.4)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>300 DPI</div>
                         )}
                         {/* Guide overlays — togglable */}
-                        {showGuides && !proofPage.isBlank && (
+                        {showGuides && !proofPage.isBlank && (() => {
+                          // Spine boundary positions in container % (only meaningful in wraparound)
+                          const spineLeftPct = isWrapCover ? ((bleed + dims.w) / bleedW) * 100 : null;
+                          const spineRightPct = isWrapCover ? ((bleed + dims.w + spineInchesNow) / bleedW) * 100 : null;
+                          return (
                           <div style={{ position:"absolute", inset:0, pointerEvents:"none", zIndex:1 }}>
                             {/* Bleed — red dashed at container edge (art must extend to here) */}
                             <div style={{ position:"absolute", inset:0, border:"2.5px dashed #ef4444", boxSizing:"border-box", opacity:0.8 }}/>
@@ -3212,11 +3532,48 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2.5px dashed #e2e8f0", boxSizing:"border-box", borderRadius:rcCSS }}/>
                             {/* Safety — green dashed further inset (keep text inside) */}
                             <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2.5px dashed #38a169", boxSizing:"border-box", borderRadius:rcCSS }}/>
-                            {/* Spine — perfect bound: binding edge always on left (glued spine) */}
-                            <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2 }}/>
-                            <div style={{ position:"absolute", left:`${bleedPctX + 1.2}%`, top:"50%", transform:"translateY(-50%) rotate(-90deg)", transformOrigin:"center center", fontSize:8, fontWeight:700, color:"#3b82f6", letterSpacing:".06em", whiteSpace:"nowrap", textTransform:"uppercase", opacity:0.7 }}>Spine</div>
+                            {isWrapCover ? <>
+                              {/* Wraparound spine boundaries — back panel | spine | front panel */}
+                              <div style={{ position:"absolute", left:`${spineLeftPct}%`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, background:"#3b82f6", boxShadow:"0 0 0 1px rgba(59,130,246,.2)" }}/>
+                              <div style={{ position:"absolute", left:`${spineRightPct}%`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, background:"#3b82f6", boxShadow:"0 0 0 1px rgba(59,130,246,.2)" }}/>
+                              {/* Panel labels */}
+                              <div style={{ position:"absolute", left:`${(bleedPctX + spineLeftPct)/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"rgba(255,255,255,.7)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Back</div>
+                              <div style={{ position:"absolute", left:`${(spineLeftPct + spineRightPct)/2}%`, top:"50%", transform:"translate(-50%, -50%) rotate(-90deg)", fontSize:9, fontWeight:700, color:"#3b82f6", letterSpacing:".08em", textTransform:"uppercase", whiteSpace:"nowrap", textShadow:"0 1px 2px rgba(0,0,0,.5)" }}>Spine · {fmtSpine(spineInchesNow)}</div>
+                              <div style={{ position:"absolute", left:`${(spineRightPct + (100 - bleedPctX))/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"rgba(255,255,255,.7)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Front</div>
+                            </> : <>
+                              {/* Spine — perfect bound: binding edge always on left (glued spine) */}
+                              <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2 }}/>
+                              <div style={{ position:"absolute", left:`${bleedPctX + 1.2}%`, top:"50%", transform:"translateY(-50%) rotate(-90deg)", transformOrigin:"center center", fontSize:8, fontWeight:700, color:"#3b82f6", letterSpacing:".06em", whiteSpace:"nowrap", textTransform:"uppercase", opacity:0.7 }}>Spine</div>
+                            </>}
+                            {/* Perforation — bright magenta dotted on interior pages near the spine when the perf
+                                add-on is enabled. Even idx (recto/front) → left; odd idx (verso/back) → right.
+                                Skip front cover (idx 0) and back cover (idx N-1). Loops over each
+                                perfPositions[i] (inches from spine) so 2-line configurations render both.
+                                Each line carries a wider invisible hit zone for drag-to-reposition. */}
+                            {perforation > 0 && proofIdx > 0 && proofIdx < displayPages.length - 1 && !isWrapCover &&
+                              (perfPositions || []).map((dIn, i) => {
+                                const isRecto = proofIdx % 2 === 0;
+                                const perfPct = ((bleed + dIn) / bleedW) * 100;
+                                const leftPct = isRecto ? perfPct : (100 - perfPct);
+                                const isDragging = draggingPerf === i;
+                                const hitW = mob ? 36 : 20;
+                                return (
+                                  <React.Fragment key={i}>
+                                    <div style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:`2px dotted ${isDragging ? "#fde047" : "#facc15"}`, filter:`drop-shadow(0 0 ${isDragging ? 4 : 2}px rgba(250,204,21,.55))`, pointerEvents:"none" }}/>
+                                    <div style={{ position:"absolute", left:`${leftPct}%`, top:"50%", transform:`translate(${isRecto ? "8px" : "-100%"}, -50%) rotate(${isRecto ? -90 : 90}deg)`, transformOrigin:"left center", fontSize:8, fontWeight:700, color:"#facc15", letterSpacing:".08em", whiteSpace:"nowrap", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)", pointerEvents:"none" }}>Perf {(perfPositions.length > 1 ? (i+1) + " · " : "")}{dIn}″</div>
+                                    {/* Drag hit zone — wider invisible band over the perf line */}
+                                    <div
+                                      title="Drag to reposition perforation"
+                                      onPointerDown={(e) => { e.preventDefault(); setDraggingPerf(i); try { e.target.setPointerCapture(e.pointerId); } catch {} }}
+                                      style={{ position:"absolute", left:`calc(${leftPct}% - ${hitW/2}px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:hitW, cursor:"col-resize", touchAction:"none", zIndex:6 }}
+                                    />
+                                  </React.Fragment>
+                                );
+                              })
+                            }
                           </div>
-                        )}
+                          );
+                        })()}
                         {rcRadius > 0 && !proofPage.isBlank && (
                           <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, borderRadius:rcCSS, boxShadow:"0 0 0 200px rgba(0,0,0,0.15)", pointerEvents:"none", zIndex:0 }}/>
                         )}
@@ -3227,61 +3584,52 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           const bgW = magPos.cw * zoom, bgH = magPos.ch * zoom;
                           const bgX = -(magPos.pctX / 100 * bgW) + magSize / 2;
                           const bgY = -(magPos.pctY / 100 * bgH) + magSize / 2;
-                          // Helper: convert a container percentage to magnifier pixel position
-                          const toMX = (pct) => (pct / 100 * bgW) + bgX;
-                          const toMY = (pct) => (pct / 100 * bgH) + bgY;
-                          // Guide rectangles as {top,left,width,height} in magnifier pixels
-                          const magGuides = showGuides ? [
-                            { // Bleed — at container edge
-                              l: toMX(0), t: toMY(0), w: bgW, h: bgH,
-                              border: "2px dashed #ef4444", opacity: 0.8
-                            },
-                            { // Trim — inset by bleed
-                              l: toMX(bleedPctX), t: toMY(bleedPctY),
-                              w: (100 - bleedPctX * 2) / 100 * bgW,
-                              h: (100 - bleedPctY * 2) / 100 * bgH,
-                              border: "2px dashed #e2e8f0", opacity: 1
-                            },
-                            { // Safety — inset by bleed + safety
-                              l: toMX(safetyPctX), t: toMY(safetyPctY),
-                              w: (100 - safetyPctX * 2) / 100 * bgW,
-                              h: (100 - safetyPctY * 2) / 100 * bgH,
-                              border: "2px dashed #38a169", opacity: 1
-                            },
-                          ] : [];
-                          // Spine bar position — perfect bound: always left
-                          const spineMX = toMX(bleedPctX);
-                          const spineMYtop = toMY(bleedPctY + 2);
-                          const spineMYbot = toMY(100 - bleedPctY - 2);
+                          const proofTx = getTx(proofIdx);
+                          const lensEd = effectiveDimsFor(artDims, proofTx.rotateSteps);
+                          const lensNativeW = lensEd ? lensEd.wIn / bleedW : (dims.w / bleedW);
+                          const lensCropStyle = (mult) => ({
+                            width: `${lensNativeW * mult * 100}%`, height: "auto",
+                            position: "absolute", top: "50%", left: "50%",
+                            transform: "translate(-50%, -50%)", display: "block", filter: gsFilter,
+                          });
                           return (
                             <div style={{
                               position:"absolute", pointerEvents:"none", zIndex:10,
                               left: magPos.x - magSize / 2, top: magPos.y - magSize / 2,
                               width: magSize, height: magSize, borderRadius:"50%",
                               border:"3px solid rgba(255,255,255,.8)", boxShadow:"0 4px 20px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.3)",
-                              backgroundImage: `url(${imgSrc})`,
-                              backgroundSize: `${bgW}px ${bgH}px`,
-                              backgroundPosition: `${bgX}px ${bgY}px`,
-                              backgroundRepeat: "no-repeat",
-                              backgroundColor: "#1a1d23",
                               overflow: "hidden",
                             }}>
-                              {/* Guide lines inside magnifier */}
-                              {magGuides.map((g, gi) => (
-                                <div key={gi} style={{
-                                  position:"absolute", left:g.l, top:g.t, width:g.w, height:g.h,
-                                  border:g.border, opacity:g.opacity, boxSizing:"border-box", pointerEvents:"none",
-                                }}/>
-                              ))}
-                              {/* Spine inside magnifier */}
-                              {showGuides && (
-                                <div style={{
-                                  position:"absolute", left: spineMX - 1.5, top: spineMYtop,
-                                  width: 3, height: spineMYbot - spineMYtop,
-                                  background:"#3b82f6", borderRadius:1, pointerEvents:"none",
-                                }}/>
-                              )}
-                              {/* Crosshair */}
+                              {/* Bleed-zoomed proof viewport — mirrors the main proof container at zoom× scale */}
+                              <div className="bp-checker" style={{ position:"absolute", left: bgX, top: bgY, width: bgW, height: bgH, overflow: "hidden" }}>
+                                <img src={imgSrc} style={{
+                                  ...(proofTx.fitMode === "crop" ? lensCropStyle(1)
+                                    : proofTx.fitMode === "scale" ? lensCropStyle(proofTx.artScale / 100)
+                                    : proofTx.fitMode === "stretch" ? { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit:"fill", position:"absolute", inset:0 }
+                                    : { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit: proofTx.fitMode === "contain" ? "contain" : "cover" }
+                                  )
+                                }} />
+                                {showGuides && <>
+                                  {/* Bleed — red dashed at container edge */}
+                                  <div style={{ position:"absolute", inset:0, border:"2px dashed #ef4444", boxSizing:"border-box", opacity:0.8, pointerEvents:"none" }}/>
+                                  {/* Trim — light dashed inset by bleed */}
+                                  <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2px dashed #e2e8f0", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
+                                  {/* Safety — green dashed further inset */}
+                                  <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2px dashed #38a169", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
+                                  {/* Spine — perfect bound: always left */}
+                                  <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2, pointerEvents:"none" }}/>
+                                  {/* Perforation — same rule as main view: interior pages only, loop over positions */}
+                                  {perforation > 0 && proofIdx > 0 && proofIdx < displayPages.length - 1 &&
+                                    (perfPositions || []).map((dIn, i) => {
+                                      const isRecto = proofIdx % 2 === 0;
+                                      const perfPct = ((bleed + dIn) / bleedW) * 100;
+                                      const leftPct = isRecto ? perfPct : (100 - perfPct);
+                                      return <div key={i} style={{ position:"absolute", left:`calc(${leftPct}% - 1px)`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, borderLeft:"2px dotted #facc15", pointerEvents:"none" }}/>;
+                                    })
+                                  }
+                                </>}
+                              </div>
+                              {/* Crosshair — anchored to lens centre */}
                               <div style={{ position:"absolute", left:"50%", top:0, bottom:0, width:1, background:"rgba(255,255,255,.3)", transform:"translateX(-50%)" }}/>
                               <div style={{ position:"absolute", top:"50%", left:0, right:0, height:1, background:"rgba(255,255,255,.3)", transform:"translateY(-50%)" }}/>
                             </div>
@@ -3333,7 +3681,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   <div style={{ display:"grid", gridTemplateColumns:`repeat(auto-fill, minmax(${mob ? 100 : 140}px, 1fr))`, gap:10 }}>
                     {displayPages.map((p, i) => (
                       <div key={i} style={{ cursor: p.isBlank ? "default" : "pointer", textAlign:"center" }} onClick={() => { if (!p.isBlank) { setProofIdx(i); setProofView("single"); } }}>
-                        <div style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", background:"#2a2e36", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
+                        <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
                           {p.isBlank
                             ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.2)", fontSize:10 }}>Blank</div>
                             : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
@@ -3667,6 +4015,19 @@ function App(){
   const[showDebug,setShowDebug]=useState(false);
   const[shareCopied,setShareCopied]=useState(false);
   const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
+  // Proof-debug mode — toggled by `?debug=1` (or `pps_debug=1` in localStorage). When on,
+  // the proof modal exposes a "Generate Package" button that runs the approval generator
+  // without locking the approval state, and the TEST DOWNLOAD bar appears as soon as a
+  // package exists. Lets us iterate on transforms and re-download the deliverables for
+  // hands-on troubleshooting without committing to an order.
+  const proofDebug = useMemo(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get("debug") === "1") return true;
+      if (typeof localStorage !== "undefined" && localStorage.getItem("pps_debug") === "1") return true;
+    } catch {}
+    return false;
+  }, []);
 
   // Per-product defaults from admin config, then URL params override
   const D = (() => {
@@ -3691,6 +4052,11 @@ function App(){
       if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
       if (p.has("bundling") && _float(p.get("bundling")) != null) base.bundling = _float(p.get("bundling"));
       if (p.has("corner") && _float(p.get("corner")) != null) base.roundCorner = _float(p.get("corner"));
+      if (p.has("perf") && _float(p.get("perf")) != null) base.perforation = _float(p.get("perf"));
+      if (p.has("perfpos")) {
+        const arr = p.get("perfpos").split(",").map(s => parseFloat(s)).filter(n => !isNaN(n) && n > 0);
+        if (arr.length) base.perfPositions = arr.slice(0, 2);
+      }
       if (p.has("state")) base.shipState = p.get("state");
     } catch(e) {}
     return base;
@@ -3718,6 +4084,10 @@ function App(){
   const[roundCorner,setRoundCorner]=useState(Number(D.roundCorner)||0);
   const[outfold,setOutfold]=useState(Number(D.outfold)||0);
   const[perforation,setPerforation]=useState(Number(D.perforation)||0);
+  const[perfPositions,setPerfPositions]=useState(()=>{
+    if (Array.isArray(D.perfPositions) && D.perfPositions.length) return D.perfPositions.slice(0, 2);
+    return [PERF_FROM_SPINE_INCHES];
+  });
   const[artwork,setArtwork]=useState(Number(D.artwork)||0.01);
   const[artEditPages,setArtEditPages]=useState(Number(D.artEditPages)||0);
   const[bleed,setBleed]=useState(Number(D.bleed)||0);
@@ -3729,6 +4099,10 @@ function App(){
   const[shipAddr,setShipAddr]=useState({name:"",company:"",street1:"",street2:"",city:"",zip:""});
   const[needByDate,setNeedByDate]=useState("");
   const[coverArt,setCoverArt]=useState(null);
+  const[backCoverArt,setBackCoverArt]=useState(null);
+  const[coverWrap,setCoverWrap]=useState("separate"); // "separate" | "wraparound"
+  const[wraparoundCoverArt,setWraparoundCoverArt]=useState(null); // {dataUrl, file, dims} for wraparound mode
+  const openPreviewModalRef=useRef(null);
   // Unified artwork file state — one variable, no priority logic
   // { type:"none" } | { type:"files", list:[File,...] } | { type:"existing", path:"/uploads/..." }
   const[artFiles,setArtFiles]=useState({type:"none"});
@@ -3838,6 +4212,36 @@ function App(){
   // Keep lastPreset in sync when user changes the dropdown
   const handleSizeLabel=(v)=>{setSizeLabel(v);if(v!=="Custom Size")lastPreset.current=v;};
   const csOK=sets.every(s=>s.pages<=24);
+
+  // Trim width in App scope — used to clamp perfPositions when count or size changes.
+  const trimW = useMemo(() => {
+    if (sizeLabel === "Custom Size") {
+      const lo = Math.max(customLong || 0, customShort || 0);
+      const sh = Math.min(customLong || 0, customShort || 0);
+      return bindDir === "long" ? lo : sh;
+    }
+    const m = (sizeLabel || "").match(/([\d.]+)×([\d.]+)/);
+    return m ? parseFloat(m[1]) : 5.5;
+  }, [sizeLabel, customLong, customShort, bindDir]);
+
+  // Keep perfPositions valid when count, trim width, or peer positions change.
+  // Match the array length to the current count and clamp every entry through
+  // clampPerfFromSpine so the user can't end up with a stale invalid value.
+  const perfCount = useMemo(() => (PERF_OPTS.find(o => o.val === perforation)?.count) || 0, [perforation]);
+  useEffect(() => {
+    if (perfCount === 0) return;
+    setPerfPositions(prev => {
+      const out = prev.slice(0, perfCount);
+      while (out.length < perfCount) {
+        // Place subsequent perfs ~1.5″ further from the spine, clamped to fit
+        const seed = (out.length ? out[out.length - 1] + 1.5 : PERF_FROM_SPINE_INCHES);
+        out.push(seed);
+      }
+      const fixed = out.map((p, i) => clampPerfFromSpine(p, i, trimW, out));
+      const same = fixed.length === prev.length && fixed.every((v, i) => v === prev[i]);
+      return same ? prev : fixed;
+    });
+  }, [perfCount, trimW]);
 
   const shipZip=shipAddr.zip||"";
   const result=useMemo(()=>calculate({
@@ -3971,6 +4375,10 @@ function App(){
     if (coating > 0) p.set("coating", coating);
     if (bundling > 0) p.set("bundling", bundling);
     if (roundCorner > 0) p.set("corner", roundCorner);
+    if (perforation > 0) {
+      p.set("perf", perforation);
+      if (perfPositions && perfPositions.length) p.set("perfpos", perfPositions.slice(0, perfCount).join(","));
+    }
     if (shipState !== "AZ") p.set("state", shipState);
     if (sets[0].qty !== 100) p.set("qty", sets[0].qty);
     if (sets[0].pages !== 8) p.set("pages", sets[0].pages);
@@ -4023,8 +4431,31 @@ function App(){
           .pps-ship-box{font-size:10px!important}
         }
       `}</style>
+      {/* Hero header — eyebrow + display + tagline */}
+      <section style={{maxWidth:1180,margin:"0 auto",padding:mob?"18px 14px 6px":"34px 28px 18px"}}>
+        <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:mob?10:20}}>
+          <div style={{flex:"1 1 320px",minWidth:0}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:CK.magenta}}>Configure · Perfect-bound Booklet</div>
+            <h1 style={{fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",fontWeight:800,lineHeight:1,letterSpacing:"-0.02em",color:CC.dark,textTransform:"uppercase",margin:mob?"8px 0 0":"10px 0 0",maxWidth:720,fontSize:mob?28:44}}>
+              Perfect-bound Booklet<br/>
+              <span style={{color:CK.cyan}}>Instant Quote</span>
+            </h1>
+            <p style={{maxWidth:560,margin:mob?"10px 0 0":"14px 0 0",color:CC.mid,fontSize:mob?12.5:14,lineHeight:1.55}}>
+              Live pricing from our Phoenix floor. No RFQs, no sales calls — configure it, see the number, pick a delivery date.
+            </p>
+          </div>
+          {!mob&&<div style={{display:"inline-flex",gap:4,alignSelf:"flex-end",paddingBottom:8}} aria-hidden="true">
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.cyan,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.magenta,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.yellow,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.key,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+          </div>}
+        </div>
+      </section>
 
-      <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"10px 10px 140px":"18px 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
+      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+
+      <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
           {/* SECTION 1: Size */}
@@ -4096,6 +4527,30 @@ function App(){
                 : <div style={{...ST.f,marginTop:0}}><label style={ST.lbl}>&nbsp;</label><div style={{fontSize:14,color:CC.light,padding:"10px 0"}}>Uses same paper as inside pages</div></div>
               }
             </div>
+            <div style={ST.hr}/>
+            {/* Cover Layout — separate or wraparound. Wraparound expects a single wide image
+                (front + spine + back) sized to (2W + spine + bleed×2) × (H + bleed×2). */}
+            <div style={r2}>
+              <Pil label="Cover Layout" value={coverWrap} onChange={setCoverWrap} options={[{t:"Separate Front/Back",v:"separate"},{t:"Wraparound (front+spine+back)",v:"wraparound"}]}/>
+              <div style={{...ST.f,marginTop:0}}>
+                <label style={ST.lbl}>Spine Thickness <InfoTip text={<>Calculated from page count and paper caliper. Formula: <code>(interior leaves × text caliper) + (2 × cover caliper) + 0.005″ glue</code>. Used for the 3D preview, the print-ready PDF spine width, and to size wraparound covers.</>}/></label>
+                <div style={{fontSize:14,fontWeight:700,color:CC.dark,padding:"10px 0",fontVariantNumeric:"tabular-nums"}}>
+                  ≈ {fmtSpine(calcSpineInches({pageCount:sets[0]?.pages||0,insidePaper,coverPaper,coverMode}))}
+                </div>
+              </div>
+            </div>
+            {coverWrap==="wraparound" && (() => {
+              const spineIn = calcSpineInches({pageCount:sets[0]?.pages||0,insidePaper,coverPaper,coverMode});
+              const trimW = isCustom ? Math.max(customLong||0,customShort||0) : (parseFloat((sizeLabel.match(/([\d.]+)×/)||[])[1])||5.5);
+              const trimH = isCustom ? Math.min(customLong||0,customShort||0) : (parseFloat((sizeLabel.match(/×([\d.]+)/)||[])[1])||8.5);
+              const wrapW = (2*trimW + spineIn + 0.25).toFixed(3);
+              const wrapH = (trimH + 0.25).toFixed(3);
+              return (
+                <div style={{padding:"10px 12px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:5,marginTop:8,fontSize:11.5,color:"#1e40af",lineHeight:1.55}}>
+                  <strong style={{color:"#1e3a8a"}}>Wraparound cover dimensions</strong> — upload one image at <strong>{wrapW}″ × {wrapH}″</strong> (back panel + spine + front panel + 0.125″ bleed all around). The proof modal will show spine guides at the panel boundaries.
+                </div>
+              );
+            })()}
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
@@ -4128,6 +4583,31 @@ function App(){
             {/* Perfect bound specific addons */}
             <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
             <Sel label="Perforation" badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+            {perfCount > 0 && (
+              <div style={{ marginTop:8, padding:"10px 12px", background:"rgba(250,204,21,.08)", border:"1px solid rgba(250,204,21,.28)", borderRadius:6 }}>
+                <div style={{ fontSize:10.5, fontWeight:700, color:"#b45309", letterSpacing:".06em", textTransform:"uppercase", marginBottom:8 }}>Perforation Position</div>
+                <div style={r2}>
+                  {perfPositions.map((d, i) => (
+                    <TxtNum key={i}
+                      label={`Perf ${i + 1} — ″ from spine`}
+                      value={d}
+                      min={0.25}
+                      max={Math.max(0.25, trimW - 0.25)}
+                      step={0.125}
+                      onChange={v => {
+                        setPerfPositions(prev => {
+                          const next = prev.slice();
+                          next[i] = clampPerfFromSpine(parseFloat(v) || 0, i, trimW, next);
+                          return next;
+                        });
+                      }}/>
+                  ))}
+                </div>
+                <div style={{ fontSize:10.5, color:CC.light, marginTop:6, lineHeight:1.5 }}>
+                  Inches from the bind edge. Recto pages mirror to the open edge automatically — drag the magenta line in the proof to reposition live.
+                </div>
+              </div>
+            )}
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
@@ -4184,9 +4664,13 @@ function App(){
                 sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir}
                 pageCount={sets[0]?.pages||8} roundCorner={roundCorner} insideColor={insideColor}
                 proof={proof} setProof={setProof}
+                insidePaper={insidePaper} coverPaper={coverPaper} coverMode={coverMode} coverWrap={coverWrap}
+                perforation={perforation} perfPositions={perfPositions} onPerfPositions={setPerfPositions}
                 onPagesDetected={(pg) => upSet(0, { pages: pg })}
                 onCoverArt={setCoverArt}
                 onArtwork={setArtFiles}
+                openPreviewModalRef={openPreviewModalRef}
+                debug={proofDebug}
                 onBleedDetected={(has) => { if(has) setBleed(0); else setBleed(1); }}
                 onSizeOverride={(w, h) => {
                   setSizeMode("custom"); setSizeLabel("Custom Size");
@@ -4423,7 +4907,8 @@ function App(){
           </table>
         </div>}
         </div>
-        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18}}>
+        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18,display:"flex",flexDirection:"column",gap:10}}>
+          <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
           <Panel result={result}/>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>

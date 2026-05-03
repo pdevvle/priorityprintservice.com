@@ -73,11 +73,34 @@
   .bp-nav-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit}
   .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.15);border-color:#007eff;color:#007eff}
   .bp-nav-btn:disabled{opacity:.25;cursor:not-allowed}
+  /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
+  .bp-checker{
+    background-color:#3a3e46;
+    background-image:
+      linear-gradient(45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(-45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#2a2e36 75%),
+      linear-gradient(-45deg,transparent 75%,#2a2e36 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0;
+  }
+  /* Approve Now CTA — strong call-to-action when art needs approval */
+  @keyframes bp-approve-pulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55),0 4px 14px rgba(239,68,68,.35)}
+    50%{box-shadow:0 0 0 6px rgba(239,68,68,0),0 4px 14px rgba(239,68,68,.35)}
+  }
+  .bp-approve-cta{
+    background:linear-gradient(135deg,#ef4444 0%,#dc2626 40%,#f87171 50%,#dc2626 60%,#b91c1c 100%) !important;
+    color:#fff !important;
+    text-shadow:0 1px 2px rgba(0,0,0,.25);
+    animation:bp-approve-pulse 2s ease-in-out infinite;
+  }
+  .bp-approve-cta:hover{filter:brightness(1.08)}
 </style>
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22 · SS-PER-PAGE-TX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · SS-GUIDES-LABEL</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1633,7 +1656,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2813,24 +2836,46 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
             </div>
           )}
 
-          {/* ── Pill Selector: Proof | Preview ── */}
-          <div style={{ display:"flex", borderRadius:8, overflow:"hidden", border:`1px solid ${CC.border}`, marginBottom:8, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
-            <button type="button" onClick={() => { setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
-              flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-              background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
-              borderRight:`1px solid ${CC.border}`,
-            }}>
-              🔍 Proof {proof===0 && !artApproved && <span style={{ fontSize:9, fontWeight:700, background:"#fee2e2", color:"#dc2626", padding:"1px 6px", borderRadius:4 }}>required</span>}
-            </button>
-            <button type="button" onClick={() => { setActiveModal("preview"); setPreviewMode("closed"); setRot({x:-15,y:-25}); }} style={{
-              flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-              background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
-            }}>
-              📖 Preview
-            </button>
-          </div>
+          {/* ── Pill Selector: Proof | Preview ── (wrapped brochure-style) */}
+          {(() => {
+            const needsApproval = proof === 0 && !artApproved;
+            return (
+              <div style={{
+                display:"flex", flexDirection:"column", gap:6, marginBottom:8,
+                padding: needsApproval ? "10px 12px" : 0,
+                background: needsApproval ? "#fef2f2" : "transparent",
+                border: needsApproval ? "1px solid #fecaca" : "none",
+                borderRadius: 6,
+              }}>
+                <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:`1px solid ${CC.border}`, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+                  <button type="button" onClick={() => { setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
+                    flex:1, padding:"11px 10px", fontSize:13, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                    background: artApproved && proof===0
+                      ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)"
+                      : "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)",
+                    color: artApproved && proof===0 ? "#fff" : "#555",
+                    borderRight:`1px solid ${CC.border}`,
+                  }}>
+                    {artApproved && proof===0 ? "✓ Proof Approved" : "🔍 Proof"} {needsApproval && <span style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 4 }}>required</span>}
+                    {debug && <span title="Proof debug mode is on (?debug=1)." style={{ marginLeft:8, fontSize:9, fontWeight:700, background:"rgba(251,191,36,.18)", color:"#fbbf24", padding:"2px 8px", borderRadius:4, letterSpacing:".06em", textTransform:"uppercase", border:"1px solid rgba(251,191,36,.4)" }}>🔧 Debug</span>}
+                  </button>
+                  <button type="button" onClick={() => { setActiveModal("preview"); setPreviewMode("closed"); setRot({x:-15,y:-25}); }} style={{
+                    flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                    background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
+                  }}>
+                    📖 Preview
+                  </button>
+                </div>
+                {needsApproval && (
+                  <div style={{ fontSize: 11, color: "#b91c1c", lineHeight: 1.4 }}>
+                    Open proof to review bleed, trim, safety and approve artwork
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Proof messages for non-online-proof modes */}
           {proof === 0.01 && (
@@ -2945,12 +2990,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           setGenProgress(null);
                         }
                       } else if (proof!==0) { setProof(0); }
-                    }} style={{
-                      padding:"8px 18px", fontSize:12, fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em",
+                    }} className={proof===0 && !artApproved && !generatingPdf ? "bp-approve-cta" : ""} style={{
+                      padding: proof===0 && !artApproved ? "10px 24px" : "8px 18px",
+                      fontSize: proof===0 && !artApproved ? 13 : 12,
+                      fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em", textTransform:"uppercase",
                       background: artApproved && proof===0
                         ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
-                        : proof===0 ? "rgba(255,255,255,.04)" : "rgba(255,255,255,.04)",
-                      color: artApproved && proof===0 ? "#fff" : proof===0 ? "#ef4444" : "rgba(255,255,255,.3)",
+                        : proof===0 ? undefined : "rgba(255,255,255,.04)",
+                      color: artApproved && proof===0 ? "#fff" : proof===0 ? undefined : "rgba(255,255,255,.3)",
                       borderRight:"1px solid rgba(255,255,255,.08)",
                     }}>{generatingPdf && genProgress ? (
                       <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
@@ -2979,7 +3026,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
                   {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
                 </div>
-                {artApproved && approvalPkg && (() => {
+                {approvalPkg && (artApproved || debug) && (() => {
                   const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                   const dlFile = (blob, name) => {
                     if (!blob) return;
@@ -3106,12 +3153,29 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
                         color: showGuides ? "#38a169" : "rgba(255,255,255,.4)",
-                      }}>{showGuides ? "Guides: Hide" : "Guides: Hidden"}</button>
+                      }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
                       <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
                         color: showMagnifier ? "#3b82f6" : "rgba(255,255,255,.4)",
                       }}>🔍</button>
+                      {debug && <button type="button" disabled={generatingPdf} title="Debug: regenerate the approval package without locking approval" onClick={async () => {
+                        setGeneratingPdf(true);
+                        setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
+                        try {
+                          const pkg = await generateApprovalPackage();
+                          if (pkg && pkg.manifestBlob) setApprovalPkg(pkg);
+                        } catch (err) {
+                          console.error("Debug generate failed:", err);
+                          alert("Generation failed: " + (err.message || err));
+                        } finally {
+                          setGeneratingPdf(false);
+                          setGenProgress(null);
+                        }
+                      }} style={{
+                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(251,191,36,.4)", borderRadius:6, cursor: generatingPdf ? "wait" : "pointer", fontFamily:"inherit",
+                        background:"rgba(251,191,36,.12)", color:"#fbbf24",
+                      }}>🔧 {generatingPdf ? "Generating…" : "Generate"}</button>}
                       <div style={{ marginLeft:4, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
                         {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (
                           <button type="button" key={o.v} onClick={() => setProofView(o.v)} title={o.v === "single" ? "Single page view" : "Grid view — all pages"} style={{
@@ -3124,7 +3188,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                     </div>
                     {/* Proof image with guide overlays — container sized to include bleed area */}
                     <div style={{ maxWidth:520, margin:"0 auto" }}>
-                      <div style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", background:"#1a1d23", cursor: showMagnifier ? "none" : "default" }}
+                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "default" }}
                         onMouseMove={showMagnifier ? (e) => {
                           const r = e.currentTarget.getBoundingClientRect();
                           setMagPos({ x: e.clientX - r.left, y: e.clientY - r.top, pctX: (e.clientX - r.left) / r.width * 100, pctY: (e.clientY - r.top) / r.height * 100, cw: r.width, ch: r.height });
@@ -3148,7 +3212,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             transform: "translate(-50%, -50%)", display: "block", filter: gsFilter,
                           });
                           return (
-                            <div style={{ position:"absolute", inset:0, overflow:"hidden", background:"#2a2e36" }}>
+                            <div className="bp-checker" style={{ position:"absolute", inset:0, overflow:"hidden" }}>
                               {proofPage.isBlank
                                 ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.3)", fontSize:14 }}>Blank page</div>
                                 : <img src={hiResValid ? hiResProof.dataUrl : proofPage.dataUrl} style={{
@@ -3191,62 +3255,44 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           const bgW = magPos.cw * zoom, bgH = magPos.ch * zoom;
                           const bgX = -(magPos.pctX / 100 * bgW) + magSize / 2;
                           const bgY = -(magPos.pctY / 100 * bgH) + magSize / 2;
-                          // Helper: convert a container percentage to magnifier pixel position
-                          const toMX = (pct) => (pct / 100 * bgW) + bgX;
-                          const toMY = (pct) => (pct / 100 * bgH) + bgY;
-                          // Guide rectangles as {top,left,width,height} in magnifier pixels
-                          const magGuides = showGuides ? [
-                            { // Bleed — at container edge
-                              l: toMX(0), t: toMY(0), w: bgW, h: bgH,
-                              border: "2px dashed #ef4444", opacity: 0.8
-                            },
-                            { // Trim — inset by bleed
-                              l: toMX(bleedPctX), t: toMY(bleedPctY),
-                              w: (100 - bleedPctX * 2) / 100 * bgW,
-                              h: (100 - bleedPctY * 2) / 100 * bgH,
-                              border: "2px dashed #e2e8f0", opacity: 1
-                            },
-                            { // Safety — inset by bleed + safety
-                              l: toMX(safetyPctX), t: toMY(safetyPctY),
-                              w: (100 - safetyPctX * 2) / 100 * bgW,
-                              h: (100 - safetyPctY * 2) / 100 * bgH,
-                              border: "2px dashed #38a169", opacity: 1
-                            },
-                          ] : [];
-                          // Spine bar position
+                          const proofTx = getTx(proofIdx);
+                          const ed = effectiveDimsFor(artDims, proofTx.rotateSteps);
+                          const nativeW = ed ? ed.wIn / bleedW : (dims.w / bleedW);
+                          const cropStyle = (mult) => ({
+                            width: `${nativeW * mult * 100}%`, height: "auto",
+                            position: "absolute", top: "50%", left: "50%",
+                            transform: "translate(-50%, -50%)", display: "block", filter: gsFilter,
+                          });
                           const spineLeft = proofIdx % 2 === 0;
-                          const spineMX = toMX(spineLeft ? bleedPctX : (100 - bleedPctX));
-                          const spineMYtop = toMY(bleedPctY + 2);
-                          const spineMYbot = toMY(100 - bleedPctY - 2);
                           return (
                             <div style={{
                               position:"absolute", pointerEvents:"none", zIndex:10,
                               left: magPos.x - magSize / 2, top: magPos.y - magSize / 2,
                               width: magSize, height: magSize, borderRadius:"50%",
                               border:"3px solid rgba(255,255,255,.8)", boxShadow:"0 4px 20px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.3)",
-                              backgroundImage: `url(${imgSrc})`,
-                              backgroundSize: `${bgW}px ${bgH}px`,
-                              backgroundPosition: `${bgX}px ${bgY}px`,
-                              backgroundRepeat: "no-repeat",
-                              backgroundColor: "#1a1d23",
                               overflow: "hidden",
                             }}>
-                              {/* Guide lines inside magnifier */}
-                              {magGuides.map((g, gi) => (
-                                <div key={gi} style={{
-                                  position:"absolute", left:g.l, top:g.t, width:g.w, height:g.h,
-                                  border:g.border, opacity:g.opacity, boxSizing:"border-box", pointerEvents:"none",
-                                }}/>
-                              ))}
-                              {/* Spine inside magnifier */}
-                              {showGuides && (
-                                <div style={{
-                                  position:"absolute", left: spineMX - 1.5, top: spineMYtop,
-                                  width: 3, height: spineMYbot - spineMYtop,
-                                  background:"#3b82f6", borderRadius:1, pointerEvents:"none",
-                                }}/>
-                              )}
-                              {/* Crosshair */}
+                              {/* Bleed-zoomed proof viewport — mirrors the main proof container at zoom× scale */}
+                              <div className="bp-checker" style={{ position:"absolute", left: bgX, top: bgY, width: bgW, height: bgH, overflow: "hidden" }}>
+                                <img src={imgSrc} style={{
+                                  ...(proofTx.fitMode === "crop" ? cropStyle(1)
+                                    : proofTx.fitMode === "scale" ? cropStyle(proofTx.artScale / 100)
+                                    : proofTx.fitMode === "stretch" ? { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit:"fill", position:"absolute", inset:0 }
+                                    : { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit: proofTx.fitMode === "contain" ? "contain" : "cover" }
+                                  )
+                                }} />
+                                {showGuides && <>
+                                  {/* Bleed — red dashed at container edge */}
+                                  <div style={{ position:"absolute", inset:0, border:"2px dashed #ef4444", boxSizing:"border-box", opacity:0.8, pointerEvents:"none" }}/>
+                                  {/* Trim — light dashed inset by bleed (rounded corners if set) */}
+                                  <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2px dashed #e2e8f0", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
+                                  {/* Safety — green dashed further inset */}
+                                  <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2px dashed #38a169", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
+                                  {/* Spine — alternating per page parity for saddle stitch */}
+                                  <div style={{ position:"absolute", [spineLeft?"left":"right"]:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2, pointerEvents:"none" }}/>
+                                </>}
+                              </div>
+                              {/* Crosshair — anchored to lens centre */}
                               <div style={{ position:"absolute", left:"50%", top:0, bottom:0, width:1, background:"rgba(255,255,255,.3)", transform:"translateX(-50%)" }}/>
                               <div style={{ position:"absolute", top:"50%", left:0, right:0, height:1, background:"rgba(255,255,255,.3)", transform:"translateY(-50%)" }}/>
                             </div>
@@ -3298,7 +3344,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   <div style={{ display:"grid", gridTemplateColumns:`repeat(auto-fill, minmax(${mob ? 100 : 140}px, 1fr))`, gap:10 }}>
                     {displayPages.map((p, i) => (
                       <div key={i} style={{ cursor:"pointer", textAlign:"center" }} onClick={() => { setProofIdx(i); setProofView("single"); }}>
-                        <div style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", background:"#2a2e36", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
+                        <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
                           {p.isBlank
                             ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.2)", fontSize:10 }}>Blank</div>
                             : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
@@ -3628,6 +3674,15 @@ function App(){
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
   const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
+  // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
+  const proofDebug = useMemo(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get("debug") === "1") return true;
+      if (typeof localStorage !== "undefined" && localStorage.getItem("pps_debug") === "1") return true;
+    } catch {}
+    return false;
+  }, []);
 
   // Global safety net: if the user drops a file ANYWHERE outside a dropzone,
   // the browser's default is to navigate to the file, wiping all config.
@@ -4121,6 +4176,7 @@ function App(){
                 onCoverArt={setCoverArt}
                 onBackCoverArt={setBackCoverArt}
                 openPreviewModalRef={openPreviewModalRef}
+                debug={proofDebug}
                 onArtwork={setArtFiles}
                 onBleedDetected={(has) => { if(has) setBleed(0); else setBleed(1); }}
                 onSizeOverride={(w, h) => {

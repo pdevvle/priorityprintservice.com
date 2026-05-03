@@ -25,10 +25,33 @@
   @media(max-width:700px){
     select,input[type="text"],input[type="number"]{font-size:16px!important;padding:10px!important;min-height:44px!important}
   }
+  /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
+  .bp-checker{
+    background-color:#3a3e46;
+    background-image:
+      linear-gradient(45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(-45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#2a2e36 75%),
+      linear-gradient(-45deg,transparent 75%,#2a2e36 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0;
+  }
+  /* Approve Now CTA — strong call-to-action when art needs approval */
+  @keyframes bp-approve-pulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55),0 4px 14px rgba(239,68,68,.35)}
+    50%{box-shadow:0 0 0 6px rgba(239,68,68,0),0 4px 14px rgba(239,68,68,.35)}
+  }
+  .bp-approve-cta{
+    background:linear-gradient(135deg,#ef4444 0%,#dc2626 40%,#f87171 50%,#dc2626 60%,#b91c1c 100%) !important;
+    color:#fff !important;
+    text-shadow:0 1px 2px rgba(0,0,0,.25);
+    animation:bp-approve-pulse 2s ease-in-out infinite;
+  }
+  .bp-approve-cta:hover{filter:brightness(1.08)}
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22 · BR-PER-SIDE-TX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · BR-BACKONLY-COATING</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -144,7 +167,7 @@ const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS
 const INV_VALS=[0.001,0.002,0.003,0.01,0.02,0.03,1.01,1.02];
 
 const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
-const COAT_SIDES=[{label:"Front Only",val:1},{label:"Both Sides",val:2}];
+const COAT_SIDES=[{label:"Front Only",val:1,mult:1,daysMult:1},{label:"Back Only",val:1.02,mult:1,daysMult:1},{label:"Both Sides",val:2,mult:2,daysMult:2}];
 const BUNDLING=_CFG.bundling||[{label:"No Bundling",val:0,price:500},{label:"Bundle in 25s",val:750,price:25},{label:"Bundle in 50s",val:1500,price:50},{label:"Bundle in 100s",val:3000,price:100}];
 const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.03,count:1},{label:"2 Perforation Lines",val:1000,price:0.03,count:2}];
 const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
@@ -310,7 +333,8 @@ function calculate(c) {
   const coat = COATINGS.find(x => x.val === c.coating) || COATINGS[0];
   P.coat = 0;
   if (coat.val > 0 && paper.coatable) {
-    const cs = c.coatSides || 1;
+    const csOpt = COAT_SIDES.find(o => o.val === c.coatSides) || COAT_SIDES[0];
+    const cs = csOpt.mult;
     P.coat = PCF.labor_bindery_hr + Math.ceil(((pressSheets * coat.price * cs) * mk) + ((pressSheets / PCF.uvcoaterimpressionsperhour) * PCF.labor_bindery_hr));
   }
 
@@ -378,8 +402,11 @@ function calculate(c) {
     || (c.sizeMode === "custom" && stdLongs.includes(longE) && stdShorts.includes(shortE));
   const isEasyFold = ["flat","bifold","trifold","z3"].includes(fold.val);
   const costSummary = P.paper + P.frontPrint + P.backPrint + P.cutting + P.folding + P.perforation + P.rc;
+  // Easy Discount stacks on top of the flat discount when both apply.
+  // Per the source pricing model, flat items get BOTH discEasyFlat and discEasy
+  // (folding labor is 0 for flat, so the formula reduces to press + cutting only).
   P.discEasyFlat = (fold.val === "flat" && isEasySize) ? -Math.min(costSummary * PCF.easydiscount_factor, PCF.easydiscount_max / 10) : 0;
-  P.discEasy = (fold.val !== "flat" && isEasyFold && isEasySize) ? -Math.min(P.press + P.cutting + P.folding, PCF.easydiscount_max / 10) : 0;
+  P.discEasy = (isEasyFold && isEasySize) ? -Math.min(P.press + P.cutting + P.folding, PCF.easydiscount_max / 10) : 0;
 
   // BW discount
   const allBW = c.frontColor === "bw" && (sides === 1 || c.backColor === "bw");
@@ -394,7 +421,8 @@ function calculate(c) {
   // Turnaround
   const paperDays = paper.days != null ? paper.days : Math.floor(paper.val || 0);
   const vividDays = c.vivid ? Math.floor(pressSheets / 2500) : 0;
-  const coatDays = (coat.val > 0 && paper.coatable) ? Math.ceil(pressSheets / (coat.val / (c.coatSides || 1))) : 0;
+  const coatDaysMult = (COAT_SIDES.find(o => o.val === c.coatSides) || COAT_SIDES[0]).daysMult;
+  const coatDays = (coat.val > 0 && paper.coatable) ? Math.ceil(pressSheets / (coat.val / coatDaysMult)) : 0;
   const bundleDays = (bund.val > 0 && qty >= 100) ? Math.floor(approxThickness / bund.val) : 0;
   const perfDays = (perf.val > 0) ? Math.ceil(pressSheets / perf.val) : 0;
   const rcDays = (rc.val > 0 && fold.val === "flat") ? Math.floor(Math.min(pressSheets / rc.val, PCF.addon_roundcornermaxdays)) : 0;
@@ -1017,17 +1045,134 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdg
 }
 
 
+// Sidebar brochure preview — flat sheet mockup with subtle perspective tilt.
+// Designed to mirror saddle stitch's SidebarBookPreview visual language: 190px viewport,
+// CMYK eyebrow, OPEN chip, size/qty caption.
+function SidebarBrochurePreview({ longEdge, shortEdge, quantity, panels, foldType, frontArt, frontColor, sides, onOpenPreview }){
+  const wIn = Number(longEdge) || 11;
+  const hIn = Number(shortEdge) || 8.5;
+  const maxDim = 150, longSide = Math.max(wIn, hIn), px = maxDim / longSide;
+  const sheetW = wIn * px, sheetH = hIn * px;
+  const inkColor = frontColor === "bw" ? "#2b2b2b" : CK.cyan;
+  const placeholder = useMemo(() => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" preserveAspectRatio="xMidYMid slice">
+<rect width="600" height="400" fill="#f7f3e8"/>
+<rect x="40" y="50" width="120" height="4" fill="${inkColor}"/>
+<text x="40" y="120" font-family="Segoe UI, sans-serif" font-size="36" font-weight="800" fill="#2b2b2b" letter-spacing="-1">YOUR</text>
+<text x="40" y="160" font-family="Segoe UI, sans-serif" font-size="36" font-weight="800" fill="#2b2b2b" letter-spacing="-1">BROCHURE</text>
+<g transform="translate(40,330)">
+<circle cx="0" cy="0" r="6" fill="${CK.cyan}"/>
+<circle cx="18" cy="0" r="6" fill="${CK.magenta}"/>
+<circle cx="36" cy="0" r="6" fill="${CK.yellow}"/>
+<circle cx="54" cy="0" r="6" fill="${CK.key}"/>
+</g>
+<text x="40" y="370" font-family="Segoe UI, sans-serif" font-size="11" font-weight="600" fill="#555" letter-spacing="2">PRIORITY PRINT</text>
+</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }, [inkColor]);
+  const hasArt = !!frontArt?.dataUrl;
+  const imgSrc = frontArt?.dataUrl || placeholder;
+  const grayFilter = frontColor === "bw" ? "grayscale(1)" : "none";
+  const clickable = hasArt && typeof onOpenPreview === "function";
+  return (
+    <div style={{ borderRadius: 6, border: `1px solid ${CC.border}`, overflow: "hidden", background: CC.white }}>
+      <div className="fold-viewport"
+        role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
+        onClick={clickable ? onOpenPreview : undefined}
+        onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenPreview(); } } : undefined}
+        title={clickable ? "Open full preview" : undefined}
+        style={{ height: 190, borderRadius: 0, border: "none", cursor: clickable ? "zoom-in" : "default", perspective: 1200 }}>
+        {/* drop shadow */}
+        <div style={{ position: "absolute", bottom: 22, width: "60%", height: 12, background: "radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)", filter: "blur(6px)", pointerEvents: "none" }} />
+        {/* Tilted sheet — gives it dimension without a full FoldRenderer */}
+        <div style={{ width: sheetW, height: sheetH, transform: "rotateX(-8deg) rotateY(22deg)", transformStyle: "preserve-3d", boxShadow: "0 12px 28px rgba(0,0,0,.4)", borderRadius: 2, overflow: "hidden", background: "#f7f3e8" }}>
+          <img src={imgSrc} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", filter: grayFilter }} />
+        </div>
+        {/* Top-left eyebrow */}
+        <div style={{ position: "absolute", top: 10, left: 14, display: "flex", alignItems: "center", gap: 6, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,.65)", letterSpacing: ".12em", pointerEvents: "none" }}>
+          <span style={{ display: "inline-flex", gap: 3 }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: CK.cyan }} />
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: CK.magenta }} />
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: CK.yellow }} />
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(255,255,255,.7)" }} />
+          </span>
+          <span>{hasArt ? "YOUR ARTWORK · LIVE" : "3D PREVIEW · LIVE"}</span>
+        </div>
+        {clickable && <div style={{ position: "absolute", top: 10, right: 12, fontSize: 9, fontWeight: 700, letterSpacing: ".1em", color: "rgba(255,255,255,.75)", background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", padding: "3px 7px", borderRadius: 4, pointerEvents: "none" }}>OPEN ⤢</div>}
+        {/* Bottom caption */}
+        <div style={{ position: "absolute", bottom: 10, left: 14, right: 14, display: "flex", justifyContent: "space-between", fontSize: 9.5, fontWeight: 600, color: "rgba(255,255,255,.6)", textTransform: "uppercase", letterSpacing: ".08em", pointerEvents: "none" }}>
+          <span>{wIn}×{hIn}″</span>
+          <span>{panels}-panel · {(quantity || 0).toLocaleString()} qty</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobilePreviewBar(props){
+  const {longEdge,shortEdge,quantity,panels,frontArt,onOpenPreview}=props;
+  const hostRef = useRef(null);
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(([entry]) => {
+      setCollapsed(!entry.isIntersecting && entry.boundingClientRect.top < 0);
+    }, { threshold: 0, rootMargin: "0px 0px 0px 0px" });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  const wIn = Number(longEdge) || 11, hIn = Number(shortEdge) || 8.5;
+  const hasArt = !!frontArt?.dataUrl;
+  const clickable = hasArt && typeof onOpenPreview === "function";
+  return (
+    <>
+      <div ref={hostRef} style={{ margin: "6px 10px 10px" }}>
+        <SidebarBrochurePreview {...props} />
+      </div>
+      <div role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
+        onClick={clickable ? onOpenPreview : undefined}
+        onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenPreview(); } } : undefined}
+        style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 45, transform: collapsed ? "translateY(0)" : "translateY(-110%)", transition: "transform .22s ease-out", background: "linear-gradient(135deg,#1a1d23,#2a2e36)", borderBottom: "1px solid rgba(255,255,255,.08)", boxShadow: "0 6px 18px rgba(0,0,0,.25)", padding: "7px 12px", display: "flex", alignItems: "center", gap: 10, cursor: clickable ? "pointer" : "default", color: "#fff" }}>
+        <div style={{ width: 32, height: Math.max(24, Math.min(48, (32 * hIn) / wIn)), borderRadius: 3, overflow: "hidden", flexShrink: 0, background: "#2a2e36", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }}>
+          {hasArt
+            ? <img src={frontArt.dataUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            : <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#e0edff,#f7f3e8)" }} />}
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+          <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".12em", opacity: .6, textTransform: "uppercase" }}>{hasArt ? "Your Artwork" : "3D Preview"}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{wIn}×{hIn}″ · {panels}-panel · {(quantity || 0).toLocaleString()} qty</div>
+        </div>
+        <div style={{ display: "inline-flex", gap: 3, alignSelf: "center" }} aria-hidden="true">
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CK.cyan }} />
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CK.magenta }} />
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CK.yellow }} />
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,.7)" }} />
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork }) {
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
   const bLabel = hasIO ? "Back / Inside" : "Back";
   const [frontArt, setFrontArt] = useState(null); // {dataUrl, file, dims:{w,h}}
   const [backArt, setBackArt] = useState(null);
+  // Push frontArt up to the parent so the sidebar preview can mirror it
+  useEffect(() => { if (onCoverArt) onCoverArt(frontArt); }, [frontArt, onCoverArt]);
+  // Expose imperative open-preview hook for the sidebar preview card
+  useEffect(() => {
+    if (!openPreviewModalRef) return;
+    openPreviewModalRef.current = frontArt ? () => setPreviewOpen(true) : null;
+    return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
+  }, [frontArt, openPreviewModalRef]);
   const [side, setSide] = useState("front"); // "front" | "back"
   const [foldFlipped, setFoldFlipped] = useState(false);
   const canFlip = panels > 1 && !["gate3","dgate4"].includes(foldType);
@@ -1057,6 +1202,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const [genProgress, setGenProgress] = useState(null);
   const [showMagnifier, setShowMagnifier] = useState(false);
   const [magPos, setMagPos] = useState(null);
+  const [showGuides, setShowGuides] = useState(true); // toggle bleed/trim/safety/fold/perf overlays in proof
   const [hiResProof, setHiResProof] = useState(null);
 
   // Per-side transform helpers
@@ -1656,6 +1802,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
               border: `1px solid ${approved ? "#16a34a" : CC.border}`,
             }}>
               {approved ? "✓ Proof Approved" : "🔍 Proof"} {!approved && <span style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 4 }}>required</span>}
+              {debug && <span title="Proof debug mode is on (?debug=1)." style={{ marginLeft: 8, fontSize: 9, fontWeight: 700, background: "rgba(251,191,36,.18)", color: "#fbbf24", padding: "2px 8px", borderRadius: 4, letterSpacing: ".06em", textTransform: "uppercase", border: "1px solid rgba(251,191,36,.4)" }}>🔧 Debug</span>}
             </button>
             <div style={{ fontSize: 11, color: approved ? CC.light : "#b91c1c", lineHeight: 1.4 }}>Open proof to review bleed, trim, safety{panels > 1 ? ", fold lines" : ""} and approve artwork</div>
           </div>
@@ -1814,16 +1961,41 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                     setGeneratingPdf(false);
                     setGenProgress(null);
                   }
-                }} style={{
-                  padding: "5px 14px", fontSize: 11, fontWeight: 700, borderRadius: 4, cursor: generatingPdf ? "wait" : "pointer", fontFamily: "inherit",
-                  background: approved ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)" : "rgba(255,255,255,.04)",
-                  color: approved ? "#fff" : "#ef4444", border: approved ? "none" : "2px solid #ef4444",
+                }} className={!approved && !generatingPdf ? "bp-approve-cta" : ""} style={{
+                  padding: !approved ? "9px 22px" : "5px 14px",
+                  fontSize: !approved ? 13 : 11,
+                  fontWeight: 800, borderRadius: 4, cursor: generatingPdf ? "wait" : "pointer", fontFamily: "inherit", letterSpacing: ".04em", textTransform: "uppercase",
+                  background: approved ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)" : undefined,
+                  color: approved ? "#fff" : undefined,
+                  border: approved ? "none" : "2px solid #b91c1c",
                 }}>{generatingPdf && genProgress ? `${genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… ${genProgress.page}/${genProgress.totalPages}` : approved ? "✓ Approved" : "Approve Now"}</button>
+                <button type="button" onClick={() => setShowGuides(g => !g)} title="Toggle bleed / trim / safety / fold guides" style={{
+                  padding: "5px 10px", fontSize: 11, fontWeight: 600, border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                  background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
+                  color: showGuides ? "#38a169" : "rgba(255,255,255,.5)",
+                }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
                 <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} title="Magnifier loupe" style={{
                   padding: "5px 10px", fontSize: 12, border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                   background: showMagnifier ? CK.cyan : "rgba(255,255,255,.06)",
                   color: showMagnifier ? "#000" : "rgba(255,255,255,.5)",
                 }}>🔍</button>
+                {debug && <button type="button" disabled={generatingPdf} title="Debug: regenerate the approval package without locking approval" onClick={async () => {
+                  setGeneratingPdf(true);
+                  setGenProgress({ step: "starting", page: 0, totalPages: 2 });
+                  try {
+                    const pkg = await generateApprovalPackage();
+                    if (pkg && pkg.manifestBlob) setApprovalPkg(pkg);
+                  } catch (err) {
+                    console.error("Debug generate failed:", err);
+                    alert("Generation failed: " + (err.message || err));
+                  } finally {
+                    setGeneratingPdf(false);
+                    setGenProgress(null);
+                  }
+                }} style={{
+                  padding: "5px 10px", fontSize: 11, fontWeight: 700, border: "1px solid rgba(251,191,36,.4)", borderRadius: 4, cursor: generatingPdf ? "wait" : "pointer", fontFamily: "inherit",
+                  background: "rgba(251,191,36,.12)", color: "#fbbf24",
+                }}>🔧 {generatingPdf ? "Generating…" : "Generate"}</button>}
                 <button type="button" onClick={() => setProofOpen(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,.15)", color: "rgba(255,255,255,.5)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
               </div>
             </div>
@@ -1837,7 +2009,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 }}>↔ Match size to art</button>
               )}
             </div>
-            {approved && approvalPkg && (() => {
+            {approvalPkg && (approved || debug) && (() => {
               const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
               const sideNames = ["front", "back"];
               const dlFile = (blob, name) => {
@@ -1877,7 +2049,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
 
           {/* Proof view — bleed-inclusive container like saddle stitch */}
           <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            <div ref={proofContainerRef} style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, background: "#1a1d23", borderRadius: 4, overflow: "hidden", cursor: showMagnifier ? "none" : "default", ...(draggingPerf !== null ? { touchAction: "none" } : {}) }}
+            <div ref={proofContainerRef} className="bp-checker" style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, borderRadius: 4, overflow: "hidden", cursor: showMagnifier ? "none" : "default", ...(draggingPerf !== null ? { touchAction: "none" } : {}) }}
               onPointerMove={handlePerfDrag}
               onPointerUp={() => setDraggingPerf(null)}
               onMouseMove={e => { if (!showMagnifier) return; const r = e.currentTarget.getBoundingClientRect(); const x = e.clientX - r.left; const y = e.clientY - r.top; setMagPos({ x, y, pctX: (x / r.width) * 100, pctY: (y / r.height) * 100, cw: r.width, ch: r.height }); }}
@@ -1898,7 +2070,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 const sideColor = side === "front" ? frontColor : backColor;
                 const grayFilter = sideColor === "bw" ? "grayscale(1)" : "none";
                 return (
-                  <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#2a2e36" }}>
+                  <div className="bp-checker" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
                     <img src={artSrc} style={{
                       filter: grayFilter,
                       ...(fitMode === "crop" ? cropStyle(1)
@@ -1911,15 +2083,18 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 );
               })()}
 
-              {/* Bleed guide (red dashed) — at container edge */}
-              <div style={{ position: "absolute", inset: 0, border: "2.5px dashed #ef4444", pointerEvents: "none", zIndex: 1, opacity: 0.8 }} />
-              {/* Trim guide (white/light dashed) — inset by bleed */}
-              <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "2.5px dashed #e2e8f0", pointerEvents: "none", zIndex: 1 }} />
-              {/* Safety guide (green dashed) — further inset */}
-              <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "2.5px dashed #38a169", pointerEvents: "none", zIndex: 1 }} />
+              {/* Bleed/trim/safety overlays — togglable via the Guides button */}
+              {showGuides && <>
+                {/* Bleed guide (red dashed) — at container edge */}
+                <div style={{ position: "absolute", inset: 0, border: "2.5px dashed #ef4444", pointerEvents: "none", zIndex: 1, opacity: 0.8 }} />
+                {/* Trim guide (white/light dashed) — inset by bleed */}
+                <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "2.5px dashed #e2e8f0", pointerEvents: "none", zIndex: 1 }} />
+                {/* Safety guide (green dashed) — further inset */}
+                <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "2.5px dashed #38a169", pointerEvents: "none", zIndex: 1 }} />
+              </>}
 
-              {/* Fold lines (orange solid, thin) */}
-              {foldLines.map((fl, i) => (
+              {/* Fold lines (orange solid, thin) — togglable */}
+              {showGuides && foldLines.map((fl, i) => (
                 <div key={i} style={{
                   position: "absolute", pointerEvents: "none", zIndex: 4,
                   ...(fl.vertical
@@ -1935,8 +2110,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 </div>
               ))}
 
-              {/* Perf lines (purple dashed, draggable) */}
-              {perfLines.map((pl) => {
+              {/* Perf lines (purple dashed, draggable) — togglable with the Guides button */}
+              {showGuides && perfLines.map((pl) => {
                 const bPct = pl.vertical ? bleedPctX : bleedPctY;
                 const pos = bPct + (100 - bPct * 2) * pl.pct / 100;
                 const trimDim = pl.vertical ? longEdge : shortEdge;
@@ -2029,37 +2204,56 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 );
               })}
 
-              {/* Magnifier loupe — 3× zoom with guides & fold overlays */}
+              {/* Magnifier loupe — 3× zoom mirroring the proof viewport (same fit mode + same guide geometry) */}
               {showMagnifier && magPos && currentArt && (() => {
                 const lensSize = 160;
                 const zoom = 3;
                 const lensX = Math.max(8, Math.min(magPos.cw - lensSize - 8, magPos.x - lensSize / 2));
                 const lensY = Math.max(8, Math.min(magPos.ch - lensSize - 8, magPos.y - lensSize / 2));
-                const toMX = pct => (pct / 100) * magPos.cw * zoom;
-                const toMY = pct => (pct / 100) * magPos.ch * zoom;
                 const bgX = -(magPos.x * zoom - lensSize / 2);
                 const bgY = -(magPos.y * zoom - lensSize / 2);
                 const imgSrc = (hiResProof && hiResProof.dataUrl) || rotatedUrl || currentArt.dataUrl;
                 const sideColor = side === "front" ? frontColor : backColor;
                 const grayFilter = sideColor === "bw" ? "grayscale(1)" : "none";
+                const ed = effectiveDims;
+                const nativeW = ed ? ed.w / bleedW : 1;
+                const cropStyle = (mult) => ({
+                  width: `${nativeW * mult * 100}%`, height: "auto",
+                  position: "absolute", top: "50%", left: "50%",
+                  transform: "translate(-50%, -50%)", display: "block",
+                });
                 return (
                   <div style={{ position: "absolute", left: lensX, top: lensY, width: lensSize, height: lensSize, borderRadius: "50%", overflow: "hidden", border: "2px solid rgba(255,255,255,.8)", boxShadow: "0 4px 20px rgba(0,0,0,.6)", pointerEvents: "none", zIndex: 10 }}>
-                    <div style={{ position: "absolute", inset: 0, background: "#2a2e36" }} />
-                    <img src={imgSrc} style={{ position: "absolute", width: magPos.cw * zoom, height: magPos.ch * zoom, left: bgX, top: bgY, filter: grayFilter, objectFit: "fill" }} />
-                    <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                      {/* Bleed — red dashed at container edge */}
-                      <div style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 - 1, top: -magPos.y * zoom + lensSize / 2 - 1, width: magPos.cw * zoom, height: magPos.ch * zoom, border: "1px dashed #ef4444", boxSizing: "border-box" }} />
-                      {/* Trim — white dashed */}
-                      <div style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 + toMX(bleedPctX), top: -magPos.y * zoom + lensSize / 2 + toMY(bleedPctY), width: toMX(100 - 2 * bleedPctX), height: toMY(100 - 2 * bleedPctY), border: "1px dashed rgba(255,255,255,.85)", boxSizing: "border-box" }} />
-                      {/* Safety — green dashed */}
-                      <div style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 + toMX(safetyPctX), top: -magPos.y * zoom + lensSize / 2 + toMY(safetyPctY), width: toMX(100 - 2 * safetyPctX), height: toMY(100 - 2 * safetyPctY), border: "1px dashed #38a169", boxSizing: "border-box" }} />
-                      {/* Fold lines — orange solid */}
-                      {foldLines.map((fl, i) => fl.vertical
-                        ? <div key={i} style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 + toMX(fl.pct), top: -magPos.y * zoom + lensSize / 2 + toMY(bleedPctY), width: 1, height: toMY(100 - 2 * bleedPctY), background: "#f97316" }} />
-                        : <div key={i} style={{ position: "absolute", left: -magPos.x * zoom + lensSize / 2 + toMX(bleedPctX), top: -magPos.y * zoom + lensSize / 2 + toMY(fl.pct), width: toMX(100 - 2 * bleedPctX), height: 1, background: "#f97316" }} />
-                      )}
+                    {/* Bleed-zoomed proof viewport — mirrors the main proof container at zoom× scale, offset so the cursor point lands at the lens centre */}
+                    <div className="bp-checker" style={{ position: "absolute", left: bgX, top: bgY, width: magPos.cw * zoom, height: magPos.ch * zoom, overflow: "hidden" }}>
+                      <img src={imgSrc} style={{
+                        filter: grayFilter,
+                        ...(fitMode === "crop" ? cropStyle(1)
+                          : fitMode === "scale" ? cropStyle(artScale / 100)
+                          : fitMode === "stretch" ? { display: "block", width: "100%", height: "100%", objectFit: "fill", position: "absolute", inset: 0 }
+                          : { display: "block", width: "100%", height: "100%", objectFit: fitMode === "contain" ? "contain" : "cover" }
+                        )
+                      }} />
+                      {showGuides && <>
+                        {/* Bleed — red dashed at container edge */}
+                        <div style={{ position: "absolute", inset: 0, border: "1px dashed #ef4444", boxSizing: "border-box", pointerEvents: "none" }} />
+                        {/* Trim — white dashed, inset by bleed */}
+                        <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "1px dashed rgba(255,255,255,.85)", boxSizing: "border-box", pointerEvents: "none" }} />
+                        {/* Safety — green dashed, further inset */}
+                        <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "1px dashed #38a169", boxSizing: "border-box", pointerEvents: "none" }} />
+                        {/* Fold lines — orange solid, positioned relative to the trim window (same math as main proof view) */}
+                        {foldLines.map((fl, i) => (
+                          <div key={i} style={{
+                            position: "absolute", pointerEvents: "none",
+                            ...(fl.vertical
+                              ? { left: `${bleedPctX + (100 - bleedPctX * 2) * fl.pct / 100}%`, top: `${bleedPctY}%`, bottom: `${bleedPctY}%`, width: 1, background: "#f97316" }
+                              : { top: `${bleedPctY + (100 - bleedPctY * 2) * fl.pct / 100}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, height: 1, background: "#f97316" }
+                            ),
+                          }} />
+                        ))}
+                      </>}
                     </div>
-                    {/* Crosshair */}
+                    {/* Crosshair — anchored to lens centre */}
                     <div style={{ position: "absolute", top: 0, left: lensSize / 2, width: 1, height: lensSize, background: "rgba(255,255,255,.3)" }} />
                     <div style={{ position: "absolute", left: 0, top: lensSize / 2, width: lensSize, height: 1, background: "rgba(255,255,255,.3)" }} />
                   </div>
@@ -2352,6 +2546,15 @@ function RichTip({ children, tipKey, title, content, dark }) {
 function App() {
   const mob = useIsMobile();
   const [op, setOp] = useState({ s1: true, s2: true, s3: false, s4: false, s5: false });
+  // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
+  const proofDebug = useMemo(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get("debug") === "1") return true;
+      if (typeof localStorage !== "undefined" && localStorage.getItem("pps_debug") === "1") return true;
+    } catch {}
+    return false;
+  }, []);
   const tog = k => setOp(p => ({ ...p, [k]: !p[k] }));
   const [showDebug, setShowDebug] = useState(false);
 
@@ -2379,6 +2582,8 @@ function App() {
   const [artEditPages, setArtEditPages] = useState(0);
   const [bleed, setBleed] = useState(0);
   const [proof, setProof] = useState(0);
+  const [coverArt, setCoverArt] = useState(null); // mirrors SheetPreview's frontArt for the sidebar preview
+  const openPreviewModalRef = useRef(null);
   const [proofAddrSame, setProofAddrSame] = useState(true);
   const [proofAddr, setProofAddr] = useState({name:"",street:"",city:"",state:"",zip:""});
   const [canvaLink, setCanvaLink] = useState("");
@@ -2389,6 +2594,75 @@ function App() {
   const [needByDate, setNeedByDate] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [mobPricing, setMobPricing] = useState(false);
+
+  // ── Reorder: pre-fill from PPS_CONFIG.reorder (set by PHP from URL) ──
+  useEffect(() => {
+    const PPS = window.PPS_CONFIG || {};
+    const encoded = PPS.reorder || "";
+    if (!encoded) return;
+
+    try {
+      // URL-safe base64 decode
+      const b64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+      const json = atob(b64);
+      const rc = JSON.parse(json);
+
+      // Quantity
+      if (rc.qty != null) setQty(Math.max(1, Math.round(Number(rc.qty))));
+
+      // Size
+      if (rc.sizeMode === "custom" || rc.sizeLabel === "Custom Size") {
+        setSizeMode("custom");
+        if (rc.longEdge != null) setLongEdge(Number(rc.longEdge));
+        if (rc.shortEdge != null) setShortEdge(Number(rc.shortEdge));
+      } else if (rc.sizeLabel) {
+        setSizeMode("preset");
+        setSizeLabel(rc.sizeLabel);
+      }
+
+      // Folding
+      if (rc.foldType) setFoldType(rc.foldType);
+      if (rc.foldDir) setFoldDir(rc.foldDir);
+
+      // Color & sides
+      if (rc.frontColor) setFrontColor(rc.frontColor);
+      if (rc.backColor) setBackColor(rc.backColor);
+      if (rc.sides != null) setSides(Number(rc.sides));
+
+      // Paper — match by label from current catalog
+      if (rc.paper && rc.paper.label) {
+        const match = PAPERS_NC.find(p => p.label === rc.paper.label);
+        if (match) setTimeout(() => setPaper(match), 0);
+      }
+
+      // Finishing — coerce types from JSON (strings → numbers/booleans)
+      if (rc.vivid != null) setVivid(rc.vivid === true || rc.vivid === "true");
+      if (rc.coating != null) setCoating(Number(rc.coating));
+      if (rc.coatSides != null) setCoatSides(Number(rc.coatSides));
+      if (rc.bundling != null) setBundling(Number(rc.bundling));
+      if (rc.perforation != null) setPerforation(Number(rc.perforation));
+      if (rc.perfDir) setPerfDir(rc.perfDir);
+      if (rc.perfPositions && Array.isArray(rc.perfPositions)) {
+        setPerfPositions(rc.perfPositions.map(Number));
+      }
+      if (rc.roundCorner != null) setRoundCorner(Number(rc.roundCorner));
+
+      // Artwork & proofing
+      if (rc.artwork != null) setArtwork(Number(rc.artwork));
+      if (rc.artEditPages != null) setArtEditPages(Number(rc.artEditPages));
+      if (rc.bleed != null) setBleed(Number(rc.bleed));
+      if (rc.proof != null) setProof(Number(rc.proof));
+
+      // Shipping (no date — recalculated fresh)
+      if (rc.shipState) setShipState(rc.shipState);
+      if (rc.shipAddr) setShipAddr(rc.shipAddr);
+
+      // Open all sections so customer can see everything
+      setOp({ s1: true, s2: true, s3: true, s4: true, s5: true });
+    } catch (e) {
+      console.warn("PPS: Failed to parse reorder config", e);
+    }
+  }, []);
 
   const shipZip = shipAddr.zip || "";
   const fold = FOLD_TYPES.find(f => f.val === foldType) || FOLD_TYPES[0];
@@ -2494,7 +2768,31 @@ function App() {
     <div style={{ minHeight: "100vh", background: CC.bg, fontFamily: "'Segoe UI','Helvetica Neue',Arial,sans-serif", color: CC.dark }}>
       <style>{`@media(max-width:700px){.pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}.pps-sec-body{padding:12px 14px!important}}`}</style>
 
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "10px" : "20px 24px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
+      {/* Hero header — eyebrow + display + tagline */}
+      <section style={{maxWidth:1180,margin:"0 auto",padding:mob?"18px 14px 6px":"34px 28px 18px"}}>
+        <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:mob?10:20}}>
+          <div style={{flex:"1 1 320px",minWidth:0}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:CK.magenta}}>Configure · Brochure & Flat Print</div>
+            <h1 style={{fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",fontWeight:800,lineHeight:1,letterSpacing:"-0.02em",color:CC.dark,textTransform:"uppercase",margin:mob?"8px 0 0":"10px 0 0",maxWidth:720,fontSize:mob?28:44}}>
+              Brochures & Flat<br/>
+              <span style={{color:CK.cyan}}>Instant Quote</span>
+            </h1>
+            <p style={{maxWidth:560,margin:mob?"10px 0 0":"14px 0 0",color:CC.mid,fontSize:mob?12.5:14,lineHeight:1.55}}>
+              Live pricing from our Phoenix floor. No RFQs, no sales calls — configure it, see the number, pick a delivery date.
+            </p>
+          </div>
+          {!mob&&<div style={{display:"inline-flex",gap:4,alignSelf:"flex-end",paddingBottom:8}} aria-hidden="true">
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.cyan,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.magenta,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.yellow,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.key,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+          </div>}
+        </div>
+      </section>
+
+      {mob && <MobilePreviewBar longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "0 10px 140px" : "0 24px 80px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
@@ -2663,6 +2961,9 @@ function App() {
                     setShortEdge(parseFloat(short.toFixed(3)));
                   }}
                   onArtwork={(a) => {/* artFiles state if needed */}}
+                  onCoverArt={setCoverArt}
+                  openPreviewModalRef={openPreviewModalRef}
+                  debug={proofDebug}
                 />
               </div>
             )}
@@ -2813,7 +3114,8 @@ function App() {
         </div>
 
         {/* Desktop sidebar */}
-        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18 }}>
+        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+          <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
           <Panel result={result} />
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>

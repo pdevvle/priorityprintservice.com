@@ -73,11 +73,34 @@
   .bp-nav-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit}
   .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.15);border-color:#007eff;color:#007eff}
   .bp-nav-btn:disabled{opacity:.25;cursor:not-allowed}
+  /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
+  .bp-checker{
+    background-color:#3a3e46;
+    background-image:
+      linear-gradient(45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(-45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#2a2e36 75%),
+      linear-gradient(-45deg,transparent 75%,#2a2e36 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0;
+  }
+  /* Approve Now CTA — strong call-to-action when art needs approval */
+  @keyframes bp-approve-pulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55),0 4px 14px rgba(239,68,68,.35)}
+    50%{box-shadow:0 0 0 6px rgba(239,68,68,0),0 4px 14px rgba(239,68,68,.35)}
+  }
+  .bp-approve-cta{
+    background:linear-gradient(135deg,#ef4444 0%,#dc2626 40%,#f87171 50%,#dc2626 60%,#b91c1c 100%) !important;
+    color:#fff !important;
+    text-shadow:0 1px 2px rgba(0,0,0,.25);
+    animation:bp-approve-pulse 2s ease-in-out infinite;
+  }
+  .bp-approve-cta:hover{filter:brightness(1.08)}
 </style>
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22 · CB-PER-PAGE-TX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · CB-GUIDES-LABEL</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -514,6 +537,7 @@ function calculate(c) {
   const artWork=art.val>=2;
   const q100=sets.some(s=>s.qty>=100);
   const q250=sets.some(s=>s.qty>250);
+  const commonSize = !sz.isCustom ? ["5.5×8.5 (Opens to 8.5×11)","8.5×11 (Opens to 11×17)"].includes(c.sizeLabel) : false;
   const coatPaper=c.coverMode==="same"?c.insidePaper:cvr;
   const coatOK=coatPaper.coatable;
   const hcOK=c.insidePaper.factory;
@@ -635,6 +659,7 @@ function calculate(c) {
   P.discBW = bwFraction > 0 ? -(P.press * PCF.bw_discount_rate * bwFraction) : 0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
   P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate_1,PCF.easydiscount_max):0;
+  P.discCommon=(commonSize&&q250)?-Math.min(P.press+P.cutting+P.perfectBind,PCF.common_discount_max):0;
 
   // Size-based adjustment — 15% off when imp<4 (8.5×11 and larger). Mirrors saddle-stitch booklet.
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
@@ -740,7 +765,7 @@ function calculate(c) {
     {l:"Magnetic Backer",v:P.magnetBacker,g:"add"},{l:"Wraparound Perf",v:P.wraparoundPerf,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
-    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
+    {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 
   // CMYK-derived group colors
@@ -1376,6 +1401,126 @@ function BookOpen3D({ pages, bookW, bookH, spread, scale, rotateX: rX, rotateY: 
   );
 }
 
+function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt,onOpenPreview}){
+  const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
+  const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
+  const maxDim=150, longSide=Math.max(wIn,hIn), px=maxDim/longSide;
+  const bookW=wIn*px, bookH=hIn*px;
+  const displayCover=coverMode==="same"?insidePaper:coverPaper;
+  const coverTone=displayCover?.tone||"#f7f3e8";
+  const inkColor=coverColor==="bw"?"#2b2b2b":CK.cyan;
+  const placeholder=useMemo(()=>{
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450" preserveAspectRatio="xMidYMid slice">
+<rect width="300" height="450" fill="${coverTone}"/>
+<rect x="36" y="58" width="110" height="4" fill="${inkColor}"/>
+<text x="36" y="140" font-family="Segoe UI, sans-serif" font-size="42" font-weight="800" fill="#2b2b2b" letter-spacing="-1">YOUR</text>
+<text x="36" y="186" font-family="Segoe UI, sans-serif" font-size="42" font-weight="800" fill="#2b2b2b" letter-spacing="-1">COUPONS</text>
+<g transform="translate(36,372)">
+<circle cx="0" cy="0" r="6" fill="${CK.cyan}"/>
+<circle cx="18" cy="0" r="6" fill="${CK.magenta}"/>
+<circle cx="36" cy="0" r="6" fill="${CK.yellow}"/>
+<circle cx="54" cy="0" r="6" fill="${CK.key}"/>
+</g>
+<text x="36" y="412" font-family="Segoe UI, sans-serif" font-size="10" font-weight="600" fill="#555" letter-spacing="2">PRIORITY PRINT</text>
+</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  },[coverTone,inkColor]);
+  const backCover=useMemo(()=>{
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450">
+<rect width="300" height="450" fill="${coverTone}"/>
+<g transform="translate(150,220)">
+<rect x="-30" y="-30" width="60" height="60" fill="#fff" stroke="#2b2b2b" stroke-width="1.5"/>
+<rect x="-22" y="-22" width="44" height="44" fill="#2b2b2b"/>
+<rect x="-16" y="-16" width="4" height="4" fill="#fff"/><rect x="-8" y="-16" width="4" height="4" fill="#fff"/><rect x="0" y="-16" width="4" height="4" fill="#fff"/><rect x="12" y="-16" width="4" height="4" fill="#fff"/>
+<rect x="-16" y="-4" width="4" height="4" fill="#fff"/><rect x="0" y="-4" width="4" height="4" fill="#fff"/><rect x="8" y="-4" width="4" height="4" fill="#fff"/>
+<rect x="-16" y="4" width="4" height="4" fill="#fff"/><rect x="-8" y="4" width="4" height="4" fill="#fff"/><rect x="8" y="4" width="4" height="4" fill="#fff"/>
+<rect x="-16" y="12" width="4" height="4" fill="#fff"/><rect x="8" y="12" width="4" height="4" fill="#fff"/>
+</g>
+<text x="150" y="300" font-family="Segoe UI, sans-serif" font-size="9" font-weight="600" fill="#555" text-anchor="middle" letter-spacing="1">PRIORITYPRINTSERVICE.COM</text>
+</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  },[coverTone]);
+  const hasArt=!!coverArt;
+  const previewPages=useMemo(()=>[
+    {dataUrl:coverArt||placeholder,isBlank:false},
+    {dataUrl:backCoverArt||coverArt||backCover,isBlank:false},
+  ],[coverArt,backCoverArt,placeholder,backCover]);
+  const clickable=hasArt&&typeof onOpenPreview==="function";
+  return (
+    <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
+      <div className="bp-viewport"
+        role={clickable?"button":undefined} tabIndex={clickable?0:undefined}
+        onClick={clickable?onOpenPreview:undefined}
+        onKeyDown={clickable?(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onOpenPreview();}}:undefined}
+        title={clickable?"Open full preview":undefined}
+        style={{height:190,borderRadius:0,border:"none",cursor:clickable?"zoom-in":"default"}}>
+        <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
+        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
+        <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
+          <span style={{display:"inline-flex",gap:3}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:CK.cyan}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:CK.magenta}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:CK.yellow}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
+          </span>
+          <span>{hasArt?"YOUR ARTWORK · LIVE":"3D PREVIEW · LIVE"}</span>
+        </div>
+        {clickable&&<div style={{position:"absolute",top:10,right:12,fontSize:9,fontWeight:700,letterSpacing:".1em",color:"rgba(255,255,255,.75)",background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.18)",padding:"3px 7px",borderRadius:4,pointerEvents:"none"}}>OPEN ⤢</div>}
+        <div style={{position:"absolute",bottom:10,left:14,right:14,display:"flex",justifyContent:"space-between",fontSize:9.5,fontWeight:600,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:".08em",pointerEvents:"none"}}>
+          <span>{wIn}×{hIn}″</span>
+          <span>{pages}pp · {quantity.toLocaleString()} qty</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobilePreviewBar(props){
+  const {sizeLabel,pages,quantity,coverArt,onOpenPreview}=props;
+  const hostRef=useRef(null);
+  const [collapsed,setCollapsed]=useState(false);
+  useEffect(()=>{
+    const el=hostRef.current;
+    if(!el||typeof IntersectionObserver==="undefined")return;
+    const obs=new IntersectionObserver(([entry])=>{
+      setCollapsed(!entry.isIntersecting && entry.boundingClientRect.top < 0);
+    },{threshold:0,rootMargin:"0px 0px 0px 0px"});
+    obs.observe(el);
+    return ()=>obs.disconnect();
+  },[]);
+  const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
+  const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
+  const hasArt=!!coverArt;
+  const clickable=hasArt&&typeof onOpenPreview==="function";
+  return (
+    <>
+      <div ref={hostRef} style={{margin:"6px 10px 10px"}}>
+        <SidebarBookPreview {...props}/>
+      </div>
+      <div role={clickable?"button":undefined} tabIndex={clickable?0:undefined}
+        onClick={clickable?onOpenPreview:undefined}
+        onKeyDown={clickable?(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onOpenPreview();}}:undefined}
+        style={{position:"fixed",top:0,left:0,right:0,zIndex:45,transform:collapsed?"translateY(0)":"translateY(-110%)",transition:"transform .22s ease-out",background:"linear-gradient(135deg,#1a1d23,#2a2e36)",borderBottom:"1px solid rgba(255,255,255,.08)",boxShadow:"0 6px 18px rgba(0,0,0,.25)",padding:"7px 12px",display:"flex",alignItems:"center",gap:10,cursor:clickable?"pointer":"default",color:"#fff"}}>
+        <div style={{width:32,height:Math.max(24,Math.min(48,(32*hIn)/wIn)),borderRadius:3,overflow:"hidden",flexShrink:0,background:"#2a2e36",boxShadow:"0 0 0 1px rgba(255,255,255,.12)"}}>
+          {hasArt
+            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+            : <div style={{width:"100%",height:"100%",background:"linear-gradient(135deg,#e0edff,#f7f3e8)"}}/>}
+        </div>
+        <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:1}}>
+          <div style={{fontSize:8,fontWeight:700,letterSpacing:".12em",opacity:.6,textTransform:"uppercase"}}>{hasArt?"Your Artwork":"3D Preview"}</div>
+          <div style={{fontSize:12,fontWeight:700,letterSpacing:".01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{wIn}×{hIn}″ · {pages}pp · {quantity.toLocaleString()} qty</div>
+        </div>
+        <div style={{display:"inline-flex",gap:3,alignSelf:"center"}} aria-hidden="true">
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.cyan}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.magenta}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:CK.yellow}}/>
+          <span style={{width:6,height:6,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function InfoTip({ children, text, dark }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -1699,7 +1844,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2608,6 +2753,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const hasFile = rawPages.length >= 2 || rawPages.some(p => !p.isBlank);
   const PF = { pass: { dot: "#4ade80", text: "#3a7124" }, warn: { dot: "#fbbf24", text: "#b8860b" }, fail: { dot: "#f87171", text: "#c2185b" }, info: { dot: "#60a5fa", text: "#2563eb" } };
 
+  // Expose an imperative open-preview hook for the sidebar preview card.
+  useEffect(() => {
+    if (!openPreviewModalRef) return;
+    openPreviewModalRef.current = hasFile ? () => { setActiveModal("preview"); setPreviewMode("closed"); setRot({ x: -15, y: -25 }); } : null;
+    return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
+  }, [hasFile, openPreviewModalRef]);
+
   // ── Per-slot upload logic ──
   const slotInputRef = useRef(null);
   const activeSlotRef = useRef(-1);
@@ -2856,24 +3008,46 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
             </div>
           )}
 
-          {/* ── Pill Selector: Proof | Preview ── */}
-          <div style={{ display:"flex", borderRadius:8, overflow:"hidden", border:`1px solid ${CC.border}`, marginBottom:8, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
-            <button type="button" onClick={() => { setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
-              flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-              background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
-              borderRight:`1px solid ${CC.border}`,
-            }}>
-              🔍 Proof {proof===0 && !artApproved && <span style={{ fontSize:9, fontWeight:700, background:"#fee2e2", color:"#dc2626", padding:"1px 6px", borderRadius:4 }}>required</span>}
-            </button>
-            <button type="button" onClick={() => { setActiveModal("preview"); setPreviewMode("closed"); setRot({x:-15,y:-25}); }} style={{
-              flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-              background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
-            }}>
-              📖 Preview
-            </button>
-          </div>
+          {/* ── Pill Selector: Proof | Preview ── (wrapped brochure-style) */}
+          {(() => {
+            const needsApproval = proof === 0 && !artApproved;
+            return (
+              <div style={{
+                display:"flex", flexDirection:"column", gap:6, marginBottom:8,
+                padding: needsApproval ? "10px 12px" : 0,
+                background: needsApproval ? "#fef2f2" : "transparent",
+                border: needsApproval ? "1px solid #fecaca" : "none",
+                borderRadius: 6,
+              }}>
+                <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:`1px solid ${CC.border}`, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+                  <button type="button" onClick={() => { setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
+                    flex:1, padding:"11px 10px", fontSize:13, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                    background: artApproved && proof===0
+                      ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)"
+                      : "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)",
+                    color: artApproved && proof===0 ? "#fff" : "#555",
+                    borderRight:`1px solid ${CC.border}`,
+                  }}>
+                    {artApproved && proof===0 ? "✓ Proof Approved" : "🔍 Proof"} {needsApproval && <span style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 4 }}>required</span>}
+                    {debug && <span title="Proof debug mode is on (?debug=1)." style={{ marginLeft:8, fontSize:9, fontWeight:700, background:"rgba(251,191,36,.18)", color:"#fbbf24", padding:"2px 8px", borderRadius:4, letterSpacing:".06em", textTransform:"uppercase", border:"1px solid rgba(251,191,36,.4)" }}>🔧 Debug</span>}
+                  </button>
+                  <button type="button" onClick={() => { setActiveModal("preview"); setPreviewMode("closed"); setRot({x:-15,y:-25}); }} style={{
+                    flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                    background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
+                  }}>
+                    📖 Preview
+                  </button>
+                </div>
+                {needsApproval && (
+                  <div style={{ fontSize: 11, color: "#b91c1c", lineHeight: 1.4 }}>
+                    Open proof to review bleed, trim, safety and approve artwork
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Proof messages for non-online-proof modes */}
           {proof === 0.01 && (
@@ -2989,12 +3163,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           setGenProgress(null);
                         }
                       } else if (proof!==0) { setProof(0); }
-                    }} style={{
-                      padding:"8px 18px", fontSize:12, fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em",
+                    }} className={proof===0 && !artApproved && !generatingPdf ? "bp-approve-cta" : ""} style={{
+                      padding: proof===0 && !artApproved ? "10px 24px" : "8px 18px",
+                      fontSize: proof===0 && !artApproved ? 13 : 12,
+                      fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em", textTransform:"uppercase",
                       background: artApproved && proof===0
                         ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
-                        : proof===0 ? "rgba(255,255,255,.04)" : "rgba(255,255,255,.04)",
-                      color: artApproved && proof===0 ? "#fff" : proof===0 ? "#ef4444" : "rgba(255,255,255,.3)",
+                        : proof===0 ? undefined : "rgba(255,255,255,.04)",
+                      color: artApproved && proof===0 ? "#fff" : proof===0 ? undefined : "rgba(255,255,255,.3)",
                       borderRight:"1px solid rgba(255,255,255,.08)",
                     }}>{generatingPdf && genProgress ? (
                       <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
@@ -3023,7 +3199,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
                   {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
                 </div>
-                {artApproved && approvalPkg && (() => {
+                {approvalPkg && (artApproved || debug) && (() => {
                   const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                   const dlFile = (blob, name) => {
                     if (!blob) return;
@@ -3150,12 +3326,29 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
                         color: showGuides ? "#38a169" : "rgba(255,255,255,.4)",
-                      }}>{showGuides ? "Guides: Hide" : "Guides: Hidden"}</button>
+                      }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
                       <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
                         color: showMagnifier ? "#3b82f6" : "rgba(255,255,255,.4)",
                       }}>🔍</button>
+                      {debug && <button type="button" disabled={generatingPdf} title="Debug: regenerate the approval package without locking approval" onClick={async () => {
+                        setGeneratingPdf(true);
+                        setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
+                        try {
+                          const pkg = await generateApprovalPackage();
+                          if (pkg && pkg.manifestBlob) setApprovalPkg(pkg);
+                        } catch (err) {
+                          console.error("Debug generate failed:", err);
+                          alert("Generation failed: " + (err.message || err));
+                        } finally {
+                          setGeneratingPdf(false);
+                          setGenProgress(null);
+                        }
+                      }} style={{
+                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(251,191,36,.4)", borderRadius:6, cursor: generatingPdf ? "wait" : "pointer", fontFamily:"inherit",
+                        background:"rgba(251,191,36,.12)", color:"#fbbf24",
+                      }}>🔧 {generatingPdf ? "Generating…" : "Generate"}</button>}
                       <div style={{ marginLeft:4, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
                         {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (
                           <button type="button" key={o.v} onClick={() => setProofView(o.v)} title={o.v === "single" ? "Single page view" : "Grid view — all pages"} style={{
@@ -3168,7 +3361,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                     </div>
                     {/* Proof image with guide overlays — container sized to include bleed area */}
                     <div style={{ maxWidth:520, margin:"0 auto" }}>
-                      <div style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", background:"#1a1d23", cursor: showMagnifier ? "none" : "default" }}
+                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "default" }}
                         onMouseMove={showMagnifier ? (e) => {
                           const r = e.currentTarget.getBoundingClientRect();
                           setMagPos({ x: e.clientX - r.left, y: e.clientY - r.top, pctX: (e.clientX - r.left) / r.width * 100, pctY: (e.clientY - r.top) / r.height * 100, cw: r.width, ch: r.height });
@@ -3192,7 +3385,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             transform: "translate(-50%, -50%)", display: "block", filter: gsFilter,
                           });
                           return (
-                            <div style={{ position:"absolute", inset:0, overflow:"hidden", background:"#2a2e36" }}>
+                            <div className="bp-checker" style={{ position:"absolute", inset:0, overflow:"hidden" }}>
                               {proofPage.isBlank
                                 ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.3)", fontSize:14 }}>Blank page</div>
                                 : <img src={hiResValid ? hiResProof.dataUrl : proofPage.dataUrl} style={{
@@ -3236,61 +3429,43 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           const bgW = magPos.cw * zoom, bgH = magPos.ch * zoom;
                           const bgX = -(magPos.pctX / 100 * bgW) + magSize / 2;
                           const bgY = -(magPos.pctY / 100 * bgH) + magSize / 2;
-                          // Helper: convert a container percentage to magnifier pixel position
-                          const toMX = (pct) => (pct / 100 * bgW) + bgX;
-                          const toMY = (pct) => (pct / 100 * bgH) + bgY;
-                          // Guide rectangles as {top,left,width,height} in magnifier pixels
-                          const magGuides = showGuides ? [
-                            { // Bleed — at container edge
-                              l: toMX(0), t: toMY(0), w: bgW, h: bgH,
-                              border: "2px dashed #ef4444", opacity: 0.8
-                            },
-                            { // Trim — inset by bleed
-                              l: toMX(bleedPctX), t: toMY(bleedPctY),
-                              w: (100 - bleedPctX * 2) / 100 * bgW,
-                              h: (100 - bleedPctY * 2) / 100 * bgH,
-                              border: "2px dashed #e2e8f0", opacity: 1
-                            },
-                            { // Safety — inset by bleed + safety
-                              l: toMX(safetyPctX), t: toMY(safetyPctY),
-                              w: (100 - safetyPctX * 2) / 100 * bgW,
-                              h: (100 - safetyPctY * 2) / 100 * bgH,
-                              border: "2px dashed #38a169", opacity: 1
-                            },
-                          ] : [];
-                          // Spine bar position — perfect bound: always left
-                          const spineMX = toMX(bleedPctX);
-                          const spineMYtop = toMY(bleedPctY + 2);
-                          const spineMYbot = toMY(100 - bleedPctY - 2);
+                          const proofTx = getTx(proofIdx);
+                          const lensEd = effectiveDimsFor(artDims, proofTx.rotateSteps);
+                          const lensNativeW = lensEd ? lensEd.wIn / bleedW : (dims.w / bleedW);
+                          const lensCropStyle = (mult) => ({
+                            width: `${lensNativeW * mult * 100}%`, height: "auto",
+                            position: "absolute", top: "50%", left: "50%",
+                            transform: "translate(-50%, -50%)", display: "block", filter: gsFilter,
+                          });
                           return (
                             <div style={{
                               position:"absolute", pointerEvents:"none", zIndex:10,
                               left: magPos.x - magSize / 2, top: magPos.y - magSize / 2,
                               width: magSize, height: magSize, borderRadius:"50%",
                               border:"3px solid rgba(255,255,255,.8)", boxShadow:"0 4px 20px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.3)",
-                              backgroundImage: `url(${imgSrc})`,
-                              backgroundSize: `${bgW}px ${bgH}px`,
-                              backgroundPosition: `${bgX}px ${bgY}px`,
-                              backgroundRepeat: "no-repeat",
-                              backgroundColor: "#1a1d23",
                               overflow: "hidden",
                             }}>
-                              {/* Guide lines inside magnifier */}
-                              {magGuides.map((g, gi) => (
-                                <div key={gi} style={{
-                                  position:"absolute", left:g.l, top:g.t, width:g.w, height:g.h,
-                                  border:g.border, opacity:g.opacity, boxSizing:"border-box", pointerEvents:"none",
-                                }}/>
-                              ))}
-                              {/* Spine inside magnifier */}
-                              {showGuides && (
-                                <div style={{
-                                  position:"absolute", left: spineMX - 1.5, top: spineMYtop,
-                                  width: 3, height: spineMYbot - spineMYtop,
-                                  background:"#3b82f6", borderRadius:1, pointerEvents:"none",
-                                }}/>
-                              )}
-                              {/* Crosshair */}
+                              {/* Bleed-zoomed proof viewport — mirrors the main proof container at zoom× scale */}
+                              <div className="bp-checker" style={{ position:"absolute", left: bgX, top: bgY, width: bgW, height: bgH, overflow: "hidden" }}>
+                                <img src={imgSrc} style={{
+                                  ...(proofTx.fitMode === "crop" ? lensCropStyle(1)
+                                    : proofTx.fitMode === "scale" ? lensCropStyle(proofTx.artScale / 100)
+                                    : proofTx.fitMode === "stretch" ? { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit:"fill", position:"absolute", inset:0 }
+                                    : { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit: proofTx.fitMode === "contain" ? "contain" : "cover" }
+                                  )
+                                }} />
+                                {showGuides && <>
+                                  {/* Bleed — red dashed at container edge */}
+                                  <div style={{ position:"absolute", inset:0, border:"2px dashed #ef4444", boxSizing:"border-box", opacity:0.8, pointerEvents:"none" }}/>
+                                  {/* Trim — light dashed inset by bleed */}
+                                  <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2px dashed #e2e8f0", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
+                                  {/* Safety — green dashed further inset */}
+                                  <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2px dashed #38a169", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
+                                  {/* Spine — coupon book: always left */}
+                                  <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2, pointerEvents:"none" }}/>
+                                </>}
+                              </div>
+                              {/* Crosshair — anchored to lens centre */}
                               <div style={{ position:"absolute", left:"50%", top:0, bottom:0, width:1, background:"rgba(255,255,255,.3)", transform:"translateX(-50%)" }}/>
                               <div style={{ position:"absolute", top:"50%", left:0, right:0, height:1, background:"rgba(255,255,255,.3)", transform:"translateY(-50%)" }}/>
                             </div>
@@ -3342,7 +3517,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   <div style={{ display:"grid", gridTemplateColumns:`repeat(auto-fill, minmax(${mob ? 100 : 140}px, 1fr))`, gap:10 }}>
                     {displayPages.map((p, i) => (
                       <div key={i} style={{ cursor: p.isBlank ? "default" : "pointer", textAlign:"center" }} onClick={() => { if (!p.isBlank) { setProofIdx(i); setProofView("single"); } }}>
-                        <div style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", background:"#2a2e36", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
+                        <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
                           {p.isBlank
                             ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.2)", fontSize:10 }}>Blank</div>
                             : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
@@ -3679,6 +3854,15 @@ function App(){
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
   const[shareCopied,setShareCopied]=useState(false);
+  // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
+  const proofDebug = useMemo(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get("debug") === "1") return true;
+      if (typeof localStorage !== "undefined" && localStorage.getItem("pps_debug") === "1") return true;
+    } catch {}
+    return false;
+  }, []);
   const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
 
   // Per-product defaults from admin config, then URL params override
@@ -3745,6 +3929,8 @@ function App(){
   const[shipAddr,setShipAddr]=useState({name:"",company:"",street1:"",street2:"",city:"",zip:""});
   const[needByDate,setNeedByDate]=useState("");
   const[coverArt,setCoverArt]=useState(null);
+  const[backCoverArt,setBackCoverArt]=useState(null);
+  const openPreviewModalRef=useRef(null);
   // Unified artwork file state — one variable, no priority logic
   // { type:"none" } | { type:"files", list:[File,...] } | { type:"existing", path:"/uploads/..." }
   const[artFiles,setArtFiles]=useState({type:"none"});
@@ -4043,8 +4229,31 @@ function App(){
           .pps-ship-box{font-size:10px!important}
         }
       `}</style>
+      {/* Hero header — eyebrow + display + tagline */}
+      <section style={{maxWidth:1180,margin:"0 auto",padding:mob?"18px 14px 6px":"34px 28px 18px"}}>
+        <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:mob?10:20}}>
+          <div style={{flex:"1 1 320px",minWidth:0}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:CK.magenta}}>Configure · Coupon Book</div>
+            <h1 style={{fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",fontWeight:800,lineHeight:1,letterSpacing:"-0.02em",color:CC.dark,textTransform:"uppercase",margin:mob?"8px 0 0":"10px 0 0",maxWidth:720,fontSize:mob?28:44}}>
+              Coupon Book<br/>
+              <span style={{color:CK.cyan}}>Instant Quote</span>
+            </h1>
+            <p style={{maxWidth:560,margin:mob?"10px 0 0":"14px 0 0",color:CC.mid,fontSize:mob?12.5:14,lineHeight:1.55}}>
+              Live pricing from our Phoenix floor. No RFQs, no sales calls — configure it, see the number, pick a delivery date.
+            </p>
+          </div>
+          {!mob&&<div style={{display:"inline-flex",gap:4,alignSelf:"flex-end",paddingBottom:8}} aria-hidden="true">
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.cyan,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.magenta,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.yellow,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CK.key,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
+          </div>}
+        </div>
+      </section>
 
-      <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"10px 10px 140px":"18px 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
+      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+
+      <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
           {/* SECTION 1: Size */}
@@ -4215,6 +4424,8 @@ function App(){
                 onPagesDetected={(pg) => upSet(0, { pages: pg })}
                 onCoverArt={setCoverArt}
                 onArtwork={setArtFiles}
+                openPreviewModalRef={openPreviewModalRef}
+                debug={proofDebug}
                 onBleedDetected={(has) => { if(has) setBleed(0); else setBleed(1); }}
                 onSizeOverride={(w, h) => {
                   setSizeMode("custom"); setSizeLabel("Custom Size");
@@ -4447,7 +4658,8 @@ function App(){
           </table>
         </div>}
         </div>
-        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18}}>
+        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18,display:"flex",flexDirection:"column",gap:10}}>
+          <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
           <Panel result={result}/>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
