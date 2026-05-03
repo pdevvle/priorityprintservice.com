@@ -2595,6 +2595,75 @@ function App() {
   const [shareCopied, setShareCopied] = useState(false);
   const [mobPricing, setMobPricing] = useState(false);
 
+  // ── Reorder: pre-fill from PPS_CONFIG.reorder (set by PHP from URL) ──
+  useEffect(() => {
+    const PPS = window.PPS_CONFIG || {};
+    const encoded = PPS.reorder || "";
+    if (!encoded) return;
+
+    try {
+      // URL-safe base64 decode
+      const b64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+      const json = atob(b64);
+      const rc = JSON.parse(json);
+
+      // Quantity
+      if (rc.qty != null) setQty(Math.max(1, Math.round(Number(rc.qty))));
+
+      // Size
+      if (rc.sizeMode === "custom" || rc.sizeLabel === "Custom Size") {
+        setSizeMode("custom");
+        if (rc.longEdge != null) setLongEdge(Number(rc.longEdge));
+        if (rc.shortEdge != null) setShortEdge(Number(rc.shortEdge));
+      } else if (rc.sizeLabel) {
+        setSizeMode("preset");
+        setSizeLabel(rc.sizeLabel);
+      }
+
+      // Folding
+      if (rc.foldType) setFoldType(rc.foldType);
+      if (rc.foldDir) setFoldDir(rc.foldDir);
+
+      // Color & sides
+      if (rc.frontColor) setFrontColor(rc.frontColor);
+      if (rc.backColor) setBackColor(rc.backColor);
+      if (rc.sides != null) setSides(Number(rc.sides));
+
+      // Paper — match by label from current catalog
+      if (rc.paper && rc.paper.label) {
+        const match = PAPERS_NC.find(p => p.label === rc.paper.label);
+        if (match) setTimeout(() => setPaper(match), 0);
+      }
+
+      // Finishing — coerce types from JSON (strings → numbers/booleans)
+      if (rc.vivid != null) setVivid(rc.vivid === true || rc.vivid === "true");
+      if (rc.coating != null) setCoating(Number(rc.coating));
+      if (rc.coatSides != null) setCoatSides(Number(rc.coatSides));
+      if (rc.bundling != null) setBundling(Number(rc.bundling));
+      if (rc.perforation != null) setPerforation(Number(rc.perforation));
+      if (rc.perfDir) setPerfDir(rc.perfDir);
+      if (rc.perfPositions && Array.isArray(rc.perfPositions)) {
+        setPerfPositions(rc.perfPositions.map(Number));
+      }
+      if (rc.roundCorner != null) setRoundCorner(Number(rc.roundCorner));
+
+      // Artwork & proofing
+      if (rc.artwork != null) setArtwork(Number(rc.artwork));
+      if (rc.artEditPages != null) setArtEditPages(Number(rc.artEditPages));
+      if (rc.bleed != null) setBleed(Number(rc.bleed));
+      if (rc.proof != null) setProof(Number(rc.proof));
+
+      // Shipping (no date — recalculated fresh)
+      if (rc.shipState) setShipState(rc.shipState);
+      if (rc.shipAddr) setShipAddr(rc.shipAddr);
+
+      // Open all sections so customer can see everything
+      setOp({ s1: true, s2: true, s3: true, s4: true, s5: true });
+    } catch (e) {
+      console.warn("PPS: Failed to parse reorder config", e);
+    }
+  }, []);
+
   const shipZip = shipAddr.zip || "";
   const fold = FOLD_TYPES.find(f => f.val === foldType) || FOLD_TYPES[0];
 
