@@ -14,6 +14,9 @@
  *     cart calculation.
  *   - Scoped .pps-acct stylesheet, enqueued only on pages containing the
  *     [pps_order_lookup] shortcode.
+ *   - Filter to hide WCPA-era internal meta keys (_pi_*) from admin
+ *     order item display, since WCPA registered them as visible despite
+ *     the underscore prefix.
  *
  * Depends on: WordPress, WooCommerce, and pps_thumb_url() from
  * pps-gdrive.php. The PPS_CALC_VERSION constant from pps-calculators.php
@@ -128,7 +131,10 @@ function pps_render_pps_item_card( $item, $order ) {
     $rush            = $is_pps ? (float) $item->get_meta( '_pps_rush' ) : 0;
     $reorder         = $is_pps ? pps_build_reorder_url( $item ) : '';
     $legacy_reorder  = $is_pps ? '' : pps_build_single_item_reorder_url( $order, $item );
-    $legacy_meta     = $is_pps ? array() : $item->get_formatted_meta_data( '' );
+    // Pass '_' to filter underscore-prefixed (internal) meta keys per WP/WC
+    // convention. Empty string previously disabled the filter and exposed
+    // internal keys like _pi_item_min_preparation_days to the customer.
+    $legacy_meta     = $is_pps ? array() : $item->get_formatted_meta_data( '_' );
 
     $status      = $order->get_status();
     $is_inactive = in_array( $status, array( 'cancelled', 'refunded', 'failed' ), true );
@@ -236,6 +242,28 @@ function pps_render_pps_item_card( $item, $order ) {
     <?php
     return ob_get_clean();
 }
+
+// ════════════════════════════════════════════════════════════════════
+// HIDE WCPA-ERA INTERNAL META FROM ADMIN ORDER ITEM DISPLAY
+// ════════════════════════════════════════════════════════════════════
+//
+// The legacy WCPA plugin stored internal preparation-day fields under
+// _pi_* keys but registered them as visible meta. WooCommerce's default
+// underscore-hiding logic doesn't apply when meta is explicitly registered
+// as visible. This filter adds them to the hidden list so they don't show
+// in the admin order item display, customer order emails, or any other
+// surface that respects woocommerce_hidden_order_itemmeta.
+//
+// Customer-facing /reorders/ display is filtered separately via the
+// '_' argument to get_formatted_meta_data() in pps_render_pps_item_card.
+
+add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
+    $extra = array(
+        '_pi_item_min_preparation_days',
+        '_pi_item_max_preparation_days',
+    );
+    return array_unique( array_merge( (array) $hidden, $extra ) );
+} );
 
 // ═══════════════════════════════════════════════════════════════
 // GUEST ORDER LOOKUP (shortcode + handler)
