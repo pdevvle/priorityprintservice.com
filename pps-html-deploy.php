@@ -67,6 +67,9 @@ if ( ! defined( 'PPS_HTML_DEPLOY_MAX_BYTES' ) ) {
 if ( ! defined( 'PPS_HTML_DEPLOY_LOG_CAP' ) ) {
     define( 'PPS_HTML_DEPLOY_LOG_CAP', 200 );
 }
+if ( ! defined( 'PPS_HTML_DEPLOY_ATTACH_OPTION' ) ) {
+    define( 'PPS_HTML_DEPLOY_ATTACH_OPTION', 'pps_html_deploy_pending_attachments' );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // HOOK
@@ -75,12 +78,14 @@ if ( ! defined( 'PPS_HTML_DEPLOY_LOG_CAP' ) ) {
 add_action( 'plugins_loaded', 'pps_html_deploy_run', 5 );
 
 function pps_html_deploy_run() {
-    // Fast path: nothing to do unless the pending dir exists and has files.
+    // Fast path: nothing to do unless we have something to process.
     if ( ! defined( 'PPS_CALC_DIR' ) || ! defined( 'PPS_UPLOAD_SUBDIR' ) || ! defined( 'PPS_CALC_OPTION' ) ) return;
-    if ( ! is_dir( PPS_HTML_DEPLOY_PENDING_DIR ) ) return;
 
-    $pending = glob( PPS_HTML_DEPLOY_PENDING_DIR . '/*.html' );
-    if ( empty( $pending ) ) return;
+    $pending_files       = is_dir( PPS_HTML_DEPLOY_PENDING_DIR ) ? glob( PPS_HTML_DEPLOY_PENDING_DIR . '/*.html' ) : array();
+    $pending_attachments = get_option( PPS_HTML_DEPLOY_ATTACH_OPTION, array() );
+    if ( ! is_array( $pending_attachments ) ) $pending_attachments = array();
+
+    if ( empty( $pending_files ) && empty( $pending_attachments ) ) return;
 
     // Transient lock prevents concurrent runs (e.g. under heavy traffic).
     if ( get_transient( PPS_HTML_DEPLOY_LOCK ) ) return;
@@ -101,7 +106,8 @@ function pps_html_deploy_run() {
     $reg     = function_exists( 'pps_get_registry' ) ? pps_get_registry() : get_option( PPS_CALC_OPTION, array() );
     $entries = array();
 
-    foreach ( $pending as $src ) {
+    // ── Path A: file-system staging (pps-calculators/_pending_html/*.html) ──
+    foreach ( $pending_files as $src ) {
         $filename = basename( $src );
         $entry    = array(
             'time'     => current_time( 'mysql' ),
@@ -109,6 +115,7 @@ function pps_html_deploy_run() {
             'bytes'    => 0,
             'ok'       => false,
             'error'    => '',
+            'via'      => 'fs',
         );
 
         if ( ! preg_match( '/^calc-[a-z0-9-]+\.html$/i', $filename ) ) {
@@ -170,6 +177,99 @@ function pps_html_deploy_run() {
         $entry['ok']    = true;
         $entries[]      = $entry;
     }
+
+    // ── Path B: WP-attachment staging (pps_html_deploy_pending_attachments option) ──
+    // Used by the priority-print MCP via wp_upload_request + curl, which
+    // streams large HTML files to the WP Media Library without putting them
+    // through the MCP transport. The attachment ID(s) are written to
+    // pps_html_deploy_pending_attachments; we copy each into the calc upload
+    // dir, then delete the attachment to avoid littering the Media Library.
+    $remaining_attachments = array();
+    foreach ( $pending_attachments as $attach_id ) {
+        $attach_id = intval( $attach_id );
+        if ( $attach_id <= 0 ) continue;
+
+        $src      = get_attached_file( $attach_id );
+        $filename = $src ? basename( $src ) : '';
+        $entry    = array(
+            'time'      => current_time( 'mysql' ),
+            'filename'  => $filename,
+            'bytes'     => 0,
+            'ok'        => false,
+            'error'     => '',
+            'via'       => 'attach',
+            'attach_id' => $attach_id,
+        );
+
+        if ( ! $src || ! file_exists( $src ) ) {
+            $entry['error'] = 'attachment file not found';
+            $entries[]      = $entry;
+            // Drop from pending; nothing we can do.
+            continue;
+        }
+        if ( ! preg_match( '/^calc-[a-z0-9-]+\.html$/i', $filename ) ) {
+            $entry['error'] = 'invalid filename (must match calc-<slug>.html)';
+            $entries[]      = $entry;
+            wp_delete_attachment( $attach_id, true );
+            continue;
+        }
+
+        $size = @filesize( $src );
+        if ( $size === false || $size === 0 ) {
+            $entry['error'] = 'attachment file unreadable or empty';
+            $entries[]      = $entry;
+            wp_delete_attachment( $attach_id, true );
+            continue;
+        }
+        if ( $size > PPS_HTML_DEPLOY_MAX_BYTES ) {
+            $entry['error'] = 'source exceeds size cap (' . PPS_HTML_DEPLOY_MAX_BYTES . ' bytes)';
+            $entry['bytes'] = $size;
+            $entries[]      = $entry;
+            wp_delete_attachment( $attach_id, true );
+            continue;
+        }
+
+        $dest = trailingslashit( $dest_dir ) . $filename;
+        if ( ! @copy( $src, $dest ) ) {
+            $entry['error'] = 'copy() failed (check permissions on ' . $dest_dir . ')';
+            $entry['bytes'] = $size;
+            $entries[]      = $entry;
+            // Leave pending so a future request can retry.
+            $remaining_attachments[] = $attach_id;
+            continue;
+        }
+
+        $written = @filesize( $dest );
+        if ( $written !== $size ) {
+            @unlink( $dest );
+            $entry['error'] = 'partial copy (wrote ' . intval( $written ) . ' of ' . $size . ' bytes)';
+            $entry['bytes'] = $size;
+            $entries[]      = $entry;
+            $remaining_attachments[] = $attach_id;
+            continue;
+        }
+
+        // Update registry.
+        if ( ! isset( $reg[ $filename ] ) ) {
+            $reg[ $filename ] = array(
+                'name'     => pathinfo( $filename, PATHINFO_FILENAME ),
+                'products' => '',
+                'uploaded' => current_time( 'mysql' ),
+            );
+        } else {
+            $reg[ $filename ]['uploaded'] = current_time( 'mysql' );
+        }
+
+        // Cleanup: remove the attachment from Media Library on success.
+        wp_delete_attachment( $attach_id, true );
+
+        $entry['bytes'] = $size;
+        $entry['ok']    = true;
+        $entries[]      = $entry;
+    }
+
+    // Persist the remaining (failed-retry) attachments back to the option.
+    update_option( PPS_HTML_DEPLOY_ATTACH_OPTION, $remaining_attachments, false );
 
     // Persist registry once after all files processed.
     if ( function_exists( 'pps_save_registry' ) ) {
