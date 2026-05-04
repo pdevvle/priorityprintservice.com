@@ -942,7 +942,7 @@ function Panel({result,compact}){
   // stacked bar: positive grouped rows + rush (if any); negatives (e.g. discounts) clamped out of the visual bar
   const brkDen=Math.max(0.01,grouped.reduce((s,r)=>s+Math.max(0,r.val),0)+(hasRush?sh.rushCost:0));
   return(
-    <div style={ST.pnl}>
+    <div style={{...ST.pnl, pointerEvents: "none"}}>
       <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:`linear-gradient(135deg, ${CK.cyan} 0%, ${CK.cyan}dd 100%)`,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
           <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol}}>{hasRush?"Rush Total":"Estimated Total"}</div>
