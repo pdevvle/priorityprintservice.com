@@ -76,6 +76,7 @@ add_action( 'plugins_loaded', 'pps_html_deploy_run', 5 );
 
 function pps_html_deploy_run() {
     // Fast path: nothing to do unless the pending dir exists and has files.
+    if ( ! defined( 'PPS_CALC_DIR' ) || ! defined( 'PPS_UPLOAD_SUBDIR' ) || ! defined( 'PPS_CALC_OPTION' ) ) return;
     if ( ! is_dir( PPS_HTML_DEPLOY_PENDING_DIR ) ) return;
 
     $pending = glob( PPS_HTML_DEPLOY_PENDING_DIR . '/*.html' );
