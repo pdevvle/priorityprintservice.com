@@ -1,6 +1,9 @@
 <?php
 /**
- * PPS Calculators — HTML Deploy Sub-Module
+ * Plugin Name: PPS HTML Deploy
+ * Description: File-system-based deploy capability for PPS calculator HTML files. Co-loaded as both an activatable plugin (via active_plugins) AND a sub-module required from pps-calculators.php. Used by the priority-print MCP.
+ * Version: 1.0.0
+ * Author: Priority Print Service
  *
  * Provides a permanent, file-system-based deploy capability for calculator
  * HTML files, intended for use by the priority-print MCP (which can write
@@ -26,6 +29,21 @@
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
+
+// Guard against double-load. This file is loaded BOTH via require_once
+// from pps-calculators.php (sub-module path) AND via WP's active_plugins
+// auto-loader (since this file declares its own Plugin Name header so it
+// can be activated standalone before pps-calculators.php pulls the
+// require_once line from git). The function-exists guard ensures the
+// hook function is declared exactly once.
+if ( function_exists( 'pps_html_deploy_run' ) ) return;
+
+// pps-calculators.php is required for the constants (PPS_UPLOAD_SUBDIR,
+// PPS_CALC_OPTION) and registry helpers used below. Load order: WP iterates
+// active_plugins alphabetically by path, so pps-calculators/pps-calculators.php
+// loads BEFORE pps-calculators/pps-html-deploy.php. By the time this file's
+// plugins_loaded hook fires (priority 5), the host plugin's defines and
+// functions are available. We also runtime-check defined() before processing.
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
