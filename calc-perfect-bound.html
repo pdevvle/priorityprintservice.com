@@ -1172,7 +1172,7 @@ function Panel({result,compact}){
   const moneyD=Math.max(0,total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
   const [dD,cD]=moneyD.split(".");
   return(
-    <div style={ST.pnl}>
+    <div style={{...ST.pnl, pointerEvents: "none"}}>
       <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:`linear-gradient(135deg, ${CK.cyan} 0%, ${CK.cyan}dd 100%)`,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
         <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",opacity:.8,marginBottom:4}}>{hasRush?"Rush Total":"Estimated Total"}</div>
         <div style={{lineHeight:1,display:"flex",alignItems:"baseline"}}>
