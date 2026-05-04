@@ -52,6 +52,10 @@ if ( file_exists( PPS_CALC_DIR . 'pps-reorder.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-reorder.php';
 }
 
+if ( file_exists( PPS_CALC_DIR . 'pps-html-deploy.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-html-deploy.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
