@@ -48,6 +48,10 @@ if ( file_exists( PPS_CALC_DIR . 'pps-presets-admin.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-presets-admin.php';
 }
 
+if ( file_exists( PPS_CALC_DIR . 'pps-reorder.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-reorder.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
