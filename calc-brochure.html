@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · BR-BACKONLY-COATING</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-HTML</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1446,6 +1446,76 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     }
   }
 
+  // Standalone HTML preview — embeds the trimmed front + back face textures so the
+  // customer can email/save a self-contained flip-between mockup without revisiting
+  // the calculator. No 3D fold animation in this version (keeps the file lean and
+  // the math simple); a Front | Back toggle shows each side at the trim aspect.
+  function buildPreviewHtml() {
+    const front = trimmedFrontUrl || frontArt?.dataUrl;
+    const back = trimmedBackUrl || backArt?.dataUrl;
+    if (!front && !back) return null;
+    const ratio = `${longEdge}/${shortEdge}`;
+    const sizeStr = `${longEdge}″ × ${shortEdge}″`;
+    const generated = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+    const foldLabel = (foldType && foldType !== "flat") ? `${panels}-panel ${foldType}` : "flat";
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print Preview · Brochure · ${sizeStr}</title><style>
+*{box-sizing:border-box}
+body{margin:0;padding:36px 18px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#f0eee9,#e6e2d8);color:#2b2b2b;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+header{text-align:center;margin-bottom:28px;max-width:720px}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#ec008c;margin-bottom:8px;display:inline-flex;gap:6px;align-items:center}
+.eyebrow .dots{display:inline-flex;gap:3px}.eyebrow .dot{width:5px;height:5px;border-radius:50%}
+.eyebrow .c{background:#00aeef}.eyebrow .m{background:#ec008c}.eyebrow .y{background:#fff200}.eyebrow .k{background:#231f20}
+h1{font-weight:800;letter-spacing:-0.02em;line-height:1.05;font-size:36px;margin:0;text-transform:uppercase}
+h1 small{font-weight:700;font-size:18px;color:#888;display:block;margin-top:6px;letter-spacing:.04em}
+.meta{margin-top:14px;color:#666;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.stage{perspective:1500px;width:100%;max-width:920px;display:flex;align-items:center;justify-content:center;margin:0 auto}
+.sheet-wrap{position:relative;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.4,0,.2,1);width:100%;max-width:840px;aspect-ratio:${ratio}}
+.sheet{position:absolute;inset:0;background:#fff;background-position:center;background-size:cover;backface-visibility:hidden;box-shadow:0 14px 36px rgba(0,0,0,.18);border-radius:2px}
+.sheet.front{transform:rotateY(0deg)}
+.sheet.back{transform:rotateY(180deg)}
+.sheet-wrap.flipped{transform:rotateY(180deg)}
+.controls{margin-top:28px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
+.controls .group{display:flex;border-radius:6px;overflow:hidden;border:1px solid #d4cdbe;background:#fff}
+.controls .group button{padding:8px 14px;font-size:12px;font-weight:600;border:none;background:transparent;color:#555;cursor:pointer;font-family:inherit;border-right:1px solid #e5e0d2;transition:all .15s}
+.controls .group button:last-child{border-right:none}
+.controls .group button.on{background:#ec008c;color:#fff}
+.controls .group button:hover:not(.on){background:#fbf6ee}
+footer{margin-top:auto;padding-top:36px;color:#999;font-size:10px;letter-spacing:.08em;text-transform:uppercase;text-align:center}
+footer a{color:#888;text-decoration:none}
+footer a:hover{color:#ec008c}
+@media(max-width:540px){h1{font-size:24px}h1 small{font-size:14px}}
+</style></head><body>
+<header>
+<div class="eyebrow"><span class="dots"><span class="dot c"></span><span class="dot m"></span><span class="dot y"></span><span class="dot k"></span></span>Print Preview · Brochure & Flat Print</div>
+<h1>${longEdge}″ × ${shortEdge}″<small>${foldLabel}</small></h1>
+<div class="meta">Generated ${generated}</div>
+</header>
+<div class="stage">
+  <div class="sheet-wrap" id="wrap">
+    <div class="sheet front" style="${front ? `background-image:url('${front}')` : "background:#f8f5f0"}"></div>
+    <div class="sheet back" style="${back ? `background-image:url('${back}')` : "background:#f8f5f0"}"></div>
+  </div>
+</div>
+<div class="controls">
+  <div class="group" id="modeGroup">
+    <button class="on" data-side="front">Front</button>
+    <button data-side="back" ${back ? "" : "disabled"}>Back</button>
+  </div>
+</div>
+<footer>Priority Print Service · <a href="https://priorityprintservice.com">priorityprintservice.com</a></footer>
+<script>
+const wrap=document.getElementById('wrap'),modeGroup=document.getElementById('modeGroup');
+let side='front';
+function update(){
+  wrap.classList.toggle('flipped',side==='back');
+  modeGroup.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.side===side));
+}
+modeGroup.addEventListener('click',e=>{if(e.target.dataset.side&&!e.target.disabled){side=e.target.dataset.side;update();}});
+update();
+</script></body></html>`;
+    return new Blob([html], { type: "text/html" });
+  }
+
   // ── Generate 4 deliverables on approval ──
   // Parameterized copy of the canonical generator (calc-perfect-bound.html); brochure
   // uses pages-shim [front, back] instead of book pages, and draws fold lines in place of a spine.
@@ -1661,7 +1731,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
-    return { printReadyBlob, previewBlobs, manifestBlob, skippedGeneration: false };
+    const previewHtmlBlob = buildPreviewHtml();
+    return { printReadyBlob, previewBlobs, manifestBlob, previewHtmlBlob, skippedGeneration: false };
   }
 
   // Perf line positions — perfDir "length" crosses longEdge (vertical when foldDir=long)
@@ -1951,6 +2022,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                       pkg.previewBlobs.forEach((b, i) => {
                         if (b) files.push(new File([b], `${baseName}_preview_${sideNames[i] || ("side_" + (i+1))}.jpg`, { type: "image/jpeg" }));
                       });
+                      if (pkg.previewHtmlBlob) files.push(new File([pkg.previewHtmlBlob], baseName + "_preview.html", { type: "text/html" }));
                       files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
                       onArtwork({ type: "files", list: files });
                     }
@@ -2025,6 +2097,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 if (rawFileRef.current) files.push([rawFileRef.current, rawFileRef.current.name || baseName + "_raw"]);
                 if (approvalPkg.printReadyBlob) files.push([approvalPkg.printReadyBlob, baseName + "_print-ready.pdf"]);
                 approvalPkg.previewBlobs.forEach((b, i) => { if (b) files.push([b, `${baseName}_preview_${sideNames[i] || ("side_" + (i+1))}.jpg`]); });
+                if (approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
                 if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
                 for (let i = 0; i < files.length; i++) {
                   dlFile(files[i][0], files[i][1]);
@@ -2040,6 +2113,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                     {rawFileRef.current && <button type="button" onClick={() => dlFile(rawFileRef.current, rawFileRef.current.name || baseName + "_raw")} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,.12)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "rgba(255,255,255,.5)" }}>Raw file</button>}
                     {approvalPkg.printReadyBlob && <button type="button" onClick={() => dlFile(approvalPkg.printReadyBlob, baseName + "_print-ready.pdf")} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,.12)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "rgba(255,255,255,.5)" }}>Print-ready PDF</button>}
                     {previewCount > 0 && <button type="button" onClick={() => approvalPkg.previewBlobs.forEach((b, i) => { if (b) dlFile(b, `${baseName}_preview_${sideNames[i] || ("side_" + (i+1))}.jpg`); })} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,.12)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "rgba(255,255,255,.5)" }}>Previews ({previewCount})</button>}
+                    {approvalPkg.previewHtmlBlob && <button type="button" onClick={() => dlFile(approvalPkg.previewHtmlBlob, baseName + "_preview.html")} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(99,102,241,.4)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(99,102,241,.12)", color: "#a5b4fc" }}>Preview HTML</button>}
                     <button type="button" onClick={() => dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt")} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,.12)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "rgba(255,255,255,.5)" }}>Manifest</button>
                   </div>
                 </div>

@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · CB-GUIDES-LABEL</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · CB-PREVIEW-HTML</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1983,8 +1983,109 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // 1. Print-ready PDF (300 DPI, transforms baked in) — or raw file if no transforms needed
   // 2. Screen preview images (what the customer saw, ~150 DPI JPEGs)
   // 3. Manipulation manifest (text describing all transforms)
-  // 4. Raw file is already in rawFileRef
-  // Returns { printReadyBlob, previewBlobs[], manifestBlob, skippedGeneration }
+  // 4. Standalone preview HTML — self-contained 3D book mockup customer can email/save
+  // 5. Raw file is already in rawFileRef
+  // Returns { printReadyBlob, previewBlobs[], manifestBlob, previewHtmlBlob, skippedGeneration }
+
+  // Standalone HTML 3D book preview — saddle-stitched coupon book shape.
+  function buildPreviewHtml() {
+    const pgs = (trimmedPages && trimmedPages.length === displayPages.length) ? trimmedPages : displayPages;
+    if (!pgs || pgs.length < 2) return null;
+    const totalPgs = pgs.length;
+    const pageSrcs = pgs.map(p => p.dataUrl || "");
+    const ratio = `${dims.w}/${dims.h}`;
+    const sizeStr = `${dims.w}″ × ${dims.h}″`;
+    const generated = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+    const bookH = 440;
+    const bookW = Math.round(bookH * (dims.w / dims.h));
+    const halfDepth = Math.max(2, Math.min(8, totalPgs * 0.15));
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print Preview · Coupon Book · ${sizeStr}</title><style>
+*{box-sizing:border-box}
+body{margin:0;padding:36px 18px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#f0eee9,#e6e2d8);color:#2b2b2b;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+header{text-align:center;margin-bottom:28px;max-width:720px}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#ec008c;margin-bottom:8px;display:inline-flex;gap:6px;align-items:center}
+.eyebrow .dots{display:inline-flex;gap:3px}.eyebrow .dot{width:5px;height:5px;border-radius:50%}
+.eyebrow .c{background:#00aeef}.eyebrow .m{background:#ec008c}.eyebrow .y{background:#fff200}.eyebrow .k{background:#231f20}
+h1{font-weight:800;letter-spacing:-0.02em;line-height:1.05;font-size:36px;margin:0;text-transform:uppercase}
+h1 small{font-weight:700;font-size:18px;color:#888;display:block;margin-top:6px;letter-spacing:.04em}
+.meta{margin-top:14px;color:#666;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.stage{perspective:1500px;width:100%;max-width:760px;height:520px;display:flex;align-items:center;justify-content:center;margin:0 auto}
+.stage.flat{perspective:none}
+.book{position:relative;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.4,0,.2,1);cursor:grab;width:${bookW}px;height:${bookH}px;will-change:transform}
+.book:active{cursor:grabbing}
+.face{position:absolute;left:0;top:0;width:${bookW}px;height:${bookH}px;background-position:center;background-size:cover;background-color:#f8f5f0;backface-visibility:hidden;box-shadow:0 8px 22px rgba(0,0,0,.18)}
+.face.front{transform:translateZ(${halfDepth}px);border-radius:1px 4px 4px 1px}
+.face.back{transform:rotateY(180deg) translateZ(${halfDepth}px);border-radius:4px 1px 1px 4px}
+.face.top{height:${halfDepth*2}px;width:${bookW}px;transform:rotateX(90deg) translateY(-${halfDepth}px);transform-origin:top center;background:repeating-linear-gradient(0deg,#f5f0e8 0,#e8e0d4 1px,#f0ebe3 2px);box-shadow:none}
+.face.bottom{height:${halfDepth*2}px;width:${bookW}px;top:${bookH}px;transform:rotateX(-90deg) translateY(-${halfDepth*2}px);transform-origin:top center;background:repeating-linear-gradient(0deg,#f5f0e8 0,#e8e0d4 1px,#f0ebe3 2px);box-shadow:none}
+.face.fore{width:${halfDepth*2}px;left:${bookW}px;transform:rotateY(90deg) translateX(-${halfDepth}px);transform-origin:left center;background:repeating-linear-gradient(0deg,#f5f0e8 0,#e8e0d4 1px,#f0ebe3 2px);box-shadow:none}
+.shadow{position:absolute;width:80%;height:18px;left:10%;bottom:-22px;background:radial-gradient(ellipse at center,rgba(0,0,0,.35),transparent 70%);filter:blur(6px);pointer-events:none}
+.flat-page{width:100%;max-width:520px;background:#fff;box-shadow:0 14px 36px rgba(0,0,0,.18);aspect-ratio:${ratio};background-position:center;background-size:cover;border-radius:2px}
+.controls{margin-top:28px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
+.controls .group{display:flex;border-radius:6px;overflow:hidden;border:1px solid #d4cdbe;background:#fff}
+.controls .group button{padding:8px 14px;font-size:12px;font-weight:600;border:none;background:transparent;color:#555;cursor:pointer;font-family:inherit;border-right:1px solid #e5e0d2;transition:all .15s}
+.controls .group button:last-child{border-right:none}
+.controls .group button.on{background:#ec008c;color:#fff}
+.controls .group button:hover:not(.on):not(:disabled){background:#fbf6ee}
+.controls .group button:disabled{opacity:.3;cursor:not-allowed}
+.pageInd{font-size:13px;font-weight:600;color:#666;min-width:120px;text-align:center;letter-spacing:.04em}
+footer{margin-top:auto;padding-top:36px;color:#999;font-size:10px;letter-spacing:.08em;text-transform:uppercase;text-align:center}
+footer a{color:#888;text-decoration:none}
+footer a:hover{color:#ec008c}
+@media(max-width:540px){h1{font-size:24px}h1 small{font-size:14px}.stage{height:380px}}
+</style></head><body>
+<header>
+<div class="eyebrow"><span class="dots"><span class="dot c"></span><span class="dot m"></span><span class="dot y"></span><span class="dot k"></span></span>Print Preview · Coupon Book</div>
+<h1>${dims.w}″ × ${dims.h}″<small>${pageCount} pages · saddle stitched</small></h1>
+<div class="meta">Generated ${generated}</div>
+</header>
+<div class="stage" id="stage3d">
+  <div class="book" id="book" style="transform:rotateX(-12deg) rotateY(-22deg)">
+    <div class="face front" style="background-image:url('${pageSrcs[0]}')"></div>
+    <div class="face back" style="background-image:url('${pageSrcs[totalPgs-1]}')"></div>
+    <div class="face top"></div>
+    <div class="face bottom"></div>
+    <div class="face fore"></div>
+    <div class="shadow"></div>
+  </div>
+</div>
+<div class="stage flat" id="stageFlat" style="display:none"><div class="flat-page" id="flatPage"></div></div>
+<div class="controls">
+  <div class="group" id="modeGroup">
+    <button class="on" data-mode="closed">3D Cover</button>
+    <button data-mode="page">Pages</button>
+  </div>
+  <button id="prev" style="padding:8px 14px;font-size:12px;font-weight:600;border:1px solid #d4cdbe;background:#fff;color:#555;cursor:pointer;font-family:inherit;border-radius:6px" disabled>← Prev</button>
+  <span class="pageInd" id="pageInd">Cover</span>
+  <button id="next" style="padding:8px 14px;font-size:12px;font-weight:600;border:1px solid #d4cdbe;background:#fff;color:#555;cursor:pointer;font-family:inherit;border-radius:6px" disabled>Next →</button>
+</div>
+<footer>Priority Print Service · <a href="https://priorityprintservice.com">priorityprintservice.com</a> · Drag the book to rotate</footer>
+<script>
+const pages=${JSON.stringify(pageSrcs)};
+const N=pages.length;
+let mode='closed',cur=0;
+const stage3d=document.getElementById('stage3d'),stageFlat=document.getElementById('stageFlat'),flat=document.getElementById('flatPage'),ind=document.getElementById('pageInd'),prev=document.getElementById('prev'),next=document.getElementById('next'),book=document.getElementById('book'),modeGroup=document.getElementById('modeGroup');
+function update(){
+  if(mode==='closed'){stage3d.style.display='flex';stageFlat.style.display='none';ind.textContent='Cover';prev.disabled=true;next.disabled=true;}
+  else{stage3d.style.display='none';stageFlat.style.display='flex';flat.style.backgroundImage="url('"+pages[cur]+"')";ind.textContent='Page '+(cur+1)+' / '+N;prev.disabled=cur===0;next.disabled=cur===N-1;}
+  modeGroup.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.mode===mode));
+}
+modeGroup.addEventListener('click',e=>{if(e.target.dataset.mode){mode=e.target.dataset.mode;update();}});
+prev.onclick=()=>{if(cur>0){cur--;update();}};
+next.onclick=()=>{if(cur<N-1){cur++;update();}};
+document.addEventListener('keydown',e=>{if(mode==='page'){if(e.key==='ArrowLeft')prev.click();else if(e.key==='ArrowRight')next.click();}});
+let drag=null,rot={x:-12,y:-22};
+book.addEventListener('mousedown',e=>{drag={sx:e.clientX,sy:e.clientY,bx:rot.x,by:rot.y};book.style.transition='none';e.preventDefault();});
+window.addEventListener('mousemove',e=>{if(!drag)return;rot.y=drag.by+(e.clientX-drag.sx)*0.5;rot.x=Math.max(-70,Math.min(70,drag.bx-(e.clientY-drag.sy)*0.5));book.style.transform='rotateX('+rot.x+'deg) rotateY('+rot.y+'deg)';});
+window.addEventListener('mouseup',()=>{if(drag){book.style.transition='';drag=null;}});
+book.addEventListener('touchstart',e=>{const t=e.touches[0];drag={sx:t.clientX,sy:t.clientY,bx:rot.x,by:rot.y};book.style.transition='none';},{passive:true});
+window.addEventListener('touchmove',e=>{if(!drag||!e.touches[0])return;const t=e.touches[0];rot.y=drag.by+(t.clientX-drag.sx)*0.5;rot.x=Math.max(-70,Math.min(70,drag.bx-(t.clientY-drag.sy)*0.5));book.style.transform='rotateX('+rot.x+'deg) rotateY('+rot.y+'deg)';e.preventDefault();},{passive:false});
+window.addEventListener('touchend',()=>{if(drag){book.style.transition='';drag=null;}});
+update();
+</script></body></html>`;
+    return new Blob([html], { type: "text/html" });
+  }
+
   async function generateApprovalPackage() {
     const BLEED = 0.125;
     const SAFETY = 0.125;
@@ -2275,7 +2376,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
-    return { printReadyBlob, previewBlobs, manifestBlob, skippedGeneration: noTransforms };
+    const previewHtmlBlob = buildPreviewHtml();
+    return { printReadyBlob, previewBlobs, manifestBlob, previewHtmlBlob, skippedGeneration: noTransforms };
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -3152,6 +3254,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             pkg.previewBlobs.forEach((b, i) => {
                               if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
                             });
+                            if (pkg.previewHtmlBlob) files.push(new File([pkg.previewHtmlBlob], baseName + "_preview.html", { type: "text/html" }));
                             files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
                             onArtwork({ type: "files", list: files });
                           }
@@ -3218,6 +3321,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                     approvalPkg.previewBlobs.forEach((b, i) => {
                       if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
                     });
+                    if (approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
                     if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
                     for (let i = 0; i < files.length; i++) {
                       dlFile(files[i][0], files[i][1]);
@@ -3251,6 +3355,12 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
                           }}>Previews ({previewCount})</button>
+                        )}
+                        {approvalPkg.previewHtmlBlob && (
+                          <button type="button" onClick={() => dlFile(approvalPkg.previewHtmlBlob, baseName + "_preview.html")} style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(99,102,241,.4)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(99,102,241,.12)", color:"#a5b4fc",
+                          }}>Preview HTML</button>
                         )}
                         <button type="button" onClick={() => dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt")} style={{
                           padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
