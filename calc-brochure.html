@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-HTML-FIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-FOLDS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1474,6 +1474,12 @@ h1 small{font-weight:700;font-size:18px;color:#888;display:block;margin-top:6px;
 .sheet.front{transform:rotateY(0deg)}
 .sheet.back{transform:rotateY(180deg)}
 .sheet-wrap.flipped{transform:rotateY(180deg)}
+.fold-line{position:absolute;pointer-events:none;z-index:5}
+.fold-line.v{top:0;bottom:0;width:0;border-left:1.5px dashed #f97316}
+.fold-line.h{left:0;right:0;height:0;border-top:1.5px dashed #f97316}
+.fold-line span{position:absolute;background:rgba(0,0,0,.55);color:#f97316;padding:2px 6px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.06em;white-space:nowrap;text-transform:uppercase}
+.fold-line.v span{top:8px;left:4px}
+.fold-line.h span{left:8px;top:2px}
 .controls{margin-top:28px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
 .controls .group{display:flex;border-radius:6px;overflow:hidden;border:1px solid #d4cdbe;background:#fff}
 .controls .group button{padding:8px 14px;font-size:12px;font-weight:600;border:none;background:transparent;color:#555;cursor:pointer;font-family:inherit;border-right:1px solid #e5e0d2;transition:all .15s}
@@ -1501,17 +1507,40 @@ footer a:hover{color:#ec008c}
     <button class="on" data-side="front">Front</button>
     <button data-side="back" ${back ? "" : "disabled"}>Back</button>
   </div>
+  ${foldLines.length ? `<div class="group" id="foldGroup">
+    <button class="on" data-folds="on">Folds: Shown</button>
+    <button data-folds="off">Folds: Hidden</button>
+  </div>` : ""}
 </div>
 <footer>Priority Print Service · <a href="https://priorityprintservice.com">priorityprintservice.com</a></footer>
 <script>
 const wrap=document.getElementById('wrap'),modeGroup=document.getElementById('modeGroup');
-let side='front';
+const foldGroup=document.getElementById('foldGroup');
+const folds=${JSON.stringify(foldLines)};
+let side='front',foldsOn=true;
+// Render fold lines onto each sheet so they ride with the front/back flip.
+// Position uses the same pct math the in-calc proof modal does (% of trim).
+function renderFolds(){
+  document.querySelectorAll('.sheet').forEach(sh=>{
+    sh.querySelectorAll('.fold-line').forEach(n=>n.remove());
+    if(!foldsOn) return;
+    folds.forEach((fl,i)=>{
+      const d=document.createElement('div');
+      d.className='fold-line '+(fl.vertical?'v':'h');
+      if(fl.vertical) d.style.left=fl.pct+'%'; else d.style.top=fl.pct+'%';
+      d.innerHTML='<span>Fold '+(i+1)+'</span>';
+      sh.appendChild(d);
+    });
+  });
+}
 function update(){
   wrap.classList.toggle('flipped',side==='back');
   modeGroup.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.side===side));
+  if(foldGroup) foldGroup.querySelectorAll('button').forEach(b=>b.classList.toggle('on',(b.dataset.folds==='on')===foldsOn));
 }
 modeGroup.addEventListener('click',e=>{if(e.target.dataset.side&&!e.target.disabled){side=e.target.dataset.side;update();}});
-update();
+if(foldGroup) foldGroup.addEventListener('click',e=>{if(e.target.dataset.folds){foldsOn=e.target.dataset.folds==='on';renderFolds();update();}});
+renderFolds();update();
 <\/script></body></html>`;
     return new Blob([html], { type: "text/html" });
   }
