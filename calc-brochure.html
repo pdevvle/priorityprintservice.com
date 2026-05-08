@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-3D</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-3D-FIX</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1450,167 +1450,348 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   // customer can email/save a self-contained flip-between mockup without revisiting
   // the calculator. No 3D fold animation in this version (keeps the file lean and
   // the math simple); a Front | Back toggle shows each side at the trim aspect.
+  // Standalone HTML preview — verbatim port of brochure-fold-previewer.html's
+  // Share-button output (the user's known-good reference). Uses the previewer's
+  // panel-wrap / hinge / face / hingeL / hingeR / hingeCtr / gateL / gateR /
+  // hinge1 / hinge2 naming so it doesn't share state with the in-calc
+  // FoldRenderer (which uses fold-* names).
   function buildPreviewHtml() {
     const front = trimmedFrontUrl || frontArt?.dataUrl;
     const back = trimmedBackUrl || backArt?.dataUrl;
     if (!front && !back) return null;
-    const ratio = `${longEdge}/${shortEdge}`;
     const sizeStr = `${longEdge}″ × ${shortEdge}″`;
     const generated = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
-    const foldKey = FOLD_KEY_MAP[foldType] || null;
-    const foldLabel = (foldType && foldType !== "flat") ? `${panels}-panel ${foldType}` : "flat";
-    // Use trim aspect when art is trimmed, art's actual dims otherwise (matches in-calc FoldRenderer wiring)
-    const fDims = trimmedFrontUrl ? { w: longEdge, h: shortEdge } : (frontArt?.dims || null);
-    const bDims = trimmedBackUrl ? { w: longEdge, h: shortEdge } : (backArt?.dims || null);
 
-    // Bundle the existing vanilla fold helpers via .toString() — no duplication, no
-    // copy-paste drift. These are pure DOM-builder + transform-applier functions
-    // that run without React, so they slot straight into the standalone HTML.
-    const helpersSrc = [
-      safeSrc, foldImgWrap, foldMkF, foldMkFGate,
-      foldBuildNest, foldBuildDParallel, foldBuildTri, foldBuildGate, foldBuildDGate,
-      foldApplyView,
-    ].map(f => f.toString()).join("\n\n");
+    // Map calc fold keys to the previewer's fold keys + drop unsupported ones.
+    // The previewer doesn't have `double-parallel`, so fall back to a flat front/back
+    // flip card for that case.
+    const PREVIEWER_FOLDS = {
+      "accordion-3": { n:3, mode:"nested",
+        views:[
+          {label:"Front (Open)",sc:[8,-6,0,0],f:[0,0]},
+          {label:"Accordion Fold",sc:[20,-35,60,0],f:[-175,168]},
+          {label:"Back (Open)",sc:[8,174,0,0],f:[0,0]}]},
+      "accordion-4": { n:4, mode:"nested",
+        views:[
+          {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0]},
+          {label:"Accordion Fold",sc:[20,-35,100,0],f:[-175,168,-162]},
+          {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0]}]},
+      "tri-fold": { n:3, mode:"trifold",
+        views:[
+          {label:"Inside (Open)",sc:[8,-6,0,0],f:[0,0],tz:[0,0]},
+          {label:"Right Tucks In",sc:[20,-35,50,0],f:[0,-179],tz:[0,0]},
+          {label:"Tri-Fold",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+          {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0],tz:[0,0]}]},
+      "half-fold": { n:2, mode:"nested",
+        views:[
+          {label:"Front (Open)",sc:[8,-6,0,0],f:[0]},
+          {label:"Half Fold",sc:[20,-30,60,0],f:[-175]},
+          {label:"Back (Open)",sc:[8,174,0,0],f:[0]}]},
+      "gate-fold": { n:4, mode:"gate3",
+        views:[
+          {label:"Front (Open)",sc:[8,-6,0,0],g:[0,0]},
+          {label:"Gate Fold",sc:[20,-25,30,0],g:[175,-175]},
+          {label:"Back (Open)",sc:[8,174,0,0],g:[0,0]}]},
+      "double-gate": { n:4, mode:"dgate",
+        views:[
+          {label:"Inside (Open)",sc:[8,-5,0,0],dg:[0,0,0],tzf:[0,0,0]},
+          {label:"Flaps In",sc:[20,-30,50,0],dg:[178,-178,0],tzf:[0.04,0.04,0]},
+          {label:"Double Gate Fold",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+          {label:"Outside (Open)",sc:[8,174,0,0],dg:[0,0,0],tzf:[0,0,0]}]},
+      "roll-fold": { n:4, mode:"nested",
+        views:[
+          {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
+          {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
+          {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
+          {label:"Roll Fold",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+          {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
+    };
+    const previewerKey = FOLD_KEY_MAP[foldType] || null;
+    const fold = previewerKey ? PREVIEWER_FOLDS[previewerKey] : null;
 
-    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print Preview · Brochure · ${sizeStr}</title><style>
-*{box-sizing:border-box}
-body{margin:0;padding:36px 18px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#1a1d23,#2a2e36);color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center}
-header{text-align:center;margin-bottom:24px;max-width:720px}
-.eyebrow{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#ec008c;margin-bottom:8px;display:inline-flex;gap:6px;align-items:center}
-.eyebrow .dots{display:inline-flex;gap:3px}.eyebrow .dot{width:5px;height:5px;border-radius:50%}
-.eyebrow .c{background:#00aeef}.eyebrow .m{background:#ec008c}.eyebrow .y{background:#fff200}.eyebrow .k{background:#231f20}
-h1{font-weight:800;letter-spacing:-0.02em;line-height:1.05;font-size:36px;margin:0;text-transform:uppercase;color:#fff}
-h1 small{font-weight:700;font-size:18px;color:rgba(255,255,255,.5);display:block;margin-top:6px;letter-spacing:.04em}
-.meta{margin-top:14px;color:rgba(255,255,255,.45);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
-/* Fold viewport CSS — copied from calc-brochure.html so the standalone renders identically */
-.fold-viewport{perspective:1800px;perspective-origin:50% 50%;display:flex;justify-content:center;align-items:center;position:relative;overflow:hidden;border-radius:8px;background:linear-gradient(135deg,#1a1d23,#2a2e36);border:1px solid rgba(255,255,255,.08);min-height:280px;width:100%;max-width:760px;margin:0 auto}
-.fold-scene{position:relative;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
-.fold-panel-wrap{position:absolute;top:0;left:0;transform-style:preserve-3d}
-.fold-hinge{position:absolute;top:0;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
-.fold-face{position:absolute;top:0;left:0;backface-visibility:hidden;overflow:hidden}
-.fold-face img{display:block}
-.fold-face.ff{z-index:2}
-.fold-face.fb{transform:rotateY(180deg);z-index:1}
-/* Flat fallback (no fold selected) — Front | Back flip card */
-.flat-stage{perspective:1500px;width:100%;max-width:760px;display:flex;align-items:center;justify-content:center;margin:0 auto}
+    // Pixel dimensions for the fold-builder math — the previewer's helpers compute
+    // panel aspect from a w/h pair, scale doesn't matter as long as the ratio is
+    // right. Use trim inches × 100 so pa = trimW/trimH (clean numbers).
+    const detW = Math.round(longEdge * 100);
+    const detH = Math.round(shortEdge * 100);
+    const dir = "left"; // previewer's fold-direction sign — left = +1
+    const ori = "landscape"; // calc-brochure renders landscape only
+
+    if (!fold) {
+      // No supported fold: flat front/back flip card
+      const ratio = `${longEdge}/${shortEdge}`;
+      const flatHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print Preview · Brochure · ${sizeStr}</title><style>
+*{box-sizing:border-box}body{margin:0;padding:36px 18px 24px;font-family:-apple-system,'Segoe UI',Arial,sans-serif;background:#1a1d23;color:#e8eaed;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;color:#fff;margin:0 0 4px}.tagline{font-size:.72rem;color:#b0b7c3}
+.stage{perspective:1500px;width:100%;max-width:760px;display:flex;align-items:center;justify-content:center;margin:0 auto}
 .flat-wrap{position:relative;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.4,0,.2,1);width:100%;max-width:680px;aspect-ratio:${ratio}}
 .flat-sheet{position:absolute;inset:0;background:#fff;background-position:center;background-size:cover;backface-visibility:hidden;box-shadow:0 14px 36px rgba(0,0,0,.4);border-radius:2px}
-.flat-sheet.front{transform:rotateY(0deg)}
-.flat-sheet.back{transform:rotateY(180deg)}
-.flat-wrap.flipped{transform:rotateY(180deg)}
-.controls{margin-top:24px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
-.controls .group{display:flex;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04)}
-.controls .group button{padding:8px 14px;font-size:12px;font-weight:600;border:none;background:transparent;color:rgba(255,255,255,.55);cursor:pointer;font-family:inherit;border-right:1px solid rgba(255,255,255,.08);transition:all .15s;white-space:nowrap}
-.controls .group button:last-child{border-right:none}
-.controls .group button.on{background:#ec008c;color:#fff}
-.controls .group button:hover:not(.on):not(:disabled){background:rgba(255,255,255,.08);color:#fff}
-.controls .group button:disabled{opacity:.3;cursor:not-allowed}
-.hint{margin-top:12px;font-size:11px;color:rgba(255,255,255,.4);letter-spacing:.04em}
-footer{margin-top:auto;padding-top:36px;color:rgba(255,255,255,.35);font-size:10px;letter-spacing:.08em;text-transform:uppercase;text-align:center}
-footer a{color:rgba(255,255,255,.45);text-decoration:none}
-footer a:hover{color:#ec008c}
-@media(max-width:540px){h1{font-size:24px}h1 small{font-size:14px}}
-</style></head><body>
-<header>
-<div class="eyebrow"><span class="dots"><span class="dot c"></span><span class="dot m"></span><span class="dot y"></span><span class="dot k"></span></span>Print Preview · Brochure & Flat Print</div>
-<h1>${longEdge}″ × ${shortEdge}″<small>${foldLabel}</small></h1>
-<div class="meta">Generated ${generated}</div>
-</header>
-<div id="root"></div>
-<div class="controls" id="ctrls"></div>
-<div class="hint" id="hint"></div>
-<footer>Priority Print Service · <a href="https://priorityprintservice.com">priorityprintservice.com</a></footer>
+.flat-sheet.front{transform:rotateY(0deg)}.flat-sheet.back{transform:rotateY(180deg)}.flat-wrap.flipped{transform:rotateY(180deg)}
+.controls{margin-top:24px;display:flex;gap:10px;justify-content:center}
+button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#b0b7c3;padding:9px 22px;border-radius:8px;cursor:pointer;font-size:.76rem;font-weight:500;letter-spacing:.06em;text-transform:uppercase;transition:all .3s;font-family:inherit}
+button:hover:not(:disabled){background:rgba(0,174,239,.12);border-color:#00AEEF;color:#00AEEF}button.on{background:#00AEEF;border-color:#00AEEF;color:#000}button:disabled{opacity:.3;cursor:not-allowed}
+.credit{margin-top:30px;font-size:.6rem;color:rgba(255,255,255,.3)}
+</style></head><body><header><h1>Brochure Preview · ${sizeStr}</h1><div class="tagline">Priority Print Service · ${generated}</div></header>
+<div class="stage"><div class="flat-wrap" id="wrap"><div class="flat-sheet front" style="${front ? `background-image:url('${front}')` : 'background:#f8f5f0'}"></div><div class="flat-sheet back" style="${back ? `background-image:url('${back}')` : 'background:#f8f5f0'}"></div></div></div>
+<div class="controls"><button class="on" id="btnFront">Front</button><button id="btnBack" ${back ? '' : 'disabled'}>Back</button></div>
+<div class="credit">Generated by Priority Print Service</div>
 <script>
-// Constants from the calculator — shipped inline so the preview is offline-capable
-var FOLDS_3D = ${JSON.stringify(FOLDS_3D)};
-var frontSrc = ${JSON.stringify(front || "")};
-var backSrc = ${JSON.stringify(back || "")};
-var frontDims = ${JSON.stringify(fDims)};
-var backDims = ${JSON.stringify(bDims)};
-var longEdge = ${JSON.stringify(longEdge)};
-var shortEdge = ${JSON.stringify(shortEdge)};
-var foldKey = ${JSON.stringify(foldKey)};
+var wrap=document.getElementById('wrap'),btnF=document.getElementById('btnFront'),btnB=document.getElementById('btnBack');
+btnF.addEventListener('click',function(){wrap.classList.remove('flipped');btnF.classList.add('on');btnB.classList.remove('on');});
+btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.add('flipped');btnB.classList.add('on');btnF.classList.remove('on');});
+<\/script></body></html>`;
+      return new Blob([flatHtml], { type: "text/html" });
+    }
 
-// Vanilla fold-rendering helpers, copied verbatim from the calculator via .toString()
-${helpersSrc}
+    // 3D fold preview — verbatim port of brochure-fold-previewer.html buildShareHTML
+    const foldJSON = JSON.stringify(fold);
+    const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Brochure Preview – ${previewerKey}</title>
+<style>
+:root{--brand:#00AEEF;--brand-light:#33c4ff;--bg:#1a1d23;--text:#e8eaed;--text-muted:#b0b7c3;--surface-border:rgba(255,255,255,0.12)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{min-height:100vh;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;color:var(--text);display:flex;flex-direction:column;align-items:center;padding:30px 20px}
+h1{font-size:1.3rem;font-weight:700;color:#fff;margin-bottom:4px}
+.tagline{font-size:.72rem;color:var(--text-muted);margin-bottom:20px}
+.meta{font-size:.72rem;color:var(--text-muted);margin-bottom:20px;text-align:center;line-height:1.6}
+.meta strong{color:var(--brand)}
+.view-controls{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;justify-content:center}
+.view-controls button{background:rgba(255,255,255,.06);border:1px solid var(--surface-border);color:var(--text-muted);padding:9px 22px;border-radius:8px;cursor:pointer;font-size:.76rem;font-weight:500;letter-spacing:.06em;text-transform:uppercase;transition:all .3s;font-family:inherit}
+.view-controls button:hover{background:rgba(0,174,239,.12);border-color:var(--brand);color:var(--brand)}
+.view-controls button.on{background:var(--brand);border-color:var(--brand);color:#000;box-shadow:0 4px 20px rgba(0,174,239,.3)}
+.state-label{text-align:center;font-size:.72rem;font-weight:500;color:var(--text-muted);letter-spacing:.12em;text-transform:uppercase;margin-bottom:14px;opacity:.7}
+.viewport{width:100%;max-width:960px;min-height:420px;perspective:1800px;display:flex;justify-content:center;align-items:center;cursor:grab;user-select:none;position:relative;overflow:hidden;border-radius:14px;background:rgba(0,0,0,.15);border:1px solid var(--surface-border);margin:0 auto 16px}
+.viewport:active{cursor:grabbing}
+.viewport .drag-hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:.62rem;color:rgba(255,255,255,.45);letter-spacing:.08em;text-transform:uppercase;pointer-events:none;opacity:1;transition:opacity .5s}
+.viewport .drag-hint.hidden{opacity:0}
+.scene{position:relative;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
+.panel-wrap{position:absolute;transform-style:preserve-3d}
+.hinge{position:absolute;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
+.face{position:absolute;top:0;left:0;backface-visibility:hidden;overflow:hidden}
+.face img{height:100%;display:block}
+.face.f{z-index:2}.face.b{transform:rotateY(180deg);z-index:1}
+.info{text-align:center;font-size:.68rem;color:rgba(255,255,255,.45);margin-top:10px}
+.zoom-bar{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:8px}
+.zoom-btn{width:30px;height:30px;border:1px solid rgba(255,255,255,.12);border-radius:6px;background:rgba(255,255,255,.06);color:#b0b7c3;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;padding:0}
+.zoom-btn:hover{background:rgba(0,174,239,.12);border-color:#00AEEF;color:#00AEEF}
+.zoom-pct{font-size:.68rem;color:#b0b7c3;min-width:40px;text-align:center;font-variant-numeric:tabular-nums}
+.zoom-fit{padding:4px 12px;border:1px solid rgba(255,255,255,.12);border-radius:6px;background:rgba(255,255,255,.06);color:#b0b7c3;font-size:.64rem;font-weight:600;cursor:pointer;text-transform:uppercase;letter-spacing:.06em;transition:all .2s}
+.zoom-fit:hover{background:rgba(0,174,239,.12);border-color:#00AEEF;color:#00AEEF}
+#zoomSlider{width:120px;height:4px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.12);border-radius:2px;outline:none;cursor:pointer}
+#zoomSlider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#00AEEF;cursor:pointer;border:none}
+.credit{margin-top:30px;font-size:.6rem;color:rgba(255,255,255,.3);text-align:center}
+@media(max-width:700px){.viewport{perspective:1000px;min-height:280px}}
+</style></head><body>
+<h1>Brochure Fold Preview</h1>
+<div class="tagline">Priority Print Service · 3D Mockup</div>
+<div class="meta"><strong>Fold:</strong> ${previewerKey} · <strong>Size:</strong> ${sizeStr} · <strong>Generated:</strong> ${generated}</div>
+<div class="view-controls" id="viewControls"></div>
+<div class="state-label" id="stateLabel"></div>
+<div class="viewport" id="vp"><div class="scene" id="scene"></div><div class="drag-hint" id="dragHint">↔ Drag to rotate</div></div>
+<div class="zoom-bar"><button class="zoom-btn" id="zo">−</button><input type="range" id="zoomSlider" min="20" max="250" value="100" step="5"><button class="zoom-btn" id="zi">+</button><span class="zoom-pct" id="zp">100%</span><button class="zoom-fit" id="zf">Fit</button></div>
+<p class="info">Interactive 3D mockup · Use the view buttons to step through the fold</p>
+<div class="credit">Generated by Priority Print Service</div>
+<script>
+const $=id=>document.getElementById(id);
+const frontUrl="${front || ""}";
+const backUrl="${back || front || ""}";
+const detW=${detW},detH=${detH};
+const foldDir="${dir}",ori="${ori}";
+const fold=${foldJSON};
+let cScale=1,userZoom=1,currentRX=0,currentRY=0;
 
-// Mount the fold scene or fall back to a flat front/back flip card
-var root = document.getElementById('root');
-var ctrls = document.getElementById('ctrls');
-var hint = document.getElementById('hint');
-var fold = foldKey && FOLDS_3D[foldKey] ? FOLDS_3D[foldKey] : null;
+function ds(){return foldDir==='left'?1:-1}
+function es(){return cScale*userZoom}
+function setZoom(z){userZoom=Math.max(0.2,Math.min(2.5,z));$('zoomSlider').value=Math.round(userZoom*100);$('zp').textContent=Math.round(userZoom*100)+'%';$('scene').style.transition='transform .4s ease';$('scene').style.transform=\`scale(\${es()}) rotateX(\${currentRX}deg) rotateY(\${currentRY}deg)\`}
+$('zo').addEventListener('click',()=>setZoom(userZoom-0.1));
+$('zi').addEventListener('click',()=>setZoom(userZoom+0.1));
+$('zf').addEventListener('click',()=>setZoom(1));
+$('zoomSlider').addEventListener('input',e=>setZoom(parseInt(e.target.value)/100));
 
-if (fold) {
-  // 3D fold preview
-  var isMobile = window.innerWidth <= 700;
-  var maxDim = isMobile ? 260 : 400;
-  var nPanels = fold.mode === 'gate3' ? 4 : fold.n;
-  var pa = (longEdge / nPanels) / shortEdge;
-  var pw = Math.round(Math.min(maxDim / nPanels, (isMobile ? window.innerWidth - 80 : 700) / nPanels));
-  var ph = Math.round(pw / pa);
-  var iW = pw * nPanels, iH = ph;
-  var qw = fold.mode === 'gate3' ? iW / 4 : pw;
-  var scale = iW / longEdge;
-  var fRW = frontDims ? frontDims.w * scale : null;
-  var fRH = frontDims ? frontDims.h * scale : null;
-  var bRW = backDims ? backDims.w * scale : null;
-  var bRH = backDims ? backDims.h * scale : null;
-  var swap = !!fold.swap;
-  var sceneHtml = '';
-  if (fold.mode === 'nested') sceneHtml = foldBuildNest(0, fold.n, pw, ph, iW, iH, false, frontSrc, backSrc, fRW, fRH, bRW, bRH, swap);
-  else if (fold.mode === 'dparallel') sceneHtml = foldBuildDParallel(pw, ph, iW, iH, false, frontSrc, backSrc, fRW, fRH, bRW, bRH, swap);
-  else if (fold.mode === 'trifold') sceneHtml = foldBuildTri(pw, ph, iW, iH, false, fold.n, frontSrc, backSrc, fRW, fRH, bRW, bRH);
-  else if (fold.mode === 'gate3') sceneHtml = foldBuildGate(qw, ph, iW, iH, false, frontSrc, backSrc, fRW, fRH, bRW, bRH);
-  else if (fold.mode === 'dgate') sceneHtml = foldBuildDGate(pw, ph, iW, iH, false, fold.n, frontSrc, backSrc, fRW, fRH, bRW, bRH);
-
-  root.innerHTML = '<div class="fold-viewport" style="min-height:' + (isMobile ? 220 : 360) + 'px"><div class="fold-scene" id="foldScene" style="transform-style:preserve-3d;position:relative;width:' + iW + 'px;height:' + iH + 'px">' + sceneHtml + '</div></div>';
-  var sceneEl = document.getElementById('foldScene');
-
-  // View stepper — one button per fold view (Inside Open, Folded Front, etc.)
-  var viewIdx = 0, flipped = false;
-  function applyView() { foldApplyView(sceneEl, foldKey, viewIdx, flipped ? -1 : 1); }
-  var stepGroup = document.createElement('div');
-  stepGroup.className = 'group';
-  fold.views.forEach(function(v, i) {
-    var b = document.createElement('button');
-    b.textContent = v.label;
-    b.className = i === 0 ? 'on' : '';
-    b.addEventListener('click', function() {
-      viewIdx = i;
-      stepGroup.querySelectorAll('button').forEach(function(x, j) { x.classList.toggle('on', j === i); });
-      applyView();
-    });
-    stepGroup.appendChild(b);
-  });
-  ctrls.appendChild(stepGroup);
-  // Initial paint
-  setTimeout(applyView, 80);
-  hint.textContent = 'Step through the fold sequence to see how the brochure folds together.';
-} else {
-  // Flat — Front | Back flip card
-  root.innerHTML = '<div class="flat-stage"><div class="flat-wrap" id="flatWrap">' +
-    '<div class="flat-sheet front" style="' + (frontSrc ? "background-image:url('" + frontSrc + "')" : 'background:#f8f5f0') + '"></div>' +
-    '<div class="flat-sheet back" style="' + (backSrc ? "background-image:url('" + backSrc + "')" : 'background:#f8f5f0') + '"></div>' +
-    '</div></div>';
-  var flatWrap = document.getElementById('flatWrap');
-  var sideGroup = document.createElement('div');
-  sideGroup.className = 'group';
-  ['front', 'back'].forEach(function(s) {
-    var b = document.createElement('button');
-    b.textContent = s.charAt(0).toUpperCase() + s.slice(1);
-    b.className = s === 'front' ? 'on' : '';
-    b.disabled = s === 'back' && !backSrc;
-    b.addEventListener('click', function() {
-      flatWrap.classList.toggle('flipped', s === 'back');
-      sideGroup.querySelectorAll('button').forEach(function(x) { x.classList.toggle('on', x.textContent.toLowerCase() === s); });
-    });
-    sideGroup.appendChild(b);
-  });
-  ctrls.appendChild(sideGroup);
+function mkF(idx,n,pw,ph,iW,iH,isP,swap){
+  const bi=n-1-idx;
+  const fSrc=swap?backUrl:frontUrl,bSrc=swap?frontUrl:backUrl;
+  let fml=0,fmt=0,bml=0,bmt=0;
+  if(isP){fmt=-ph*idx;bmt=-ph*bi}else{fml=-pw*idx;bml=-pw*bi}
+  return\`<div class="face f" style="width:\${pw}px;height:\${ph}px;"><img src="\${fSrc}" style="width:\${iW}px;height:\${iH}px;margin-left:\${fml}px;margin-top:\${fmt}px;"></div><div class="face b" style="width:\${pw}px;height:\${ph}px;"><img src="\${bSrc}" style="width:\${iW}px;height:\${iH}px;margin-left:\${bml}px;margin-top:\${bmt}px;"></div>\`;
 }
+
+function mkFGate(startQ,spanQ,qw,qh,iW,iH,isP,totalQ){
+  const bStartQ=totalQ-startQ-spanQ;
+  if(isP){
+    const fmt=-qh*startQ,bmt=-qh*bStartQ;
+    return\`<div class="face f" style="width:\${qw}px;height:\${qh*spanQ}px;"><img src="\${frontUrl}" style="width:\${iW}px;height:\${iH}px;margin-left:0;margin-top:\${fmt}px;"></div><div class="face b" style="width:\${qw}px;height:\${qh*spanQ}px;"><img src="\${backUrl}" style="width:\${iW}px;height:\${iH}px;margin-left:0;margin-top:\${bmt}px;"></div>\`;
+  } else {
+    const fml=-qw*startQ,bml=-qw*bStartQ;
+    return\`<div class="face f" style="width:\${qw*spanQ}px;height:\${qh}px;"><img src="\${frontUrl}" style="width:\${iW}px;height:\${iH}px;margin-left:\${fml}px;margin-top:0;"></div><div class="face b" style="width:\${qw*spanQ}px;height:\${qh}px;"><img src="\${backUrl}" style="width:\${iW}px;height:\${iH}px;margin-left:\${bml}px;margin-top:0;"></div>\`;
+  }
+}
+
+function buildNest(idx,n,pw,ph,iW,iH,isP){
+  const last=idx===n-1;
+  let h=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+  h+=mkF(idx,n,pw,ph,iW,iH,isP);
+  if(!last){
+    const hp=isP?\`left:0;top:\${ph}px;\`:\`left:\${pw}px;top:0;\`;
+    const og=isP?'center top':'left center';
+    h+=\`<div class="hinge" id="hinge\${idx+1}" style="\${hp}width:\${pw}px;height:\${ph}px;transform-origin:\${og};">\`;
+    h+=buildNest(idx+1,n,pw,ph,iW,iH,isP);
+    h+=\`</div>\`;
+  }
+  h+=\`</div>\`;return h;
+}
+
+function buildTriFold(scene,pw,ph,iW,iH,isP,n){
+  let h='';
+  if(isP){
+    h+=\`<div class="panel-wrap" style="left:0;top:\${ph}px;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(1,n,pw,ph,iW,iH,isP,true);
+    h+=\`<div class="hinge" id="hingeL" style="left:0;top:\${-ph}px;width:\${pw}px;height:\${ph}px;transform-origin:center bottom;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(0,n,pw,ph,iW,iH,isP,true);
+    h+=\`</div></div>\`;
+    h+=\`<div class="hinge" id="hingeR" style="left:0;top:\${ph}px;width:\${pw}px;height:\${ph}px;transform-origin:center top;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(2,n,pw,ph,iW,iH,isP,true);
+    h+=\`</div></div></div>\`;
+  } else {
+    h+=\`<div class="panel-wrap" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(1,n,pw,ph,iW,iH,isP,true);
+    h+=\`<div class="hinge" id="hingeL" style="left:\${-pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:right center;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(0,n,pw,ph,iW,iH,isP,true);
+    h+=\`</div></div>\`;
+    h+=\`<div class="hinge" id="hingeR" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(2,n,pw,ph,iW,iH,isP,true);
+    h+=\`</div></div></div>\`;
+  }
+  scene.innerHTML=h;
+}
+
+function buildGate3(scene,qw,qh,iW,iH,isP){
+  let h='';
+  if(isP){
+    const cH=qh*2;
+    h+=\`<div class="hinge" id="gateL" style="left:0;top:0;width:\${qw}px;height:\${qh}px;transform-origin:center bottom;">\`+mkFGate(0,1,qw,qh,iW,iH,isP,4)+\`</div>\`;
+    h+=\`<div class="panel-wrap" style="left:0;top:\${qh}px;width:\${qw}px;height:\${cH}px;">\`+mkFGate(1,2,qw,qh,iW,iH,isP,4)+\`</div>\`;
+    h+=\`<div class="hinge" id="gateR" style="left:0;top:\${qh+cH}px;width:\${qw}px;height:\${qh}px;transform-origin:center top;">\`+mkFGate(3,1,qw,qh,iW,iH,isP,4)+\`</div>\`;
+  } else {
+    const cW=qw*2;
+    h+=\`<div class="hinge" id="gateL" style="left:0;top:0;width:\${qw}px;height:\${qh}px;transform-origin:right center;">\`+mkFGate(0,1,qw,qh,iW,iH,isP,4)+\`</div>\`;
+    h+=\`<div class="panel-wrap" style="left:\${qw}px;top:0;width:\${cW}px;height:\${qh}px;">\`+mkFGate(1,2,qw,qh,iW,iH,isP,4)+\`</div>\`;
+    h+=\`<div class="hinge" id="gateR" style="left:\${qw+cW}px;top:0;width:\${qw}px;height:\${qh}px;transform-origin:left center;">\`+mkFGate(3,1,qw,qh,iW,iH,isP,4)+\`</div>\`;
+  }
+  scene.innerHTML=h;
+}
+
+function buildDGate(scene,pw,ph,iW,iH,isP,n){
+  let h='';
+  if(isP){
+    h+=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph*2}px;">\`;
+    h+=\`<div class="panel-wrap" style="left:0;top:\${ph}px;width:\${pw}px;height:\${ph}px;">\`+mkF(1,n,pw,ph,iW,iH,isP,true)+\`</div>\`;
+    h+=\`<div class="hinge" id="hingeL" style="left:0;top:0;width:\${pw}px;height:\${ph}px;transform-origin:center bottom;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(0,n,pw,ph,iW,iH,isP,true)+\`</div></div>\`;
+    h+=\`<div class="hinge" id="hingeCtr" style="left:0;top:\${ph*2}px;width:\${pw}px;height:\${ph*2}px;transform-origin:center top;">\`;
+    h+=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(2,n,pw,ph,iW,iH,isP,true)+\`</div>\`;
+    h+=\`<div class="hinge" id="hingeR" style="left:0;top:\${ph}px;width:\${pw}px;height:\${ph}px;transform-origin:center top;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(3,n,pw,ph,iW,iH,isP,true)+\`</div></div>\`;
+    h+=\`</div></div>\`;
+  } else {
+    h+=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw*2}px;height:\${ph}px;">\`;
+    h+=\`<div class="panel-wrap" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(1,n,pw,ph,iW,iH,isP,true)+\`</div>\`;
+    h+=\`<div class="hinge" id="hingeL" style="left:0;top:0;width:\${pw}px;height:\${ph}px;transform-origin:right center;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(0,n,pw,ph,iW,iH,isP,true)+\`</div></div>\`;
+    h+=\`<div class="hinge" id="hingeCtr" style="left:\${pw*2}px;top:0;width:\${pw*2}px;height:\${ph}px;transform-origin:left center;">\`;
+    h+=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(2,n,pw,ph,iW,iH,isP,true)+\`</div>\`;
+    h+=\`<div class="hinge" id="hingeR" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(3,n,pw,ph,iW,iH,isP,true)+\`</div></div>\`;
+    h+=\`</div></div>\`;
+  }
+  scene.innerHTML=h;
+}
+
+function generate(){
+  const n=fold.n,isP=ori==='portrait',scene=$('scene');
+  if(fold.mode==='gate3'){
+    const pa=isP?(detW/(detH/4)):((detW/4)/detH);
+    const mx=Math.min(200,(window.innerWidth-100)/(isP?2:4));
+    const qw=Math.round(mx),qh=Math.round(qw/pa);
+    const iW=isP?qw:qw*4,iH=isP?qh*4:qh;
+    scene.style.width=(isP?qw:(qw*4))+'px';scene.style.height=(isP?(qh*4):qh)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?qw*2:qw*4)*1.4));
+    buildGate3(scene,qw,qh,iW,iH,isP);
+  } else if(fold.mode==='dgate'){
+    const pa=isP?(detW/(detH/n)):((detW/n)/detH);
+    const mx=Math.min(200,(window.innerWidth-100)/(isP?1.5:n));
+    const pw=Math.round(mx),ph=Math.round(pw/pa);
+    const iW=isP?pw:pw*n,iH=isP?ph*n:ph;
+    scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*2:pw*n)*1.4));
+    buildDGate(scene,pw,ph,iW,iH,isP,n);
+  } else if(fold.mode==='trifold'){
+    const pa=isP?(detW/(detH/n)):((detW/n)/detH);
+    const mx=Math.min(240,(window.innerWidth-100)/(isP?1.5:n));
+    const pw=Math.round(mx),ph=Math.round(pw/pa);
+    const iW=isP?pw:pw*n,iH=isP?ph*n:ph;
+    scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*1.5:pw*n)*1.4));
+    buildTriFold(scene,pw,ph,iW,iH,isP,n);
+  } else {
+    const pa=isP?(detW/(detH/n)):((detW/n)/detH);
+    const mx=Math.min(240,(window.innerWidth-100)/(isP?1.5:n));
+    const pw=Math.round(mx),ph=Math.round(pw/pa);
+    const iW=isP?pw:pw*n,iH=isP?ph*n:ph;
+    scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*1.5:pw*n)*1.4));
+    scene.innerHTML=buildNest(0,n,pw,ph,iW,iH,isP);
+  }
+  const ctrl=$('viewControls');ctrl.innerHTML='';
+  fold.views.forEach((v,i)=>{const b=document.createElement('button');b.textContent=v.label;b.addEventListener('click',()=>applyV(i));if(i===0)b.classList.add('on');ctrl.appendChild(b)});
+  applyV(0);
+}
+
+function applyV(vi){
+  const view=fold.views[vi],scene=$('scene'),s=ds(),isP=ori==='portrait';
+  let[rx,ry,tx,ty]=view.sc;
+  if(s<0)ry=-ry;
+  if(isP){const t=rx;rx=-ry*.4;ry=t*.5;const tt=tx;tx=0;ty=tt}
+  currentRX=rx;currentRY=ry;
+  scene.style.transition='transform 1.4s cubic-bezier(.4,0,.2,1)';
+  scene.style.transform=\`scale(\${es()}) rotateX(\${rx}deg) rotateY(\${ry}deg) translateX(\${tx}px) translateY(\${ty}px)\`;
+  if(fold.mode==='trifold'){
+    const[lA,rA]=view.f;const tzf=view.tzf_tf||[0,0];const hL=$('hingeL'),hR=$('hingeR');
+    const pw=hL?parseInt(hL.style.width)||0:0;const tzL=tzf[0]?tzf[0]*pw:0,tzR=tzf[1]?tzf[1]*pw:0;
+    if(isP){if(hR)hR.style.transform=\`\${tzR?'translateZ('+tzR.toFixed(1)+'px) ':''}rotateX(\${rA*s}deg)\`;if(hL)hL.style.transform=\`\${tzL?'translateZ('+tzL.toFixed(1)+'px) ':''}rotateX(\${-lA*s}deg)\`}
+    else{if(hR)hR.style.transform=\`\${tzR?'translateZ('+tzR.toFixed(1)+'px) ':''}rotateY(\${rA*s}deg)\`;if(hL)hL.style.transform=\`\${tzL?'translateZ('+tzL.toFixed(1)+'px) ':''}rotateY(\${lA*s}deg)\`}
+  } else if(fold.mode==='gate3'){
+    const[lA,rA]=view.g;const gL=$('gateL'),gR=$('gateR');
+    if(isP){if(gL)gL.style.transform=\`rotateX(\${-lA*s}deg)\`;if(gR)gR.style.transform=\`rotateX(\${-rA*s}deg)\`}
+    else{if(gL)gL.style.transform=\`rotateY(\${lA*s}deg)\`;if(gR)gR.style.transform=\`rotateY(\${rA*s}deg)\`}
+  } else if(fold.mode==='dgate'){
+    const[lA,rA,cA]=view.dg;const tzf=view.tzf||[0,0,0];const hL=$('hingeL'),hR=$('hingeR'),hC=$('hingeCtr');
+    const pw=hL?parseInt(hL.style.width)||0:0;const tzLpx=tzf[0]?tzf[0]*pw:0;const tzRpx=tzf[1]?tzf[1]*pw:0;const tzCpx=tzf[2]?tzf[2]*pw:0;
+    if(isP){if(hL)hL.style.transform=\`\${tzLpx?'translateZ('+tzLpx.toFixed(1)+'px) ':''}rotateX(\${-lA*s}deg)\`;if(hR)hR.style.transform=\`\${tzRpx?'translateZ('+tzRpx.toFixed(1)+'px) ':''}rotateX(\${-rA*s}deg)\`;if(hC)hC.style.transform=\`\${tzCpx?'translateZ('+tzCpx.toFixed(1)+'px) ':''}rotateX(\${cA*s}deg)\`}
+    else{if(hL)hL.style.transform=\`\${tzLpx?'translateZ('+tzLpx.toFixed(1)+'px) ':''}rotateY(\${lA*s}deg)\`;if(hR)hR.style.transform=\`\${tzRpx?'translateZ('+tzRpx.toFixed(1)+'px) ':''}rotateY(\${rA*s}deg)\`;if(hC)hC.style.transform=\`\${tzCpx?'translateZ('+tzCpx.toFixed(1)+'px) ':''}rotateY(\${cA*s}deg)\`}
+  } else {
+    const tzf=view.tzf;
+    view.f.forEach((a,i)=>{const h=$('hinge'+(i+1));if(!h)return;
+      let tz='';if(tzf&&tzf[i]){const pw=parseInt(h.style.width)||0;tz='translateZ('+(tzf[i]*pw).toFixed(1)+'px) '}
+      if(isP)h.style.transform=\`\${tz}rotateX(\${a*s}deg)\`;else h.style.transform=\`\${tz}rotateY(\${a*s}deg)\`});
+  }
+  $('viewControls').querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',i===vi));
+  $('stateLabel').textContent=view.label;
+}
+
+// Drag to spin
+let dragActive=false,dsx=0,dsy=0,dbx=0,dby=0;
+const vp=$('vp');
+vp.addEventListener('mousedown',e=>{e.preventDefault();dragActive=true;dsx=e.clientX;dsy=e.clientY;dbx=currentRX;dby=currentRY;$('scene').style.transition='none';const h=$('dragHint');if(h)h.classList.add('hidden')});
+document.addEventListener('mousemove',e=>{if(!dragActive)return;currentRY=dby+(e.clientX-dsx)*0.4;currentRX=Math.max(-60,Math.min(60,dbx-(e.clientY-dsy)*0.3));$('scene').style.transform=\`scale(\${es()}) rotateX(\${currentRX}deg) rotateY(\${currentRY}deg)\`});
+document.addEventListener('mouseup',()=>{dragActive=false;$('scene').style.transition='transform 1.4s cubic-bezier(.4,0,.2,1)'});
+vp.addEventListener('touchstart',e=>{e.preventDefault();dragActive=true;dsx=e.touches[0].clientX;dsy=e.touches[0].clientY;dbx=currentRX;dby=currentRY;$('scene').style.transition='none';const h=$('dragHint');if(h)h.classList.add('hidden')},{passive:false});
+document.addEventListener('touchmove',e=>{if(!dragActive)return;e.preventDefault();currentRY=dby+(e.touches[0].clientX-dsx)*0.4;currentRX=Math.max(-60,Math.min(60,dbx-(e.touches[0].clientY-dsy)*0.3));$('scene').style.transform=\`scale(\${es()}) rotateX(\${currentRX}deg) rotateY(\${currentRY}deg)\`},{passive:false});
+document.addEventListener('touchend',()=>{dragActive=false;$('scene').style.transition='transform 1.4s cubic-bezier(.4,0,.2,1)'});
+vp.addEventListener('wheel',e=>{e.preventDefault();setZoom(userZoom+(e.deltaY>0?-0.05:0.05))},{passive:false});
+
+generate();
 <\/script></body></html>`;
     return new Blob([html], { type: "text/html" });
   }
+
 
 
   // ── Generate 4 deliverables on approval ──
