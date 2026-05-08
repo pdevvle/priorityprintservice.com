@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · CB-PREVIEW-HTML</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · CB-PREVIEW-HTML-FIX</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -2082,7 +2082,7 @@ book.addEventListener('touchstart',e=>{const t=e.touches[0];drag={sx:t.clientX,s
 window.addEventListener('touchmove',e=>{if(!drag||!e.touches[0])return;const t=e.touches[0];rot.y=drag.by+(t.clientX-drag.sx)*0.5;rot.x=Math.max(-70,Math.min(70,drag.bx-(t.clientY-drag.sy)*0.5));book.style.transform='rotateX('+rot.x+'deg) rotateY('+rot.y+'deg)';e.preventDefault();},{passive:false});
 window.addEventListener('touchend',()=>{if(drag){book.style.transition='';drag=null;}});
 update();
-</script></body></html>`;
+<\/script></body></html>`;
     return new Blob([html], { type: "text/html" });
   }
 
