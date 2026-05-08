@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-FOLDS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-3D</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1457,37 +1457,57 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     const ratio = `${longEdge}/${shortEdge}`;
     const sizeStr = `${longEdge}″ × ${shortEdge}″`;
     const generated = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+    const foldKey = FOLD_KEY_MAP[foldType] || null;
     const foldLabel = (foldType && foldType !== "flat") ? `${panels}-panel ${foldType}` : "flat";
+    // Use trim aspect when art is trimmed, art's actual dims otherwise (matches in-calc FoldRenderer wiring)
+    const fDims = trimmedFrontUrl ? { w: longEdge, h: shortEdge } : (frontArt?.dims || null);
+    const bDims = trimmedBackUrl ? { w: longEdge, h: shortEdge } : (backArt?.dims || null);
+
+    // Bundle the existing vanilla fold helpers via .toString() — no duplication, no
+    // copy-paste drift. These are pure DOM-builder + transform-applier functions
+    // that run without React, so they slot straight into the standalone HTML.
+    const helpersSrc = [
+      safeSrc, foldImgWrap, foldMkF, foldMkFGate,
+      foldBuildNest, foldBuildDParallel, foldBuildTri, foldBuildGate, foldBuildDGate,
+      foldApplyView,
+    ].map(f => f.toString()).join("\n\n");
+
     const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print Preview · Brochure · ${sizeStr}</title><style>
 *{box-sizing:border-box}
-body{margin:0;padding:36px 18px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#f0eee9,#e6e2d8);color:#2b2b2b;min-height:100vh;display:flex;flex-direction:column;align-items:center}
-header{text-align:center;margin-bottom:28px;max-width:720px}
+body{margin:0;padding:36px 18px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#1a1d23,#2a2e36);color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+header{text-align:center;margin-bottom:24px;max-width:720px}
 .eyebrow{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#ec008c;margin-bottom:8px;display:inline-flex;gap:6px;align-items:center}
 .eyebrow .dots{display:inline-flex;gap:3px}.eyebrow .dot{width:5px;height:5px;border-radius:50%}
 .eyebrow .c{background:#00aeef}.eyebrow .m{background:#ec008c}.eyebrow .y{background:#fff200}.eyebrow .k{background:#231f20}
-h1{font-weight:800;letter-spacing:-0.02em;line-height:1.05;font-size:36px;margin:0;text-transform:uppercase}
-h1 small{font-weight:700;font-size:18px;color:#888;display:block;margin-top:6px;letter-spacing:.04em}
-.meta{margin-top:14px;color:#666;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
-.stage{perspective:1500px;width:100%;max-width:920px;display:flex;align-items:center;justify-content:center;margin:0 auto}
-.sheet-wrap{position:relative;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.4,0,.2,1);width:100%;max-width:840px;aspect-ratio:${ratio}}
-.sheet{position:absolute;inset:0;background:#fff;background-position:center;background-size:cover;backface-visibility:hidden;box-shadow:0 14px 36px rgba(0,0,0,.18);border-radius:2px}
-.sheet.front{transform:rotateY(0deg)}
-.sheet.back{transform:rotateY(180deg)}
-.sheet-wrap.flipped{transform:rotateY(180deg)}
-.fold-line{position:absolute;pointer-events:none;z-index:5}
-.fold-line.v{top:0;bottom:0;width:0;border-left:1.5px dashed #f97316}
-.fold-line.h{left:0;right:0;height:0;border-top:1.5px dashed #f97316}
-.fold-line span{position:absolute;background:rgba(0,0,0,.55);color:#f97316;padding:2px 6px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.06em;white-space:nowrap;text-transform:uppercase}
-.fold-line.v span{top:8px;left:4px}
-.fold-line.h span{left:8px;top:2px}
-.controls{margin-top:28px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
-.controls .group{display:flex;border-radius:6px;overflow:hidden;border:1px solid #d4cdbe;background:#fff}
-.controls .group button{padding:8px 14px;font-size:12px;font-weight:600;border:none;background:transparent;color:#555;cursor:pointer;font-family:inherit;border-right:1px solid #e5e0d2;transition:all .15s}
+h1{font-weight:800;letter-spacing:-0.02em;line-height:1.05;font-size:36px;margin:0;text-transform:uppercase;color:#fff}
+h1 small{font-weight:700;font-size:18px;color:rgba(255,255,255,.5);display:block;margin-top:6px;letter-spacing:.04em}
+.meta{margin-top:14px;color:rgba(255,255,255,.45);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+/* Fold viewport CSS — copied from calc-brochure.html so the standalone renders identically */
+.fold-viewport{perspective:1800px;perspective-origin:50% 50%;display:flex;justify-content:center;align-items:center;position:relative;overflow:hidden;border-radius:8px;background:linear-gradient(135deg,#1a1d23,#2a2e36);border:1px solid rgba(255,255,255,.08);min-height:280px;width:100%;max-width:760px;margin:0 auto}
+.fold-scene{position:relative;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
+.fold-panel-wrap{position:absolute;top:0;left:0;transform-style:preserve-3d}
+.fold-hinge{position:absolute;top:0;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
+.fold-face{position:absolute;top:0;left:0;backface-visibility:hidden;overflow:hidden}
+.fold-face img{display:block}
+.fold-face.ff{z-index:2}
+.fold-face.fb{transform:rotateY(180deg);z-index:1}
+/* Flat fallback (no fold selected) — Front | Back flip card */
+.flat-stage{perspective:1500px;width:100%;max-width:760px;display:flex;align-items:center;justify-content:center;margin:0 auto}
+.flat-wrap{position:relative;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.4,0,.2,1);width:100%;max-width:680px;aspect-ratio:${ratio}}
+.flat-sheet{position:absolute;inset:0;background:#fff;background-position:center;background-size:cover;backface-visibility:hidden;box-shadow:0 14px 36px rgba(0,0,0,.4);border-radius:2px}
+.flat-sheet.front{transform:rotateY(0deg)}
+.flat-sheet.back{transform:rotateY(180deg)}
+.flat-wrap.flipped{transform:rotateY(180deg)}
+.controls{margin-top:24px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
+.controls .group{display:flex;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04)}
+.controls .group button{padding:8px 14px;font-size:12px;font-weight:600;border:none;background:transparent;color:rgba(255,255,255,.55);cursor:pointer;font-family:inherit;border-right:1px solid rgba(255,255,255,.08);transition:all .15s;white-space:nowrap}
 .controls .group button:last-child{border-right:none}
 .controls .group button.on{background:#ec008c;color:#fff}
-.controls .group button:hover:not(.on){background:#fbf6ee}
-footer{margin-top:auto;padding-top:36px;color:#999;font-size:10px;letter-spacing:.08em;text-transform:uppercase;text-align:center}
-footer a{color:#888;text-decoration:none}
+.controls .group button:hover:not(.on):not(:disabled){background:rgba(255,255,255,.08);color:#fff}
+.controls .group button:disabled{opacity:.3;cursor:not-allowed}
+.hint{margin-top:12px;font-size:11px;color:rgba(255,255,255,.4);letter-spacing:.04em}
+footer{margin-top:auto;padding-top:36px;color:rgba(255,255,255,.35);font-size:10px;letter-spacing:.08em;text-transform:uppercase;text-align:center}
+footer a{color:rgba(255,255,255,.45);text-decoration:none}
 footer a:hover{color:#ec008c}
 @media(max-width:540px){h1{font-size:24px}h1 small{font-size:14px}}
 </style></head><body>
@@ -1496,54 +1516,102 @@ footer a:hover{color:#ec008c}
 <h1>${longEdge}″ × ${shortEdge}″<small>${foldLabel}</small></h1>
 <div class="meta">Generated ${generated}</div>
 </header>
-<div class="stage">
-  <div class="sheet-wrap" id="wrap">
-    <div class="sheet front" style="${front ? `background-image:url('${front}')` : "background:#f8f5f0"}"></div>
-    <div class="sheet back" style="${back ? `background-image:url('${back}')` : "background:#f8f5f0"}"></div>
-  </div>
-</div>
-<div class="controls">
-  <div class="group" id="modeGroup">
-    <button class="on" data-side="front">Front</button>
-    <button data-side="back" ${back ? "" : "disabled"}>Back</button>
-  </div>
-  ${foldLines.length ? `<div class="group" id="foldGroup">
-    <button class="on" data-folds="on">Folds: Shown</button>
-    <button data-folds="off">Folds: Hidden</button>
-  </div>` : ""}
-</div>
+<div id="root"></div>
+<div class="controls" id="ctrls"></div>
+<div class="hint" id="hint"></div>
 <footer>Priority Print Service · <a href="https://priorityprintservice.com">priorityprintservice.com</a></footer>
 <script>
-const wrap=document.getElementById('wrap'),modeGroup=document.getElementById('modeGroup');
-const foldGroup=document.getElementById('foldGroup');
-const folds=${JSON.stringify(foldLines)};
-let side='front',foldsOn=true;
-// Render fold lines onto each sheet so they ride with the front/back flip.
-// Position uses the same pct math the in-calc proof modal does (% of trim).
-function renderFolds(){
-  document.querySelectorAll('.sheet').forEach(sh=>{
-    sh.querySelectorAll('.fold-line').forEach(n=>n.remove());
-    if(!foldsOn) return;
-    folds.forEach((fl,i)=>{
-      const d=document.createElement('div');
-      d.className='fold-line '+(fl.vertical?'v':'h');
-      if(fl.vertical) d.style.left=fl.pct+'%'; else d.style.top=fl.pct+'%';
-      d.innerHTML='<span>Fold '+(i+1)+'</span>';
-      sh.appendChild(d);
+// Constants from the calculator — shipped inline so the preview is offline-capable
+var FOLDS_3D = ${JSON.stringify(FOLDS_3D)};
+var frontSrc = ${JSON.stringify(front || "")};
+var backSrc = ${JSON.stringify(back || "")};
+var frontDims = ${JSON.stringify(fDims)};
+var backDims = ${JSON.stringify(bDims)};
+var longEdge = ${JSON.stringify(longEdge)};
+var shortEdge = ${JSON.stringify(shortEdge)};
+var foldKey = ${JSON.stringify(foldKey)};
+
+// Vanilla fold-rendering helpers, copied verbatim from the calculator via .toString()
+${helpersSrc}
+
+// Mount the fold scene or fall back to a flat front/back flip card
+var root = document.getElementById('root');
+var ctrls = document.getElementById('ctrls');
+var hint = document.getElementById('hint');
+var fold = foldKey && FOLDS_3D[foldKey] ? FOLDS_3D[foldKey] : null;
+
+if (fold) {
+  // 3D fold preview
+  var isMobile = window.innerWidth <= 700;
+  var maxDim = isMobile ? 260 : 400;
+  var nPanels = fold.mode === 'gate3' ? 4 : fold.n;
+  var pa = (longEdge / nPanels) / shortEdge;
+  var pw = Math.round(Math.min(maxDim / nPanels, (isMobile ? window.innerWidth - 80 : 700) / nPanels));
+  var ph = Math.round(pw / pa);
+  var iW = pw * nPanels, iH = ph;
+  var qw = fold.mode === 'gate3' ? iW / 4 : pw;
+  var scale = iW / longEdge;
+  var fRW = frontDims ? frontDims.w * scale : null;
+  var fRH = frontDims ? frontDims.h * scale : null;
+  var bRW = backDims ? backDims.w * scale : null;
+  var bRH = backDims ? backDims.h * scale : null;
+  var swap = !!fold.swap;
+  var sceneHtml = '';
+  if (fold.mode === 'nested') sceneHtml = foldBuildNest(0, fold.n, pw, ph, iW, iH, false, frontSrc, backSrc, fRW, fRH, bRW, bRH, swap);
+  else if (fold.mode === 'dparallel') sceneHtml = foldBuildDParallel(pw, ph, iW, iH, false, frontSrc, backSrc, fRW, fRH, bRW, bRH, swap);
+  else if (fold.mode === 'trifold') sceneHtml = foldBuildTri(pw, ph, iW, iH, false, fold.n, frontSrc, backSrc, fRW, fRH, bRW, bRH);
+  else if (fold.mode === 'gate3') sceneHtml = foldBuildGate(qw, ph, iW, iH, false, frontSrc, backSrc, fRW, fRH, bRW, bRH);
+  else if (fold.mode === 'dgate') sceneHtml = foldBuildDGate(pw, ph, iW, iH, false, fold.n, frontSrc, backSrc, fRW, fRH, bRW, bRH);
+
+  root.innerHTML = '<div class="fold-viewport" style="min-height:' + (isMobile ? 220 : 360) + 'px"><div class="fold-scene" id="foldScene" style="transform-style:preserve-3d;position:relative;width:' + iW + 'px;height:' + iH + 'px">' + sceneHtml + '</div></div>';
+  var sceneEl = document.getElementById('foldScene');
+
+  // View stepper — one button per fold view (Inside Open, Folded Front, etc.)
+  var viewIdx = 0, flipped = false;
+  function applyView() { foldApplyView(sceneEl, foldKey, viewIdx, flipped ? -1 : 1); }
+  var stepGroup = document.createElement('div');
+  stepGroup.className = 'group';
+  fold.views.forEach(function(v, i) {
+    var b = document.createElement('button');
+    b.textContent = v.label;
+    b.className = i === 0 ? 'on' : '';
+    b.addEventListener('click', function() {
+      viewIdx = i;
+      stepGroup.querySelectorAll('button').forEach(function(x, j) { x.classList.toggle('on', j === i); });
+      applyView();
     });
+    stepGroup.appendChild(b);
   });
+  ctrls.appendChild(stepGroup);
+  // Initial paint
+  setTimeout(applyView, 80);
+  hint.textContent = 'Step through the fold sequence to see how the brochure folds together.';
+} else {
+  // Flat — Front | Back flip card
+  root.innerHTML = '<div class="flat-stage"><div class="flat-wrap" id="flatWrap">' +
+    '<div class="flat-sheet front" style="' + (frontSrc ? "background-image:url('" + frontSrc + "')" : 'background:#f8f5f0') + '"></div>' +
+    '<div class="flat-sheet back" style="' + (backSrc ? "background-image:url('" + backSrc + "')" : 'background:#f8f5f0') + '"></div>' +
+    '</div></div>';
+  var flatWrap = document.getElementById('flatWrap');
+  var sideGroup = document.createElement('div');
+  sideGroup.className = 'group';
+  ['front', 'back'].forEach(function(s) {
+    var b = document.createElement('button');
+    b.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+    b.className = s === 'front' ? 'on' : '';
+    b.disabled = s === 'back' && !backSrc;
+    b.addEventListener('click', function() {
+      flatWrap.classList.toggle('flipped', s === 'back');
+      sideGroup.querySelectorAll('button').forEach(function(x) { x.classList.toggle('on', x.textContent.toLowerCase() === s); });
+    });
+    sideGroup.appendChild(b);
+  });
+  ctrls.appendChild(sideGroup);
 }
-function update(){
-  wrap.classList.toggle('flipped',side==='back');
-  modeGroup.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.side===side));
-  if(foldGroup) foldGroup.querySelectorAll('button').forEach(b=>b.classList.toggle('on',(b.dataset.folds==='on')===foldsOn));
-}
-modeGroup.addEventListener('click',e=>{if(e.target.dataset.side&&!e.target.disabled){side=e.target.dataset.side;update();}});
-if(foldGroup) foldGroup.addEventListener('click',e=>{if(e.target.dataset.folds){foldsOn=e.target.dataset.folds==='on';renderFolds();update();}});
-renderFolds();update();
 <\/script></body></html>`;
     return new Blob([html], { type: "text/html" });
   }
+
 
   // ── Generate 4 deliverables on approval ──
   // Parameterized copy of the canonical generator (calc-perfect-bound.html); brochure
