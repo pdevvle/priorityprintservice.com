@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-3D-FIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-3D-PARITY</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -1465,46 +1465,55 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     // Map calc fold keys to the previewer's fold keys + drop unsupported ones.
     // The previewer doesn't have `double-parallel`, so fall back to a flat front/back
     // flip card for that case.
+    // FOLD configurations — copied verbatim from calc-brochure FOLDS_3D so the
+    // standalone matches the in-calc preview view-for-view (Folded Back included,
+    // swap honoured, double-parallel mode supported).
     const PREVIEWER_FOLDS = {
-      "accordion-3": { n:3, mode:"nested",
-        views:[
-          {label:"Front (Open)",sc:[8,-6,0,0],f:[0,0]},
-          {label:"Accordion Fold",sc:[20,-35,60,0],f:[-175,168]},
-          {label:"Back (Open)",sc:[8,174,0,0],f:[0,0]}]},
-      "accordion-4": { n:4, mode:"nested",
-        views:[
-          {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0]},
-          {label:"Accordion Fold",sc:[20,-35,100,0],f:[-175,168,-162]},
-          {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0]}]},
-      "tri-fold": { n:3, mode:"trifold",
-        views:[
-          {label:"Inside (Open)",sc:[8,-6,0,0],f:[0,0],tz:[0,0]},
-          {label:"Right Tucks In",sc:[20,-35,50,0],f:[0,-179],tz:[0,0]},
-          {label:"Tri-Fold",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
-          {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0],tz:[0,0]}]},
-      "half-fold": { n:2, mode:"nested",
-        views:[
-          {label:"Front (Open)",sc:[8,-6,0,0],f:[0]},
-          {label:"Half Fold",sc:[20,-30,60,0],f:[-175]},
-          {label:"Back (Open)",sc:[8,174,0,0],f:[0]}]},
-      "gate-fold": { n:4, mode:"gate3",
-        views:[
-          {label:"Front (Open)",sc:[8,-6,0,0],g:[0,0]},
-          {label:"Gate Fold",sc:[20,-25,30,0],g:[175,-175]},
-          {label:"Back (Open)",sc:[8,174,0,0],g:[0,0]}]},
-      "double-gate": { n:4, mode:"dgate",
-        views:[
-          {label:"Inside (Open)",sc:[8,-5,0,0],dg:[0,0,0],tzf:[0,0,0]},
-          {label:"Flaps In",sc:[20,-30,50,0],dg:[178,-178,0],tzf:[0.04,0.04,0]},
-          {label:"Double Gate Fold",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
-          {label:"Outside (Open)",sc:[8,174,0,0],dg:[0,0,0],tzf:[0,0,0]}]},
-      "roll-fold": { n:4, mode:"nested",
-        views:[
-          {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
-          {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
-          {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
-          {label:"Roll Fold",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
-          {label:"Back (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
+      "half-fold": { n:2, mode:"nested", swap:true, views:[
+        {label:"Inside (Open)",sc:[8,-6,0,0],f:[0]},
+        {label:"Folded (Front)",sc:[20,-30,60,0],f:[-175]},
+        {label:"Folded (Back)",sc:[20,150,60,0],f:[-175]},
+        {label:"Outside (Open)",sc:[8,174,0,0],f:[0]}]},
+      "accordion-3": { n:3, mode:"nested", views:[
+        {label:"Front (Open)",sc:[8,-6,0,0],f:[0,0]},
+        {label:"Folded (Front)",sc:[20,-35,60,0],f:[-175,168]},
+        {label:"Folded (Back)",sc:[20,145,60,0],f:[-175,168]},
+        {label:"Back (Open)",sc:[8,174,0,0],f:[0,0]}]},
+      "accordion-4": { n:4, mode:"nested", swap:true, views:[
+        {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0]},
+        {label:"Folded (Front)",sc:[20,-35,100,0],f:[-175,168,-162]},
+        {label:"Folded (Back)",sc:[20,145,100,0],f:[-175,168,-162]},
+        {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0]}]},
+      "tri-fold": { n:3, mode:"trifold", views:[
+        {label:"Inside (Open)",sc:[8,-6,0,0],f:[0,0],tz:[0,0]},
+        {label:"Right Tucks In",sc:[20,-35,50,0],f:[0,-179],tz:[0,0]},
+        {label:"Folded (Front)",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+        {label:"Folded (Back)",sc:[20,155,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+        {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0],tz:[0,0]}]},
+      "gate-fold": { n:4, mode:"gate3", views:[
+        {label:"Inside (Open)",sc:[8,-6,0,0],g:[0,0]},
+        {label:"Folded (Front)",sc:[20,-25,30,0],g:[-175,175]},
+        {label:"Folded (Back)",sc:[20,155,30,0],g:[-175,175]},
+        {label:"Outside (Open)",sc:[8,174,0,0],g:[0,0]}]},
+      "double-gate": { n:4, mode:"dgate", views:[
+        {label:"Inside (Open)",sc:[8,-5,0,0],dg:[0,0,0],tzf:[0,0,0]},
+        {label:"Flaps In",sc:[20,-30,50,0],dg:[178,-178,0],tzf:[0.04,0.04,0]},
+        {label:"Folded (Front)",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+        {label:"Folded (Back)",sc:[20,155,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+        {label:"Outside (Open)",sc:[8,174,0,0],dg:[0,0,0],tzf:[0,0,0]}]},
+      "roll-fold": { n:4, mode:"nested", swap:true, views:[
+        {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
+        {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
+        {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
+        {label:"Folded (Front)",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+        {label:"Folded (Back)",sc:[20,150,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+        {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
+      "double-parallel": { n:4, mode:"dparallel", views:[
+        {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0],tzf:[0,0]},
+        {label:"First Bifold",sc:[20,-30,60,0],f:[-175,0],tzf:[0.04,0]},
+        {label:"Folded (Front)",sc:[20,-30,80,0],f:[-175,-175],tzf:[0.04,0.08]},
+        {label:"Folded (Back)",sc:[20,150,80,0],f:[-175,-175],tzf:[0.04,0.08]},
+        {label:"Back (Open)",sc:[8,174,0,0],f:[0,0],tzf:[0,0]}]},
     };
     const previewerKey = FOLD_KEY_MAP[foldType] || null;
     const fold = previewerKey ? PREVIEWER_FOLDS[previewerKey] : null;
@@ -1628,18 +1637,35 @@ function mkFGate(startQ,spanQ,qw,qh,iW,iH,isP,totalQ){
   }
 }
 
-function buildNest(idx,n,pw,ph,iW,iH,isP){
+function buildNest(idx,n,pw,ph,iW,iH,isP,swap){
   const last=idx===n-1;
   let h=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
-  h+=mkF(idx,n,pw,ph,iW,iH,isP);
+  h+=mkF(idx,n,pw,ph,iW,iH,isP,!!swap);
   if(!last){
     const hp=isP?\`left:0;top:\${ph}px;\`:\`left:\${pw}px;top:0;\`;
     const og=isP?'center top':'left center';
     h+=\`<div class="hinge" id="hinge\${idx+1}" style="\${hp}width:\${pw}px;height:\${ph}px;transform-origin:\${og};">\`;
-    h+=buildNest(idx+1,n,pw,ph,iW,iH,isP);
+    h+=buildNest(idx+1,n,pw,ph,iW,iH,isP,swap);
     h+=\`</div>\`;
   }
   h+=\`</div>\`;return h;
+}
+
+// Double-parallel fold (bifold of a bifold). Bifurcated DOM: dpHinge2 contains
+// P2 + dpHinge1a (which holds P3); dpHinge1b is a sibling carrying P4 alone.
+// dpHinge1a + dpHinge1b rotate together (fold 1); dpHinge2 rotates alone (fold 2).
+function buildDParallel(scene,pw,ph,iW,iH,isP,swap){
+  const mkP=(idx)=>\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(idx,4,pw,ph,iW,iH,isP,!!swap)+\`</div>\`;
+  let h=mkP(0);
+  h+=\`<div class="hinge" id="dpHinge2" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;">\`;
+  h+=mkP(1);
+  h+=\`<div class="hinge" id="dpHinge1a" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;">\`;
+  h+=mkP(2);
+  h+=\`</div></div>\`;
+  h+=\`<div class="hinge" id="dpHinge1b" style="left:\${2*pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;">\`;
+  h+=\`<div class="panel-wrap" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(3,4,pw,ph,iW,iH,isP,!!swap)+\`</div>\`;
+  h+=\`</div>\`;
+  scene.innerHTML=h;
 }
 
 function buildTriFold(scene,pw,ph,iW,iH,isP,n){
@@ -1705,7 +1731,7 @@ function buildDGate(scene,pw,ph,iW,iH,isP,n){
 }
 
 function generate(){
-  const n=fold.n,isP=ori==='portrait',scene=$('scene');
+  const n=fold.n,isP=ori==='portrait',scene=$('scene'),swap=!!fold.swap;
   if(fold.mode==='gate3'){
     const pa=isP?(detW/(detH/4)):((detW/4)/detH);
     const mx=Math.min(200,(window.innerWidth-100)/(isP?2:4));
@@ -1730,6 +1756,14 @@ function generate(){
     scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
     cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*1.5:pw*n)*1.4));
     buildTriFold(scene,pw,ph,iW,iH,isP,n);
+  } else if(fold.mode==='dparallel'){
+    const pa=isP?(detW/(detH/n)):((detW/n)/detH);
+    const mx=Math.min(240,(window.innerWidth-100)/(isP?1.5:n));
+    const pw=Math.round(mx),ph=Math.round(pw/pa);
+    const iW=isP?pw:pw*n,iH=isP?ph*n:ph;
+    scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*1.5:pw*n)*1.4));
+    buildDParallel(scene,pw,ph,iW,iH,isP,swap);
   } else {
     const pa=isP?(detW/(detH/n)):((detW/n)/detH);
     const mx=Math.min(240,(window.innerWidth-100)/(isP?1.5:n));
@@ -1737,7 +1771,7 @@ function generate(){
     const iW=isP?pw:pw*n,iH=isP?ph*n:ph;
     scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
     cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*1.5:pw*n)*1.4));
-    scene.innerHTML=buildNest(0,n,pw,ph,iW,iH,isP);
+    scene.innerHTML=buildNest(0,n,pw,ph,iW,iH,isP,swap);
   }
   const ctrl=$('viewControls');ctrl.innerHTML='';
   fold.views.forEach((v,i)=>{const b=document.createElement('button');b.textContent=v.label;b.addEventListener('click',()=>applyV(i));if(i===0)b.classList.add('on');ctrl.appendChild(b)});
@@ -1766,6 +1800,23 @@ function applyV(vi){
     const pw=hL?parseInt(hL.style.width)||0:0;const tzLpx=tzf[0]?tzf[0]*pw:0;const tzRpx=tzf[1]?tzf[1]*pw:0;const tzCpx=tzf[2]?tzf[2]*pw:0;
     if(isP){if(hL)hL.style.transform=\`\${tzLpx?'translateZ('+tzLpx.toFixed(1)+'px) ':''}rotateX(\${-lA*s}deg)\`;if(hR)hR.style.transform=\`\${tzRpx?'translateZ('+tzRpx.toFixed(1)+'px) ':''}rotateX(\${-rA*s}deg)\`;if(hC)hC.style.transform=\`\${tzCpx?'translateZ('+tzCpx.toFixed(1)+'px) ':''}rotateX(\${cA*s}deg)\`}
     else{if(hL)hL.style.transform=\`\${tzLpx?'translateZ('+tzLpx.toFixed(1)+'px) ':''}rotateY(\${lA*s}deg)\`;if(hR)hR.style.transform=\`\${tzRpx?'translateZ('+tzRpx.toFixed(1)+'px) ':''}rotateY(\${rA*s}deg)\`;if(hC)hC.style.transform=\`\${tzCpx?'translateZ('+tzCpx.toFixed(1)+'px) ':''}rotateY(\${cA*s}deg)\`}
+  } else if(fold.mode==='dparallel'){
+    // view.f = [fold1Angle, fold2Angle]. dpHinge1a + dpHinge1b rotate together
+    // (fold 1, the first bifold); dpHinge2 rotates alone (fold 2 bifolds the bifold).
+    const[a1,a2]=view.f;const tzf=view.tzf||[0,0];
+    const fh1a=$('dpHinge1a'),fh1b=$('dpHinge1b'),fh2=$('dpHinge2');
+    const pw=fh2?parseInt(fh2.style.width)||0:0;
+    const tz1=tzf[0]?'translateZ('+(tzf[0]*pw).toFixed(1)+'px) ':'';
+    const tz2=tzf[1]?'translateZ('+(tzf[1]*pw).toFixed(1)+'px) ':'';
+    if(isP){
+      if(fh1a)fh1a.style.transform=\`\${tz1}rotateX(\${a1*s}deg)\`;
+      if(fh1b)fh1b.style.transform=\`\${tz1}rotateX(\${a1*s}deg)\`;
+      if(fh2)fh2.style.transform=\`\${tz2}rotateX(\${a2*s}deg)\`;
+    } else {
+      if(fh1a)fh1a.style.transform=\`\${tz1}rotateY(\${a1*s}deg)\`;
+      if(fh1b)fh1b.style.transform=\`\${tz1}rotateY(\${a1*s}deg)\`;
+      if(fh2)fh2.style.transform=\`\${tz2}rotateY(\${a2*s}deg)\`;
+    }
   } else {
     const tzf=view.tzf;
     view.f.forEach((a,i)=>{const h=$('hinge'+(i+1));if(!h)return;
