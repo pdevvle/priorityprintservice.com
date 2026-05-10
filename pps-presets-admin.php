@@ -97,17 +97,19 @@ function pps_presets_render_page() {
             }
 
             $data = array(
-                'calc'             => isset( $_POST['preset_calc'] )        ? wp_unslash( $_POST['preset_calc'] )        : '',
-                'title'            => isset( $_POST['preset_title'] )       ? wp_unslash( $_POST['preset_title'] )       : '',
-                'description'      => isset( $_POST['preset_description'] ) ? wp_unslash( $_POST['preset_description'] ) : '',
-                'image'            => isset( $_POST['preset_image'] )       ? wp_unslash( $_POST['preset_image'] )       : '',
-                'price_from'       => isset( $_POST['preset_price_from'] )  ? wp_unslash( $_POST['preset_price_from'] )  : '',
-                'currency'         => isset( $_POST['preset_currency'] )    ? wp_unslash( $_POST['preset_currency'] )    : 'USD',
-                'defaults'         => $defaults_arr,
-                'overrides'        => $overrides,
-                'schema_overrides' => $schema_overrides,
-                'schema_extras'    => $schema_extras,
-                'faqs'             => $faqs_arr,
+                'calc'              => isset( $_POST['preset_calc'] )              ? wp_unslash( $_POST['preset_calc'] )              : '',
+                'title'             => isset( $_POST['preset_title'] )             ? wp_unslash( $_POST['preset_title'] )             : '',
+                'description'       => isset( $_POST['preset_description'] )       ? wp_unslash( $_POST['preset_description'] )       : '',
+                'image'             => isset( $_POST['preset_image'] )             ? wp_unslash( $_POST['preset_image'] )             : '',
+                'price_from'        => isset( $_POST['preset_price_from'] )        ? wp_unslash( $_POST['preset_price_from'] )        : '',
+                'currency'          => isset( $_POST['preset_currency'] )          ? wp_unslash( $_POST['preset_currency'] )          : 'USD',
+                'sale_discount_pct' => isset( $_POST['preset_sale_discount_pct'] ) ? wp_unslash( $_POST['preset_sale_discount_pct'] ) : '',
+                'sale_label'        => isset( $_POST['preset_sale_label'] )        ? wp_unslash( $_POST['preset_sale_label'] )        : '',
+                'defaults'          => $defaults_arr,
+                'overrides'         => $overrides,
+                'schema_overrides'  => $schema_overrides,
+                'schema_extras'     => $schema_extras,
+                'faqs'              => $faqs_arr,
             );
 
             $result = pps_save_preset( $slug, $data );
@@ -345,6 +347,21 @@ function pps_presets_render_edit_form( $preset ) {
     echo '<label for="preset_currency">Currency</label>';
     echo '<input id="preset_currency" type="text" name="preset_currency" value="' . esc_attr( $preset['currency'] ?? 'USD' ) . '" pattern="[A-Z]{3}" maxlength="3">';
     echo '<span class="hint">ISO 4217.</span>';
+    echo '</div>';
+
+    // Sale % (per-preset override; 0 = use site-wide)
+    echo '<div class="pps-preset-field">';
+    echo '<label for="preset_sale_discount_pct">Sale %</label>';
+    $sale_pct_val = ( isset( $preset['sale_discount_pct'] ) && $preset['sale_discount_pct'] !== '' ) ? (float) $preset['sale_discount_pct'] : '';
+    echo '<input id="preset_sale_discount_pct" type="number" name="preset_sale_discount_pct" value="' . esc_attr( $sale_pct_val ) . '" min="0" max="0.5" step="0.01">';
+    echo '<span class="hint">0 (or blank) = use site-wide PCF setting. Decimal e.g. 0.15 = 15% off. Capped at 0.5.</span>';
+    echo '</div>';
+
+    // Sale label
+    echo '<div class="pps-preset-field">';
+    echo '<label for="preset_sale_label">Sale Label</label>';
+    echo '<input id="preset_sale_label" type="text" name="preset_sale_label" value="' . esc_attr( $preset['sale_label'] ?? '' ) . '" maxlength="80">';
+    echo '<span class="hint">Shown in price breakdown + badge. Blank = use site-wide PCF label.</span>';
     echo '</div>';
 
     echo '</div>';

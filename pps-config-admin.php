@@ -79,6 +79,11 @@ function pps_default_config() {
             // Shippo integration (leave token empty to use static transit map)
             'shippo_api_token'                  => '',
             'shippo_origin_zip'                 => '85027',
+            // Site-wide sale discount. 0 = sale off; >0 = subtotal multiplied by (1 - pct).
+            // Excludes shipping, rush surcharge, and turnaround add-ons. Per-preset rows
+            // can override these via the Presets admin (Sale fields).
+            'sale_discount_pct'                 => 0,
+            'sale_label'                        => 'Sale',
         ),
 
         'papers_nc' => array(
@@ -1051,6 +1056,10 @@ function pps_config_tab_production( $cfg ) {
             'common_discount_max'    => array( 'Competitive Disc. (>0=on)', '' ),
             'bw_discount_rate'       => array( 'B&W Discount', '×' ),
         ),
+        'Site-Wide Sale' => array(
+            'sale_discount_pct'      => array( 'Sale % (0 = off)', '×' ),
+            'sale_label'             => array( 'Sale Label', '' ),
+        ),
         'Fees' => array(
             'non_inventory_fee'      => array( 'Non-Inventory', '$' ),
             'bundling_base_fee'      => array( 'Bundling Base', '$' ),
@@ -1090,7 +1099,7 @@ function pps_config_tab_production( $cfg ) {
         echo '<table class="pps-ss"><tbody>';
         foreach ( $fields as $key => $meta ) {
             $val  = $pcf[ $key ] ?? '';
-            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip' ) ) ? 'text' : 'number';
+            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip', 'sale_label' ) ) ? 'text' : 'number';
             $step = ( is_float( $val + 0 ) || strpos( (string) $val, '.' ) !== false ) ? '0.001' : '1';
             echo '<tr>';
             echo '<td style="font-weight:600;white-space:nowrap;width:1%;padding-right:10px;font-size:12px">' . esc_html( $meta[0] ) . '</td>';

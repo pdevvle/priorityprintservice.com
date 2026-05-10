@@ -1622,6 +1622,18 @@ function pps_save_preset( $slug, $data ) {
     $currency = isset( $data['currency'] ) ? strtoupper( sanitize_text_field( (string) $data['currency'] ) ) : 'USD';
     if ( ! preg_match( '/^[A-Z]{3}$/', $currency ) ) $currency = 'USD';
 
+    // Per-preset sale override. 0 = use site-wide PCF.sale_discount_pct.
+    // Hard-capped at 0.50 to prevent typos like "15" instead of "0.15".
+    $sale_discount_pct = 0.0;
+    if ( isset( $data['sale_discount_pct'] ) && $data['sale_discount_pct'] !== '' ) {
+        $sd = floatval( $data['sale_discount_pct'] );
+        if ( $sd < 0 ) $sd = 0.0;
+        if ( $sd > 0.5 ) $sd = 0.5;
+        $sale_discount_pct = $sd;
+    }
+    $sale_label = isset( $data['sale_label'] ) ? sanitize_text_field( (string) $data['sale_label'] ) : '';
+    if ( strlen( $sale_label ) > 80 ) $sale_label = substr( $sale_label, 0, 80 );
+
     // ── Tier 1: simple field overrides (spec-table dispatcher) ──
     // Each key declares its sanitization strategy. pps_sanitize_override_value()
     // returns null to signal "drop this field"; we only store non-null results.
@@ -1757,19 +1769,21 @@ function pps_save_preset( $slug, $data ) {
     }
 
     $clean = array(
-        'slug'             => $slug,
-        'calc'             => $calc,
-        'title'            => $title,
-        'description'      => $description,
-        'image'            => $image,
-        'defaults'         => $defaults,
-        'price_from'       => $price_from,
-        'currency'         => $currency,
-        'overrides'        => $overrides,
-        'schema_overrides' => $schema_overrides,
-        'schema_extras'    => $schema_extras,
-        'faqs'             => $faqs,
-        'modified_at'      => time(), // sitemap <lastmod>; updated on every save
+        'slug'              => $slug,
+        'calc'              => $calc,
+        'title'             => $title,
+        'description'       => $description,
+        'image'             => $image,
+        'defaults'          => $defaults,
+        'price_from'        => $price_from,
+        'currency'          => $currency,
+        'sale_discount_pct' => $sale_discount_pct,
+        'sale_label'        => $sale_label,
+        'overrides'         => $overrides,
+        'schema_overrides'  => $schema_overrides,
+        'schema_extras'     => $schema_extras,
+        'faqs'              => $faqs,
+        'modified_at'       => time(), // sitemap <lastmod>; updated on every save
     );
 
     $presets = pps_get_presets();
@@ -1988,6 +2002,20 @@ function pps_render_preset_calculator( $preset ) {
     // reads PPS_CONFIG.defaults to pre-fill the form.
     if ( ! empty( $preset['defaults'] ) && is_array( $preset['defaults'] ) ) {
         $config['defaults'] = $preset['defaults'];
+    }
+
+    // Per-preset sale override. A non-zero preset sale overrides the site-wide
+    // PCF default; a non-empty preset label overrides too. Calculator JS only
+    // reads PCF.sale_*, so we mutate the injected PCF block.
+    if ( ! empty( $preset['sale_discount_pct'] ) || ! empty( $preset['sale_label'] ) ) {
+        if ( ! isset( $config['calc'] ) || ! is_array( $config['calc'] ) ) $config['calc'] = array();
+        if ( ! isset( $config['calc']['pcf'] ) || ! is_array( $config['calc']['pcf'] ) ) $config['calc']['pcf'] = array();
+        if ( ! empty( $preset['sale_discount_pct'] ) ) {
+            $config['calc']['pcf']['sale_discount_pct'] = floatval( $preset['sale_discount_pct'] );
+        }
+        if ( ! empty( $preset['sale_label'] ) ) {
+            $config['calc']['pcf']['sale_label'] = (string) $preset['sale_label'];
+        }
     }
 
     // Build output buffer — we have to return a string, not echo.

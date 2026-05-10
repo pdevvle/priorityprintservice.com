@@ -83,6 +83,8 @@ const PCF = Object.assign({
   default_transit_days:4,
   shop_timezone:"America/Phoenix", shop_cutoff_hour:14, free_shipping_buffer:1.5,
   shippo_api_token:"", shippo_origin_zip:"85027",
+  // Site-wide sale (0 = off). Applied on subtotal before shipping/rush.
+  sale_discount_pct:0, sale_label:"Sale",
 }, _CFG.pcf || {});
 
 // ═══════════════════════════════════════════════════════════════
@@ -416,6 +418,10 @@ function calculate(c) {
   const csDiscVals = [0.01, 0.02, 0.03, 1.01, 1.02, 2.021, 2.022, 2.023, 2.024, 2.025, 2.01, 3.03, 3.01, 3.04, 3.02];
   P.cardstockDisc = csDiscVals.includes(paper.val) ? -(0.04 * pressSheets) : 0;
 
+  // Sale discount applies last, on the post-discount subtotal. Excludes shipping/rush.
+  const subBeforeSale = Object.values(P).reduce((s, v) => s + v, 0);
+  P.discSale = (PCF.sale_discount_pct > 0) ? -Math.round(subBeforeSale * PCF.sale_discount_pct * 100) / 100 : 0;
+
   const total = Object.values(P).reduce((s, v) => s + v, 0);
 
   // Turnaround
@@ -486,6 +492,7 @@ function calculate(c) {
     {l:"Non-Inventory",v:P.nonInv,g:"fee"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Discount (Flat)",v:P.discEasyFlat,g:"disc"},{l:"Easy Discount",v:P.discEasy,g:"disc"},{l:"Cardstock Disc",v:P.cardstockDisc,g:"disc"},
+    {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
   ].filter(r => Math.abs(r.v) > 0.005);
 
   const gC={mat:CK.cyan,lab:CK.key,add:CK.yellow,art:CK.magenta,fee:"#c25050",disc:CK.cyan};
@@ -494,11 +501,15 @@ function calculate(c) {
 
   const perUnit = qty > 0 ? grandTotal / qty : 0;
 
+  const saleActive = P.discSale < -0.005;
+  const saleAmount = saleActive ? Math.round(-P.discSale * 100) / 100 : 0;
+  const totalWithoutSale = Math.round((grandTotal - P.discSale) * 100) / 100;
   return {
     total: Math.round(grandTotal * 100) / 100, baseTotal: Math.round(total * 100) / 100,
     perUnit: Math.round(perUnit * 100) / 100, days, qty: qty, bd, grouped,
     imp, mk, fold, panels, pressSheets, longE, shortE, approxThickness,
     coatOK: paper.coatable, q100: qty >= 100, ti,
+    saleActive, saleAmount, saleLabel: (PCF.sale_label || "Sale"), totalWithoutSale,
     shipping: {
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
       earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday),
@@ -2776,12 +2787,15 @@ function Panel({ result, compact }) {
   const sh = r.shipping || {};
   const moneyStr = Math.max(0, r.total).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [dPart, cPart] = moneyStr.split(".");
+  const saleActive = !!r.saleActive;
   if (compact) {
     return (
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        {saleActive && <span style={{ fontSize: 12, color: CC.light, textDecoration: "line-through", fontWeight: 600 }}>${r.totalWithoutSale.toFixed(2)}</span>}
         <span style={{ fontSize: 20, fontWeight: 800, color: CC.dark, display: "inline-flex", alignItems: "baseline" }}>
           ${dPart}<span style={{ fontSize: 13, fontWeight: 600, color: CC.mid, marginLeft: 1 }}>.{cPart}</span>
         </span>
+        {saleActive && <span style={{ fontSize: 9.5, fontWeight: 800, color: CK.magenta, letterSpacing: ".5px", textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
         <span style={{ fontSize: 11, color: CC.mid }}>${r.perUnit.toFixed(2)}/ea</span>
         <span style={{ fontSize: 10, color: CC.light }}>{r.days}d</span>
       </div>
@@ -2791,9 +2805,11 @@ function Panel({ result, compact }) {
     <div style={{ background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden", pointerEvents: "none" }}>
       <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}`, pointerEvents: "none" }}>
         <div style={{ fontSize: 11, color: CC.light, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 2 }}>Estimated Total</div>
-        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: CC.dark }}>
+        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: CC.dark, gap: 10, flexWrap: "wrap" }}>
+          {saleActive && <span style={{ fontSize: 16, color: CC.light, textDecoration: "line-through", fontWeight: 700 }}>${r.totalWithoutSale.toFixed(2)}</span>}
           <span style={{ fontSize: 28, fontWeight: 800 }}>${dPart}</span>
-          <span style={{ fontSize: 18, fontWeight: 700, color: CC.light, marginLeft: 1 }}>.{cPart}</span>
+          <span style={{ fontSize: 18, fontWeight: 700, color: CC.light, marginLeft: -7 }}>.{cPart}</span>
+          {saleActive && <span style={{ display: "inline-block", background: CK.magenta, color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: ".5px", padding: "3px 8px", borderRadius: 4, textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
         </div>
       </div>
       <div style={{ display: "flex", borderBottom: `1px solid ${CC.border}` }}>

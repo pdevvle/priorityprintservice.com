@@ -163,6 +163,11 @@ const PCF = Object.assign({
   // Shippo integration (future) — when shippo_api_token is set, zip-based ETAs replace static transit map
   shippo_api_token:"",              // Shippo API Live Token — leave empty to use static transit map
   shippo_origin_zip:"85027",        // Shop origin zip for rate/ETA lookups
+  // Site-wide sale (0 = off). Discount is applied to the calc subtotal AFTER all
+  // existing discounts/surcharges, BEFORE proof, rush, and shipping. Per-preset
+  // rows can override these via PHP injection.
+  sale_discount_pct:0,
+  sale_label:"Sale",
 }, _CFG.pcf || {});
 
 // Ground transit days from facility (Phoenix AZ) — state-level fallback
@@ -491,6 +496,11 @@ function calculate(c) {
   const subBeforeSurcharge=Object.values(P).reduce((s,v)=>s+v,0);
   P.surcharge=subBeforeSurcharge*(PCF.booklet_surcharge||0);
 
+  // Sale discount applies last, on the post-surcharge subtotal. Excludes shipping
+  // and rush (which are added separately into grandTotal below).
+  const subBeforeSale=Object.values(P).reduce((s,v)=>s+v,0);
+  P.discSale=(PCF.sale_discount_pct>0)?-Math.round(subBeforeSale*PCF.sale_discount_pct*100)/100:0;
+
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
   // Turnaround
@@ -583,6 +593,7 @@ function calculate(c) {
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Difficult Size",v:P.diffSize,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
+    {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 
   // CMYK-derived group colors
@@ -674,7 +685,10 @@ function calculate(c) {
     minDaysConfig:PCF.minimum_turnaround_days,
   };
 
-  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,hcOK,sz,debug,ti,
+  const saleActive=P.discSale<-0.005;
+  const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
+  const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
+  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
     shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
@@ -908,7 +922,7 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
 function Panel({result,compact}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
-  const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh}=result;
+  const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
   const hasRush=sh&&sh.rushCost>0;
   const availRange=sh?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):String(days);
 
@@ -918,10 +932,12 @@ function Panel({result,compact}){
     return(
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:hasRush?CK.rush:CK.cyan,borderRadius:6,padding:"8px 14px",color:hasRush?"#333":"#fff"}}>
         <div>
-          <div style={{lineHeight:1,display:"flex",alignItems:"baseline"}}>
+          <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
+            {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
             <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
             <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
           </div>
+          {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
           {hasRush&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
         </div>
         <div style={{display:"flex",gap:12}}>
@@ -953,9 +969,11 @@ function Panel({result,compact}){
             <span style={{...ST.cmykDot,background:CK.key,boxShadow:"0 0 0 1px rgba(255,255,255,.4)"}}/>
           </span>
         </div>
-        <div style={{lineHeight:1,display:"flex",alignItems:"baseline"}}>
+        <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
+          {saleActive&&<span style={{fontSize:18,opacity:.55,textDecoration:"line-through",fontWeight:700,letterSpacing:"-.5px"}}>${totalWithoutSale.toFixed(2)}</span>}
           <span style={{fontSize:38,fontWeight:800,letterSpacing:"-1.5px"}}>${dD}</span>
-          <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:1}}>.{cD}</span>
+          <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
+          {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
         </div>
         {hasRush&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
       </div>

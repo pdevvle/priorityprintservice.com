@@ -213,6 +213,56 @@ Defaults updated to match all calculators:
 
 ---
 
+## Sale discount
+
+Manual on/off site-wide sale via two PCF scalars. Shipped 2026-05-10.
+
+### Knobs
+
+| PCF key | Default | Meaning |
+|---|---:|---|
+| `sale_discount_pct` | `0` | Decimal fraction (e.g. `0.15` = 15% off). `0` = sale off. Hard-capped at `0.5` in admin/preset save. |
+| `sale_label` | `"Sale"` | Human label shown on the calculator panel badge and in the price breakdown. |
+
+### Apply order
+
+```
+…all existing line items + existing discounts (discBW, discEasy, discCommon, discSize) + surcharge…
+const subBeforeSale = sum(P)
+P.discSale = (PCF.sale_discount_pct > 0) ? -round(subBeforeSale * PCF.sale_discount_pct) : 0
+total = sum(P)              // includes P.discSale
+grandTotal = total + rushCost
+final = grandTotal + shipping
+```
+
+The sale discounts the **post-existing-discount, post-surcharge** subtotal. **Excluded:** rush surcharge, shipping, and turnaround add-ons (these are added after `total`). This matches retail convention — "15% off" applies to product cost, not to shipping & handling.
+
+### Resolution: site-wide vs per-preset
+
+- Sitewide via WP Admin → **PPS Config → Production → Site-Wide Sale**.
+- Per-preset overrides via **Presets admin** (`Sale %` and `Sale Label` fields on each preset row). Non-zero per-preset values override the site-wide PCF values via `PPS_CONFIG.calc.pcf.sale_*` injection in `pps_render_preset_calculator()`.
+- Calculators always read `PCF.sale_*` — they have no preset-awareness. Override happens at the PHP injection layer.
+
+### Display
+
+- When `P.discSale < -0.005`: panel renders the original price struck-through alongside the sale price plus a magenta `<label> · Save $<amount>` badge. Breakdown line item appears with the configured `sale_label`.
+- When `P.discSale === 0`: zero sale UI rendered. Identical to pre-sale baseline.
+
+### Files touched
+
+- `pps-config-admin.php` — defaults + Production tab "Site-Wide Sale" group + `sale_label` added to text-input list.
+- `pps-calculators.php` — `pps_save_preset()` accepts and clamps the two fields; `pps_render_preset_calculator()` injects per-preset overrides into `PPS_CONFIG.calc.pcf`.
+- `pps-presets-admin.php` — two form fields under the basic-info grid; passes through to save handler.
+- `calc-preview-test.html`, `calc-perfect-bound.html`, `calc-brochure.html`, `calc-coupon-book.html` — PCF defaults, `P.discSale` line in `calculate()`, breakdown row, return-object additions, Panel strikethrough/badge.
+
+### Tuning
+
+- "Sale needs to be more aggressive": raise `sale_discount_pct`. Cap is 0.5 (50%).
+- "Sale should not appear on a particular preset": leave preset's `Sale %` blank or `0`; that preset will fall through to the site-wide value, which can also be 0 to disable globally.
+- "Different label per campaign": just edit `sale_label` in admin — no code change.
+
+---
+
 ## Worked examples — the philosophy in action
 
 ### 1. Perforation reprice (commits `9625325`, `6004198`, `c87cd8a`, `27095e7`)
