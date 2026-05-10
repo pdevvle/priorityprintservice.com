@@ -492,6 +492,17 @@ add_action( 'wp', function() {
             $config['reorder'] = sanitize_text_field( $_GET['pps_reorder'] );
         }
 
+        // Add-on visibility flags resolved for this calculator's type.
+        // Calculator JS reads window.PPS_CONFIG.addons.<slug> to hide the
+        // option row (false) and calculate() returns an error if a pre-filled
+        // state carries a non-default value for a disabled add-on.
+        if ( function_exists( 'pps_get_addons_visibility_for_calc' ) ) {
+            $calc_type = pps_get_calc_type_for_filename( $filename );
+            if ( $calc_type ) {
+                $config['addons'] = pps_get_addons_visibility_for_calc( $calc_type );
+            }
+        }
+
         // Edit mode: store edit key so add-to-cart replaces the old item
         if ( ! empty( $_GET['pps_edit_key'] ) ) {
             $edit_key = sanitize_text_field( $_GET['pps_edit_key'] );
@@ -2016,6 +2027,12 @@ function pps_render_preset_calculator( $preset ) {
         if ( ! empty( $preset['sale_label'] ) ) {
             $config['calc']['pcf']['sale_label'] = (string) $preset['sale_label'];
         }
+    }
+
+    // Add-on visibility (per-calc-type, not per-preset). Same shape as the
+    // product-page render path.
+    if ( function_exists( 'pps_get_addons_visibility_for_calc' ) ) {
+        $config['addons'] = pps_get_addons_visibility_for_calc( $preset['calc'] );
     }
 
     // Build output buffer — we have to return a string, not echo.

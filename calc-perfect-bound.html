@@ -128,6 +128,8 @@ function useIsMobile(breakpoint=700){
 // Falls back to hardcoded defaults for standalone testing
 // ═══════════════════════════════════════════════════════════════
 const _CFG = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.calc) ? window.PPS_CONFIG.calc : {};
+// Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
+const _AD = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.addons) ? window.PPS_CONFIG.addons : {};
 
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
@@ -573,6 +575,16 @@ function calculate(c) {
   const sz=resolveSize(c); const imp=sz.imp;
   const sets=c.sets.filter(s=>s.qty>0&&s.pages>0);
   if(!sets.length||sz.errors.length>0) return {error:sz.errors,sz};
+
+  // Add-on availability guard
+  const _adErrs=[];
+  if(_AD.vivid===false && c.vividPrint===true) _adErrs.push("Vivid Print is currently unavailable. Please turn it off to continue.");
+  if(_AD.coating===false && Number(c.coating)>0) _adErrs.push("UV Coating is currently unavailable. Please change Coating to None to continue.");
+  if(_AD.bundling===false && Number(c.bundling)>0) _adErrs.push("Bundling is currently unavailable. Please change Bundling to None to continue.");
+  if(_AD.rc===false && Number(c.roundCorner)>0) _adErrs.push("Round Cornering is currently unavailable. Please change Round Corner to None to continue.");
+  if(_AD.perforation===false && Number(c.perforation)>0) _adErrs.push("Perforation is currently unavailable. Please change Perforation to None to continue.");
+  if(_AD.outfold===false && Number(c.outfold)>0) _adErrs.push("Outfold is currently unavailable. Please change Outfold to None to continue.");
+  if(_adErrs.length) return {error:_adErrs,sz};
 
   const N=sets.length;
   const coat=COATINGS.find(x=>x.val===c.coating)||COATINGS[0];
@@ -4718,15 +4730,15 @@ function App(){
 
           {/* SECTION 3: Finishing & Addons */}
           <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")} badge={r.debug?.turnaround?.addonDays>0?`+${r.debug.turnaround.addonDays}d turnaround`:null}>
-            <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>
-            <div style={ST.hr}/>
+            {(_AD.vivid!==false || vividPrint===true) && <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
+            {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
-              <Sel label="Cover Coating" badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-              {r.q100!==false
+              {(_AD.coating!==false || coating>0) && <Sel label="Cover Coating" badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+              {(_AD.bundling!==false || bundling>0) && (r.q100!==false
                 ? <Sel label="Bundling" badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-                : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>}
+                : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>)}
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+            {(_AD.rc!==false || roundCorner>0) && <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <Sel label="Round Cornering" badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
               </div>
@@ -4741,11 +4753,11 @@ function App(){
                   </div>
                 );
               })()}
-            </div>
+            </div>}
 
             {/* Perfect bound specific addons */}
-            <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-            <Sel label="Perforation" badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+            {(_AD.outfold!==false || outfold>0) && <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+            {(_AD.perforation!==false || perforation>0) && <Sel label="Perforation" badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
             {perfCount > 0 && (
               <div style={{ marginTop:8, padding:"10px 12px", background:"rgba(250,204,21,.08)", border:"1px solid rgba(250,204,21,.28)", borderRadius:6 }}>
                 <div style={{ fontSize:10.5, fontWeight:700, color:"#b45309", letterSpacing:".06em", textTransform:"uppercase", marginBottom:8 }}>Perforation Position</div>

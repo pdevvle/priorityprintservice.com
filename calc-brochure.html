@@ -65,6 +65,8 @@ const CC={bg:"#f5f5f7",white:"#fff",dark:"#1d2327",mid:"#555",light:"#999",borde
 const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#1d2327",cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
+// Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
+const _AD = (window.PPS_CONFIG || {}).addons || {};
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
   labor_press_hr:35, labor_bindery_hr:35, labor_cutting_hr:45,
@@ -246,6 +248,15 @@ function calcBrochureImp(longEdge, shortEdge) {
 // PRICING ENGINE
 // ═══════════════════════════════════════════════════════════════
 function calculate(c) {
+  // Add-on availability guard
+  const _adErrs = [];
+  if (_AD.vivid === false && c.vivid === true) _adErrs.push("Vivid Print is currently unavailable. Please turn it off to continue.");
+  if (_AD.coating === false && Number(c.coating) > 0) _adErrs.push("UV Coating is currently unavailable. Please change Coating to None to continue.");
+  if (_AD.bundling === false && Number(c.bundling) > 0) _adErrs.push("Bundling is currently unavailable. Please change Bundling to None to continue.");
+  if (_AD.rc === false && Number(c.roundCorner) > 0) _adErrs.push("Round Cornering is currently unavailable. Please change Round Corner to None to continue.");
+  if (_AD.perforation === false && Number(c.perforation) > 0) _adErrs.push("Perforation is currently unavailable. Please change Perforation to None to continue.");
+  if (_adErrs.length) return { error: _adErrs };
+
   const errors = [];
   let imp, longE, shortE;
   if (c.sizeMode === "preset") {
@@ -3281,9 +3292,9 @@ function App() {
               {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             <div style={ST.hr} />
-            <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />
-            <div style={ST.hr} />
-            {paper.coatable ? (
+            {(_AD.vivid !== false || vivid === true) && <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
+            {(_AD.vivid !== false || vivid === true) && <div style={ST.hr} />}
+            {(_AD.coating !== false || coating > 0) && (paper.coatable ? (
               <>
                 <Sel label="Additional Coating" value={coating} onChange={v => setCoating(Number(v))}>
                   {COATINGS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
@@ -3301,25 +3312,25 @@ function App() {
               </>
             ) : (
               <div style={{...ST.f, opacity: 0.4}}><label style={ST.lbl}>Additional Coating</label><div style={{padding:"8px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#f5f5f5",fontSize:13,color:CC.light}}>Not available for this paper type</div></div>
-            )}
-            <div style={ST.hr} />
-            <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
+            ))}
+            {(_AD.coating !== false || coating > 0) && <div style={ST.hr} />}
+            {(_AD.bundling !== false || bundling > 0) && <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-            </Sel>
-            <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
+            </Sel>}
+            {(_AD.perforation !== false || perforation > 0) && <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
               note={dimShort > 14 && perfCount > 0 ? `14" throat — ${dimShort}" perf only` : (perfCount > 0 && perfCrossDim < 4 ? `${perfCrossDim}" too short for 2 perfs` : undefined)}>
               {PERF_OPTS.filter(o => {
                 var c = o.count != null ? o.count : PERF_OPTS.indexOf(o);
                 return c <= maxPerfs;
               }).map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-            </Sel>
-            {perfCount > 0 && dimShort <= 14 && (
+            </Sel>}
+            {(_AD.perforation !== false || perforation > 0) && perfCount > 0 && dimShort <= 14 && (
               <Pil label="Perf Direction" value={perfDir} onChange={setPerfDir} options={[
                 { t: `${dimShort}" perf`, v: "length" },
                 { t: `${dimLong}" perf`, v: "width" },
               ]} />
             )}
-            {foldType === "flat" && (
+            {(_AD.rc !== false || roundCorner > 0) && foldType === "flat" && (
               <Sel label="Round Cornering" value={roundCorner} onChange={v => setRoundCorner(Number(v))}>
                 {CORNERS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
               </Sel>

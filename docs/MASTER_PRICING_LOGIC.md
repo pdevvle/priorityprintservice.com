@@ -263,6 +263,49 @@ The sale discounts the **post-existing-discount, post-surcharge** subtotal. **Ex
 
 ---
 
+## Add-on availability (per-calc on/off)
+
+Per-calc-type on/off switches for finishing add-ons. Shipped 2026-05-10.
+
+### Storage
+
+`wp_options['pps_addons_visibility']` — associative array keyed by add-on slug, then by calc type. Only calc types that support each add-on appear under its key. Defaults: every cell `true` (current behavior). Setting any cell `false` makes that add-on unavailable on that calculator.
+
+### Supported add-ons
+
+| Slug | Label | Saddle | PB | Brochure | Coupon |
+|---|---|:-:|:-:|:-:|:-:|
+| `vivid` | Vivid Print | ✓ | ✓ | ✓ | ✓ |
+| `coating` | UV Coating | ✓ | ✓ | ✓ | ✓ |
+| `bundling` | Bundling | ✓ | ✓ | ✓ | ✓ |
+| `rc` | Round Cornering | ✓ | ✓ | ✓ | ✓ |
+| `two_staple` | Two-Staple | ✓ | — | — | — |
+| `perforation` | Perforation | — | ✓ | ✓ | ✓ |
+| `outfold` | Outfold | — | ✓ | — | ✓ |
+
+### "Off" semantics
+
+- Calculator form row is **hidden** when the add-on is off for that calc.
+- If a pre-filled state (reorder URL, preset defaults, edit-mode) carries a non-default value for the disabled add-on, the row is **force-shown** so the user can see and clear it, AND `calculate()` returns `{error: ["<Label> is currently unavailable. Please change this option to continue."]}` so no price displays until cleared.
+- This is stricter than the sale-discount knob: off = truly unavailable, not just suppressed.
+
+### Admin UI
+
+- **Finishing tab**: above each of the Coatings / Bundling / Round Cornering spreadsheets, a row of 4 calc-type checkboxes ("Available on: Saddle / Perfect Bound / Brochure / Coupon").
+- **Production tab**: bottom-of-tab "Add-on Availability" section for the four add-ons that don't have their own finishing spreadsheet (Vivid Print, Two-Staple, Perforation, Outfold).
+
+### Injection
+
+`pps-calculators.php` resolves the visibility matrix to just this calculator's flags via `pps_get_addons_visibility_for_calc($calc_type)` and writes the result as `PPS_CONFIG.addons` on both the WC product render path and the preset render path. Calculator JS reads `window.PPS_CONFIG.addons.<slug>` directly.
+
+### Files touched
+
+- `pps-config-admin.php` — constant, defaults matrix, getter helpers, save handler, two new render helpers, UI sections.
+- `pps-calculators.php` — `$config['addons']` injection on both render paths.
+- All 4 calc HTMLs — `const _AD = ...` near `_CFG`; add-on availability guard at start of `calculate()`; each add-on UI row gated with `(_AD.<slug>!==false || <stateValue> non-default) && <UI>`.
+
+---
+
 ## Worked examples — the philosophy in action
 
 ### 1. Perforation reprice (commits `9625325`, `6004198`, `c87cd8a`, `27095e7`)

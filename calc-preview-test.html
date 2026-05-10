@@ -127,6 +127,9 @@ function useIsMobile(breakpoint=700){
 // Falls back to hardcoded defaults for standalone testing
 // ═══════════════════════════════════════════════════════════════
 const _CFG = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.calc) ? window.PPS_CONFIG.calc : {};
+// Per-calc add-on visibility flags injected by PHP. Shape: { vivid: bool, coating: bool, ... }.
+// Only keys for this calc-type's supported add-ons appear. Absent key = treated as visible.
+const _AD = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.addons) ? window.PPS_CONFIG.addons : {};
 
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
@@ -421,6 +424,17 @@ function calculate(c) {
   const sz=resolveSize(c); const imp=sz.imp;
   const sets=c.sets.filter(s=>s.qty>0&&s.pages>0);
   if(!sets.length||sz.errors.length>0) return {error:sz.errors,sz};
+
+  // Add-on availability guard: if a disabled add-on carries a non-default value
+  // (typically from a pre-filled reorder/edit URL), refuse to price and tell
+  // the user which option to clear.
+  const _adErrs=[];
+  if(_AD.vivid===false && c.vividPrint===true) _adErrs.push("Vivid Print is currently unavailable. Please turn it off to continue.");
+  if(_AD.coating===false && Number(c.coating)>0) _adErrs.push("UV Coating is currently unavailable. Please change Coating to None to continue.");
+  if(_AD.bundling===false && Number(c.bundling)>0) _adErrs.push("Bundling is currently unavailable. Please change Bundling to None to continue.");
+  if(_AD.rc===false && Number(c.roundCorner)>0) _adErrs.push("Round Cornering is currently unavailable. Please change Round Corner to None to continue.");
+  if(_AD.two_staple===false && c.twoStaple===true) _adErrs.push("Two-Staple is currently unavailable. Please turn it off to continue.");
+  if(_adErrs.length) return {error:_adErrs,sz};
 
   const N=sets.length;
   const coat=COATINGS.find(x=>x.val===c.coating)||COATINGS[0];
@@ -4217,11 +4231,11 @@ function App(){
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
             </div>
 
-            {/* Staple Binding */}
-            {r.twoAuto
+            {/* Staple Binding — hidden when two_staple add-on is disabled and not pre-filled */}
+            {(_AD.two_staple!==false || twoStaple===true) && (r.twoAuto
               ? <div style={ST.f}><label style={ST.lbl}>Staple Binding<TurnBadge days={r.ti?.twoStaple}/></label><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Two Staples — standard for this size</div></div>
               : <Pil label="Staple Binding" badge={<TurnBadge days={r.ti?.twoStaple}/>} value={twoStaple} onChange={setTwoStaple} options={[{t:"Single Staple",v:false},{t:"Two Staples",v:true}]}/>
-            }
+            )}
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
@@ -4248,15 +4262,15 @@ function App(){
 
           {/* SECTION 3: Finishing & Addons */}
           <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")} badge={r.debug?.turnaround?.addonDays>0?`+${r.debug.turnaround.addonDays}d turnaround`:null}>
-            <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>
-            <div style={ST.hr}/>
+            {(_AD.vivid!==false || vividPrint===true) && <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
+            {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
-              <Sel label="Cover Coating" badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-              {r.q100!==false
+              {(_AD.coating!==false || coating>0) && <Sel label="Cover Coating" badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+              {(_AD.bundling!==false || bundling>0) && (r.q100!==false
                 ? <Sel label="Bundling" badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-                : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>}
+                : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>)}
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+            {(_AD.rc!==false || roundCorner>0) && <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <Sel label="Round Cornering" badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
               </div>
@@ -4271,7 +4285,7 @@ function App(){
                   </div>
                 );
               })()}
-            </div>
+            </div>}
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
