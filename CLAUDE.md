@@ -111,3 +111,7 @@ Before suggesting any formula change, PCF default change, or new pricing knob, r
   - https://pdevvle.github.io/priorityprintservice.com/calc-coupon-book.html (coupon book)
 - Each calculator has a build-stamp chip in the bottom-right corner. After a push, wait ~60 seconds for Pages to rebuild, then hard-refresh (Cmd/Ctrl+Shift+R) or use an Incognito window. If the chip still doesn't update, verify `.nojekyll` exists on `pps-pricing-config` root — that's the #1 cause of "my push didn't show up."
 - Go private protocol: replace files with dummies, flip repo to private. Restore: `git checkout pps-real-backup -- <files>`
+
+## Retired branches
+
+- `gh-pages` (last commit 2026-04-17) — never the live Pages source despite an earlier session's mistaken claim. Archived as `OLD/gh-pages`. Safe to delete locally: `git push origin --delete gh-pages`. Contained an orphan `pb-v2.html` cache-verification duplicate of the perfect-bound calculator with the pre-fix cover-print formula.
