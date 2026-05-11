@@ -3685,6 +3685,13 @@ function App() {
         </div>}
       </div>
 
+      {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
+      {mob && !qOpen && (
+        <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ position: "fixed", bottom: "calc(70px + env(safe-area-inset-bottom))", right: 12, zIndex: 39, padding: "7px 13px", borderRadius: 16, border: `1px solid ${CK.cyan}`, background: "#fff", color: CK.cyan, fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 8px rgba(0,0,0,.12)", cursor: "pointer", fontFamily: "inherit" }}>
+          Have a question? →
+        </button>
+      )}
+
       {/* Mobile bottom bar */}
       {mob && <>
         {/* Slide-up panels: debug or qty pricing */}

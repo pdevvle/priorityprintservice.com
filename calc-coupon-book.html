@@ -4998,6 +4998,13 @@ function App(){
         </div>}
       </div>
 
+      {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
+      {mob&&!qOpen&&(
+        <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{position:"fixed",bottom:"calc(70px + env(safe-area-inset-bottom))",right:12,zIndex:39,padding:"7px 13px",borderRadius:16,border:`1px solid ${CK.cyan}`,background:"#fff",color:CK.cyan,fontSize:11.5,fontWeight:700,boxShadow:"0 2px 8px rgba(0,0,0,.12)",cursor:"pointer",fontFamily:"inherit"}}>
+          Have a question? →
+        </button>
+      )}
+
       {/* Fixed bottom bar — mobile */}
       {mob&&<>
         {showDebug&&<div style={{position:"fixed",bottom:76,left:0,right:0,zIndex:39,maxHeight:"60vh",overflowY:"auto",background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.12)",padding:"0 10px 10px",paddingBottom:"env(safe-area-inset-bottom)"}}>

@@ -652,6 +652,97 @@ add_action( 'wp_ajax_nopriv_pps_add_to_cart', 'pps_ajax_add_to_cart' );
 add_action( 'wp_ajax_pps_quote_question', 'pps_ajax_quote_question' );
 add_action( 'wp_ajax_nopriv_pps_quote_question', 'pps_ajax_quote_question' );
 
+// ── CPT: pps_question (admin-only log of submissions) ──
+add_action( 'init', function() {
+    register_post_type( 'pps_question', array(
+        'label'          => 'Calc Questions',
+        'labels'         => array(
+            'name'          => 'Calc Questions',
+            'singular_name' => 'Calc Question',
+            'all_items'     => 'All Questions',
+            'edit_item'     => 'View Question',
+            'view_item'     => 'View Question',
+            'search_items'  => 'Search questions',
+            'not_found'     => 'No questions yet.',
+        ),
+        'public'              => false,
+        'show_ui'             => true,
+        'show_in_menu'        => true,
+        'show_in_admin_bar'   => false,
+        'show_in_nav_menus'   => false,
+        'menu_position'       => 26,
+        'menu_icon'           => 'dashicons-format-chat',
+        'supports'            => array( 'title', 'editor' ),
+        'capability_type'     => 'post',
+        'capabilities'        => array( 'create_posts' => 'do_not_allow' ),
+        'map_meta_cap'        => true,
+        'has_archive'         => false,
+        'rewrite'             => false,
+        'exclude_from_search' => true,
+    ) );
+} );
+
+// Custom columns on the Calc Questions list table — show Email + Calc + Total
+add_filter( 'manage_pps_question_posts_columns', function( $cols ) {
+    $new = array();
+    foreach ( $cols as $k => $v ) {
+        $new[ $k ] = $v;
+        if ( $k === 'title' ) {
+            $new['pps_q_email'] = 'Email';
+            $new['pps_q_calc']  = 'Calculator';
+            $new['pps_q_total'] = 'Total';
+        }
+    }
+    return $new;
+} );
+add_action( 'manage_pps_question_posts_custom_column', function( $col, $post_id ) {
+    if ( $col === 'pps_q_email' ) {
+        $email = get_post_meta( $post_id, '_pps_q_email', true );
+        if ( $email ) echo '<a href="mailto:' . esc_attr( $email ) . '">' . esc_html( $email ) . '</a>';
+    } elseif ( $col === 'pps_q_calc' ) {
+        $label  = get_post_meta( $post_id, '_pps_q_calc_label', true );
+        $preset = get_post_meta( $post_id, '_pps_q_preset_slug', true );
+        echo esc_html( $label );
+        if ( $preset ) echo ' <span style="color:#888">· ' . esc_html( $preset ) . '</span>';
+    } elseif ( $col === 'pps_q_total' ) {
+        $t = (float) get_post_meta( $post_id, '_pps_q_total', true );
+        if ( $t > 0 ) echo '$' . number_format( $t, 2 );
+    }
+}, 10, 2 );
+
+// Render snapshot meta as a read-only meta box on the edit screen
+add_action( 'add_meta_boxes', function() {
+    add_meta_box( 'pps_q_snapshot', 'Quote snapshot', 'pps_render_question_meta_box', 'pps_question', 'side', 'high' );
+} );
+function pps_render_question_meta_box( $post ) {
+    $rows = array(
+        'Name'         => get_post_meta( $post->ID, '_pps_q_name', true ),
+        'Email'        => get_post_meta( $post->ID, '_pps_q_email', true ),
+        'Phone'        => get_post_meta( $post->ID, '_pps_q_phone', true ),
+        'Calculator'   => get_post_meta( $post->ID, '_pps_q_calc_label', true ),
+        'Preset'       => get_post_meta( $post->ID, '_pps_q_preset_slug', true ),
+        'Total'        => ( $t = (float) get_post_meta( $post->ID, '_pps_q_total', true ) ) > 0 ? '$' . number_format( $t, 2 ) : '',
+        'Per Unit'     => ( $u = (float) get_post_meta( $post->ID, '_pps_q_per_unit', true ) ) > 0 ? '$' . number_format( $u, 2 ) : '',
+        'Quantity'     => ( $q = (int) get_post_meta( $post->ID, '_pps_q_qty', true ) ) > 0 ? number_format( $q ) : '',
+        'Days'         => ( $d = (int) get_post_meta( $post->ID, '_pps_q_days', true ) ) > 0 ? $d . ' biz' : '',
+        'Submitter IP' => get_post_meta( $post->ID, '_pps_q_user_ip', true ),
+    );
+    echo '<table class="form-table" style="margin:0"><tbody>';
+    foreach ( $rows as $label => $val ) {
+        if ( $val === '' || $val === null ) continue;
+        echo '<tr><th scope="row" style="padding:6px 0;font-size:12px;width:90px">' . esc_html( $label ) . '</th><td style="padding:6px 0;font-size:12px">' . esc_html( $val ) . '</td></tr>';
+    }
+    echo '</tbody></table>';
+    $summary = get_post_meta( $post->ID, '_pps_q_summary', true );
+    if ( $summary ) {
+        echo '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #ddd"><strong style="font-size:12px">Spec</strong><pre style="margin:4px 0 0;padding:8px;background:#fafafa;border-radius:3px;font-size:11px;white-space:pre-wrap">' . esc_html( $summary ) . '</pre></div>';
+    }
+    $reorder = get_post_meta( $post->ID, '_pps_q_reorder_url', true );
+    if ( $reorder ) {
+        echo '<p style="margin-top:10px"><a href="' . esc_url( $reorder ) . '" target="_blank" class="button button-primary" style="width:100%;text-align:center">Open this quote in calculator →</a></p>';
+    }
+}
+
 function pps_quote_question_rate_key() {
     $ip   = isset( $_SERVER['REMOTE_ADDR'] ) ? $_SERVER['REMOTE_ADDR'] : '';
     $salt = defined( 'AUTH_SALT' ) ? AUTH_SALT : 'pps';
@@ -716,8 +807,18 @@ function pps_ajax_quote_question() {
     }
 
     // ── Compose staff email ──
-    $recipient = get_option( 'pps_question_recipient', '' );
-    if ( ! is_email( $recipient ) ) $recipient = get_option( 'admin_email' );
+    // Recipient resolution: PCF (admin-editable) → legacy option → WP admin_email.
+    $recipient = '';
+    if ( function_exists( 'pps_get_config' ) ) {
+        $cfg = pps_get_config();
+        $cand = isset( $cfg['pcf']['question_recipient_email'] ) ? trim( (string) $cfg['pcf']['question_recipient_email'] ) : '';
+        if ( is_email( $cand ) ) $recipient = $cand;
+    }
+    if ( ! $recipient ) {
+        $cand = get_option( 'pps_question_recipient', '' );
+        if ( is_email( $cand ) ) $recipient = $cand;
+    }
+    if ( ! $recipient ) $recipient = get_option( 'admin_email' );
     $subject_calc = $calc_label !== '' ? $calc_label : 'Calculator';
     $subject = sprintf( '[PPS] Question on %s quote — %s', $subject_calc, $name );
 
@@ -759,7 +860,38 @@ function pps_ajax_quote_question() {
         'Reply-To: ' . sprintf( '%s <%s>', $name, $email ),
     );
 
+    // Log the submission as a pps_question post BEFORE sending so we keep
+    // a record even if mail delivery fails. wp_kses cleans the bodies for
+    // safe storage; emails were already plain text but this is defense in
+    // depth in case wp_insert_post stores HTML escapes oddly.
+    $post_title = sprintf( '%s — %s', $name, $calc_label !== '' ? $calc_label : 'Calculator' );
+    if ( $total > 0 ) $post_title .= sprintf( ' · $%s', number_format( $total, 2 ) );
+    $post_id = wp_insert_post( array(
+        'post_type'    => 'pps_question',
+        'post_status'  => 'publish',
+        'post_title'   => wp_strip_all_tags( $post_title ),
+        'post_content' => $message,
+    ), true );
+    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+        update_post_meta( $post_id, '_pps_q_name',         $name );
+        update_post_meta( $post_id, '_pps_q_email',        $email );
+        update_post_meta( $post_id, '_pps_q_phone',        $phone );
+        update_post_meta( $post_id, '_pps_q_calc_type',    $calc_type );
+        update_post_meta( $post_id, '_pps_q_calc_label',   $calc_label );
+        update_post_meta( $post_id, '_pps_q_preset_slug',  $preset_slug );
+        update_post_meta( $post_id, '_pps_q_total',        $total );
+        update_post_meta( $post_id, '_pps_q_per_unit',     $per_unit );
+        update_post_meta( $post_id, '_pps_q_qty',          $qty );
+        update_post_meta( $post_id, '_pps_q_days',         $days );
+        update_post_meta( $post_id, '_pps_q_summary',      $summary );
+        update_post_meta( $post_id, '_pps_q_reorder_url',  $reorder_url );
+        update_post_meta( $post_id, '_pps_q_user_ip',      isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '' );
+    }
+
     $sent_staff = wp_mail( $recipient, $subject, $staff_body, $staff_headers );
+    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+        update_post_meta( $post_id, '_pps_q_email_sent', $sent_staff ? 1 : 0 );
+    }
 
     // ── Compose customer confirmation ──
     $site_name = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
