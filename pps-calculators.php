@@ -638,6 +638,167 @@ function pps_ajax_upload_artwork() {
 add_action( 'wp_ajax_pps_add_to_cart', 'pps_ajax_add_to_cart' );
 add_action( 'wp_ajax_nopriv_pps_add_to_cart', 'pps_ajax_add_to_cart' );
 
+// ═══════════════════════════════════════════════════════════════
+// QUOTE QUESTION FORM — AJAX handler
+// ═══════════════════════════════════════════════════════════════
+//
+// Customer fills in name/email/phone/question while viewing a quote.
+// Calculator JS posts the current calc state + a re-open URL. We email
+// the staff (admin_email by default; override via pps_question_recipient
+// option) and send a confirmation back to the customer. Honeypot + rate
+// limit prevent the obvious bot floods. Reuses the pps_add_to_cart nonce
+// since the calculator already has it loaded.
+
+add_action( 'wp_ajax_pps_quote_question', 'pps_ajax_quote_question' );
+add_action( 'wp_ajax_nopriv_pps_quote_question', 'pps_ajax_quote_question' );
+
+function pps_quote_question_rate_key() {
+    $ip   = isset( $_SERVER['REMOTE_ADDR'] ) ? $_SERVER['REMOTE_ADDR'] : '';
+    $salt = defined( 'AUTH_SALT' ) ? AUTH_SALT : 'pps';
+    return 'pps_qq_' . substr( hash( 'sha256', $ip . $salt ), 0, 24 );
+}
+
+function pps_ajax_quote_question() {
+    check_ajax_referer( 'pps_add_to_cart', 'nonce' );
+
+    // ── Rate limit: 5 submissions per IP per 15 minutes ──
+    $rkey     = pps_quote_question_rate_key();
+    $attempts = (int) get_transient( $rkey );
+    if ( $attempts >= 5 ) {
+        wp_send_json_error( array( 'message' => 'Too many submissions from your address. Please try again in a few minutes.' ), 429 );
+    }
+    set_transient( $rkey, $attempts + 1, 15 * MINUTE_IN_SECONDS );
+
+    // ── Honeypot: silently drop bot submissions ──
+    $honey = isset( $_POST['hp'] ) ? sanitize_text_field( wp_unslash( $_POST['hp'] ) ) : '';
+    if ( $honey !== '' ) {
+        wp_send_json_success( array( 'message' => 'Thanks — we will be in touch shortly.' ) );
+    }
+
+    // ── Required fields ──
+    $name    = sanitize_text_field( wp_unslash( $_POST['name'] ?? '' ) );
+    $email   = sanitize_email( wp_unslash( $_POST['email'] ?? '' ) );
+    $message = sanitize_textarea_field( wp_unslash( $_POST['message'] ?? '' ) );
+    if ( $name === '' || strlen( $name ) > 120 ) {
+        wp_send_json_error( array( 'message' => 'Please enter your name.' ) );
+    }
+    if ( ! is_email( $email ) ) {
+        wp_send_json_error( array( 'message' => 'Please enter a valid email address.' ) );
+    }
+    if ( $message === '' || strlen( $message ) > 4000 ) {
+        wp_send_json_error( array( 'message' => 'Please enter a question (1-4000 chars).' ) );
+    }
+
+    // ── Optional fields ──
+    $phone        = sanitize_text_field( wp_unslash( $_POST['phone'] ?? '' ) );
+    if ( strlen( $phone ) > 40 ) $phone = substr( $phone, 0, 40 );
+    $summary      = sanitize_textarea_field( wp_unslash( $_POST['summary'] ?? '' ) );
+    if ( strlen( $summary ) > 4000 ) $summary = substr( $summary, 0, 4000 );
+    $total        = isset( $_POST['total'] ) ? (float) $_POST['total'] : 0;
+    $per_unit     = isset( $_POST['perUnit'] ) ? (float) $_POST['perUnit'] : 0;
+    $qty          = isset( $_POST['qty'] ) ? (int) $_POST['qty'] : 0;
+    $days         = isset( $_POST['days'] ) ? (int) $_POST['days'] : 0;
+    $calc_type    = sanitize_key( wp_unslash( $_POST['calcType'] ?? '' ) );
+    $calc_label   = sanitize_text_field( wp_unslash( $_POST['calcLabel'] ?? '' ) );
+    $preset_slug  = sanitize_key( wp_unslash( $_POST['presetSlug'] ?? '' ) );
+
+    // Re-open URL: must be on our site to prevent the email from being used
+    // as an open redirector. We accept the calc's pre-built reorder URL and
+    // validate the host.
+    $reorder_url  = '';
+    if ( ! empty( $_POST['reorderUrl'] ) ) {
+        $candidate = esc_url_raw( wp_unslash( $_POST['reorderUrl'] ), array( 'http', 'https' ) );
+        $site_host = wp_parse_url( home_url(), PHP_URL_HOST );
+        $cand_host = wp_parse_url( $candidate, PHP_URL_HOST );
+        if ( $candidate && $cand_host && strcasecmp( $cand_host, $site_host ) === 0 ) {
+            $reorder_url = $candidate;
+        }
+    }
+
+    // ── Compose staff email ──
+    $recipient = get_option( 'pps_question_recipient', '' );
+    if ( ! is_email( $recipient ) ) $recipient = get_option( 'admin_email' );
+    $subject_calc = $calc_label !== '' ? $calc_label : 'Calculator';
+    $subject = sprintf( '[PPS] Question on %s quote — %s', $subject_calc, $name );
+
+    $body_lines = array();
+    $body_lines[] = 'A customer has a question about a quote.';
+    $body_lines[] = '';
+    $body_lines[] = 'NAME:    ' . $name;
+    $body_lines[] = 'EMAIL:   ' . $email;
+    if ( $phone !== '' ) $body_lines[] = 'PHONE:   ' . $phone;
+    $body_lines[] = '';
+    $body_lines[] = 'QUESTION:';
+    $body_lines[] = $message;
+    $body_lines[] = '';
+    $body_lines[] = 'QUOTE:';
+    if ( $calc_label !== '' )  $body_lines[] = '  Calculator: ' . $calc_label;
+    if ( $preset_slug !== '' ) $body_lines[] = '  Preset:     ' . $preset_slug;
+    if ( $total > 0 )          $body_lines[] = '  Total:      $' . number_format( $total, 2 );
+    if ( $per_unit > 0 )       $body_lines[] = '  Per unit:   $' . number_format( $per_unit, 2 );
+    if ( $qty > 0 )            $body_lines[] = '  Quantity:   ' . number_format( $qty );
+    if ( $days > 0 )           $body_lines[] = '  Days:       ' . $days . ' biz';
+    if ( $summary !== '' ) {
+        $body_lines[] = '';
+        $body_lines[] = 'SPEC:';
+        foreach ( explode( "\n", $summary ) as $line ) {
+            $body_lines[] = '  ' . $line;
+        }
+    }
+    if ( $reorder_url !== '' ) {
+        $body_lines[] = '';
+        $body_lines[] = 'OPEN THIS QUOTE IN THE CALCULATOR:';
+        $body_lines[] = $reorder_url;
+    }
+    $body_lines[] = '';
+    $body_lines[] = '— Submitted ' . current_time( 'M j, Y g:i a T' );
+
+    $staff_body = implode( "\n", $body_lines );
+    $staff_headers = array(
+        'Content-Type: text/plain; charset=UTF-8',
+        'Reply-To: ' . sprintf( '%s <%s>', $name, $email ),
+    );
+
+    $sent_staff = wp_mail( $recipient, $subject, $staff_body, $staff_headers );
+
+    // ── Compose customer confirmation ──
+    $site_name = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
+    $cust_subject = sprintf( 'We got your question — %s', $site_name );
+    $cust_lines = array();
+    $cust_lines[] = sprintf( 'Hi %s,', $name );
+    $cust_lines[] = '';
+    $cust_lines[] = 'Thanks for reaching out about your quote. We typically respond within 1 business day.';
+    $cust_lines[] = '';
+    $cust_lines[] = 'For reference, here is the quote you were looking at:';
+    $cust_lines[] = '';
+    if ( $calc_label !== '' ) $cust_lines[] = 'Calculator: ' . $calc_label;
+    if ( $total > 0 )         $cust_lines[] = 'Total:      $' . number_format( $total, 2 );
+    if ( $qty > 0 )           $cust_lines[] = 'Quantity:   ' . number_format( $qty );
+    if ( $summary !== '' ) {
+        $cust_lines[] = '';
+        foreach ( explode( "\n", $summary ) as $line ) $cust_lines[] = $line;
+    }
+    if ( $reorder_url !== '' ) {
+        $cust_lines[] = '';
+        $cust_lines[] = 'Re-open this quote in the calculator:';
+        $cust_lines[] = $reorder_url;
+    }
+    $cust_lines[] = '';
+    $cust_lines[] = 'Your question:';
+    $cust_lines[] = $message;
+    $cust_lines[] = '';
+    $cust_lines[] = sprintf( '— The %s team', $site_name );
+
+    $cust_headers = array( 'Content-Type: text/plain; charset=UTF-8' );
+    wp_mail( $email, $cust_subject, implode( "\n", $cust_lines ), $cust_headers );
+
+    if ( $sent_staff ) {
+        wp_send_json_success( array( 'message' => 'Thanks! We received your question and emailed you a copy. Expect a reply within 1 business day.' ) );
+    } else {
+        wp_send_json_error( array( 'message' => 'Sorry — there was a problem submitting your question. Please try again or call us directly.' ) );
+    }
+}
+
 function pps_ajax_add_to_cart() {
     check_ajax_referer( 'pps_add_to_cart', 'nonce' );
 

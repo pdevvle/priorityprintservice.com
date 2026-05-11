@@ -3993,6 +3993,14 @@ function App(){
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
   const[shareCopied,setShareCopied]=useState(false);
+  // Question form modal state
+  const[qOpen,setQOpen]=useState(false);
+  const[qName,setQName]=useState("");
+  const[qEmail,setQEmail]=useState("");
+  const[qPhone,setQPhone]=useState("");
+  const[qMessage,setQMessage]=useState("");
+  const[qStatus,setQStatus]=useState("idle");
+  const[qErrorMsg,setQErrorMsg]=useState("");
   // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
   const proofDebug = useMemo(() => {
     try {
@@ -4348,6 +4356,54 @@ function App(){
       // Fallback for non-HTTPS or denied clipboard
       prompt("Copy this link:", url);
     });
+  };
+
+  const handleQuestionSubmit = async (e) => {
+    e.preventDefault();
+    if (qStatus === "sending" || qStatus === "sent") return;
+    if (!qName.trim() || !qEmail.trim() || !qMessage.trim()) {
+      setQStatus("error"); setQErrorMsg("Please fill in name, email, and your question."); return;
+    }
+    setQStatus("sending"); setQErrorMsg("");
+    const PPS = window.PPS_CONFIG || {};
+    const fd = new FormData();
+    fd.append("action", "pps_quote_question");
+    fd.append("nonce", PPS.cartNonce || "");
+    fd.append("name", qName); fd.append("email", qEmail); fd.append("phone", qPhone);
+    fd.append("message", qMessage); fd.append("hp", "");
+    let summary = "";
+    try {
+      const cfgForSummary = {
+        sets, sizeLabel, customLong, customShort, bindDir,
+        insidePaper, insidePaperType, coverMode, coverPaper, coverPaperType,
+        vividPrint, coating, bundling, roundCorner, outfold, perforation, magnetBacker,
+        artwork, artEditPages, bleed, proof, needByDate, shipState,
+      };
+      if (result && !result.error?.length) summary = buildSummary(cfgForSummary, result);
+    } catch (_) {}
+    fd.append("summary", summary);
+    fd.append("total", String(result?.total || 0));
+    fd.append("perUnit", String(result?.perUnit || 0));
+    fd.append("qty", String(result?.tQ || 0));
+    fd.append("days", String(result?.days || 0));
+    fd.append("calcType", "coupon");
+    fd.append("calcLabel", "Coupon Book");
+    fd.append("presetSlug", PPS.presetSlug || "");
+    fd.append("reorderUrl", buildShareUrl());
+    try {
+      const resp = await fetch(PPS.ajaxUrl || "/wp-admin/admin-ajax.php", { method: "POST", body: fd, credentials: "same-origin" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const j = await resp.json();
+      if (j && j.success) { setQStatus("sent"); }
+      else { setQStatus("error"); setQErrorMsg((j && j.data && j.data.message) || "Submission failed. Please try again."); }
+    } catch (err) {
+      setQStatus("error"); setQErrorMsg("Network error. Please try again.");
+    }
+  };
+
+  const resetQuestionForm = () => {
+    setQOpen(false);
+    setTimeout(() => { setQName(""); setQEmail(""); setQPhone(""); setQMessage(""); setQStatus("idle"); setQErrorMsg(""); }, 200);
   };
 
   const handleAddToOrder = async () => {
@@ -4936,6 +4992,9 @@ function App(){
               </div>
             </div>
           )}
+          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px solid ${CK.cyan}55`,background:"#fff",color:CK.cyan,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+            Have a question about this quote? →
+          </button>
         </div>}
       </div>
 
@@ -4984,6 +5043,56 @@ function App(){
         </div>
       </div>
       </>}
+
+      {/* Question modal — overlay rendered at App root */}
+      {qOpen && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"min(8vh,60px) 16px 16px",overflowY:"auto"}} onClick={resetQuestionForm}>
+          <div style={{background:"#fff",borderRadius:8,maxWidth:520,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
+            <div style={{padding:"16px 20px",borderBottom:`1px solid ${CC.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:15,fontWeight:700,color:CC.dark}}>Have a question about this quote?</div>
+              <button type="button" onClick={resetQuestionForm} style={{background:"none",border:"none",fontSize:22,lineHeight:1,color:CC.light,cursor:"pointer",padding:0,marginLeft:12}} aria-label="Close">×</button>
+            </div>
+            {qStatus === "sent" ? (
+              <div style={{padding:"24px 20px",textAlign:"center"}}>
+                <div style={{fontSize:34,marginBottom:8}}>✓</div>
+                <div style={{fontSize:14,fontWeight:600,color:CC.dark,marginBottom:6}}>Question sent!</div>
+                <div style={{fontSize:13,color:CC.mid,lineHeight:1.5,maxWidth:380,margin:"0 auto"}}>We&rsquo;ve emailed a copy of your quote to <strong>{qEmail}</strong>. A team member will reply within 1 business day.</div>
+                <button type="button" onClick={resetQuestionForm} style={{marginTop:18,padding:"9px 20px",borderRadius:5,border:`1px solid ${CC.border}`,background:"#fafafa",color:CC.dark,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Close</button>
+              </div>
+            ) : (
+              <form onSubmit={handleQuestionSubmit} style={{padding:"16px 20px"}}>
+                <div style={{fontSize:12,color:CC.mid,marginBottom:14,lineHeight:1.45}}>We&rsquo;ll see exactly what you&rsquo;re looking at — your current configuration and price are included automatically.</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  <div>
+                    <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Name <span style={{color:"#d00"}}>*</span></label>
+                    <input type="text" value={qName} onChange={e=>setQName(e.target.value)} maxLength={120} required style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}} />
+                  </div>
+                  <div>
+                    <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Email <span style={{color:"#d00"}}>*</span></label>
+                    <input type="email" value={qEmail} onChange={e=>setQEmail(e.target.value)} maxLength={160} required style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}} />
+                  </div>
+                </div>
+                <div style={{marginBottom:10}}>
+                  <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Phone <span style={{color:CC.light,fontWeight:400}}>(optional)</span></label>
+                  <input type="tel" value={qPhone} onChange={e=>setQPhone(e.target.value)} maxLength={40} style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}} />
+                </div>
+                <div style={{marginBottom:14}}>
+                  <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Your question <span style={{color:"#d00"}}>*</span></label>
+                  <textarea value={qMessage} onChange={e=>setQMessage(e.target.value)} maxLength={4000} required rows={5} style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box"}} />
+                </div>
+                <input type="text" name="company_url" tabIndex={-1} autoComplete="off" style={{position:"absolute",left:"-9999px",width:1,height:1,opacity:0}} aria-hidden="true" />
+                {qStatus === "error" && qErrorMsg && (
+                  <div style={{padding:"8px 12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:4,fontSize:12,color:"#b91c1c",marginBottom:10}}>{qErrorMsg}</div>
+                )}
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end",alignItems:"center"}}>
+                  <button type="button" onClick={resetQuestionForm} style={{padding:"9px 16px",borderRadius:5,border:`1px solid ${CC.border}`,background:"#fafafa",color:CC.dark,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} disabled={qStatus==="sending"}>Cancel</button>
+                  <button type="submit" disabled={qStatus==="sending"} style={{padding:"9px 18px",borderRadius:5,border:"none",background:qStatus==="sending"?CC.light:CK.cyan,color:"#fff",fontSize:13,fontWeight:700,cursor:qStatus==="sending"?"wait":"pointer",fontFamily:"inherit"}}>{qStatus==="sending"?"Sending…":"Send question"}</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
