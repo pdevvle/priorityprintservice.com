@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-11 · CB-QFORM-ADDONS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-11 · CB-QFORM-PERFPOS</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -370,6 +370,27 @@ const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,p
 // Perfect bound specific options
 const OUTFOLD_OPTS=_CFG.outfold_opts||[{label:"No Outfold",val:0,price:0},{label:"1 Fold-Out Page (Bifold)",val:1000,price:0.02},{label:"2 Fold-Out Pages (Bifold)",val:500,price:0.04}];
 const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.03,count:1},{label:"2 Perforation Lines",val:1000,price:0.03,count:2}];
+
+// Default position for a single perf line (inches from the bind edge).
+// Mirrors the perfect-bound calculator.
+const PERF_FROM_SPINE_INCHES = 0.375;
+
+// Clamp a perforation position into valid range, snap to 1/8", and enforce
+// a 1-inch minimum gap between adjacent perf lines (matches PB + brochure).
+function clampPerfFromSpine(inches, idx, trimW, positions) {
+  let minIn = 0.25;
+  let maxIn = (trimW || 100) - 0.25;
+  (positions || []).forEach((p, j) => {
+    if (j === idx) return;
+    if (inches < p) maxIn = Math.min(maxIn, p - 1);
+    else            minIn = Math.max(minIn, p + 1);
+  });
+  if (maxIn < minIn) maxIn = minIn;
+  const clamped = Math.max(minIn, Math.min(maxIn, inches));
+  const snapped = Math.round(clamped * 8) / 8;
+  return Math.max(minIn, Math.min(maxIn, snapped));
+}
+
 // Coupon book specific
 const BIND_STYLE_OPTS=[{label:"Open Faced: Glued/Padded",val:"openface"},{label:"Wraparound Cover with Perforation(s)",val:"wraparound"}];
 const SIDES_OPTS=[{label:"Double-Sided (Printed on Both Sides)",val:"double"},{label:"Single-Sided (Printed on One Side)",val:"single"}];
@@ -4035,6 +4056,11 @@ function App(){
       if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
       if (p.has("bundling") && _float(p.get("bundling")) != null) base.bundling = _float(p.get("bundling"));
       if (p.has("corner") && _float(p.get("corner")) != null) base.roundCorner = _float(p.get("corner"));
+      if (p.has("perf") && _float(p.get("perf")) != null) base.perforation = _float(p.get("perf"));
+      if (p.has("perfpos")) {
+        const arr = p.get("perfpos").split(",").map(s => parseFloat(s)).filter(n => !isNaN(n) && n > 0);
+        if (arr.length) base.perfPositions = arr.slice(0, 2);
+      }
       if (p.has("state")) base.shipState = p.get("state");
     } catch(e) {}
     return base;
@@ -4065,6 +4091,10 @@ function App(){
   const[roundCorner,setRoundCorner]=useState(Number(D.roundCorner)||0);
   const[outfold,setOutfold]=useState(Number(D.outfold)||0);
   const[perforation,setPerforation]=useState(Number(D.perforation)||0);
+  const[perfPositions,setPerfPositions]=useState(()=>{
+    if (Array.isArray(D.perfPositions) && D.perfPositions.length) return D.perfPositions.slice(0, 2);
+    return [PERF_FROM_SPINE_INCHES];
+  });
   const[artwork,setArtwork]=useState(Number(D.artwork)||0.01);
   const[artEditPages,setArtEditPages]=useState(Number(D.artEditPages)||0);
   const[bleed,setBleed]=useState(Number(D.bleed)||0);
@@ -4204,6 +4234,35 @@ function App(){
   const handleSizeLabel=(v)=>{setSizeLabel(v);if(v!=="Custom Size")lastPreset.current=v;};
   const csOK=sets.every(s=>s.pages<=24);
 
+  // Trim width for clamping perfPositions. For openface (pad) bind style the
+  // perf line runs across the short edge — we still clamp by the dimension
+  // that the user thinks of as "from binding to open edge."
+  const trimW = useMemo(() => {
+    if (sizeLabel === "Custom Size") {
+      const lo = Math.max(customLong || 0, customShort || 0);
+      const sh = Math.min(customLong || 0, customShort || 0);
+      return bindDir === "long" ? lo : sh;
+    }
+    const m = (sizeLabel || "").match(/([\d.]+)×([\d.]+)/);
+    return m ? parseFloat(m[1]) : 5.5;
+  }, [sizeLabel, customLong, customShort, bindDir]);
+
+  // Match perfPositions length to the current count and clamp every entry.
+  const perfCount = useMemo(() => (PERF_OPTS.find(o => o.val === perforation)?.count) || 0, [perforation]);
+  useEffect(() => {
+    if (perfCount === 0) return;
+    setPerfPositions(prev => {
+      const out = prev.slice(0, perfCount);
+      while (out.length < perfCount) {
+        const seed = (out.length ? out[out.length - 1] + 1.5 : PERF_FROM_SPINE_INCHES);
+        out.push(seed);
+      }
+      const fixed = out.map((p, i) => clampPerfFromSpine(p, i, trimW, out));
+      const same = fixed.length === prev.length && fixed.every((v, i) => v === prev[i]);
+      return same ? prev : fixed;
+    });
+  }, [perfCount, trimW]);
+
   const shipZip=shipAddr.zip||"";
   const effectiveCoverMode = bindStyle==="openface" ? "same" : coverMode;
   const result=useMemo(()=>calculate({
@@ -4339,6 +4398,10 @@ function App(){
     if (coating > 0) p.set("coating", coating);
     if (bundling > 0) p.set("bundling", bundling);
     if (roundCorner > 0) p.set("corner", roundCorner);
+    if (perforation > 0) p.set("perf", perforation);
+    if (perforation > 0 && perfPositions && perfPositions.length) {
+      p.set("perfpos", perfPositions.slice(0, perfCount).join(","));
+    }
     if (shipState !== "AZ") p.set("state", shipState);
     if (sets[0].qty !== 100) p.set("qty", sets[0].qty);
     if (sets[0].pages !== 8) p.set("pages", sets[0].pages);
@@ -4582,6 +4645,31 @@ function App(){
 
             {/* Coupon book specific addons */}
             {(_AD.perforation!==false || perforation>0) && <Sel label={bindStyle==="openface"?"Coupon Perforation (tear-out)":"Cover Perforation"} badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+            {perfCount > 0 && (
+              <div style={{ marginTop:8, padding:"10px 12px", background:"rgba(250,204,21,.08)", border:"1px solid rgba(250,204,21,.28)", borderRadius:6 }}>
+                <div style={{ fontSize:10.5, fontWeight:700, color:"#b45309", letterSpacing:".06em", textTransform:"uppercase", marginBottom:8 }}>Perforation Position</div>
+                <div style={r2}>
+                  {perfPositions.map((d, i) => (
+                    <TxtNum key={i}
+                      label={`Perf ${i + 1} — ″ from bind`}
+                      value={d}
+                      min={0.25}
+                      max={Math.max(0.25, trimW - 0.25)}
+                      step={0.125}
+                      onChange={v => {
+                        setPerfPositions(prev => {
+                          const next = prev.slice();
+                          next[i] = clampPerfFromSpine(parseFloat(v) || 0, i, trimW, next);
+                          return next;
+                        });
+                      }}/>
+                  ))}
+                </div>
+                <div style={{ fontSize:10.5, color:CC.light, marginTop:6, lineHeight:1.5 }}>
+                  Inches from the bind edge. 1″ minimum gap between lines when 2 are selected.
+                </div>
+              </div>
+            )}
             <Sel label="Magnetic Backer" badge={<TurnBadge days={r.ti?.magnetBacker}/>} value={magnetBacker} onChange={v=>setMagnetBacker(Number(v))}>{MAGNET_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
             {(_AD.outfold!==false || outfold>0) && <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
           </Sec>
