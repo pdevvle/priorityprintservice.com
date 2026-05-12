@@ -2,6 +2,15 @@
 
 WordPress/WooCommerce plugin for Priority Print Service — pricing calculators with integrated artwork proofing.
 
+## Operator environment
+
+The repository owner does NOT use Claude Code locally and has no intention of installing it. All work happens through Claude on the web. This means:
+
+- **Never tell the user to "run this from your local machine"** as the resolution to a sandbox issue — they have no local terminal.
+- **Never assume they can git fetch, merge, or push locally.** If a push from the sandbox fails (403 etc.), surface the failure and ask the user how to proceed, or suggest using a GitHub PR/web UI instead. Don't hand them a CLI command and call it done.
+- **Always do git pushes from this environment.** If a destination branch is blocked by sandbox permissions, that's a real problem to flag, not something to off-load to the user.
+- Mirror this expectation in every new chat about this codebase.
+
 ## Architecture
 - Self-contained React calculators (HTML files with inline Babel)
 - PHP plugin handles cart, orders, REST API, SEO, Google Drive, tooltips
