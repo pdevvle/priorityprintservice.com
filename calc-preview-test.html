@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · SS-PREVIEW-HTML-FIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-11 · SS-QFORM-ADDONS</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -127,6 +127,9 @@ function useIsMobile(breakpoint=700){
 // Falls back to hardcoded defaults for standalone testing
 // ═══════════════════════════════════════════════════════════════
 const _CFG = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.calc) ? window.PPS_CONFIG.calc : {};
+// Per-calc add-on visibility flags injected by PHP. Shape: { vivid: bool, coating: bool, ... }.
+// Only keys for this calc-type's supported add-ons appear. Absent key = treated as visible.
+const _AD = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.addons) ? window.PPS_CONFIG.addons : {};
 
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
@@ -163,6 +166,11 @@ const PCF = Object.assign({
   // Shippo integration (future) — when shippo_api_token is set, zip-based ETAs replace static transit map
   shippo_api_token:"",              // Shippo API Live Token — leave empty to use static transit map
   shippo_origin_zip:"85027",        // Shop origin zip for rate/ETA lookups
+  // Site-wide sale (0 = off). Discount is applied to the calc subtotal AFTER all
+  // existing discounts/surcharges, BEFORE proof, rush, and shipping. Per-preset
+  // rows can override these via PHP injection.
+  sale_discount_pct:0,
+  sale_label:"Sale",
 }, _CFG.pcf || {});
 
 // Ground transit days from facility (Phoenix AZ) — state-level fallback
@@ -417,6 +425,17 @@ function calculate(c) {
   const sets=c.sets.filter(s=>s.qty>0&&s.pages>0);
   if(!sets.length||sz.errors.length>0) return {error:sz.errors,sz};
 
+  // Add-on availability guard: if a disabled add-on carries a non-default value
+  // (typically from a pre-filled reorder/edit URL), refuse to price and tell
+  // the user which option to clear.
+  const _adErrs=[];
+  if(_AD.vivid===false && c.vividPrint===true) _adErrs.push("Vivid Print is currently unavailable. Please turn it off to continue.");
+  if(_AD.coating===false && Number(c.coating)>0) _adErrs.push("UV Coating is currently unavailable. Please change Coating to None to continue.");
+  if(_AD.bundling===false && Number(c.bundling)>0) _adErrs.push("Bundling is currently unavailable. Please change Bundling to None to continue.");
+  if(_AD.rc===false && Number(c.roundCorner)>0) _adErrs.push("Round Cornering is currently unavailable. Please change Round Corner to None to continue.");
+  if(_AD.two_staple===false && c.twoStaple===true) _adErrs.push("Two-Staple is currently unavailable. Please turn it off to continue.");
+  if(_adErrs.length) return {error:_adErrs,sz};
+
   const N=sets.length;
   const coat=COATINGS.find(x=>x.val===c.coating)||COATINGS[0];
   const bund=BUNDLING.find(x=>x.val===c.bundling)||BUNDLING[0];
@@ -490,6 +509,11 @@ function calculate(c) {
   P.discSize=imp<4?subBeforeSize*(-PCF.booklet_size_discount):0;
   const subBeforeSurcharge=Object.values(P).reduce((s,v)=>s+v,0);
   P.surcharge=subBeforeSurcharge*(PCF.booklet_surcharge||0);
+
+  // Sale discount applies last, on the post-surcharge subtotal. Excludes shipping
+  // and rush (which are added separately into grandTotal below).
+  const subBeforeSale=Object.values(P).reduce((s,v)=>s+v,0);
+  P.discSale=(PCF.sale_discount_pct>0)?-Math.round(subBeforeSale*PCF.sale_discount_pct*100)/100:0;
 
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
@@ -583,6 +607,7 @@ function calculate(c) {
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Difficult Size",v:P.diffSize,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
+    {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 
   // CMYK-derived group colors
@@ -674,7 +699,10 @@ function calculate(c) {
     minDaysConfig:PCF.minimum_turnaround_days,
   };
 
-  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,hcOK,sz,debug,ti,
+  const saleActive=P.discSale<-0.005;
+  const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
+  const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
+  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
     shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
@@ -908,7 +936,7 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
 function Panel({result,compact}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
-  const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh}=result;
+  const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
   const hasRush=sh&&sh.rushCost>0;
   const availRange=sh?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):String(days);
 
@@ -918,10 +946,12 @@ function Panel({result,compact}){
     return(
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:hasRush?CK.rush:CK.cyan,borderRadius:6,padding:"8px 14px",color:hasRush?"#333":"#fff"}}>
         <div>
-          <div style={{lineHeight:1,display:"flex",alignItems:"baseline"}}>
+          <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
+            {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
             <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
             <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
           </div>
+          {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
           {hasRush&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
         </div>
         <div style={{display:"flex",gap:12}}>
@@ -953,9 +983,11 @@ function Panel({result,compact}){
             <span style={{...ST.cmykDot,background:CK.key,boxShadow:"0 0 0 1px rgba(255,255,255,.4)"}}/>
           </span>
         </div>
-        <div style={{lineHeight:1,display:"flex",alignItems:"baseline"}}>
+        <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
+          {saleActive&&<span style={{fontSize:18,opacity:.55,textDecoration:"line-through",fontWeight:700,letterSpacing:"-.5px"}}>${totalWithoutSale.toFixed(2)}</span>}
           <span style={{fontSize:38,fontWeight:800,letterSpacing:"-1.5px"}}>${dD}</span>
-          <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:1}}>.{cD}</span>
+          <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
+          {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
         </div>
         {hasRush&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
       </div>
@@ -4054,6 +4086,14 @@ function App(){
   const[submitting,setSubmitting]=useState(false);
   const[uploadProgress,setUploadProgress]=useState(null); // null | {phase, pct, fileName, fileIdx, fileCount}
   const[shareCopied,setShareCopied]=useState(false);
+  // Question form modal state
+  const[qOpen,setQOpen]=useState(false);
+  const[qName,setQName]=useState("");
+  const[qEmail,setQEmail]=useState("");
+  const[qPhone,setQPhone]=useState("");
+  const[qMessage,setQMessage]=useState("");
+  const[qStatus,setQStatus]=useState("idle"); // idle | sending | sent | error
+  const[qErrorMsg,setQErrorMsg]=useState("");
 
   const buildShareUrl = () => {
     const p = new URLSearchParams();
@@ -4093,6 +4133,58 @@ function App(){
     }).catch(() => {
       prompt("Copy this link:", url);
     });
+  };
+
+  const handleQuestionSubmit = async (e) => {
+    e.preventDefault();
+    if (qStatus === "sending" || qStatus === "sent") return;
+    if (!qName.trim() || !qEmail.trim() || !qMessage.trim()) {
+      setQStatus("error"); setQErrorMsg("Please fill in name, email, and your question."); return;
+    }
+    setQStatus("sending"); setQErrorMsg("");
+    const PPS = window.PPS_CONFIG || {};
+    const fd = new FormData();
+    fd.append("action", "pps_quote_question");
+    fd.append("nonce", PPS.cartNonce || "");
+    fd.append("name", qName);
+    fd.append("email", qEmail);
+    fd.append("phone", qPhone);
+    fd.append("message", qMessage);
+    fd.append("hp", ""); // honeypot — bots fill it, real users don't
+    let summary = "";
+    try {
+      const cfgForSummary = {
+        sets, sizeLabel, customLong, customShort, bindDir,
+        insideColor, coverColor, insidePaper, insidePaperType,
+        coverMode, coverPaper, coverPaperType,
+        twoStaple, vividPrint, coating, bundling, roundCorner,
+        artwork, artEditPages, bleed, proof, needByDate, shipState,
+      };
+      if (result && !result.error?.length) summary = buildSummary(cfgForSummary, result);
+    } catch (_) {}
+    fd.append("summary", summary);
+    fd.append("total", String(result?.total || 0));
+    fd.append("perUnit", String(result?.perUnit || 0));
+    fd.append("qty", String(result?.tQ || 0));
+    fd.append("days", String(result?.days || 0));
+    fd.append("calcType", "saddle");
+    fd.append("calcLabel", "Saddle Stitch Booklet");
+    fd.append("presetSlug", PPS.presetSlug || "");
+    fd.append("reorderUrl", buildShareUrl());
+    try {
+      const resp = await fetch(PPS.ajaxUrl || "/wp-admin/admin-ajax.php", { method: "POST", body: fd, credentials: "same-origin" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const j = await resp.json();
+      if (j && j.success) { setQStatus("sent"); }
+      else { setQStatus("error"); setQErrorMsg((j && j.data && j.data.message) || "Submission failed. Please try again."); }
+    } catch (err) {
+      setQStatus("error"); setQErrorMsg("Network error. Please try again.");
+    }
+  };
+
+  const resetQuestionForm = () => {
+    setQOpen(false);
+    setTimeout(() => { setQName(""); setQEmail(""); setQPhone(""); setQMessage(""); setQStatus("idle"); setQErrorMsg(""); }, 200);
   };
 
   const handleAddToOrder = async () => {
@@ -4199,11 +4291,11 @@ function App(){
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
             </div>
 
-            {/* Staple Binding */}
-            {r.twoAuto
+            {/* Staple Binding — hidden when two_staple add-on is disabled and not pre-filled */}
+            {(_AD.two_staple!==false || twoStaple===true) && (r.twoAuto
               ? <div style={ST.f}><label style={ST.lbl}>Staple Binding<TurnBadge days={r.ti?.twoStaple}/></label><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Two Staples — standard for this size</div></div>
               : <Pil label="Staple Binding" badge={<TurnBadge days={r.ti?.twoStaple}/>} value={twoStaple} onChange={setTwoStaple} options={[{t:"Single Staple",v:false},{t:"Two Staples",v:true}]}/>
-            }
+            )}
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
@@ -4230,15 +4322,15 @@ function App(){
 
           {/* SECTION 3: Finishing & Addons */}
           <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")} badge={r.debug?.turnaround?.addonDays>0?`+${r.debug.turnaround.addonDays}d turnaround`:null}>
-            <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>
-            <div style={ST.hr}/>
+            {(_AD.vivid!==false || vividPrint===true) && <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
+            {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
-              <Sel label="Cover Coating" badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-              {r.q100!==false
+              {(_AD.coating!==false || coating>0) && <Sel label="Cover Coating" badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+              {(_AD.bundling!==false || bundling>0) && (r.q100!==false
                 ? <Sel label="Bundling" badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-                : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>}
+                : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>)}
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+            {(_AD.rc!==false || roundCorner>0) && <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <Sel label="Round Cornering" badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
               </div>
@@ -4253,7 +4345,7 @@ function App(){
                   </div>
                 );
               })()}
-            </div>
+            </div>}
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
@@ -4579,8 +4671,18 @@ function App(){
             {showDebug?"▼ Hide":"▶ Show"} Debug Panel
           </button>
           {showDebug&&<DebugPanel debug={result?.debug}/>}
+          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px solid ${CK.cyan}55`,background:"#fff",color:CK.cyan,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+            Have a question about this quote? →
+          </button>
         </div>}
       </div>
+
+      {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
+      {mob&&!qOpen&&(
+        <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{position:"fixed",bottom:"calc(70px + env(safe-area-inset-bottom))",right:12,zIndex:39,padding:"7px 13px",borderRadius:16,border:`1px solid ${CK.cyan}`,background:"#fff",color:CK.cyan,fontSize:11.5,fontWeight:700,boxShadow:"0 2px 8px rgba(0,0,0,.12)",cursor:"pointer",fontFamily:"inherit"}}>
+          Have a question? →
+        </button>
+      )}
 
       {/* Fixed bottom bar — mobile */}
       {mob&&<div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:40,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
@@ -4604,6 +4706,57 @@ function App(){
           </button>
         </div>
       </div>}
+
+      {/* Question modal — overlay rendered at App root so it sits above everything */}
+      {qOpen && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"min(8vh,60px) 16px 16px",overflowY:"auto"}} onClick={resetQuestionForm}>
+          <div style={{background:"#fff",borderRadius:8,maxWidth:520,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
+            <div style={{padding:"16px 20px",borderBottom:`1px solid ${CC.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:15,fontWeight:700,color:CC.dark}}>Have a question about this quote?</div>
+              <button type="button" onClick={resetQuestionForm} style={{background:"none",border:"none",fontSize:22,lineHeight:1,color:CC.light,cursor:"pointer",padding:0,marginLeft:12}} aria-label="Close">×</button>
+            </div>
+            {qStatus === "sent" ? (
+              <div style={{padding:"24px 20px",textAlign:"center"}}>
+                <div style={{fontSize:34,marginBottom:8}}>✓</div>
+                <div style={{fontSize:14,fontWeight:600,color:CC.dark,marginBottom:6}}>Question sent!</div>
+                <div style={{fontSize:13,color:CC.mid,lineHeight:1.5,maxWidth:380,margin:"0 auto"}}>We&rsquo;ve emailed a copy of your quote to <strong>{qEmail}</strong>. A team member will reply within 1 business day.</div>
+                <button type="button" onClick={resetQuestionForm} style={{marginTop:18,padding:"9px 20px",borderRadius:5,border:`1px solid ${CC.border}`,background:"#fafafa",color:CC.dark,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Close</button>
+              </div>
+            ) : (
+              <form onSubmit={handleQuestionSubmit} style={{padding:"16px 20px"}}>
+                <div style={{fontSize:12,color:CC.mid,marginBottom:14,lineHeight:1.45}}>We&rsquo;ll see exactly what you&rsquo;re looking at — your current configuration and price are included automatically.</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  <div>
+                    <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Name <span style={{color:"#d00"}}>*</span></label>
+                    <input type="text" value={qName} onChange={e=>setQName(e.target.value)} maxLength={120} required style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}} />
+                  </div>
+                  <div>
+                    <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Email <span style={{color:"#d00"}}>*</span></label>
+                    <input type="email" value={qEmail} onChange={e=>setQEmail(e.target.value)} maxLength={160} required style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}} />
+                  </div>
+                </div>
+                <div style={{marginBottom:10}}>
+                  <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Phone <span style={{color:CC.light,fontWeight:400}}>(optional)</span></label>
+                  <input type="tel" value={qPhone} onChange={e=>setQPhone(e.target.value)} maxLength={40} style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}} />
+                </div>
+                <div style={{marginBottom:14}}>
+                  <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Your question <span style={{color:"#d00"}}>*</span></label>
+                  <textarea value={qMessage} onChange={e=>setQMessage(e.target.value)} maxLength={4000} required rows={5} style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box"}} />
+                </div>
+                {/* Honeypot — hidden from real users; bots usually fill all visible inputs */}
+                <input type="text" name="company_url" tabIndex={-1} autoComplete="off" style={{position:"absolute",left:"-9999px",width:1,height:1,opacity:0}} aria-hidden="true" />
+                {qStatus === "error" && qErrorMsg && (
+                  <div style={{padding:"8px 12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:4,fontSize:12,color:"#b91c1c",marginBottom:10}}>{qErrorMsg}</div>
+                )}
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end",alignItems:"center"}}>
+                  <button type="button" onClick={resetQuestionForm} style={{padding:"9px 16px",borderRadius:5,border:`1px solid ${CC.border}`,background:"#fafafa",color:CC.dark,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} disabled={qStatus==="sending"}>Cancel</button>
+                  <button type="submit" disabled={qStatus==="sending"} style={{padding:"9px 18px",borderRadius:5,border:"none",background:qStatus==="sending"?CC.light:CK.cyan,color:"#fff",fontSize:13,fontWeight:700,cursor:qStatus==="sending"?"wait":"pointer",fontFamily:"inherit"}}>{qStatus==="sending"?"Sending…":"Send question"}</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-02 · BR-PREVIEW-3D-PARITY</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-11 · BR-QFORM-ADDONS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -65,6 +65,8 @@ const CC={bg:"#f5f5f7",white:"#fff",dark:"#1d2327",mid:"#555",light:"#999",borde
 const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#1d2327",cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
+// Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
+const _AD = (window.PPS_CONFIG || {}).addons || {};
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
   labor_press_hr:35, labor_bindery_hr:35, labor_cutting_hr:45,
@@ -83,6 +85,8 @@ const PCF = Object.assign({
   default_transit_days:4,
   shop_timezone:"America/Phoenix", shop_cutoff_hour:14, free_shipping_buffer:1.5,
   shippo_api_token:"", shippo_origin_zip:"85027",
+  // Site-wide sale (0 = off). Applied on subtotal before shipping/rush.
+  sale_discount_pct:0, sale_label:"Sale",
 }, _CFG.pcf || {});
 
 // ═══════════════════════════════════════════════════════════════
@@ -244,6 +248,15 @@ function calcBrochureImp(longEdge, shortEdge) {
 // PRICING ENGINE
 // ═══════════════════════════════════════════════════════════════
 function calculate(c) {
+  // Add-on availability guard
+  const _adErrs = [];
+  if (_AD.vivid === false && c.vivid === true) _adErrs.push("Vivid Print is currently unavailable. Please turn it off to continue.");
+  if (_AD.coating === false && Number(c.coating) > 0) _adErrs.push("UV Coating is currently unavailable. Please change Coating to None to continue.");
+  if (_AD.bundling === false && Number(c.bundling) > 0) _adErrs.push("Bundling is currently unavailable. Please change Bundling to None to continue.");
+  if (_AD.rc === false && Number(c.roundCorner) > 0) _adErrs.push("Round Cornering is currently unavailable. Please change Round Corner to None to continue.");
+  if (_AD.perforation === false && Number(c.perforation) > 0) _adErrs.push("Perforation is currently unavailable. Please change Perforation to None to continue.");
+  if (_adErrs.length) return { error: _adErrs };
+
   const errors = [];
   let imp, longE, shortE;
   if (c.sizeMode === "preset") {
@@ -416,6 +429,10 @@ function calculate(c) {
   const csDiscVals = [0.01, 0.02, 0.03, 1.01, 1.02, 2.021, 2.022, 2.023, 2.024, 2.025, 2.01, 3.03, 3.01, 3.04, 3.02];
   P.cardstockDisc = csDiscVals.includes(paper.val) ? -(0.04 * pressSheets) : 0;
 
+  // Sale discount applies last, on the post-discount subtotal. Excludes shipping/rush.
+  const subBeforeSale = Object.values(P).reduce((s, v) => s + v, 0);
+  P.discSale = (PCF.sale_discount_pct > 0) ? -Math.round(subBeforeSale * PCF.sale_discount_pct * 100) / 100 : 0;
+
   const total = Object.values(P).reduce((s, v) => s + v, 0);
 
   // Turnaround
@@ -486,6 +503,7 @@ function calculate(c) {
     {l:"Non-Inventory",v:P.nonInv,g:"fee"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Discount (Flat)",v:P.discEasyFlat,g:"disc"},{l:"Easy Discount",v:P.discEasy,g:"disc"},{l:"Cardstock Disc",v:P.cardstockDisc,g:"disc"},
+    {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
   ].filter(r => Math.abs(r.v) > 0.005);
 
   const gC={mat:CK.cyan,lab:CK.key,add:CK.yellow,art:CK.magenta,fee:"#c25050",disc:CK.cyan};
@@ -494,11 +512,15 @@ function calculate(c) {
 
   const perUnit = qty > 0 ? grandTotal / qty : 0;
 
+  const saleActive = P.discSale < -0.005;
+  const saleAmount = saleActive ? Math.round(-P.discSale * 100) / 100 : 0;
+  const totalWithoutSale = Math.round((grandTotal - P.discSale) * 100) / 100;
   return {
     total: Math.round(grandTotal * 100) / 100, baseTotal: Math.round(total * 100) / 100,
     perUnit: Math.round(perUnit * 100) / 100, days, qty: qty, bd, grouped,
     imp, mk, fold, panels, pressSheets, longE, shortE, approxThickness,
     coatOK: paper.coatable, q100: qty >= 100, ti,
+    saleActive, saleAmount, saleLabel: (PCF.sale_label || "Sale"), totalWithoutSale,
     shipping: {
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
       earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday),
@@ -2776,12 +2798,15 @@ function Panel({ result, compact }) {
   const sh = r.shipping || {};
   const moneyStr = Math.max(0, r.total).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [dPart, cPart] = moneyStr.split(".");
+  const saleActive = !!r.saleActive;
   if (compact) {
     return (
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        {saleActive && <span style={{ fontSize: 12, color: CC.light, textDecoration: "line-through", fontWeight: 600 }}>${r.totalWithoutSale.toFixed(2)}</span>}
         <span style={{ fontSize: 20, fontWeight: 800, color: CC.dark, display: "inline-flex", alignItems: "baseline" }}>
           ${dPart}<span style={{ fontSize: 13, fontWeight: 600, color: CC.mid, marginLeft: 1 }}>.{cPart}</span>
         </span>
+        {saleActive && <span style={{ fontSize: 9.5, fontWeight: 800, color: CK.magenta, letterSpacing: ".5px", textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
         <span style={{ fontSize: 11, color: CC.mid }}>${r.perUnit.toFixed(2)}/ea</span>
         <span style={{ fontSize: 10, color: CC.light }}>{r.days}d</span>
       </div>
@@ -2791,9 +2816,11 @@ function Panel({ result, compact }) {
     <div style={{ background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden", pointerEvents: "none" }}>
       <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}`, pointerEvents: "none" }}>
         <div style={{ fontSize: 11, color: CC.light, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 2 }}>Estimated Total</div>
-        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: CC.dark }}>
+        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: CC.dark, gap: 10, flexWrap: "wrap" }}>
+          {saleActive && <span style={{ fontSize: 16, color: CC.light, textDecoration: "line-through", fontWeight: 700 }}>${r.totalWithoutSale.toFixed(2)}</span>}
           <span style={{ fontSize: 28, fontWeight: 800 }}>${dPart}</span>
-          <span style={{ fontSize: 18, fontWeight: 700, color: CC.light, marginLeft: 1 }}>.{cPart}</span>
+          <span style={{ fontSize: 18, fontWeight: 700, color: CC.light, marginLeft: -7 }}>.{cPart}</span>
+          {saleActive && <span style={{ display: "inline-block", background: CK.magenta, color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: ".5px", padding: "3px 8px", borderRadius: 4, textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
         </div>
       </div>
       <div style={{ display: "flex", borderBottom: `1px solid ${CC.border}` }}>
@@ -2997,6 +3024,14 @@ function App() {
   const [needByDate, setNeedByDate] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [mobPricing, setMobPricing] = useState(false);
+  // Question form modal state
+  const [qOpen, setQOpen] = useState(false);
+  const [qName, setQName] = useState("");
+  const [qEmail, setQEmail] = useState("");
+  const [qPhone, setQPhone] = useState("");
+  const [qMessage, setQMessage] = useState("");
+  const [qStatus, setQStatus] = useState("idle");
+  const [qErrorMsg, setQErrorMsg] = useState("");
 
   // ── Reorder: pre-fill from PPS_CONFIG.reorder (set by PHP from URL) ──
   useEffect(() => {
@@ -3167,6 +3202,75 @@ function App() {
     });
   };
 
+  const handleQuestionSubmit = async (e) => {
+    e.preventDefault();
+    if (qStatus === "sending" || qStatus === "sent") return;
+    if (!qName.trim() || !qEmail.trim() || !qMessage.trim()) {
+      setQStatus("error"); setQErrorMsg("Please fill in name, email, and your question."); return;
+    }
+    setQStatus("sending"); setQErrorMsg("");
+    const PPS = window.PPS_CONFIG || {};
+    const fd = new FormData();
+    fd.append("action", "pps_quote_question");
+    fd.append("nonce", PPS.cartNonce || "");
+    fd.append("name", qName); fd.append("email", qEmail); fd.append("phone", qPhone);
+    fd.append("message", qMessage); fd.append("hp", "");
+    // Build a small inline summary — brochure doesn't have a buildSummary helper
+    let summary = "";
+    try {
+      const lines = [];
+      const sizeStr = sizeMode === "custom" ? `${longEdge}×${shortEdge} custom` : sizeLabel;
+      lines.push(`${qty.toLocaleString()} × ${sizeStr}`);
+      const foldName = (FOLD_TYPES.find(f => f.val === foldType) || {label: foldType}).label;
+      lines.push(`Fold: ${foldName}`);
+      lines.push(`Paper: ${paper.label}`);
+      const cName = c => c === "bw" ? "Black & White" : "Full Color";
+      lines.push(`Front: ${cName(frontColor)}` + (sides === 2 ? ` · Back: ${cName(backColor)}` : " · Single-sided"));
+      if (vivid) lines.push("Enhanced Vivid Print");
+      if (coating > 0) {
+        const ct = COATINGS.find(o => o.val === coating);
+        if (ct) lines.push(`Coating: ${ct.label}`);
+      }
+      if (bundling > 0) {
+        const b = BUNDLING.find(o => o.val === bundling);
+        if (b) lines.push(`Bundling: ${b.label}`);
+      }
+      if (perforation > 0) {
+        const p = PERF_OPTS.find(o => o.val === perforation);
+        if (p) lines.push(`Perforation: ${p.label}`);
+      }
+      if (roundCorner > 0) {
+        const r = CORNERS.find(o => o.val === roundCorner);
+        if (r) lines.push(`Round Corner: ${r.label}`);
+      }
+      lines.push(`Ship to: ${shipState}`);
+      summary = lines.join("\n");
+    } catch (_) {}
+    fd.append("summary", summary);
+    fd.append("total", String(result?.total || 0));
+    fd.append("perUnit", String(result?.perUnit || 0));
+    fd.append("qty", String(result?.qty || qty || 0));
+    fd.append("days", String(result?.days || 0));
+    fd.append("calcType", "brochure");
+    fd.append("calcLabel", "Brochure / Flat Print");
+    fd.append("presetSlug", PPS.presetSlug || "");
+    fd.append("reorderUrl", buildShareUrl());
+    try {
+      const resp = await fetch(PPS.ajaxUrl || "/wp-admin/admin-ajax.php", { method: "POST", body: fd, credentials: "same-origin" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const j = await resp.json();
+      if (j && j.success) { setQStatus("sent"); }
+      else { setQStatus("error"); setQErrorMsg((j && j.data && j.data.message) || "Submission failed. Please try again."); }
+    } catch (err) {
+      setQStatus("error"); setQErrorMsg("Network error. Please try again.");
+    }
+  };
+
+  const resetQuestionForm = () => {
+    setQOpen(false);
+    setTimeout(() => { setQName(""); setQEmail(""); setQPhone(""); setQMessage(""); setQStatus("idle"); setQErrorMsg(""); }, 200);
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: CC.bg, fontFamily: "'Segoe UI','Helvetica Neue',Arial,sans-serif", color: CC.dark }}>
       <style>{`@media(max-width:700px){.pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}.pps-sec-body{padding:12px 14px!important}}`}</style>
@@ -3265,9 +3369,9 @@ function App() {
               {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             <div style={ST.hr} />
-            <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />
-            <div style={ST.hr} />
-            {paper.coatable ? (
+            {(_AD.vivid !== false || vivid === true) && <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
+            {(_AD.vivid !== false || vivid === true) && <div style={ST.hr} />}
+            {(_AD.coating !== false || coating > 0) && (paper.coatable ? (
               <>
                 <Sel label="Additional Coating" value={coating} onChange={v => setCoating(Number(v))}>
                   {COATINGS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
@@ -3285,25 +3389,25 @@ function App() {
               </>
             ) : (
               <div style={{...ST.f, opacity: 0.4}}><label style={ST.lbl}>Additional Coating</label><div style={{padding:"8px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#f5f5f5",fontSize:13,color:CC.light}}>Not available for this paper type</div></div>
-            )}
-            <div style={ST.hr} />
-            <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
+            ))}
+            {(_AD.coating !== false || coating > 0) && <div style={ST.hr} />}
+            {(_AD.bundling !== false || bundling > 0) && <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-            </Sel>
-            <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
+            </Sel>}
+            {(_AD.perforation !== false || perforation > 0) && <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
               note={dimShort > 14 && perfCount > 0 ? `14" throat — ${dimShort}" perf only` : (perfCount > 0 && perfCrossDim < 4 ? `${perfCrossDim}" too short for 2 perfs` : undefined)}>
               {PERF_OPTS.filter(o => {
                 var c = o.count != null ? o.count : PERF_OPTS.indexOf(o);
                 return c <= maxPerfs;
               }).map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-            </Sel>
-            {perfCount > 0 && dimShort <= 14 && (
+            </Sel>}
+            {(_AD.perforation !== false || perforation > 0) && perfCount > 0 && dimShort <= 14 && (
               <Pil label="Perf Direction" value={perfDir} onChange={setPerfDir} options={[
                 { t: `${dimShort}" perf`, v: "length" },
                 { t: `${dimLong}" perf`, v: "width" },
               ]} />
             )}
-            {foldType === "flat" && (
+            {(_AD.rc !== false || roundCorner > 0) && foldType === "flat" && (
               <Sel label="Round Cornering" value={roundCorner} onChange={v => setRoundCorner(Number(v))}>
                 {CORNERS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
               </Sel>
@@ -3516,10 +3620,14 @@ function App() {
 
         </div>
 
-        {/* Desktop sidebar */}
-        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
-          <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
-          <Panel result={result} />
+        {/* Desktop sidebar — pointer-events:none only on read-only preview+Panel
+            so the projections rows, Share button, and Debug button (siblings
+            below) still receive clicks. Mirrors the saddle calculator's split. */}
+        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
+            <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+            <Panel result={result} />
+          </div>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
@@ -3571,8 +3679,18 @@ function App() {
               </details>}
             </div>
           )}
+          <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 4, border: `1px solid ${CK.cyan}55`, background: "#fff", color: CK.cyan, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
+            Have a question about this quote? →
+          </button>
         </div>}
       </div>
+
+      {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
+      {mob && !qOpen && (
+        <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ position: "fixed", bottom: "calc(70px + env(safe-area-inset-bottom))", right: 12, zIndex: 39, padding: "7px 13px", borderRadius: 16, border: `1px solid ${CK.cyan}`, background: "#fff", color: CK.cyan, fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 8px rgba(0,0,0,.12)", cursor: "pointer", fontFamily: "inherit" }}>
+          Have a question? →
+        </button>
+      )}
 
       {/* Mobile bottom bar */}
       {mob && <>
@@ -3632,6 +3750,56 @@ function App() {
           </div>
         </div>
       </>}
+
+      {/* Question modal — overlay rendered at App root */}
+      {qOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "min(8vh,60px) 16px 16px", overflowY: "auto" }} onClick={resetQuestionForm}>
+          <div style={{ background: "#fff", borderRadius: 8, maxWidth: 520, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.3)", overflow: "hidden" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "16px 20px", borderBottom: `1px solid ${CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: CC.dark }}>Have a question about this quote?</div>
+              <button type="button" onClick={resetQuestionForm} style={{ background: "none", border: "none", fontSize: 22, lineHeight: 1, color: CC.light, cursor: "pointer", padding: 0, marginLeft: 12 }} aria-label="Close">×</button>
+            </div>
+            {qStatus === "sent" ? (
+              <div style={{ padding: "24px 20px", textAlign: "center" }}>
+                <div style={{ fontSize: 34, marginBottom: 8 }}>✓</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: CC.dark, marginBottom: 6 }}>Question sent!</div>
+                <div style={{ fontSize: 13, color: CC.mid, lineHeight: 1.5, maxWidth: 380, margin: "0 auto" }}>We&rsquo;ve emailed a copy of your quote to <strong>{qEmail}</strong>. A team member will reply within 1 business day.</div>
+                <button type="button" onClick={resetQuestionForm} style={{ marginTop: 18, padding: "9px 20px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#fafafa", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
+              </div>
+            ) : (
+              <form onSubmit={handleQuestionSubmit} style={{ padding: "16px 20px" }}>
+                <div style={{ fontSize: 12, color: CC.mid, marginBottom: 14, lineHeight: 1.45 }}>We&rsquo;ll see exactly what you&rsquo;re looking at — your current configuration and price are included automatically.</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: CC.mid, marginBottom: 4 }}>Name <span style={{ color: "#d00" }}>*</span></label>
+                    <input type="text" value={qName} onChange={e => setQName(e.target.value)} maxLength={120} required style={{ width: "100%", padding: "8px 10px", borderRadius: 4, border: `1px solid ${CC.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: CC.mid, marginBottom: 4 }}>Email <span style={{ color: "#d00" }}>*</span></label>
+                    <input type="email" value={qEmail} onChange={e => setQEmail(e.target.value)} maxLength={160} required style={{ width: "100%", padding: "8px 10px", borderRadius: 4, border: `1px solid ${CC.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: CC.mid, marginBottom: 4 }}>Phone <span style={{ color: CC.light, fontWeight: 400 }}>(optional)</span></label>
+                  <input type="tel" value={qPhone} onChange={e => setQPhone(e.target.value)} maxLength={40} style={{ width: "100%", padding: "8px 10px", borderRadius: 4, border: `1px solid ${CC.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: CC.mid, marginBottom: 4 }}>Your question <span style={{ color: "#d00" }}>*</span></label>
+                  <textarea value={qMessage} onChange={e => setQMessage(e.target.value)} maxLength={4000} required rows={5} style={{ width: "100%", padding: "8px 10px", borderRadius: 4, border: `1px solid ${CC.border}`, fontSize: 14, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+                </div>
+                <input type="text" name="company_url" tabIndex={-1} autoComplete="off" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} aria-hidden="true" />
+                {qStatus === "error" && qErrorMsg && (
+                  <div style={{ padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 4, fontSize: 12, color: "#b91c1c", marginBottom: 10 }}>{qErrorMsg}</div>
+                )}
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                  <button type="button" onClick={resetQuestionForm} style={{ padding: "9px 16px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#fafafa", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }} disabled={qStatus === "sending"}>Cancel</button>
+                  <button type="submit" disabled={qStatus === "sending"} style={{ padding: "9px 18px", borderRadius: 5, border: "none", background: qStatus === "sending" ? CC.light : CK.cyan, color: "#fff", fontSize: 13, fontWeight: 700, cursor: qStatus === "sending" ? "wait" : "pointer", fontFamily: "inherit" }}>{qStatus === "sending" ? "Sending…" : "Send question"}</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

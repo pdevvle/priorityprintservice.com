@@ -12,6 +12,80 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 if ( ! defined( 'PPS_CONFIG_OPTION' ) ) {
     define( 'PPS_CONFIG_OPTION', 'pps_calc_config' );
 }
+if ( ! defined( 'PPS_ADDONS_VISIBILITY_OPTION' ) ) {
+    define( 'PPS_ADDONS_VISIBILITY_OPTION', 'pps_addons_visibility' );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ADD-ON VISIBILITY — per-calc-type on/off for finishing add-ons
+// ═══════════════════════════════════════════════════════════════
+//
+// Storage: wp_options['pps_addons_visibility'] = associative array keyed by
+// add-on slug, then by calc type. Only calc types that actually support the
+// add-on appear under each key. Defaults: every cell `true`.
+//
+// "Off" semantics: the add-on row is hidden from the calculator form, and
+// if a pre-filled state (reorder/preset/edit) carries a non-default value
+// for an off add-on, calculate() returns an error so no price displays
+// until the user clears the option.
+
+function pps_addon_visibility_matrix_defaults() {
+    return array(
+        // key          => array of calc-types it applies to
+        'vivid'         => array( 'saddle', 'perfect-bound', 'brochure', 'coupon' ),
+        'coating'       => array( 'saddle', 'perfect-bound', 'brochure', 'coupon' ),
+        'bundling'      => array( 'saddle', 'perfect-bound', 'brochure', 'coupon' ),
+        'rc'            => array( 'saddle', 'perfect-bound', 'brochure', 'coupon' ),
+        'two_staple'    => array( 'saddle' ),
+        'perforation'   => array( 'perfect-bound', 'brochure', 'coupon' ),
+        'outfold'       => array( 'perfect-bound', 'coupon' ),
+    );
+}
+
+function pps_addon_labels() {
+    return array(
+        'vivid'       => 'Vivid Print',
+        'coating'     => 'UV Coating',
+        'bundling'    => 'Bundling',
+        'rc'          => 'Round Cornering',
+        'two_staple'  => 'Two-Staple',
+        'perforation' => 'Perforation',
+        'outfold'     => 'Outfold',
+    );
+}
+
+function pps_get_addons_visibility() {
+    $matrix = pps_addon_visibility_matrix_defaults();
+    $saved  = get_option( PPS_ADDONS_VISIBILITY_OPTION, array() );
+    if ( ! is_array( $saved ) ) $saved = array();
+
+    $out = array();
+    foreach ( $matrix as $addon => $calcs ) {
+        $out[ $addon ] = array();
+        foreach ( $calcs as $calc ) {
+            $stored = isset( $saved[ $addon ][ $calc ] ) ? $saved[ $addon ][ $calc ] : true;
+            $out[ $addon ][ $calc ] = ! empty( $stored );
+        }
+    }
+    return $out;
+}
+
+/**
+ * Resolve the visibility flags for a single calc type. Returns
+ * { addon_slug => bool } only for add-ons that apply to the calc.
+ * Calculator JS reads this directly via window.PPS_CONFIG.addons.
+ */
+function pps_get_addons_visibility_for_calc( $calc_type ) {
+    $matrix = pps_addon_visibility_matrix_defaults();
+    $vis    = pps_get_addons_visibility();
+    $out    = array();
+    foreach ( $matrix as $addon => $calcs ) {
+        if ( in_array( $calc_type, $calcs, true ) ) {
+            $out[ $addon ] = ! empty( $vis[ $addon ][ $calc_type ] );
+        }
+    }
+    return $out;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // DEFAULT CONFIG (mirrors calculator hardcodes — single source of truth)
@@ -79,6 +153,13 @@ function pps_default_config() {
             // Shippo integration (leave token empty to use static transit map)
             'shippo_api_token'                  => '',
             'shippo_origin_zip'                 => '85027',
+            // Site-wide sale discount. 0 = sale off; >0 = subtotal multiplied by (1 - pct).
+            // Excludes shipping, rush surcharge, and turnaround add-ons. Per-preset rows
+            // can override these via the Presets admin (Sale fields).
+            'sale_discount_pct'                 => 0,
+            'sale_label'                        => 'Sale',
+            // "Have a question?" form recipient. Empty falls back to admin_email.
+            'question_recipient_email'          => '',
         ),
 
         'papers_nc' => array(
@@ -502,6 +583,21 @@ function pps_config_render_page() {
         }
 
         pps_save_config( $cfg );
+
+        // ── Add-on visibility matrix (separate option) ──
+        // POST shape: addons_visibility[<addon>][<calc>] = '1' when checked,
+        // omitted when unchecked. Build the full matrix from defaults so any
+        // missing checkboxes are treated as "off" rather than "default true".
+        $matrix = pps_addon_visibility_matrix_defaults();
+        $vis_save = array();
+        $vis_post = ( isset( $_POST['addons_visibility'] ) && is_array( $_POST['addons_visibility'] ) )
+            ? wp_unslash( $_POST['addons_visibility'] ) : array();
+        foreach ( $matrix as $addon => $calcs ) {
+            foreach ( $calcs as $calc ) {
+                $vis_save[ $addon ][ $calc ] = ! empty( $vis_post[ $addon ][ $calc ] );
+            }
+        }
+        update_option( PPS_ADDONS_VISIBILITY_OPTION, $vis_save, false );
 
         // ── FAQs (separate option from main config) ──
         if ( isset( $_POST['pps_faqs_json'] ) ) {
@@ -1051,6 +1147,13 @@ function pps_config_tab_production( $cfg ) {
             'common_discount_max'    => array( 'Competitive Disc. (>0=on)', '' ),
             'bw_discount_rate'       => array( 'B&W Discount', '×' ),
         ),
+        'Site-Wide Sale' => array(
+            'sale_discount_pct'      => array( 'Sale % (0 = off)', '×' ),
+            'sale_label'             => array( 'Sale Label', '' ),
+        ),
+        'Question Form' => array(
+            'question_recipient_email' => array( 'Recipient Email (blank = admin)', '' ),
+        ),
         'Fees' => array(
             'non_inventory_fee'      => array( 'Non-Inventory', '$' ),
             'bundling_base_fee'      => array( 'Bundling Base', '$' ),
@@ -1090,7 +1193,7 @@ function pps_config_tab_production( $cfg ) {
         echo '<table class="pps-ss"><tbody>';
         foreach ( $fields as $key => $meta ) {
             $val  = $pcf[ $key ] ?? '';
-            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip' ) ) ? 'text' : 'number';
+            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip', 'sale_label', 'question_recipient_email' ) ) ? 'text' : 'number';
             $step = ( is_float( $val + 0 ) || strpos( (string) $val, '.' ) !== false ) ? '0.001' : '1';
             echo '<tr>';
             echo '<td style="font-weight:600;white-space:nowrap;width:1%;padding-right:10px;font-size:12px">' . esc_html( $meta[0] ) . '</td>';
@@ -1101,6 +1204,24 @@ function pps_config_tab_production( $cfg ) {
         echo '</tbody></table></div>';
     }
     echo '</div>';
+
+    // ── Add-on availability (Vivid Print, Two-Staple, Perforation, Outfold) ──
+    // The other three add-ons (UV Coating, Bundling, Round Cornering) live on
+    // the Finishing tab inline with their spreadsheets. These four don't have
+    // their own spreadsheet sections, so they live here.
+    pps_render_addon_availability_block( array( 'vivid', 'two_staple', 'perforation', 'outfold' ) );
+}
+
+/**
+ * Render a compact block of per-add-on availability rows. Used at the bottom
+ * of the Production tab for add-ons that have no spreadsheet of their own.
+ */
+function pps_render_addon_availability_block( $addon_slugs ) {
+    echo '<div class="pps-ss-section" style="margin-top:32px">Add-on Availability</div>';
+    echo '<p style="margin:-4px 0 8px;color:#666;font-size:12px">Uncheck a box to make the add-on unavailable on that calculator. Customers no longer see the option; pre-filled orders carrying the option will return an error until cleared.</p>';
+    foreach ( $addon_slugs as $slug ) {
+        pps_render_addon_availability_row( $slug );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1147,9 +1268,41 @@ function pps_config_tab_finishing( $cfg ) {
         array( 'field' => 'price', 'header' => 'Price',  'type' => 'number', 'width' => '80px' ),
     );
 
+    pps_render_addon_availability_row( 'coating' );
     pps_render_spreadsheet( 'coatings', 'Coatings', $cfg['coatings'], $cols, 'val=imp/hr, 0=none' );
+
+    pps_render_addon_availability_row( 'bundling' );
     pps_render_spreadsheet( 'bundling', 'Bundling', $cfg['bundling'], $cols, 'price=bundle size' );
+
+    pps_render_addon_availability_row( 'rc' );
     pps_render_spreadsheet( 'corners', 'Round Cornering', $cfg['corners'], $cols );
+}
+
+/**
+ * Render an "Available on:" checkbox row for a single add-on slug.
+ * Slug must exist in pps_addon_visibility_matrix_defaults(). Renders only
+ * the calc-type checkboxes that apply to the add-on.
+ */
+function pps_render_addon_availability_row( $addon_slug ) {
+    $matrix = pps_addon_visibility_matrix_defaults();
+    if ( ! isset( $matrix[ $addon_slug ] ) ) return;
+    $calcs  = $matrix[ $addon_slug ];
+    $labels = array(
+        'saddle'        => 'Saddle Stitch',
+        'perfect-bound' => 'Perfect Bound',
+        'brochure'      => 'Brochure',
+        'coupon'        => 'Coupon Book',
+    );
+    $vis    = pps_get_addons_visibility();
+    $addon_labels = pps_addon_labels();
+    echo '<div style="margin:14px 0 -6px;padding:8px 12px;background:#f6f7f9;border:1px solid #e2e6ec;border-radius:4px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px">';
+    echo '<span style="font-weight:700;color:#444">' . esc_html( $addon_labels[ $addon_slug ] ?? $addon_slug ) . ' — available on:</span>';
+    foreach ( $calcs as $calc ) {
+        $on  = ! empty( $vis[ $addon_slug ][ $calc ] );
+        $cb  = '<input type="checkbox" name="addons_visibility[' . esc_attr( $addon_slug ) . '][' . esc_attr( $calc ) . ']" value="1"' . ( $on ? ' checked' : '' ) . '>';
+        echo '<label style="display:inline-flex;align-items:center;gap:4px;color:#333;cursor:pointer">' . $cb . esc_html( $labels[ $calc ] ?? $calc ) . '</label>';
+    }
+    echo '</div>';
 }
 
 // ═══════════════════════════════════════════════════════════════
