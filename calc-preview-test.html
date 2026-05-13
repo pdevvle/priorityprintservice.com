@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-11 · SS-QFORM-ADDONS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · SS-VIEWPORT</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1712,6 +1712,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [proofView, setProofView] = useState("single"); // "single" | "grid" within proof modal
   const [showMagnifier, setShowMagnifier] = useState(false); // magnifier loupe active
   const [magPos, setMagPos] = useState(null); // {x, y, pctX, pctY} — cursor position on proof image
+  // Proof viewport — pure view transform (zoom + pan). Does NOT modify the art.
+  // Scale 1 = fit, max 5x. Pan in CSS pixels relative to container center.
+  const [vpScale, setVpScale] = useState(1);
+  const [vpX, setVpX] = useState(0);
+  const [vpY, setVpY] = useState(0);
+  const [vpDragging, setVpDragging] = useState(false);
+  const vpDragStart = useRef(null);
   const [hiResProof, setHiResProof] = useState(null); // {idx, dataUrl} — 300 DPI render of current proof page
   const pdfDocRef = useRef(null); // holds the pdf.js document for hi-res re-rendering
   const rawFileRef = useRef(null); // holds the original uploaded File for the raw deliverable
@@ -2560,6 +2567,40 @@ update();
   const exScale = Math.min(1, 700 / (exBookW * 2.5));
   const totalSpreads = Math.max(1, Math.ceil((displayPages.length - 2) / 2));
 
+  // Reset viewport (zoom + pan) whenever the user changes pages or opens/closes the proof modal
+  useEffect(() => { setVpScale(1); setVpX(0); setVpY(0); }, [proofIdx, activeModal]);
+
+  // Viewport zoom helpers — pure view transform, does not modify the art
+  const VP_MIN = 1, VP_MAX = 5, VP_STEP = 0.25;
+  const vpZoomBy = (delta) => setVpScale(s => Math.max(VP_MIN, Math.min(VP_MAX, Math.round((s + delta) * 100) / 100)));
+  const vpReset = () => { setVpScale(1); setVpX(0); setVpY(0); };
+  const vpOnWheel = (e) => {
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    const cx = (e.clientX - r.left) - r.width / 2;
+    const cy = (e.clientY - r.top) - r.height / 2;
+    setVpScale(prev => {
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const next = Math.max(VP_MIN, Math.min(VP_MAX, prev * factor));
+      const ratio = next / prev;
+      setVpX(x => (x - cx) * ratio + cx);
+      setVpY(y => (y - cy) * ratio + cy);
+      if (next <= VP_MIN + 0.001) { setVpX(0); setVpY(0); return VP_MIN; }
+      return next;
+    });
+  };
+  const vpOnMouseDown = (e) => {
+    if (vpScale <= VP_MIN || showMagnifier) return;
+    vpDragStart.current = { x: e.clientX, y: e.clientY, vpX, vpY };
+    setVpDragging(true);
+  };
+  const vpOnMouseMove = (e) => {
+    if (!vpDragging || !vpDragStart.current) return;
+    setVpX(vpDragStart.current.vpX + (e.clientX - vpDragStart.current.x));
+    setVpY(vpDragStart.current.vpY + (e.clientY - vpDragStart.current.y));
+  };
+  const vpOnMouseUp = () => { setVpDragging(false); vpDragStart.current = null; };
+
   // Render current proof page at 300 DPI on demand
   useEffect(() => {
     if (activeModal !== "proof") { return; }
@@ -2682,6 +2723,7 @@ update();
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
     setRotatedCache({ key: "", pages: [] }); setPageTransforms({});
     setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setApprovalPkg(null);
+    setVpScale(1); setVpX(0); setVpY(0);
     pdfDocRef.current = null;
     rawFileRef.current = null;
     slotFilesRef.current = {};
@@ -3298,6 +3340,13 @@ update();
                         background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
                         color: showGuides ? "#38a169" : "rgba(255,255,255,.4)",
                       }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
+                      {/* Viewport zoom controls — pure view transform, mirrors PDF viewer UX */}
+                      <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.04)" }}>
+                        <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>−</button>
+                        <span style={{ fontSize:10.5, fontWeight:600, color:"rgba(255,255,255,.65)", minWidth:38, textAlign:"center", letterSpacing:".02em" }}>{Math.round(vpScale*100)}%</span>
+                        <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>+</button>
+                        <button type="button" onClick={vpReset} disabled={vpScale===1 && vpX===0 && vpY===0} title="Fit page" style={{padding:"4px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid rgba(255,255,255,.12)",marginLeft:2,borderRadius:0,cursor:(vpScale===1&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===1&&vpX===0&&vpY===0)?"rgba(255,255,255,.2)":"rgba(255,255,255,.55)",fontFamily:"inherit"}}>⛶</button>
+                      </div>
                       <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
@@ -3331,8 +3380,16 @@ update();
                       </div>
                     </div>
                     {/* Proof image with guide overlays — container sized to include bleed area */}
-                    <div style={{ maxWidth:520, margin:"0 auto" }}>
-                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "default" }}
+                    {/* Outer viewport wrapper handles wheel zoom + click-drag pan; inner is the unchanged proof */}
+                    <div style={{ maxWidth:520, margin:"0 auto", overflow:"hidden", position:"relative", borderRadius:6, cursor: vpScale>VP_MIN ? (vpDragging?"grabbing":"grab") : "default" }}
+                      onWheel={vpOnWheel}
+                      onMouseDown={vpOnMouseDown}
+                      onMouseMove={vpOnMouseMove}
+                      onMouseUp={vpOnMouseUp}
+                      onMouseLeave={vpOnMouseUp}
+                    >
+                    <div style={{ transform:`translate(${vpX}px, ${vpY}px) scale(${vpScale})`, transformOrigin:"center center", transition: vpDragging ? "none" : "transform .12s", willChange:"transform" }}>
+                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "inherit" }}
                         onMouseMove={showMagnifier ? (e) => {
                           const r = e.currentTarget.getBoundingClientRect();
                           setMagPos({ x: e.clientX - r.left, y: e.clientY - r.top, pctX: (e.clientX - r.left) / r.width * 100, pctY: (e.clientY - r.top) / r.height * 100, cw: r.width, ch: r.height });
@@ -3443,6 +3500,8 @@ update();
                           );
                         })()}
                       </div>
+                    </div>
+                    </div>
                     </div>
                     {/* Legend */}
                     {showGuides && (
