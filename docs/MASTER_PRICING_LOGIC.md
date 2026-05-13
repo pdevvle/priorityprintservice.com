@@ -211,6 +211,19 @@ Defaults updated to match all calculators:
 2. **Disabled `easydiscount` and `common_discount`.** These ad-hoc discount caps were redundant with the new curve and created non-monotonic pricing. Both max caps set to 0.
 3. **Size-based discount** (booklets only). New `P.discSize` line item: 15% off the subtotal when `imp < 4`. Shows as "Size Adj." in the price breakdown. Hides automatically for 5.5×8.5 (imp=4).
 
+### Saddle stitch: 8-up markup bonus (2026-05-12)
+
+The smallest saddle sizes (`imp >= 8` — 3.5×5.5, 4×6, 4.25×5.5, Square 4×4, 6×4 Landscape, etc.) print 8 books per press sheet, so material costs scale down accordingly. But the customer perception of value doesn't scale 1:1 with sheet-count, and labor (press time, cutting, stitching) is roughly the same per-book regardless of imp. New PCF knob `booklet_8up_markup_bonus` (default `0.15`) multiplies `mk` by `(1 + bonus)` when `imp >= 8`:
+
+```javascript
+const mkBase = Math.max(maxMk - dL, minMk);
+const mk = imp >= 8 ? mkBase * (1 + PCF.booklet_8up_markup_bonus) : mkBase;
+```
+
+This affects materials and print costs only (those are the line items that scale with `mk`). Labor stays at its base hourly rate. Tunes the 8-up-vs-4-up price ratio without bloating labor cost in the breakdown.
+
+Set to 0 to disable. Currently saddle-only — PB and coupon book have different imp tables and would need their own knobs.
+
 ---
 
 ## Sale discount

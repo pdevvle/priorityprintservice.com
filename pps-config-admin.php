@@ -117,6 +117,7 @@ function pps_default_config() {
             'booklet_markup_coef_pages'         => 0.30,
             'booklet_size_discount'             => 0,
             'booklet_surcharge'                 => 0.30,
+            'booklet_8up_markup_bonus'          => 0.15,    // multiplier added to mk when imp >= 8 (small saddle sizes); affects materials/print only, not labor
             // Perfect-bound-specific markup (separate from brochure backend_* and booklet_* values)
             'perfectbound_maximummarkup'        => 8,
             'perfectbound_minimummarkup'        => 1.5,
@@ -1126,6 +1127,7 @@ function pps_config_tab_production( $cfg ) {
             'booklet_markup_coef_tS'     => array( 'Sheet Decay Coef', '×' ),
             'booklet_markup_coef_pages'  => array( 'Pages Decay Coef', '×' ),
             'booklet_size_discount'      => array( '8.5×11 Size Disc.', '×' ),
+            'booklet_8up_markup_bonus'   => array( '8-up Markup Bonus', '×' ),
             'booklet_surcharge'          => array( 'Pricing Surcharge', '×' ),
         ),
         'Perfect Bound Markup' => array(
