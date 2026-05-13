@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · SS-VP-MIN10</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · SS-8UP-MK</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -144,6 +144,7 @@ const PCF = Object.assign({
   booklet_maximummarkup:3.6, booklet_minimummarkup:1.45,
   booklet_markup_coef_tS:0.15, booklet_markup_coef_pages:0.30,
   booklet_size_discount:0, booklet_surcharge:0.30,
+  booklet_8up_markup_bonus:0.15, // raises mk by this % for imp>=8 sizes (materials/print only, not labor)
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
   art_pagesperhour:8, art_newdesignmodifier:0.5,
   sheetsforlowcosthardcopyproof:1500,
@@ -448,7 +449,11 @@ function calculate(c) {
   const tP=sets.reduce((s,x)=>s+x.pages,0);
   const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/4,0)/(imp/2);
   const dL=PCF.booklet_markup_coef_tS*Math.log(tS)+PCF.booklet_markup_coef_pages*Math.log(tP);
-  const mk=Math.max(PCF.booklet_maximummarkup-dL,PCF.booklet_minimummarkup);
+  // Base markup, then 8-up bonus: imp>=8 (small saddle sizes) gets a markup boost to
+  // raise per-unit material/print revenue without inflating labor (labor cost per book
+  // is roughly the same regardless of imp). 0 = off; admin-tunable via Production tab.
+  const mkBase=Math.max(PCF.booklet_maximummarkup-dL,PCF.booklet_minimummarkup);
+  const mk=imp>=8 ? mkBase*(1+(PCF.booklet_8up_markup_bonus||0)) : mkBase;
   const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
   const csOK=sets.every(s=>s.pages<=24);
 
