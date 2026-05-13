@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · SS-ART-UNDO</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · SS-VP-MIN10</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -2596,7 +2596,7 @@ update();
   // Viewport zoom helpers — pure view transform, does not modify the art
   // Allow zoom-out below 100% for context (page shrinks within viewport).
   // Pan only makes sense when scale > 1 (i.e., page is bigger than viewport).
-  const VP_MIN = 0.25, VP_FIT = 1, VP_MAX = 5, VP_STEP = 0.25;
+  const VP_MIN = 0.10, VP_FIT = 1, VP_MAX = 5, VP_STEP = 0.25;
   const vpZoomBy = (delta) => setVpScale(s => {
     const next = Math.max(VP_MIN, Math.min(VP_MAX, Math.round((s + delta) * 100) / 100));
     if (next <= VP_FIT) { setVpX(0); setVpY(0); }
