@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-11 · CB-QFORM-PERFPOS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · CB-PROOF-VIEWPORT</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1930,6 +1930,29 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // Per-page transform helpers
   const DEFAULT_TX = { fitMode: "crop", artScale: 100, rotateSteps: 0 };
   const getTx = (idx) => pageTransforms[idx] || DEFAULT_TX;
+  const [txHistory, setTxHistory] = useState([]);
+  const pushTxHistory = (idx) => {
+    const snap = { ...getTx(idx) };
+    setTxHistory(h => {
+      const next = [...h, { idx, prev: snap }];
+      if (next.length > 30) next.shift();
+      return next;
+    });
+  };
+  const undoTx = () => {
+    setTxHistory(h => {
+      if (!h.length) return h;
+      const last = h[h.length - 1];
+      setPageTransforms(p => ({ ...p, [last.idx]: last.prev }));
+      if (last.idx !== proofIdx && last.idx >= 0) setProofIdx(last.idx);
+      return h.slice(0, -1);
+    });
+  };
+  const [vpScale, setVpScale] = useState(1);
+  const [vpX, setVpX] = useState(0);
+  const [vpY, setVpY] = useState(0);
+  const [vpDragging, setVpDragging] = useState(false);
+  const vpDragStart = useRef(null);
   const setTx = (idx, patch) => {
     setPageTransforms(p => {
       const cur = p[idx] || DEFAULT_TX;
@@ -1945,9 +1968,43 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const fitMode = currentTx.fitMode;
   const artScale = currentTx.artScale;
   const rotateSteps = currentTx.rotateSteps;
-  const setFitMode = (v) => setTx(proofIdx, { fitMode: v });
-  const setArtScale = (v) => setTx(proofIdx, { artScale: v });
-  const setRotateSteps = (v) => setTx(proofIdx, { rotateSteps: v });
+  const setFitMode = (v) => { pushTxHistory(proofIdx); setTx(proofIdx, { fitMode: v }); };
+  const setArtScale = (v) => { pushTxHistory(proofIdx); setTx(proofIdx, { artScale: v }); };
+  const setRotateSteps = (v) => { pushTxHistory(proofIdx); setTx(proofIdx, { rotateSteps: v }); };
+
+  useEffect(() => { setVpScale(1); setVpX(0); setVpY(0); }, [proofIdx, activeModal]);
+  const VP_MIN = 0.25, VP_FIT = 1, VP_MAX = 5, VP_STEP = 0.25;
+  const vpZoomBy = (delta) => setVpScale(s => {
+    const next = Math.max(VP_MIN, Math.min(VP_MAX, Math.round((s + delta) * 100) / 100));
+    if (next <= VP_FIT) { setVpX(0); setVpY(0); }
+    return next;
+  });
+  const vpReset = () => { setVpScale(VP_FIT); setVpX(0); setVpY(0); };
+  const vpOnWheel = (e) => {
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    const cx = (e.clientX - r.left) - r.width / 2;
+    const cy = (e.clientY - r.top) - r.height / 2;
+    setVpScale(prev => {
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const next = Math.max(VP_MIN, Math.min(VP_MAX, prev * factor));
+      const ratio = next / prev;
+      setVpX(x => next <= VP_FIT ? 0 : (x - cx) * ratio + cx);
+      setVpY(y => next <= VP_FIT ? 0 : (y - cy) * ratio + cy);
+      return next;
+    });
+  };
+  const vpOnMouseDown = (e) => {
+    if (vpScale <= VP_FIT || showMagnifier) return;
+    vpDragStart.current = { x: e.clientX, y: e.clientY, vpX, vpY };
+    setVpDragging(true);
+  };
+  const vpOnMouseMove = (e) => {
+    if (!vpDragging || !vpDragStart.current) return;
+    setVpX(vpDragStart.current.vpX + (e.clientX - vpDragStart.current.x));
+    setVpY(vpDragStart.current.vpY + (e.clientY - vpDragStart.current.y));
+  };
+  const vpOnMouseUp = () => { setVpDragging(false); vpDragStart.current = null; };
 
   // Clear approval when ANY page's transform changes — forces re-approval
   const prevTxHash = useRef(txHash);
@@ -2837,6 +2894,7 @@ update();
       } else {
         setPageTransforms({});
       }
+      setTxHistory([]);
       if (onCoverArt && extracted.pages.length >= 1) onCoverArt(extracted.pages[0].dataUrl);
       if (onPagesDetected && extracted.pages.length >= 2) {
         // Perfect bound: round up to next even page count, min 20
@@ -2867,7 +2925,7 @@ update();
   function handleClear() {
     setRawPages([]); setFileName(""); setUploadPageCount(0);
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
-    setRotatedCache({ key: "", pages: [] }); setPageTransforms({});
+    setRotatedCache({ key: "", pages: [] }); setPageTransforms({}); setTxHistory([]);
     setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setApprovalPkg(null);
     pdfDocRef.current = null;
     slotFilesRef.current = {};
@@ -3014,9 +3072,10 @@ update();
   // Fit toggle (light theme for inline)
   const FitToggle = ({ dark }) => (
     <div style={{ display: "flex", alignItems:"center", gap: 6 }}>
+      <span style={{ fontSize:10, fontWeight:700, color:"rgba(255,255,255,.55)", letterSpacing:".08em", textTransform:"uppercase", marginRight:2 }}>Art:</span>
       <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
-        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Stretch" }, { v: "scale", l: "Scale" }].map(o => (
-          <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} style={{
+        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Force Fill" }, { v: "scale", l: "Scale" }].map(o => (
+          <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} title={o.v === "stretch" ? "Stretch art to fill the entire bleed area — distorts aspect ratio" : undefined} style={{
             padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
             background: fitMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
             color: fitMode === o.v ? "#000" : "rgba(255,255,255,.5)",
@@ -3027,6 +3086,11 @@ update();
           background: rotateSteps > 0 ? CK.cyan : "rgba(255,255,255,.06)",
           color: rotateSteps > 0 ? "#000" : "rgba(255,255,255,.5)",
         }}>Rotate 90°{rotateSteps > 0 ? ` (${rotateSteps * 90}°)` : ""}</button>
+        <button type="button" onClick={undoTx} disabled={txHistory.length === 0} title={txHistory.length ? `Undo last art change (${txHistory.length} step${txHistory.length === 1 ? "" : "s"} available)` : "No changes to undo"} style={{
+          padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor: txHistory.length ? "pointer" : "default", fontFamily:"inherit",
+          background:"rgba(255,255,255,.06)",
+          color: txHistory.length ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.2)",
+        }}>↶ Undo</button>
       </div>
       {fitMode === "scale" && (
         <div style={{ display:"flex", alignItems:"center", gap:3 }}>
@@ -3042,13 +3106,6 @@ update();
           </div>
           <span style={{ fontSize:10, fontWeight:600, color:"rgba(255,255,255,.4)", minWidth:32, textAlign:"center" }}>{artScale}%</span>
         </div>
-      )}
-      {fitMode === "stretch" && (
-        <button type="button" onClick={() => setFitMode("crop")} style={{
-          padding:"5px 12px", fontSize:10, fontWeight:700, border:"1px solid rgba(239,68,68,.4)",
-          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(239,68,68,.12)",
-          color:"#f87171", letterSpacing:".03em",
-        }}>Reset Stretch</button>
       )}
     </div>
   );
@@ -3485,6 +3542,13 @@ update();
                         background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
                         color: showGuides ? "#38a169" : "rgba(255,255,255,.4)",
                       }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
+                      {/* Viewport zoom controls */}
+                      <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.04)" }}>
+                        <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>−</button>
+                        <span style={{ fontSize:10.5, fontWeight:600, color:"rgba(255,255,255,.65)", minWidth:38, textAlign:"center", letterSpacing:".02em" }}>{Math.round(vpScale*100)}%</span>
+                        <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>+</button>
+                        <button type="button" onClick={vpReset} disabled={vpScale===VP_FIT && vpX===0 && vpY===0} title="Fit page" style={{padding:"4px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid rgba(255,255,255,.12)",marginLeft:2,borderRadius:0,cursor:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"rgba(255,255,255,.2)":"rgba(255,255,255,.55)",fontFamily:"inherit"}}>⛶</button>
+                      </div>
                       <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
@@ -3519,7 +3583,15 @@ update();
                     </div>
                     {/* Proof image with guide overlays — container sized to include bleed area */}
                     <div style={{ maxWidth:520, margin:"0 auto" }}>
-                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "default" }}
+                    <div style={{ overflow:"hidden", position:"relative", borderRadius:6, cursor: vpScale>VP_FIT ? (vpDragging?"grabbing":"grab") : "default" }}
+                      onWheel={vpOnWheel}
+                      onMouseDown={vpOnMouseDown}
+                      onMouseMove={vpOnMouseMove}
+                      onMouseUp={vpOnMouseUp}
+                      onMouseLeave={vpOnMouseUp}
+                    >
+                    <div style={{ transform:`translate(${vpX}px, ${vpY}px) scale(${vpScale})`, transformOrigin:"center center", transition: vpDragging ? "none" : "transform .12s", willChange:"transform" }}>
+                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "inherit" }}
                         onMouseMove={showMagnifier ? (e) => {
                           const r = e.currentTarget.getBoundingClientRect();
                           setMagPos({ x: e.clientX - r.left, y: e.clientY - r.top, pctX: (e.clientX - r.left) / r.width * 100, pctY: (e.clientY - r.top) / r.height * 100, cw: r.width, ch: r.height });
@@ -3630,6 +3702,8 @@ update();
                           );
                         })()}
                       </div>
+                    </div>
+                    </div>
                     </div>
                     {/* Legend */}
                     {showGuides && (
