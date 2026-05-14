@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · SS-8UP-MK</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-14 · MK-1AXIS</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -140,9 +140,14 @@ const PCF = Object.assign({
   cutterbasefee:7.5, sheetsturnaround:2500,
   backend_maximummarkup:15.2, backend_minimummarkup:3.5,
   easydiscount_max:0, uvcoaterimpressionsperhour:250,
-  // Booklet-specific markup overrides (separate from brochure backend_* values)
+  // Booklet-specific markup overrides (separate from brochure backend_* values).
+  // ROLLBACK 2026-05-14: pre-single-axis values were
+  //   coef_tS:0.15, coef_pages:0.30 (two-axis VP-fit regression, cd65403).
+  // Reverted to single-axis: pages already drive tS, so a second pages-decay
+  // term double-counted. coefS bumped to 0.30 to preserve pricing at typical
+  // configs while eliminating the separate pages knob.
   booklet_maximummarkup:3.6, booklet_minimummarkup:1.45,
-  booklet_markup_coef_tS:0.15, booklet_markup_coef_pages:0.30,
+  booklet_markup_coef_tS:0.30,
   booklet_size_discount:0, booklet_surcharge:0.30,
   booklet_8up_markup_bonus:0.15, // raises mk by this % for imp>=8 sizes (materials/print only, not labor)
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
@@ -448,7 +453,7 @@ function calculate(c) {
   const tQ=sets.reduce((s,x)=>s+x.qty,0);
   const tP=sets.reduce((s,x)=>s+x.pages,0);
   const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/4,0)/(imp/2);
-  const dL=PCF.booklet_markup_coef_tS*Math.log(tS)+PCF.booklet_markup_coef_pages*Math.log(tP);
+  const dL=PCF.booklet_markup_coef_tS*Math.log(tS);
   // Base markup, then 8-up bonus: imp>=8 (small saddle sizes) gets a markup boost to
   // raise per-unit material/print revenue without inflating labor (labor cost per book
   // is roughly the same regardless of imp). 0 = off; admin-tunable via Production tab.

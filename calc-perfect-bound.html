@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · PB-VP-MIN10</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-14 · PB-MK-MIRROR</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -139,10 +139,18 @@ const PCF = Object.assign({
   cutter_sheetsperhour:15000, horizonspf20_sheetsperhour:4000,
   cutterbasefee:7.5, sheetsturnaround:2500,
   backend_maximummarkup:9, backend_minimummarkup:1.5,
-  // Perfect bound markup (parallel to booklet_* / backend_*). Tune independently via WP admin.
-  perfectbound_maximummarkup:22, perfectbound_minimummarkup:3.2,
-  perfectbound_size_discount:0,       // disabled — sheet decay in markup curve already differentiates imp<4 sizes
-  perfectbound_discount_log_coef:2.2, // steepness of markup decay vs ln(tS); higher = faster drop
+  // Perfect bound markup — saddle-stitch-mirrored architecture (2026-05-14).
+  // Single-axis tS decay (pages already drive tS, so no separate pages knob),
+  // plus a flat surcharge layer. coefS slightly under saddle (0.275 vs 0.30)
+  // because PB carries fixed adders (baseRate $40 + perfectBind + finishingCuts)
+  // that already lift the per-book price vs an equivalent saddle config.
+  // ROLLBACK 2026-05-14: pre-reform values were
+  //   maximummarkup:22, minimummarkup:3.2, discount_log_coef:2.2
+  // (single-axis but with very high ceiling — produced 2.5-3x saddle prices).
+  perfectbound_maximummarkup:3.6, perfectbound_minimummarkup:1.45,
+  perfectbound_size_discount:0,       // disabled — sheet decay differentiates imp<4 sizes
+  perfectbound_markup_coef_tS:0.275,  // steepness of markup decay vs ln(tS)
+  perfectbound_surcharge:0.30,        // flat % applied to post-discount subtotal
   // ROLLBACK: pre-2026-04-14 values were easydiscount_max:1500, common_discount_max:1000
   easydiscount_max:0, uvcoaterimpressionsperhour:250,
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
@@ -602,14 +610,12 @@ function calculate(c) {
   // Perfect bound: pages / 2 per sheet (each sheet = 2 pages front/back)
   const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/2,0)/imp;
 
-  // Markup curve — single slope, aligned with saddle-stitch booklet (2026-04-14)
-  // ROLLBACK: to restore the prior two-branch curve, comment out the two lines below
-  // and uncomment this block:
-  // const dL = tS >= 1000
-  //   ? 1.1782 * Math.log(tS) - 5.5887
-  //   : 2.5003 * Math.pow(Math.log(tS), 2) - 21.9175 * Math.log(tS) + 34.6437;
-  // const mk=Math.max(PCF.backend_maximummarkup-dL,PCF.backend_minimummarkup);
-  const dL = PCF.perfectbound_discount_log_coef * Math.log(tS);
+  // Markup curve — saddle-mirrored single-axis (2026-05-14).
+  // Pages already drive tS, so we don't need a separate pages-decay term.
+  // ROLLBACK 2026-05-14: prior form was
+  //   const dL = PCF.perfectbound_discount_log_coef * Math.log(tS);
+  // with max=22, min=3.2 — produced 2.5-3x saddle prices.
+  const dL = PCF.perfectbound_markup_coef_tS * Math.log(tS);
   const mk = Math.max(PCF.perfectbound_maximummarkup - dL, PCF.perfectbound_minimummarkup);
 
   // Spine proxy: used for bundling/corner turnaround estimates
@@ -729,6 +735,11 @@ function calculate(c) {
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
   P.discSize=imp<4?subBeforeSize*(-PCF.perfectbound_size_discount):0;
 
+  // Surcharge layer — mirrors saddle's booklet_surcharge. Applied on subtotal
+  // before sale discount, after all other adjustments.
+  const subBeforeSurcharge=Object.values(P).reduce((s,v)=>s+v,0);
+  P.surcharge=subBeforeSurcharge*(PCF.perfectbound_surcharge||0);
+
   // Sale discount applies last, on the post-discount subtotal. Excludes shipping/rush.
   const subBeforeSale=Object.values(P).reduce((s,v)=>s+v,0);
   P.discSale=(PCF.sale_discount_pct>0)?-Math.round(subBeforeSale*PCF.sale_discount_pct*100)/100:0;
@@ -829,7 +840,7 @@ function calculate(c) {
     {l:"UV Coating",v:P.coat,g:"add"},{l:"Bundling",v:P.bundle,g:"add"},
     {l:"Round Cornering",v:P.rc,g:"add"},{l:"Outfold",v:P.outfold,g:"add"},{l:"Perforation",v:P.perforation,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
-    {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
+    {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
     {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);

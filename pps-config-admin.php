@@ -110,19 +110,19 @@ function pps_default_config() {
             'backend_maximummarkup'             => 15.2,
             'backend_minimummarkup'             => 3.5,
             'easydiscount_max'                  => 0,
-            // Booklet-specific markup (separate from brochure backend_* values)
+            // Booklet-specific markup — single-axis (pages already drive tS, 2026-05-14)
             'booklet_maximummarkup'             => 3.6,
             'booklet_minimummarkup'             => 1.45,
-            'booklet_markup_coef_tS'            => 0.15,
-            'booklet_markup_coef_pages'         => 0.30,
+            'booklet_markup_coef_tS'            => 0.30,
             'booklet_size_discount'             => 0,
             'booklet_surcharge'                 => 0.30,
             'booklet_8up_markup_bonus'          => 0.15,    // multiplier added to mk when imp >= 8 (small saddle sizes); affects materials/print only, not labor
-            // Perfect-bound-specific markup (separate from brochure backend_* and booklet_* values)
-            'perfectbound_maximummarkup'        => 8,
-            'perfectbound_minimummarkup'        => 1.5,
+            // Perfect-bound markup — saddle-mirrored, slightly lower coefS to offset PB-only fixed adders
+            'perfectbound_maximummarkup'        => 3.6,
+            'perfectbound_minimummarkup'        => 1.45,
+            'perfectbound_markup_coef_tS'       => 0.275,
             'perfectbound_size_discount'        => 0,
-            'perfectbound_discount_log_coef'    => 2.2,
+            'perfectbound_surcharge'            => 0.30,
             // Coupon book markup (separate from perfect-bound; pads/coupon books)
             'couponbook_maximummarkup'          => 8,
             'couponbook_minimummarkup'          => 1.5,
@@ -1124,17 +1124,17 @@ function pps_config_tab_production( $cfg ) {
         'Booklet Markup' => array(
             'booklet_maximummarkup'      => array( 'Max Markup', '×' ),
             'booklet_minimummarkup'      => array( 'Min Markup', '×' ),
-            'booklet_markup_coef_tS'     => array( 'Sheet Decay Coef', '×' ),
-            'booklet_markup_coef_pages'  => array( 'Pages Decay Coef', '×' ),
+            'booklet_markup_coef_tS'     => array( 'Sheet Decay Coef', '×ln(tS)' ),
             'booklet_size_discount'      => array( '8.5×11 Size Disc.', '×' ),
             'booklet_8up_markup_bonus'   => array( '8-up Markup Bonus', '×' ),
             'booklet_surcharge'          => array( 'Pricing Surcharge', '×' ),
         ),
         'Perfect Bound Markup' => array(
-            'perfectbound_maximummarkup'     => array( 'Max Markup', '×' ),
-            'perfectbound_minimummarkup'     => array( 'Min Markup', '×' ),
-            'perfectbound_size_discount'     => array( '8.5×11 Size Disc.', '×' ),
-            'perfectbound_discount_log_coef' => array( 'Discount Curve Steepness', '×ln(tS)' ),
+            'perfectbound_maximummarkup'   => array( 'Max Markup', '×' ),
+            'perfectbound_minimummarkup'   => array( 'Min Markup', '×' ),
+            'perfectbound_markup_coef_tS'  => array( 'Sheet Decay Coef', '×ln(tS)' ),
+            'perfectbound_size_discount'   => array( '8.5×11 Size Disc.', '×' ),
+            'perfectbound_surcharge'       => array( 'Pricing Surcharge', '×' ),
         ),
         'Coupon Book Markup' => array(
             'couponbook_maximummarkup'       => array( 'Max Markup', '×' ),
