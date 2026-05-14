@@ -113,7 +113,7 @@ function pps_default_config() {
             // Booklet-specific markup — single-axis (pages already drive tS, 2026-05-14)
             'booklet_maximummarkup'             => 3.6,
             'booklet_minimummarkup'             => 1.45,
-            'booklet_markup_coef_tS'            => 0.30,
+            'booklet_markup_coef_tS'            => 0.295,
             'booklet_size_discount'             => 0,
             'booklet_surcharge'                 => 0.30,
             'booklet_8up_markup_bonus'          => 0.15,    // multiplier added to mk when imp >= 8 (small saddle sizes); affects materials/print only, not labor
