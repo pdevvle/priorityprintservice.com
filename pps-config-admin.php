@@ -107,7 +107,7 @@ function pps_default_config() {
             'horizonspf20_sheetsperhour'        => 4000,
             'cutterbasefee'                     => 7.5,
             'sheetsturnaround'                  => 2500,
-            'backend_maximummarkup'             => 15.2,
+            'backend_maximummarkup'             => 14,
             'backend_minimummarkup'             => 1.5,
             'backend_markup_coef_tS'            => 1.75,    // single-axis decay vs ln(pressSheets); floor cross @ ~2500 sheets
             'easydiscount_max'                  => 0,

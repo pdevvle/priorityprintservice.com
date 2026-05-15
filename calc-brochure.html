@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-14 · BR-1AXIS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-14 · BR-YIELD</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -74,7 +74,7 @@ const PCF = Object.assign({
   press_printsperhour:600, bindery_morgana_impressionperhour:750,
   cutter_stackheight_inches:3.5, cutter_cyclesperhour:120,
   cutterbasefee:7.5, sheetsturnaround:2500,
-  backend_maximummarkup:15.2, backend_minimummarkup:1.5,
+  backend_maximummarkup:14, backend_minimummarkup:1.5,
   backend_markup_coef_tS:1.75,    // single-axis decay vs ln(pressSheets); floor lands at ~2500 sheets
   // ROLLBACK 2026-05-14: pre-reform was min=3.5, formula `dL = 1.85·ln(pressSheets) − 0.5`
   // (constant offset removed; min dropped to 1.5; coef softened from 1.85 → 1.75 to
@@ -313,7 +313,26 @@ function calculate(c) {
       else sizeTierMult = 1.5;
     }
   }
-  const mk = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup) * sizeTierMult;
+  // High-yield markup bonus — holds back some of the natural materials savings
+  // on small/high-yield sizes. Anchored to imp=2 as 100% baseline:
+  //   imp=3 → +5%  (target: 70% of imp=2 materials)
+  //   imp=4 → +20% (target: 60%)
+  //   imp=6 → +50% (target: 50%)
+  //   imp=8 → +60% (target: 40%)
+  // Linear interpolation between anchors. Extrapolates +5% per +1 imp past 8.
+  // Mirrors saddle-stitch booklet_8up_markup_bonus conceptually, but with a curve
+  // since brochure has more imp tiers (presets 0.5, 1, 2, 4; custom up to ~32).
+  function bro_yieldBonus(imp) {
+    if (imp <= 2) return 0;
+    const lerp = (x, x0, y0, x1, y1) => y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+    if (imp <= 3) return lerp(imp, 2,    0,    3, 0.05);
+    if (imp <= 4) return lerp(imp, 3, 0.05,    4, 0.20);
+    if (imp <= 6) return lerp(imp, 4, 0.20,    6, 0.50);
+    if (imp <= 8) return lerp(imp, 6, 0.50,    8, 0.60);
+    return 0.60 + (imp - 8) * 0.05;
+  }
+  const mkBase = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup);
+  const mk = mkBase * (1 + bro_yieldBonus(imp)) * sizeTierMult;
 
   // Approximate thickness
   const approxThickness = (paper.price / 10) * qty;
