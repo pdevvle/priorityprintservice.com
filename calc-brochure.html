@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · BR-VP-MIN10</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-14 · BR-1AXIS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -74,7 +74,11 @@ const PCF = Object.assign({
   press_printsperhour:600, bindery_morgana_impressionperhour:750,
   cutter_stackheight_inches:3.5, cutter_cyclesperhour:120,
   cutterbasefee:7.5, sheetsturnaround:2500,
-  backend_maximummarkup:15.2, backend_minimummarkup:3.5,
+  backend_maximummarkup:15.2, backend_minimummarkup:1.5,
+  backend_markup_coef_tS:1.75,    // single-axis decay vs ln(pressSheets); floor lands at ~2500 sheets
+  // ROLLBACK 2026-05-14: pre-reform was min=3.5, formula `dL = 1.85·ln(pressSheets) − 0.5`
+  // (constant offset removed; min dropped to 1.5; coef softened from 1.85 → 1.75 to
+  //  push the floor-cross point from ~560 sheets to ~2500 sheets).
   easydiscount_factor:0.05, easydiscount_max:0,
   uvcoaterimpressionsperhour:250, roundcornerperhour:75, bundlesperhour:50,
   speed_gwperhr:250, addon_roundcornermaxdays:30,
@@ -294,7 +298,11 @@ function calculate(c) {
   //   Similar to preset (<=0.5" on both): 1.15x
   //   Flat, not similar to any preset:    1.25x
   //   Folded, not similar to any preset:  1.50x
-  const dL = 1.85 * Math.log(pressSheets) - 0.5;
+  // ROLLBACK 2026-05-14: prior form was `dL = 1.85 * Math.log(pressSheets) - 0.5`
+  // with min=3.5. Constant offset removed (was a hidden +0.5 to MAX); coef softened
+  // to 1.75 so floor cross-point moves from ~560 to ~2500 press sheets; min dropped
+  // to 1.5 to give big-volume orders a meaningful discount.
+  const dL = PCF.backend_markup_coef_tS * Math.log(pressSheets);
   let sizeTierMult = 1;
   if (c.sizeMode === "custom") {
     const exactMatch = SIZE_PRESETS.some(s => s.long === longE && s.short === shortE);

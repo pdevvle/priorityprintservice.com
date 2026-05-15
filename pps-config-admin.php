@@ -108,7 +108,8 @@ function pps_default_config() {
             'cutterbasefee'                     => 7.5,
             'sheetsturnaround'                  => 2500,
             'backend_maximummarkup'             => 15.2,
-            'backend_minimummarkup'             => 3.5,
+            'backend_minimummarkup'             => 1.5,
+            'backend_markup_coef_tS'            => 1.75,    // single-axis decay vs ln(pressSheets); floor cross @ ~2500 sheets
             'easydiscount_max'                  => 0,
             // Booklet-specific markup — single-axis (pages already drive tS, 2026-05-14)
             'booklet_maximummarkup'             => 3.6,
@@ -1120,6 +1121,7 @@ function pps_config_tab_production( $cfg ) {
         'Brochure Markup' => array(
             'backend_maximummarkup'  => array( 'Max Markup', '×' ),
             'backend_minimummarkup'  => array( 'Min Markup', '×' ),
+            'backend_markup_coef_tS' => array( 'Sheet Decay Coef', '×ln(tS)' ),
         ),
         'Booklet Markup' => array(
             'booklet_maximummarkup'      => array( 'Max Markup', '×' ),
