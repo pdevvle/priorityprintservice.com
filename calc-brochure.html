@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-14 · BR-BASE10</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-14 · BR-MAX13</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -74,7 +74,7 @@ const PCF = Object.assign({
   press_printsperhour:600, bindery_morgana_impressionperhour:750,
   cutter_stackheight_inches:3.5, cutter_cyclesperhour:120,
   cutterbasefee:7.5, sheetsturnaround:2500,
-  backend_maximummarkup:14, backend_minimummarkup:1.5,
+  backend_maximummarkup:13, backend_minimummarkup:1.5,
   backend_markup_coef_tS:1.75,    // single-axis decay vs ln(pressSheets); floor lands at ~2500 sheets
   // ROLLBACK 2026-05-14: pre-reform was min=3.5, formula `dL = 1.85·ln(pressSheets) − 0.5`
   // (constant offset removed; min dropped to 1.5; coef softened from 1.85 → 1.75 to
