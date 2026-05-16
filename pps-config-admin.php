@@ -140,6 +140,7 @@ function pps_default_config() {
             'minimum_turnaround_days'           => 3,
             'two_staple_threshold'              => 5.25,
             'non_inventory_fee'                 => 35,
+            'backend_base_rate'                 => 10,    // flat per-order fee for brochures
             'bw_discount_rate'                  => 0.3,
             'easy_discount_rate'                => 0.05,
             'common_discount_max'               => 1500,
