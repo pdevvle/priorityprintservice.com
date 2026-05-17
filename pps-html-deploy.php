@@ -2,7 +2,7 @@
 /**
  * Plugin Name: PPS HTML Deploy
  * Description: File-system-based deploy capability for PPS calculator HTML files. Co-loaded as both an activatable plugin AND a sub-module required from pps-calculators.php. Used by the priority-print MCP.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: Priority Print Service
  *
  * Drop calc-*.html into wp-content/plugins/pps-calculators/_pending_html/
@@ -17,6 +17,11 @@
  * runs). Instead, we rely on PHP's `include_once`/`require_once` to
  * prevent the file being loaded twice when both the active_plugins
  * auto-loader AND pps-calculators.php's require_once try to load it.
+ *
+ * v1.2.0: tolerate JSON-string option values. The MCP wp_update_option
+ * endpoint serialises array payloads as JSON strings; without this
+ * tolerance pps_html_deploy_pending_attachments stays string-shaped
+ * and the is_array() guard would silently drop the deploy.
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
@@ -66,6 +71,11 @@ function pps_html_deploy_run() {
 
     $pending_files       = is_dir( PPS_HTML_DEPLOY_PENDING_DIR ) ? glob( PPS_HTML_DEPLOY_PENDING_DIR . '/*.html' ) : array();
     $pending_attachments = get_option( PPS_HTML_DEPLOY_ATTACH_OPTION, array() );
+    // MCP wp_update_option stores values as JSON strings — accept those too.
+    if ( is_string( $pending_attachments ) ) {
+        $decoded = json_decode( $pending_attachments, true );
+        if ( is_array( $decoded ) ) $pending_attachments = $decoded;
+    }
     if ( ! is_array( $pending_attachments ) ) $pending_attachments = array();
 
     if ( empty( $pending_files ) && empty( $pending_attachments ) ) return;
