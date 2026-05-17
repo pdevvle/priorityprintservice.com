@@ -89,6 +89,7 @@ WordPress/WooCommerce plugin for Priority Print Service — pricing calculators 
 - parseInt NaN validation on URL params
 - Reorder type coercion (Number() on all numeric, strict boolean)
 - Edit mode atomicity (add before remove)
+- **Never write remote-fetch-and-execute code** (no `file_get_contents()`/`curl`+`eval`/`include` of external URLs, no dynamic require of attacker-controllable paths, no on-the-fly download of PHP/JS to execute). When you need to update files on the live server, use the existing `pps-html-deploy.php` pattern — admin-gated, WP-attachment-staged, nonce-verified writes to known paths under `wp-content/plugins/pps-calculators/`. Cloudways `git pull` from the `production` branch is the other approved path. Both keep the file source in source control and the execution surface bounded.
 
 ## Branch & Deploy
 
