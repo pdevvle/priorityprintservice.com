@@ -2,7 +2,7 @@
 /**
  * Plugin Name: PPS HTML Deploy
  * Description: File-system-based deploy capability for PPS calculator HTML files. Co-loaded as both an activatable plugin AND a sub-module required from pps-calculators.php. Used by the priority-print MCP.
- * Version: 1.2.0
+ * Version: 1.3.0
  * Author: Priority Print Service
  *
  * Drop calc-*.html into wp-content/plugins/pps-calculators/_pending_html/
@@ -22,9 +22,21 @@
  * endpoint serialises array payloads as JSON strings; without this
  * tolerance pps_html_deploy_pending_attachments stays string-shaped
  * and the is_array() guard would silently drop the deploy.
+ *
+ * v1.3.0: side-load pps-cart-price-floor.php (security patch shipped
+ * via MCP ahead of the next Cloudways pull that brings the in-tree
+ * fix from pps-calculators.php / production). Once production sync
+ * lands, the floor file can be removed or left as a harmless duplicate.
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
+
+// ── Side-load the cart-price-floor security patch (best-effort) ──
+$_pps_floor_path = __DIR__ . '/pps-cart-price-floor.php';
+if ( file_exists( $_pps_floor_path ) ) {
+    require_once $_pps_floor_path;
+}
+unset( $_pps_floor_path );
 
 if ( ! defined( 'PPS_HTML_DEPLOY_PENDING_DIR' ) ) {
     define( 'PPS_HTML_DEPLOY_PENDING_DIR', defined( 'PPS_CALC_DIR' ) ? PPS_CALC_DIR . '_pending_html' : __DIR__ . '/_pending_html' );
