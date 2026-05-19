@@ -141,6 +141,10 @@ function pps_default_config() {
             'two_staple_threshold'              => 5.25,
             'non_inventory_fee'                 => 35,
             'backend_base_rate'                 => 10,    // flat per-order fee for brochures
+            // Cart-price tampering defense (server-side floor on add-to-cart).
+            // Submitted pps_price must be >= max(absolute_min, regular_price * min_pct).
+            'pps_min_price_pct'                 => 0.5,
+            'pps_absolute_min_price'            => 5,
             'bw_discount_rate'                  => 0.3,
             'easy_discount_rate'                => 0.05,
             'common_discount_max'               => 1500,

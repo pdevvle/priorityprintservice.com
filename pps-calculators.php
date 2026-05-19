@@ -650,6 +650,39 @@ function pps_ajax_add_to_cart() {
         wp_send_json_error( 'Invalid metadata JSON.' );
     }
 
+    // ── Price-tampering defense (security, 2026-05-17) ──
+    // The calculator computes price client-side and posts it. A malicious
+    // shopper could POST pps_price=0.01 to check out a real order for cents.
+    // Until we port the pricing engine to PHP for an authoritative recompute,
+    // enforce a hard floor: the submitted price must be >= the smaller of
+    //   (a) the product's regular_price × pps_min_price_pct (default 50%), or
+    //   (b) the absolute floor pps_absolute_min_price (default $5).
+    // Both knobs live in wp_options['pps_calc_config']['pcf']; admin-tunable.
+    $cfg = get_option( PPS_CONFIG_OPTION, array() );
+    $pcf = isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ? $cfg['pcf'] : array();
+    $min_pct       = floatval( $pcf['pps_min_price_pct']      ?? 0.5 );
+    $absolute_min  = floatval( $pcf['pps_absolute_min_price'] ?? 5 );
+    $product       = wc_get_product( $product_id );
+    if ( $product ) {
+        $regular = floatval( $product->get_regular_price() );
+        if ( $regular > 0 ) {
+            $pct_floor    = $regular * $min_pct;
+            $allowed_min  = max( $absolute_min, $pct_floor );
+            if ( $price < $allowed_min ) {
+                if ( function_exists( 'error_log' ) ) {
+                    error_log( sprintf(
+                        '[pps] add-to-cart price floor rejected: pid=%d submitted=%.2f required>=%.2f (regular=%.2f, pct=%.2f, abs=%.2f)',
+                        $product_id, $price, $allowed_min, $regular, $min_pct, $absolute_min
+                    ) );
+                }
+                wp_send_json_error( 'Price below product floor. Refresh and try again.' );
+            }
+        } elseif ( $price < $absolute_min ) {
+            // No regular_price set — fall back to absolute floor only.
+            wp_send_json_error( 'Price below minimum. Refresh and try again.' );
+        }
+    }
+
     // Edit mode: remember old cart key — remove AFTER successful add for atomicity
     $edit_key = null;
     if ( WC()->session && WC()->cart ) {
