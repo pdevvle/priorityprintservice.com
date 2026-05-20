@@ -70,7 +70,7 @@
   .bp-mode-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.6);padding:7px 18px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;transition:all .25s;font-family:inherit}
   .bp-mode-btn:hover{background:rgba(0,126,255,.12);border-color:#007eff;color:#007eff}
   .bp-mode-btn.on{background:#007eff;border-color:#007eff;color:#000;box-shadow:0 4px 16px rgba(0,126,255,.3)}
-  .bp-nav-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit}
+  .bp-nav-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);width:36px;height:36px;min-width:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit;flex-shrink:0;box-sizing:border-box}
   .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.15);border-color:#007eff;color:#007eff}
   .bp-nav-btn:disabled{opacity:.25;cursor:not-allowed}
   /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-12 · CB-VP-MIN10</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-17 · CB-CIRCLE-FIX</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -130,8 +130,6 @@ function useIsMobile(breakpoint=700){
 // Falls back to hardcoded defaults for standalone testing
 // ═══════════════════════════════════════════════════════════════
 const _CFG = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.calc) ? window.PPS_CONFIG.calc : {};
-// Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
-const _AD = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.addons) ? window.PPS_CONFIG.addons : {};
 
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
@@ -182,9 +180,6 @@ const PCF = Object.assign({
   free_shipping_buffer:1.5,
   shippo_api_token:"",
   shippo_origin_zip:"85027",
-  // Site-wide sale (0 = off). Applied on subtotal before shipping/rush.
-  sale_discount_pct:0,
-  sale_label:"Sale",
 }, _CFG.pcf || {});
 
 // Ground transit days from facility (Phoenix AZ) — state-level fallback
@@ -370,27 +365,6 @@ const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,p
 // Perfect bound specific options
 const OUTFOLD_OPTS=_CFG.outfold_opts||[{label:"No Outfold",val:0,price:0},{label:"1 Fold-Out Page (Bifold)",val:1000,price:0.02},{label:"2 Fold-Out Pages (Bifold)",val:500,price:0.04}];
 const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.03,count:1},{label:"2 Perforation Lines",val:1000,price:0.03,count:2}];
-
-// Default position for a single perf line (inches from the bind edge).
-// Mirrors the perfect-bound calculator.
-const PERF_FROM_SPINE_INCHES = 0.375;
-
-// Clamp a perforation position into valid range, snap to 1/8", and enforce
-// a 1-inch minimum gap between adjacent perf lines (matches PB + brochure).
-function clampPerfFromSpine(inches, idx, trimW, positions) {
-  let minIn = 0.25;
-  let maxIn = (trimW || 100) - 0.25;
-  (positions || []).forEach((p, j) => {
-    if (j === idx) return;
-    if (inches < p) maxIn = Math.min(maxIn, p - 1);
-    else            minIn = Math.max(minIn, p + 1);
-  });
-  if (maxIn < minIn) maxIn = minIn;
-  const clamped = Math.max(minIn, Math.min(maxIn, inches));
-  const snapped = Math.round(clamped * 8) / 8;
-  return Math.max(minIn, Math.min(maxIn, snapped));
-}
-
 // Coupon book specific
 const BIND_STYLE_OPTS=[{label:"Open Faced: Glued/Padded",val:"openface"},{label:"Wraparound Cover with Perforation(s)",val:"wraparound"}];
 const SIDES_OPTS=[{label:"Double-Sided (Printed on Both Sides)",val:"double"},{label:"Single-Sided (Printed on One Side)",val:"single"}];
@@ -531,16 +505,6 @@ function calculate(c) {
   const sz=resolveSize(c); const imp=sz.imp;
   const sets=c.sets.filter(s=>s.qty>0&&s.pages>0);
   if(!sets.length||sz.errors.length>0) return {error:sz.errors,sz};
-
-  // Add-on availability guard
-  const _adErrs=[];
-  if(_AD.vivid===false && c.vividPrint===true) _adErrs.push("Vivid Print is currently unavailable. Please turn it off to continue.");
-  if(_AD.coating===false && Number(c.coating)>0) _adErrs.push("UV Coating is currently unavailable. Please change Coating to None to continue.");
-  if(_AD.bundling===false && Number(c.bundling)>0) _adErrs.push("Bundling is currently unavailable. Please change Bundling to None to continue.");
-  if(_AD.rc===false && Number(c.roundCorner)>0) _adErrs.push("Round Cornering is currently unavailable. Please change Round Corner to None to continue.");
-  if(_AD.perforation===false && Number(c.perforation)>0) _adErrs.push("Perforation is currently unavailable. Please change Perforation to None to continue.");
-  if(_AD.outfold===false && Number(c.outfold)>0) _adErrs.push("Outfold is currently unavailable. Please change Outfold to None to continue.");
-  if(_adErrs.length) return {error:_adErrs,sz};
 
   const N=sets.length;
   const coat=COATINGS.find(x=>x.val===c.coating)||COATINGS[0];
@@ -701,10 +665,6 @@ function calculate(c) {
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
   P.discSize=imp<4?subBeforeSize*(-PCF.couponbook_size_discount):0;
 
-  // Sale discount applies last, on the post-discount subtotal. Excludes shipping/rush.
-  const subBeforeSale=Object.values(P).reduce((s,v)=>s+v,0);
-  P.discSale=(PCF.sale_discount_pct>0)?-Math.round(subBeforeSale*PCF.sale_discount_pct*100)/100:0;
-
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
   // Turnaround
@@ -806,7 +766,6 @@ function calculate(c) {
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
-    {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 
   // CMYK-derived group colors
@@ -910,10 +869,7 @@ function calculate(c) {
     minDaysConfig:PCF.minimum_turnaround_days,
   };
 
-  const saleActive=P.discSale<-0.005;
-  const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
-  const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
-  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,q100,coatOK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
+  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,q100,coatOK,hcOK,sz,debug,ti,
     shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,needByPast,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
@@ -1147,7 +1103,7 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
 function Panel({result,compact}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
-  const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
+  const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh}=result;
   const hasRush=sh&&sh.rushCost>0;
   const availRange=sh?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):String(days);
 
@@ -1157,12 +1113,10 @@ function Panel({result,compact}){
     return(
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:hasRush?CK.rush:CK.cyan,borderRadius:6,padding:"8px 14px",color:hasRush?"#333":"#fff"}}>
         <div>
-          <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
-            {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
+          <div style={{lineHeight:1,display:"flex",alignItems:"baseline"}}>
             <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
             <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
           </div>
-          {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
           {hasRush&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
         </div>
         <div style={{display:"flex",gap:12}}>
@@ -1183,11 +1137,9 @@ function Panel({result,compact}){
     <div style={{...ST.pnl, pointerEvents: "none"}}>
       <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:`linear-gradient(135deg, ${CK.cyan} 0%, ${CK.cyan}dd 100%)`,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
         <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",opacity:.8,marginBottom:4}}>{hasRush?"Rush Total":"Estimated Total"}</div>
-        <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
-          {saleActive&&<span style={{fontSize:18,opacity:.55,textDecoration:"line-through",fontWeight:700,letterSpacing:"-.5px"}}>${totalWithoutSale.toFixed(2)}</span>}
+        <div style={{lineHeight:1,display:"flex",alignItems:"baseline"}}>
           <span style={{fontSize:38,fontWeight:800,letterSpacing:"-1.5px"}}>${dD}</span>
-          <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
-          {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
+          <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:1}}>.{cD}</span>
         </div>
         {hasRush&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
       </div>
@@ -1930,29 +1882,6 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // Per-page transform helpers
   const DEFAULT_TX = { fitMode: "crop", artScale: 100, rotateSteps: 0 };
   const getTx = (idx) => pageTransforms[idx] || DEFAULT_TX;
-  const [txHistory, setTxHistory] = useState([]);
-  const pushTxHistory = (idx) => {
-    const snap = { ...getTx(idx) };
-    setTxHistory(h => {
-      const next = [...h, { idx, prev: snap }];
-      if (next.length > 30) next.shift();
-      return next;
-    });
-  };
-  const undoTx = () => {
-    setTxHistory(h => {
-      if (!h.length) return h;
-      const last = h[h.length - 1];
-      setPageTransforms(p => ({ ...p, [last.idx]: last.prev }));
-      if (last.idx !== proofIdx && last.idx >= 0) setProofIdx(last.idx);
-      return h.slice(0, -1);
-    });
-  };
-  const [vpScale, setVpScale] = useState(1);
-  const [vpX, setVpX] = useState(0);
-  const [vpY, setVpY] = useState(0);
-  const [vpDragging, setVpDragging] = useState(false);
-  const vpDragStart = useRef(null);
   const setTx = (idx, patch) => {
     setPageTransforms(p => {
       const cur = p[idx] || DEFAULT_TX;
@@ -1968,43 +1897,9 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const fitMode = currentTx.fitMode;
   const artScale = currentTx.artScale;
   const rotateSteps = currentTx.rotateSteps;
-  const setFitMode = (v) => { pushTxHistory(proofIdx); setTx(proofIdx, { fitMode: v }); };
-  const setArtScale = (v) => { pushTxHistory(proofIdx); setTx(proofIdx, { artScale: v }); };
-  const setRotateSteps = (v) => { pushTxHistory(proofIdx); setTx(proofIdx, { rotateSteps: v }); };
-
-  useEffect(() => { setVpScale(1); setVpX(0); setVpY(0); }, [proofIdx, activeModal]);
-  const VP_MIN = 0.10, VP_FIT = 1, VP_MAX = 5, VP_STEP = 0.25;
-  const vpZoomBy = (delta) => setVpScale(s => {
-    const next = Math.max(VP_MIN, Math.min(VP_MAX, Math.round((s + delta) * 100) / 100));
-    if (next <= VP_FIT) { setVpX(0); setVpY(0); }
-    return next;
-  });
-  const vpReset = () => { setVpScale(VP_FIT); setVpX(0); setVpY(0); };
-  const vpOnWheel = (e) => {
-    e.preventDefault();
-    const r = e.currentTarget.getBoundingClientRect();
-    const cx = (e.clientX - r.left) - r.width / 2;
-    const cy = (e.clientY - r.top) - r.height / 2;
-    setVpScale(prev => {
-      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-      const next = Math.max(VP_MIN, Math.min(VP_MAX, prev * factor));
-      const ratio = next / prev;
-      setVpX(x => next <= VP_FIT ? 0 : (x - cx) * ratio + cx);
-      setVpY(y => next <= VP_FIT ? 0 : (y - cy) * ratio + cy);
-      return next;
-    });
-  };
-  const vpOnMouseDown = (e) => {
-    if (vpScale <= VP_FIT || showMagnifier) return;
-    vpDragStart.current = { x: e.clientX, y: e.clientY, vpX, vpY };
-    setVpDragging(true);
-  };
-  const vpOnMouseMove = (e) => {
-    if (!vpDragging || !vpDragStart.current) return;
-    setVpX(vpDragStart.current.vpX + (e.clientX - vpDragStart.current.x));
-    setVpY(vpDragStart.current.vpY + (e.clientY - vpDragStart.current.y));
-  };
-  const vpOnMouseUp = () => { setVpDragging(false); vpDragStart.current = null; };
+  const setFitMode = (v) => setTx(proofIdx, { fitMode: v });
+  const setArtScale = (v) => setTx(proofIdx, { artScale: v });
+  const setRotateSteps = (v) => setTx(proofIdx, { rotateSteps: v });
 
   // Clear approval when ANY page's transform changes — forces re-approval
   const prevTxHash = useRef(txHash);
@@ -2088,109 +1983,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // 1. Print-ready PDF (300 DPI, transforms baked in) — or raw file if no transforms needed
   // 2. Screen preview images (what the customer saw, ~150 DPI JPEGs)
   // 3. Manipulation manifest (text describing all transforms)
-  // 4. Standalone preview HTML — self-contained 3D book mockup customer can email/save
-  // 5. Raw file is already in rawFileRef
-  // Returns { printReadyBlob, previewBlobs[], manifestBlob, previewHtmlBlob, skippedGeneration }
-
-  // Standalone HTML 3D book preview — saddle-stitched coupon book shape.
-  function buildPreviewHtml() {
-    const pgs = (trimmedPages && trimmedPages.length === displayPages.length) ? trimmedPages : displayPages;
-    if (!pgs || pgs.length < 2) return null;
-    const totalPgs = pgs.length;
-    const pageSrcs = pgs.map(p => p.dataUrl || "");
-    const ratio = `${dims.w}/${dims.h}`;
-    const sizeStr = `${dims.w}″ × ${dims.h}″`;
-    const generated = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
-    const bookH = 440;
-    const bookW = Math.round(bookH * (dims.w / dims.h));
-    const halfDepth = Math.max(2, Math.min(8, totalPgs * 0.15));
-    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print Preview · Coupon Book · ${sizeStr}</title><style>
-*{box-sizing:border-box}
-body{margin:0;padding:36px 18px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#f0eee9,#e6e2d8);color:#2b2b2b;min-height:100vh;display:flex;flex-direction:column;align-items:center}
-header{text-align:center;margin-bottom:28px;max-width:720px}
-.eyebrow{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#ec008c;margin-bottom:8px;display:inline-flex;gap:6px;align-items:center}
-.eyebrow .dots{display:inline-flex;gap:3px}.eyebrow .dot{width:5px;height:5px;border-radius:50%}
-.eyebrow .c{background:#00aeef}.eyebrow .m{background:#ec008c}.eyebrow .y{background:#fff200}.eyebrow .k{background:#231f20}
-h1{font-weight:800;letter-spacing:-0.02em;line-height:1.05;font-size:36px;margin:0;text-transform:uppercase}
-h1 small{font-weight:700;font-size:18px;color:#888;display:block;margin-top:6px;letter-spacing:.04em}
-.meta{margin-top:14px;color:#666;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
-.stage{perspective:1500px;width:100%;max-width:760px;height:520px;display:flex;align-items:center;justify-content:center;margin:0 auto}
-.stage.flat{perspective:none}
-.book{position:relative;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.4,0,.2,1);cursor:grab;width:${bookW}px;height:${bookH}px;will-change:transform}
-.book:active{cursor:grabbing}
-.face{position:absolute;left:0;top:0;width:${bookW}px;height:${bookH}px;background-position:center;background-size:cover;background-color:#f8f5f0;backface-visibility:hidden;box-shadow:0 8px 22px rgba(0,0,0,.18)}
-.face.front{transform:translateZ(${halfDepth}px);border-radius:1px 4px 4px 1px}
-.face.back{transform:rotateY(180deg) translateZ(${halfDepth}px);border-radius:4px 1px 1px 4px}
-.face.top{height:${halfDepth*2}px;width:${bookW}px;transform:rotateX(90deg) translateY(-${halfDepth}px);transform-origin:top center;background:repeating-linear-gradient(0deg,#f5f0e8 0,#e8e0d4 1px,#f0ebe3 2px);box-shadow:none}
-.face.bottom{height:${halfDepth*2}px;width:${bookW}px;top:${bookH}px;transform:rotateX(-90deg) translateY(-${halfDepth*2}px);transform-origin:top center;background:repeating-linear-gradient(0deg,#f5f0e8 0,#e8e0d4 1px,#f0ebe3 2px);box-shadow:none}
-.face.fore{width:${halfDepth*2}px;left:${bookW}px;transform:rotateY(90deg) translateX(-${halfDepth}px);transform-origin:left center;background:repeating-linear-gradient(0deg,#f5f0e8 0,#e8e0d4 1px,#f0ebe3 2px);box-shadow:none}
-.shadow{position:absolute;width:80%;height:18px;left:10%;bottom:-22px;background:radial-gradient(ellipse at center,rgba(0,0,0,.35),transparent 70%);filter:blur(6px);pointer-events:none}
-.flat-page{width:100%;max-width:520px;background:#fff;box-shadow:0 14px 36px rgba(0,0,0,.18);aspect-ratio:${ratio};background-position:center;background-size:cover;border-radius:2px}
-.controls{margin-top:28px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
-.controls .group{display:flex;border-radius:6px;overflow:hidden;border:1px solid #d4cdbe;background:#fff}
-.controls .group button{padding:8px 14px;font-size:12px;font-weight:600;border:none;background:transparent;color:#555;cursor:pointer;font-family:inherit;border-right:1px solid #e5e0d2;transition:all .15s}
-.controls .group button:last-child{border-right:none}
-.controls .group button.on{background:#ec008c;color:#fff}
-.controls .group button:hover:not(.on):not(:disabled){background:#fbf6ee}
-.controls .group button:disabled{opacity:.3;cursor:not-allowed}
-.pageInd{font-size:13px;font-weight:600;color:#666;min-width:120px;text-align:center;letter-spacing:.04em}
-footer{margin-top:auto;padding-top:36px;color:#999;font-size:10px;letter-spacing:.08em;text-transform:uppercase;text-align:center}
-footer a{color:#888;text-decoration:none}
-footer a:hover{color:#ec008c}
-@media(max-width:540px){h1{font-size:24px}h1 small{font-size:14px}.stage{height:380px}}
-</style></head><body>
-<header>
-<div class="eyebrow"><span class="dots"><span class="dot c"></span><span class="dot m"></span><span class="dot y"></span><span class="dot k"></span></span>Print Preview · Coupon Book</div>
-<h1>${dims.w}″ × ${dims.h}″<small>${pageCount} pages · saddle stitched</small></h1>
-<div class="meta">Generated ${generated}</div>
-</header>
-<div class="stage" id="stage3d">
-  <div class="book" id="book" style="transform:rotateX(-12deg) rotateY(-22deg)">
-    <div class="face front" style="background-image:url('${pageSrcs[0]}')"></div>
-    <div class="face back" style="background-image:url('${pageSrcs[totalPgs-1]}')"></div>
-    <div class="face top"></div>
-    <div class="face bottom"></div>
-    <div class="face fore"></div>
-    <div class="shadow"></div>
-  </div>
-</div>
-<div class="stage flat" id="stageFlat" style="display:none"><div class="flat-page" id="flatPage"></div></div>
-<div class="controls">
-  <div class="group" id="modeGroup">
-    <button class="on" data-mode="closed">3D Cover</button>
-    <button data-mode="page">Pages</button>
-  </div>
-  <button id="prev" style="padding:8px 14px;font-size:12px;font-weight:600;border:1px solid #d4cdbe;background:#fff;color:#555;cursor:pointer;font-family:inherit;border-radius:6px" disabled>← Prev</button>
-  <span class="pageInd" id="pageInd">Cover</span>
-  <button id="next" style="padding:8px 14px;font-size:12px;font-weight:600;border:1px solid #d4cdbe;background:#fff;color:#555;cursor:pointer;font-family:inherit;border-radius:6px" disabled>Next →</button>
-</div>
-<footer>Priority Print Service · <a href="https://priorityprintservice.com">priorityprintservice.com</a> · Drag the book to rotate</footer>
-<script>
-const pages=${JSON.stringify(pageSrcs)};
-const N=pages.length;
-let mode='closed',cur=0;
-const stage3d=document.getElementById('stage3d'),stageFlat=document.getElementById('stageFlat'),flat=document.getElementById('flatPage'),ind=document.getElementById('pageInd'),prev=document.getElementById('prev'),next=document.getElementById('next'),book=document.getElementById('book'),modeGroup=document.getElementById('modeGroup');
-function update(){
-  if(mode==='closed'){stage3d.style.display='flex';stageFlat.style.display='none';ind.textContent='Cover';prev.disabled=true;next.disabled=true;}
-  else{stage3d.style.display='none';stageFlat.style.display='flex';flat.style.backgroundImage="url('"+pages[cur]+"')";ind.textContent='Page '+(cur+1)+' / '+N;prev.disabled=cur===0;next.disabled=cur===N-1;}
-  modeGroup.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.mode===mode));
-}
-modeGroup.addEventListener('click',e=>{if(e.target.dataset.mode){mode=e.target.dataset.mode;update();}});
-prev.onclick=()=>{if(cur>0){cur--;update();}};
-next.onclick=()=>{if(cur<N-1){cur++;update();}};
-document.addEventListener('keydown',e=>{if(mode==='page'){if(e.key==='ArrowLeft')prev.click();else if(e.key==='ArrowRight')next.click();}});
-let drag=null,rot={x:-12,y:-22};
-book.addEventListener('mousedown',e=>{drag={sx:e.clientX,sy:e.clientY,bx:rot.x,by:rot.y};book.style.transition='none';e.preventDefault();});
-window.addEventListener('mousemove',e=>{if(!drag)return;rot.y=drag.by+(e.clientX-drag.sx)*0.5;rot.x=Math.max(-70,Math.min(70,drag.bx-(e.clientY-drag.sy)*0.5));book.style.transform='rotateX('+rot.x+'deg) rotateY('+rot.y+'deg)';});
-window.addEventListener('mouseup',()=>{if(drag){book.style.transition='';drag=null;}});
-book.addEventListener('touchstart',e=>{const t=e.touches[0];drag={sx:t.clientX,sy:t.clientY,bx:rot.x,by:rot.y};book.style.transition='none';},{passive:true});
-window.addEventListener('touchmove',e=>{if(!drag||!e.touches[0])return;const t=e.touches[0];rot.y=drag.by+(t.clientX-drag.sx)*0.5;rot.x=Math.max(-70,Math.min(70,drag.bx-(t.clientY-drag.sy)*0.5));book.style.transform='rotateX('+rot.x+'deg) rotateY('+rot.y+'deg)';e.preventDefault();},{passive:false});
-window.addEventListener('touchend',()=>{if(drag){book.style.transition='';drag=null;}});
-update();
-<\/script></body></html>`;
-    return new Blob([html], { type: "text/html" });
-  }
-
+  // 4. Raw file is already in rawFileRef
+  // Returns { printReadyBlob, previewBlobs[], manifestBlob, skippedGeneration }
   async function generateApprovalPackage() {
     const BLEED = 0.125;
     const SAFETY = 0.125;
@@ -2481,8 +2275,7 @@ update();
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
-    const previewHtmlBlob = buildPreviewHtml();
-    return { printReadyBlob, previewBlobs, manifestBlob, previewHtmlBlob, skippedGeneration: noTransforms };
+    return { printReadyBlob, previewBlobs, manifestBlob, skippedGeneration: noTransforms };
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -2894,7 +2687,6 @@ update();
       } else {
         setPageTransforms({});
       }
-      setTxHistory([]);
       if (onCoverArt && extracted.pages.length >= 1) onCoverArt(extracted.pages[0].dataUrl);
       if (onPagesDetected && extracted.pages.length >= 2) {
         // Perfect bound: round up to next even page count, min 20
@@ -2925,7 +2717,7 @@ update();
   function handleClear() {
     setRawPages([]); setFileName(""); setUploadPageCount(0);
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
-    setRotatedCache({ key: "", pages: [] }); setPageTransforms({}); setTxHistory([]);
+    setRotatedCache({ key: "", pages: [] }); setPageTransforms({});
     setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setApprovalPkg(null);
     pdfDocRef.current = null;
     slotFilesRef.current = {};
@@ -3072,10 +2864,9 @@ update();
   // Fit toggle (light theme for inline)
   const FitToggle = ({ dark }) => (
     <div style={{ display: "flex", alignItems:"center", gap: 6 }}>
-      <span style={{ fontSize:10, fontWeight:700, color:"rgba(255,255,255,.55)", letterSpacing:".08em", textTransform:"uppercase", marginRight:2 }}>Art:</span>
       <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
-        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Force Fill" }, { v: "scale", l: "Scale" }].map(o => (
-          <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} title={o.v === "stretch" ? "Stretch art to fill the entire bleed area — distorts aspect ratio" : undefined} style={{
+        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Stretch" }, { v: "scale", l: "Scale" }].map(o => (
+          <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} style={{
             padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
             background: fitMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
             color: fitMode === o.v ? "#000" : "rgba(255,255,255,.5)",
@@ -3086,11 +2877,6 @@ update();
           background: rotateSteps > 0 ? CK.cyan : "rgba(255,255,255,.06)",
           color: rotateSteps > 0 ? "#000" : "rgba(255,255,255,.5)",
         }}>Rotate 90°{rotateSteps > 0 ? ` (${rotateSteps * 90}°)` : ""}</button>
-        <button type="button" onClick={undoTx} disabled={txHistory.length === 0} title={txHistory.length ? `Undo last art change (${txHistory.length} step${txHistory.length === 1 ? "" : "s"} available)` : "No changes to undo"} style={{
-          padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor: txHistory.length ? "pointer" : "default", fontFamily:"inherit",
-          background:"rgba(255,255,255,.06)",
-          color: txHistory.length ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.2)",
-        }}>↶ Undo</button>
       </div>
       {fitMode === "scale" && (
         <div style={{ display:"flex", alignItems:"center", gap:3 }}>
@@ -3106,6 +2892,13 @@ update();
           </div>
           <span style={{ fontSize:10, fontWeight:600, color:"rgba(255,255,255,.4)", minWidth:32, textAlign:"center" }}>{artScale}%</span>
         </div>
+      )}
+      {fitMode === "stretch" && (
+        <button type="button" onClick={() => setFitMode("crop")} style={{
+          padding:"5px 12px", fontSize:10, fontWeight:700, border:"1px solid rgba(239,68,68,.4)",
+          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(239,68,68,.12)",
+          color:"#f87171", letterSpacing:".03em",
+        }}>Reset Stretch</button>
       )}
     </div>
   );
@@ -3309,7 +3102,7 @@ update();
               </div>
               {isUserPage && (
                 <button type="button" onClick={e => { e.stopPropagation(); handleSlotRemove(i); }}
-                  style={{ position:"absolute", top:-4, right:-4, width:16, height:16, borderRadius:"50%", border:"none", background:"#e74c3c", color:"#fff", fontSize:9, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1, zIndex:2 }}>✕</button>
+                  style={{ position:"absolute", top:-4, right:-4, width:16, height:16, minWidth:16, minHeight:16, borderRadius:"50%", border:"none", background:"#e74c3c", color:"#fff", fontSize:9, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1, zIndex:2, flexShrink:0, boxSizing:"border-box", padding:0 }}>✕</button>
               )}
               <span style={{ fontSize:8, color: isEmpty ? CC.light : CC.mid, marginTop:2, display:"block", lineHeight:1 }}>{p.label}</span>
             </div>
@@ -3359,7 +3152,6 @@ update();
                             pkg.previewBlobs.forEach((b, i) => {
                               if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
                             });
-                            if (pkg.previewHtmlBlob) files.push(new File([pkg.previewHtmlBlob], baseName + "_preview.html", { type: "text/html" }));
                             files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
                             onArtwork({ type: "files", list: files });
                           }
@@ -3426,7 +3218,6 @@ update();
                     approvalPkg.previewBlobs.forEach((b, i) => {
                       if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
                     });
-                    if (approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
                     if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
                     for (let i = 0; i < files.length; i++) {
                       dlFile(files[i][0], files[i][1]);
@@ -3460,12 +3251,6 @@ update();
                             padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
                           }}>Previews ({previewCount})</button>
-                        )}
-                        {approvalPkg.previewHtmlBlob && (
-                          <button type="button" onClick={() => dlFile(approvalPkg.previewHtmlBlob, baseName + "_preview.html")} style={{
-                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(99,102,241,.4)",
-                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(99,102,241,.12)", color:"#a5b4fc",
-                          }}>Preview HTML</button>
                         )}
                         <button type="button" onClick={() => dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt")} style={{
                           padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
@@ -3542,13 +3327,6 @@ update();
                         background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
                         color: showGuides ? "#38a169" : "rgba(255,255,255,.4)",
                       }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
-                      {/* Viewport zoom controls */}
-                      <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.04)" }}>
-                        <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>−</button>
-                        <span style={{ fontSize:10.5, fontWeight:600, color:"rgba(255,255,255,.65)", minWidth:38, textAlign:"center", letterSpacing:".02em" }}>{Math.round(vpScale*100)}%</span>
-                        <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>+</button>
-                        <button type="button" onClick={vpReset} disabled={vpScale===VP_FIT && vpX===0 && vpY===0} title="Fit page" style={{padding:"4px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid rgba(255,255,255,.12)",marginLeft:2,borderRadius:0,cursor:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"rgba(255,255,255,.2)":"rgba(255,255,255,.55)",fontFamily:"inherit"}}>⛶</button>
-                      </div>
                       <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
                         background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
@@ -3583,15 +3361,7 @@ update();
                     </div>
                     {/* Proof image with guide overlays — container sized to include bleed area */}
                     <div style={{ maxWidth:520, margin:"0 auto" }}>
-                    <div style={{ overflow:"hidden", position:"relative", borderRadius:6, cursor: vpScale>VP_FIT ? (vpDragging?"grabbing":"grab") : "default" }}
-                      onWheel={vpOnWheel}
-                      onMouseDown={vpOnMouseDown}
-                      onMouseMove={vpOnMouseMove}
-                      onMouseUp={vpOnMouseUp}
-                      onMouseLeave={vpOnMouseUp}
-                    >
-                    <div style={{ transform:`translate(${vpX}px, ${vpY}px) scale(${vpScale})`, transformOrigin:"center center", transition: vpDragging ? "none" : "transform .12s", willChange:"transform" }}>
-                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "inherit" }}
+                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:6, overflow:"hidden", cursor: showMagnifier ? "none" : "default" }}
                         onMouseMove={showMagnifier ? (e) => {
                           const r = e.currentTarget.getBoundingClientRect();
                           setMagPos({ x: e.clientX - r.left, y: e.clientY - r.top, pctX: (e.clientX - r.left) / r.width * 100, pctY: (e.clientY - r.top) / r.height * 100, cw: r.width, ch: r.height });
@@ -3702,8 +3472,6 @@ update();
                           );
                         })()}
                       </div>
-                    </div>
-                    </div>
                     </div>
                     {/* Legend */}
                     {showGuides && (
@@ -4088,14 +3856,6 @@ function App(){
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
   const[shareCopied,setShareCopied]=useState(false);
-  // Question form modal state
-  const[qOpen,setQOpen]=useState(false);
-  const[qName,setQName]=useState("");
-  const[qEmail,setQEmail]=useState("");
-  const[qPhone,setQPhone]=useState("");
-  const[qMessage,setQMessage]=useState("");
-  const[qStatus,setQStatus]=useState("idle");
-  const[qErrorMsg,setQErrorMsg]=useState("");
   // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
   const proofDebug = useMemo(() => {
     try {
@@ -4130,11 +3890,6 @@ function App(){
       if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
       if (p.has("bundling") && _float(p.get("bundling")) != null) base.bundling = _float(p.get("bundling"));
       if (p.has("corner") && _float(p.get("corner")) != null) base.roundCorner = _float(p.get("corner"));
-      if (p.has("perf") && _float(p.get("perf")) != null) base.perforation = _float(p.get("perf"));
-      if (p.has("perfpos")) {
-        const arr = p.get("perfpos").split(",").map(s => parseFloat(s)).filter(n => !isNaN(n) && n > 0);
-        if (arr.length) base.perfPositions = arr.slice(0, 2);
-      }
       if (p.has("state")) base.shipState = p.get("state");
     } catch(e) {}
     return base;
@@ -4165,10 +3920,6 @@ function App(){
   const[roundCorner,setRoundCorner]=useState(Number(D.roundCorner)||0);
   const[outfold,setOutfold]=useState(Number(D.outfold)||0);
   const[perforation,setPerforation]=useState(Number(D.perforation)||0);
-  const[perfPositions,setPerfPositions]=useState(()=>{
-    if (Array.isArray(D.perfPositions) && D.perfPositions.length) return D.perfPositions.slice(0, 2);
-    return [PERF_FROM_SPINE_INCHES];
-  });
   const[artwork,setArtwork]=useState(Number(D.artwork)||0.01);
   const[artEditPages,setArtEditPages]=useState(Number(D.artEditPages)||0);
   const[bleed,setBleed]=useState(Number(D.bleed)||0);
@@ -4308,35 +4059,6 @@ function App(){
   const handleSizeLabel=(v)=>{setSizeLabel(v);if(v!=="Custom Size")lastPreset.current=v;};
   const csOK=sets.every(s=>s.pages<=24);
 
-  // Trim width for clamping perfPositions. For openface (pad) bind style the
-  // perf line runs across the short edge — we still clamp by the dimension
-  // that the user thinks of as "from binding to open edge."
-  const trimW = useMemo(() => {
-    if (sizeLabel === "Custom Size") {
-      const lo = Math.max(customLong || 0, customShort || 0);
-      const sh = Math.min(customLong || 0, customShort || 0);
-      return bindDir === "long" ? lo : sh;
-    }
-    const m = (sizeLabel || "").match(/([\d.]+)×([\d.]+)/);
-    return m ? parseFloat(m[1]) : 5.5;
-  }, [sizeLabel, customLong, customShort, bindDir]);
-
-  // Match perfPositions length to the current count and clamp every entry.
-  const perfCount = useMemo(() => (PERF_OPTS.find(o => o.val === perforation)?.count) || 0, [perforation]);
-  useEffect(() => {
-    if (perfCount === 0) return;
-    setPerfPositions(prev => {
-      const out = prev.slice(0, perfCount);
-      while (out.length < perfCount) {
-        const seed = (out.length ? out[out.length - 1] + 1.5 : PERF_FROM_SPINE_INCHES);
-        out.push(seed);
-      }
-      const fixed = out.map((p, i) => clampPerfFromSpine(p, i, trimW, out));
-      const same = fixed.length === prev.length && fixed.every((v, i) => v === prev[i]);
-      return same ? prev : fixed;
-    });
-  }, [perfCount, trimW]);
-
   const shipZip=shipAddr.zip||"";
   const effectiveCoverMode = bindStyle==="openface" ? "same" : coverMode;
   const result=useMemo(()=>calculate({
@@ -4472,10 +4194,6 @@ function App(){
     if (coating > 0) p.set("coating", coating);
     if (bundling > 0) p.set("bundling", bundling);
     if (roundCorner > 0) p.set("corner", roundCorner);
-    if (perforation > 0) p.set("perf", perforation);
-    if (perforation > 0 && perfPositions && perfPositions.length) {
-      p.set("perfpos", perfPositions.slice(0, perfCount).join(","));
-    }
     if (shipState !== "AZ") p.set("state", shipState);
     if (sets[0].qty !== 100) p.set("qty", sets[0].qty);
     if (sets[0].pages !== 8) p.set("pages", sets[0].pages);
@@ -4493,54 +4211,6 @@ function App(){
       // Fallback for non-HTTPS or denied clipboard
       prompt("Copy this link:", url);
     });
-  };
-
-  const handleQuestionSubmit = async (e) => {
-    e.preventDefault();
-    if (qStatus === "sending" || qStatus === "sent") return;
-    if (!qName.trim() || !qEmail.trim() || !qMessage.trim()) {
-      setQStatus("error"); setQErrorMsg("Please fill in name, email, and your question."); return;
-    }
-    setQStatus("sending"); setQErrorMsg("");
-    const PPS = window.PPS_CONFIG || {};
-    const fd = new FormData();
-    fd.append("action", "pps_quote_question");
-    fd.append("nonce", PPS.cartNonce || "");
-    fd.append("name", qName); fd.append("email", qEmail); fd.append("phone", qPhone);
-    fd.append("message", qMessage); fd.append("hp", "");
-    let summary = "";
-    try {
-      const cfgForSummary = {
-        sets, sizeLabel, customLong, customShort, bindDir,
-        insidePaper, insidePaperType, coverMode, coverPaper, coverPaperType,
-        vividPrint, coating, bundling, roundCorner, outfold, perforation, magnetBacker,
-        artwork, artEditPages, bleed, proof, needByDate, shipState,
-      };
-      if (result && !result.error?.length) summary = buildSummary(cfgForSummary, result);
-    } catch (_) {}
-    fd.append("summary", summary);
-    fd.append("total", String(result?.total || 0));
-    fd.append("perUnit", String(result?.perUnit || 0));
-    fd.append("qty", String(result?.tQ || 0));
-    fd.append("days", String(result?.days || 0));
-    fd.append("calcType", "coupon");
-    fd.append("calcLabel", "Coupon Book");
-    fd.append("presetSlug", PPS.presetSlug || "");
-    fd.append("reorderUrl", buildShareUrl());
-    try {
-      const resp = await fetch(PPS.ajaxUrl || "/wp-admin/admin-ajax.php", { method: "POST", body: fd, credentials: "same-origin" });
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      const j = await resp.json();
-      if (j && j.success) { setQStatus("sent"); }
-      else { setQStatus("error"); setQErrorMsg((j && j.data && j.data.message) || "Submission failed. Please try again."); }
-    } catch (err) {
-      setQStatus("error"); setQErrorMsg("Network error. Please try again.");
-    }
-  };
-
-  const resetQuestionForm = () => {
-    setQOpen(false);
-    setTimeout(() => { setQName(""); setQEmail(""); setQPhone(""); setQMessage(""); setQStatus("idle"); setQErrorMsg(""); }, 200);
   };
 
   const handleAddToOrder = async () => {
@@ -4692,15 +4362,15 @@ function App(){
 
           {/* SECTION 3: Finishing & Addons */}
           <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")} badge={r.debug?.turnaround?.addonDays>0?`+${r.debug.turnaround.addonDays}d turnaround`:null}>
-            {(_AD.vivid!==false || vividPrint===true) && <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
-            {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
+            <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>
+            <div style={ST.hr}/>
             <div style={r2}>
-              {(_AD.coating!==false || coating>0) && <Sel label="Cover Coating" badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
-              {(_AD.bundling!==false || bundling>0) && (r.q100!==false
+              <Sel label="Cover Coating" badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+              {r.q100!==false
                 ? <Sel label="Bundling" badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-                : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>)}
+                : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>}
             </div>
-            {(_AD.rc!==false || roundCorner>0) && <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <Sel label="Round Cornering" badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
               </div>
@@ -4715,37 +4385,12 @@ function App(){
                   </div>
                 );
               })()}
-            </div>}
+            </div>
 
             {/* Coupon book specific addons */}
-            {(_AD.perforation!==false || perforation>0) && <Sel label={bindStyle==="openface"?"Coupon Perforation (tear-out)":"Cover Perforation"} badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
-            {perfCount > 0 && (
-              <div style={{ marginTop:8, padding:"10px 12px", background:"rgba(250,204,21,.08)", border:"1px solid rgba(250,204,21,.28)", borderRadius:6 }}>
-                <div style={{ fontSize:10.5, fontWeight:700, color:"#b45309", letterSpacing:".06em", textTransform:"uppercase", marginBottom:8 }}>Perforation Position</div>
-                <div style={r2}>
-                  {perfPositions.map((d, i) => (
-                    <TxtNum key={i}
-                      label={`Perf ${i + 1} — ″ from bind`}
-                      value={d}
-                      min={0.25}
-                      max={Math.max(0.25, trimW - 0.25)}
-                      step={0.125}
-                      onChange={v => {
-                        setPerfPositions(prev => {
-                          const next = prev.slice();
-                          next[i] = clampPerfFromSpine(parseFloat(v) || 0, i, trimW, next);
-                          return next;
-                        });
-                      }}/>
-                  ))}
-                </div>
-                <div style={{ fontSize:10.5, color:CC.light, marginTop:6, lineHeight:1.5 }}>
-                  Inches from the bind edge. 1″ minimum gap between lines when 2 are selected.
-                </div>
-              </div>
-            )}
+            <Sel label={bindStyle==="openface"?"Coupon Perforation (tear-out)":"Cover Perforation"} badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
             <Sel label="Magnetic Backer" badge={<TurnBadge days={r.ti?.magnetBacker}/>} value={magnetBacker} onChange={v=>setMagnetBacker(Number(v))}>{MAGNET_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-            {(_AD.outfold!==false || outfold>0) && <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+            <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
@@ -5041,11 +4686,9 @@ function App(){
           </table>
         </div>}
         </div>
-        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18,display:"flex",flexDirection:"column",gap:10}}>
-          <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
-            <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
-            <Panel result={result}/>
-          </div>
+        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18,display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
+          <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+          <Panel result={result}/>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
@@ -5154,18 +4797,8 @@ function App(){
               </div>
             </div>
           )}
-          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px solid ${CK.cyan}55`,background:"#fff",color:CK.cyan,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
-            Have a question about this quote? →
-          </button>
         </div>}
       </div>
-
-      {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
-      {mob&&!qOpen&&(
-        <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{position:"fixed",bottom:"calc(70px + env(safe-area-inset-bottom))",right:12,zIndex:39,padding:"7px 13px",borderRadius:16,border:`1px solid ${CK.cyan}`,background:"#fff",color:CK.cyan,fontSize:11.5,fontWeight:700,boxShadow:"0 2px 8px rgba(0,0,0,.12)",cursor:"pointer",fontFamily:"inherit"}}>
-          Have a question? →
-        </button>
-      )}
 
       {/* Fixed bottom bar — mobile */}
       {mob&&<>
@@ -5212,56 +4845,6 @@ function App(){
         </div>
       </div>
       </>}
-
-      {/* Question modal — overlay rendered at App root */}
-      {qOpen && (
-        <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"min(8vh,60px) 16px 16px",overflowY:"auto"}} onClick={resetQuestionForm}>
-          <div style={{background:"#fff",borderRadius:8,maxWidth:520,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
-            <div style={{padding:"16px 20px",borderBottom:`1px solid ${CC.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{fontSize:15,fontWeight:700,color:CC.dark}}>Have a question about this quote?</div>
-              <button type="button" onClick={resetQuestionForm} style={{background:"none",border:"none",fontSize:22,lineHeight:1,color:CC.light,cursor:"pointer",padding:0,marginLeft:12}} aria-label="Close">×</button>
-            </div>
-            {qStatus === "sent" ? (
-              <div style={{padding:"24px 20px",textAlign:"center"}}>
-                <div style={{fontSize:34,marginBottom:8}}>✓</div>
-                <div style={{fontSize:14,fontWeight:600,color:CC.dark,marginBottom:6}}>Question sent!</div>
-                <div style={{fontSize:13,color:CC.mid,lineHeight:1.5,maxWidth:380,margin:"0 auto"}}>We&rsquo;ve emailed a copy of your quote to <strong>{qEmail}</strong>. A team member will reply within 1 business day.</div>
-                <button type="button" onClick={resetQuestionForm} style={{marginTop:18,padding:"9px 20px",borderRadius:5,border:`1px solid ${CC.border}`,background:"#fafafa",color:CC.dark,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Close</button>
-              </div>
-            ) : (
-              <form onSubmit={handleQuestionSubmit} style={{padding:"16px 20px"}}>
-                <div style={{fontSize:12,color:CC.mid,marginBottom:14,lineHeight:1.45}}>We&rsquo;ll see exactly what you&rsquo;re looking at — your current configuration and price are included automatically.</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                  <div>
-                    <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Name <span style={{color:"#d00"}}>*</span></label>
-                    <input type="text" value={qName} onChange={e=>setQName(e.target.value)} maxLength={120} required style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}} />
-                  </div>
-                  <div>
-                    <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Email <span style={{color:"#d00"}}>*</span></label>
-                    <input type="email" value={qEmail} onChange={e=>setQEmail(e.target.value)} maxLength={160} required style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}} />
-                  </div>
-                </div>
-                <div style={{marginBottom:10}}>
-                  <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Phone <span style={{color:CC.light,fontWeight:400}}>(optional)</span></label>
-                  <input type="tel" value={qPhone} onChange={e=>setQPhone(e.target.value)} maxLength={40} style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}} />
-                </div>
-                <div style={{marginBottom:14}}>
-                  <label style={{display:"block",fontSize:11,fontWeight:600,color:CC.mid,marginBottom:4}}>Your question <span style={{color:"#d00"}}>*</span></label>
-                  <textarea value={qMessage} onChange={e=>setQMessage(e.target.value)} maxLength={4000} required rows={5} style={{width:"100%",padding:"8px 10px",borderRadius:4,border:`1px solid ${CC.border}`,fontSize:14,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box"}} />
-                </div>
-                <input type="text" name="company_url" tabIndex={-1} autoComplete="off" style={{position:"absolute",left:"-9999px",width:1,height:1,opacity:0}} aria-hidden="true" />
-                {qStatus === "error" && qErrorMsg && (
-                  <div style={{padding:"8px 12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:4,fontSize:12,color:"#b91c1c",marginBottom:10}}>{qErrorMsg}</div>
-                )}
-                <div style={{display:"flex",gap:8,justifyContent:"flex-end",alignItems:"center"}}>
-                  <button type="button" onClick={resetQuestionForm} style={{padding:"9px 16px",borderRadius:5,border:`1px solid ${CC.border}`,background:"#fafafa",color:CC.dark,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} disabled={qStatus==="sending"}>Cancel</button>
-                  <button type="submit" disabled={qStatus==="sending"} style={{padding:"9px 18px",borderRadius:5,border:"none",background:qStatus==="sending"?CC.light:CK.cyan,color:"#fff",fontSize:13,fontWeight:700,cursor:qStatus==="sending"?"wait":"pointer",fontFamily:"inherit"}}>{qStatus==="sending"?"Sending…":"Send question"}</button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

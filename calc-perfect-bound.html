@@ -71,7 +71,7 @@
   .bp-mode-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.6);padding:7px 18px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;transition:all .25s;font-family:inherit}
   .bp-mode-btn:hover{background:rgba(0,126,255,.12);border-color:#007eff;color:#007eff}
   .bp-mode-btn.on{background:#007eff;border-color:#007eff;color:#000;box-shadow:0 4px 16px rgba(0,126,255,.3)}
-  .bp-nav-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit}
+  .bp-nav-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);width:36px;height:36px;min-width:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit;flex-shrink:0;box-sizing:border-box}
   .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.15);border-color:#007eff;color:#007eff}
   .bp-nav-btn:disabled{opacity:.25;cursor:not-allowed}
   /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-14 · PB-MK-MIRROR</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-17 · PB-MK-MIRROR + CIRCLE-FIX</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -3411,7 +3411,7 @@ update();
               </div>
               {isUserPage && (
                 <button type="button" onClick={e => { e.stopPropagation(); handleSlotRemove(i); }}
-                  style={{ position:"absolute", top:-4, right:-4, width:16, height:16, borderRadius:"50%", border:"none", background:"#e74c3c", color:"#fff", fontSize:9, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1, zIndex:2 }}>✕</button>
+                  style={{ position:"absolute", top:-4, right:-4, width:16, height:16, minWidth:16, minHeight:16, borderRadius:"50%", border:"none", background:"#e74c3c", color:"#fff", fontSize:9, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1, zIndex:2, flexShrink:0, boxSizing:"border-box", padding:0 }}>✕</button>
               )}
               <span style={{ fontSize:8, color: isEmpty ? CC.light : CC.mid, marginTop:2, display:"block", lineHeight:1 }}>{p.label}</span>
             </div>
