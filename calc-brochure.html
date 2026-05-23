@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-14 · BR-MAX13</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-20 · BR-RIGHTANGLE</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -119,12 +119,24 @@ const FOLD_TYPES = _CFG.fold_types || [
   {label:"Roll Fold (4 Panel)",val:"roll4",panels:4},
   {label:"Double Gate Fold (4 Panel)",val:"dgate4",panels:4},
   {label:"Double Parallel Fold (4 Panel)",val:"dparallel4",panels:4},
+  // Compound fold — only offered for 11×25.5 non-cardstock (gated in the size/fold UI).
+  // Trifold along the 25.5" length (3×8.5 → 8.5×11), then a cross bifold across the
+  // 11" height (→ 8.5×5.5). Trifold front panel stays on the outside.
+  {label:"Right-Angle Fold (Trifold + Cross Bifold)",val:"trifold_xbifold",panels:3},
 ];
 
 // Panel labels per fold type — front (outside art) and back (inside art), left to right
+// Fold types available for a given size + material. The compound right-angle
+// fold (trifold + cross bifold) is only offered for 11×25.5 non-cardstock.
+function availableFoldTypes(longE, shortE, isCardstock) {
+  const is1125 = Math.abs((longE || 0) - 25.5) < 0.05 && Math.abs((shortE || 0) - 11) < 0.05;
+  return FOLD_TYPES.filter(f => f.val !== "trifold_xbifold" || (is1125 && !isCardstock));
+}
+
 const PANEL_LABELS = {
   bifold:    { front: ["Back","Front"], back: ["Inside Front","Inside Back"] },
   trifold:   { front: ["Inside Flap","Back","Front"], back: ["Inside Left","Inside Center","Inside Right"] },
+  trifold_xbifold: { front: ["Inside Flap","Back","Front"], back: ["Inside Left","Inside Center","Inside Right"] },
   z3:        { front: ["Back","Center","Front"], back: ["Back Inside","Center Inside","Front Inside"] },
   gate3:     { front: ["Left Flap","Front","Right Flap"], back: ["Inside Left","Inside Center","Inside Right"] },
   accordion4:{ front: ["Back","Inside Right","Inside Left","Front"], back: ["Back Inside","Outside Right","Outside Left","Front Inside"] },
@@ -414,6 +426,12 @@ function calculate(c) {
   P.diffFold2 = fold.val === "roll4" ? foldLabor : 0;
   // Tier 3: narrow sheets (short < 5") with any fold, OR folding the short side
   P.diffFold3 = fold.val !== "flat" && (shortE < 5 || c.foldDir === "short") ? foldLabor : 0;
+  // Compound right-angle fold: trifold + a cross-direction bifold is a second
+  // bindery pass in a different orientation plus hand-work. Per spec, sum all
+  // fold labor and multiply by 3 (each line ×3 → total ×3).
+  if (fold.val === "trifold_xbifold") {
+    P.folding *= 3; P.diffFold1 *= 3; P.diffFold2 *= 3; P.diffFold3 *= 3;
+  }
 
   // Artwork — fees live in PCF (Production tab → Artwork group)
   const art = ART_OPTS.find(x => x.val === c.artwork) || ART_OPTS[0];
@@ -650,6 +668,18 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
         }
       }
 
+      // Cross-fold crease — compound right-angle fold only. After the trifold
+      // (vertical creases above), a bifold runs across the short edge → a
+      // horizontal crease at mid-height. Drawn dashed to read as a second pass.
+      if (foldType === "trifold_xbifold") {
+        pdf.setDrawColor(245, 166, 35);
+        pdf.setLineWidth(0.01);
+        const ymid = bleed + trimH / 2;
+        drawDashedLine(pdf, bleed + 0.1, ymid, bleed + trimW - 0.1, ymid, 0.06, 0.04);
+        pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
+        pdf.text("CROSS FOLD", bleed + trimW - 1.0, ymid - 0.05);
+      }
+
       // Perf lines (purple dashed)
       if (perfCount > 0 && perfPositions) {
         pdf.setDrawColor(139, 92, 246);
@@ -760,6 +790,7 @@ const FOLD_KEY_MAP = {
   bifold: "half-fold", trifold: "tri-fold", z3: "accordion-3",
   gate3: "gate-fold", accordion4: "accordion-4", roll4: "roll-fold",
   dgate4: "double-gate", dparallel4: "double-parallel",
+  trifold_xbifold: "tri-fold", // reuse trifold 3D renderer; cross-fold shown as an overlay crease
 };
 
 // Verified fold configurations with anti-clipping translateZ factors.
@@ -1035,7 +1066,7 @@ function foldApplyView(sceneEl, foldKey, viewIdx, dirSign) {
 }
 
 // React component that renders the 3D fold scene
-function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdge, shortEdge, viewIdx, foldDir, flipped, frontGray, backGray }) {
+function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdge, shortEdge, viewIdx, foldDir, flipped, frontGray, backGray, crossFold }) {
   const sceneRef = useRef(null);
   const fold = FOLDS_3D[foldKey];
 
@@ -1091,9 +1122,20 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdg
   if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.4)" }}>Flat — no fold preview</div>;
 
   return (
-    <div className="fold-viewport" style={{ minHeight: mob ? 220 : 350 }}>
+    <div className="fold-viewport" style={{ minHeight: mob ? 220 : 350, position: "relative" }}>
       <div ref={sceneRef} className="fold-scene"
         style={{ transformStyle: "preserve-3d", position: "relative", width: iW, height: iH }} />
+      {crossFold && (
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 5 }}>
+          {/* horizontal cross-fold crease */}
+          <div style={{ position: "absolute", left: "8%", right: "8%", top: "50%", transform: "translateY(-50%)", borderTop: "2px dashed #f5a623" }} />
+          {/* mid-line caption */}
+          <span style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", fontSize: 10, fontWeight: 700, color: "#f5a623", background: "rgba(0,0,0,.55)", padding: "2px 7px", borderRadius: 3, whiteSpace: "nowrap" }}>↕ Cross fold → 8.5×5.5</span>
+          {/* half labels */}
+          <span style={{ position: "absolute", left: "50%", top: "calc(50% - 22px)", transform: "translate(-50%,-100%)", fontSize: 10, fontWeight: 700, color: "#f5a623", whiteSpace: "nowrap" }}>Final Folded Back</span>
+          <span style={{ position: "absolute", left: "50%", top: "calc(50% + 22px)", transform: "translateX(-50%)", fontSize: 10, fontWeight: 700, color: "#f5a623", whiteSpace: "nowrap" }}>Final Folded Front</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1212,7 +1254,7 @@ function MobilePreviewBar(props){
 // SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug }) {
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug, paperIsCardstock }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
@@ -2331,7 +2373,7 @@ generate();
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>
               <Sel label="Fold Type" value={foldType} onChange={onFoldChange}>
-                {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
+                {availableFoldTypes(longEdge, shortEdge, paperIsCardstock).map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
               </Sel>
             </div>
             {panels > 1 && (
@@ -2874,6 +2916,7 @@ generate();
                   <div style={{ width: "100%", maxWidth: 700, margin: "0 auto" }}>
                     <FoldRenderer
                       foldKey={foldKey}
+                      crossFold={foldType === "trifold_xbifold"}
                       frontSrc={trimmedFrontUrl || frontArt?.dataUrl}
                       backSrc={trimmedBackUrl || backArt?.dataUrl}
                       frontDims={trimmedFrontUrl ? { w: longEdge, h: shortEdge } : frontArt?.dims}
@@ -3254,6 +3297,18 @@ function App() {
   const dimLong = sizeMode === "preset" ? (preset?.long || 11) : longEdge;
   const dimShort = sizeMode === "preset" ? (preset?.short || 8.5) : shortEdge;
 
+  // Guard: the compound right-angle fold is only valid for 11×25.5 non-cardstock.
+  // If size/material changes away from that while it's selected, fall back to trifold.
+  useEffect(() => {
+    if (foldType === "trifold_xbifold") {
+      const ok = Math.abs(dimLong - 25.5) < 0.05 && Math.abs(dimShort - 11) < 0.05 && paper.type !== "cardstock";
+      if (!ok) { setFoldType("trifold"); return; }
+      // Compound fold is inherently a long-edge trifold; force foldDir so the
+      // panel-size validation and template orientation stay correct.
+      if (foldDir !== "long") setFoldDir("long");
+    }
+  }, [foldType, foldDir, dimLong, dimShort, paper]);
+
   // Perf count + constraint logic
   // The perf crosses one dimension: "length" → longEdge, "width" → shortEdge
   const perfCrossDim = perfDir === "length" ? dimLong : dimShort;
@@ -3432,7 +3487,7 @@ function App() {
             }
             <div style={ST.hr} />
             <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
-              {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
+              {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             {fold.panels > 1 && sizeMode === "custom" && (
               <Pil label="Fold Direction" value={foldDir} onChange={setFoldDir} options={[
@@ -3481,7 +3536,7 @@ function App() {
           {/* SECTION 3: Addons */}
           <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
             <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
-              {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
+              {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             <div style={ST.hr} />
             {(_AD.vivid !== false || vivid === true) && <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
@@ -3569,6 +3624,7 @@ function App() {
               <div style={{marginTop:8}}>
                 <SheetPreview
                   longEdge={dimLong} shortEdge={dimShort}
+                  paperIsCardstock={paper.type === "cardstock"}
                   foldType={foldType} foldDir={foldDir} panels={fold.panels}
                   perfCount={perfCount} perfDir={perfDir}
                   perfPositions={perfPositions} onPerfPositions={setPerfPositions}
