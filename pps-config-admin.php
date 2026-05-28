@@ -141,6 +141,10 @@ function pps_default_config() {
             'two_staple_threshold'              => 5.25,
             'non_inventory_fee'                 => 35,
             'backend_base_rate'                 => 10,    // flat per-order fee for brochures
+            // Outfold (PB fold-out page tipped into the spine) — Tier C aggressive defaults
+            'outfold_per_book_handling'         => 0.40,  // per-book hand-insertion labor ($/book/fold)
+            'outfold_setup'                     => 35,    // flat setup per fold per run ($)
+            'outfold_specialty_markup'          => 1.30,  // specialty multiplier on the outfold subtotal
             // Cart-price tampering defense (server-side floor on add-to-cart).
             // Submitted pps_price must be >= max(absolute_min, regular_price * min_pct).
             'pps_min_price_pct'                 => 0.5,
