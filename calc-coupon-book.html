@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-17 · CB-CIRCLE-FIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-28 · CB-MK-MIRROR + OUTFOLD-C</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -139,10 +139,13 @@ const PCF = Object.assign({
   cutter_sheetsperhour:15000, horizonspf20_sheetsperhour:4000,
   cutterbasefee:7.5, sheetsturnaround:2500,
   backend_maximummarkup:9, backend_minimummarkup:1.5,
-  // Coupon book markup — independent from perfect-bound. Tune via WP admin.
-  couponbook_maximummarkup:22, couponbook_minimummarkup:3.2,
-  couponbook_size_discount:0,        // disabled — sheet decay in markup curve already differentiates imp<4 sizes
-  couponbook_discount_log_coef:2.2,
+  // Coupon book markup — saddle/PB-mirrored single-axis architecture (2026-05-28).
+  // ROLLBACK 2026-05-28: pre-reform was max=22, min=3.2, discount_log_coef=2.2
+  // (same broken curve PB had — produced 2.5-3x saddle prices).
+  couponbook_maximummarkup:3.6, couponbook_minimummarkup:1.45,
+  couponbook_markup_coef_tS:0.275,   // single-axis decay vs ln(tS)
+  couponbook_size_discount:0,        // disabled — sheet decay differentiates imp<4 sizes
+  couponbook_surcharge:0.30,         // 30% flat surcharge on post-discount subtotal
   magneticstripapplication_perhour:120,
   // ROLLBACK: pre-2026-04-14 values were easydiscount_max:1500, common_discount_max:1000
   easydiscount_max:0, uvcoaterimpressionsperhour:250,
@@ -363,7 +366,7 @@ const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'
 const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01},{label:"Email Art After Order",val:0.02},{label:"Artwork already discussed",val:0.03},{label:"I have a design in Canva",val:0.04},{label:"Artwork needs edits",val:2.01},{label:"Design from scratch",val:4.01}];
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
 // Perfect bound specific options
-const OUTFOLD_OPTS=_CFG.outfold_opts||[{label:"No Outfold",val:0,price:0},{label:"1 Fold-Out Page (Bifold)",val:1000,price:0.02},{label:"2 Fold-Out Pages (Bifold)",val:500,price:0.04}];
+const OUTFOLD_OPTS=_CFG.outfold_opts||[{label:"No Outfold",val:0,count:0,price:0},{label:"1 Fold-Out Page (Bifold)",val:1000,count:1,price:0.02},{label:"2 Fold-Out Pages (Bifold)",val:500,count:2,price:0.04}];
 const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},{label:"1 Perforation Line",val:2000,price:0.03,count:1},{label:"2 Perforation Lines",val:1000,price:0.03,count:2}];
 // Coupon book specific
 const BIND_STYLE_OPTS=[{label:"Open Faced: Glued/Padded",val:"openface"},{label:"Wraparound Cover with Perforation(s)",val:"wraparound"}];
@@ -525,7 +528,9 @@ function calculate(c) {
   // Coupon book: pages / 2 per sheet (double-sided). Single-sided = 1 page per sheet = 2× tS.
   const tS=(sets.reduce((s,x)=>s+(x.qty*x.pages)/2,0)/imp)*sidesMult;
 
-  const dL = PCF.couponbook_discount_log_coef * Math.log(tS);
+  // Markup curve — saddle/PB-mirrored single-axis (2026-05-28).
+  // ROLLBACK: prior was `dL = couponbook_discount_log_coef * Math.log(tS)` with max=22.
+  const dL = PCF.couponbook_markup_coef_tS * Math.log(tS);
   const mk = Math.max(PCF.couponbook_maximummarkup - dL, PCF.couponbook_minimummarkup);
 
   // Spine proxy: used for bundling/corner turnaround estimates
@@ -606,7 +611,14 @@ function calculate(c) {
   // ── Outfold ──
   P.outfold=0;
   if(outfold.val>0){
-    P.outfold=((PCF.printing_fullcolor_cost*tQ*outfold.price)+((tQ*outfold.price)/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr)*mk;
+    // Outfold pricing — Tier C (Aggressive). Mirrors perfect bound. ROLLBACK:
+    // prior was `((printing*tQ*price)+(tQ*price)/bindery*labor)*mk` — effectively free.
+    const ofCount = outfold.count || 1;
+    const ofExtraSheets = tQ * ofCount;
+    const ofMat = ofExtraSheets * (c.insidePaper.price + PCF.printing_fullcolor_cost * 2) * mk;
+    const ofFold = (ofExtraSheets / PCF.bindery_morgana_impressionperhour) * PCF.labor_bindery_hr + (PCF.outfold_setup || 0) * ofCount;
+    const ofHandle = tQ * (PCF.outfold_per_book_handling || 0) * ofCount;
+    P.outfold = (ofMat + ofFold + ofHandle) * (PCF.outfold_specialty_markup || 1);
   }
   const outfoldTurnaround = outfold.val > 0 ? Math.ceil(tQ / outfold.val) : 0;
 
@@ -664,6 +676,10 @@ function calculate(c) {
   // Size-based adjustment — 15% off when imp<4 (8.5×11 and larger). Mirrors saddle-stitch booklet.
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
   P.discSize=imp<4?subBeforeSize*(-PCF.couponbook_size_discount):0;
+
+  // Surcharge layer — mirrors saddle's booklet_surcharge / PB's perfectbound_surcharge.
+  const subBeforeSurcharge=Object.values(P).reduce((s,v)=>s+v,0);
+  P.surcharge=subBeforeSurcharge*(PCF.couponbook_surcharge||0);
 
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
@@ -764,7 +780,7 @@ function calculate(c) {
     {l:"Round Cornering",v:P.rc,g:"add"},{l:"Outfold",v:P.outfold,g:"add"},{l:"Perforation",v:P.perforation,g:"add"},
     {l:"Magnetic Backer",v:P.magnetBacker,g:"add"},{l:"Wraparound Perf",v:P.wraparoundPerf,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
-    {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
+    {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
 

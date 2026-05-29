@@ -124,11 +124,12 @@ function pps_default_config() {
             'perfectbound_markup_coef_tS'       => 0.275,
             'perfectbound_size_discount'        => 0,
             'perfectbound_surcharge'            => 0.30,
-            // Coupon book markup (separate from perfect-bound; pads/coupon books)
-            'couponbook_maximummarkup'          => 8,
-            'couponbook_minimummarkup'          => 1.5,
+            // Coupon book markup — saddle/PB-mirrored single-axis (2026-05-28)
+            'couponbook_maximummarkup'          => 3.6,
+            'couponbook_minimummarkup'          => 1.45,
+            'couponbook_markup_coef_tS'         => 0.275,
             'couponbook_size_discount'          => 0,
-            'couponbook_discount_log_coef'      => 2.2,
+            'couponbook_surcharge'              => 0.30,
             'magneticstripapplication_perhour'   => 120,
             'uvcoaterimpressionsperhour'        => 250,
             'roundcornerperhour'                => 75,
@@ -1148,10 +1149,11 @@ function pps_config_tab_production( $cfg ) {
             'perfectbound_surcharge'       => array( 'Pricing Surcharge', '×' ),
         ),
         'Coupon Book Markup' => array(
-            'couponbook_maximummarkup'       => array( 'Max Markup', '×' ),
-            'couponbook_minimummarkup'        => array( 'Min Markup', '×' ),
-            'couponbook_size_discount'        => array( '8.5×11 Size Disc.', '×' ),
-            'couponbook_discount_log_coef'    => array( 'Discount Curve Steepness', '×ln(tS)' ),
+            'couponbook_maximummarkup'    => array( 'Max Markup', '×' ),
+            'couponbook_minimummarkup'    => array( 'Min Markup', '×' ),
+            'couponbook_markup_coef_tS'   => array( 'Sheet Decay Coef', '×ln(tS)' ),
+            'couponbook_size_discount'    => array( '8.5×11 Size Disc.', '×' ),
+            'couponbook_surcharge'        => array( 'Pricing Surcharge', '×' ),
             'magneticstripapplication_perhour' => array( 'Magnetic Backer', '/hr' ),
         ),
         'Discounts' => array(
