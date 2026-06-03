@@ -3144,6 +3144,8 @@ function App() {
   }, []);
   const tog = k => setOp(p => ({ ...p, [k]: !p[k] }));
   const [showDebug, setShowDebug] = useState(false);
+  const [jobName, setJobName] = useState("");
+  const debugUnlocked = jobName === "%3414";
 
   // State
   const [qty, setQty] = useState(250);
@@ -3475,6 +3477,7 @@ function App() {
           <Sec num={1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
+              <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
               <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
             </div>
             {sizeMode === "preset"
@@ -3827,10 +3830,10 @@ function App() {
           <button type="button" onClick={handleShareLink} style={{ width: "100%", marginTop: 8, padding: "8px", borderRadius: 4, border: `1px solid ${shareCopied ? "#86efac" : "#ddd"}`, background: shareCopied ? "#f0fdf4" : "#fafafa", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
-          <button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : "#ddd"}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
+          {debugUnlocked&&<button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : "#ddd"}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
             {showDebug ? "▼ Hide" : "▶ Show"} Debug Panel
-          </button>
-          {showDebug && r.debug && (
+          </button>}
+          {debugUnlocked && showDebug && r.debug && (
             <div style={{ ...ST.pnl, marginTop: 10, padding: 14, fontSize: 11 }}>
               <div style={{ fontWeight: 700, marginBottom: 8, color: CC.mid }}>Debug</div>
               {Object.entries(r.debug).map(([k, v]) => (
@@ -3865,7 +3868,7 @@ function App() {
       {/* Mobile bottom bar */}
       {mob && <>
         {/* Slide-up panels: debug or qty pricing */}
-        {showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
+        {debugUnlocked && showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: CC.mid, marginBottom: 6 }}>DEBUG</div>
           {Object.entries(r.debug).filter(([k]) => k !== "P").map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "1px 0" }}>
@@ -3913,9 +3916,9 @@ function App() {
             <button type="button" onClick={handleShareLink} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : "#fafafa", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s", lineHeight: 1 }} title="Share link">
               {shareCopied ? "✓" : "🔗"}
             </button>
-            <button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
+            {debugUnlocked&&<button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
               {showDebug ? "✕" : "⚙"}
-            </button>
+            </button>}
             <button type="button" style={{ flexShrink: 0, padding: "12px 16px", borderRadius: 6, border: "none", background: result?.error ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: result?.error ? "default" : "pointer", fontFamily: "inherit", opacity: result?.error ? .5 : 1 }} disabled={!!result?.error}>Add to Order</button>
           </div>
         </div>

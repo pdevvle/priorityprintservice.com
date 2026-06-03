@@ -3960,6 +3960,7 @@ function App(){
   const mob=useIsMobile();
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
+  const debugUnlocked = sets.some(s => s.name === "%3414");
   const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
   // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
   const proofDebug = useMemo(() => {
@@ -4809,10 +4810,10 @@ function App(){
           <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
-          <button type="button" onClick={()=>setShowDebug(p=>!p)} style={{width:"100%",marginTop:8,padding:"6px",borderRadius:4,border:`1px solid ${showDebug?"#555":"#ddd"}`,background:showDebug?"#1a1a1a":"#fafafa",color:showDebug?"#888":"#bbb",fontSize:10,fontWeight:600,letterSpacing:".5px",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+          {debugUnlocked&&<button type="button" onClick={()=>setShowDebug(p=>!p)} style={{width:"100%",marginTop:8,padding:"6px",borderRadius:4,border:`1px solid ${showDebug?"#555":"#ddd"}`,background:showDebug?"#1a1a1a":"#fafafa",color:showDebug?"#888":"#bbb",fontSize:10,fontWeight:600,letterSpacing:".5px",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {showDebug?"▼ Hide":"▶ Show"} Debug Panel
-          </button>
-          {showDebug&&<DebugPanel debug={result?.debug}/>}
+          </button>}
+          {debugUnlocked&&showDebug&&<DebugPanel debug={result?.debug}/>}
           <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px solid ${CK.cyan}55`,background:"#fff",color:CK.cyan,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             Have a question about this quote? →
           </button>
