@@ -2965,7 +2965,8 @@ function Panel({ result, compact }) {
         </span>
         {saleActive && <span style={{ fontSize: 9.5, fontWeight: 800, color: CK.magenta, letterSpacing: ".5px", textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
         <span style={{ fontSize: 11, color: CC.mid }}>${r.perUnit.toFixed(2)}/ea</span>
-        <span style={{ fontSize: 10, color: CC.light }}>{r.days}d</span>
+        <span style={{ fontSize: 10, color: CC.light }}>Turn: {r.days}d</span>
+        <span style={{ fontSize: 10, color: CC.light }}>Avail: {sh.earliestBizDays===sh.freeDeliveryBizDays?sh.earliestBizDays:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`}d</span>
       </div>
     );
   }
@@ -2981,12 +2982,18 @@ function Panel({ result, compact }) {
         </div>
       </div>
       <div style={{ display: "flex", borderBottom: `1px solid ${CC.border}` }}>
-        {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], ["Days", r.days + " biz"]].map(([l, v], i) => (
+        {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], ["Availability", (sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`)+" days"]].map(([l, v], i) => (
           <div key={i} style={{ flex: 1, padding: "11px 8px", textAlign: "center", borderRight: i < 2 ? `1px solid ${CC.border}` : "none" }}>
             <div style={{ fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", color: CC.light, marginBottom: 1 }}>{l}</div>
             <div style={{ fontSize: 14.5, fontWeight: 700, color: CC.dark }}>{v}</div>
           </div>
         ))}
+      </div>
+      <div style={{padding:"7px 18px",borderBottom:`1px solid ${CC.border}`,background:"#f0fdf4"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:11,color:"#16a34a",fontWeight:600}}>⏱ Production turnaround</span>
+          <span style={{fontSize:12,fontWeight:700,color:"#15803d"}}>{r.days} business days</span>
+        </div>
       </div>
       {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#fafafa", fontSize: 11, color: CC.mid, pointerEvents: "none" }}>
         Free delivery est: <strong>{sh.freeDeliveryDate}</strong> ({sh.freeDeliveryBizDays} biz days)
