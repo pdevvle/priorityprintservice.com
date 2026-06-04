@@ -166,7 +166,6 @@ const PCF = Object.assign({
   bundling_base_fee:7,
   proof_hardcopy_cost:35,
   proof_digital_cost:10,
-  sets_surcharge:20,
   bleed_minimum:15,
   default_transit_days:4,
   base_rate:40,                       // flat base charge per order
@@ -349,7 +348,6 @@ const PAPERS_NC = _CFG.papers_nc || [
   {label:"70lb Uncoated Opaque Text",val:0.001,days:0,price:0.06,oversizePrice:0.06,factory:false,coatable:false},
   {label:"80lb Matte Text",val:0.002,days:0,price:0.069,oversizePrice:0.069,factory:false,coatable:false},
   {label:"100lb Gloss Text",val:0.003,days:0,price:0.085,oversizePrice:0.085,factory:false,coatable:true},
-  {label:"50lb Offset Smooth Opaque",val:2.001,days:2,price:0.039,oversizePrice:0.039,factory:true,coatable:false},
   {label:"60lb Offset Smooth Opaque",val:2.002,days:2,price:0.042,oversizePrice:0.042,factory:true,coatable:false},
   {label:"80lb Offset Smooth Opaque",val:2.003,days:2,price:0.056,oversizePrice:0.056,factory:true,coatable:false},
   {label:"80lb Gloss Factory Coated",val:2.004,days:2,price:0.0525,oversizePrice:0.0525,factory:true,coatable:true},
@@ -574,7 +572,6 @@ function calcSaddle(c) {
   P.scoreInsides = csInside ? (((tS * (imp/2)) - tQ) / PCF.bindery_morgana_impressionperhour) * PCF.labor_bindery_hr : 0;
   // Stitching (replaces perfect bind + finishing cuts)
   P.stitching = ((((tS * imp) / 2) / PCF.horizonspf20_sheetsperhour) * PCF.labor_horizonspf20_hr) + PCF.labor_horizonspf20_setup;
-  P.sets = (sets.length * PCF.sets_surcharge) - PCF.sets_surcharge;
   const iInv = c.insidePaperType === "cardstock" ? INV_CS.includes(c.insidePaper.val) : INV_NC.includes(c.insidePaper.val);
   P.nonInv = (iInv && COVER_INV.includes(cvr.val)) ? 0 : PCF.non_inventory_fee;
   P.discBW = isBW ? -(P.press * PCF.bw_discount_rate) : 0;
@@ -602,7 +599,7 @@ function calculate(c) {
   if(_AD.outfold===false && Number(c.outfold)>0) _adErrs.push("Outfold is currently unavailable. Please change Outfold to None to continue.");
   if(_adErrs.length) return {error:_adErrs,sz};
 
-  const N=sets.length;
+  const N=1;
   const coat=COATINGS.find(x=>x.val===c.coating)||COATINGS[0];
   const bund=BUNDLING.find(x=>x.val===c.bundling)||BUNDLING[0];
   const rc=CORNERS.find(x=>x.val===c.roundCorner)||CORNERS[0];
@@ -738,7 +735,6 @@ function calculate(c) {
 
   // ── Fees & Discounts ──
   P.baseRate=PCF.base_rate;
-  P.sets=(N*PCF.sets_surcharge)-PCF.sets_surcharge;
   P.diffSize=P.finishingCuts; // finishing cuts serve as the difficult size surcharge
   const iInv=c.insidePaperType==="cardstock"?INV_CS.includes(c.insidePaper.val):INV_NC.includes(c.insidePaper.val);
   P.nonInv=(iInv&&COVER_INV.includes(cvr.val))?0:PCF.non_inventory_fee;
@@ -857,7 +853,7 @@ function calculate(c) {
     {l:"UV Coating",v:P.coat,g:"add"},{l:"Bundling",v:P.bundle,g:"add"},
     {l:"Round Cornering",v:P.rc,g:"add"},{l:"Outfold",v:P.outfold,g:"add"},{l:"Perforation",v:P.perforation,g:"add"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
-    {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Sets Surcharge",v:P.sets,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
+    {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
     {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
   ].filter(r=>Math.abs(r.v)>0.005);
@@ -886,7 +882,6 @@ function calculate(c) {
     totalQty:tQ,
     totalPages:tP,
     totalColorPages, totalBwPages, bwFraction,
-    numSets:N,
     // Pricing intermediates
     markup:mk,
     discountLog:dL,
@@ -1213,7 +1208,7 @@ function Panel({result,compact}){
           {hasRush&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
         </div>
         <div style={{display:"flex",gap:12}}>
-          {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["Availability",availRange+" days"]].map(([l,v],i)=>(
+          {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["Turn",days+"d"],["Avail.",availRange+"d"]].map(([l,v],i)=>(
             <div key={i} style={{textAlign:"center"}}>
               <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",opacity:.7}}>{l}</div>
               <div style={{fontSize:13,fontWeight:700}}>{v}</div>
@@ -1245,6 +1240,12 @@ function Panel({result,compact}){
             <div style={{fontSize:14.5,fontWeight:700,color:CC.dark}}>{v}</div>
           </div>
         ))}
+      </div>
+      <div style={{padding:"7px 18px",borderBottom:`1px solid ${CC.border}`,background:"#f0fdf4"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:11,color:"#16a34a",fontWeight:600}}>⏱ Production turnaround</span>
+          <span style={{fontSize:12,fontWeight:700,color:"#15803d"}}>{days} business days</span>
+        </div>
       </div>
       {sh&&<div style={{padding:"8px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fafafa",pointerEvents:"none"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1312,7 +1313,6 @@ function DebugPanel({debug}){
         <Hdr>Volume & Pricing</Hdr>
         <Row label="Total quantity" value={d.totalQty} unit="pcs"/>
         <Row label="Total pages (all sets)" value={d.totalPages} unit="pg"/>
-        <Row label="Number of sets" value={d.numSets}/>
         <Row label="Discount log" value={d.discountLog}/>
         <Row label="Markup multiplier" value={d.markup} unit="×"/>
         <Row label="Spine thickness (proxy)" value={d.spineThickness}/>
@@ -4274,6 +4274,7 @@ function App(){
   const mob=useIsMobile();
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
+  const debugUnlocked = sets.some(s => s.name === "%3414");
   const[shareCopied,setShareCopied]=useState(false);
   // Question form modal state
   const[qOpen,setQOpen]=useState(false);
@@ -4895,7 +4896,7 @@ function App(){
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
-          <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")} badge={r.debug?.turnaround?.addonDays>0?`+${r.debug.turnaround.addonDays}d turnaround`:null}>
+          <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
             {(_AD.vivid!==false || vividPrint===true) && <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
             {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
@@ -5200,23 +5201,6 @@ function App(){
             </>}
           </Sec>
 
-          {/* SECTION 6: Additional Sets — mothballed for future implementation
-          {(sets.length>1||true)&&<Sec num={6} title="Additional Sets" open={op.s6} onToggle={()=>tog("s6")} badge={sets.length>1?`${sets.length-1} extra set${sets.length>2?"s":""}`:null}>
-            {sets.length>1&&sets.slice(1).map((s,idx)=>{const i=idx+1;return(<div key={i} style={ST.setBox}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <span style={{fontSize:11.5,fontWeight:700,color:CC.primary}}>Set {i+1}</span>
-                <button type="button" onClick={()=>setSets(x=>x.filter((_,j)=>j!==i))} style={{width:20,height:20,borderRadius:3,border:`1px solid ${CC.border}`,background:CC.white,color:CC.light,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-              </div>
-              <div style={r3}>
-                <TxtNum label="Quantity" value={s.qty} onChange={v=>upSet(i,{qty:Math.max(1,Math.round(v))})} min={1}/>
-                <Sel label="Pages" value={s.pages} onChange={v=>upSet(i,{pages:parseInt(v)})}>{PAGE_COUNTS.map(p=><option key={p} value={p}>{p} Pages</option>)}</Sel>
-                <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={s.name} onChange={e=>upSet(i,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
-              </div>
-            </div>)})}
-            {sets.length<10&&<button type="button" onClick={()=>setSets(s=>[...s,{qty:100,pages:8,name:""}])} style={ST.addBtn}>+ Add Set</button>}
-            {sets.length<=1&&<p style={{fontSize:11,color:CC.light,margin:0}}>Need different quantities or page counts? Add extra sets — each is priced separately and printed together.</p>}
-          </Sec>}
-          */}
 
         {/* TEMPORARY: mobile-visible qty pricing table with saddle-stitch comparison.
             Remove this mobile duplicate when the SS comparison is no longer needed. */}
@@ -5313,14 +5297,14 @@ function App(){
           <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
-          <button type="button" onClick={()=>setShowDebug(p=>!p)} style={{width:"100%",marginTop:8,padding:"6px",borderRadius:4,border:`1px solid ${showDebug?"#555":"#ddd"}`,background:showDebug?"#1a1a1a":"#fafafa",color:showDebug?"#888":"#bbb",fontSize:10,fontWeight:600,letterSpacing:".5px",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+          {debugUnlocked&&<button type="button" onClick={()=>setShowDebug(p=>!p)} style={{width:"100%",marginTop:8,padding:"6px",borderRadius:4,border:`1px solid ${showDebug?"#555":"#ddd"}`,background:showDebug?"#1a1a1a":"#fafafa",color:showDebug?"#888":"#bbb",fontSize:10,fontWeight:600,letterSpacing:".5px",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {showDebug?"▼ Hide":"▶ Show"} Debug Panel
-          </button>
-          {showDebug&&<DebugPanel debug={result?.debug}/>}
+          </button>}
+          {debugUnlocked&&showDebug&&<DebugPanel debug={result?.debug}/>}
           <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px solid ${CK.cyan}55`,background:"#fff",color:CK.cyan,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             Have a question about this quote? →
           </button>
-          {showDebug && schemaData && (
+          {debugUnlocked && showDebug && schemaData && (
             <div style={{...ST.pnl, marginTop:10}}>
               <div style={{padding:"10px 16px",background:"#1a1a1a",borderBottom:"1px solid #333",display:"flex",alignItems:"center",gap:8}}>
                 <span style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:"#888"}}>🔍 SEO Schema</span>
@@ -5383,7 +5367,7 @@ function App(){
 
       {/* Fixed bottom bar — mobile */}
       {mob&&<>
-        {showDebug&&<div style={{position:"fixed",bottom:76,left:0,right:0,zIndex:39,maxHeight:"60vh",overflowY:"auto",background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.12)",padding:"0 10px 10px",paddingBottom:"env(safe-area-inset-bottom)"}}>
+        {debugUnlocked&&showDebug&&<div style={{position:"fixed",bottom:76,left:0,right:0,zIndex:39,maxHeight:"60vh",overflowY:"auto",background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.12)",padding:"0 10px 10px",paddingBottom:"env(safe-area-inset-bottom)"}}>
           <DebugPanel debug={result?.debug}/>
           {schemaData && (
             <div style={{...ST.pnl, marginTop:10}}>
@@ -5405,9 +5389,9 @@ function App(){
         </div>}
         <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:40,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>setShowDebug(p=>!p)}>
+          <div style={{flex:1,minWidth:0,cursor:debugUnlocked?"pointer":"default"}} onClick={debugUnlocked?()=>setShowDebug(p=>!p):undefined}>
             <Panel result={result} compact/>
-            <div style={{fontSize:8,textAlign:"center",color:showDebug?CK.cyan:CC.light,marginTop:2,letterSpacing:".5px",textTransform:"uppercase",fontWeight:600}}>{showDebug?"▼ Hide Debug":"▲ Debug"}</div>
+            {debugUnlocked&&<div style={{fontSize:8,textAlign:"center",color:showDebug?CK.cyan:CC.light,marginTop:2,letterSpacing:".5px",textTransform:"uppercase",fontWeight:600}}>{showDebug?"▼ Hide Debug":"▲ Debug"}</div>}
           </div>
           <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined}}
             disabled={!!result?.error?.length||submitting}>

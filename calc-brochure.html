@@ -172,7 +172,6 @@ const PAPERS_NC = _CFG.papers_nc || [
   {label:"70lb Uncoated Opaque Text",val:0.001,days:0,price:0.06,oversizePrice:0.06,factory:false,coatable:false},
   {label:"80lb Matte Text",val:0.002,days:0,price:0.069,oversizePrice:0.069,factory:false,coatable:false},
   {label:"100lb Gloss Text",val:0.003,days:0,price:0.085,oversizePrice:0.085,factory:false,coatable:true},
-  {label:"50lb Offset Smooth Opaque",val:2.001,days:2,price:0.039,oversizePrice:0.039,factory:true,coatable:false},
   {label:"60lb Offset Smooth Opaque",val:2.002,days:2,price:0.042,oversizePrice:0.042,factory:true,coatable:false},
   {label:"80lb Offset Smooth Opaque",val:2.003,days:2,price:0.056,oversizePrice:0.056,factory:true,coatable:false},
   {label:"80lb Gloss Factory Coated",val:2.004,days:2,price:0.0525,oversizePrice:0.0525,factory:true,coatable:true},
@@ -2966,7 +2965,8 @@ function Panel({ result, compact }) {
         </span>
         {saleActive && <span style={{ fontSize: 9.5, fontWeight: 800, color: CK.magenta, letterSpacing: ".5px", textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
         <span style={{ fontSize: 11, color: CC.mid }}>${r.perUnit.toFixed(2)}/ea</span>
-        <span style={{ fontSize: 10, color: CC.light }}>{r.days}d</span>
+        <span style={{ fontSize: 10, color: CC.light }}>Turn: {r.days}d</span>
+        <span style={{ fontSize: 10, color: CC.light }}>Avail: {sh.earliestBizDays===sh.freeDeliveryBizDays?sh.earliestBizDays:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`}d</span>
       </div>
     );
   }
@@ -2982,12 +2982,18 @@ function Panel({ result, compact }) {
         </div>
       </div>
       <div style={{ display: "flex", borderBottom: `1px solid ${CC.border}` }}>
-        {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], ["Days", r.days + " biz"]].map(([l, v], i) => (
+        {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], ["Availability", (sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`)+" days"]].map(([l, v], i) => (
           <div key={i} style={{ flex: 1, padding: "11px 8px", textAlign: "center", borderRight: i < 2 ? `1px solid ${CC.border}` : "none" }}>
             <div style={{ fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", color: CC.light, marginBottom: 1 }}>{l}</div>
             <div style={{ fontSize: 14.5, fontWeight: 700, color: CC.dark }}>{v}</div>
           </div>
         ))}
+      </div>
+      <div style={{padding:"7px 18px",borderBottom:`1px solid ${CC.border}`,background:"#f0fdf4"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:11,color:"#16a34a",fontWeight:600}}>⏱ Production turnaround</span>
+          <span style={{fontSize:12,fontWeight:700,color:"#15803d"}}>{r.days} business days</span>
+        </div>
       </div>
       {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#fafafa", fontSize: 11, color: CC.mid, pointerEvents: "none" }}>
         Free delivery est: <strong>{sh.freeDeliveryDate}</strong> ({sh.freeDeliveryBizDays} biz days)
@@ -3145,6 +3151,8 @@ function App() {
   }, []);
   const tog = k => setOp(p => ({ ...p, [k]: !p[k] }));
   const [showDebug, setShowDebug] = useState(false);
+  const [jobName, setJobName] = useState("");
+  const debugUnlocked = jobName === "%3414";
 
   // State
   const [qty, setQty] = useState(250);
@@ -3476,6 +3484,7 @@ function App() {
           <Sec num={1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
+              <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
               <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
             </div>
             {sizeMode === "preset"
@@ -3828,10 +3837,10 @@ function App() {
           <button type="button" onClick={handleShareLink} style={{ width: "100%", marginTop: 8, padding: "8px", borderRadius: 4, border: `1px solid ${shareCopied ? "#86efac" : "#ddd"}`, background: shareCopied ? "#f0fdf4" : "#fafafa", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
-          <button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : "#ddd"}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
+          {debugUnlocked&&<button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : "#ddd"}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
             {showDebug ? "▼ Hide" : "▶ Show"} Debug Panel
-          </button>
-          {showDebug && r.debug && (
+          </button>}
+          {debugUnlocked && showDebug && r.debug && (
             <div style={{ ...ST.pnl, marginTop: 10, padding: 14, fontSize: 11 }}>
               <div style={{ fontWeight: 700, marginBottom: 8, color: CC.mid }}>Debug</div>
               {Object.entries(r.debug).map(([k, v]) => (
@@ -3866,7 +3875,7 @@ function App() {
       {/* Mobile bottom bar */}
       {mob && <>
         {/* Slide-up panels: debug or qty pricing */}
-        {showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
+        {debugUnlocked && showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: CC.mid, marginBottom: 6 }}>DEBUG</div>
           {Object.entries(r.debug).filter(([k]) => k !== "P").map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "1px 0" }}>
@@ -3914,9 +3923,9 @@ function App() {
             <button type="button" onClick={handleShareLink} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : "#fafafa", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s", lineHeight: 1 }} title="Share link">
               {shareCopied ? "✓" : "🔗"}
             </button>
-            <button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
+            {debugUnlocked&&<button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
               {showDebug ? "✕" : "⚙"}
-            </button>
+            </button>}
             <button type="button" style={{ flexShrink: 0, padding: "12px 16px", borderRadius: 6, border: "none", background: result?.error ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: result?.error ? "default" : "pointer", fontFamily: "inherit", opacity: result?.error ? .5 : 1 }} disabled={!!result?.error}>Add to Order</button>
           </div>
         </div>

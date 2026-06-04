@@ -496,6 +496,17 @@ add_action( 'wp', function() {
             $config['reorder'] = sanitize_text_field( $_GET['pps_reorder'] );
         }
 
+        // Add-on visibility flags resolved for this calculator's type.
+        // Calculator JS reads window.PPS_CONFIG.addons.<slug> to hide the
+        // option row (false) and calculate() returns an error if a pre-filled
+        // state carries a non-default value for a disabled add-on.
+        if ( function_exists( 'pps_get_addons_visibility_for_calc' ) ) {
+            $calc_type = pps_get_calc_type_for_filename( $filename );
+            if ( $calc_type ) {
+                $config['addons'] = pps_get_addons_visibility_for_calc( $calc_type );
+            }
+        }
+
         // Edit mode: store edit key so add-to-cart replaces the old item
         if ( ! empty( $_GET['pps_edit_key'] ) ) {
             $edit_key = sanitize_text_field( $_GET['pps_edit_key'] );
@@ -630,6 +641,299 @@ function pps_ajax_upload_artwork() {
 
 add_action( 'wp_ajax_pps_add_to_cart', 'pps_ajax_add_to_cart' );
 add_action( 'wp_ajax_nopriv_pps_add_to_cart', 'pps_ajax_add_to_cart' );
+
+// ═══════════════════════════════════════════════════════════════
+// QUOTE QUESTION FORM — AJAX handler
+// ═══════════════════════════════════════════════════════════════
+//
+// Customer fills in name/email/phone/question while viewing a quote.
+// Calculator JS posts the current calc state + a re-open URL. We email
+// the staff (admin_email by default; override via pps_question_recipient
+// option) and send a confirmation back to the customer. Honeypot + rate
+// limit prevent the obvious bot floods. Reuses the pps_add_to_cart nonce
+// since the calculator already has it loaded.
+
+add_action( 'wp_ajax_pps_quote_question', 'pps_ajax_quote_question' );
+add_action( 'wp_ajax_nopriv_pps_quote_question', 'pps_ajax_quote_question' );
+
+// ── CPT: pps_question (admin-only log of submissions) ──
+add_action( 'init', function() {
+    register_post_type( 'pps_question', array(
+        'label'          => 'Calc Questions',
+        'labels'         => array(
+            'name'          => 'Calc Questions',
+            'singular_name' => 'Calc Question',
+            'all_items'     => 'All Questions',
+            'edit_item'     => 'View Question',
+            'view_item'     => 'View Question',
+            'search_items'  => 'Search questions',
+            'not_found'     => 'No questions yet.',
+        ),
+        'public'              => false,
+        'show_ui'             => true,
+        'show_in_menu'        => true,
+        'show_in_admin_bar'   => false,
+        'show_in_nav_menus'   => false,
+        'menu_position'       => 26,
+        'menu_icon'           => 'dashicons-format-chat',
+        'supports'            => array( 'title', 'editor' ),
+        'capability_type'     => 'post',
+        'capabilities'        => array( 'create_posts' => 'do_not_allow' ),
+        'map_meta_cap'        => true,
+        'has_archive'         => false,
+        'rewrite'             => false,
+        'exclude_from_search' => true,
+    ) );
+} );
+
+// Custom columns on the Calc Questions list table — show Email + Calc + Total
+add_filter( 'manage_pps_question_posts_columns', function( $cols ) {
+    $new = array();
+    foreach ( $cols as $k => $v ) {
+        $new[ $k ] = $v;
+        if ( $k === 'title' ) {
+            $new['pps_q_email'] = 'Email';
+            $new['pps_q_calc']  = 'Calculator';
+            $new['pps_q_total'] = 'Total';
+        }
+    }
+    return $new;
+} );
+add_action( 'manage_pps_question_posts_custom_column', function( $col, $post_id ) {
+    if ( $col === 'pps_q_email' ) {
+        $email = get_post_meta( $post_id, '_pps_q_email', true );
+        if ( $email ) echo '<a href="mailto:' . esc_attr( $email ) . '">' . esc_html( $email ) . '</a>';
+    } elseif ( $col === 'pps_q_calc' ) {
+        $label  = get_post_meta( $post_id, '_pps_q_calc_label', true );
+        $preset = get_post_meta( $post_id, '_pps_q_preset_slug', true );
+        echo esc_html( $label );
+        if ( $preset ) echo ' <span style="color:#888">· ' . esc_html( $preset ) . '</span>';
+    } elseif ( $col === 'pps_q_total' ) {
+        $t = (float) get_post_meta( $post_id, '_pps_q_total', true );
+        if ( $t > 0 ) echo '$' . number_format( $t, 2 );
+    }
+}, 10, 2 );
+
+// Render snapshot meta as a read-only meta box on the edit screen
+add_action( 'add_meta_boxes', function() {
+    add_meta_box( 'pps_q_snapshot', 'Quote snapshot', 'pps_render_question_meta_box', 'pps_question', 'side', 'high' );
+} );
+function pps_render_question_meta_box( $post ) {
+    $rows = array(
+        'Name'         => get_post_meta( $post->ID, '_pps_q_name', true ),
+        'Email'        => get_post_meta( $post->ID, '_pps_q_email', true ),
+        'Phone'        => get_post_meta( $post->ID, '_pps_q_phone', true ),
+        'Calculator'   => get_post_meta( $post->ID, '_pps_q_calc_label', true ),
+        'Preset'       => get_post_meta( $post->ID, '_pps_q_preset_slug', true ),
+        'Total'        => ( $t = (float) get_post_meta( $post->ID, '_pps_q_total', true ) ) > 0 ? '$' . number_format( $t, 2 ) : '',
+        'Per Unit'     => ( $u = (float) get_post_meta( $post->ID, '_pps_q_per_unit', true ) ) > 0 ? '$' . number_format( $u, 2 ) : '',
+        'Quantity'     => ( $q = (int) get_post_meta( $post->ID, '_pps_q_qty', true ) ) > 0 ? number_format( $q ) : '',
+        'Days'         => ( $d = (int) get_post_meta( $post->ID, '_pps_q_days', true ) ) > 0 ? $d . ' biz' : '',
+        'Submitter IP' => get_post_meta( $post->ID, '_pps_q_user_ip', true ),
+    );
+    echo '<table class="form-table" style="margin:0"><tbody>';
+    foreach ( $rows as $label => $val ) {
+        if ( $val === '' || $val === null ) continue;
+        echo '<tr><th scope="row" style="padding:6px 0;font-size:12px;width:90px">' . esc_html( $label ) . '</th><td style="padding:6px 0;font-size:12px">' . esc_html( $val ) . '</td></tr>';
+    }
+    echo '</tbody></table>';
+    $summary = get_post_meta( $post->ID, '_pps_q_summary', true );
+    if ( $summary ) {
+        echo '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #ddd"><strong style="font-size:12px">Spec</strong><pre style="margin:4px 0 0;padding:8px;background:#fafafa;border-radius:3px;font-size:11px;white-space:pre-wrap">' . esc_html( $summary ) . '</pre></div>';
+    }
+    $reorder = get_post_meta( $post->ID, '_pps_q_reorder_url', true );
+    if ( $reorder ) {
+        echo '<p style="margin-top:10px"><a href="' . esc_url( $reorder ) . '" target="_blank" class="button button-primary" style="width:100%;text-align:center">Open this quote in calculator →</a></p>';
+    }
+}
+
+function pps_quote_question_rate_key() {
+    $ip   = isset( $_SERVER['REMOTE_ADDR'] ) ? $_SERVER['REMOTE_ADDR'] : '';
+    $salt = defined( 'AUTH_SALT' ) ? AUTH_SALT : 'pps';
+    return 'pps_qq_' . substr( hash( 'sha256', $ip . $salt ), 0, 24 );
+}
+
+function pps_ajax_quote_question() {
+    check_ajax_referer( 'pps_add_to_cart', 'nonce' );
+
+    // ── Rate limit: 5 submissions per IP per 15 minutes ──
+    $rkey     = pps_quote_question_rate_key();
+    $attempts = (int) get_transient( $rkey );
+    if ( $attempts >= 5 ) {
+        wp_send_json_error( array( 'message' => 'Too many submissions from your address. Please try again in a few minutes.' ), 429 );
+    }
+    set_transient( $rkey, $attempts + 1, 15 * MINUTE_IN_SECONDS );
+
+    // ── Honeypot: silently drop bot submissions ──
+    $honey = isset( $_POST['hp'] ) ? sanitize_text_field( wp_unslash( $_POST['hp'] ) ) : '';
+    if ( $honey !== '' ) {
+        wp_send_json_success( array( 'message' => 'Thanks — we will be in touch shortly.' ) );
+    }
+
+    // ── Required fields ──
+    $name    = sanitize_text_field( wp_unslash( $_POST['name'] ?? '' ) );
+    $email   = sanitize_email( wp_unslash( $_POST['email'] ?? '' ) );
+    $message = sanitize_textarea_field( wp_unslash( $_POST['message'] ?? '' ) );
+    if ( $name === '' || strlen( $name ) > 120 ) {
+        wp_send_json_error( array( 'message' => 'Please enter your name.' ) );
+    }
+    if ( ! is_email( $email ) ) {
+        wp_send_json_error( array( 'message' => 'Please enter a valid email address.' ) );
+    }
+    if ( $message === '' || strlen( $message ) > 4000 ) {
+        wp_send_json_error( array( 'message' => 'Please enter a question (1-4000 chars).' ) );
+    }
+
+    // ── Optional fields ──
+    $phone        = sanitize_text_field( wp_unslash( $_POST['phone'] ?? '' ) );
+    if ( strlen( $phone ) > 40 ) $phone = substr( $phone, 0, 40 );
+    $summary      = sanitize_textarea_field( wp_unslash( $_POST['summary'] ?? '' ) );
+    if ( strlen( $summary ) > 4000 ) $summary = substr( $summary, 0, 4000 );
+    $total        = isset( $_POST['total'] ) ? (float) $_POST['total'] : 0;
+    $per_unit     = isset( $_POST['perUnit'] ) ? (float) $_POST['perUnit'] : 0;
+    $qty          = isset( $_POST['qty'] ) ? (int) $_POST['qty'] : 0;
+    $days         = isset( $_POST['days'] ) ? (int) $_POST['days'] : 0;
+    $calc_type    = sanitize_key( wp_unslash( $_POST['calcType'] ?? '' ) );
+    $calc_label   = sanitize_text_field( wp_unslash( $_POST['calcLabel'] ?? '' ) );
+    $preset_slug  = sanitize_key( wp_unslash( $_POST['presetSlug'] ?? '' ) );
+
+    // Re-open URL: must be on our site to prevent the email from being used
+    // as an open redirector. We accept the calc's pre-built reorder URL and
+    // validate the host.
+    $reorder_url  = '';
+    if ( ! empty( $_POST['reorderUrl'] ) ) {
+        $candidate = esc_url_raw( wp_unslash( $_POST['reorderUrl'] ), array( 'http', 'https' ) );
+        $site_host = wp_parse_url( home_url(), PHP_URL_HOST );
+        $cand_host = wp_parse_url( $candidate, PHP_URL_HOST );
+        if ( $candidate && $cand_host && strcasecmp( $cand_host, $site_host ) === 0 ) {
+            $reorder_url = $candidate;
+        }
+    }
+
+    // ── Compose staff email ──
+    // Recipient resolution: PCF (admin-editable) → legacy option → WP admin_email.
+    $recipient = '';
+    if ( function_exists( 'pps_get_config' ) ) {
+        $cfg = pps_get_config();
+        $cand = isset( $cfg['pcf']['question_recipient_email'] ) ? trim( (string) $cfg['pcf']['question_recipient_email'] ) : '';
+        if ( is_email( $cand ) ) $recipient = $cand;
+    }
+    if ( ! $recipient ) {
+        $cand = get_option( 'pps_question_recipient', '' );
+        if ( is_email( $cand ) ) $recipient = $cand;
+    }
+    if ( ! $recipient ) $recipient = get_option( 'admin_email' );
+    $subject_calc = $calc_label !== '' ? $calc_label : 'Calculator';
+    $subject = sprintf( '[PPS] Question on %s quote — %s', $subject_calc, $name );
+
+    $body_lines = array();
+    $body_lines[] = 'A customer has a question about a quote.';
+    $body_lines[] = '';
+    $body_lines[] = 'NAME:    ' . $name;
+    $body_lines[] = 'EMAIL:   ' . $email;
+    if ( $phone !== '' ) $body_lines[] = 'PHONE:   ' . $phone;
+    $body_lines[] = '';
+    $body_lines[] = 'QUESTION:';
+    $body_lines[] = $message;
+    $body_lines[] = '';
+    $body_lines[] = 'QUOTE:';
+    if ( $calc_label !== '' )  $body_lines[] = '  Calculator: ' . $calc_label;
+    if ( $preset_slug !== '' ) $body_lines[] = '  Preset:     ' . $preset_slug;
+    if ( $total > 0 )          $body_lines[] = '  Total:      $' . number_format( $total, 2 );
+    if ( $per_unit > 0 )       $body_lines[] = '  Per unit:   $' . number_format( $per_unit, 2 );
+    if ( $qty > 0 )            $body_lines[] = '  Quantity:   ' . number_format( $qty );
+    if ( $days > 0 )           $body_lines[] = '  Days:       ' . $days . ' biz';
+    if ( $summary !== '' ) {
+        $body_lines[] = '';
+        $body_lines[] = 'SPEC:';
+        foreach ( explode( "\n", $summary ) as $line ) {
+            $body_lines[] = '  ' . $line;
+        }
+    }
+    if ( $reorder_url !== '' ) {
+        $body_lines[] = '';
+        $body_lines[] = 'OPEN THIS QUOTE IN THE CALCULATOR:';
+        $body_lines[] = $reorder_url;
+    }
+    $body_lines[] = '';
+    $body_lines[] = '— Submitted ' . current_time( 'M j, Y g:i a T' );
+
+    $staff_body = implode( "\n", $body_lines );
+    $staff_headers = array(
+        'Content-Type: text/plain; charset=UTF-8',
+        'Reply-To: ' . sprintf( '%s <%s>', $name, $email ),
+    );
+
+    // Log the submission as a pps_question post BEFORE sending so we keep
+    // a record even if mail delivery fails. wp_kses cleans the bodies for
+    // safe storage; emails were already plain text but this is defense in
+    // depth in case wp_insert_post stores HTML escapes oddly.
+    $post_title = sprintf( '%s — %s', $name, $calc_label !== '' ? $calc_label : 'Calculator' );
+    if ( $total > 0 ) $post_title .= sprintf( ' · $%s', number_format( $total, 2 ) );
+    $post_id = wp_insert_post( array(
+        'post_type'    => 'pps_question',
+        'post_status'  => 'publish',
+        'post_title'   => wp_strip_all_tags( $post_title ),
+        'post_content' => $message,
+    ), true );
+    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+        update_post_meta( $post_id, '_pps_q_name',         $name );
+        update_post_meta( $post_id, '_pps_q_email',        $email );
+        update_post_meta( $post_id, '_pps_q_phone',        $phone );
+        update_post_meta( $post_id, '_pps_q_calc_type',    $calc_type );
+        update_post_meta( $post_id, '_pps_q_calc_label',   $calc_label );
+        update_post_meta( $post_id, '_pps_q_preset_slug',  $preset_slug );
+        update_post_meta( $post_id, '_pps_q_total',        $total );
+        update_post_meta( $post_id, '_pps_q_per_unit',     $per_unit );
+        update_post_meta( $post_id, '_pps_q_qty',          $qty );
+        update_post_meta( $post_id, '_pps_q_days',         $days );
+        update_post_meta( $post_id, '_pps_q_summary',      $summary );
+        update_post_meta( $post_id, '_pps_q_reorder_url',  $reorder_url );
+        update_post_meta( $post_id, '_pps_q_user_ip',      isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '' );
+    }
+
+    $sent_staff = wp_mail( $recipient, $subject, $staff_body, $staff_headers );
+    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+        update_post_meta( $post_id, '_pps_q_email_sent', $sent_staff ? 1 : 0 );
+    }
+
+    // ── Compose customer confirmation ──
+    $site_name = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
+    $cust_subject = sprintf( 'We got your question — %s', $site_name );
+    $cust_lines = array();
+    $cust_lines[] = sprintf( 'Hi %s,', $name );
+    $cust_lines[] = '';
+    $cust_lines[] = 'Thanks for reaching out about your quote. We typically respond within 1 business day.';
+    $cust_lines[] = '';
+    $cust_lines[] = 'For reference, here is the quote you were looking at:';
+    $cust_lines[] = '';
+    if ( $calc_label !== '' ) $cust_lines[] = 'Calculator: ' . $calc_label;
+    if ( $total > 0 )         $cust_lines[] = 'Total:      $' . number_format( $total, 2 );
+    if ( $qty > 0 )           $cust_lines[] = 'Quantity:   ' . number_format( $qty );
+    if ( $summary !== '' ) {
+        $cust_lines[] = '';
+        foreach ( explode( "\n", $summary ) as $line ) $cust_lines[] = $line;
+    }
+    if ( $reorder_url !== '' ) {
+        $cust_lines[] = '';
+        $cust_lines[] = 'Re-open this quote in the calculator:';
+        $cust_lines[] = $reorder_url;
+    }
+    $cust_lines[] = '';
+    $cust_lines[] = 'Your question:';
+    $cust_lines[] = $message;
+    $cust_lines[] = '';
+    $cust_lines[] = sprintf( '— The %s team', $site_name );
+
+    $cust_headers = array( 'Content-Type: text/plain; charset=UTF-8' );
+    wp_mail( $email, $cust_subject, implode( "\n", $cust_lines ), $cust_headers );
+
+    if ( $sent_staff ) {
+        wp_send_json_success( array( 'message' => 'Thanks! We received your question and emailed you a copy. Expect a reply within 1 business day.' ) );
+    } else {
+        wp_send_json_error( array( 'message' => 'Sorry — there was a problem submitting your question. Please try again or call us directly.' ) );
+    }
+}
 
 function pps_ajax_add_to_cart() {
     check_ajax_referer( 'pps_add_to_cart', 'nonce' );
@@ -1659,6 +1963,18 @@ function pps_save_preset( $slug, $data ) {
     $currency = isset( $data['currency'] ) ? strtoupper( sanitize_text_field( (string) $data['currency'] ) ) : 'USD';
     if ( ! preg_match( '/^[A-Z]{3}$/', $currency ) ) $currency = 'USD';
 
+    // Per-preset sale override. 0 = use site-wide PCF.sale_discount_pct.
+    // Hard-capped at 0.50 to prevent typos like "15" instead of "0.15".
+    $sale_discount_pct = 0.0;
+    if ( isset( $data['sale_discount_pct'] ) && $data['sale_discount_pct'] !== '' ) {
+        $sd = floatval( $data['sale_discount_pct'] );
+        if ( $sd < 0 ) $sd = 0.0;
+        if ( $sd > 0.5 ) $sd = 0.5;
+        $sale_discount_pct = $sd;
+    }
+    $sale_label = isset( $data['sale_label'] ) ? sanitize_text_field( (string) $data['sale_label'] ) : '';
+    if ( strlen( $sale_label ) > 80 ) $sale_label = substr( $sale_label, 0, 80 );
+
     // ── Tier 1: simple field overrides (spec-table dispatcher) ──
     // Each key declares its sanitization strategy. pps_sanitize_override_value()
     // returns null to signal "drop this field"; we only store non-null results.
@@ -1794,19 +2110,21 @@ function pps_save_preset( $slug, $data ) {
     }
 
     $clean = array(
-        'slug'             => $slug,
-        'calc'             => $calc,
-        'title'            => $title,
-        'description'      => $description,
-        'image'            => $image,
-        'defaults'         => $defaults,
-        'price_from'       => $price_from,
-        'currency'         => $currency,
-        'overrides'        => $overrides,
-        'schema_overrides' => $schema_overrides,
-        'schema_extras'    => $schema_extras,
-        'faqs'             => $faqs,
-        'modified_at'      => time(), // sitemap <lastmod>; updated on every save
+        'slug'              => $slug,
+        'calc'              => $calc,
+        'title'             => $title,
+        'description'       => $description,
+        'image'             => $image,
+        'defaults'          => $defaults,
+        'price_from'        => $price_from,
+        'currency'          => $currency,
+        'sale_discount_pct' => $sale_discount_pct,
+        'sale_label'        => $sale_label,
+        'overrides'         => $overrides,
+        'schema_overrides'  => $schema_overrides,
+        'schema_extras'     => $schema_extras,
+        'faqs'              => $faqs,
+        'modified_at'       => time(), // sitemap <lastmod>; updated on every save
     );
 
     $presets = pps_get_presets();
@@ -2025,6 +2343,26 @@ function pps_render_preset_calculator( $preset ) {
     // reads PPS_CONFIG.defaults to pre-fill the form.
     if ( ! empty( $preset['defaults'] ) && is_array( $preset['defaults'] ) ) {
         $config['defaults'] = $preset['defaults'];
+    }
+
+    // Per-preset sale override. A non-zero preset sale overrides the site-wide
+    // PCF default; a non-empty preset label overrides too. Calculator JS only
+    // reads PCF.sale_*, so we mutate the injected PCF block.
+    if ( ! empty( $preset['sale_discount_pct'] ) || ! empty( $preset['sale_label'] ) ) {
+        if ( ! isset( $config['calc'] ) || ! is_array( $config['calc'] ) ) $config['calc'] = array();
+        if ( ! isset( $config['calc']['pcf'] ) || ! is_array( $config['calc']['pcf'] ) ) $config['calc']['pcf'] = array();
+        if ( ! empty( $preset['sale_discount_pct'] ) ) {
+            $config['calc']['pcf']['sale_discount_pct'] = floatval( $preset['sale_discount_pct'] );
+        }
+        if ( ! empty( $preset['sale_label'] ) ) {
+            $config['calc']['pcf']['sale_label'] = (string) $preset['sale_label'];
+        }
+    }
+
+    // Add-on visibility (per-calc-type, not per-preset). Same shape as the
+    // product-page render path.
+    if ( function_exists( 'pps_get_addons_visibility_for_calc' ) ) {
+        $config['addons'] = pps_get_addons_visibility_for_calc( $preset['calc'] );
     }
 
     // Build output buffer — we have to return a string, not echo.
