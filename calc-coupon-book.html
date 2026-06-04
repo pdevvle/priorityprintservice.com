@@ -3895,7 +3895,6 @@ function App(){
   const mob=useIsMobile();
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
-  const debugUnlocked = sets.some(s => s.name === "%3414");
   const[shareCopied,setShareCopied]=useState(false);
   // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
   const proofDebug = useMemo(() => {
@@ -3941,6 +3940,7 @@ function App(){
   const[sidesPrinted,setSidesPrinted]=useState(D.sidesPrinted||"double");
   const[magnetBacker,setMagnetBacker]=useState(Number(D.magnetBacker)||0);
   const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||10, name:"", colorMode:D.insideColor==="bw"?"bw":"color", colorPages:D.pages||10, bwPages:0}]);
+  const debugUnlocked = sets.some(s => s.name === "%3414");
   const[sizeLabel,setSizeLabel]=useState(D.sizeLabel || "5.5×8.5 (Opens to 8.5×11)");
   const[sizeMode,setSizeMode]=useState(D.sizeLabel==="Custom Size"?"custom":"preset");
   const[customLong,setCustomLong]=useState(D.customLong||8.5);
