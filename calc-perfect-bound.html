@@ -1193,6 +1193,20 @@ function Panel({result,compact}){
   const hasRush=sh&&sh.rushCost>0;
   const availRange=sh?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):String(days);
 
+  const ti=result.ti||{};
+  const _factors=[];
+  if(ti.coverPaper>0)_factors.push("paper lead time");
+  if(ti.vivid>0)_factors.push("vivid printing");
+  if(ti.coating>0)_factors.push("coating");
+  if(ti.bundling>0)_factors.push("bundling");
+  if(ti.roundCorner>0)_factors.push("round corners");
+  if(ti.perforation>0)_factors.push("perforation");
+  if(ti.outfold>0)_factors.push("outfold");
+  if(ti.artDesign>0||ti.artEdits>0)_factors.push("artwork");
+  if(ti.proof>0)_factors.push("proofing");
+  const _extraDays=Object.values(ti).reduce((s,v)=>s+(v||0),0);
+  const _hasExtra=_extraDays>=1&&_factors.length>0;
+
   if(compact){
     const moneyC=Math.max(0,total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
     const [dC,cC]=moneyC.split(".");
@@ -1208,7 +1222,7 @@ function Panel({result,compact}){
           {hasRush&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
         </div>
         <div style={{display:"flex",gap:12}}>
-          {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["Turn",days+"d"],["Avail.",availRange+"d"]].map(([l,v],i)=>(
+          {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["Avail.",availRange+" days"]].map(([l,v],i)=>(
             <div key={i} style={{textAlign:"center"}}>
               <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",opacity:.7}}>{l}</div>
               <div style={{fontSize:13,fontWeight:700}}>{v}</div>
@@ -1234,19 +1248,20 @@ function Panel({result,compact}){
         {hasRush&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
       </div>
       <div style={{display:"flex",borderBottom:`1px solid ${CC.border}`}}>
-        {[["Per Unit","$"+Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["Availability",availRange+" days"]].map(([l,v],i)=>(
-          <div key={i} style={{flex:1,padding:"11px 8px",textAlign:"center",borderRight:i<2?`1px solid ${CC.border}`:"none"}}>
+        {[["Per Unit","$"+Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()]].map(([l,v],i)=>(
+          <div key={i} style={{flex:1,padding:"11px 8px",textAlign:"center",borderRight:`1px solid ${CC.border}`}}>
             <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:CC.light,marginBottom:1}}>{l}</div>
             <div style={{fontSize:14.5,fontWeight:700,color:CC.dark}}>{v}</div>
           </div>
         ))}
-      </div>
-      <div style={{padding:"7px 18px",borderBottom:`1px solid ${CC.border}`,background:"#f0fdf4"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:11,color:"#16a34a",fontWeight:600}}>⏱ Production turnaround</span>
-          <span style={{fontSize:12,fontWeight:700,color:"#15803d"}}>{days} business days</span>
+        <div style={{flex:1,padding:"11px 8px",textAlign:"center",background:_hasExtra?"#fffbeb":"transparent",transition:"background .3s"}}>
+          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>Availability</div>
+          <div style={{fontSize:14.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{availRange+" days"}</div>
         </div>
       </div>
+      {_hasExtra&&<div style={{padding:"5px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
+        <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>* +{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
+      </div>}
       {sh&&<div style={{padding:"8px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fafafa",pointerEvents:"none"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:11,color:CC.light}}>Free delivery by</span>
