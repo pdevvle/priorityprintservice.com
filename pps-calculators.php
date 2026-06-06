@@ -3966,15 +3966,19 @@ add_filter( 'rank_math/sitemap/index', function( $xml ) {
 }, 10 );
 
 // ═══════════════════════════════════════════════════════════════
-// ONE-SHOT SELF-INSTALL: seed registry + copy calc-*.html to uploads
+// SELF-SYNC: copy calc-*.html from plugin dir → uploads dir on demand
 //
-// Runs once on first request after deploy. Self-disables via the
-// pps_calculators_seeded option. Safe to leave in place — won't re-run.
+// Runs on init. Fast no-op when nothing has changed (4 stat() calls,
+// kernel-cached). When a calc HTML in the plugin directory is newer
+// than its uploads-dir counterpart, this re-syncs it AND refreshes the
+// registry display name to include the BUILD chip embedded in the HTML
+// (so the dashboard shows e.g. "Brochures · 2026-05-20 · BR-RIGHTANGLE").
+//
+// Update workflow: push new calc HTMLs into the plugin directory; the
+// next request triggers the sync. Product assignments are preserved.
 // ═══════════════════════════════════════════════════════════════
 
 add_action( 'init', function() {
-    if ( get_option( 'pps_calculators_seeded' ) === 'yes' ) return;
-
     $calcs = array(
         'calc-preview-test.html'   => 'Saddle Stitch Booklets',
         'calc-perfect-bound.html'  => 'Perfect Bound Booklets',
@@ -3984,20 +3988,37 @@ add_action( 'init', function() {
 
     $plugin_dir = PPS_CALC_DIR;
     $upload_dir = pps_upload_dir();
-
-    $registry = get_option( 'pps_calculators_registry', array() );
+    $registry   = get_option( 'pps_calculators_registry', array() );
     if ( ! is_array( $registry ) ) $registry = array();
 
+    $changed   = false;
     $now_mysql = current_time( 'mysql' );
-    $any_copied = false;
 
-    foreach ( $calcs as $filename => $display_name ) {
+    foreach ( $calcs as $filename => $base_name ) {
         $src = $plugin_dir . $filename;
+        if ( ! file_exists( $src ) ) continue;
         $dst = trailingslashit( $upload_dir ) . $filename;
 
-        if ( ! file_exists( $src ) ) continue;
+        $src_mtime = filemtime( $src );
+        $dst_mtime = file_exists( $dst ) ? filemtime( $dst ) : 0;
+
+        // Force refresh if the current registry name has no build date
+        // (e.g. seeded by the older install hook before this format existed).
+        $current_name    = isset( $registry[ $filename ]['name'] ) ? (string) $registry[ $filename ]['name'] : '';
+        $has_build_label = (bool) preg_match( '/\d{4}-\d{2}-\d{2}/', $current_name );
+
+        if ( $dst_mtime >= $src_mtime && $has_build_label ) continue;
+
         if ( ! @copy( $src, $dst ) ) continue;
-        $any_copied = true;
+        // Align dst mtime with src so the next request short-circuits.
+        @touch( $dst, $src_mtime );
+
+        // Extract the BUILD chip from the calculator HTML for the display name.
+        $build_label = $base_name;
+        $contents    = @file_get_contents( $dst );
+        if ( $contents !== false && preg_match( '/BUILD\s+([^<\n]+?)</', $contents, $m ) ) {
+            $build_label = $base_name . ' · ' . trim( $m[1] );
+        }
 
         $existing_products = '';
         if ( isset( $registry[ $filename ]['products'] ) && is_string( $registry[ $filename ]['products'] ) ) {
@@ -4005,14 +4026,14 @@ add_action( 'init', function() {
         }
 
         $registry[ $filename ] = array(
-            'name'     => $display_name,
+            'name'     => $build_label,
             'products' => $existing_products,
             'uploaded' => $now_mysql,
         );
+        $changed = true;
     }
 
-    if ( $any_copied ) {
+    if ( $changed ) {
         update_option( 'pps_calculators_registry', $registry, false );
-        update_option( 'pps_calculators_seeded', 'yes', false );
     }
 }, 5 );
