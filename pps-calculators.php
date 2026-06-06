@@ -3964,3 +3964,55 @@ add_filter( 'rank_math/sitemap/index', function( $xml ) {
     $append .= "</sitemap>\n";
     return is_string( $xml ) ? $xml . $append : $xml;
 }, 10 );
+
+// ═══════════════════════════════════════════════════════════════
+// ONE-SHOT SELF-INSTALL: seed registry + copy calc-*.html to uploads
+//
+// Runs once on first request after deploy. Self-disables via the
+// pps_calculators_seeded option. Safe to leave in place — won't re-run.
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'init', function() {
+    if ( get_option( 'pps_calculators_seeded' ) === 'yes' ) return;
+
+    $calcs = array(
+        'calc-preview-test.html'   => 'Saddle Stitch Booklets',
+        'calc-perfect-bound.html'  => 'Perfect Bound Booklets',
+        'calc-brochure.html'       => 'Brochures',
+        'calc-coupon-book.html'    => 'Coupon Books',
+    );
+
+    $plugin_dir = PPS_CALC_DIR;
+    $upload_dir = pps_upload_dir();
+
+    $registry = get_option( 'pps_calculators_registry', array() );
+    if ( ! is_array( $registry ) ) $registry = array();
+
+    $now_mysql = current_time( 'mysql' );
+    $any_copied = false;
+
+    foreach ( $calcs as $filename => $display_name ) {
+        $src = $plugin_dir . $filename;
+        $dst = trailingslashit( $upload_dir ) . $filename;
+
+        if ( ! file_exists( $src ) ) continue;
+        if ( ! @copy( $src, $dst ) ) continue;
+        $any_copied = true;
+
+        $existing_products = '';
+        if ( isset( $registry[ $filename ]['products'] ) && is_string( $registry[ $filename ]['products'] ) ) {
+            $existing_products = $registry[ $filename ]['products'];
+        }
+
+        $registry[ $filename ] = array(
+            'name'     => $display_name,
+            'products' => $existing_products,
+            'uploaded' => $now_mysql,
+        );
+    }
+
+    if ( $any_copied ) {
+        update_option( 'pps_calculators_registry', $registry, false );
+        update_option( 'pps_calculators_seeded', 'yes', false );
+    }
+}, 5 );
