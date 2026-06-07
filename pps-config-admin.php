@@ -124,11 +124,12 @@ function pps_default_config() {
             'perfectbound_markup_coef_tS'       => 0.275,
             'perfectbound_size_discount'        => 0,
             'perfectbound_surcharge'            => 0.30,
-            // Coupon book markup (separate from perfect-bound; pads/coupon books)
-            'couponbook_maximummarkup'          => 8,
-            'couponbook_minimummarkup'          => 1.5,
+            // Coupon book markup — saddle/PB-mirrored single-axis (2026-05-28)
+            'couponbook_maximummarkup'          => 3.6,
+            'couponbook_minimummarkup'          => 1.45,
+            'couponbook_markup_coef_tS'         => 0.275,
             'couponbook_size_discount'          => 0,
-            'couponbook_discount_log_coef'      => 2.2,
+            'couponbook_surcharge'              => 0.30,
             'magneticstripapplication_perhour'   => 120,
             'uvcoaterimpressionsperhour'        => 250,
             'roundcornerperhour'                => 75,
@@ -141,6 +142,14 @@ function pps_default_config() {
             'two_staple_threshold'              => 5.25,
             'non_inventory_fee'                 => 35,
             'backend_base_rate'                 => 10,    // flat per-order fee for brochures
+            // Outfold (PB fold-out page tipped into the spine) — Tier C aggressive defaults
+            'outfold_per_book_handling'         => 0.40,  // per-book hand-insertion labor ($/book/fold)
+            'outfold_setup'                     => 35,    // flat setup per fold per run ($)
+            'outfold_specialty_markup'          => 1.30,  // specialty multiplier on the outfold subtotal
+            // Cart-price tampering defense (server-side floor on add-to-cart).
+            // Submitted pps_price must be >= max(absolute_min, regular_price * min_pct).
+            'pps_min_price_pct'                 => 0.5,
+            'pps_absolute_min_price'            => 5,
             'bw_discount_rate'                  => 0.3,
             'easy_discount_rate'                => 0.05,
             'common_discount_max'               => 1500,
@@ -1140,10 +1149,11 @@ function pps_config_tab_production( $cfg ) {
             'perfectbound_surcharge'       => array( 'Pricing Surcharge', '×' ),
         ),
         'Coupon Book Markup' => array(
-            'couponbook_maximummarkup'       => array( 'Max Markup', '×' ),
-            'couponbook_minimummarkup'        => array( 'Min Markup', '×' ),
-            'couponbook_size_discount'        => array( '8.5×11 Size Disc.', '×' ),
-            'couponbook_discount_log_coef'    => array( 'Discount Curve Steepness', '×ln(tS)' ),
+            'couponbook_maximummarkup'    => array( 'Max Markup', '×' ),
+            'couponbook_minimummarkup'    => array( 'Min Markup', '×' ),
+            'couponbook_markup_coef_tS'   => array( 'Sheet Decay Coef', '×ln(tS)' ),
+            'couponbook_size_discount'    => array( '8.5×11 Size Disc.', '×' ),
+            'couponbook_surcharge'        => array( 'Pricing Surcharge', '×' ),
             'magneticstripapplication_perhour' => array( 'Magnetic Backer', '/hr' ),
         ),
         'Discounts' => array(
