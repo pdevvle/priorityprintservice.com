@@ -1054,6 +1054,30 @@ function pps_ajax_add_to_cart() {
         $cart_item_data['pps_artwork_path'] = $artwork_path;
     }
 
+    // Full approval package: every uploaded deliverable (raw + print-ready PDF +
+    // preview pages + manifest) as an array of { path, name }. The raw file is
+    // also kept in pps_artwork_path above for reorder/back-compat.
+    $files_raw = wp_unslash( $_POST['pps_artwork_files'] ?? '' );
+    if ( $files_raw ) {
+        $decoded = json_decode( $files_raw, true );
+        if ( is_array( $decoded ) ) {
+            $clean = array();
+            foreach ( $decoded as $f ) {
+                if ( ! is_array( $f ) || empty( $f['path'] ) ) continue;
+                $p = sanitize_text_field( $f['path'] );
+                // Same path-traversal guard as the single-file path above.
+                if ( strpos( $p, '..' ) !== false || strpos( $p, 'pps-artwork/' ) !== 0 ) continue;
+                $clean[] = array(
+                    'path' => $p,
+                    'name' => sanitize_file_name( $f['name'] ?? basename( $p ) ),
+                );
+            }
+            if ( $clean ) {
+                $cart_item_data['pps_artwork_files'] = $clean;
+            }
+        }
+    }
+
     if ( ! WC()->cart ) {
         wp_send_json_error( 'Cart not available.' );
     }
@@ -1077,7 +1101,7 @@ function pps_ajax_add_to_cart() {
 // ═══════════════════════════════════════════════════════════════
 
 add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $values ) {
-    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path' );
+    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path', 'pps_artwork_files' );
     foreach ( $keys as $k ) {
         if ( isset( $values[ $k ] ) ) {
             $cart_item[ $k ] = $values[ $k ];
@@ -1260,6 +1284,21 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         }
     }
 
+    // Full approval package → order item (JSON). The Drive uploader pushes every
+    // deliverable in this list into the order folder, not just the raw file.
+    if ( ! empty( $values['pps_artwork_files'] ) && is_array( $values['pps_artwork_files'] ) ) {
+        $clean = array();
+        foreach ( $values['pps_artwork_files'] as $f ) {
+            if ( ! is_array( $f ) || empty( $f['path'] ) ) continue;
+            $p = sanitize_text_field( $f['path'] );
+            if ( strpos( $p, '..' ) !== false || strpos( $p, 'pps-artwork/' ) !== 0 ) continue;
+            $clean[] = array( 'path' => $p, 'name' => sanitize_file_name( $f['name'] ?? basename( $p ) ) );
+        }
+        if ( $clean ) {
+            $item->add_meta_data( '_pps_artwork_files', wp_json_encode( $clean ), true );
+        }
+    }
+
     // Visible in order emails
     $item->add_meta_data( 'Estimated Delivery', $delivery->format( 'l, M j, Y' ), true );
     $item->add_meta_data( 'Order Summary', $values['pps_summary'] ?? '', true );
@@ -1388,6 +1427,7 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
     $hidden[] = '_pps_rush';
     $hidden[] = '_pps_delivery_date';
     $hidden[] = '_pps_artwork_path';
+    $hidden[] = '_pps_artwork_files';
     return $hidden;
 });
 

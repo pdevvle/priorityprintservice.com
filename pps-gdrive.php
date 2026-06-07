@@ -475,64 +475,106 @@ function pps_process_artwork_upload( $order_id ) {
         // Skip items already uploaded to Drive (idempotent on retry)
         if ( $item->get_meta( '_pps_artwork_location' ) === 'gdrive' ) continue;
 
-        $artwork_path = $item->get_meta( '_pps_artwork_path' );
-        if ( ! $artwork_path ) continue;
-
-        $full_path = trailingslashit( $upload['basedir'] ) . $artwork_path;
-        if ( ! file_exists( $full_path ) ) {
-            error_log( 'PPS Drive: File missing for order ' . $order_id . ': ' . $artwork_path );
-            continue;
+        // Build the deliverable list for this item. Newer orders carry the full
+        // approval package in '_pps_artwork_files' (array/JSON of { path, name }:
+        // raw + print-ready PDF + preview pages + manifest). Older orders only
+        // have the single raw '_pps_artwork_path' — fall back to that.
+        $deliverables = array();
+        $files_meta   = $item->get_meta( '_pps_artwork_files' );
+        if ( $files_meta ) {
+            $decoded = is_array( $files_meta ) ? $files_meta : json_decode( (string) $files_meta, true );
+            if ( is_array( $decoded ) ) {
+                foreach ( $decoded as $f ) {
+                    if ( ! is_array( $f ) || empty( $f['path'] ) ) continue;
+                    $rel = (string) $f['path'];
+                    if ( strpos( $rel, '..' ) !== false || strpos( $rel, 'pps-artwork/' ) !== 0 ) continue;
+                    $deliverables[] = array(
+                        'path' => $rel,
+                        'name' => ! empty( $f['name'] ) ? sanitize_file_name( $f['name'] ) : basename( $rel ),
+                    );
+                }
+            }
         }
+
+        $artwork_path = $item->get_meta( '_pps_artwork_path' );
+        if ( empty( $deliverables ) && $artwork_path ) {
+            $product   = $item->get_product();
+            $prod_name = $product ? sanitize_file_name( $product->get_name() ) : 'artwork';
+            $deliverables[] = array(
+                'path' => $artwork_path,
+                'name' => $prod_name . '.' . pathinfo( $artwork_path, PATHINFO_EXTENSION ),
+            );
+        }
+
+        if ( empty( $deliverables ) ) continue;
 
         $had_artwork = true;
-        $token = pathinfo( basename( $artwork_path ), PATHINFO_FILENAME );
 
-        $thumb_name = pps_generate_thumbnail( $full_path, $token );
-        if ( $thumb_name ) {
-            $item->update_meta_data( '_pps_artwork_thumb', $thumb_name );
-            $item->save();
-        }
-
+        // Create the order folder once (persist immediately so retries reuse it).
         $folder_id = $order->get_meta( '_pps_gdrive_folder_id' );
         if ( ! $folder_id ) {
             $folder_name = 'Order #' . $order_id . ' — ' . $order->get_billing_first_name() . ' ' . $order->get_billing_last_name();
             $folder_id   = pps_gdrive_create_folder( $folder_name, pps_gdrive_parent_folder() );
             if ( $folder_id ) {
                 $order->update_meta_data( '_pps_gdrive_folder_id', $folder_id );
+                $order->save();
             }
         }
-
         if ( ! $folder_id ) {
             error_log( 'PPS Drive: Failed to create folder for order ' . $order_id );
             $all_succeeded = false;
             continue;
         }
 
-        $product        = $item->get_product();
-        $prod_name      = $product ? sanitize_file_name( $product->get_name() ) : 'artwork';
-        $original_ext   = pathinfo( $artwork_path, PATHINFO_EXTENSION );
-        $drive_filename = $prod_name . '.' . $original_ext;
+        // Thumbnail from the first (raw) deliverable, if present and not yet made.
+        $raw_full = trailingslashit( $upload['basedir'] ) . $deliverables[0]['path'];
+        if ( file_exists( $raw_full ) && ! $item->get_meta( '_pps_artwork_thumb' ) ) {
+            $thumb_name = pps_generate_thumbnail( $raw_full, pathinfo( basename( $deliverables[0]['path'] ), PATHINFO_FILENAME ) );
+            if ( $thumb_name ) {
+                $item->update_meta_data( '_pps_artwork_thumb', $thumb_name );
+                $item->save();
+            }
+        }
 
-        $file_id = pps_gdrive_upload_file( $full_path, $drive_filename, $folder_id );
+        // Upload every deliverable. A file already gone locally was uploaded on a
+        // previous (partial) run — skip it rather than fail, so retries converge.
+        $item_failed = false;
+        foreach ( $deliverables as $idx => $d ) {
+            $full_path = trailingslashit( $upload['basedir'] ) . $d['path'];
+            if ( ! file_exists( $full_path ) ) {
+                // A missing raw file on a never-uploaded item is a real error;
+                // anything else is assumed already on Drive from a prior run.
+                if ( $idx === 0 && ! $item->get_meta( '_pps_gdrive_file_id' ) ) {
+                    error_log( 'PPS Drive: Raw file missing for order ' . $order_id . ': ' . $d['path'] );
+                    $item_failed = true;
+                }
+                continue;
+            }
 
-        if ( $file_id ) {
-            $drive_url = 'https://drive.google.com/file/d/' . $file_id . '/view';
-            // Save metadata BEFORE deleting local file — if this fails, retry will re-upload (duplicate on Drive, but no data loss)
-            $item->update_meta_data( '_pps_gdrive_file_id', $file_id );
-            $item->update_meta_data( '_pps_gdrive_url', $drive_url );
+            $file_id = pps_gdrive_upload_file( $full_path, $d['name'], $folder_id );
+            if ( $file_id ) {
+                // The raw file (index 0) drives the admin "Open in Google Drive" link.
+                if ( $idx === 0 ) {
+                    $item->update_meta_data( '_pps_gdrive_file_id', $file_id );
+                    $item->update_meta_data( '_pps_gdrive_url', 'https://drive.google.com/file/d/' . $file_id . '/view' );
+                    $item->save();
+                }
+                // Only delete the local file after the upload is confirmed.
+                if ( file_exists( $full_path ) ) unlink( $full_path );
+                @rmdir( dirname( $full_path ) );
+                @rmdir( dirname( dirname( $full_path ) ) );
+                error_log( 'PPS Drive: Order ' . $order_id . ' item ' . $item_id . ' → ' . $d['name'] . ' (' . $file_id . ')' );
+            } else {
+                error_log( 'PPS Drive: Upload failed for order ' . $order_id . ' file ' . $d['name'] . '. Kept locally.' );
+                $item_failed = true;
+            }
+        }
+
+        if ( $item_failed ) {
+            $all_succeeded = false;
+        } else {
             $item->update_meta_data( '_pps_artwork_location', 'gdrive' );
             $item->save();
-
-            // Only delete local file after metadata is confirmed saved
-            // Keep artwork_path for reorder reference even though local file is gone
-            if ( file_exists( $full_path ) ) unlink( $full_path );
-            @rmdir( dirname( $full_path ) );
-            @rmdir( dirname( dirname( $full_path ) ) );
-
-            error_log( 'PPS Drive: Order ' . $order_id . ' item ' . $item_id . ' → ' . $file_id );
-        } else {
-            error_log( 'PPS Drive: Upload failed for order ' . $order_id . '. File kept locally.' );
-            $all_succeeded = false;
         }
     }
 
@@ -595,5 +637,6 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
         '_pps_artwork_thumb', '_pps_artwork_location',
         '_pps_gdrive_file_id', '_pps_gdrive_url',
         '_pps_gdrive_folder_id', '_pps_drive_attempts',
+        '_pps_artwork_files',
     ) );
 });

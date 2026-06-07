@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-07 · SS-UPLOAD-RESILIENT</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-07 · SS-DRIVE-PACKAGE</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -3970,6 +3970,10 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
 
   // ── Server mode ──
   let artworkPath = "";
+  // Every successfully uploaded deliverable as { path, name } — the full
+  // approval package, sent to the cart so all of it lands in the order's
+  // Google Drive folder (not just the raw file kept in artworkPath).
+  const uploadedFiles = [];
 
   if (artFiles.type === "files") {
     const total_files = artFiles.list.length;
@@ -3994,6 +3998,7 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
         });
         if (data.success && data.data && data.data.path) {
           if (!artworkPath) artworkPath = data.data.path;
+          uploadedFiles.push({ path: data.data.path, name: file.name });
         } else {
           const reason = (data && data.data) || "Unknown error";
           if (isPrimary) {
@@ -4032,6 +4037,7 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     const parsed = JSON.parse(metadata);
     fd.append("pps_biz_days", String(parsed.requestedBizDays || parsed.freeDeliveryBizDays || 5));
     if (artworkPath) fd.append("pps_artwork_path", artworkPath);
+    if (uploadedFiles.length) fd.append("pps_artwork_files", JSON.stringify(uploadedFiles));
 
     const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: fd });
     const data = await resp.json();
