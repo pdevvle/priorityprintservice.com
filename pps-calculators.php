@@ -442,9 +442,35 @@ add_action( 'wp', function() {
         wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
         wp_enqueue_script( 'pps-pdfjs', 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
         wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
+        // jsPDF — for generating print-ready PDFs. Pre-loading via wp_enqueue_script
+        // removes the runtime <script> injection in the calc HTML, which was a
+        // DOM-mutation source contributing to React removeChild errors.
+        wp_enqueue_script( 'pps-jspdf', 'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js', array(), '2.5.1', true );
         // Babel must load after React so transpiled code can find it
-        wp_enqueue_script( 'pps-babel', 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs' ), '7.26.9', true );
+        wp_enqueue_script( 'pps-babel', 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
     });
+
+    // ── External-JS hardening on calculator product pages ──
+    // The calc's React mount is fragile to non-React DOM mutations. We
+    // suppress the two known production sources:
+    //  1) WCPA's frontend bundle — form is CSS-hidden but its JS still
+    //     mounts and mutates fields that can collide with React.
+    //  2) WP Rocket lazy-load + delay-JS — both rewrite DOM attributes
+    //     post-mount, producing "Failed to execute 'removeChild' on Node"
+    //     errors after artwork approval.
+    add_action( 'wp_enqueue_scripts', function() {
+        foreach ( array( 'wcpa-front', 'wcpa-shared', 'wcpa_front', 'wcpa-modal', 'wcpa-frontend' ) as $h ) {
+            wp_dequeue_script( $h );
+            wp_dequeue_style( $h );
+        }
+    }, 100 );
+    add_filter( 'do_rocket_lazyload',          '__return_false' );
+    add_filter( 'do_rocket_lazyload_iframes',  '__return_false' );
+    add_filter( 'do_rocket_delay_js',          '__return_false' );
+    add_filter( 'rocket_lazyload_excluded_src', function( $excluded ) {
+        $excluded[] = 'pps-calculator';
+        return $excluded;
+    } );
 
     // Embed calculator inline
     add_action( 'woocommerce_after_single_product_summary', function() use ( $filepath, $product_id ) {
@@ -2287,8 +2313,25 @@ add_action( 'wp_enqueue_scripts', function() {
     wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
     wp_enqueue_script( 'pps-pdfjs',     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
     wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
-    wp_enqueue_script( 'pps-babel',     'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs' ), '7.26.9', true );
+    // jsPDF — pre-loaded to avoid the runtime script injection in the calc HTML
+    wp_enqueue_script( 'pps-jspdf',     'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js', array(), '2.5.1', true );
+    wp_enqueue_script( 'pps-babel',     'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
 } );
+
+// ── External-JS hardening on preset URLs (mirrors the product-page logic) ──
+add_action( 'wp_enqueue_scripts', function() {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
+    foreach ( array( 'wcpa-front', 'wcpa-shared', 'wcpa_front', 'wcpa-modal', 'wcpa-frontend' ) as $h ) {
+        wp_dequeue_script( $h );
+        wp_dequeue_style( $h );
+    }
+}, 100 );
+add_action( 'wp', function() {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
+    add_filter( 'do_rocket_lazyload',         '__return_false' );
+    add_filter( 'do_rocket_lazyload_iframes', '__return_false' );
+    add_filter( 'do_rocket_delay_js',         '__return_false' );
+}, 5 );
 
 /**
  * Render the calculator + its config inline as the page content.
