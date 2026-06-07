@@ -633,7 +633,9 @@ function pps_ajax_upload_artwork() {
     $file = $_FILES['artwork'];
     $ext  = strtolower( pathinfo( $file['name'], PATHINFO_EXTENSION ) );
 
-    $allowed = array( 'pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'eps', 'ai' );
+    // 'txt' is permitted for the generated manipulation-manifest deliverable
+    // (plain-text record of art transforms) that ships with the approval package.
+    $allowed = array( 'pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'eps', 'ai', 'txt' );
     if ( ! in_array( $ext, $allowed, true ) ) {
         wp_send_json_error( 'File type not allowed: .' . $ext );
     }
