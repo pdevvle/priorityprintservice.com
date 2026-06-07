@@ -95,7 +95,16 @@ function pps_artwork_dir() {
 // ═══════════════════════════════════════════════════════════════
 
 function pps_get_registry() {
-    return get_option( PPS_CALC_OPTION, array() );
+    $reg = get_option( PPS_CALC_OPTION, array() );
+    // The MCP wp_update_option endpoint serialises array payloads as JSON
+    // strings; decode so callers always receive an array (same tolerance
+    // pps-html-deploy.php applies to its pending-attachments option). The
+    // next pps_save_registry() rewrites the option in native array form.
+    if ( is_string( $reg ) ) {
+        $decoded = json_decode( $reg, true );
+        $reg = is_array( $decoded ) ? $decoded : array();
+    }
+    return is_array( $reg ) ? $reg : array();
 }
 
 function pps_save_registry( $reg ) {
