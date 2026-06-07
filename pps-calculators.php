@@ -672,6 +672,18 @@ function pps_ajax_upload_artwork() {
     ) );
 }
 
+// Ensure WordPress accepts .txt uploads. The approval-package manipulation
+// manifest is a plain-text file; some security plugins (e.g. AIOS) strip
+// text/plain from the allowed-mime list, which would make wp_check_filetype()
+// return an empty type (and any wp_handle_upload/media path reject the file).
+// Registering it guarantees .txt is recognised as text/plain site-wide.
+add_filter( 'upload_mimes', function( $mimes ) {
+    if ( empty( $mimes['txt'] ) ) {
+        $mimes['txt'] = 'text/plain';
+    }
+    return $mimes;
+} );
+
 // ═══════════════════════════════════════════════════════════════
 // AJAX: ADD TO CART
 // ═══════════════════════════════════════════════════════════════
