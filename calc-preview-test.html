@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-07 · SS-DOMGUARD</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-07 · SS-CARTFIX-PREVIEWHTML</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -3322,7 +3322,9 @@ update();
                             pkg.previewBlobs.forEach((b, i) => {
                               if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
                             });
-                            if (pkg.previewHtmlBlob) files.push(new File([pkg.previewHtmlBlob], baseName + "_preview.html", { type: "text/html" }));
+                            // The _preview.html deliverable is intentionally NOT attached to the
+                            // order upload — it is a staff-only download (debug-gated, art modal only).
+                            // Attaching it broke the add-to-cart / order upload flow.
                             files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
                             onArtwork({ type: "files", list: files });
                           }
@@ -3389,7 +3391,7 @@ update();
                     approvalPkg.previewBlobs.forEach((b, i) => {
                       if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
                     });
-                    if (approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
+                    if (debug && approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
                     if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
                     for (let i = 0; i < files.length; i++) {
                       dlFile(files[i][0], files[i][1]);
@@ -3424,7 +3426,7 @@ update();
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
                           }}>Previews ({previewCount})</button>
                         )}
-                        {approvalPkg.previewHtmlBlob && (
+                        {debug && approvalPkg.previewHtmlBlob && (
                           <button type="button" onClick={() => dlFile(approvalPkg.previewHtmlBlob, baseName + "_preview.html")} style={{
                             padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(99,102,241,.4)",
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(99,102,241,.12)", color:"#a5b4fc",
@@ -4861,7 +4863,7 @@ function App(){
               <div>
                 <div style={{marginBottom:6}}>
                   {uploadProgress.phase === "upload"
-                    ? `Uploading${uploadProgress.fileCount > 1 ? ` file ${uploadProgress.fileIdx + 1}/${uploadProgress.fileCount}` : ""}… ${uploadProgress.pct}%`
+                    ? `Uploading file(s) and page(s)${uploadProgress.fileCount > 1 ? ` ${uploadProgress.fileIdx + 1}/${uploadProgress.fileCount}` : ""}… ${uploadProgress.pct}%`
                     : "Adding to cart…"
                   }
                 </div>
@@ -4875,7 +4877,7 @@ function App(){
                   <div style={{fontSize:10,fontWeight:500,opacity:.7,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{uploadProgress.fileName}</div>
                 )}
               </div>
-            ) : submitting ? "Uploading artwork…" : "Add to Order"}
+            ) : submitting ? "Uploading file(s) and page(s)…" : "Add to Order"}
           </button>
           <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
@@ -4907,7 +4909,7 @@ function App(){
             disabled={!!result?.error?.length||submitting}>
             {submitting && uploadProgress ? (
               <div>
-                <div style={{fontSize:12}}>{uploadProgress.phase === "upload" ? `Uploading… ${uploadProgress.pct}%` : "Adding…"}</div>
+                <div style={{fontSize:12}}>{uploadProgress.phase === "upload" ? `Uploading file(s) and page(s)… ${uploadProgress.pct}%` : "Adding…"}</div>
                 <div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}>
                   <div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width: uploadProgress.phase === "upload"
                     ? `${((uploadProgress.fileIdx / uploadProgress.fileCount) + (uploadProgress.pct / 100 / uploadProgress.fileCount)) * 100}%`
@@ -4915,7 +4917,7 @@ function App(){
                   }}/>
                 </div>
               </div>
-            ) : submitting ? "Uploading…" : "Add to Order"}
+            ) : submitting ? "Uploading file(s) and page(s)…" : "Add to Order"}
           </button>
         </div>
       </div>}
