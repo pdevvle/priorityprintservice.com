@@ -623,8 +623,30 @@ add_action( 'wp', function() {
 add_action( 'wp_ajax_pps_upload_artwork', 'pps_ajax_upload_artwork' );
 add_action( 'wp_ajax_nopriv_pps_upload_artwork', 'pps_ajax_upload_artwork' );
 
+// Per-IP rate-limit key for the artwork upload endpoint. Mirrors
+// pps_quote_question_rate_key() so both nopriv endpoints throttle the same way.
+function pps_upload_rate_key() {
+    $ip   = isset( $_SERVER['REMOTE_ADDR'] ) ? $_SERVER['REMOTE_ADDR'] : '';
+    $salt = defined( 'AUTH_SALT' ) ? AUTH_SALT : 'pps';
+    return 'pps_up_' . substr( hash( 'sha256', $ip . $salt ), 0, 24 );
+}
+
 function pps_ajax_upload_artwork() {
     check_ajax_referer( 'pps_upload_artwork', 'nonce' );
+
+    // ── Rate limit: cap a single IP's uploads to blunt flood / storage-
+    // exhaustion abuse of this unauthenticated endpoint. The threshold is
+    // deliberately generous: one approval package alone is several deliverables
+    // (raw file, print-ready PDF, preview JPEGs, manifest), and a customer may
+    // upload front/back art across multiple line items plus re-uploads after
+    // corrections — so a real session legitimately runs to a few dozen files.
+    // 60 / 15 min never touches a genuine customer but stops an automated flood.
+    $rkey     = pps_upload_rate_key();
+    $attempts = (int) get_transient( $rkey );
+    if ( $attempts >= 60 ) {
+        wp_send_json_error( array( 'message' => 'Too many uploads from your address. Please try again in a few minutes.' ), 429 );
+    }
+    set_transient( $rkey, $attempts + 1, 15 * MINUTE_IN_SECONDS );
 
     if ( empty( $_FILES['artwork'] ) || $_FILES['artwork']['error'] !== UPLOAD_ERR_OK ) {
         wp_send_json_error( 'No file received.' );
@@ -642,6 +664,43 @@ function pps_ajax_upload_artwork() {
 
     if ( $file['size'] > 200 * 1024 * 1024 ) {
         wp_send_json_error( 'File too large (max 200MB).' );
+    }
+
+    // ── Content validation: confirm the file's actual bytes match the claimed
+    // extension via libmagic (finfo), so a renamed executable/script/HTML file
+    // can't slip through behind an image/PDF name. This blocks extension
+    // spoofing; it cannot vet a genuinely-malicious-but-valid PDF/EPS (nothing
+    // at this layer can — those are handled by how the synced files are opened).
+    // The per-extension allow-list is tolerant of real-world detector variance:
+    // modern .ai reports as application/pdf, EPS as application/postscript, and
+    // some TIFFs as image/x-tiff. finfo is effectively always present on the
+    // host; if it were ever missing we fall through to the extension gate above
+    // rather than block every legitimate upload.
+    if ( is_uploaded_file( $file['tmp_name'] ) && function_exists( 'finfo_open' ) ) {
+        $finfo = finfo_open( FILEINFO_MIME_TYPE );
+        if ( $finfo ) {
+            $detected = finfo_file( $finfo, $file['tmp_name'] );
+            finfo_close( $finfo );
+            if ( is_string( $detected ) && $detected !== '' ) {
+                // Normalise: lower-case, drop any "; charset=..." suffix.
+                $detected = strtolower( trim( explode( ';', $detected )[0] ) );
+                $mime_map = array(
+                    'pdf'  => array( 'application/pdf' ),
+                    'jpg'  => array( 'image/jpeg' ),
+                    'jpeg' => array( 'image/jpeg' ),
+                    'png'  => array( 'image/png' ),
+                    'tif'  => array( 'image/tiff', 'image/x-tiff' ),
+                    'tiff' => array( 'image/tiff', 'image/x-tiff' ),
+                    'eps'  => array( 'application/postscript', 'application/eps', 'image/eps', 'image/x-eps' ),
+                    'ai'   => array( 'application/postscript', 'application/pdf', 'application/illustrator' ),
+                    'txt'  => array( 'text/plain' ),
+                );
+                $accepted = isset( $mime_map[ $ext ] ) ? $mime_map[ $ext ] : array();
+                if ( ! in_array( $detected, $accepted, true ) ) {
+                    wp_send_json_error( 'File contents do not match a .' . $ext . ' file.' );
+                }
+            }
+        }
     }
 
     // Unique filename: timestamp-hash.ext
