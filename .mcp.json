@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "astra-staging": {
+      "type": "http",
+      "url": "https://woocommerce-70867-4915293.cloudwaysapps.com/wp-json/astra/v1/mcp",
+      "headers": {
+        "Authorization": "${ASTRA_MCP_AUTH}"
+      }
+    }
+  }
+}
