@@ -100,9 +100,43 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-07 · SS-ERRORBOUNDARY</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-07 · SS-DOMGUARD</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
+
+// ── Defensive DOM guard ──────────────────────────────────────────────
+// This calculator runs embedded in a heavy WordPress page. Third-party
+// scripts (chat widgets, image optimizers, analytics) and browser
+// features like auto-translate can wrap or move DOM nodes that React
+// owns. When React later commits a removal/insertion it calls
+// parent.removeChild(node) / parent.insertBefore(node, ref) on a node
+// whose parent has since changed, throwing "Failed to execute
+// 'removeChild' on 'Node': The node to be removed is not a child of this
+// node" during the commit phase — the crash seen right after artwork
+// approval (a large re-render that also reconciles the modal portaled
+// into document.body). These guards turn those two calls into graceful
+// no-ops in exactly that situation and are a pass-through otherwise. This
+// is React's recommended workaround (facebook/react#11538).
+(function () {
+  if (typeof Node !== "function" || !Node.prototype || Node.prototype.__ppsDomGuard) return;
+  Node.prototype.__ppsDomGuard = true;
+  const _removeChild = Node.prototype.removeChild;
+  Node.prototype.removeChild = function (child) {
+    if (child && child.parentNode !== this) {
+      try { console.warn("[PPS calc] removeChild guard: node is not a child of the expected parent; skipping.", child); } catch (e) {}
+      return child;
+    }
+    return _removeChild.apply(this, arguments);
+  };
+  const _insertBefore = Node.prototype.insertBefore;
+  Node.prototype.insertBefore = function (newNode, referenceNode) {
+    if (referenceNode && referenceNode.parentNode !== this) {
+      try { console.warn("[PPS calc] insertBefore guard: reference node is not a child of the expected parent; appending instead.", referenceNode); } catch (e) {}
+      return this.appendChild(newNode);
+    }
+    return _insertBefore.apply(this, arguments);
+  };
+})();
 
 // Error boundary — catches render/commit-phase crashes (e.g. the third-party
 // DOM-mutation vs React reconciliation conflict seen after artwork approval)
