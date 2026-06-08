@@ -1,0 +1,260 @@
+/*
+ * BACKUP — Staging "Additional CSS" (Customizer), Astra theme
+ * Site:   https://woocommerce-70867-4915293.cloudwaysapps.com  (STAGING)
+ * Pulled: 2026-06-08 via pps_get_custom_css
+ * Reason: snapshot before appending the "PPS Clean Polish" layer.
+ * Restore: pps_set_custom_css with append=false and this exact content.
+ */
+
+.wcpa_price_summary {
+  position: sticky;
+  bottom: 1% !important; /* Ensure this value is what you intend */
+  /* If you also had other offset properties like top, left, or right, include them here as needed. */
+}
+
+/* BORDER */
+.wcpa_form_outer .wcpa_form_item select, .wcpa_form_outer .wcpa_form_item input[type="number"],.wcpa_form_outer .wcpa_form_item input[type="text"] {
+  border: 2px solid grey !important;
+	height: 50px;
+}
+
+/* SELECT ARROWS */
+.wcpa_form_outer .wcpa_form_item .select_arrow {
+  border: none !important;
+  content: url(https://woocommerce-70867-4915293.cloudwaysapps.com/wp-content/uploads/2021/09/select-arrow-down.svg);
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+/* BLUE GLOW EFFECT WHEN INPUT ACTIVE */
+.wcpa_form_outer .wcpa_form_item select:focus,
+.wcpa_form_outer .wcpa_form_item select:active,
+.wcpa_form_outer .wcpa_form_item input[type="number"]:focus,
+.wcpa_form_outer .wcpa_form_item input[type="number"]:active,
+.wcpa_form_outer .wcpa_form_item input[type="text"]:focus,
+.wcpa_form_outer .wcpa_form_item input[type="text"]:active {
+  box-shadow: 0 0 5px 1px #007eff !important;
+  border: none !important;
+}
+
+.wcpa_form_outer
+  .wcpa_form_item
+  .wcpa_disp_type_square
+  .wcpa_image
+  input:checked
+  + picture
+  img {
+  box-shadow: 0 0 5px 1px #007eff;
+}
+
+/* CENTER ELEMENTS */
+.wcpa_form_outer {
+	text-align:center;
+}
+.wcpa_form_outer .wcpa_form_item .image-inline img {
+margin: auto;
+}
+
+/* RADIO INPUT */
+.image-group.radio_image_full_width {
+	display: flex;
+	gap: 30%;
+}
+
+.wcpa_form_outer .wcpa_row {
+	margin-left: 0;
+	margin-right: 0;
+}
+
+.wcpa_has_relation .radio-group {
+	text-align: start;
+}
+
+/* FORM ALIGNMENT */
+
+/* row-1 */
+/* .wcpa_form_outer > .wcpa_row:nth-of-type(1) {
+    display: flex;
+}
+
+.wcpa_row:nth-of-type(1) > .wcpa_form_item {
+    display: flex;
+    flex-direction: column;
+}
+ */
+.number_half_width_parent input.number_half_width {
+    max-width: 100% !important;
+    width: 100%;
+}
+
+/* rows */
+.dropdown_full_width_parent, .number_full_width_parent, .wcpa_type_text {
+    display: flex;
+		justify-content: space-between;
+    align-items: center;
+    gap: 10%;
+}
+
+/* input-size */
+.dropdown_full_width_parent .select, .number_full_width_parent > .number_full_width,
+.wcpa_type_text > input[type='text'], .number_full_width_parent > .select {
+	flex-grow: 1;
+	max-width: 60% !important;
+}
+
+.number_full_width_parent > .numArrowBox {
+	max-width: 60% !important;
+	width: 100% !important;
+}
+
+.number_full_width_parent > .numArrowBox > .number_full_width {
+	flex-grow:1;
+	max-width: 100%;
+}
+
+.number_full_width_parent > .numArrowBox:hover .arrow_up_svg,
+.number_full_width_parent > .numArrowBox:hover .arrow_down_svg, .number_full_width_parent > .numArrowBox:focus .arrow_up_svg,
+.number_full_width_parent > .numArrowBox:focus .arrow_down_svg,
+.number_full_width_parent > .numArrowBox:active .arrow_up_svg,
+.number_full_width_parent > .numArrowBox:active .arrow_down_svg,
+.number_half_width_parent > .numArrowBox:hover .arrow_up_svg,
+.number_half_width_parent > .numArrowBox:hover .arrow_down_svg, .number_half_width_parent > .numArrowBox:focus .arrow_up_svg,
+.number_half_width_parent > .numArrowBox:focus .arrow_down_svg,
+.number_half_width_parent > .numArrowBox:active .arrow_up_svg,
+.number_half_width_parent > .numArrowBox:active .arrow_down_svg
+{
+	display:none;
+	opacity: 0 !important;
+}
+
+
+.wcpa_form_outer label {
+	margin-bottom: 7px;
+}
+.wcpa_form_item {
+	margin-bottom: 2em;
+}
+.wcpa_form_item .wcpa_paragraph_block {
+margin-bottom: 10px;
+}
+
+
+.numArrowBox {
+	position: relative;
+}
+
+.arrow_up_svg {
+	height: 15px;
+	width: 15px;
+	position: absolute;
+	top: 25%;
+	right: 10%;
+	cursor: pointer;
+	transform: all 0.3s;
+}
+
+.arrow_down_svg {
+	height: 15px;
+	width: 15px;
+	position: absolute;
+	top: 55%;
+	right: 10%;
+	cursor: pointer;
+}
+
+
+/* =================== */
+
+div.elementor.elementor-19815.elementor-type-header.elementor-location-header{
+	position:relative;
+	z-index:100!important;
+}
+
+.site-content {
+	position:relative;
+	z-index:0!important;
+}
+
+/*single product edits*/
+
+.woocommerce div.product form.cart .button.single_add_to_cart_button {
+ margin: 0;
+ width:100%;
+}
+
+.single-product div.product p.price, .single-product div.product span.price {
+	text-align:center;
+}
+
+
+/*endnbd*/
+
+.elementor-add-to-cart--align-justify form.cart {
+	flex-wrap: wrap!important;
+}
+
+
+
+a.button {
+	text-align: center;
+	width: 100%!important;
+}
+
+cxecrt-cart-page-button button {
+	width: auto!important;
+	margin:5px 5px 5px 5px;
+}
+
+/*Astra Product Page*/
+
+div.summary.entry-summary > form > button {
+	width:91% ;
+}
+
+
+/*Checkout Page*/
+
+#billing_email {
+	margin-bottom:5%;
+	border-bottom-width:2px!important;
+	border-bottom-color:#000!important;
+}
+
+.woocommerce-form__input woocommerce-form__input-checkbox input-checkbox {
+	display:none!important;
+}
+
+#shipping_first_name_field label:before {
+  content: "Shipping ";
+}
+
+#shipping_last_name_field > label:before {
+  content: "Shipping ";
+}
+
+#order_review > table > tbody > tr:nth-child(2) > td.product-name > dl > dt.variation-QuantityDiscount {
+	display:none
+}
+
+#order_review > table > tbody > tr:nth-child(2) > td.product-name > dl > dd.variation-QuantityDiscount > p {
+	display:none
+}
+
+#order_review > table > tbody > tr:nth-child > td.product-total {
+	display:none;
+}
+
+
+/*edited product appearence as blog post field*/
+
+.elementor-post__read-more {
+    color: #13579d;
+    font-size: 14px;
+    font-weight: 700;
+    background: #fff;
+    border: 1.5px solid;
+    padding: 1% 25% 1% 25%;
+    border-color: #13579d;
+    text-transform: uppercase;
+}
