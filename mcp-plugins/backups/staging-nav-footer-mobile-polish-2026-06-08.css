@@ -1,0 +1,262 @@
+/* PPS staging — Additional CSS additions, 2026-06-08
+ * ---------------------------------------------------------------------------
+ * These three blocks were APPENDED to the Astra Customizer "Additional CSS"
+ * on the STAGING site (woocommerce-70867-4915293.cloudwaysapps.com), on top
+ * of the pre-existing CSS captured in:
+ *     mcp-plugins/backups/staging-additional-css-2026-06-08.css   (revert baseline)
+ *
+ * Each block is delimited by START/END markers in the live Additional CSS and
+ * can be removed independently to revert that layer. This file is the tracked
+ * source of record for the additions.
+ *
+ * Block 1: PPS CLEAN POLISH        — site-wide buttons / typography / cards
+ * Block 2: PPS NAV + FOOTER POLISH — desktop header nav + light/minimal footer
+ * Block 3: PPS MOBILE NAV POLISH   — hamburger + mobile menu + mobile CTA
+ *
+ * Header & footer are Elementor templates (elementor-location-header / -footer),
+ * so selectors target Elementor's standard nav/heading classes. The header CTA
+ * targets the "Reorder" menu item (menu-item-85273).
+ * ---------------------------------------------------------------------------
+ */
+
+
+/* ===== PPS CLEAN POLISH (staging, 2026-06-08) — START =====
+   Conservative, additive aesthetic pass. No fonts swapped, no layout
+   rewrites. Delete everything from START to END to fully revert.
+   Backup of prior CSS: repo mcp-plugins/backups/staging-additional-css-2026-06-08.css */
+
+:root {
+  --pps-blue: #13579d;
+  --pps-blue-bright: #007eff;
+  --pps-ink: #1f2733;
+  --pps-radius: 8px;
+  --pps-ease: 0.2s ease;
+}
+
+/* Typography rhythm — calmer reading, no font-family change */
+body { color: var(--pps-ink); line-height: 1.65; }
+.site-content p { margin-bottom: 1.15em; }
+h1, h2, h3, h4 { line-height: 1.25; letter-spacing: -0.01em; }
+
+/* Links: smooth state changes */
+a { transition: color var(--pps-ease); }
+
+/* Buttons: unified radius + motion across Astra, WooCommerce, blocks */
+.wp-block-button__link,
+.ast-button, .button, button.button,
+.woocommerce a.button, .woocommerce button.button,
+.woocommerce #respond input#submit, .woocommerce input.button {
+  border-radius: var(--pps-radius);
+  letter-spacing: 0.01em;
+  transition: background-color var(--pps-ease), box-shadow var(--pps-ease), transform var(--pps-ease);
+}
+.wp-block-button__link:hover,
+.ast-button:hover, .button:hover, button.button:hover,
+.woocommerce a.button:hover, .woocommerce button.button:hover,
+.woocommerce input.button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(19, 87, 157, 0.18);
+}
+
+/* Accessible, tidy focus ring (keyboard users) */
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible, .button:focus-visible {
+  outline: 2px solid var(--pps-blue-bright);
+  outline-offset: 2px;
+}
+
+/* Shop loop: gentle hover lift on product cards */
+.woocommerce ul.products li.product {
+  transition: box-shadow var(--pps-ease), transform var(--pps-ease);
+}
+.woocommerce ul.products li.product:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+/* Softer corners on inputs (adds rounding only; existing borders untouched) */
+input[type="text"], input[type="email"], input[type="tel"],
+input[type="number"], input[type="search"], textarea, select {
+  border-radius: 6px;
+}
+
+/* ===== PPS CLEAN POLISH — END ===== */
+
+
+/* ===== PPS NAV + FOOTER POLISH (staging, 2026-06-08) — START =====
+   Goal: header nav + footer reading more like a print-shop site.
+   Light/minimal footer + a brand-blue CTA button on the "Reorder"
+   nav item (menu-item-85273). Scoped to Elementor header/footer
+   locations so nothing else is touched. Reuses --pps-* vars from the
+   CLEAN POLISH block above. Delete START→END to fully revert. */
+
+/* ---------- HEADER NAV ---------- */
+
+/* Top-level link rhythm + weight */
+.elementor-location-header .elementor-nav-menu > li > a.elementor-item,
+.elementor-location-header .elementor-nav-menu > li > a {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: color var(--pps-ease, 0.2s ease);
+}
+
+/* Animated underline on hover (top-level only), drawn under the text */
+.elementor-location-header .elementor-nav-menu > li > a.elementor-item::after {
+  content: "";
+  display: block;
+  height: 2px;
+  width: 0;
+  margin-top: 3px;
+  background: var(--pps-blue, #13579d);
+  transition: width var(--pps-ease, 0.2s ease);
+}
+.elementor-location-header .elementor-nav-menu > li > a.elementor-item:hover::after,
+.elementor-location-header .elementor-nav-menu > li.current-menu-item > a.elementor-item::after,
+.elementor-location-header .elementor-nav-menu > li.current-menu-ancestor > a.elementor-item::after {
+  width: 100%;
+}
+
+/* Current page gets brand-blue text */
+.elementor-location-header .elementor-nav-menu > li.current-menu-item > a,
+.elementor-location-header .elementor-nav-menu > li.current-menu-ancestor > a {
+  color: var(--pps-blue, #13579d);
+}
+
+/* Dropdown submenus: clean card look */
+.elementor-location-header .elementor-nav-menu .sub-menu,
+.elementor-location-header .elementor-nav-menu--dropdown {
+  border-radius: var(--pps-radius, 8px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+  overflow: hidden;
+}
+.elementor-location-header .elementor-nav-menu .sub-menu a.elementor-sub-item {
+  transition: background-color var(--pps-ease, 0.2s ease), color var(--pps-ease, 0.2s ease);
+}
+.elementor-location-header .elementor-nav-menu .sub-menu a.elementor-sub-item:hover {
+  background: rgba(19, 87, 157, 0.06);
+  color: var(--pps-blue, #13579d);
+}
+
+/* CTA button: the "Reorder" nav item (menu-item-85273).
+   No underline animation here — it's a solid button instead. */
+.elementor-location-header .menu-item-85273 > a.elementor-item,
+.elementor-location-header .menu-item-85273 > a {
+  background: var(--pps-blue, #13579d);
+  color: #fff !important;
+  border-radius: var(--pps-radius, 8px);
+  padding: 0.5em 1.15em !important;
+  font-weight: 700;
+  line-height: 1.2;
+  transition: background-color var(--pps-ease, 0.2s ease),
+              box-shadow var(--pps-ease, 0.2s ease),
+              transform var(--pps-ease, 0.2s ease);
+}
+.elementor-location-header .menu-item-85273 > a.elementor-item:hover,
+.elementor-location-header .menu-item-85273 > a:hover {
+  background: #0f4680;
+  color: #fff !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(19, 87, 157, 0.28);
+}
+/* Kill the underline pseudo on the CTA */
+.elementor-location-header .menu-item-85273 > a.elementor-item::after {
+  display: none;
+}
+
+/* ---------- FOOTER (light, minimal) ---------- */
+
+/* Clear top edge separating content from footer */
+.elementor-location-footer {
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* Column headings: stronger, brand-ink, a touch of tracking */
+.elementor-location-footer .elementor-widget-heading .elementor-heading-title {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--pps-ink, #1f2733);
+}
+
+/* Footer link lists: comfortable spacing + brand-blue hover slide */
+.elementor-location-footer .elementor-nav-menu > li > a,
+.elementor-location-footer .elementor-nav-menu .elementor-item {
+  padding-top: 0.35em;
+  padding-bottom: 0.35em;
+  transition: color var(--pps-ease, 0.2s ease),
+              padding-left var(--pps-ease, 0.2s ease);
+}
+.elementor-location-footer .elementor-nav-menu > li > a:hover,
+.elementor-location-footer .elementor-nav-menu .elementor-item:hover {
+  color: var(--pps-blue, #13579d);
+  padding-left: 4px;
+}
+
+/* Generic footer text links (non-menu) also get brand-blue hover */
+.elementor-location-footer a:not(.elementor-button):hover {
+  color: var(--pps-blue, #13579d);
+}
+
+/* Tighten footer logo/tagline block spacing for a cleaner top row */
+.elementor-location-footer .elementor-widget-theme-site-logo,
+.elementor-location-footer .elementor-widget-image {
+  margin-bottom: 0.75em;
+}
+
+/* ===== PPS NAV + FOOTER POLISH — END ===== */
+
+
+/* ===== PPS MOBILE NAV POLISH (staging, 2026-06-08) — START =====
+   Hamburger toggle + mobile dropdown menu + mobile CTA treatment.
+   Scoped to the Elementor header location. Delete START→END to revert. */
+
+/* Hamburger toggle: brand color, tidy tap target + focus ring */
+.elementor-location-header .elementor-menu-toggle {
+  color: var(--pps-blue, #13579d);
+  border-radius: var(--pps-radius, 8px);
+  padding: 0.3em;
+  transition: background-color var(--pps-ease, 0.2s ease);
+}
+.elementor-location-header .elementor-menu-toggle:hover {
+  background: rgba(19, 87, 157, 0.08);
+}
+.elementor-location-header .elementor-menu-toggle:focus-visible {
+  outline: 2px solid var(--pps-blue-bright, #007eff);
+  outline-offset: 2px;
+}
+
+/* Mobile dropdown panel: clean card with row dividers */
+.elementor-location-header .elementor-nav-menu--dropdown {
+  border-radius: var(--pps-radius, 8px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+.elementor-location-header .elementor-nav-menu--dropdown a.elementor-item,
+.elementor-location-header .elementor-nav-menu--dropdown a.elementor-sub-item {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  transition: background-color var(--pps-ease, 0.2s ease),
+              color var(--pps-ease, 0.2s ease);
+}
+.elementor-location-header .elementor-nav-menu--dropdown a.elementor-item:hover,
+.elementor-location-header .elementor-nav-menu--dropdown a.elementor-sub-item:hover,
+.elementor-location-header .elementor-nav-menu--dropdown a.elementor-item.elementor-item-active {
+  background: rgba(19, 87, 157, 0.06);
+  color: var(--pps-blue, #13579d);
+}
+
+/* Mobile CTA: render "Reorder" (menu-item-85273) as a full-width
+   solid button so it stays prominent in the stacked list */
+.elementor-location-header .elementor-nav-menu--dropdown .menu-item-85273 > a.elementor-item,
+.elementor-location-header .elementor-nav-menu--dropdown .menu-item-85273 > a {
+  background: var(--pps-blue, #13579d);
+  color: #fff !important;
+  font-weight: 700;
+  text-align: center;
+  border-bottom: none;
+}
+.elementor-location-header .elementor-nav-menu--dropdown .menu-item-85273 > a.elementor-item:hover,
+.elementor-location-header .elementor-nav-menu--dropdown .menu-item-85273 > a:hover {
+  background: #0f4680;
+  color: #fff !important;
+}
+
+/* ===== PPS MOBILE NAV POLISH — END ===== */
