@@ -528,8 +528,10 @@ add_action( 'wp', function() {
             const gallery = document.querySelector('.woocommerce-product-gallery');
             if (!gallery) return;
 
-            let isExpanded = false;
-            let touchStartY = null;
+            let isExpanded     = false;
+            let touchStartY    = null;
+            let hasArtwork     = false;
+            let originalImgSrc = null;  // remember the WC product image so we can restore it
 
             const expand = () => {
                 if (isExpanded) return;
@@ -555,16 +557,48 @@ add_action( 'wp', function() {
                 gallery.style.removeProperty('left');
             };
 
-            // Mouse wheel: scroll-up at top of page expands; scroll-down while expanded collapses
+            // Ask the calc to open its proof modal (artwork with bleed/trim/safety guides).
+            const requestProof = () => {
+                window.dispatchEvent(new CustomEvent('pps:request-proof'));
+            };
+
+            // Swap the gallery's main image whenever the calc emits new artwork
+            // state. We target the first <img> in the gallery (the active featured
+            // image on a standard WC single-product page).
+            const swapImage = (newSrc) => {
+                const img = gallery.querySelector('img');
+                if (!img) return;
+                if (originalImgSrc === null) originalImgSrc = img.getAttribute('src');
+                if (newSrc) {
+                    img.setAttribute('src', newSrc);
+                    img.removeAttribute('srcset'); // WC may have srcset that overrides src
+                } else if (originalImgSrc) {
+                    img.setAttribute('src', originalImgSrc);
+                }
+            };
+
+            // Listen for the calc telling us "artwork changed". Update both our
+            // hasArtwork flag (used for gesture routing) and the gallery image.
+            window.addEventListener('pps:artwork-changed', (e) => {
+                const detail = (e && e.detail) || {};
+                hasArtwork = !!detail.available;
+                swapImage(detail.thumbnail || null);
+            });
+
+            // Mouse wheel: at scrollY=0, scroll-up opens the proof modal (if
+            // artwork is loaded) or expands the gallery (if not).
             window.addEventListener('wheel', (e) => {
                 if (!isExpanded && window.scrollY === 0 && e.deltaY < 0) {
-                    expand();
+                    if (hasArtwork) {
+                        requestProof();
+                    } else {
+                        expand();
+                    }
                 } else if (isExpanded && e.deltaY > 0) {
                     collapse();
                 }
             }, { passive: true });
 
-            // Touch: track start; swipe-down 40px+ at top expands; swipe-up 40px+ while expanded collapses
             window.addEventListener('touchstart', (e) => {
                 if (e.touches && e.touches.length > 0) {
                     touchStartY = e.touches[0].clientY;
@@ -575,23 +609,30 @@ add_action( 'wp', function() {
                 if (touchStartY === null || !e.touches || e.touches.length === 0) return;
                 const deltaY = e.touches[0].clientY - touchStartY;
                 if (!isExpanded && window.scrollY === 0 && deltaY >= SWIPE_THRESHOLD) {
-                    expand();
+                    if (hasArtwork) {
+                        requestProof();
+                        touchStartY = null;
+                    } else {
+                        expand();
+                    }
                 } else if (isExpanded && deltaY <= -SWIPE_THRESHOLD) {
                     collapse();
                 }
             }, { passive: true });
 
-            // Page scroll: any forward scroll while expanded collapses
             window.addEventListener('scroll', () => {
                 if (isExpanded && window.scrollY > 0) {
                     collapse();
                 }
             }, { passive: true });
 
-            // Direct tap/click on the gallery collapses
+            // Click on the gallery: collapse if expanded; open proof if artwork
+            // is loaded (gives keyboard/click users the same affordance).
             gallery.addEventListener('click', () => {
                 if (isExpanded) {
                     collapse();
+                } else if (hasArtwork) {
+                    requestProof();
                 }
             }, { passive: true });
         })();

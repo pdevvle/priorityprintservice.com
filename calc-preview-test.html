@@ -2925,6 +2925,29 @@ update();
     return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
   }, [hasFile, openPreviewModalRef]);
 
+  // ── External event bridge for the product-page gallery (pps-calculators.php) ──
+  // Lets the WC gallery (rendered above the calc) swap its image to the user's
+  // uploaded artwork thumbnail, and lets gallery overscroll gestures open the
+  // proof modal showing the artwork with bleed/trim/safety guides.
+  useEffect(() => {
+    const thumb = (displayPages && displayPages[0] && displayPages[0].dataUrl) || null;
+    try {
+      window.dispatchEvent(new CustomEvent("pps:artwork-changed", {
+        detail: { available: hasFile, thumbnail: thumb }
+      }));
+    } catch (e) { /* CustomEvent unsupported (very old browsers) — ignore */ }
+  }, [hasFile, displayPages]);
+
+  useEffect(() => {
+    const h = (e) => {
+      if (!hasFile) return;
+      const which = (e && e.detail && e.detail.modal === "preview") ? "preview" : "proof";
+      setActiveModal(which);
+    };
+    window.addEventListener("pps:request-proof", h);
+    return () => window.removeEventListener("pps:request-proof", h);
+  }, [hasFile]);
+
   // ── Per-slot upload logic ──
   const slotInputRef = useRef(null);
   const activeSlotRef = useRef(-1);
