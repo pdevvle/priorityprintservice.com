@@ -481,6 +481,124 @@ add_action( 'wp', function() {
         return $excluded;
     } );
 
+    // ── Gallery overscroll-to-expand (calc-owned product pages only) ──
+    // The WC product gallery renders as a 50dvh sticky hero. When the user
+    // is at scrollY=0 and scrolls up (mouse wheel) or swipes down 40px+
+    // (touch), the gallery expands to fill the viewport. Wheel-down, upward
+    // swipe, page scroll, or click on the gallery collapses it back.
+    add_action( 'wp_head', function() {
+        ?>
+        <style>
+            .woocommerce-product-gallery {
+                --pps-gh-collapsed: 50vh;
+                --pps-gh-expanded:  100vh;
+                position: sticky;
+                top: 0;
+                width: 100vw;
+                height: var(--pps-gh-collapsed);
+                margin: 0 0 0 calc(-50vw + 50%);
+                z-index: 0;
+                overflow: hidden;
+                transition: top    0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                            left   0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                            width  0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                            height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                            margin 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            @supports (height: 100dvh) {
+                .woocommerce-product-gallery {
+                    --pps-gh-collapsed: 50dvh;
+                    --pps-gh-expanded:  100dvh;
+                }
+            }
+            .woocommerce-product-gallery img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+            }
+        </style>
+        <?php
+    } );
+
+    add_action( 'wp_footer', function() {
+        ?>
+        <script>
+        (function() {
+            const SWIPE_THRESHOLD = 40;
+            const gallery = document.querySelector('.woocommerce-product-gallery');
+            if (!gallery) return;
+
+            let isExpanded = false;
+            let touchStartY = null;
+
+            const expand = () => {
+                if (isExpanded) return;
+                isExpanded = true;
+                gallery.style.setProperty('position', 'fixed',                       'important');
+                gallery.style.setProperty('top',      '0',                           'important');
+                gallery.style.setProperty('left',     '0',                           'important');
+                gallery.style.setProperty('width',    '100vw',                       'important');
+                gallery.style.setProperty('height',   'var(--pps-gh-expanded)',      'important');
+                gallery.style.setProperty('margin',   '0',                           'important');
+                gallery.style.setProperty('z-index',  '9999',                        'important');
+            };
+
+            const collapse = () => {
+                if (!isExpanded) return;
+                isExpanded = false;
+                gallery.style.setProperty('position', 'sticky',                      'important');
+                gallery.style.setProperty('top',      '0',                           'important');
+                gallery.style.setProperty('width',    '100vw',                       'important');
+                gallery.style.setProperty('height',   'var(--pps-gh-collapsed)',     'important');
+                gallery.style.setProperty('margin',   '0 0 0 calc(-50vw + 50%)',     'important');
+                gallery.style.setProperty('z-index',  '0',                           'important');
+                gallery.style.removeProperty('left');
+            };
+
+            // Mouse wheel: scroll-up at top of page expands; scroll-down while expanded collapses
+            window.addEventListener('wheel', (e) => {
+                if (!isExpanded && window.scrollY === 0 && e.deltaY < 0) {
+                    expand();
+                } else if (isExpanded && e.deltaY > 0) {
+                    collapse();
+                }
+            }, { passive: true });
+
+            // Touch: track start; swipe-down 40px+ at top expands; swipe-up 40px+ while expanded collapses
+            window.addEventListener('touchstart', (e) => {
+                if (e.touches && e.touches.length > 0) {
+                    touchStartY = e.touches[0].clientY;
+                }
+            }, { passive: true });
+
+            window.addEventListener('touchmove', (e) => {
+                if (touchStartY === null || !e.touches || e.touches.length === 0) return;
+                const deltaY = e.touches[0].clientY - touchStartY;
+                if (!isExpanded && window.scrollY === 0 && deltaY >= SWIPE_THRESHOLD) {
+                    expand();
+                } else if (isExpanded && deltaY <= -SWIPE_THRESHOLD) {
+                    collapse();
+                }
+            }, { passive: true });
+
+            // Page scroll: any forward scroll while expanded collapses
+            window.addEventListener('scroll', () => {
+                if (isExpanded && window.scrollY > 0) {
+                    collapse();
+                }
+            }, { passive: true });
+
+            // Direct tap/click on the gallery collapses
+            gallery.addEventListener('click', () => {
+                if (isExpanded) {
+                    collapse();
+                }
+            }, { passive: true });
+        })();
+        </script>
+        <?php
+    } );
+
     // Embed calculator inline — render immediately after the product gallery.
     // WC hooks pps_show_product_images into woocommerce_before_single_product_summary
     // at priority 20, so priority 25 fires right after the gallery and before
