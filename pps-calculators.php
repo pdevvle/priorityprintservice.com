@@ -481,8 +481,11 @@ add_action( 'wp', function() {
         return $excluded;
     } );
 
-    // Embed calculator inline
-    add_action( 'woocommerce_after_single_product_summary', function() use ( $filepath, $product_id ) {
+    // Embed calculator inline — render immediately after the product gallery.
+    // WC hooks pps_show_product_images into woocommerce_before_single_product_summary
+    // at priority 20, so priority 25 fires right after the gallery and before
+    // the summary block (price/title/add-to-cart, which we hide via CSS anyway).
+    add_action( 'woocommerce_before_single_product_summary', function() use ( $filepath, $product_id ) {
         $html  = file_get_contents( $filepath );
         $parts = pps_parse_calculator_html( $html );
 
@@ -613,7 +616,7 @@ add_action( 'wp', function() {
         if ( $parts['app_code'] ) {
             echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
         }
-    }, 5 );
+    }, 25 );
 });
 
 // ═══════════════════════════════════════════════════════════════
