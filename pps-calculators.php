@@ -542,7 +542,7 @@ add_action( 'wp', function() {
                 gallery.style.setProperty('width',    '100vw',                       'important');
                 gallery.style.setProperty('height',   'var(--pps-gh-expanded)',      'important');
                 gallery.style.setProperty('margin',   '0',                           'important');
-                gallery.style.setProperty('z-index',  '9999',                        'important');
+                gallery.style.setProperty('z-index',  '9999999',                     'important');
             };
 
             const collapse = () => {
@@ -557,9 +557,14 @@ add_action( 'wp', function() {
                 gallery.style.removeProperty('left');
             };
 
-            // Ask the calc to open its proof modal (artwork with bleed/trim/safety guides).
+            // Ask the calc to open its 3D book preview modal (the customer-facing
+            // mockup of how the artwork looks on the printed product). The calc's
+            // pps:request-proof listener accepts a `modal` detail to route to
+            // "preview" instead of the default "proof" (technical guides view).
             const requestProof = () => {
-                window.dispatchEvent(new CustomEvent('pps:request-proof'));
+                window.dispatchEvent(new CustomEvent('pps:request-proof', {
+                    detail: { modal: 'preview' }
+                }));
             };
 
             // Swap the gallery's main image whenever the calc emits new artwork
