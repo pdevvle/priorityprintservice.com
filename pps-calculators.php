@@ -481,165 +481,39 @@ add_action( 'wp', function() {
         return $excluded;
     } );
 
-    // ── Gallery overscroll-to-expand (calc-owned product pages only) ──
-    // The WC product gallery renders as a 50dvh sticky hero. When the user
-    // is at scrollY=0 and scrolls up (mouse wheel) or swipes down 40px+
-    // (touch), the gallery expands to fill the viewport. Wheel-down, upward
-    // swipe, page scroll, or click on the gallery collapses it back.
-    add_action( 'wp_head', function() {
-        ?>
-        <style>
-            .woocommerce-product-gallery {
-                --pps-gh-collapsed: 50vh;
-                --pps-gh-expanded:  100vh;
-                position: sticky;
-                top: 0;
-                width: 100vw;
-                height: var(--pps-gh-collapsed);
-                margin: 0 0 0 calc(-50vw + 50%);
-                z-index: 0;
-                overflow: hidden;
-                transition: top    0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                            left   0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                            width  0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                            height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                            margin 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-            }
-            @supports (height: 100dvh) {
-                .woocommerce-product-gallery {
-                    --pps-gh-collapsed: 50dvh;
-                    --pps-gh-expanded:  100dvh;
-                }
-            }
-            .woocommerce-product-gallery img {
-                width: 100%;
-                height: 100%;
-                object-fit: cover;
-            }
-        </style>
-        <?php
-    } );
-
+    // ── Gallery image swap on artwork upload ──
+    // When the customer uploads artwork in the calc, swap the WC gallery's
+    // featured image to show the first-page thumbnail of their artwork. No
+    // gesture handlers, no sticky/expand behavior — the gallery otherwise
+    // looks and behaves like a standard WC gallery.
     add_action( 'wp_footer', function() {
         ?>
         <script>
         (function() {
-            const SWIPE_THRESHOLD = 40;
             const gallery = document.querySelector('.woocommerce-product-gallery');
             if (!gallery) return;
 
-            let isExpanded     = false;
-            let touchStartY    = null;
-            let hasArtwork     = false;
-            let originalImgSrc = null;  // remember the WC product image so we can restore it
+            let originalImgSrc    = null;
+            let originalImgSrcset = null;
 
-            const expand = () => {
-                if (isExpanded) return;
-                isExpanded = true;
-                gallery.style.setProperty('position', 'fixed',                       'important');
-                gallery.style.setProperty('top',      '0',                           'important');
-                gallery.style.setProperty('left',     '0',                           'important');
-                gallery.style.setProperty('width',    '100vw',                       'important');
-                gallery.style.setProperty('height',   'var(--pps-gh-expanded)',      'important');
-                gallery.style.setProperty('margin',   '0',                           'important');
-                gallery.style.setProperty('z-index',  '9999999',                     'important');
-            };
-
-            const collapse = () => {
-                if (!isExpanded) return;
-                isExpanded = false;
-                gallery.style.setProperty('position', 'sticky',                      'important');
-                gallery.style.setProperty('top',      '0',                           'important');
-                gallery.style.setProperty('width',    '100vw',                       'important');
-                gallery.style.setProperty('height',   'var(--pps-gh-collapsed)',     'important');
-                gallery.style.setProperty('margin',   '0 0 0 calc(-50vw + 50%)',     'important');
-                gallery.style.setProperty('z-index',  '0',                           'important');
-                gallery.style.removeProperty('left');
-            };
-
-            // Ask the calc to open its 3D book preview modal (the customer-facing
-            // mockup of how the artwork looks on the printed product). The calc's
-            // pps:request-proof listener accepts a `modal` detail to route to
-            // "preview" instead of the default "proof" (technical guides view).
-            const requestProof = () => {
-                window.dispatchEvent(new CustomEvent('pps:request-proof', {
-                    detail: { modal: 'preview' }
-                }));
-            };
-
-            // Swap the gallery's main image whenever the calc emits new artwork
-            // state. We target the first <img> in the gallery (the active featured
-            // image on a standard WC single-product page).
-            const swapImage = (newSrc) => {
-                const img = gallery.querySelector('img');
-                if (!img) return;
-                if (originalImgSrc === null) originalImgSrc = img.getAttribute('src');
-                if (newSrc) {
-                    img.setAttribute('src', newSrc);
-                    img.removeAttribute('srcset'); // WC may have srcset that overrides src
-                } else if (originalImgSrc) {
-                    img.setAttribute('src', originalImgSrc);
-                }
-            };
-
-            // Listen for the calc telling us "artwork changed". Update both our
-            // hasArtwork flag (used for gesture routing) and the gallery image.
             window.addEventListener('pps:artwork-changed', (e) => {
                 const detail = (e && e.detail) || {};
-                hasArtwork = !!detail.available;
-                swapImage(detail.thumbnail || null);
+                const img    = gallery.querySelector('img');
+                if (!img) return;
+
+                if (originalImgSrc === null) {
+                    originalImgSrc    = img.getAttribute('src');
+                    originalImgSrcset = img.getAttribute('srcset');
+                }
+
+                if (detail.thumbnail) {
+                    img.setAttribute('src', detail.thumbnail);
+                    img.removeAttribute('srcset'); // srcset would otherwise override src
+                } else {
+                    if (originalImgSrc)    img.setAttribute('src', originalImgSrc);
+                    if (originalImgSrcset) img.setAttribute('srcset', originalImgSrcset);
+                }
             });
-
-            // Mouse wheel: at scrollY=0, scroll-up opens the proof modal (if
-            // artwork is loaded) or expands the gallery (if not).
-            window.addEventListener('wheel', (e) => {
-                if (!isExpanded && window.scrollY === 0 && e.deltaY < 0) {
-                    if (hasArtwork) {
-                        requestProof();
-                    } else {
-                        expand();
-                    }
-                } else if (isExpanded && e.deltaY > 0) {
-                    collapse();
-                }
-            }, { passive: true });
-
-            window.addEventListener('touchstart', (e) => {
-                if (e.touches && e.touches.length > 0) {
-                    touchStartY = e.touches[0].clientY;
-                }
-            }, { passive: true });
-
-            window.addEventListener('touchmove', (e) => {
-                if (touchStartY === null || !e.touches || e.touches.length === 0) return;
-                const deltaY = e.touches[0].clientY - touchStartY;
-                if (!isExpanded && window.scrollY === 0 && deltaY >= SWIPE_THRESHOLD) {
-                    if (hasArtwork) {
-                        requestProof();
-                        touchStartY = null;
-                    } else {
-                        expand();
-                    }
-                } else if (isExpanded && deltaY <= -SWIPE_THRESHOLD) {
-                    collapse();
-                }
-            }, { passive: true });
-
-            window.addEventListener('scroll', () => {
-                if (isExpanded && window.scrollY > 0) {
-                    collapse();
-                }
-            }, { passive: true });
-
-            // Click on the gallery: collapse if expanded; open proof if artwork
-            // is loaded (gives keyboard/click users the same affordance).
-            gallery.addEventListener('click', () => {
-                if (isExpanded) {
-                    collapse();
-                } else if (hasArtwork) {
-                    requestProof();
-                }
-            }, { passive: true });
         })();
         </script>
         <?php
