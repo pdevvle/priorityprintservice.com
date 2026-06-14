@@ -100,9 +100,81 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-23 · SS-JSPDF-FALLBACK</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-14 · SS-PREVIEW-OPEN-NOART</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
+
+// ── Defensive DOM guard ──────────────────────────────────────────────
+// This calculator runs embedded in a heavy WordPress page. Third-party
+// scripts (chat widgets, image optimizers, analytics) and browser
+// features like auto-translate can wrap or move DOM nodes that React
+// owns. When React later commits a removal/insertion it calls
+// parent.removeChild(node) / parent.insertBefore(node, ref) on a node
+// whose parent has since changed, throwing "Failed to execute
+// 'removeChild' on 'Node': The node to be removed is not a child of this
+// node" during the commit phase — the crash seen right after artwork
+// approval (a large re-render that also reconciles the modal portaled
+// into document.body). These guards turn those two calls into graceful
+// no-ops in exactly that situation and are a pass-through otherwise. This
+// is React's recommended workaround (facebook/react#11538).
+(function () {
+  if (typeof Node !== "function" || !Node.prototype || Node.prototype.__ppsDomGuard) return;
+  Node.prototype.__ppsDomGuard = true;
+  const _removeChild = Node.prototype.removeChild;
+  Node.prototype.removeChild = function (child) {
+    if (child && child.parentNode !== this) {
+      try { console.warn("[PPS calc] removeChild guard: node is not a child of the expected parent; skipping.", child); } catch (e) {}
+      return child;
+    }
+    return _removeChild.apply(this, arguments);
+  };
+  const _insertBefore = Node.prototype.insertBefore;
+  Node.prototype.insertBefore = function (newNode, referenceNode) {
+    if (referenceNode && referenceNode.parentNode !== this) {
+      try { console.warn("[PPS calc] insertBefore guard: reference node is not a child of the expected parent; appending instead.", referenceNode); } catch (e) {}
+      return this.appendChild(newNode);
+    }
+    return _insertBefore.apply(this, arguments);
+  };
+})();
+
+// Error boundary — catches render/commit-phase crashes (e.g. the third-party
+// DOM-mutation vs React reconciliation conflict seen after artwork approval)
+// so the calculator surfaces a recoverable message instead of vanishing
+// silently. Must be a class component; hooks can't implement error boundaries.
+class ErrorBoundary extends React.Component {
+  constructor(props){
+    super(props);
+    this.state = { hasError:false, err:null };
+  }
+  static getDerivedStateFromError(err){
+    return { hasError:true, err:err };
+  }
+  componentDidCatch(err, info){
+    try { console.error("[PPS calc] render error caught by ErrorBoundary:", err, info); } catch(e){}
+  }
+  render(){
+    if(this.state.hasError){
+      const msg = (this.state.err && this.state.err.message) ? String(this.state.err.message) : "Unknown error";
+      return (
+        <div style={{maxWidth:520,margin:"48px auto",padding:"24px 26px",border:"1px solid #f0c0c0",borderRadius:8,background:"#fff6f6",fontFamily:"system-ui,-apple-system,Segoe UI,Roboto,sans-serif",color:"#333",lineHeight:1.5}}>
+          <div style={{fontSize:17,fontWeight:700,color:"#c0392b",marginBottom:8}}>The calculator hit a display error</div>
+          <p style={{margin:"0 0 14px",fontSize:14}}>
+            Your work wasn't lost on our end, but the page needs a refresh to recover.
+            Please reload this page (Ctrl/Cmd+Shift+R) and try again. If it keeps
+            happening after approving artwork, let us know.
+          </p>
+          <button onClick={()=>{ try{ window.location.reload(); }catch(e){} }}
+            style={{appearance:"none",border:"none",borderRadius:6,background:"#c0392b",color:"#fff",fontSize:14,fontWeight:600,padding:"9px 18px",cursor:"pointer",fontFamily:"inherit"}}>
+            Reload calculator
+          </button>
+          <div style={{marginTop:14,fontSize:11,color:"#999",fontFamily:"ui-monospace,Menlo,Consolas,monospace",wordBreak:"break-word"}}>{msg}</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function useIsMobile(breakpoint=700){
   const[m,setM]=useState(()=>typeof window!=="undefined"?window.innerWidth<breakpoint:false);
@@ -1103,7 +1175,9 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
     {dataUrl:coverArt||placeholder,isBlank:false},
     {dataUrl:backCoverArt||coverArt||backCover,isBlank:false},
   ],[coverArt,backCoverArt,placeholder,backCover]);
-  const clickable=hasArt&&typeof onOpenPreview==="function";
+  // Always clickable when handler is wired — opens the 3D preview modal even
+  // before artwork is uploaded so customers can see how the format previews.
+  const clickable=typeof onOpenPreview==="function";
   return (
     <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
       <div
@@ -1116,7 +1190,7 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
         style={{height:190,borderRadius:0,border:"none",cursor:clickable?"zoom-in":"default"}}>
         {/* drop shadow */}
         <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
-        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
+        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="contain"/>
         {/* top-left eyebrow overlay */}
         <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
           <span style={{display:"inline-flex",gap:3}}>
@@ -1158,7 +1232,8 @@ function MobilePreviewBar(props){
   const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
   const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
   const hasArt=!!coverArt;
-  const clickable=hasArt&&typeof onOpenPreview==="function";
+  // Always clickable when handler is wired — opens preview modal regardless of upload state.
+  const clickable=typeof onOpenPreview==="function";
   return (
     <>
       {/* Inline full card — shows by default above the sections */}
@@ -1187,7 +1262,7 @@ function MobilePreviewBar(props){
         {/* Thumbnail — aspect ratio preserved */}
         <div style={{width:32,height:Math.max(24,Math.min(48,(32*hIn)/wIn)),borderRadius:3,overflow:"hidden",flexShrink:0,background:"#2a2e36",boxShadow:"0 0 0 1px rgba(255,255,255,.12)"}}>
           {hasArt
-            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>
             : <div style={{width:"100%",height:"100%",background:"linear-gradient(135deg,#e0edff,#f7f3e8)"}}/>
           }
         </div>
@@ -2847,11 +2922,37 @@ update();
   const PF = { pass: { dot: "#4ade80", text: "#3a7124" }, warn: { dot: "#fbbf24", text: "#b8860b" }, fail: { dot: "#f87171", text: "#c2185b" }, info: { dot: "#60a5fa", text: "#2563eb" } };
 
   // Expose an imperative open-preview hook for the sidebar preview card.
+  // Always set (not gated on hasFile) so the sidebar/mobile preview thumbnails
+  // are clickable even before artwork is uploaded — they open the 3D preview
+  // modal showing placeholder pages so customers can see the format.
   useEffect(() => {
     if (!openPreviewModalRef) return;
-    openPreviewModalRef.current = hasFile ? () => setActiveModal("preview") : null;
+    openPreviewModalRef.current = () => setActiveModal("preview");
     return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
-  }, [hasFile, openPreviewModalRef]);
+  }, [openPreviewModalRef]);
+
+  // ── External event bridge for the product-page gallery (pps-calculators.php) ──
+  // Lets the WC gallery (rendered above the calc) swap its image to the user's
+  // uploaded artwork thumbnail, and lets gallery overscroll gestures open the
+  // proof modal showing the artwork with bleed/trim/safety guides.
+  useEffect(() => {
+    const thumb = (displayPages && displayPages[0] && displayPages[0].dataUrl) || null;
+    try {
+      window.dispatchEvent(new CustomEvent("pps:artwork-changed", {
+        detail: { available: hasFile, thumbnail: thumb }
+      }));
+    } catch (e) { /* CustomEvent unsupported (very old browsers) — ignore */ }
+  }, [hasFile, displayPages]);
+
+  useEffect(() => {
+    const h = (e) => {
+      if (!hasFile) return;
+      const which = (e && e.detail && e.detail.modal === "preview") ? "preview" : "proof";
+      setActiveModal(which);
+    };
+    window.addEventListener("pps:request-proof", h);
+    return () => window.removeEventListener("pps:request-proof", h);
+  }, [hasFile]);
 
   // ── Per-slot upload logic ──
   const slotInputRef = useRef(null);
@@ -3250,7 +3351,9 @@ update();
                             pkg.previewBlobs.forEach((b, i) => {
                               if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
                             });
-                            if (pkg.previewHtmlBlob) files.push(new File([pkg.previewHtmlBlob], baseName + "_preview.html", { type: "text/html" }));
+                            // The _preview.html deliverable is intentionally NOT attached to the
+                            // order upload — it is a staff-only download (debug-gated, art modal only).
+                            // Attaching it broke the add-to-cart / order upload flow.
                             files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
                             onArtwork({ type: "files", list: files });
                           }
@@ -3317,7 +3420,7 @@ update();
                     approvalPkg.previewBlobs.forEach((b, i) => {
                       if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
                     });
-                    if (approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
+                    if (debug && approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
                     if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
                     for (let i = 0; i < files.length; i++) {
                       dlFile(files[i][0], files[i][1]);
@@ -3352,7 +3455,7 @@ update();
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
                           }}>Previews ({previewCount})</button>
                         )}
-                        {approvalPkg.previewHtmlBlob && (
+                        {debug && approvalPkg.previewHtmlBlob && (
                           <button type="button" onClick={() => dlFile(approvalPkg.previewHtmlBlob, baseName + "_preview.html")} style={{
                             padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(99,102,241,.4)",
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(99,102,241,.12)", color:"#a5b4fc",
@@ -3663,7 +3766,7 @@ update();
       {/* ════════════════════════════════════════════════════════════
            PREVIEW MODAL — 3D closed book, page spreads, animations
          ════════════════════════════════════════════════════════════ */}
-      {activeModal === "preview" && hasFile && (
+      {activeModal === "preview" && (
         <div className="bp-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) setActiveModal(null); }}>
           <div className="bp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
@@ -3896,11 +3999,23 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
 
   // ── Server mode ──
   let artworkPath = "";
+  // Every successfully uploaded deliverable as { path, name } — the full
+  // approval package, sent to the cart so all of it lands in the order's
+  // Google Drive folder (not just the raw file kept in artworkPath).
+  const uploadedFiles = [];
 
   if (artFiles.type === "files") {
     const total_files = artFiles.list.length;
     for (let fi = 0; fi < total_files; fi++) {
       const file = artFiles.list[fi];
+      // The first file is the customer's raw artwork — it is required, and its
+      // stored path becomes the order's artwork reference. Every later entry is
+      // a generated supplementary deliverable (print-ready PDF, preview pages,
+      // manipulation manifest, …). A failure on a supplementary deliverable —
+      // for example a future filetype the server doesn't accept — must NOT block
+      // checkout: we log it and keep going, so an incompatible deliverable can
+      // never break add-to-cart. Only a failure on the primary artwork is fatal.
+      const isPrimary = fi === 0;
       try {
         const fd = new FormData();
         fd.append("action", "pps_upload_artwork");
@@ -3910,16 +4025,28 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
         const data = await uploadWithProgress(PPS.ajaxUrl, fd, (pct) => {
           if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct });
         });
-        if (data.success && data.data.path) {
+        if (data.success && data.data && data.data.path) {
           if (!artworkPath) artworkPath = data.data.path;
+          uploadedFiles.push({ path: data.data.path, name: file.name });
         } else {
-          alert("Artwork upload failed: " + (data.data || "Unknown error") + "\nPlease try again.");
-          return;
+          const reason = (data && data.data) || "Unknown error";
+          if (isPrimary) {
+            alert("Artwork upload failed: " + reason + "\nPlease try again.");
+            return;
+          }
+          try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload rejected: ${reason}`); } catch (e) {}
         }
       } catch (err) {
-        alert("Artwork upload error: " + err.message + "\nPlease try again.");
-        return;
+        if (isPrimary) {
+          alert("Artwork upload error: " + err.message + "\nPlease try again.");
+          return;
+        }
+        try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload error: ${err.message}`); } catch (e) {}
       }
+    }
+    if (!artworkPath) {
+      alert("Artwork upload failed: the artwork file could not be uploaded.\nPlease try again.");
+      return;
     }
     if (onProgress) onProgress({ phase: "cart", pct: 100 });
   } else if (artFiles.type === "existing") {
@@ -3939,6 +4066,7 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     const parsed = JSON.parse(metadata);
     fd.append("pps_biz_days", String(parsed.requestedBizDays || parsed.freeDeliveryBizDays || 5));
     if (artworkPath) fd.append("pps_artwork_path", artworkPath);
+    if (uploadedFiles.length) fd.append("pps_artwork_files", JSON.stringify(uploadedFiles));
 
     const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: fd });
     const data = await resp.json();
@@ -4789,7 +4917,7 @@ function App(){
               <div>
                 <div style={{marginBottom:6}}>
                   {uploadProgress.phase === "upload"
-                    ? `Uploading${uploadProgress.fileCount > 1 ? ` file ${uploadProgress.fileIdx + 1}/${uploadProgress.fileCount}` : ""}… ${uploadProgress.pct}%`
+                    ? `Uploading file(s) and page(s)${uploadProgress.fileCount > 1 ? ` ${uploadProgress.fileIdx + 1}/${uploadProgress.fileCount}` : ""}… ${uploadProgress.pct}%`
                     : "Adding to cart…"
                   }
                 </div>
@@ -4803,7 +4931,7 @@ function App(){
                   <div style={{fontSize:10,fontWeight:500,opacity:.7,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{uploadProgress.fileName}</div>
                 )}
               </div>
-            ) : submitting ? "Uploading artwork…" : "Add to Order"}
+            ) : submitting ? "Uploading file(s) and page(s)…" : "Add to Order"}
           </button>
           <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
@@ -4835,7 +4963,7 @@ function App(){
             disabled={!!result?.error?.length||submitting}>
             {submitting && uploadProgress ? (
               <div>
-                <div style={{fontSize:12}}>{uploadProgress.phase === "upload" ? `Uploading… ${uploadProgress.pct}%` : "Adding…"}</div>
+                <div style={{fontSize:12}}>{uploadProgress.phase === "upload" ? `Uploading file(s) and page(s)… ${uploadProgress.pct}%` : "Adding…"}</div>
                 <div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}>
                   <div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width: uploadProgress.phase === "upload"
                     ? `${((uploadProgress.fileIdx / uploadProgress.fileCount) + (uploadProgress.pct / 100 / uploadProgress.fileCount)) * 100}%`
@@ -4843,7 +4971,7 @@ function App(){
                   }}/>
                 </div>
               </div>
-            ) : submitting ? "Uploading…" : "Add to Order"}
+            ) : submitting ? "Uploading file(s) and page(s)…" : "Add to Order"}
           </button>
         </div>
       </div>}
@@ -4936,7 +5064,7 @@ const ST = {
 
 // Mount
 ReactDOM.createRoot(document.getElementById('pps-calculator-root'))
-  .render(React.createElement(App));
+  .render(React.createElement(ErrorBoundary, null, React.createElement(App)));
 </script>
 </body>
 </html>
