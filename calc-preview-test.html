@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-23 · SS-JSPDF-FALLBACK</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-14 · SS-PREVIEW-OPEN-NOART</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -3650,7 +3650,7 @@ update();
       {/* ════════════════════════════════════════════════════════════
            PREVIEW MODAL — 3D closed book, page spreads, animations
          ════════════════════════════════════════════════════════════ */}
-      {activeModal === "preview" && hasFile && (
+      {activeModal === "preview" && (
         <div className="bp-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) setActiveModal(null); }}>
           <div className="bp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
