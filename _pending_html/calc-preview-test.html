@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-14 · SS-PREVIEW-OPEN-NOART</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-14 · SS-GALLERY-SWAP-GUARD</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -2936,7 +2936,13 @@ update();
   // uploaded artwork thumbnail, and lets gallery overscroll gestures open the
   // proof modal showing the artwork with bleed/trim/safety guides.
   useEffect(() => {
-    const thumb = (displayPages && displayPages[0] && displayPages[0].dataUrl) || null;
+    // Only emit a thumbnail when the customer has actually uploaded artwork.
+    // displayPages[0].dataUrl is the blank-page placeholder before upload, so
+    // sending it would cause the WC gallery bridge to swap the catalog image
+    // with a blank slate.
+    const thumb = hasFile && displayPages && displayPages[0] && !displayPages[0].isBlank
+      ? displayPages[0].dataUrl
+      : null;
     try {
       window.dispatchEvent(new CustomEvent("pps:artwork-changed", {
         detail: { available: hasFile, thumbnail: thumb }
