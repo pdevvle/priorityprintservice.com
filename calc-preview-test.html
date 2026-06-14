@@ -1175,7 +1175,9 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
     {dataUrl:coverArt||placeholder,isBlank:false},
     {dataUrl:backCoverArt||coverArt||backCover,isBlank:false},
   ],[coverArt,backCoverArt,placeholder,backCover]);
-  const clickable=hasArt&&typeof onOpenPreview==="function";
+  // Always clickable when handler is wired — opens the 3D preview modal even
+  // before artwork is uploaded so customers can see how the format previews.
+  const clickable=typeof onOpenPreview==="function";
   return (
     <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
       <div
@@ -1188,7 +1190,7 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
         style={{height:190,borderRadius:0,border:"none",cursor:clickable?"zoom-in":"default"}}>
         {/* drop shadow */}
         <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
-        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
+        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="contain"/>
         {/* top-left eyebrow overlay */}
         <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
           <span style={{display:"inline-flex",gap:3}}>
@@ -1230,7 +1232,8 @@ function MobilePreviewBar(props){
   const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
   const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
   const hasArt=!!coverArt;
-  const clickable=hasArt&&typeof onOpenPreview==="function";
+  // Always clickable when handler is wired — opens preview modal regardless of upload state.
+  const clickable=typeof onOpenPreview==="function";
   return (
     <>
       {/* Inline full card — shows by default above the sections */}
@@ -1259,7 +1262,7 @@ function MobilePreviewBar(props){
         {/* Thumbnail — aspect ratio preserved */}
         <div style={{width:32,height:Math.max(24,Math.min(48,(32*hIn)/wIn)),borderRadius:3,overflow:"hidden",flexShrink:0,background:"#2a2e36",boxShadow:"0 0 0 1px rgba(255,255,255,.12)"}}>
           {hasArt
-            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>
             : <div style={{width:"100%",height:"100%",background:"linear-gradient(135deg,#e0edff,#f7f3e8)"}}/>
           }
         </div>
@@ -2919,11 +2922,14 @@ update();
   const PF = { pass: { dot: "#4ade80", text: "#3a7124" }, warn: { dot: "#fbbf24", text: "#b8860b" }, fail: { dot: "#f87171", text: "#c2185b" }, info: { dot: "#60a5fa", text: "#2563eb" } };
 
   // Expose an imperative open-preview hook for the sidebar preview card.
+  // Always set (not gated on hasFile) so the sidebar/mobile preview thumbnails
+  // are clickable even before artwork is uploaded — they open the 3D preview
+  // modal showing placeholder pages so customers can see the format.
   useEffect(() => {
     if (!openPreviewModalRef) return;
-    openPreviewModalRef.current = hasFile ? () => setActiveModal("preview") : null;
+    openPreviewModalRef.current = () => setActiveModal("preview");
     return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
-  }, [hasFile, openPreviewModalRef]);
+  }, [openPreviewModalRef]);
 
   // ── External event bridge for the product-page gallery (pps-calculators.php) ──
   // Lets the WC gallery (rendered above the calc) swap its image to the user's
