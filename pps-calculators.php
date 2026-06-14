@@ -461,23 +461,47 @@ add_action( 'wp', function() {
 
     // ── External-JS hardening on calculator product pages ──
     // The calc's React mount is fragile to non-React DOM mutations. We
-    // suppress the two known production sources:
+    // suppress two known production sources surgically — keeping WP Rocket's
+    // page cache, minify, CSS optimization, and CDN active so we don't lose
+    // Core Web Vitals headroom on a high-SEO-value page.
+    //
     //  1) WCPA's frontend bundle — form is CSS-hidden but its JS still
     //     mounts and mutates fields that can collide with React.
-    //  2) WP Rocket lazy-load + delay-JS — both rewrite DOM attributes
-    //     post-mount, producing "Failed to execute 'removeChild' on Node"
-    //     errors after artwork approval.
+    //  2) WP Rocket Delay-JS — would defer the React/Babel/jsPDF bundle until
+    //     first user interaction, so the calc never paints on page load.
+    //     Excluded by URL pattern via rocket_delay_js_exclusions; delay-JS
+    //     stays active for analytics, social embeds, and everything else.
+    //  3) WP Rocket Lazy-Load — only the images React creates dynamically
+    //     (proof modal, 3D preview spreads, magnifier overlays) cause the
+    //     "Failed to execute 'removeChild' on Node" errors. Excluded by
+    //     selector via rocket_lazyload_excluded_attributes; header, gallery,
+    //     and footer images keep lazy-load for LCP.
     add_action( 'wp_enqueue_scripts', function() {
         foreach ( array( 'wcpa-front', 'wcpa-shared', 'wcpa_front', 'wcpa-modal', 'wcpa-frontend' ) as $h ) {
             wp_dequeue_script( $h );
             wp_dequeue_style( $h );
         }
     }, 100 );
-    add_filter( 'do_rocket_lazyload',          '__return_false' );
-    add_filter( 'do_rocket_lazyload_iframes',  '__return_false' );
-    add_filter( 'do_rocket_delay_js',          '__return_false' );
-    add_filter( 'rocket_lazyload_excluded_src', function( $excluded ) {
+    add_filter( 'rocket_delay_js_exclusions', function( $excluded ) {
+        $excluded[] = '/unpkg\.com/react';
+        $excluded[] = '/unpkg\.com/react-dom';
+        $excluded[] = '/unpkg\.com/@babel/standalone';
+        $excluded[] = '/unpkg\.com/jspdf';
+        $excluded[] = '/cdnjs\.cloudflare\.com/ajax/libs/pdf\.js';
         $excluded[] = 'pps-calculator';
+        return $excluded;
+    } );
+    add_filter( 'rocket_lazyload_excluded_attributes', function( $excluded ) {
+        // Exclude only images inside the calc's React-controlled DOM. Modal
+        // panels (.bp-modal-bg / .bp-modal), 3D book scenes (.bp-scene), and
+        // page faces (.bp-page, .bp-face) cover every dynamically-created
+        // <img> the calc renders. WC gallery, hero, and chrome images stay
+        // lazy-loaded.
+        $excluded[] = 'class*="bp-modal"';
+        $excluded[] = 'class*="bp-scene"';
+        $excluded[] = 'class*="bp-page"';
+        $excluded[] = 'class*="bp-face"';
+        $excluded[] = 'data-pps-calc';
         return $excluded;
     } );
 
@@ -2435,9 +2459,26 @@ add_action( 'wp_enqueue_scripts', function() {
 }, 100 );
 add_action( 'wp', function() {
     if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
-    add_filter( 'do_rocket_lazyload',         '__return_false' );
-    add_filter( 'do_rocket_lazyload_iframes', '__return_false' );
-    add_filter( 'do_rocket_delay_js',         '__return_false' );
+    // Surgical exclusions only — keep page cache, minify, CSS optimization,
+    // and CDN active on preset URLs (same SEO rationale as the product-page
+    // block above). See that block for the per-filter explanation.
+    add_filter( 'rocket_delay_js_exclusions', function( $excluded ) {
+        $excluded[] = '/unpkg\.com/react';
+        $excluded[] = '/unpkg\.com/react-dom';
+        $excluded[] = '/unpkg\.com/@babel/standalone';
+        $excluded[] = '/unpkg\.com/jspdf';
+        $excluded[] = '/cdnjs\.cloudflare\.com/ajax/libs/pdf\.js';
+        $excluded[] = 'pps-calculator';
+        return $excluded;
+    } );
+    add_filter( 'rocket_lazyload_excluded_attributes', function( $excluded ) {
+        $excluded[] = 'class*="bp-modal"';
+        $excluded[] = 'class*="bp-scene"';
+        $excluded[] = 'class*="bp-page"';
+        $excluded[] = 'class*="bp-face"';
+        $excluded[] = 'data-pps-calc';
+        return $excluded;
+    } );
 }, 5 );
 
 /**
