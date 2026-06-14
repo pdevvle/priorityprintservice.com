@@ -486,6 +486,17 @@ add_action( 'wp', function() {
     // featured image to show the first-page thumbnail of their artwork. No
     // gesture handlers, no sticky/expand behavior — the gallery otherwise
     // looks and behaves like a standard WC gallery.
+    add_action( 'wp_head', function() {
+        ?>
+        <style>
+            /* Show the full artwork (or product image) without cropping when
+               the WC gallery's container has a fixed aspect ratio. */
+            .woocommerce-product-gallery img,
+            .woocommerce-product-gallery__image img,
+            .woocommerce div.product div.images img { object-fit: contain !important; }
+        </style>
+        <?php
+    } );
     add_action( 'wp_footer', function() {
         ?>
         <script>
