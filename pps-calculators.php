@@ -506,7 +506,10 @@ add_action( 'wp', function() {
                     originalImgSrcset = img.getAttribute('srcset');
                 }
 
-                if (detail.thumbnail) {
+                // Only swap when the calc reports a real customer upload —
+                // detail.thumbnail is also populated with blank-page placeholders
+                // before upload, so gate strictly on detail.available.
+                if (detail.available && detail.thumbnail) {
                     img.setAttribute('src', detail.thumbnail);
                     img.removeAttribute('srcset'); // srcset would otherwise override src
                 } else {
