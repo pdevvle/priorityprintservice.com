@@ -1209,7 +1209,7 @@ function pps_config_tab_production( $cfg ) {
         foreach ( $fields as $key => $meta ) {
             $val  = $pcf[ $key ] ?? '';
             $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip', 'sale_label', 'question_recipient_email' ) ) ? 'text' : 'number';
-            $step = ( is_float( $val + 0 ) || strpos( (string) $val, '.' ) !== false ) ? '0.001' : '1';
+            $step = ( is_numeric( $val ) && ( is_float( $val + 0 ) || strpos( (string) $val, '.' ) !== false ) ) ? '0.001' : '1';
             echo '<tr>';
             echo '<td style="font-weight:600;white-space:nowrap;width:1%;padding-right:10px;font-size:12px">' . esc_html( $meta[0] ) . '</td>';
             echo '<td><input type="' . $type . '" name="pcf[' . esc_attr( $key ) . ']" value="' . esc_attr( $val ) . '" step="' . $step . '"></td>';

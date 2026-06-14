@@ -95,7 +95,16 @@ function pps_artwork_dir() {
 // ═══════════════════════════════════════════════════════════════
 
 function pps_get_registry() {
-    return get_option( PPS_CALC_OPTION, array() );
+    $reg = get_option( PPS_CALC_OPTION, array() );
+    // The MCP wp_update_option endpoint serialises array payloads as JSON
+    // strings; decode so callers always receive an array (same tolerance
+    // pps-html-deploy.php applies to its pending-attachments option). The
+    // next pps_save_registry() rewrites the option in native array form.
+    if ( is_string( $reg ) ) {
+        $decoded = json_decode( $reg, true );
+        $reg = is_array( $decoded ) ? $decoded : array();
+    }
+    return is_array( $reg ) ? $reg : array();
 }
 
 function pps_save_registry( $reg ) {
@@ -442,12 +451,82 @@ add_action( 'wp', function() {
         wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
         wp_enqueue_script( 'pps-pdfjs', 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
         wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
+        // jsPDF — for generating print-ready PDFs. Pre-loading via wp_enqueue_script
+        // removes the runtime <script> injection in the calc HTML, which was a
+        // DOM-mutation source contributing to React removeChild errors.
+        wp_enqueue_script( 'pps-jspdf', 'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js', array(), '2.5.1', true );
         // Babel must load after React so transpiled code can find it
-        wp_enqueue_script( 'pps-babel', 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs' ), '7.26.9', true );
+        wp_enqueue_script( 'pps-babel', 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
     });
 
-    // Embed calculator inline
-    add_action( 'woocommerce_after_single_product_summary', function() use ( $filepath, $product_id ) {
+    // ── External-JS hardening on calculator product pages ──
+    // The calc's React mount is fragile to non-React DOM mutations. We
+    // suppress the two known production sources:
+    //  1) WCPA's frontend bundle — form is CSS-hidden but its JS still
+    //     mounts and mutates fields that can collide with React.
+    //  2) WP Rocket lazy-load + delay-JS — both rewrite DOM attributes
+    //     post-mount, producing "Failed to execute 'removeChild' on Node"
+    //     errors after artwork approval.
+    add_action( 'wp_enqueue_scripts', function() {
+        foreach ( array( 'wcpa-front', 'wcpa-shared', 'wcpa_front', 'wcpa-modal', 'wcpa-frontend' ) as $h ) {
+            wp_dequeue_script( $h );
+            wp_dequeue_style( $h );
+        }
+    }, 100 );
+    add_filter( 'do_rocket_lazyload',          '__return_false' );
+    add_filter( 'do_rocket_lazyload_iframes',  '__return_false' );
+    add_filter( 'do_rocket_delay_js',          '__return_false' );
+    add_filter( 'rocket_lazyload_excluded_src', function( $excluded ) {
+        $excluded[] = 'pps-calculator';
+        return $excluded;
+    } );
+
+    // ── Gallery image swap on artwork upload ──
+    // When the customer uploads artwork in the calc, swap the WC gallery's
+    // featured image to show the first-page thumbnail of their artwork. No
+    // gesture handlers, no sticky/expand behavior — the gallery otherwise
+    // looks and behaves like a standard WC gallery.
+    add_action( 'wp_footer', function() {
+        ?>
+        <script>
+        (function() {
+            const gallery = document.querySelector('.woocommerce-product-gallery');
+            if (!gallery) return;
+
+            let originalImgSrc    = null;
+            let originalImgSrcset = null;
+
+            window.addEventListener('pps:artwork-changed', (e) => {
+                const detail = (e && e.detail) || {};
+                const img    = gallery.querySelector('img');
+                if (!img) return;
+
+                if (originalImgSrc === null) {
+                    originalImgSrc    = img.getAttribute('src');
+                    originalImgSrcset = img.getAttribute('srcset');
+                }
+
+                // Only swap when the calc reports a real customer upload —
+                // detail.thumbnail is also populated with blank-page placeholders
+                // before upload, so gate strictly on detail.available.
+                if (detail.available && detail.thumbnail) {
+                    img.setAttribute('src', detail.thumbnail);
+                    img.removeAttribute('srcset'); // srcset would otherwise override src
+                } else {
+                    if (originalImgSrc)    img.setAttribute('src', originalImgSrc);
+                    if (originalImgSrcset) img.setAttribute('srcset', originalImgSrcset);
+                }
+            });
+        })();
+        </script>
+        <?php
+    } );
+
+    // Embed calculator inline — render immediately after the product gallery.
+    // WC hooks pps_show_product_images into woocommerce_before_single_product_summary
+    // at priority 20, so priority 25 fires right after the gallery and before
+    // the summary block (price/title/add-to-cart, which we hide via CSS anyway).
+    add_action( 'woocommerce_before_single_product_summary', function() use ( $filepath, $product_id ) {
         $html  = file_get_contents( $filepath );
         $parts = pps_parse_calculator_html( $html );
 
@@ -578,7 +657,7 @@ add_action( 'wp', function() {
         if ( $parts['app_code'] ) {
             echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
         }
-    }, 5 );
+    }, 25 );
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -598,7 +677,9 @@ function pps_ajax_upload_artwork() {
     $file = $_FILES['artwork'];
     $ext  = strtolower( pathinfo( $file['name'], PATHINFO_EXTENSION ) );
 
-    $allowed = array( 'pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'eps', 'ai' );
+    // 'txt' is permitted for the generated manipulation-manifest deliverable
+    // (plain-text record of art transforms) that ships with the approval package.
+    $allowed = array( 'pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'eps', 'ai', 'txt' );
     if ( ! in_array( $ext, $allowed, true ) ) {
         wp_send_json_error( 'File type not allowed: .' . $ext );
     }
@@ -634,6 +715,18 @@ function pps_ajax_upload_artwork() {
         'size'     => $file['size'],
     ) );
 }
+
+// Ensure WordPress accepts .txt uploads. The approval-package manipulation
+// manifest is a plain-text file; some security plugins (e.g. AIOS) strip
+// text/plain from the allowed-mime list, which would make wp_check_filetype()
+// return an empty type (and any wp_handle_upload/media path reject the file).
+// Registering it guarantees .txt is recognised as text/plain site-wide.
+add_filter( 'upload_mimes', function( $mimes ) {
+    if ( empty( $mimes['txt'] ) ) {
+        $mimes['txt'] = 'text/plain';
+    }
+    return $mimes;
+} );
 
 // ═══════════════════════════════════════════════════════════════
 // AJAX: ADD TO CART
@@ -1017,6 +1110,30 @@ function pps_ajax_add_to_cart() {
         $cart_item_data['pps_artwork_path'] = $artwork_path;
     }
 
+    // Full approval package: every uploaded deliverable (raw + print-ready PDF +
+    // preview pages + manifest) as an array of { path, name }. The raw file is
+    // also kept in pps_artwork_path above for reorder/back-compat.
+    $files_raw = wp_unslash( $_POST['pps_artwork_files'] ?? '' );
+    if ( $files_raw ) {
+        $decoded = json_decode( $files_raw, true );
+        if ( is_array( $decoded ) ) {
+            $clean = array();
+            foreach ( $decoded as $f ) {
+                if ( ! is_array( $f ) || empty( $f['path'] ) ) continue;
+                $p = sanitize_text_field( $f['path'] );
+                // Same path-traversal guard as the single-file path above.
+                if ( strpos( $p, '..' ) !== false || strpos( $p, 'pps-artwork/' ) !== 0 ) continue;
+                $clean[] = array(
+                    'path' => $p,
+                    'name' => sanitize_file_name( $f['name'] ?? basename( $p ) ),
+                );
+            }
+            if ( $clean ) {
+                $cart_item_data['pps_artwork_files'] = $clean;
+            }
+        }
+    }
+
     if ( ! WC()->cart ) {
         wp_send_json_error( 'Cart not available.' );
     }
@@ -1040,7 +1157,7 @@ function pps_ajax_add_to_cart() {
 // ═══════════════════════════════════════════════════════════════
 
 add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $values ) {
-    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path' );
+    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path', 'pps_artwork_files' );
     foreach ( $keys as $k ) {
         if ( isset( $values[ $k ] ) ) {
             $cart_item[ $k ] = $values[ $k ];
@@ -1223,6 +1340,21 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         }
     }
 
+    // Full approval package → order item (JSON). The Drive uploader pushes every
+    // deliverable in this list into the order folder, not just the raw file.
+    if ( ! empty( $values['pps_artwork_files'] ) && is_array( $values['pps_artwork_files'] ) ) {
+        $clean = array();
+        foreach ( $values['pps_artwork_files'] as $f ) {
+            if ( ! is_array( $f ) || empty( $f['path'] ) ) continue;
+            $p = sanitize_text_field( $f['path'] );
+            if ( strpos( $p, '..' ) !== false || strpos( $p, 'pps-artwork/' ) !== 0 ) continue;
+            $clean[] = array( 'path' => $p, 'name' => sanitize_file_name( $f['name'] ?? basename( $p ) ) );
+        }
+        if ( $clean ) {
+            $item->add_meta_data( '_pps_artwork_files', wp_json_encode( $clean ), true );
+        }
+    }
+
     // Visible in order emails
     $item->add_meta_data( 'Estimated Delivery', $delivery->format( 'l, M j, Y' ), true );
     $item->add_meta_data( 'Order Summary', $values['pps_summary'] ?? '', true );
@@ -1351,6 +1483,7 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
     $hidden[] = '_pps_rush';
     $hidden[] = '_pps_delivery_date';
     $hidden[] = '_pps_artwork_path';
+    $hidden[] = '_pps_artwork_files';
     return $hidden;
 });
 
@@ -2287,8 +2420,25 @@ add_action( 'wp_enqueue_scripts', function() {
     wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
     wp_enqueue_script( 'pps-pdfjs',     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
     wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
-    wp_enqueue_script( 'pps-babel',     'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs' ), '7.26.9', true );
+    // jsPDF — pre-loaded to avoid the runtime script injection in the calc HTML
+    wp_enqueue_script( 'pps-jspdf',     'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js', array(), '2.5.1', true );
+    wp_enqueue_script( 'pps-babel',     'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
 } );
+
+// ── External-JS hardening on preset URLs (mirrors the product-page logic) ──
+add_action( 'wp_enqueue_scripts', function() {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
+    foreach ( array( 'wcpa-front', 'wcpa-shared', 'wcpa_front', 'wcpa-modal', 'wcpa-frontend' ) as $h ) {
+        wp_dequeue_script( $h );
+        wp_dequeue_style( $h );
+    }
+}, 100 );
+add_action( 'wp', function() {
+    if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
+    add_filter( 'do_rocket_lazyload',         '__return_false' );
+    add_filter( 'do_rocket_lazyload_iframes', '__return_false' );
+    add_filter( 'do_rocket_delay_js',         '__return_false' );
+}, 5 );
 
 /**
  * Render the calculator + its config inline as the page content.

@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-04-22m · BR-BACKONLY-COATING</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-20 · BR-RIGHTANGLE</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -65,6 +65,8 @@ const CC={bg:"#f5f5f7",white:"#fff",dark:"#1d2327",mid:"#555",light:"#999",borde
 const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#1d2327",cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
+// Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
+const _AD = (window.PPS_CONFIG || {}).addons || {};
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
   labor_press_hr:35, labor_bindery_hr:35, labor_cutting_hr:45,
@@ -72,17 +74,25 @@ const PCF = Object.assign({
   press_printsperhour:600, bindery_morgana_impressionperhour:750,
   cutter_stackheight_inches:3.5, cutter_cyclesperhour:120,
   cutterbasefee:7.5, sheetsturnaround:2500,
-  backend_maximummarkup:15.2, backend_minimummarkup:3.5,
+  backend_maximummarkup:13, backend_minimummarkup:1.5,
+  backend_markup_coef_tS:1.75,    // single-axis decay vs ln(pressSheets); floor lands at ~2500 sheets
+  // ROLLBACK 2026-05-14: pre-reform was min=3.5, formula `dL = 1.85·ln(pressSheets) − 0.5`
+  // (constant offset removed; min dropped to 1.5; coef softened from 1.85 → 1.75 to
+  //  push the floor-cross point from ~560 sheets to ~2500 sheets).
   easydiscount_factor:0.05, easydiscount_max:0,
   uvcoaterimpressionsperhour:250, roundcornerperhour:75, bundlesperhour:50,
   speed_gwperhr:250, addon_roundcornermaxdays:30,
   art_newdesignmodifier:0.5, art_canva_fee:10, art_edit_rate:75, art_design_rate:75,
   sheetsforlowcosthardcopyproof:1500,
   minimum_turnaround_days:3, non_inventory_fee:45,
+  backend_base_rate:10,          // flat base charge per order (brochure-specific; PB uses base_rate=$40)
+
   proof_hardcopy_cost:35, proof_digital_cost:10, bleed_minimum:15,
   default_transit_days:4,
   shop_timezone:"America/Phoenix", shop_cutoff_hour:14, free_shipping_buffer:1.5,
   shippo_api_token:"", shippo_origin_zip:"85027",
+  // Site-wide sale (0 = off). Applied on subtotal before shipping/rush.
+  sale_discount_pct:0, sale_label:"Sale",
 }, _CFG.pcf || {});
 
 // ═══════════════════════════════════════════════════════════════
@@ -109,12 +119,24 @@ const FOLD_TYPES = _CFG.fold_types || [
   {label:"Roll Fold (4 Panel)",val:"roll4",panels:4},
   {label:"Double Gate Fold (4 Panel)",val:"dgate4",panels:4},
   {label:"Double Parallel Fold (4 Panel)",val:"dparallel4",panels:4},
+  // Compound fold — only offered for 11×25.5 non-cardstock (gated in the size/fold UI).
+  // Trifold along the 25.5" length (3×8.5 → 8.5×11), then a cross bifold across the
+  // 11" height (→ 8.5×5.5). Trifold front panel stays on the outside.
+  {label:"Right-Angle Fold (Trifold + Cross Bifold)",val:"trifold_xbifold",panels:3},
 ];
 
 // Panel labels per fold type — front (outside art) and back (inside art), left to right
+// Fold types available for a given size + material. The compound right-angle
+// fold (trifold + cross bifold) is only offered for 11×25.5 non-cardstock.
+function availableFoldTypes(longE, shortE, isCardstock) {
+  const is1125 = Math.abs((longE || 0) - 25.5) < 0.05 && Math.abs((shortE || 0) - 11) < 0.05;
+  return FOLD_TYPES.filter(f => f.val !== "trifold_xbifold" || (is1125 && !isCardstock));
+}
+
 const PANEL_LABELS = {
   bifold:    { front: ["Back","Front"], back: ["Inside Front","Inside Back"] },
   trifold:   { front: ["Inside Flap","Back","Front"], back: ["Inside Left","Inside Center","Inside Right"] },
+  trifold_xbifold: { front: ["Inside Flap","Back","Front"], back: ["Inside Left","Inside Center","Inside Right"] },
   z3:        { front: ["Back","Center","Front"], back: ["Back Inside","Center Inside","Front Inside"] },
   gate3:     { front: ["Left Flap","Front","Right Flap"], back: ["Inside Left","Inside Center","Inside Right"] },
   accordion4:{ front: ["Back","Inside Right","Inside Left","Front"], back: ["Back Inside","Outside Right","Outside Left","Front Inside"] },
@@ -150,7 +172,6 @@ const PAPERS_NC = _CFG.papers_nc || [
   {label:"70lb Uncoated Opaque Text",val:0.001,days:0,price:0.06,oversizePrice:0.06,factory:false,coatable:false},
   {label:"80lb Matte Text",val:0.002,days:0,price:0.069,oversizePrice:0.069,factory:false,coatable:false},
   {label:"100lb Gloss Text",val:0.003,days:0,price:0.085,oversizePrice:0.085,factory:false,coatable:true},
-  {label:"50lb Offset Smooth Opaque",val:2.001,days:2,price:0.039,oversizePrice:0.039,factory:true,coatable:false},
   {label:"60lb Offset Smooth Opaque",val:2.002,days:2,price:0.042,oversizePrice:0.042,factory:true,coatable:false},
   {label:"80lb Offset Smooth Opaque",val:2.003,days:2,price:0.056,oversizePrice:0.056,factory:true,coatable:false},
   {label:"80lb Gloss Factory Coated",val:2.004,days:2,price:0.0525,oversizePrice:0.0525,factory:true,coatable:true},
@@ -244,6 +265,15 @@ function calcBrochureImp(longEdge, shortEdge) {
 // PRICING ENGINE
 // ═══════════════════════════════════════════════════════════════
 function calculate(c) {
+  // Add-on availability guard
+  const _adErrs = [];
+  if (_AD.vivid === false && c.vivid === true) _adErrs.push("Vivid Print is currently unavailable. Please turn it off to continue.");
+  if (_AD.coating === false && Number(c.coating) > 0) _adErrs.push("UV Coating is currently unavailable. Please change Coating to None to continue.");
+  if (_AD.bundling === false && Number(c.bundling) > 0) _adErrs.push("Bundling is currently unavailable. Please change Bundling to None to continue.");
+  if (_AD.rc === false && Number(c.roundCorner) > 0) _adErrs.push("Round Cornering is currently unavailable. Please change Round Corner to None to continue.");
+  if (_AD.perforation === false && Number(c.perforation) > 0) _adErrs.push("Perforation is currently unavailable. Please change Perforation to None to continue.");
+  if (_adErrs.length) return { error: _adErrs };
+
   const errors = [];
   let imp, longE, shortE;
   if (c.sizeMode === "preset") {
@@ -281,7 +311,11 @@ function calculate(c) {
   //   Similar to preset (<=0.5" on both): 1.15x
   //   Flat, not similar to any preset:    1.25x
   //   Folded, not similar to any preset:  1.50x
-  const dL = 1.85 * Math.log(pressSheets) - 0.5;
+  // ROLLBACK 2026-05-14: prior form was `dL = 1.85 * Math.log(pressSheets) - 0.5`
+  // with min=3.5. Constant offset removed (was a hidden +0.5 to MAX); coef softened
+  // to 1.75 so floor cross-point moves from ~560 to ~2500 press sheets; min dropped
+  // to 1.5 to give big-volume orders a meaningful discount.
+  const dL = PCF.backend_markup_coef_tS * Math.log(pressSheets);
   let sizeTierMult = 1;
   if (c.sizeMode === "custom") {
     const exactMatch = SIZE_PRESETS.some(s => s.long === longE && s.short === shortE);
@@ -292,7 +326,26 @@ function calculate(c) {
       else sizeTierMult = 1.5;
     }
   }
-  const mk = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup) * sizeTierMult;
+  // High-yield markup bonus — holds back some of the natural materials savings
+  // on small/high-yield sizes. Anchored to imp=2 as 100% baseline:
+  //   imp=3 → +5%  (target: 70% of imp=2 materials)
+  //   imp=4 → +20% (target: 60%)
+  //   imp=6 → +50% (target: 50%)
+  //   imp=8 → +60% (target: 40%)
+  // Linear interpolation between anchors. Extrapolates +5% per +1 imp past 8.
+  // Mirrors saddle-stitch booklet_8up_markup_bonus conceptually, but with a curve
+  // since brochure has more imp tiers (presets 0.5, 1, 2, 4; custom up to ~32).
+  function bro_yieldBonus(imp) {
+    if (imp <= 2) return 0;
+    const lerp = (x, x0, y0, x1, y1) => y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+    if (imp <= 3) return lerp(imp, 2,    0,    3, 0.05);
+    if (imp <= 4) return lerp(imp, 3, 0.05,    4, 0.20);
+    if (imp <= 6) return lerp(imp, 4, 0.20,    6, 0.50);
+    if (imp <= 8) return lerp(imp, 6, 0.50,    8, 0.60);
+    return 0.60 + (imp - 8) * 0.05;
+  }
+  const mkBase = Math.max(PCF.backend_maximummarkup - dL, PCF.backend_minimummarkup);
+  const mk = mkBase * (1 + bro_yieldBonus(imp)) * sizeTierMult;
 
   // Approximate thickness
   const approxThickness = (paper.price / 10) * qty;
@@ -372,6 +425,12 @@ function calculate(c) {
   P.diffFold2 = fold.val === "roll4" ? foldLabor : 0;
   // Tier 3: narrow sheets (short < 5") with any fold, OR folding the short side
   P.diffFold3 = fold.val !== "flat" && (shortE < 5 || c.foldDir === "short") ? foldLabor : 0;
+  // Compound right-angle fold: trifold + a cross-direction bifold is a second
+  // bindery pass in a different orientation plus hand-work. Per spec, sum all
+  // fold labor and multiply by 3 (each line ×3 → total ×3).
+  if (fold.val === "trifold_xbifold") {
+    P.folding *= 3; P.diffFold1 *= 3; P.diffFold2 *= 3; P.diffFold3 *= 3;
+  }
 
   // Artwork — fees live in PCF (Production tab → Artwork group)
   const art = ART_OPTS.find(x => x.val === c.artwork) || ART_OPTS[0];
@@ -395,6 +454,9 @@ function calculate(c) {
   // Non-inventory surcharge
   P.nonInv = INV_VALS.includes(paper.val) ? 0 : PCF.non_inventory_fee;
 
+  // Flat base rate per order
+  P.baseRate = PCF.backend_base_rate;
+
   // Easy discounts — preset OR custom dims matching standard sizes
   const stdLongs = [8.5, 9, 11, 14, 17];
   const stdShorts = [5.5, 6, 8.5, 11];
@@ -415,6 +477,10 @@ function calculate(c) {
   // Cardstock discount — specific cardstock values only
   const csDiscVals = [0.01, 0.02, 0.03, 1.01, 1.02, 2.021, 2.022, 2.023, 2.024, 2.025, 2.01, 3.03, 3.01, 3.04, 3.02];
   P.cardstockDisc = csDiscVals.includes(paper.val) ? -(0.04 * pressSheets) : 0;
+
+  // Sale discount applies last, on the post-discount subtotal. Excludes shipping/rush.
+  const subBeforeSale = Object.values(P).reduce((s, v) => s + v, 0);
+  P.discSale = (PCF.sale_discount_pct > 0) ? -Math.round(subBeforeSale * PCF.sale_discount_pct * 100) / 100 : 0;
 
   const total = Object.values(P).reduce((s, v) => s + v, 0);
 
@@ -483,9 +549,10 @@ function calculate(c) {
     {l:"Vivid Print",v:P.vivid,g:"add"},{l:"UV Coating",v:P.coat,g:"add"},{l:"Bundling",v:P.bundle,g:"add"},
     {l:"Perforation",v:P.perforation,g:"add"},{l:"Round Cornering",v:P.rc,g:"add"},
     {l:"Fold Surcharge 1",v:P.diffFold1,g:"fee"},{l:"Fold Surcharge 2",v:P.diffFold2,g:"fee"},{l:"Fold Surcharge 3",v:P.diffFold3,g:"fee"},
-    {l:"Non-Inventory",v:P.nonInv,g:"fee"},
+    {l:"Base Rate",v:P.baseRate,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},
     {l:"Artwork",v:P.artwork,g:"art"},{l:"Bleed",v:P.bleed,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Discount (Flat)",v:P.discEasyFlat,g:"disc"},{l:"Easy Discount",v:P.discEasy,g:"disc"},{l:"Cardstock Disc",v:P.cardstockDisc,g:"disc"},
+    {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
   ].filter(r => Math.abs(r.v) > 0.005);
 
   const gC={mat:CK.cyan,lab:CK.key,add:CK.yellow,art:CK.magenta,fee:"#c25050",disc:CK.cyan};
@@ -494,11 +561,15 @@ function calculate(c) {
 
   const perUnit = qty > 0 ? grandTotal / qty : 0;
 
+  const saleActive = P.discSale < -0.005;
+  const saleAmount = saleActive ? Math.round(-P.discSale * 100) / 100 : 0;
+  const totalWithoutSale = Math.round((grandTotal - P.discSale) * 100) / 100;
   return {
     total: Math.round(grandTotal * 100) / 100, baseTotal: Math.round(total * 100) / 100,
     perUnit: Math.round(perUnit * 100) / 100, days, qty: qty, bd, grouped,
     imp, mk, fold, panels, pressSheets, longE, shortE, approxThickness,
     coatOK: paper.coatable, q100: qty >= 100, ti,
+    saleActive, saleAmount, saleLabel: (PCF.sale_label || "Sale"), totalWithoutSale,
     shipping: {
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
       earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday),
@@ -594,6 +665,18 @@ function generateBrochureTemplate(longE, shortE, foldType, panels, foldDir, size
             pdf.text("FOLD " + (i + 1), bleed + 0.15, y - 0.04);
           }
         }
+      }
+
+      // Cross-fold crease — compound right-angle fold only. After the trifold
+      // (vertical creases above), a bifold runs across the short edge → a
+      // horizontal crease at mid-height. Drawn dashed to read as a second pass.
+      if (foldType === "trifold_xbifold") {
+        pdf.setDrawColor(245, 166, 35);
+        pdf.setLineWidth(0.01);
+        const ymid = bleed + trimH / 2;
+        drawDashedLine(pdf, bleed + 0.1, ymid, bleed + trimW - 0.1, ymid, 0.06, 0.04);
+        pdf.setFontSize(6); pdf.setTextColor(245, 166, 35);
+        pdf.text("CROSS FOLD", bleed + trimW - 1.0, ymid - 0.05);
       }
 
       // Perf lines (purple dashed)
@@ -706,6 +789,7 @@ const FOLD_KEY_MAP = {
   bifold: "half-fold", trifold: "tri-fold", z3: "accordion-3",
   gate3: "gate-fold", accordion4: "accordion-4", roll4: "roll-fold",
   dgate4: "double-gate", dparallel4: "double-parallel",
+  trifold_xbifold: "tri-fold", // reuse trifold 3D renderer; cross-fold shown as an overlay crease
 };
 
 // Verified fold configurations with anti-clipping translateZ factors.
@@ -981,7 +1065,7 @@ function foldApplyView(sceneEl, foldKey, viewIdx, dirSign) {
 }
 
 // React component that renders the 3D fold scene
-function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdge, shortEdge, viewIdx, foldDir, flipped, frontGray, backGray }) {
+function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdge, shortEdge, viewIdx, foldDir, flipped, frontGray, backGray, crossFold }) {
   const sceneRef = useRef(null);
   const fold = FOLDS_3D[foldKey];
 
@@ -1037,9 +1121,20 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdg
   if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.4)" }}>Flat — no fold preview</div>;
 
   return (
-    <div className="fold-viewport" style={{ minHeight: mob ? 220 : 350 }}>
+    <div className="fold-viewport" style={{ minHeight: mob ? 220 : 350, position: "relative" }}>
       <div ref={sceneRef} className="fold-scene"
         style={{ transformStyle: "preserve-3d", position: "relative", width: iW, height: iH }} />
+      {crossFold && (
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 5 }}>
+          {/* horizontal cross-fold crease */}
+          <div style={{ position: "absolute", left: "8%", right: "8%", top: "50%", transform: "translateY(-50%)", borderTop: "2px dashed #f5a623" }} />
+          {/* mid-line caption */}
+          <span style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", fontSize: 10, fontWeight: 700, color: "#f5a623", background: "rgba(0,0,0,.55)", padding: "2px 7px", borderRadius: 3, whiteSpace: "nowrap" }}>↕ Cross fold → 8.5×5.5</span>
+          {/* half labels */}
+          <span style={{ position: "absolute", left: "50%", top: "calc(50% - 22px)", transform: "translate(-50%,-100%)", fontSize: 10, fontWeight: 700, color: "#f5a623", whiteSpace: "nowrap" }}>Final Folded Back</span>
+          <span style={{ position: "absolute", left: "50%", top: "calc(50% + 22px)", transform: "translateX(-50%)", fontSize: 10, fontWeight: 700, color: "#f5a623", whiteSpace: "nowrap" }}>Final Folded Front</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1158,7 +1253,7 @@ function MobilePreviewBar(props){
 // SHEET PREVIEW — Upload + Proof for single-sheet products (brochures, flat printing)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug }) {
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug, paperIsCardstock }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
@@ -1208,6 +1303,20 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   // Per-side transform helpers
   const DEFAULT_TX = { fitMode: "crop", artScale: 100, rotateSteps: 0 };
   const getTx = (idx) => pageTransforms[idx] || DEFAULT_TX;
+  const [txHistory, setTxHistory] = useState([]);
+  const pushTxHistory = (idx) => {
+    const snap = { ...getTx(idx) };
+    setTxHistory(h => {
+      const next = [...h, { idx, prev: snap }];
+      if (next.length > 30) next.shift();
+      return next;
+    });
+  };
+  const [vpScale, setVpScale] = useState(1);
+  const [vpX, setVpX] = useState(0);
+  const [vpY, setVpY] = useState(0);
+  const [vpDragging, setVpDragging] = useState(false);
+  const vpDragStart = useRef(null);
   const setTx = (idx, patch) => {
     setPageTransforms(p => {
       const cur = p[idx] || DEFAULT_TX;
@@ -1223,9 +1332,57 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const fitMode = currentTx.fitMode;
   const artScale = currentTx.artScale;
   const rotateSteps = currentTx.rotateSteps;
-  const setFitMode = (v) => setTx(side, { fitMode: v });
-  const setArtScale = (v) => setTx(side, { artScale: v });
-  const setRotateSteps = (v) => setTx(side, { rotateSteps: v });
+  const setFitMode = (v) => { pushTxHistory(side); setTx(side, { fitMode: v }); };
+  const setArtScale = (v) => { pushTxHistory(side); setTx(side, { artScale: v }); };
+  const setRotateSteps = (v) => { pushTxHistory(side); setTx(side, { rotateSteps: v }); };
+  const undoTx = () => {
+    setTxHistory(h => {
+      if (!h.length) return h;
+      const last = h[h.length - 1];
+      setPageTransforms(p => ({ ...p, [last.idx]: last.prev }));
+      if (last.idx !== side && typeof setSide === "function") {
+        // side is a state setter in brochure
+        try { setSide(last.idx); } catch (_) {}
+      }
+      return h.slice(0, -1);
+    });
+  };
+
+  useEffect(() => { setVpScale(1); setVpX(0); setVpY(0); }, [side, proofOpen]);
+
+  // Viewport zoom/pan helpers
+  const VP_MIN = 0.10, VP_FIT = 1, VP_MAX = 5, VP_STEP = 0.25;
+  const vpZoomBy = (delta) => setVpScale(s => {
+    const next = Math.max(VP_MIN, Math.min(VP_MAX, Math.round((s + delta) * 100) / 100));
+    if (next <= VP_FIT) { setVpX(0); setVpY(0); }
+    return next;
+  });
+  const vpReset = () => { setVpScale(VP_FIT); setVpX(0); setVpY(0); };
+  const vpOnWheel = (e) => {
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    const cx = (e.clientX - r.left) - r.width / 2;
+    const cy = (e.clientY - r.top) - r.height / 2;
+    setVpScale(prev => {
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const next = Math.max(VP_MIN, Math.min(VP_MAX, prev * factor));
+      const ratio = next / prev;
+      setVpX(x => next <= VP_FIT ? 0 : (x - cx) * ratio + cx);
+      setVpY(y => next <= VP_FIT ? 0 : (y - cy) * ratio + cy);
+      return next;
+    });
+  };
+  const vpOnMouseDown = (e) => {
+    if (vpScale <= VP_FIT || showMagnifier) return;
+    vpDragStart.current = { x: e.clientX, y: e.clientY, vpX, vpY };
+    setVpDragging(true);
+  };
+  const vpOnMouseMove = (e) => {
+    if (!vpDragging || !vpDragStart.current) return;
+    setVpX(vpDragStart.current.vpX + (e.clientX - vpDragStart.current.x));
+    setVpY(vpDragStart.current.vpY + (e.clientY - vpDragStart.current.y));
+  };
+  const vpOnMouseUp = () => { setVpDragging(false); vpDragStart.current = null; };
 
   // Clear approval when ANY side's transform changes
   const prevTxHash = useRef(txHash);
@@ -1351,9 +1508,10 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   // FitToggle component
   const FitToggle = () => (
     <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.55)", letterSpacing: ".08em", textTransform: "uppercase", marginRight: 2 }}>Art:</span>
       <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,.12)" }}>
-        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Stretch" }, { v: "scale", l: "Scale" }].map(o => (
-          <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} style={{
+        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Force Fill" }, { v: "scale", l: "Scale" }].map(o => (
+          <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} title={o.v === "stretch" ? "Stretch art to fill the entire bleed area — distorts aspect ratio" : undefined} style={{
             padding: "6px 12px", fontSize: 10, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit",
             background: fitMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
             color: fitMode === o.v ? "#000" : "rgba(255,255,255,.5)",
@@ -1364,6 +1522,11 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
           background: rotateSteps > 0 ? CK.cyan : "rgba(255,255,255,.06)",
           color: rotateSteps > 0 ? "#000" : "rgba(255,255,255,.5)",
         }}>Rotate 90°{rotateSteps > 0 ? ` (${rotateSteps * 90}°)` : ""}</button>
+        <button type="button" onClick={undoTx} disabled={txHistory.length === 0} title={txHistory.length ? `Undo last art change (${txHistory.length} step${txHistory.length === 1 ? "" : "s"} available)` : "No changes to undo"} style={{
+          padding: "6px 12px", fontSize: 10, fontWeight: 600, border: "none", borderLeft: "1px solid rgba(255,255,255,.08)", cursor: txHistory.length ? "pointer" : "default", fontFamily: "inherit",
+          background: "rgba(255,255,255,.06)",
+          color: txHistory.length ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.2)",
+        }}>↶ Undo</button>
       </div>
       {fitMode === "scale" && (
         <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
@@ -1373,9 +1536,6 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
           </div>
           <span style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,.4)", minWidth: 32, textAlign: "center" }}>{artScale}%</span>
         </div>
-      )}
-      {fitMode === "stretch" && (
-        <button type="button" onClick={() => setFitMode("crop")} style={{ padding: "5px 12px", fontSize: 10, fontWeight: 700, border: "1px solid rgba(239,68,68,.4)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(239,68,68,.12)", color: "#f87171" }}>Reset Stretch</button>
       )}
     </div>
   );
@@ -1428,6 +1588,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
 
   function handleClear() {
     setFrontArt(null); setBackArt(null); setFileName(""); setApproved(false);
+    setPageTransforms({}); setTxHistory([]);
     rawFileRef.current = null;
     if (onArtwork) onArtwork({ type: "none" });
   }
@@ -1445,6 +1606,405 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       foldLines.push({ pct: frac * 100, vertical: foldingLong });
     }
   }
+
+  // Standalone HTML preview — embeds the trimmed front + back face textures so the
+  // customer can email/save a self-contained flip-between mockup without revisiting
+  // the calculator. No 3D fold animation in this version (keeps the file lean and
+  // the math simple); a Front | Back toggle shows each side at the trim aspect.
+  // Standalone HTML preview — verbatim port of brochure-fold-previewer.html's
+  // Share-button output (the user's known-good reference). Uses the previewer's
+  // panel-wrap / hinge / face / hingeL / hingeR / hingeCtr / gateL / gateR /
+  // hinge1 / hinge2 naming so it doesn't share state with the in-calc
+  // FoldRenderer (which uses fold-* names).
+  function buildPreviewHtml() {
+    const front = trimmedFrontUrl || frontArt?.dataUrl;
+    const back = trimmedBackUrl || backArt?.dataUrl;
+    if (!front && !back) return null;
+    const sizeStr = `${longEdge}″ × ${shortEdge}″`;
+    const generated = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+
+    // Map calc fold keys to the previewer's fold keys + drop unsupported ones.
+    // The previewer doesn't have `double-parallel`, so fall back to a flat front/back
+    // flip card for that case.
+    // FOLD configurations — copied verbatim from calc-brochure FOLDS_3D so the
+    // standalone matches the in-calc preview view-for-view (Folded Back included,
+    // swap honoured, double-parallel mode supported).
+    const PREVIEWER_FOLDS = {
+      "half-fold": { n:2, mode:"nested", swap:true, views:[
+        {label:"Inside (Open)",sc:[8,-6,0,0],f:[0]},
+        {label:"Folded (Front)",sc:[20,-30,60,0],f:[-175]},
+        {label:"Folded (Back)",sc:[20,150,60,0],f:[-175]},
+        {label:"Outside (Open)",sc:[8,174,0,0],f:[0]}]},
+      "accordion-3": { n:3, mode:"nested", views:[
+        {label:"Front (Open)",sc:[8,-6,0,0],f:[0,0]},
+        {label:"Folded (Front)",sc:[20,-35,60,0],f:[-175,168]},
+        {label:"Folded (Back)",sc:[20,145,60,0],f:[-175,168]},
+        {label:"Back (Open)",sc:[8,174,0,0],f:[0,0]}]},
+      "accordion-4": { n:4, mode:"nested", swap:true, views:[
+        {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0]},
+        {label:"Folded (Front)",sc:[20,-35,100,0],f:[-175,168,-162]},
+        {label:"Folded (Back)",sc:[20,145,100,0],f:[-175,168,-162]},
+        {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0]}]},
+      "tri-fold": { n:3, mode:"trifold", views:[
+        {label:"Inside (Open)",sc:[8,-6,0,0],f:[0,0],tz:[0,0]},
+        {label:"Right Tucks In",sc:[20,-35,50,0],f:[0,-179],tz:[0,0]},
+        {label:"Folded (Front)",sc:[20,-25,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+        {label:"Folded (Back)",sc:[20,155,60,0],f:[175,-179],tzf_tf:[0.04,0]},
+        {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0],tz:[0,0]}]},
+      "gate-fold": { n:4, mode:"gate3", views:[
+        {label:"Inside (Open)",sc:[8,-6,0,0],g:[0,0]},
+        {label:"Folded (Front)",sc:[20,-25,30,0],g:[-175,175]},
+        {label:"Folded (Back)",sc:[20,155,30,0],g:[-175,175]},
+        {label:"Outside (Open)",sc:[8,174,0,0],g:[0,0]}]},
+      "double-gate": { n:4, mode:"dgate", views:[
+        {label:"Inside (Open)",sc:[8,-5,0,0],dg:[0,0,0],tzf:[0,0,0]},
+        {label:"Flaps In",sc:[20,-30,50,0],dg:[178,-178,0],tzf:[0.04,0.04,0]},
+        {label:"Folded (Front)",sc:[20,-25,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+        {label:"Folded (Back)",sc:[20,155,80,0],dg:[178,-178,-178],tzf:[0.04,0.04,0.18]},
+        {label:"Outside (Open)",sc:[8,174,0,0],dg:[0,0,0],tzf:[0,0,0]}]},
+      "roll-fold": { n:4, mode:"nested", swap:true, views:[
+        {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
+        {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
+        {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
+        {label:"Folded (Front)",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+        {label:"Folded (Back)",sc:[20,150,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+        {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
+      "double-parallel": { n:4, mode:"dparallel", views:[
+        {label:"Front (Open)",sc:[8,-4,0,0],f:[0,0],tzf:[0,0]},
+        {label:"First Bifold",sc:[20,-30,60,0],f:[-175,0],tzf:[0.04,0]},
+        {label:"Folded (Front)",sc:[20,-30,80,0],f:[-175,-175],tzf:[0.04,0.08]},
+        {label:"Folded (Back)",sc:[20,150,80,0],f:[-175,-175],tzf:[0.04,0.08]},
+        {label:"Back (Open)",sc:[8,174,0,0],f:[0,0],tzf:[0,0]}]},
+    };
+    const previewerKey = FOLD_KEY_MAP[foldType] || null;
+    const fold = previewerKey ? PREVIEWER_FOLDS[previewerKey] : null;
+
+    // Pixel dimensions for the fold-builder math — the previewer's helpers compute
+    // panel aspect from a w/h pair, scale doesn't matter as long as the ratio is
+    // right. Use trim inches × 100 so pa = trimW/trimH (clean numbers).
+    const detW = Math.round(longEdge * 100);
+    const detH = Math.round(shortEdge * 100);
+    const dir = "left"; // previewer's fold-direction sign — left = +1
+    const ori = "landscape"; // calc-brochure renders landscape only
+
+    if (!fold) {
+      // No supported fold: flat front/back flip card
+      const ratio = `${longEdge}/${shortEdge}`;
+      const flatHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print Preview · Brochure · ${sizeStr}</title><style>
+*{box-sizing:border-box}body{margin:0;padding:36px 18px 24px;font-family:-apple-system,'Segoe UI',Arial,sans-serif;background:#1a1d23;color:#e8eaed;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;color:#fff;margin:0 0 4px}.tagline{font-size:.72rem;color:#b0b7c3}
+.stage{perspective:1500px;width:100%;max-width:760px;display:flex;align-items:center;justify-content:center;margin:0 auto}
+.flat-wrap{position:relative;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.4,0,.2,1);width:100%;max-width:680px;aspect-ratio:${ratio}}
+.flat-sheet{position:absolute;inset:0;background:#fff;background-position:center;background-size:cover;backface-visibility:hidden;box-shadow:0 14px 36px rgba(0,0,0,.4);border-radius:2px}
+.flat-sheet.front{transform:rotateY(0deg)}.flat-sheet.back{transform:rotateY(180deg)}.flat-wrap.flipped{transform:rotateY(180deg)}
+.controls{margin-top:24px;display:flex;gap:10px;justify-content:center}
+button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#b0b7c3;padding:9px 22px;border-radius:8px;cursor:pointer;font-size:.76rem;font-weight:500;letter-spacing:.06em;text-transform:uppercase;transition:all .3s;font-family:inherit}
+button:hover:not(:disabled){background:rgba(0,174,239,.12);border-color:#00AEEF;color:#00AEEF}button.on{background:#00AEEF;border-color:#00AEEF;color:#000}button:disabled{opacity:.3;cursor:not-allowed}
+.credit{margin-top:30px;font-size:.6rem;color:rgba(255,255,255,.3)}
+</style></head><body><header><h1>Brochure Preview · ${sizeStr}</h1><div class="tagline">Priority Print Service · ${generated}</div></header>
+<div class="stage"><div class="flat-wrap" id="wrap"><div class="flat-sheet front" style="${front ? `background-image:url('${front}')` : 'background:#f8f5f0'}"></div><div class="flat-sheet back" style="${back ? `background-image:url('${back}')` : 'background:#f8f5f0'}"></div></div></div>
+<div class="controls"><button class="on" id="btnFront">Front</button><button id="btnBack" ${back ? '' : 'disabled'}>Back</button></div>
+<div class="credit">Generated by Priority Print Service</div>
+<script>
+var wrap=document.getElementById('wrap'),btnF=document.getElementById('btnFront'),btnB=document.getElementById('btnBack');
+btnF.addEventListener('click',function(){wrap.classList.remove('flipped');btnF.classList.add('on');btnB.classList.remove('on');});
+btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.add('flipped');btnB.classList.add('on');btnF.classList.remove('on');});
+<\/script></body></html>`;
+      return new Blob([flatHtml], { type: "text/html" });
+    }
+
+    // 3D fold preview — verbatim port of brochure-fold-previewer.html buildShareHTML
+    const foldJSON = JSON.stringify(fold);
+    const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Brochure Preview – ${previewerKey}</title>
+<style>
+:root{--brand:#00AEEF;--brand-light:#33c4ff;--bg:#1a1d23;--text:#e8eaed;--text-muted:#b0b7c3;--surface-border:rgba(255,255,255,0.12)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{min-height:100vh;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;color:var(--text);display:flex;flex-direction:column;align-items:center;padding:30px 20px}
+h1{font-size:1.3rem;font-weight:700;color:#fff;margin-bottom:4px}
+.tagline{font-size:.72rem;color:var(--text-muted);margin-bottom:20px}
+.meta{font-size:.72rem;color:var(--text-muted);margin-bottom:20px;text-align:center;line-height:1.6}
+.meta strong{color:var(--brand)}
+.view-controls{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;justify-content:center}
+.view-controls button{background:rgba(255,255,255,.06);border:1px solid var(--surface-border);color:var(--text-muted);padding:9px 22px;border-radius:8px;cursor:pointer;font-size:.76rem;font-weight:500;letter-spacing:.06em;text-transform:uppercase;transition:all .3s;font-family:inherit}
+.view-controls button:hover{background:rgba(0,174,239,.12);border-color:var(--brand);color:var(--brand)}
+.view-controls button.on{background:var(--brand);border-color:var(--brand);color:#000;box-shadow:0 4px 20px rgba(0,174,239,.3)}
+.state-label{text-align:center;font-size:.72rem;font-weight:500;color:var(--text-muted);letter-spacing:.12em;text-transform:uppercase;margin-bottom:14px;opacity:.7}
+.viewport{width:100%;max-width:960px;min-height:420px;perspective:1800px;display:flex;justify-content:center;align-items:center;cursor:grab;user-select:none;position:relative;overflow:hidden;border-radius:14px;background:rgba(0,0,0,.15);border:1px solid var(--surface-border);margin:0 auto 16px}
+.viewport:active{cursor:grabbing}
+.viewport .drag-hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:.62rem;color:rgba(255,255,255,.45);letter-spacing:.08em;text-transform:uppercase;pointer-events:none;opacity:1;transition:opacity .5s}
+.viewport .drag-hint.hidden{opacity:0}
+.scene{position:relative;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
+.panel-wrap{position:absolute;transform-style:preserve-3d}
+.hinge{position:absolute;transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.4,0,.2,1)}
+.face{position:absolute;top:0;left:0;backface-visibility:hidden;overflow:hidden}
+.face img{height:100%;display:block}
+.face.f{z-index:2}.face.b{transform:rotateY(180deg);z-index:1}
+.info{text-align:center;font-size:.68rem;color:rgba(255,255,255,.45);margin-top:10px}
+.zoom-bar{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:8px}
+.zoom-btn{width:30px;height:30px;border:1px solid rgba(255,255,255,.12);border-radius:6px;background:rgba(255,255,255,.06);color:#b0b7c3;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;padding:0}
+.zoom-btn:hover{background:rgba(0,174,239,.12);border-color:#00AEEF;color:#00AEEF}
+.zoom-pct{font-size:.68rem;color:#b0b7c3;min-width:40px;text-align:center;font-variant-numeric:tabular-nums}
+.zoom-fit{padding:4px 12px;border:1px solid rgba(255,255,255,.12);border-radius:6px;background:rgba(255,255,255,.06);color:#b0b7c3;font-size:.64rem;font-weight:600;cursor:pointer;text-transform:uppercase;letter-spacing:.06em;transition:all .2s}
+.zoom-fit:hover{background:rgba(0,174,239,.12);border-color:#00AEEF;color:#00AEEF}
+#zoomSlider{width:120px;height:4px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.12);border-radius:2px;outline:none;cursor:pointer}
+#zoomSlider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#00AEEF;cursor:pointer;border:none}
+.credit{margin-top:30px;font-size:.6rem;color:rgba(255,255,255,.3);text-align:center}
+@media(max-width:700px){.viewport{perspective:1000px;min-height:280px}}
+</style></head><body>
+<h1>Brochure Fold Preview</h1>
+<div class="tagline">Priority Print Service · 3D Mockup</div>
+<div class="meta"><strong>Fold:</strong> ${previewerKey} · <strong>Size:</strong> ${sizeStr} · <strong>Generated:</strong> ${generated}</div>
+<div class="view-controls" id="viewControls"></div>
+<div class="state-label" id="stateLabel"></div>
+<div class="viewport" id="vp"><div class="scene" id="scene"></div><div class="drag-hint" id="dragHint">↔ Drag to rotate</div></div>
+<div class="zoom-bar"><button class="zoom-btn" id="zo">−</button><input type="range" id="zoomSlider" min="20" max="250" value="100" step="5"><button class="zoom-btn" id="zi">+</button><span class="zoom-pct" id="zp">100%</span><button class="zoom-fit" id="zf">Fit</button></div>
+<p class="info">Interactive 3D mockup · Use the view buttons to step through the fold</p>
+<div class="credit">Generated by Priority Print Service</div>
+<script>
+const $=id=>document.getElementById(id);
+const frontUrl="${front || ""}";
+const backUrl="${back || front || ""}";
+const detW=${detW},detH=${detH};
+const foldDir="${dir}",ori="${ori}";
+const fold=${foldJSON};
+let cScale=1,userZoom=1,currentRX=0,currentRY=0;
+
+function ds(){return foldDir==='left'?1:-1}
+function es(){return cScale*userZoom}
+function setZoom(z){userZoom=Math.max(0.2,Math.min(2.5,z));$('zoomSlider').value=Math.round(userZoom*100);$('zp').textContent=Math.round(userZoom*100)+'%';$('scene').style.transition='transform .4s ease';$('scene').style.transform=\`scale(\${es()}) rotateX(\${currentRX}deg) rotateY(\${currentRY}deg)\`}
+$('zo').addEventListener('click',()=>setZoom(userZoom-0.1));
+$('zi').addEventListener('click',()=>setZoom(userZoom+0.1));
+$('zf').addEventListener('click',()=>setZoom(1));
+$('zoomSlider').addEventListener('input',e=>setZoom(parseInt(e.target.value)/100));
+
+function mkF(idx,n,pw,ph,iW,iH,isP,swap){
+  const bi=n-1-idx;
+  const fSrc=swap?backUrl:frontUrl,bSrc=swap?frontUrl:backUrl;
+  let fml=0,fmt=0,bml=0,bmt=0;
+  if(isP){fmt=-ph*idx;bmt=-ph*bi}else{fml=-pw*idx;bml=-pw*bi}
+  return\`<div class="face f" style="width:\${pw}px;height:\${ph}px;"><img src="\${fSrc}" style="width:\${iW}px;height:\${iH}px;margin-left:\${fml}px;margin-top:\${fmt}px;"></div><div class="face b" style="width:\${pw}px;height:\${ph}px;"><img src="\${bSrc}" style="width:\${iW}px;height:\${iH}px;margin-left:\${bml}px;margin-top:\${bmt}px;"></div>\`;
+}
+
+function mkFGate(startQ,spanQ,qw,qh,iW,iH,isP,totalQ){
+  const bStartQ=totalQ-startQ-spanQ;
+  if(isP){
+    const fmt=-qh*startQ,bmt=-qh*bStartQ;
+    return\`<div class="face f" style="width:\${qw}px;height:\${qh*spanQ}px;"><img src="\${frontUrl}" style="width:\${iW}px;height:\${iH}px;margin-left:0;margin-top:\${fmt}px;"></div><div class="face b" style="width:\${qw}px;height:\${qh*spanQ}px;"><img src="\${backUrl}" style="width:\${iW}px;height:\${iH}px;margin-left:0;margin-top:\${bmt}px;"></div>\`;
+  } else {
+    const fml=-qw*startQ,bml=-qw*bStartQ;
+    return\`<div class="face f" style="width:\${qw*spanQ}px;height:\${qh}px;"><img src="\${frontUrl}" style="width:\${iW}px;height:\${iH}px;margin-left:\${fml}px;margin-top:0;"></div><div class="face b" style="width:\${qw*spanQ}px;height:\${qh}px;"><img src="\${backUrl}" style="width:\${iW}px;height:\${iH}px;margin-left:\${bml}px;margin-top:0;"></div>\`;
+  }
+}
+
+function buildNest(idx,n,pw,ph,iW,iH,isP,swap){
+  const last=idx===n-1;
+  let h=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+  h+=mkF(idx,n,pw,ph,iW,iH,isP,!!swap);
+  if(!last){
+    const hp=isP?\`left:0;top:\${ph}px;\`:\`left:\${pw}px;top:0;\`;
+    const og=isP?'center top':'left center';
+    h+=\`<div class="hinge" id="hinge\${idx+1}" style="\${hp}width:\${pw}px;height:\${ph}px;transform-origin:\${og};">\`;
+    h+=buildNest(idx+1,n,pw,ph,iW,iH,isP,swap);
+    h+=\`</div>\`;
+  }
+  h+=\`</div>\`;return h;
+}
+
+// Double-parallel fold (bifold of a bifold). Bifurcated DOM: dpHinge2 contains
+// P2 + dpHinge1a (which holds P3); dpHinge1b is a sibling carrying P4 alone.
+// dpHinge1a + dpHinge1b rotate together (fold 1); dpHinge2 rotates alone (fold 2).
+function buildDParallel(scene,pw,ph,iW,iH,isP,swap){
+  const mkP=(idx)=>\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(idx,4,pw,ph,iW,iH,isP,!!swap)+\`</div>\`;
+  let h=mkP(0);
+  h+=\`<div class="hinge" id="dpHinge2" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;">\`;
+  h+=mkP(1);
+  h+=\`<div class="hinge" id="dpHinge1a" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;">\`;
+  h+=mkP(2);
+  h+=\`</div></div>\`;
+  h+=\`<div class="hinge" id="dpHinge1b" style="left:\${2*pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;">\`;
+  h+=\`<div class="panel-wrap" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(3,4,pw,ph,iW,iH,isP,!!swap)+\`</div>\`;
+  h+=\`</div>\`;
+  scene.innerHTML=h;
+}
+
+function buildTriFold(scene,pw,ph,iW,iH,isP,n){
+  let h='';
+  if(isP){
+    h+=\`<div class="panel-wrap" style="left:0;top:\${ph}px;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(1,n,pw,ph,iW,iH,isP,true);
+    h+=\`<div class="hinge" id="hingeL" style="left:0;top:\${-ph}px;width:\${pw}px;height:\${ph}px;transform-origin:center bottom;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(0,n,pw,ph,iW,iH,isP,true);
+    h+=\`</div></div>\`;
+    h+=\`<div class="hinge" id="hingeR" style="left:0;top:\${ph}px;width:\${pw}px;height:\${ph}px;transform-origin:center top;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(2,n,pw,ph,iW,iH,isP,true);
+    h+=\`</div></div></div>\`;
+  } else {
+    h+=\`<div class="panel-wrap" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(1,n,pw,ph,iW,iH,isP,true);
+    h+=\`<div class="hinge" id="hingeL" style="left:\${-pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:right center;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(0,n,pw,ph,iW,iH,isP,true);
+    h+=\`</div></div>\`;
+    h+=\`<div class="hinge" id="hingeR" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`;
+    h+=mkF(2,n,pw,ph,iW,iH,isP,true);
+    h+=\`</div></div></div>\`;
+  }
+  scene.innerHTML=h;
+}
+
+function buildGate3(scene,qw,qh,iW,iH,isP){
+  let h='';
+  if(isP){
+    const cH=qh*2;
+    h+=\`<div class="hinge" id="gateL" style="left:0;top:0;width:\${qw}px;height:\${qh}px;transform-origin:center bottom;">\`+mkFGate(0,1,qw,qh,iW,iH,isP,4)+\`</div>\`;
+    h+=\`<div class="panel-wrap" style="left:0;top:\${qh}px;width:\${qw}px;height:\${cH}px;">\`+mkFGate(1,2,qw,qh,iW,iH,isP,4)+\`</div>\`;
+    h+=\`<div class="hinge" id="gateR" style="left:0;top:\${qh+cH}px;width:\${qw}px;height:\${qh}px;transform-origin:center top;">\`+mkFGate(3,1,qw,qh,iW,iH,isP,4)+\`</div>\`;
+  } else {
+    const cW=qw*2;
+    h+=\`<div class="hinge" id="gateL" style="left:0;top:0;width:\${qw}px;height:\${qh}px;transform-origin:right center;">\`+mkFGate(0,1,qw,qh,iW,iH,isP,4)+\`</div>\`;
+    h+=\`<div class="panel-wrap" style="left:\${qw}px;top:0;width:\${cW}px;height:\${qh}px;">\`+mkFGate(1,2,qw,qh,iW,iH,isP,4)+\`</div>\`;
+    h+=\`<div class="hinge" id="gateR" style="left:\${qw+cW}px;top:0;width:\${qw}px;height:\${qh}px;transform-origin:left center;">\`+mkFGate(3,1,qw,qh,iW,iH,isP,4)+\`</div>\`;
+  }
+  scene.innerHTML=h;
+}
+
+function buildDGate(scene,pw,ph,iW,iH,isP,n){
+  let h='';
+  if(isP){
+    h+=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph*2}px;">\`;
+    h+=\`<div class="panel-wrap" style="left:0;top:\${ph}px;width:\${pw}px;height:\${ph}px;">\`+mkF(1,n,pw,ph,iW,iH,isP,true)+\`</div>\`;
+    h+=\`<div class="hinge" id="hingeL" style="left:0;top:0;width:\${pw}px;height:\${ph}px;transform-origin:center bottom;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(0,n,pw,ph,iW,iH,isP,true)+\`</div></div>\`;
+    h+=\`<div class="hinge" id="hingeCtr" style="left:0;top:\${ph*2}px;width:\${pw}px;height:\${ph*2}px;transform-origin:center top;">\`;
+    h+=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(2,n,pw,ph,iW,iH,isP,true)+\`</div>\`;
+    h+=\`<div class="hinge" id="hingeR" style="left:0;top:\${ph}px;width:\${pw}px;height:\${ph}px;transform-origin:center top;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(3,n,pw,ph,iW,iH,isP,true)+\`</div></div>\`;
+    h+=\`</div></div>\`;
+  } else {
+    h+=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw*2}px;height:\${ph}px;">\`;
+    h+=\`<div class="panel-wrap" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(1,n,pw,ph,iW,iH,isP,true)+\`</div>\`;
+    h+=\`<div class="hinge" id="hingeL" style="left:0;top:0;width:\${pw}px;height:\${ph}px;transform-origin:right center;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(0,n,pw,ph,iW,iH,isP,true)+\`</div></div>\`;
+    h+=\`<div class="hinge" id="hingeCtr" style="left:\${pw*2}px;top:0;width:\${pw*2}px;height:\${ph}px;transform-origin:left center;">\`;
+    h+=\`<div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(2,n,pw,ph,iW,iH,isP,true)+\`</div>\`;
+    h+=\`<div class="hinge" id="hingeR" style="left:\${pw}px;top:0;width:\${pw}px;height:\${ph}px;transform-origin:left center;"><div class="panel-wrap" style="left:0;top:0;width:\${pw}px;height:\${ph}px;">\`+mkF(3,n,pw,ph,iW,iH,isP,true)+\`</div></div>\`;
+    h+=\`</div></div>\`;
+  }
+  scene.innerHTML=h;
+}
+
+function generate(){
+  const n=fold.n,isP=ori==='portrait',scene=$('scene'),swap=!!fold.swap;
+  if(fold.mode==='gate3'){
+    const pa=isP?(detW/(detH/4)):((detW/4)/detH);
+    const mx=Math.min(200,(window.innerWidth-100)/(isP?2:4));
+    const qw=Math.round(mx),qh=Math.round(qw/pa);
+    const iW=isP?qw:qw*4,iH=isP?qh*4:qh;
+    scene.style.width=(isP?qw:(qw*4))+'px';scene.style.height=(isP?(qh*4):qh)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?qw*2:qw*4)*1.4));
+    buildGate3(scene,qw,qh,iW,iH,isP);
+  } else if(fold.mode==='dgate'){
+    const pa=isP?(detW/(detH/n)):((detW/n)/detH);
+    const mx=Math.min(200,(window.innerWidth-100)/(isP?1.5:n));
+    const pw=Math.round(mx),ph=Math.round(pw/pa);
+    const iW=isP?pw:pw*n,iH=isP?ph*n:ph;
+    scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*2:pw*n)*1.4));
+    buildDGate(scene,pw,ph,iW,iH,isP,n);
+  } else if(fold.mode==='trifold'){
+    const pa=isP?(detW/(detH/n)):((detW/n)/detH);
+    const mx=Math.min(240,(window.innerWidth-100)/(isP?1.5:n));
+    const pw=Math.round(mx),ph=Math.round(pw/pa);
+    const iW=isP?pw:pw*n,iH=isP?ph*n:ph;
+    scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*1.5:pw*n)*1.4));
+    buildTriFold(scene,pw,ph,iW,iH,isP,n);
+  } else if(fold.mode==='dparallel'){
+    const pa=isP?(detW/(detH/n)):((detW/n)/detH);
+    const mx=Math.min(240,(window.innerWidth-100)/(isP?1.5:n));
+    const pw=Math.round(mx),ph=Math.round(pw/pa);
+    const iW=isP?pw:pw*n,iH=isP?ph*n:ph;
+    scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*1.5:pw*n)*1.4));
+    buildDParallel(scene,pw,ph,iW,iH,isP,swap);
+  } else {
+    const pa=isP?(detW/(detH/n)):((detW/n)/detH);
+    const mx=Math.min(240,(window.innerWidth-100)/(isP?1.5:n));
+    const pw=Math.round(mx),ph=Math.round(pw/pa);
+    const iW=isP?pw:pw*n,iH=isP?ph*n:ph;
+    scene.style.width=(isP?pw:(pw*n))+'px';scene.style.height=(isP?(ph*n):ph)+'px';
+    cScale=Math.min(1,(Math.min(window.innerWidth-60,1100))/((isP?pw*1.5:pw*n)*1.4));
+    scene.innerHTML=buildNest(0,n,pw,ph,iW,iH,isP,swap);
+  }
+  const ctrl=$('viewControls');ctrl.innerHTML='';
+  fold.views.forEach((v,i)=>{const b=document.createElement('button');b.textContent=v.label;b.addEventListener('click',()=>applyV(i));if(i===0)b.classList.add('on');ctrl.appendChild(b)});
+  applyV(0);
+}
+
+function applyV(vi){
+  const view=fold.views[vi],scene=$('scene'),s=ds(),isP=ori==='portrait';
+  let[rx,ry,tx,ty]=view.sc;
+  if(s<0)ry=-ry;
+  if(isP){const t=rx;rx=-ry*.4;ry=t*.5;const tt=tx;tx=0;ty=tt}
+  currentRX=rx;currentRY=ry;
+  scene.style.transition='transform 1.4s cubic-bezier(.4,0,.2,1)';
+  scene.style.transform=\`scale(\${es()}) rotateX(\${rx}deg) rotateY(\${ry}deg) translateX(\${tx}px) translateY(\${ty}px)\`;
+  if(fold.mode==='trifold'){
+    const[lA,rA]=view.f;const tzf=view.tzf_tf||[0,0];const hL=$('hingeL'),hR=$('hingeR');
+    const pw=hL?parseInt(hL.style.width)||0:0;const tzL=tzf[0]?tzf[0]*pw:0,tzR=tzf[1]?tzf[1]*pw:0;
+    if(isP){if(hR)hR.style.transform=\`\${tzR?'translateZ('+tzR.toFixed(1)+'px) ':''}rotateX(\${rA*s}deg)\`;if(hL)hL.style.transform=\`\${tzL?'translateZ('+tzL.toFixed(1)+'px) ':''}rotateX(\${-lA*s}deg)\`}
+    else{if(hR)hR.style.transform=\`\${tzR?'translateZ('+tzR.toFixed(1)+'px) ':''}rotateY(\${rA*s}deg)\`;if(hL)hL.style.transform=\`\${tzL?'translateZ('+tzL.toFixed(1)+'px) ':''}rotateY(\${lA*s}deg)\`}
+  } else if(fold.mode==='gate3'){
+    const[lA,rA]=view.g;const gL=$('gateL'),gR=$('gateR');
+    if(isP){if(gL)gL.style.transform=\`rotateX(\${-lA*s}deg)\`;if(gR)gR.style.transform=\`rotateX(\${-rA*s}deg)\`}
+    else{if(gL)gL.style.transform=\`rotateY(\${lA*s}deg)\`;if(gR)gR.style.transform=\`rotateY(\${rA*s}deg)\`}
+  } else if(fold.mode==='dgate'){
+    const[lA,rA,cA]=view.dg;const tzf=view.tzf||[0,0,0];const hL=$('hingeL'),hR=$('hingeR'),hC=$('hingeCtr');
+    const pw=hL?parseInt(hL.style.width)||0:0;const tzLpx=tzf[0]?tzf[0]*pw:0;const tzRpx=tzf[1]?tzf[1]*pw:0;const tzCpx=tzf[2]?tzf[2]*pw:0;
+    if(isP){if(hL)hL.style.transform=\`\${tzLpx?'translateZ('+tzLpx.toFixed(1)+'px) ':''}rotateX(\${-lA*s}deg)\`;if(hR)hR.style.transform=\`\${tzRpx?'translateZ('+tzRpx.toFixed(1)+'px) ':''}rotateX(\${-rA*s}deg)\`;if(hC)hC.style.transform=\`\${tzCpx?'translateZ('+tzCpx.toFixed(1)+'px) ':''}rotateX(\${cA*s}deg)\`}
+    else{if(hL)hL.style.transform=\`\${tzLpx?'translateZ('+tzLpx.toFixed(1)+'px) ':''}rotateY(\${lA*s}deg)\`;if(hR)hR.style.transform=\`\${tzRpx?'translateZ('+tzRpx.toFixed(1)+'px) ':''}rotateY(\${rA*s}deg)\`;if(hC)hC.style.transform=\`\${tzCpx?'translateZ('+tzCpx.toFixed(1)+'px) ':''}rotateY(\${cA*s}deg)\`}
+  } else if(fold.mode==='dparallel'){
+    // view.f = [fold1Angle, fold2Angle]. dpHinge1a + dpHinge1b rotate together
+    // (fold 1, the first bifold); dpHinge2 rotates alone (fold 2 bifolds the bifold).
+    const[a1,a2]=view.f;const tzf=view.tzf||[0,0];
+    const fh1a=$('dpHinge1a'),fh1b=$('dpHinge1b'),fh2=$('dpHinge2');
+    const pw=fh2?parseInt(fh2.style.width)||0:0;
+    const tz1=tzf[0]?'translateZ('+(tzf[0]*pw).toFixed(1)+'px) ':'';
+    const tz2=tzf[1]?'translateZ('+(tzf[1]*pw).toFixed(1)+'px) ':'';
+    if(isP){
+      if(fh1a)fh1a.style.transform=\`\${tz1}rotateX(\${a1*s}deg)\`;
+      if(fh1b)fh1b.style.transform=\`\${tz1}rotateX(\${a1*s}deg)\`;
+      if(fh2)fh2.style.transform=\`\${tz2}rotateX(\${a2*s}deg)\`;
+    } else {
+      if(fh1a)fh1a.style.transform=\`\${tz1}rotateY(\${a1*s}deg)\`;
+      if(fh1b)fh1b.style.transform=\`\${tz1}rotateY(\${a1*s}deg)\`;
+      if(fh2)fh2.style.transform=\`\${tz2}rotateY(\${a2*s}deg)\`;
+    }
+  } else {
+    const tzf=view.tzf;
+    view.f.forEach((a,i)=>{const h=$('hinge'+(i+1));if(!h)return;
+      let tz='';if(tzf&&tzf[i]){const pw=parseInt(h.style.width)||0;tz='translateZ('+(tzf[i]*pw).toFixed(1)+'px) '}
+      if(isP)h.style.transform=\`\${tz}rotateX(\${a*s}deg)\`;else h.style.transform=\`\${tz}rotateY(\${a*s}deg)\`});
+  }
+  $('viewControls').querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',i===vi));
+  $('stateLabel').textContent=view.label;
+}
+
+// Drag to spin
+let dragActive=false,dsx=0,dsy=0,dbx=0,dby=0;
+const vp=$('vp');
+vp.addEventListener('mousedown',e=>{e.preventDefault();dragActive=true;dsx=e.clientX;dsy=e.clientY;dbx=currentRX;dby=currentRY;$('scene').style.transition='none';const h=$('dragHint');if(h)h.classList.add('hidden')});
+document.addEventListener('mousemove',e=>{if(!dragActive)return;currentRY=dby+(e.clientX-dsx)*0.4;currentRX=Math.max(-60,Math.min(60,dbx-(e.clientY-dsy)*0.3));$('scene').style.transform=\`scale(\${es()}) rotateX(\${currentRX}deg) rotateY(\${currentRY}deg)\`});
+document.addEventListener('mouseup',()=>{dragActive=false;$('scene').style.transition='transform 1.4s cubic-bezier(.4,0,.2,1)'});
+vp.addEventListener('touchstart',e=>{e.preventDefault();dragActive=true;dsx=e.touches[0].clientX;dsy=e.touches[0].clientY;dbx=currentRX;dby=currentRY;$('scene').style.transition='none';const h=$('dragHint');if(h)h.classList.add('hidden')},{passive:false});
+document.addEventListener('touchmove',e=>{if(!dragActive)return;e.preventDefault();currentRY=dby+(e.touches[0].clientX-dsx)*0.4;currentRX=Math.max(-60,Math.min(60,dbx-(e.touches[0].clientY-dsy)*0.3));$('scene').style.transform=\`scale(\${es()}) rotateX(\${currentRX}deg) rotateY(\${currentRY}deg)\`},{passive:false});
+document.addEventListener('touchend',()=>{dragActive=false;$('scene').style.transition='transform 1.4s cubic-bezier(.4,0,.2,1)'});
+vp.addEventListener('wheel',e=>{e.preventDefault();setZoom(userZoom+(e.deltaY>0?-0.05:0.05))},{passive:false});
+
+generate();
+<\/script></body></html>`;
+    return new Blob([html], { type: "text/html" });
+  }
+
+
 
   // ── Generate 4 deliverables on approval ──
   // Parameterized copy of the canonical generator (calc-perfect-bound.html); brochure
@@ -1661,7 +2221,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
-    return { printReadyBlob, previewBlobs, manifestBlob, skippedGeneration: false };
+    const previewHtmlBlob = buildPreviewHtml();
+    return { printReadyBlob, previewBlobs, manifestBlob, previewHtmlBlob, skippedGeneration: false };
   }
 
   // Perf line positions — perfDir "length" crosses longEdge (vertical when foldDir=long)
@@ -1811,7 +2372,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>
               <Sel label="Fold Type" value={foldType} onChange={onFoldChange}>
-                {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
+                {availableFoldTypes(longEdge, shortEdge, paperIsCardstock).map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
               </Sel>
             </div>
             {panels > 1 && (
@@ -1951,6 +2512,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                       pkg.previewBlobs.forEach((b, i) => {
                         if (b) files.push(new File([b], `${baseName}_preview_${sideNames[i] || ("side_" + (i+1))}.jpg`, { type: "image/jpeg" }));
                       });
+                      if (pkg.previewHtmlBlob) files.push(new File([pkg.previewHtmlBlob], baseName + "_preview.html", { type: "text/html" }));
                       files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
                       onArtwork({ type: "files", list: files });
                     }
@@ -1974,6 +2536,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                   background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
                   color: showGuides ? "#38a169" : "rgba(255,255,255,.5)",
                 }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
+                {/* Viewport zoom controls */}
+                <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.04)" }}>
+                  <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>−</button>
+                  <span style={{ fontSize:10.5, fontWeight:600, color:"rgba(255,255,255,.65)", minWidth:38, textAlign:"center", letterSpacing:".02em" }}>{Math.round(vpScale*100)}%</span>
+                  <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>+</button>
+                  <button type="button" onClick={vpReset} disabled={vpScale===VP_FIT && vpX===0 && vpY===0} title="Fit page" style={{padding:"4px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid rgba(255,255,255,.12)",marginLeft:2,borderRadius:0,cursor:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"rgba(255,255,255,.2)":"rgba(255,255,255,.55)",fontFamily:"inherit"}}>⛶</button>
+                </div>
                 <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} title="Magnifier loupe" style={{
                   padding: "5px 10px", fontSize: 12, border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                   background: showMagnifier ? CK.cyan : "rgba(255,255,255,.06)",
@@ -2025,6 +2594,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                 if (rawFileRef.current) files.push([rawFileRef.current, rawFileRef.current.name || baseName + "_raw"]);
                 if (approvalPkg.printReadyBlob) files.push([approvalPkg.printReadyBlob, baseName + "_print-ready.pdf"]);
                 approvalPkg.previewBlobs.forEach((b, i) => { if (b) files.push([b, `${baseName}_preview_${sideNames[i] || ("side_" + (i+1))}.jpg`]); });
+                if (approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
                 if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
                 for (let i = 0; i < files.length; i++) {
                   dlFile(files[i][0], files[i][1]);
@@ -2040,6 +2610,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                     {rawFileRef.current && <button type="button" onClick={() => dlFile(rawFileRef.current, rawFileRef.current.name || baseName + "_raw")} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,.12)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "rgba(255,255,255,.5)" }}>Raw file</button>}
                     {approvalPkg.printReadyBlob && <button type="button" onClick={() => dlFile(approvalPkg.printReadyBlob, baseName + "_print-ready.pdf")} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,.12)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "rgba(255,255,255,.5)" }}>Print-ready PDF</button>}
                     {previewCount > 0 && <button type="button" onClick={() => approvalPkg.previewBlobs.forEach((b, i) => { if (b) dlFile(b, `${baseName}_preview_${sideNames[i] || ("side_" + (i+1))}.jpg`); })} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,.12)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "rgba(255,255,255,.5)" }}>Previews ({previewCount})</button>}
+                    {approvalPkg.previewHtmlBlob && <button type="button" onClick={() => dlFile(approvalPkg.previewHtmlBlob, baseName + "_preview.html")} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(99,102,241,.4)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(99,102,241,.12)", color: "#a5b4fc" }}>Preview HTML</button>}
                     <button type="button" onClick={() => dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt")} style={{ padding: "5px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,.12)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "rgba(255,255,255,.5)" }}>Manifest</button>
                   </div>
                 </div>
@@ -2049,7 +2620,15 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
 
           {/* Proof view — bleed-inclusive container like saddle stitch */}
           <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            <div ref={proofContainerRef} className="bp-checker" style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, borderRadius: 4, overflow: "hidden", cursor: showMagnifier ? "none" : "default", ...(draggingPerf !== null ? { touchAction: "none" } : {}) }}
+          <div style={{ maxWidth: 800, width: "100%", overflow:"hidden", position:"relative", borderRadius:4, cursor: vpScale>VP_FIT ? (vpDragging?"grabbing":"grab") : "default" }}
+            onWheel={vpOnWheel}
+            onMouseDown={vpOnMouseDown}
+            onMouseMove={vpOnMouseMove}
+            onMouseUp={vpOnMouseUp}
+            onMouseLeave={vpOnMouseUp}
+          >
+          <div style={{ transform:`translate(${vpX}px, ${vpY}px) scale(${vpScale})`, transformOrigin:"center center", transition: vpDragging ? "none" : "transform .12s", willChange:"transform" }}>
+            <div ref={proofContainerRef} className="bp-checker" style={{ position: "relative", maxWidth: 800, width: "100%", aspectRatio: `${bleedW}/${bleedH}`, borderRadius: 4, overflow: "hidden", cursor: showMagnifier ? "none" : "inherit", ...(draggingPerf !== null ? { touchAction: "none" } : {}) }}
               onPointerMove={handlePerfDrag}
               onPointerUp={() => setDraggingPerf(null)}
               onMouseMove={e => { if (!showMagnifier) return; const r = e.currentTarget.getBoundingClientRect(); const x = e.clientX - r.left; const y = e.clientY - r.top; setMagPos({ x, y, pctX: (x / r.width) * 100, pctY: (y / r.height) * 100, cw: r.width, ch: r.height }); }}
@@ -2273,6 +2852,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
               </div>
             </div>
           </div>
+          </div>
+          </div>
         </div>
       )}
 
@@ -2334,6 +2915,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
                   <div style={{ width: "100%", maxWidth: 700, margin: "0 auto" }}>
                     <FoldRenderer
                       foldKey={foldKey}
+                      crossFold={foldType === "trifold_xbifold"}
                       frontSrc={trimmedFrontUrl || frontArt?.dataUrl}
                       backSrc={trimmedBackUrl || backArt?.dataUrl}
                       frontDims={trimmedFrontUrl ? { w: longEdge, h: shortEdge } : frontArt?.dims}
@@ -2371,16 +2953,32 @@ function Panel({ result, compact }) {
   }
   const r = result;
   const sh = r.shipping || {};
+  const ti=r.ti||{};
+  const _factors=[];
+  if(ti.paper>0)_factors.push("paper lead time");
+  if(ti.vivid>0)_factors.push("vivid printing");
+  if(ti.coating>0)_factors.push("coating");
+  if(ti.bundling>0)_factors.push("bundling");
+  if(ti.roundCorner>0)_factors.push("round corners");
+  if(ti.perforation>0)_factors.push("perforation");
+  if(ti.artDesign>0||ti.artEdits>0)_factors.push("artwork");
+  if(ti.proof>0)_factors.push("proofing");
+  const _extraDays=Object.values(ti).reduce((s,v)=>s+(v||0),0);
+  const _hasExtra=_extraDays>=1&&_factors.length>0;
+  const availRange=sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`;
   const moneyStr = Math.max(0, r.total).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [dPart, cPart] = moneyStr.split(".");
+  const saleActive = !!r.saleActive;
   if (compact) {
     return (
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        {saleActive && <span style={{ fontSize: 12, color: CC.light, textDecoration: "line-through", fontWeight: 600 }}>${r.totalWithoutSale.toFixed(2)}</span>}
         <span style={{ fontSize: 20, fontWeight: 800, color: CC.dark, display: "inline-flex", alignItems: "baseline" }}>
           ${dPart}<span style={{ fontSize: 13, fontWeight: 600, color: CC.mid, marginLeft: 1 }}>.{cPart}</span>
         </span>
+        {saleActive && <span style={{ fontSize: 9.5, fontWeight: 800, color: CK.magenta, letterSpacing: ".5px", textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
         <span style={{ fontSize: 11, color: CC.mid }}>${r.perUnit.toFixed(2)}/ea</span>
-        <span style={{ fontSize: 10, color: CC.light }}>{r.days}d</span>
+        <span style={{ fontSize: 10, color: _hasExtra?"#b45309":CC.light }}>{availRange} days{_hasExtra?" *":""}</span>
       </div>
     );
   }
@@ -2388,19 +2986,28 @@ function Panel({ result, compact }) {
     <div style={{ background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden", pointerEvents: "none" }}>
       <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}`, pointerEvents: "none" }}>
         <div style={{ fontSize: 11, color: CC.light, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 2 }}>Estimated Total</div>
-        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: CC.dark }}>
+        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: CC.dark, gap: 10, flexWrap: "wrap" }}>
+          {saleActive && <span style={{ fontSize: 16, color: CC.light, textDecoration: "line-through", fontWeight: 700 }}>${r.totalWithoutSale.toFixed(2)}</span>}
           <span style={{ fontSize: 28, fontWeight: 800 }}>${dPart}</span>
-          <span style={{ fontSize: 18, fontWeight: 700, color: CC.light, marginLeft: 1 }}>.{cPart}</span>
+          <span style={{ fontSize: 18, fontWeight: 700, color: CC.light, marginLeft: -7 }}>.{cPart}</span>
+          {saleActive && <span style={{ display: "inline-block", background: CK.magenta, color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: ".5px", padding: "3px 8px", borderRadius: 4, textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
         </div>
       </div>
       <div style={{ display: "flex", borderBottom: `1px solid ${CC.border}` }}>
-        {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], ["Days", r.days + " biz"]].map(([l, v], i) => (
-          <div key={i} style={{ flex: 1, padding: "11px 8px", textAlign: "center", borderRight: i < 2 ? `1px solid ${CC.border}` : "none" }}>
+        {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()]].map(([l, v], i) => (
+          <div key={i} style={{ flex: 1, padding: "11px 8px", textAlign: "center", borderRight: `1px solid ${CC.border}` }}>
             <div style={{ fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", color: CC.light, marginBottom: 1 }}>{l}</div>
             <div style={{ fontSize: 14.5, fontWeight: 700, color: CC.dark }}>{v}</div>
           </div>
         ))}
+        <div style={{flex:1,padding:"11px 8px",textAlign:"center",background:_hasExtra?"#fffbeb":"transparent",transition:"background .3s"}}>
+          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>Availability</div>
+          <div style={{fontSize:14.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{availRange+" days"}</div>
+        </div>
       </div>
+      {_hasExtra&&<div style={{padding:"5px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
+        <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>* +{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
+      </div>}
       {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#fafafa", fontSize: 11, color: CC.mid, pointerEvents: "none" }}>
         Free delivery est: <strong>{sh.freeDeliveryDate}</strong> ({sh.freeDeliveryBizDays} biz days)
       </div>}
@@ -2557,6 +3164,8 @@ function App() {
   }, []);
   const tog = k => setOp(p => ({ ...p, [k]: !p[k] }));
   const [showDebug, setShowDebug] = useState(false);
+  const [jobName, setJobName] = useState("");
+  const debugUnlocked = jobName === "%3414";
 
   // State
   const [qty, setQty] = useState(250);
@@ -2594,6 +3203,14 @@ function App() {
   const [needByDate, setNeedByDate] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [mobPricing, setMobPricing] = useState(false);
+  // Question form modal state
+  const [qOpen, setQOpen] = useState(false);
+  const [qName, setQName] = useState("");
+  const [qEmail, setQEmail] = useState("");
+  const [qPhone, setQPhone] = useState("");
+  const [qMessage, setQMessage] = useState("");
+  const [qStatus, setQStatus] = useState("idle");
+  const [qErrorMsg, setQErrorMsg] = useState("");
 
   // ── Reorder: pre-fill from PPS_CONFIG.reorder (set by PHP from URL) ──
   useEffect(() => {
@@ -2701,6 +3318,18 @@ function App() {
   const dimLong = sizeMode === "preset" ? (preset?.long || 11) : longEdge;
   const dimShort = sizeMode === "preset" ? (preset?.short || 8.5) : shortEdge;
 
+  // Guard: the compound right-angle fold is only valid for 11×25.5 non-cardstock.
+  // If size/material changes away from that while it's selected, fall back to trifold.
+  useEffect(() => {
+    if (foldType === "trifold_xbifold") {
+      const ok = Math.abs(dimLong - 25.5) < 0.05 && Math.abs(dimShort - 11) < 0.05 && paper.type !== "cardstock";
+      if (!ok) { setFoldType("trifold"); return; }
+      // Compound fold is inherently a long-edge trifold; force foldDir so the
+      // panel-size validation and template orientation stay correct.
+      if (foldDir !== "long") setFoldDir("long");
+    }
+  }, [foldType, foldDir, dimLong, dimShort, paper]);
+
   // Perf count + constraint logic
   // The perf crosses one dimension: "length" → longEdge, "width" → shortEdge
   const perfCrossDim = perfDir === "length" ? dimLong : dimShort;
@@ -2764,6 +3393,75 @@ function App() {
     });
   };
 
+  const handleQuestionSubmit = async (e) => {
+    e.preventDefault();
+    if (qStatus === "sending" || qStatus === "sent") return;
+    if (!qName.trim() || !qEmail.trim() || !qMessage.trim()) {
+      setQStatus("error"); setQErrorMsg("Please fill in name, email, and your question."); return;
+    }
+    setQStatus("sending"); setQErrorMsg("");
+    const PPS = window.PPS_CONFIG || {};
+    const fd = new FormData();
+    fd.append("action", "pps_quote_question");
+    fd.append("nonce", PPS.cartNonce || "");
+    fd.append("name", qName); fd.append("email", qEmail); fd.append("phone", qPhone);
+    fd.append("message", qMessage); fd.append("hp", "");
+    // Build a small inline summary — brochure doesn't have a buildSummary helper
+    let summary = "";
+    try {
+      const lines = [];
+      const sizeStr = sizeMode === "custom" ? `${longEdge}×${shortEdge} custom` : sizeLabel;
+      lines.push(`${qty.toLocaleString()} × ${sizeStr}`);
+      const foldName = (FOLD_TYPES.find(f => f.val === foldType) || {label: foldType}).label;
+      lines.push(`Fold: ${foldName}`);
+      lines.push(`Paper: ${paper.label}`);
+      const cName = c => c === "bw" ? "Black & White" : "Full Color";
+      lines.push(`Front: ${cName(frontColor)}` + (sides === 2 ? ` · Back: ${cName(backColor)}` : " · Single-sided"));
+      if (vivid) lines.push("Enhanced Vivid Print");
+      if (coating > 0) {
+        const ct = COATINGS.find(o => o.val === coating);
+        if (ct) lines.push(`Coating: ${ct.label}`);
+      }
+      if (bundling > 0) {
+        const b = BUNDLING.find(o => o.val === bundling);
+        if (b) lines.push(`Bundling: ${b.label}`);
+      }
+      if (perforation > 0) {
+        const p = PERF_OPTS.find(o => o.val === perforation);
+        if (p) lines.push(`Perforation: ${p.label}`);
+      }
+      if (roundCorner > 0) {
+        const r = CORNERS.find(o => o.val === roundCorner);
+        if (r) lines.push(`Round Corner: ${r.label}`);
+      }
+      lines.push(`Ship to: ${shipState}`);
+      summary = lines.join("\n");
+    } catch (_) {}
+    fd.append("summary", summary);
+    fd.append("total", String(result?.total || 0));
+    fd.append("perUnit", String(result?.perUnit || 0));
+    fd.append("qty", String(result?.qty || qty || 0));
+    fd.append("days", String(result?.days || 0));
+    fd.append("calcType", "brochure");
+    fd.append("calcLabel", "Brochure / Flat Print");
+    fd.append("presetSlug", PPS.presetSlug || "");
+    fd.append("reorderUrl", buildShareUrl());
+    try {
+      const resp = await fetch(PPS.ajaxUrl || "/wp-admin/admin-ajax.php", { method: "POST", body: fd, credentials: "same-origin" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const j = await resp.json();
+      if (j && j.success) { setQStatus("sent"); }
+      else { setQStatus("error"); setQErrorMsg((j && j.data && j.data.message) || "Submission failed. Please try again."); }
+    } catch (err) {
+      setQStatus("error"); setQErrorMsg("Network error. Please try again.");
+    }
+  };
+
+  const resetQuestionForm = () => {
+    setQOpen(false);
+    setTimeout(() => { setQName(""); setQEmail(""); setQPhone(""); setQMessage(""); setQStatus("idle"); setQErrorMsg(""); }, 200);
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: CC.bg, fontFamily: "'Segoe UI','Helvetica Neue',Arial,sans-serif", color: CC.dark }}>
       <style>{`@media(max-width:700px){.pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}.pps-sec-body{padding:12px 14px!important}}`}</style>
@@ -2799,6 +3497,7 @@ function App() {
           <Sec num={1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
+              <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
               <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
             </div>
             {sizeMode === "preset"
@@ -2810,7 +3509,7 @@ function App() {
             }
             <div style={ST.hr} />
             <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
-              {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
+              {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             {fold.panels > 1 && sizeMode === "custom" && (
               <Pil label="Fold Direction" value={foldDir} onChange={setFoldDir} options={[
@@ -2859,12 +3558,12 @@ function App() {
           {/* SECTION 3: Addons */}
           <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
             <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
-              {FOLD_TYPES.map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
+              {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             <div style={ST.hr} />
-            <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />
-            <div style={ST.hr} />
-            {paper.coatable ? (
+            {(_AD.vivid !== false || vivid === true) && <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
+            {(_AD.vivid !== false || vivid === true) && <div style={ST.hr} />}
+            {(_AD.coating !== false || coating > 0) && (paper.coatable ? (
               <>
                 <Sel label="Additional Coating" value={coating} onChange={v => setCoating(Number(v))}>
                   {COATINGS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
@@ -2882,25 +3581,25 @@ function App() {
               </>
             ) : (
               <div style={{...ST.f, opacity: 0.4}}><label style={ST.lbl}>Additional Coating</label><div style={{padding:"8px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#f5f5f5",fontSize:13,color:CC.light}}>Not available for this paper type</div></div>
-            )}
-            <div style={ST.hr} />
-            <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
+            ))}
+            {(_AD.coating !== false || coating > 0) && <div style={ST.hr} />}
+            {(_AD.bundling !== false || bundling > 0) && <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-            </Sel>
-            <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
+            </Sel>}
+            {(_AD.perforation !== false || perforation > 0) && <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
               note={dimShort > 14 && perfCount > 0 ? `14" throat — ${dimShort}" perf only` : (perfCount > 0 && perfCrossDim < 4 ? `${perfCrossDim}" too short for 2 perfs` : undefined)}>
               {PERF_OPTS.filter(o => {
                 var c = o.count != null ? o.count : PERF_OPTS.indexOf(o);
                 return c <= maxPerfs;
               }).map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-            </Sel>
-            {perfCount > 0 && dimShort <= 14 && (
+            </Sel>}
+            {(_AD.perforation !== false || perforation > 0) && perfCount > 0 && dimShort <= 14 && (
               <Pil label="Perf Direction" value={perfDir} onChange={setPerfDir} options={[
                 { t: `${dimShort}" perf`, v: "length" },
                 { t: `${dimLong}" perf`, v: "width" },
               ]} />
             )}
-            {foldType === "flat" && (
+            {(_AD.rc !== false || roundCorner > 0) && foldType === "flat" && (
               <Sel label="Round Cornering" value={roundCorner} onChange={v => setRoundCorner(Number(v))}>
                 {CORNERS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
               </Sel>
@@ -2947,6 +3646,7 @@ function App() {
               <div style={{marginTop:8}}>
                 <SheetPreview
                   longEdge={dimLong} shortEdge={dimShort}
+                  paperIsCardstock={paper.type === "cardstock"}
                   foldType={foldType} foldDir={foldDir} panels={fold.panels}
                   perfCount={perfCount} perfDir={perfDir}
                   perfPositions={perfPositions} onPerfPositions={setPerfPositions}
@@ -3113,10 +3813,14 @@ function App() {
 
         </div>
 
-        {/* Desktop sidebar */}
-        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
-          <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
-          <Panel result={result} />
+        {/* Desktop sidebar — pointer-events:none only on read-only preview+Panel
+            so the projections rows, Share button, and Debug button (siblings
+            below) still receive clicks. Mirrors the saddle calculator's split. */}
+        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
+            <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+            <Panel result={result} />
+          </div>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
@@ -3146,10 +3850,10 @@ function App() {
           <button type="button" onClick={handleShareLink} style={{ width: "100%", marginTop: 8, padding: "8px", borderRadius: 4, border: `1px solid ${shareCopied ? "#86efac" : "#ddd"}`, background: shareCopied ? "#f0fdf4" : "#fafafa", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
-          <button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : "#ddd"}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
+          {debugUnlocked&&<button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : "#ddd"}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
             {showDebug ? "▼ Hide" : "▶ Show"} Debug Panel
-          </button>
-          {showDebug && r.debug && (
+          </button>}
+          {debugUnlocked && showDebug && r.debug && (
             <div style={{ ...ST.pnl, marginTop: 10, padding: 14, fontSize: 11 }}>
               <div style={{ fontWeight: 700, marginBottom: 8, color: CC.mid }}>Debug</div>
               {Object.entries(r.debug).map(([k, v]) => (
@@ -3168,13 +3872,23 @@ function App() {
               </details>}
             </div>
           )}
+          <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 4, border: `1px solid ${CK.cyan}55`, background: "#fff", color: CK.cyan, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
+            Have a question about this quote? →
+          </button>
         </div>}
       </div>
+
+      {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
+      {mob && !qOpen && (
+        <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ position: "fixed", bottom: "calc(70px + env(safe-area-inset-bottom))", right: 12, zIndex: 39, padding: "7px 13px", borderRadius: 16, border: `1px solid ${CK.cyan}`, background: "#fff", color: CK.cyan, fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 8px rgba(0,0,0,.12)", cursor: "pointer", fontFamily: "inherit" }}>
+          Have a question? →
+        </button>
+      )}
 
       {/* Mobile bottom bar */}
       {mob && <>
         {/* Slide-up panels: debug or qty pricing */}
-        {showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
+        {debugUnlocked && showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: CC.mid, marginBottom: 6 }}>DEBUG</div>
           {Object.entries(r.debug).filter(([k]) => k !== "P").map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "1px 0" }}>
@@ -3222,13 +3936,63 @@ function App() {
             <button type="button" onClick={handleShareLink} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : "#fafafa", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s", lineHeight: 1 }} title="Share link">
               {shareCopied ? "✓" : "🔗"}
             </button>
-            <button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
+            {debugUnlocked&&<button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
               {showDebug ? "✕" : "⚙"}
-            </button>
+            </button>}
             <button type="button" style={{ flexShrink: 0, padding: "12px 16px", borderRadius: 6, border: "none", background: result?.error ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: result?.error ? "default" : "pointer", fontFamily: "inherit", opacity: result?.error ? .5 : 1 }} disabled={!!result?.error}>Add to Order</button>
           </div>
         </div>
       </>}
+
+      {/* Question modal — overlay rendered at App root */}
+      {qOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "min(8vh,60px) 16px 16px", overflowY: "auto" }} onClick={resetQuestionForm}>
+          <div style={{ background: "#fff", borderRadius: 8, maxWidth: 520, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.3)", overflow: "hidden" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "16px 20px", borderBottom: `1px solid ${CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: CC.dark }}>Have a question about this quote?</div>
+              <button type="button" onClick={resetQuestionForm} style={{ background: "none", border: "none", fontSize: 22, lineHeight: 1, color: CC.light, cursor: "pointer", padding: 0, marginLeft: 12 }} aria-label="Close">×</button>
+            </div>
+            {qStatus === "sent" ? (
+              <div style={{ padding: "24px 20px", textAlign: "center" }}>
+                <div style={{ fontSize: 34, marginBottom: 8 }}>✓</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: CC.dark, marginBottom: 6 }}>Question sent!</div>
+                <div style={{ fontSize: 13, color: CC.mid, lineHeight: 1.5, maxWidth: 380, margin: "0 auto" }}>We&rsquo;ve emailed a copy of your quote to <strong>{qEmail}</strong>. A team member will reply within 1 business day.</div>
+                <button type="button" onClick={resetQuestionForm} style={{ marginTop: 18, padding: "9px 20px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#fafafa", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
+              </div>
+            ) : (
+              <form onSubmit={handleQuestionSubmit} style={{ padding: "16px 20px" }}>
+                <div style={{ fontSize: 12, color: CC.mid, marginBottom: 14, lineHeight: 1.45 }}>We&rsquo;ll see exactly what you&rsquo;re looking at — your current configuration and price are included automatically.</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: CC.mid, marginBottom: 4 }}>Name <span style={{ color: "#d00" }}>*</span></label>
+                    <input type="text" value={qName} onChange={e => setQName(e.target.value)} maxLength={120} required style={{ width: "100%", padding: "8px 10px", borderRadius: 4, border: `1px solid ${CC.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: CC.mid, marginBottom: 4 }}>Email <span style={{ color: "#d00" }}>*</span></label>
+                    <input type="email" value={qEmail} onChange={e => setQEmail(e.target.value)} maxLength={160} required style={{ width: "100%", padding: "8px 10px", borderRadius: 4, border: `1px solid ${CC.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: CC.mid, marginBottom: 4 }}>Phone <span style={{ color: CC.light, fontWeight: 400 }}>(optional)</span></label>
+                  <input type="tel" value={qPhone} onChange={e => setQPhone(e.target.value)} maxLength={40} style={{ width: "100%", padding: "8px 10px", borderRadius: 4, border: `1px solid ${CC.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: CC.mid, marginBottom: 4 }}>Your question <span style={{ color: "#d00" }}>*</span></label>
+                  <textarea value={qMessage} onChange={e => setQMessage(e.target.value)} maxLength={4000} required rows={5} style={{ width: "100%", padding: "8px 10px", borderRadius: 4, border: `1px solid ${CC.border}`, fontSize: 14, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+                </div>
+                <input type="text" name="company_url" tabIndex={-1} autoComplete="off" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} aria-hidden="true" />
+                {qStatus === "error" && qErrorMsg && (
+                  <div style={{ padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 4, fontSize: 12, color: "#b91c1c", marginBottom: 10 }}>{qErrorMsg}</div>
+                )}
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                  <button type="button" onClick={resetQuestionForm} style={{ padding: "9px 16px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#fafafa", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }} disabled={qStatus === "sending"}>Cancel</button>
+                  <button type="submit" disabled={qStatus === "sending"} style={{ padding: "9px 18px", borderRadius: 5, border: "none", background: qStatus === "sending" ? CC.light : CK.cyan, color: "#fff", fontSize: 13, fontWeight: 700, cursor: qStatus === "sending" ? "wait" : "pointer", fontFamily: "inherit" }}>{qStatus === "sending" ? "Sending…" : "Send question"}</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
