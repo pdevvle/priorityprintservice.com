@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-20 · BR-RIGHTANGLE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-14 · BR-UNSTICKY</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -3816,7 +3816,7 @@ function App() {
         {/* Desktop sidebar — pointer-events:none only on read-only preview+Panel
             so the projections rows, Share button, and Debug button (siblings
             below) still receive clicks. Mirrors the saddle calculator's split. */}
-        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+        {!mob && <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
             <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} />

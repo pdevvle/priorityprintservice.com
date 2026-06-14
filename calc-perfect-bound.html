@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-25 · PB-OUTFOLD-C</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-14 · PB-UNSTICKY-GATE-LI</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1186,7 +1186,7 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
   );
 }
 
-function Panel({result,compact}){
+function Panel({result,compact,debugUnlocked}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
@@ -1278,12 +1278,12 @@ function Panel({result,compact}){
           <span style={{fontSize:13,fontWeight:600,color:CK.rush}}>+${sh.rushCost.toFixed(2)}</span>
         </div>}
       </div>
-      <details style={{borderTop:`1px solid ${CC.border}`}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
+      {debugUnlocked&&<details style={{borderTop:`1px solid ${CC.border}`}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
         <div style={{padding:"0 18px 14px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
           <span style={{fontSize:11.5,color:CC.light}}>{r.l}</span>
           <span style={{fontSize:11.5,fontWeight:600,color:r.v<0?CK.cyan:CC.mid}}>{r.v<0?"−":""}${Math.abs(r.v).toFixed(2)}</span>
         </div>))}</div>
-      </details>
+      </details>}
     </div>
   );
 }
@@ -5249,10 +5249,10 @@ function App(){
           </table>
         </div>}
         </div>
-        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18,display:"flex",flexDirection:"column",gap:10}}>
+        {!mob&&<div style={{width:320,flexShrink:0,display:"flex",flexDirection:"column",gap:10}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
             <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
-            <Panel result={result}/>
+            <Panel result={result} debugUnlocked={debugUnlocked}/>
           </div>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
