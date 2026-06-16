@@ -99,6 +99,8 @@ const PCF = Object.assign({
 // DATA: SIZES, FOLDS, PAPERS, OPTIONS
 // ═══════════════════════════════════════════════════════════════
 const SIZE_PRESETS = _CFG.brochure_sizes || [
+  {label:"4.25×5.5",imp:8,long:5.5,short:4.25,easy:true},
+  {label:"4×6",imp:9,long:6,short:4,easy:true},
   {label:"5.5×8.5",imp:4,long:8.5,short:5.5,easy:true},
   {label:"6×9",imp:4,long:9,short:6,easy:true},
   {label:"8.5×11",imp:2,long:11,short:8.5,easy:true},
@@ -325,7 +327,7 @@ function calculate(c) {
     if (!exactMatch) {
       const similar = SIZE_PRESETS.some(s => Math.abs(s.long - longE) <= 0.5 && Math.abs(s.short - shortE) <= 0.5);
       if (similar) sizeTierMult = 1.15;
-      else if (fold.val === "flat") sizeTierMult = 1.25;
+      else if (fold.val === "flat") sizeTierMult = 1.10;
       else sizeTierMult = 1.5;
     }
   }
