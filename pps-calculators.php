@@ -481,6 +481,14 @@ add_action( 'wp', function() {
             wp_dequeue_script( $h );
             wp_dequeue_style( $h );
         }
+        // Dequeue WC's Flexslider + PhotoSwipe — we replace the default gallery
+        // with a CSS scroll-snap peek carousel below. PhotoSwipe's modal zoom is
+        // intentionally out (customer goes into the calc's preview/proof modal
+        // for close-up inspection).
+        foreach ( array( 'flexslider', 'photoswipe', 'photoswipe-ui-default', 'wc-single-product', 'zoom' ) as $h ) {
+            wp_dequeue_script( $h );
+            wp_dequeue_style( $h );
+        }
     }, 100 );
     add_filter( 'rocket_delay_js_exclusions', function( $excluded ) {
         $excluded[] = '/unpkg\.com/react';
@@ -505,40 +513,72 @@ add_action( 'wp', function() {
         return $excluded;
     } );
 
-    // ── Gallery image swap on artwork upload ──
-    // When the customer uploads artwork in the calc, swap the WC gallery's
-    // featured image to show the first-page thumbnail of their artwork. No
-    // gesture handlers, no sticky/expand behavior — the gallery otherwise
-    // looks and behaves like a standard WC gallery.
+    // ── Peek-carousel gallery + artwork-hides-gallery bridge ──
+    // Replace WC's Flexslider + PhotoSwipe with a native CSS scroll-snap
+    // carousel: each product image takes ~85% width so the prev/next image
+    // edges peek on both sides. Native swipe on touch, drag on desktop, no
+    // lightbox modal. When the customer uploads artwork via the calc, the
+    // entire gallery hides — the calc's sidebar preview becomes the only
+    // surface showing their art.
+    add_action( 'wp_head', function() {
+        ?>
+        <style id="pps-peek-carousel">
+        .woocommerce-product-gallery { position: relative; overflow: hidden; }
+        .woocommerce-product-gallery__wrapper {
+            display: flex !important;
+            gap: 10px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            scroll-padding-inline: 7.5%;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+            margin: 0;
+            padding: 0 7.5%;
+            float: none !important;
+            width: 100% !important;
+        }
+        .woocommerce-product-gallery__wrapper::-webkit-scrollbar { display: none; }
+        .woocommerce-product-gallery__image {
+            flex: 0 0 85%;
+            scroll-snap-align: center;
+            margin: 0 !important;
+            width: 85% !important;
+            float: none !important;
+            display: block;
+        }
+        .woocommerce-product-gallery__image a,
+        .woocommerce-product-gallery__image img {
+            display: block;
+            width: 100% !important;
+            height: auto !important;
+            margin: 0 !important;
+            cursor: grab;
+        }
+        .woocommerce-product-gallery__image a:active,
+        .woocommerce-product-gallery__image img:active { cursor: grabbing; }
+        /* Hide the WC zoom/lightbox trigger button — we don't use it. */
+        .woocommerce-product-gallery__trigger { display: none !important; }
+        /* Hide the thumbnails strip Flexslider would have built; the carousel
+           itself is the only navigation surface. */
+        .woocommerce-product-gallery .flex-control-nav,
+        .woocommerce-product-gallery .flex-direction-nav { display: none !important; }
+        /* Artwork-uploaded state — gallery hides entirely. */
+        body.pps-artwork-uploaded .woocommerce-product-gallery { display: none !important; }
+        </style>
+        <?php
+    } );
     add_action( 'wp_footer', function() {
         ?>
         <script>
         (function() {
-            const gallery = document.querySelector('.woocommerce-product-gallery');
-            if (!gallery) return;
-
-            let originalImgSrc    = null;
-            let originalImgSrcset = null;
-
+            const body = document.body;
             window.addEventListener('pps:artwork-changed', (e) => {
                 const detail = (e && e.detail) || {};
-                const img    = gallery.querySelector('img');
-                if (!img) return;
-
-                if (originalImgSrc === null) {
-                    originalImgSrc    = img.getAttribute('src');
-                    originalImgSrcset = img.getAttribute('srcset');
-                }
-
-                // Only swap when the calc reports a real customer upload —
-                // detail.thumbnail is also populated with blank-page placeholders
-                // before upload, so gate strictly on detail.available.
-                if (detail.available && detail.thumbnail) {
-                    img.setAttribute('src', detail.thumbnail);
-                    img.removeAttribute('srcset'); // srcset would otherwise override src
+                if (detail.available) {
+                    body.classList.add('pps-artwork-uploaded');
                 } else {
-                    if (originalImgSrc)    img.setAttribute('src', originalImgSrc);
-                    if (originalImgSrcset) img.setAttribute('srcset', originalImgSrcset);
+                    body.classList.remove('pps-artwork-uploaded');
                 }
             });
         })();
