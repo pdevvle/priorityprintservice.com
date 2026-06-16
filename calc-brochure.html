@@ -254,11 +254,14 @@ const MNAMES=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov",
 // IMPOSITION CALCULATION
 // ═══════════════════════════════════════════════════════════════
 function calcBrochureImp(longEdge, shortEdge) {
-  const r1 = 18.5 / longEdge;
-  const across = r1 < 0.5 ? 0 : r1 < 1 ? 0.5 : r1 < 1.48 ? 1 : r1 < 3 ? 2 : r1 < 4 ? 3 : r1 < 5 ? 4 : r1 < 6 ? 5 : r1 < 7 ? 6 : r1 < 8 ? 7 : 8;
-  const r2 = 12.5 / shortEdge;
-  const down = r2 < 2 ? 1 : r2 < 3 ? 2 : r2 < 4 ? 3 : 4;
-  return across * down;
+  function calc(w, h) {
+    const r1 = 18.5 / w;
+    const across = r1 < 0.5 ? 0 : r1 < 1 ? 0.5 : r1 < 1.48 ? 1 : r1 < 3 ? 2 : r1 < 4 ? 3 : r1 < 5 ? 4 : r1 < 6 ? 5 : r1 < 7 ? 6 : r1 < 8 ? 7 : 8;
+    const r2 = 12.5 / h;
+    const down = r2 < 1 ? 0 : r2 < 2 ? 1 : r2 < 3 ? 2 : r2 < 4 ? 3 : 4;
+    return across * down;
+  }
+  return Math.max(calc(longEdge, shortEdge), calc(shortEdge, longEdge));
 }
 
 // ═══════════════════════════════════════════════════════════════
