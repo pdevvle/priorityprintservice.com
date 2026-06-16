@@ -1011,7 +1011,7 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
   );
 }
 
-function Panel({result,compact}){
+function Panel({result,compact,expanded,onToggleExpand}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
@@ -1033,24 +1033,48 @@ function Panel({result,compact}){
     const moneyC=Math.max(0,total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
     const [dC,cC]=moneyC.split(".");
     return(
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:hasRush?CK.rush:CK.cyan,borderRadius:6,padding:"8px 14px",color:hasRush?"#333":"#fff"}}>
-        <div>
-          <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
-            {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
-            <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
-            <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
-          </div>
-          {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
-          {hasRush&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
-        </div>
-        <div style={{display:"flex",gap:12}}>
-          {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["Avail.",availRange+" days"]].map(([l,v],i)=>(
-            <div key={i} style={{textAlign:"center"}}>
-              <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",opacity:.7}}>{l}</div>
-              <div style={{fontSize:13,fontWeight:700}}>{v}</div>
+      <div>
+        <div onClick={onToggleExpand} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:hasRush?CK.rush:CK.cyan,borderRadius:expanded?"6px 6px 0 0":6,padding:"8px 14px",color:hasRush?"#333":"#fff",cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
+          <div>
+            <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
+              {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
+              <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
+              <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
             </div>
-          ))}
+            {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
+            {hasRush&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["Avail.",availRange+" days"]].map(([l,v],i)=>(
+              <div key={i} style={{textAlign:"center"}}>
+                <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",opacity:.7}}>{l}</div>
+                <div style={{fontSize:13,fontWeight:700}}>{v}</div>
+              </div>
+            ))}
+            <div style={{fontSize:10,opacity:.5,marginLeft:2,transition:"transform .2s",transform:expanded?"rotate(180deg)":"none"}}>▼</div>
+          </div>
         </div>
+        {expanded&&<div style={{background:"#fff",borderRadius:"0 0 6px 6px",border:`1px solid ${CC.border}`,borderTop:"none",maxHeight:"40vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+          {_hasExtra&&<div style={{padding:"5px 14px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
+            <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>+{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
+          </div>}
+          {sh&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",borderBottom:`1px solid ${CC.border}`,background:"#fafafa"}}>
+            <div style={{padding:"8px 12px",borderRight:`1px solid ${CC.border}`}}>
+              <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".8px",color:CC.light,textTransform:"uppercase",marginBottom:1}}>Earliest</div>
+              <div style={{fontSize:11.5,fontWeight:700,color:CC.dark,lineHeight:1.15}}>{sh.earliestDate}</div>
+              <div style={{fontSize:9.5,color:CC.light,marginTop:1}}>{sh.earliestBizDays}d · overnight</div>
+            </div>
+            <div style={{padding:"8px 12px"}}>
+              <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".8px",color:CC.light,textTransform:"uppercase",marginBottom:1}}>Free Ground</div>
+              <div style={{fontSize:11.5,fontWeight:700,color:CC.dark,lineHeight:1.15}}>{sh.freeDeliveryDate}</div>
+              <div style={{fontSize:9.5,color:CC.light,marginTop:1}}>{sh.freeDeliveryBizDays}d · included</div>
+            </div>
+          </div>}
+          <div style={{padding:"6px 12px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2.5px 0"}}>
+            <span style={{fontSize:11,color:CC.light}}>{r.l}</span>
+            <span style={{fontSize:11,fontWeight:600,color:r.v<0?CK.cyan:CC.mid}}>{r.v<0?"−":""}${Math.abs(r.v).toFixed(2)}</span>
+          </div>))}</div>
+        </div>}
       </div>
     );
   }
@@ -4073,6 +4097,7 @@ function App(){
   const mob=useIsMobile();
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
+  const[mobExpanded,setMobExpanded]=useState(false);
   const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
   // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
   const proofDebug = useMemo(() => {
@@ -4918,7 +4943,7 @@ function App(){
       </div>
 
       {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
-      {mob&&!qOpen&&(
+      {mob&&!qOpen&&!mobExpanded&&(
         <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{position:"fixed",bottom:"calc(70px + env(safe-area-inset-bottom))",right:12,zIndex:39,padding:"7px 13px",borderRadius:16,border:`1px solid ${CK.cyan}`,background:"#fff",color:CK.cyan,fontSize:11.5,fontWeight:700,boxShadow:"0 2px 8px rgba(0,0,0,.12)",cursor:"pointer",fontFamily:"inherit"}}>
           Have a question? →
         </button>
@@ -4926,11 +4951,11 @@ function App(){
 
       {/* Fixed bottom bar — mobile */}
       {mob&&<div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:40,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{flex:1,minWidth:0}}>
-            <Panel result={result} compact/>
+        <div style={{display:"flex",flexDirection:mobExpanded?"column":"row",alignItems:mobExpanded?"stretch":"center",gap:10}}>
+          <div style={{flex:mobExpanded?undefined:1,minWidth:0}}>
+            <Panel result={result} compact expanded={mobExpanded} onToggleExpand={()=>setMobExpanded(p=>!p)}/>
           </div>
-          <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined}}
+          <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined,width:mobExpanded?"100%":undefined}}
             disabled={!!result?.error?.length||submitting}>
             {submitting && uploadProgress ? (
               <div>
