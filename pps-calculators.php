@@ -522,87 +522,102 @@ add_action( 'wp', function() {
     } );
 
     // ── Peek-carousel gallery + artwork-hides-gallery bridge ──
-    // Replace WC's Flexslider + PhotoSwipe with a native CSS scroll-snap
-    // carousel: each product image takes ~85% width so the prev/next image
-    // edges peek on both sides. Native swipe on touch, drag on desktop, no
-    // lightbox modal. When the customer uploads artwork via the calc, the
-    // entire gallery hides — the calc's sidebar preview becomes the only
-    // surface showing their art.
+    // ── Custom gallery — replace WC default render entirely ──
+    // Strategy: skip WooCommerce's default gallery render (and everything
+    // any third-party plugin like Astra Pro / WC Gallery Slider / PhotoSwipe
+    // adds on top of it) by removing the woocommerce_show_product_images
+    // callback. We emit our own .pps-gallery markup at the same hook so the
+    // calc still renders directly below. Anyone hooked into the WC gallery
+    // classes finds nothing to enhance.
+    remove_action( 'woocommerce_before_single_product_summary', 'woocommerce_show_product_images', 20 );
+    add_action( 'woocommerce_before_single_product_summary', function() use ( $product_id ) {
+        $product = wc_get_product( $product_id );
+        if ( ! $product ) return;
+        $image_ids = array();
+        $featured  = $product->get_image_id();
+        if ( $featured ) $image_ids[] = (int) $featured;
+        foreach ( (array) $product->get_gallery_image_ids() as $gid ) {
+            if ( $gid && ! in_array( (int) $gid, $image_ids, true ) ) $image_ids[] = (int) $gid;
+        }
+        if ( empty( $image_ids ) ) return;
+        echo '<div class="pps-gallery" role="region" aria-label="Product images">';
+        echo '<div class="pps-gallery__track">';
+        foreach ( $image_ids as $id ) {
+            $src = wp_get_attachment_image_url( $id, 'woocommerce_single' );
+            if ( ! $src ) $src = wp_get_attachment_image_url( $id, 'large' );
+            if ( ! $src ) continue;
+            $alt = trim( strip_tags( get_post_meta( $id, '_wp_attachment_image_alt', true ) ) );
+            printf(
+                '<div class="pps-gallery__slide"><img src="%s" alt="%s" loading="lazy" decoding="async" /></div>',
+                esc_url( $src ),
+                esc_attr( $alt )
+            );
+        }
+        echo '</div></div>';
+    }, 20 );
+
+    // ── Peek-carousel CSS + artwork-hides-gallery bridge ──
+    // Native CSS scroll-snap; each slide is 85% wide, 7.5% gutters reveal the
+    // prev/next image edges. No JS slider, no lightbox. When the calc emits
+    // pps:artwork-changed { available: true }, body.pps-artwork-uploaded hides
+    // .pps-gallery — calc sidebar preview becomes the only artwork surface.
     add_action( 'wp_head', function() {
         ?>
         <style id="pps-peek-carousel">
-        /* Reset gallery container — kill float/width from Astra/WC default theming. */
-        .woocommerce-product-gallery {
-            position: relative !important;
-            float: none !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 0 16px 0 !important;
-            padding: 0 !important;
-            opacity: 1 !important;
-            height: auto !important;
-            overflow: visible !important;
+        /* Hide WC default gallery if any plugin re-injects it after our
+           remove_action above (e.g. Astra Pro's gallery enhancer).
+           Our own .pps-gallery is the only carousel that should show. */
+        .woocommerce-product-gallery,
+        .astra-product-images,
+        .ast-product-gallery-layout-vertical { display: none !important; }
+
+        .pps-gallery {
+            position: relative;
+            width: 100%;
+            margin: 0 0 16px 0;
+            padding: 0;
+            overflow: hidden;
         }
-        /* Wrapper becomes a horizontal scroll-snap row. */
-        .woocommerce-product-gallery__wrapper {
-            display: flex !important;
-            flex-direction: row !important;
-            align-items: stretch !important;
-            gap: 10px !important;
-            overflow-x: auto !important;
-            overflow-y: hidden !important;
-            scroll-snap-type: x mandatory !important;
-            scroll-padding-inline: 7.5% !important;
-            scrollbar-width: none !important;
-            -webkit-overflow-scrolling: touch !important;
-            margin: 0 !important;
-            padding: 0 7.5% !important;
-            float: none !important;
-            width: 100% !important;
-            height: auto !important;
-            max-height: 60vh !important;
-            position: static !important;
-            transform: none !important;
+        .pps-gallery__track {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            scroll-padding-inline: 7.5%;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+            margin: 0;
+            padding: 0 7.5%;
+            max-height: 60vh;
         }
-        .woocommerce-product-gallery__wrapper::-webkit-scrollbar { display: none; }
-        /* Each slide — 85% width, snap-centered. */
-        .woocommerce-product-gallery__image {
-            flex: 0 0 85% !important;
-            scroll-snap-align: center !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 85% !important;
-            float: none !important;
-            display: block !important;
-            position: relative !important;
-            aspect-ratio: auto !important;
+        .pps-gallery__track::-webkit-scrollbar { display: none; }
+        .pps-gallery__slide {
+            flex: 0 0 85%;
+            scroll-snap-align: center;
+            margin: 0;
+            padding: 0;
+            display: block;
+            background: transparent;
         }
-        .woocommerce-product-gallery__image a,
-        .woocommerce-product-gallery__image img {
-            display: block !important;
-            width: 100% !important;
-            height: auto !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            cursor: grab;
+        .pps-gallery__slide img {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-width: 100%;
+            max-height: 60vh;
+            margin: 0;
+            padding: 0;
             object-fit: contain;
+            cursor: grab;
+            user-select: none;
+            -webkit-user-drag: none;
         }
-        .woocommerce-product-gallery__image a {
-            /* Lightbox is gone — kill click navigation so a misclick during
-               drag doesn't navigate to the image URL. */
-            pointer-events: none;
-        }
-        .woocommerce-product-gallery__image a:active,
-        .woocommerce-product-gallery__image img:active { cursor: grabbing; }
-        /* Hide the WC zoom/lightbox trigger button — we don't use it. */
-        .woocommerce-product-gallery__trigger { display: none !important; }
-        /* Hide the thumbnails strip Flexslider would have built; the carousel
-           itself is the only navigation surface. */
-        .woocommerce-product-gallery .flex-control-nav,
-        .woocommerce-product-gallery .flex-direction-nav { display: none !important; }
-        /* Artwork-uploaded state — gallery hides entirely. */
-        body.pps-artwork-uploaded .woocommerce-product-gallery { display: none !important; }
+        .pps-gallery__slide img:active { cursor: grabbing; }
+        /* Artwork-uploaded state — calc owns the visual now. */
+        body.pps-artwork-uploaded .pps-gallery { display: none !important; }
         </style>
         <?php
     } );
