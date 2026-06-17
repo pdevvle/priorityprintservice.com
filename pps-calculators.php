@@ -459,6 +459,15 @@ add_action( 'wp', function() {
         wp_enqueue_script( 'pps-babel', 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
     });
 
+    // ── Kill WC's gallery slider / lightbox / zoom on calc product pages ──
+    // Theme support is read at gallery render time; turning it off here means
+    // WC outputs plain stacked images instead of Flexslider-wrapped DOM with
+    // inline height/transform styles. Lets our CSS scroll-snap carousel
+    // work on simple DOM rather than fighting JS-applied inline styles.
+    remove_theme_support( 'wc-product-gallery-slider' );
+    remove_theme_support( 'wc-product-gallery-lightbox' );
+    remove_theme_support( 'wc-product-gallery-zoom' );
+
     // ── External-JS hardening on calculator product pages ──
     // The calc's React mount is fragile to non-React DOM mutations. We
     // suppress two known production sources surgically — keeping WP Rocket's
@@ -481,10 +490,9 @@ add_action( 'wp', function() {
             wp_dequeue_script( $h );
             wp_dequeue_style( $h );
         }
-        // Dequeue WC's Flexslider + PhotoSwipe — we replace the default gallery
-        // with a CSS scroll-snap peek carousel below. PhotoSwipe's modal zoom is
-        // intentionally out (customer goes into the calc's preview/proof modal
-        // for close-up inspection).
+        // Belt-and-suspenders: theme support is gone (above), but some themes
+        // enqueue these unconditionally. Dropping them here keeps the page
+        // payload trim.
         foreach ( array( 'flexslider', 'photoswipe', 'photoswipe-ui-default', 'wc-single-product', 'zoom' ) as $h ) {
             wp_dequeue_script( $h );
             wp_dequeue_style( $h );
@@ -523,37 +531,67 @@ add_action( 'wp', function() {
     add_action( 'wp_head', function() {
         ?>
         <style id="pps-peek-carousel">
-        .woocommerce-product-gallery { position: relative; overflow: hidden; }
-        .woocommerce-product-gallery__wrapper {
-            display: flex !important;
-            gap: 10px;
-            overflow-x: auto;
-            overflow-y: hidden;
-            scroll-snap-type: x mandatory;
-            scroll-padding-inline: 7.5%;
-            scrollbar-width: none;
-            -webkit-overflow-scrolling: touch;
-            margin: 0;
-            padding: 0 7.5%;
+        /* Reset gallery container — kill float/width from Astra/WC default theming. */
+        .woocommerce-product-gallery {
+            position: relative !important;
             float: none !important;
             width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 0 16px 0 !important;
+            padding: 0 !important;
+            opacity: 1 !important;
+            height: auto !important;
+            overflow: visible !important;
+        }
+        /* Wrapper becomes a horizontal scroll-snap row. */
+        .woocommerce-product-gallery__wrapper {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: stretch !important;
+            gap: 10px !important;
+            overflow-x: auto !important;
+            overflow-y: hidden !important;
+            scroll-snap-type: x mandatory !important;
+            scroll-padding-inline: 7.5% !important;
+            scrollbar-width: none !important;
+            -webkit-overflow-scrolling: touch !important;
+            margin: 0 !important;
+            padding: 0 7.5% !important;
+            float: none !important;
+            width: 100% !important;
+            height: auto !important;
+            max-height: 60vh !important;
+            position: static !important;
+            transform: none !important;
         }
         .woocommerce-product-gallery__wrapper::-webkit-scrollbar { display: none; }
+        /* Each slide — 85% width, snap-centered. */
         .woocommerce-product-gallery__image {
-            flex: 0 0 85%;
-            scroll-snap-align: center;
+            flex: 0 0 85% !important;
+            scroll-snap-align: center !important;
             margin: 0 !important;
+            padding: 0 !important;
             width: 85% !important;
             float: none !important;
-            display: block;
+            display: block !important;
+            position: relative !important;
+            aspect-ratio: auto !important;
         }
         .woocommerce-product-gallery__image a,
         .woocommerce-product-gallery__image img {
-            display: block;
+            display: block !important;
             width: 100% !important;
             height: auto !important;
+            max-width: 100% !important;
             margin: 0 !important;
+            padding: 0 !important;
             cursor: grab;
+            object-fit: contain;
+        }
+        .woocommerce-product-gallery__image a {
+            /* Lightbox is gone — kill click navigation so a misclick during
+               drag doesn't navigate to the image URL. */
+            pointer-events: none;
         }
         .woocommerce-product-gallery__image a:active,
         .woocommerce-product-gallery__image img:active { cursor: grabbing; }
