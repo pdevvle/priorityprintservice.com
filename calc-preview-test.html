@@ -388,8 +388,11 @@ const SIZE_PRESETS = _CFG.size_presets || [
 const ALL_SIZES = SIZE_PRESETS.flatMap(g => g.items);
 const TWO_STAPLE_THRESH = PCF.two_staple_threshold;
 
-function calcCustomImp(longest, shortest, bindDir) {
-  const sA=x=>{const r=18.5/x;return r<.5?0:r<1?.5:r<2?1:r<3?2:r<4?3:r<5?4:4};
+// sheetLong = usable long-axis inches of the press sheet.
+//   18.5 → 13×19 stock (default); 27 → 13×27.5 stock. Short axis is always 12.5.
+function calcCustomImp(longest, shortest, bindDir, sheetLong) {
+  const L=sheetLong||18.5;
+  const sA=x=>{const r=L/x;return r<.5?0:r<1?.5:r<2?1:r<3?2:r<4?3:r<5?4:4};
   const sB=x=>{const r=12.5/x;return r<2?1:r<3?2:2};
   return bindDir==="short"?sA(longest)*sB(shortest):sA(shortest)*sB(longest);
 }
@@ -420,6 +423,9 @@ const COVER_SAME=_CFG.cover_same||{label:"Same as Inside Pages",val:0.001,price:
 const COVER_SCORING_VALS=_CFG.cover_scoring_vals||[0.01,0.02,0.03,1.01,1.02,2.21,2.22,2.23,2.24,2.25];
 const _INV_NC=_CFG.inv_nc||[0.001,0.002,0.003], _INV_CS=_CFG.inv_cs||[0.01,0.02,0.03,1.01,1.02];
 const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_NC,...INV_CS];
+// Papers stocked at the larger 13×27.5 press sheet (everything else is 13×19 only).
+// Oversized jobs (imp<1 on 13×19) must run here; non-stock papers incur the non-inventory fee.
+const LARGE_SHEET_VALS=_CFG.large_sheet_vals||[0.003,0.03]; // 100lb Gloss Text, 100lb Gloss Cardstock
 // Combined paper lists: text weight first, then cardstock with suffix
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
 const isCardstockVal=v=>PAPERS_CS.some(p=>p.val===v);
@@ -460,7 +466,7 @@ function resolveSize(c) {
       const pw=parseFloat(m[1]),ph=parseFloat(m[2]);
       return Math.abs(longest-Math.max(pw,ph))<0.05&&Math.abs(shortest-Math.min(pw,ph))<0.05;
     });
-    if(match) return {imp:match.imp,bindEdge:match.bindEdge,isCustom:false,errors:[],clamped:null};
+    if(match) return {imp:match.imp,bindEdge:match.bindEdge,isCustom:false,errors:[],clamped:null,sheet:"13x19",needsLargeSheet:false};
 
     // Determine spine and open side based on bind direction
     const bindEdge = c.bindDir==="short" ? shortest : longest;
@@ -487,13 +493,21 @@ function resolveSize(c) {
       shortest = newShort;
     }
 
-    const imp = calcCustomImp(longest, shortest, c.bindDir);
+    let imp = calcCustomImp(longest, shortest, c.bindDir);   // 13×19 sheet
+    let sheet = "13x19", needsLargeSheet = false;
+    if (imp < 1) {
+      // Too big to image even one-up on 13×19 → run on the 13×27.5 press sheet
+      // (stocked only for select papers; the non-inventory fee covers the rest).
+      imp = calcCustomImp(longest, shortest, c.bindDir, 27);
+      sheet = "13x27.5";
+      needsLargeSheet = true;
+    }
     const finalBindEdge = c.bindDir==="short" ? shortest : longest;
     if(imp<=0) errors.push("Cannot produce — adjust dimensions.");
-    return {imp:Math.max(imp,0.5),bindEdge:finalBindEdge,isCustom:true,errors,clamped};
+    return {imp:Math.max(imp,0.5),bindEdge:finalBindEdge,isCustom:true,errors,clamped,sheet,needsLargeSheet};
   }
   const p=ALL_SIZES.find(s=>s.label===c.sizeLabel)||ALL_SIZES[0];
-  return {imp:p.imp,bindEdge:p.bindEdge,isCustom:false,errors:[],clamped:null};
+  return {imp:p.imp,bindEdge:p.bindEdge,isCustom:false,errors:[],clamped:null,sheet:"13x19",needsLargeSheet:false};
 }
 
 function calculate(c) {
@@ -579,7 +593,18 @@ function calculate(c) {
   if(c.proof>0){const sf=(PCF.sheetsforlowcosthardcopyproof/tS)>1?1:(PCF.sheetsforlowcosthardcopyproof/tS);P.proof=((c.proof>=3?PCF.proof_hardcopy_cost:PCF.proof_digital_cost)*sf)*N}
   P.diffSize=(sz.bindEdge<=3.5&&sz.bindEdge<=TWO_STAPLE_THRESH&&csInside)?Math.ceil(P.stitching):0;
   const iInv=c.insidePaperType==="cardstock"?INV_CS.includes(c.insidePaper.val):INV_NC.includes(c.insidePaper.val);
-  P.nonInv=(iInv&&COVER_INV.includes(cvr.val))?0:PCF.non_inventory_fee;
+  // Non-inventory fee: in-stock papers are free, non-stock/factory papers pay it.
+  // Oversized jobs (sz.needsLargeSheet) must run on 13×27.5, stocked only for select
+  // papers — so there, "in stock" means both inside AND cover are 13×27.5 papers.
+  let paperInStock;
+  if(sz.needsLargeSheet){
+    const insideLarge=LARGE_SHEET_VALS.includes(c.insidePaper.val);
+    const coverLarge=c.coverMode==="same"?insideLarge:LARGE_SHEET_VALS.includes(cvr.val);
+    paperInStock=insideLarge&&coverLarge;
+  } else {
+    paperInStock=iInv&&COVER_INV.includes(cvr.val);
+  }
+  P.nonInv=paperInStock?0:PCF.non_inventory_fee;
   P.discBW=c.insideColor==="bw"?-(P.press*PCF.bw_discount_rate):0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
   P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate,PCF.easydiscount_max):0;
@@ -731,6 +756,8 @@ function calculate(c) {
     // Size
     bindingEdge:sz.bindEdge,
     isCustom:sz.isCustom,
+    pressSheet:sz.sheet,
+    needsLargeSheet:sz.needsLargeSheet,
     easySize,
     commonSize,
     // Two staple
@@ -1350,7 +1377,7 @@ function DebugPanel({debug}){
         {d.perSetSheets.map((s,i)=><Row key={i} label={`${s.name}: ${s.qty.toLocaleString()} qty × ${s.pages} pg ÷ 4`} value={s.bookletSheets} unit="booklet sheets" indent/>)}
         <Row label="Booklet sheets total (Σ)" value={d.bookletSheetsTotal} unit="sheets"/>
         <Row label="Imposition (imp)" value={d.imp} unit={`(÷${d.impHalf} for parent)`}/>
-        <Row label="Parent 13×19 sheets (totalSheets)" value={d.parentSheets} unit="sheets"/>
+        <Row label={`Parent ${d.pressSheet} sheets (totalSheets)`} value={d.parentSheets} unit="sheets"/>
 
         <Hdr>Volume & Pricing</Hdr>
         <Row label="Total quantity" value={d.totalQty} unit="pcs"/>
@@ -1362,9 +1389,11 @@ function DebugPanel({debug}){
 
         <Hdr>Size & Binding</Hdr>
         <Row label="Binding edge" value={d.bindingEdge} unit="inches"/>
+        <Row label="Press sheet" value={d.pressSheet}/>
         <Row label="Two staple mode" value={d.twoStapleMode}/>
         <div style={{padding:"4px 0",display:"flex",flexWrap:"wrap"}}>
           <Flag label="Custom size" value={d.isCustom}/>
+          <Flag label="Needs 13×27.5 sheet" value={d.needsLargeSheet}/>
           <Flag label="Easy size" value={d.easySize}/>
           <Flag label="Common size" value={d.commonSize}/>
         </div>
