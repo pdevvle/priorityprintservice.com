@@ -571,12 +571,32 @@ add_action( 'wp', function() {
         .astra-product-images,
         .ast-product-gallery-layout-vertical { display: none !important; }
 
+        /* Sticky parallax needs overflow: visible up the ancestor chain.
+           Common WC/theme containers get the override. */
+        .single-product .product,
+        .single-product .content-area,
+        .single-product .site-main,
+        .single-product .entry-content,
+        .single-product main { overflow: visible !important; }
+
         .pps-gallery {
-            position: relative;
+            position: sticky;
+            top: 0;
+            z-index: 0;
             width: 100%;
-            margin: 0 0 16px 0;
+            margin: 0;
             padding: 0;
             overflow: hidden;
+        }
+        /* Parallax overlay — the calc wrap slides up over the sticky gallery. */
+        #pps-calculator-wrap {
+            position: relative !important;
+            z-index: 1 !important;
+            background: #fff !important;
+            margin-top: -28px !important;
+            padding-top: 28px !important;
+            border-radius: 24px 24px 0 0 !important;
+            box-shadow: 0 -12px 32px rgba(0,0,0,.08) !important;
         }
         .pps-gallery__track {
             display: flex;
