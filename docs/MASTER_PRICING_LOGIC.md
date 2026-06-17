@@ -211,6 +211,20 @@ Defaults updated to match all calculators:
 2. **Disabled `easydiscount` and `common_discount`.** These ad-hoc discount caps were redundant with the new curve and created non-monotonic pricing. Both max caps set to 0.
 3. **Size-based discount** (booklets only). New `P.discSize` line item: 15% off the subtotal when `imp < 4`. Shows as "Size Adj." in the price breakdown. Hides automatically for 5.5×8.5 (imp=4).
 
+### Saddle stitch: two-sheet inventory model (13×19 + 13×27.5) (2026-06-17)
+
+Stock reality: most papers are inventoried only at **13×19**; **100lb Gloss Text** (`val 0.003`) and **100lb Gloss Cardstock** (`val 0.03`) are *also* stocked at **13×27.5**. The calculator's `imp` (books per press sheet) is defined on the **13×19** sheet — so all preset prices (every preset is `imp ≥ 1`) are unchanged.
+
+Rule (per operator): **`imp < 1` on 13×19 → run the job on the 13×27.5 sheet.** This only happens on large *custom* sizes (presets never go below 1).
+
+Implementation:
+- `calcCustomImp(longest, shortest, bindDir, sheetLong)` gained an optional `sheetLong` (usable long-axis inches; default `18.5` = 13×19, `27` = 13×27.5). Short axis stays `12.5`. Default arg keeps all existing 13×19 calls byte-identical.
+- `resolveSize()` computes `imp` on 13×19; if `imp < 1` it re-images on 13×27.5 (`sheetLong=27`) and returns `sheet:"13x27.5"`, `needsLargeSheet:true`. Otherwise `sheet:"13x19"`, `needsLargeSheet:false`. (Presets return `13x19`/`false`.)
+- `LARGE_SHEET_VALS` (`_CFG.large_sheet_vals || [0.003, 0.03]`) lists the papers stocked at 13×27.5.
+- Non-inventory fee: when `needsLargeSheet`, "in stock" means **both inside and cover are 13×27.5 papers** (cover "same as inside" inherits the inside check); otherwise the `non_inventory_fee` applies (special-order at the big sheet). Normal (`imp ≥ 1`) jobs keep the existing 13×19 inventory test (`INV_NC`/`INV_CS`/`COVER_INV`).
+
+Net effect: oversized custom jobs are now priced on their real (larger, more-efficient) press sheet instead of being floored at `imp 0.5` on 13×19, and a special-order fee is added unless the chosen papers are the two 13×27.5 stocks. Debug panel exposes **Press sheet** and a **Needs 13×27.5 sheet** flag. PHP default + `$json_keys` carry `large_sheet_vals`.
+
 ### Saddle stitch: in-stock text-weight covers exempt from non-inventory fee (2026-06-17)
 
 The `$35` `non_inventory_fee` is meant for genuinely non-stock papers. But the cover-inventory set was `COVER_INV = [COVER_SAME.val, ...INV_CS]` — it only recognized "Same as Inside" plus in-stock **cardstocks** as stocked covers. A text-weight sheet that is in-stock for *interiors* (e.g. 100lb Gloss Text, `val 0.003`, which is in `INV_NC`) was therefore tagged non-inventory the moment it was chosen as a *separate cover*, adding `$35` (further inflated by the 30% `booklet_surcharge`). Net effect: a pricier 80lb cardstock cover could come out cheaper than a 100lb Gloss Text cover.

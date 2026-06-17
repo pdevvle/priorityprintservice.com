@@ -203,6 +203,9 @@ function pps_default_config() {
         'cover_scoring_vals' => array( 0.01, 0.02, 0.03, 1.01, 1.02, 2.21, 2.22, 2.23, 2.24, 2.25 ),
         'inv_nc'    => array( 0.001, 0.002, 0.003 ),
         'inv_cs'    => array( 0.01, 0.02, 0.03, 1.01, 1.02 ),
+        // Papers stocked at the larger 13×27.5 press sheet (saddle stitch). Oversized
+        // jobs (imp<1 on 13×19) must run here; non-stock papers incur non_inventory_fee.
+        'large_sheet_vals' => array( 0.003, 0.03 ), // 100lb Gloss Text, 100lb Gloss Cardstock
 
         'coatings' => array(
             array( 'label' => 'No Additional Coating', 'val' => 0,   'price' => 0 ),
@@ -548,7 +551,7 @@ function pps_config_render_page() {
         // ── JSON sections ──
         $json_keys = array(
             'papers_nc', 'papers_cs', 'cover_same',
-            'cover_scoring_vals', 'inv_nc', 'inv_cs',
+            'cover_scoring_vals', 'inv_nc', 'inv_cs', 'large_sheet_vals',
             'coatings', 'bundling', 'corners',
             'art_opts', 'bleed_opts',
             'size_presets', 'transit_days', 'closures', 'page_counts',
