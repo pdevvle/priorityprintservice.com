@@ -419,7 +419,7 @@ const PAPERS_CS = _CFG.papers_cs || [
 const COVER_SAME=_CFG.cover_same||{label:"Same as Inside Pages",val:0.001,price:0.01,factory:false,coatable:false};
 const COVER_SCORING_VALS=_CFG.cover_scoring_vals||[0.01,0.02,0.03,1.01,1.02,2.21,2.22,2.23,2.24,2.25];
 const _INV_NC=_CFG.inv_nc||[0.001,0.002,0.003], _INV_CS=_CFG.inv_cs||[0.01,0.02,0.03,1.01,1.02];
-const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_CS];
+const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_NC,...INV_CS];
 // Combined paper lists: text weight first, then cardstock with suffix
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
 const isCardstockVal=v=>PAPERS_CS.some(p=>p.val===v);
