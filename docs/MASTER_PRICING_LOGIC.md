@@ -211,6 +211,21 @@ Defaults updated to match all calculators:
 2. **Disabled `easydiscount` and `common_discount`.** These ad-hoc discount caps were redundant with the new curve and created non-monotonic pricing. Both max caps set to 0.
 3. **Size-based discount** (booklets only). New `P.discSize` line item: 15% off the subtotal when `imp < 4`. Shows as "Size Adj." in the price breakdown. Hides automatically for 5.5×8.5 (imp=4).
 
+### Saddle stitch: in-stock text-weight covers exempt from non-inventory fee (2026-06-17)
+
+The `$35` `non_inventory_fee` is meant for genuinely non-stock papers. But the cover-inventory set was `COVER_INV = [COVER_SAME.val, ...INV_CS]` — it only recognized "Same as Inside" plus in-stock **cardstocks** as stocked covers. A text-weight sheet that is in-stock for *interiors* (e.g. 100lb Gloss Text, `val 0.003`, which is in `INV_NC`) was therefore tagged non-inventory the moment it was chosen as a *separate cover*, adding `$35` (further inflated by the 30% `booklet_surcharge`). Net effect: a pricier 80lb cardstock cover could come out cheaper than a 100lb Gloss Text cover.
+
+Fix (calc-preview-test.html, `COVER_INV` definition): include the in-stock text weights too.
+
+```javascript
+// before
+const COVER_INV = [COVER_SAME.val, ...INV_CS];
+// after
+const COVER_INV = [COVER_SAME.val, ...INV_NC, ...INV_CS];
+```
+
+Now `P.nonInv` is `0` for any in-stock cover (text-weight *or* cardstock); the fee still applies to non-stock/factory cover papers. `COVER_INV` is derived in the HTML only (no config key), so this is an HTML-only change — `inv_nc`/`inv_cs` PHP config is unchanged.
+
 ### Saddle stitch: 8-up markup bonus (2026-05-12)
 
 The smallest saddle sizes (`imp >= 8` — 3.5×5.5, 4×6, 4.25×5.5, Square 4×4, 6×4 Landscape, etc.) print 8 books per press sheet, so material costs scale down accordingly. But the customer perception of value doesn't scale 1:1 with sheet-count, and labor (press time, cutting, stitching) is roughly the same per-book regardless of imp. New PCF knob `booklet_8up_markup_bonus` (default `0.15`) multiplies `mk` by `(1 + bonus)` when `imp >= 8`:
