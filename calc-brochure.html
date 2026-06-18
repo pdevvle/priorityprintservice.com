@@ -188,6 +188,9 @@ const PAPERS_CS = _CFG.papers_cs || [
 ];
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
 const INV_VALS=[0.001,0.002,0.003,0.01,0.02,0.03,1.01,1.02];
+// Papers stocked at the larger 13×27.5 press sheet. Oversized flats (imp<1 on 13×19)
+// must run here; non-stock papers incur the non-inventory fee.
+const LARGE_SHEET_VALS=_CFG.large_sheet_vals||[0.003,0.03]; // 100lb Gloss Text, 100lb Gloss Cardstock
 
 const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
 const COAT_SIDES=[{label:"Front Only",val:1,mult:1,daysMult:1},{label:"Back Only",val:1.02,mult:1,daysMult:1},{label:"Both Sides",val:2,mult:2,daysMult:2}];
@@ -255,9 +258,12 @@ const MNAMES=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov",
 // ═══════════════════════════════════════════════════════════════
 // IMPOSITION CALCULATION
 // ═══════════════════════════════════════════════════════════════
-function calcBrochureImp(longEdge, shortEdge) {
+// sheetLong = usable long-axis inches. 18.5 → 13×19 stock (default); 27 → 13×27.5 stock.
+// Tries both sheet orientations and keeps the better yield.
+function calcBrochureImp(longEdge, shortEdge, sheetLong) {
+  const L = sheetLong || 18.5;
   function calc(w, h) {
-    const r1 = 18.5 / w;
+    const r1 = L / w;
     const across = r1 < 0.5 ? 0 : r1 < 1 ? 0.5 : r1 < 1.48 ? 1 : r1 < 3 ? 2 : r1 < 4 ? 3 : r1 < 5 ? 4 : r1 < 6 ? 5 : r1 < 7 ? 6 : r1 < 8 ? 7 : 8;
     const r2 = 12.5 / h;
     const down = r2 < 1 ? 0 : r2 < 2 ? 1 : r2 < 3 ? 2 : r2 < 4 ? 3 : 4;
@@ -292,6 +298,15 @@ function calculate(c) {
     if (longE > 27 || shortE > 12.5) return { error: ["Maximum size: 27×12.5 inches flat"] };
     imp = calcBrochureImp(longE, shortE);
     if (imp <= 0) return { error: ["Size too large for press sheet"] };
+  }
+
+  // Two-sheet rule: a flat piece too big to image one-up on 13×19 (imp<1) runs on the
+  // larger 13×27.5 press sheet — stocked only for select papers (non-stock pays the fee).
+  let needsLargeSheet = false, pressSheet = "13x19";
+  if (imp < 1) {
+    imp = calcBrochureImp(longE, shortE, 27);
+    needsLargeSheet = true;
+    pressSheet = "13x27.5";
   }
 
   const qty = c.qty;
@@ -456,8 +471,9 @@ function calculate(c) {
     P.proof = (c.proof >= 3 ? PCF.proof_hardcopy_cost : PCF.proof_digital_cost) * sf;
   }
 
-  // Non-inventory surcharge
-  P.nonInv = INV_VALS.includes(paper.val) ? 0 : PCF.non_inventory_fee;
+  // Non-inventory surcharge. Oversized flats (needsLargeSheet) must run on 13×27.5,
+  // stocked only for LARGE_SHEET_VALS papers; everything else there pays the fee.
+  P.nonInv = (needsLargeSheet ? LARGE_SHEET_VALS.includes(paper.val) : INV_VALS.includes(paper.val)) ? 0 : PCF.non_inventory_fee;
 
   // Flat base rate per order
   P.baseRate = PCF.backend_base_rate;
@@ -583,7 +599,7 @@ function calculate(c) {
       productionStartDate: fmtDate(productionStartDate), productionStartYMD: toYMD(productionStartDate),
       mustShipDate: fmtDate(mustShipDate), mustShipYMD: toYMD(mustShipDate),
     },
-    debug: { pressSheets, imp, qty, mk, dL, approxThickness, fold: fold.label, panels, longE, shortE, paperDays, baseDays, days, P },
+    debug: { pressSheets, imp, pressSheet, needsLargeSheet, qty, mk, dL, approxThickness, fold: fold.label, panels, longE, shortE, paperDays, baseDays, days, P },
   };
 }
 
