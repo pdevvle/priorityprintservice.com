@@ -211,6 +211,15 @@ Defaults updated to match all calculators:
 2. **Disabled `easydiscount` and `common_discount`.** These ad-hoc discount caps were redundant with the new curve and created non-monotonic pricing. Both max caps set to 0.
 3. **Size-based discount** (booklets only). New `P.discSize` line item: 15% off the subtotal when `imp < 4`. Shows as "Size Adj." in the price breakdown. Hides automatically for 5.5×8.5 (imp=4).
 
+### Rollout: two-sheet model to all calculators (2026-06-17)
+
+The 13×19 + 13×27.5 two-sheet rule (below) was rolled out from saddle stitch to **perfect bound**, **coupon book**, and **brochure**. Same rule everywhere: **yield/`imp` is computed on 13×19; if `imp < 1` the piece images on the 13×27.5 sheet**, and the non-inventory fee applies unless the paper(s) are stocked at 13×27.5 (`LARGE_SHEET_VALS`, default `[0.003, 0.03]` = 100lb Gloss Text / 100lb Gloss Cardstock — identical paper vals across all four calcs).
+
+- **Perfect bound & coupon book** — structural twins of saddle: `calcCustomImp` gained the `sheetLong` arg; `resolveSize` switches to 27″ when `imp<1` (`sheet`/`needsLargeSheet`); `calculate()` fee requires both inside+cover to be 13×27.5 papers on oversized jobs. Also picked up the same `COVER_INV` text-weight fix (`…INV_NC,…INV_CS`). The throwaway `calcSaddle` comparison helper was left as-is.
+- **Brochure** — flat/single-paper, its own `calcBrochureImp` (the long axis divisor is now parameterized 18.5→27). After imp is resolved (preset or custom), `imp<1` re-images on 27″ and sets `needsLargeSheet`; the single-paper `nonInv` then checks `LARGE_SHEET_VALS` instead of `INV_VALS`. Note the `11×25.5` preset (`imp:0.5`) now correctly routes to the 13×27.5 sheet.
+
+Presets with `imp ≥ 1` and normal custom sizes are unchanged in all four calcs (default `sheetLong` keeps the 13×19 math byte-identical).
+
 ### Saddle stitch: two-sheet inventory model (13×19 + 13×27.5) (2026-06-17)
 
 Stock reality: most papers are inventoried only at **13×19**; **100lb Gloss Text** (`val 0.003`) and **100lb Gloss Cardstock** (`val 0.03`) are *also* stocked at **13×27.5**. The calculator's `imp` (books per press sheet) is defined on the **13×19** sheet — so all preset prices (every preset is `imp ≥ 1`) are unchanged.
