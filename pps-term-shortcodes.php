@@ -57,8 +57,12 @@ add_action( 'wp_head', function() {
 
 /* ── Paper cards ── */
 .pps-cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin:16px 0 24px}
-.pps-cat-card{border:1px solid #e2e8f0;border-left:3px solid #4f46e5;border-radius:8px;padding:14px 16px;background:#fff;transition:box-shadow .2s,transform .15s}
+.pps-cat-card{position:relative;border:1px solid #e2e8f0;border-left:3px solid #4f46e5;border-radius:8px;padding:14px 16px;background:#fff;transition:box-shadow .2s,transform .15s}
 .pps-cat-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.08);transform:translateY(-2px)}
+.pps-cat-card--link{text-decoration:none;color:inherit;cursor:pointer}
+.pps-cat-card--link:hover .pps-cat-card-name{color:#4f46e5}
+.pps-cat-card-arrow{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:20px;color:#cbd5e1;font-weight:300;transition:color .15s,transform .15s}
+.pps-cat-card--link:hover .pps-cat-card-arrow{color:#4f46e5;transform:translateY(-50%) translateX(3px)}
 .pps-cat-card-name{font-weight:600;font-size:14px;color:#0f172a;margin-bottom:6px}
 .pps-cat-card-meta{display:flex;flex-wrap:wrap;gap:5px}
 .pps-cat-badge{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 8px;border-radius:4px}
@@ -131,7 +135,7 @@ ul.products li.product img{border-radius:8px}
 
 add_shortcode( 'pps_cat_papers', function( $atts ) {
     if ( ! function_exists( 'pps_get_config' ) ) return '';
-    $a   = shortcode_atts( array( 'type' => 'all', 'factory' => 'yes' ), $atts );
+    $a   = shortcode_atts( array( 'type' => 'all', 'factory' => 'yes', 'link' => '' ), $atts );
     $cfg = pps_get_config();
 
     $papers = array();
@@ -146,6 +150,8 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
     }
     if ( empty( $papers ) ) return '';
 
+    $base_link = trim( $a['link'] );
+
     $out = '<div class="pps-cat-grid">';
     foreach ( $papers as $p ) {
         $label = esc_html( $p['label'] );
@@ -155,10 +161,18 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
         $coat  = ! empty( $p['coatable'] )
             ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
             : '';
-        $out .= '<div class="pps-cat-card">'
-              . '<div class="pps-cat-card-name">' . $label . '</div>'
-              . '<div class="pps-cat-card-meta">' . $stock . $coat . '</div>'
-              . '</div>';
+        $inner = '<div class="pps-cat-card-name">' . $label . '</div>'
+               . '<div class="pps-cat-card-meta">' . $stock . $coat . '</div>';
+
+        if ( $base_link ) {
+            $href = esc_url( add_query_arg( 'paper', $p['val'], $base_link ) );
+            $out .= '<a href="' . $href . '" class="pps-cat-card pps-cat-card--link">'
+                  . $inner
+                  . '<span class="pps-cat-card-arrow">&#8250;</span>'
+                  . '</a>';
+        } else {
+            $out .= '<div class="pps-cat-card">' . $inner . '</div>';
+        }
     }
     $out .= '</div>';
     return $out;

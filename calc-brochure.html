@@ -3309,6 +3309,15 @@ function App() {
     }
   }, []);
 
+  // ── URL param: ?paper=<val> preselects a paper stock ──
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pv = params.get('paper');
+    if (!pv) return;
+    const match = ALL_PAPERS.find(p => String(p.val) === pv);
+    if (match) setPaper(match);
+  }, []);
+
   const shipZip = shipAddr.zip || "";
   const fold = FOLD_TYPES.find(f => f.val === foldType) || FOLD_TYPES[0];
 
