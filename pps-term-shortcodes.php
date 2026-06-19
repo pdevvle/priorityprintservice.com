@@ -17,11 +17,18 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 add_filter( 'term_description', 'do_shortcode', 11 );
 
+add_filter( 'woocommerce_product_add_to_cart_text', function() {
+    return 'Customize Order';
+}, 10, 2 );
+
 add_action( 'wp_head', function() {
     if ( ! is_product_category() && ! is_product_taxonomy() ) return;
     ?>
 <style id="pps-cat-shortcode-css">
-.term-description{max-width:860px}
+.ast-separate-container .ast-article-post,.ast-separate-container .ast-article-single,.ast-separate-container .ast-archive-description{background:#fff}
+.ast-separate-container .site-content>.ast-container{background:transparent}
+.ast-archive-description{padding:28px 32px 8px}
+.term-description{max-width:880px}
 .term-description h2{font-size:21px;font-weight:700;color:#1a202c;margin:32px 0 10px;padding-bottom:8px;border-bottom:2px solid #667eea}
 .term-description h2:first-of-type{margin-top:20px}
 .term-description>p{font-size:15px;line-height:1.75;color:#4a5568;margin-bottom:14px}
@@ -29,6 +36,11 @@ add_action( 'wp_head', function() {
 .term-description ul{list-style:none;padding:0;margin:14px 0}
 .term-description ul li{padding:6px 0 6px 22px;position:relative;font-size:15px;color:#4a5568;line-height:1.6}
 .term-description ul li::before{content:"\25B8";position:absolute;left:0;color:#667eea;font-weight:700}
+ul.products{padding:0 20px}
+ul.products li.product{background:#fff;border-radius:10px;padding:16px;border:1px solid #e2e8f0;transition:box-shadow .2s,transform .15s}
+ul.products li.product:hover{box-shadow:0 4px 14px rgba(0,0,0,.07);transform:translateY(-1px)}
+ul.products li.product .button{background:#667eea;color:#fff;border-radius:6px;font-weight:600;font-size:13px;letter-spacing:.3px;padding:8px 18px;transition:background .15s}
+ul.products li.product .button:hover{background:#5a67d8}
 .pps-cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin:16px 0 20px}
 .pps-cat-card{border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#fff;transition:box-shadow .2s,transform .15s}
 .pps-cat-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.07);transform:translateY(-1px)}
