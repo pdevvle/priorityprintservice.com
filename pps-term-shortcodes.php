@@ -154,6 +154,32 @@ ul.products li.product img{border-radius:8px}
     <?php
 } );
 
+// ── URL-param → reorder bridge (carries wizard selections to the calculator) ──
+
+add_action( 'wp_footer', function() {
+    if ( ! function_exists( 'is_product' ) || ! is_product() ) return;
+    ?>
+    <script>
+    (function(){
+        var p=new URLSearchParams(window.location.search);
+        if(!p.has("paper")&&!p.has("fold")&&!p.has("size"))return;
+        var c=window.PPS_CONFIG;if(!c||c.reorder)return;
+        var rc={};
+        var pv=p.get("paper");
+        if(pv){
+            var label;
+            if(c.calc){var all=(c.calc.papers_nc||[]).concat(c.calc.papers_cs||[]);var m=all.find(function(pp){return String(pp.val)===pv});if(m)label=m.label}
+            if(!label){var map={"0.001":"70lb Uncoated Opaque Text","0.002":"80lb Matte Text","0.003":"100lb Gloss Text","2.002":"60lb Offset Smooth Opaque","2.003":"80lb Offset Smooth Opaque","2.004":"80lb Gloss Factory Coated","2.005":"100lb Matte Factory Coated","0.01":"80lb Opaque Uncoated","0.02":"80lb Matte Cardstock","0.03":"100lb Gloss Cardstock","1.01":"14pt Gloss C1S","1.02":"16pt Coated C2S"};label=map[pv]}
+            if(label)rc.paper={label:label}
+        }
+        var fv=p.get("fold");if(fv)rc.foldType=fv;
+        var sv=p.get("size");if(sv){rc.sizeMode="preset";rc.sizeLabel=sv.replace(/x/gi,"×")}
+        if(Object.keys(rc).length)c.reorder=btoa(JSON.stringify(rc));
+    })();
+    </script>
+    <?php
+}, 1 );
+
 // ── [pps_cat_papers type="text|cover|all" factory="yes|no"] ──
 
 add_shortcode( 'pps_cat_papers', function( $atts ) {
