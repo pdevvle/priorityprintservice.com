@@ -34,7 +34,9 @@ add_action( 'wp_head', function() {
 .term-description{max-width:100%}
 
 /* ── Hero banner ── */
-.pps-cat-hero{background:linear-gradient(135deg,#0f172a 0%,#1e293b 60%,#334155 100%);padding:44px 40px 38px;color:#fff}
+.pps-cat-hero{position:relative;padding:44px 40px 38px;color:#fff;background-size:cover;background-position:center;background-color:#0f172a}
+.pps-cat-hero::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,rgba(15,23,42,.91) 0%,rgba(30,41,59,.88) 60%,rgba(51,65,85,.86) 100%);z-index:0}
+.pps-cat-hero>*{position:relative;z-index:1}
 .pps-cat-hero-title{font-size:32px;font-weight:800;letter-spacing:-.3px;margin:0 0 10px;line-height:1.2}
 .pps-cat-hero-sub{font-size:16px;color:#cbd5e1;line-height:1.6;margin:0;max-width:640px}
 
