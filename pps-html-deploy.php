@@ -38,6 +38,20 @@ if ( file_exists( $_pps_floor_path ) ) {
 }
 unset( $_pps_floor_path );
 
+// ── Side-load rich HTML filter for WooCommerce category descriptions ──
+$_pps_term_html = __DIR__ . '/pps-term-html.php';
+if ( file_exists( $_pps_term_html ) ) {
+    require_once $_pps_term_html;
+}
+unset( $_pps_term_html );
+
+// ── Side-load dynamic shortcodes for category descriptions ──
+$_pps_term_sc = __DIR__ . '/pps-term-shortcodes.php';
+if ( file_exists( $_pps_term_sc ) ) {
+    require_once $_pps_term_sc;
+}
+unset( $_pps_term_sc );
+
 if ( ! defined( 'PPS_HTML_DEPLOY_PENDING_DIR' ) ) {
     define( 'PPS_HTML_DEPLOY_PENDING_DIR', defined( 'PPS_CALC_DIR' ) ? PPS_CALC_DIR . '_pending_html' : __DIR__ . '/_pending_html' );
 }
