@@ -323,9 +323,37 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 
     $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '">';
 
-    // Step 1: Paper
-    $out .= '<div class="pps-wiz-step is-active" data-step="paper">';
-    $out .= '<div class="pps-wiz-prompt">What type of paper works best for your project?</div>';
+    // Step 1: Size
+    $out .= '<div class="pps-wiz-step is-active" data-step="size">';
+    $out .= '<div class="pps-wiz-prompt">What size brochure do you need?</div>';
+    $out .= '<div class="pps-wiz-grid">';
+    foreach ( $sizes as $s ) {
+        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $s['val'] ) . '" data-label="' . esc_attr( $s['label'] ) . '">'
+              . '<div class="pps-wiz-opt-name">' . esc_html( $s['label'] ) . '</div>'
+              . '<div class="pps-wiz-opt-desc">' . esc_html( $s['desc'] ) . '</div>'
+              . '</button>';
+    }
+    $out .= '<button type="button" class="pps-wiz-opt" data-val="" data-label="Custom Size">'
+          . '<div class="pps-wiz-opt-name">Custom Size</div>'
+          . '<div class="pps-wiz-opt-desc">I\'ll enter dimensions in the calculator</div>'
+          . '</button>';
+    $out .= '</div></div>';
+
+    // Step 2: Fold
+    $out .= '<div class="pps-wiz-step" data-step="fold">';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — now, which type of fold?</div>';
+    $out .= '<div class="pps-wiz-grid">';
+    foreach ( $folds as $f ) {
+        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $f['val'] ) . '" data-label="' . esc_attr( $f['label'] ) . '">'
+              . '<div class="pps-wiz-opt-name">' . esc_html( $f['label'] ) . '</div>'
+              . '<div class="pps-wiz-opt-desc">' . esc_html( $f['desc'] ) . '</div>'
+              . '</button>';
+    }
+    $out .= '</div></div>';
+
+    // Step 3: Paper
+    $out .= '<div class="pps-wiz-step" data-step="paper">';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="fold"></span> — and which paper stock?</div>';
     $out .= '<div class="pps-wiz-grid">';
     foreach ( $papers as $p ) {
         $hint  = isset( $paper_hints[ $p['label'] ] ) ? $paper_hints[ $p['label'] ] : '';
@@ -343,34 +371,6 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     }
     $out .= '</div></div>';
 
-    // Step 2: Fold
-    $out .= '<div class="pps-wiz-step" data-step="fold">';
-    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="paper"></span> — now, which type of fold?</div>';
-    $out .= '<div class="pps-wiz-grid">';
-    foreach ( $folds as $f ) {
-        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $f['val'] ) . '" data-label="' . esc_attr( $f['label'] ) . '">'
-              . '<div class="pps-wiz-opt-name">' . esc_html( $f['label'] ) . '</div>'
-              . '<div class="pps-wiz-opt-desc">' . esc_html( $f['desc'] ) . '</div>'
-              . '</button>';
-    }
-    $out .= '</div></div>';
-
-    // Step 3: Size
-    $out .= '<div class="pps-wiz-step" data-step="size">';
-    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="fold"></span> — what size?</div>';
-    $out .= '<div class="pps-wiz-grid">';
-    foreach ( $sizes as $s ) {
-        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $s['val'] ) . '" data-label="' . esc_attr( $s['label'] ) . '">'
-              . '<div class="pps-wiz-opt-name">' . esc_html( $s['label'] ) . '</div>'
-              . '<div class="pps-wiz-opt-desc">' . esc_html( $s['desc'] ) . '</div>'
-              . '</button>';
-    }
-    $out .= '<button type="button" class="pps-wiz-opt" data-val="" data-label="Custom Size">'
-          . '<div class="pps-wiz-opt-name">Custom Size</div>'
-          . '<div class="pps-wiz-opt-desc">I\'ll enter dimensions in the calculator</div>'
-          . '</button>';
-    $out .= '</div></div>';
-
     // Step 4: Done
     $out .= '<div class="pps-wiz-step" data-step="done">';
     $out .= '<div class="pps-wiz-done">'
@@ -386,7 +386,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '(function(){'
           . 'var w=document.getElementById(' . wp_json_encode( $id ) . ');'
           . 'if(!w)return;'
-          . 'var steps=["paper","fold","size","done"],state={},base=w.dataset.link;'
+          . 'var steps=["size","fold","paper","done"],state={},base=w.dataset.link;'
           . 'function show(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e){e.classList.add("is-active");e.scrollIntoView({behavior:"smooth",block:"nearest"})}}'
           . 'function hide(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e)e.classList.remove("is-active")}'
           . 'function pick(step,val,label){'
@@ -404,9 +404,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   '});'
           . '}'
           . 'function updateDone(){'
-          .   'if(!state.paper||!state.fold||!state.size)return;'
+          .   'if(!state.size||!state.fold||!state.paper)return;'
           .   'var s=w.querySelector(".pps-wiz-summary");'
-          .   'if(s)s.innerHTML="<strong>"+state.paper.label+"<\\/strong> \\u00b7 <strong>"+state.fold.label+"<\\/strong> \\u00b7 <strong>"+state.size.label+"<\\/strong>";'
+          .   'if(s)s.innerHTML="<strong>"+state.size.label+"<\\/strong> \\u00b7 <strong>"+state.fold.label+"<\\/strong> \\u00b7 <strong>"+state.paper.label+"<\\/strong>";'
           .   'var a=w.querySelector(".pps-wiz-cta");if(!a)return;'
           .   'var u=base+(base.indexOf("?")>-1?"&":"?")+"paper="+encodeURIComponent(state.paper.val)+"&fold="+encodeURIComponent(state.fold.val);'
           .   'if(state.size.val)u+="&size="+encodeURIComponent(state.size.val);'
@@ -419,7 +419,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'state={};'
           .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected")});'
           .     'steps.forEach(function(s,i){if(i>0)hide(s)});'
-          .     'w.querySelector(\'[data-step="paper"]\').scrollIntoView({behavior:"smooth",block:"nearest"});'
+          .     'w.querySelector(\'[data-step="size"]\').scrollIntoView({behavior:"smooth",block:"nearest"});'
           .   '}'
           . '});'
           . '})();'
