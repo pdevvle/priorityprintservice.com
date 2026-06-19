@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-14 · BR-UNSTICKY</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-16 · BR-CART-PARITY</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -3170,6 +3170,255 @@ function RichTip({ children, tipKey, title, content, dark }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// CART-SUBMISSION HELPERS  (parity with saddle stitch + perfect bound)
+// ═══════════════════════════════════════════════════════════════
+
+function buildSummary(config, result) {
+  const lines = [];
+  const r = result;
+  const sh = r.shipping || {};
+
+  // Size + fold + quantity
+  const sizeStr = config.sizeMode === "custom"
+    ? `${config.longEdge}×${config.shortEdge}" custom`
+    : config.sizeLabel;
+  const foldName = (FOLD_TYPES.find(f => f.val === config.foldType) || { label: config.foldType }).label;
+  lines.push(`${config.qty.toLocaleString()} × ${sizeStr} · ${foldName}` + (config.jobName ? ` "${config.jobName}"` : ""));
+
+  // Paper + print
+  const cName = c => c === "bw" ? "Black & White" : "Full Color";
+  lines.push(`Paper: ${config.paper.label}`);
+  const sideStr = config.sides === 2
+    ? `Front: ${cName(config.frontColor)} · Back: ${cName(config.backColor)}`
+    : `Single-sided · ${cName(config.frontColor)}`;
+  lines.push(sideStr);
+  if (config.vivid) lines.push("Enhanced Vivid Print");
+
+  // Finishing — only when selected
+  if (config.coating > 0) {
+    const ct = COATINGS.find(o => o.val === config.coating);
+    if (ct) lines.push(`Coating: ${ct.label}` + (config.coatSides === 2 ? " (both sides)" : ""));
+  }
+  if (config.bundling > 0) {
+    const b = BUNDLING.find(o => o.val === config.bundling);
+    if (b) lines.push(`Bundling: ${b.label}`);
+  }
+  if (config.perforation > 0) {
+    const p = PERF_OPTS.find(o => o.val === config.perforation);
+    if (p) lines.push(`Perforation: ${p.label} (${config.perfDir})`);
+  }
+  if (config.roundCorner > 0) {
+    const rc = CORNERS.find(o => o.val === config.roundCorner);
+    if (rc) lines.push(`Round Corner: ${rc.label}`);
+  }
+
+  // Artwork
+  const art = ART_OPTS.find(x => x.val === config.artwork);
+  if (art) lines.push(art.label);
+  if (config.bleed > 0) {
+    const b = BLEED_OPTS.find(x => x.val === config.bleed);
+    if (b) lines.push(b.label);
+  }
+  if (config.proof > 0) lines.push(config.proof >= 3 ? "Hardcopy Proof" : "Digital Proof");
+
+  // Delivery
+  if (config.needByDate && sh.rushCost > 0) {
+    lines.push(`Rush: ${sh.bizDaysToDate} business days · ${sh.rushMultiplier.toFixed(2)}×`);
+  } else {
+    lines.push(`Standard delivery: ${sh.freeDeliveryBizDays} business days`);
+  }
+  lines.push(`Ship to: ${config.shipState}${config.shipAddr?.zip ? " " + config.shipAddr.zip : ""}`);
+
+  return lines.join("\n");
+}
+
+function buildMetadata(config, result) {
+  const sh = result.shipping || {};
+  return JSON.stringify({
+    // Calc identification
+    calcType: "brochure",
+    calcLabel: "Brochure / Flat Print",
+    // Customer selections
+    jobName: config.jobName || "",
+    qty: config.qty,
+    sizeMode: config.sizeMode,
+    sizeLabel: config.sizeLabel,
+    longEdge: config.longEdge,
+    shortEdge: config.shortEdge,
+    foldType: config.foldType,
+    foldDir: config.foldDir,
+    frontColor: config.frontColor,
+    backColor: config.backColor,
+    sides: config.sides,
+    paper: config.paper,
+    vivid: config.vivid,
+    coating: config.coating,
+    coatSides: config.coatSides,
+    bundling: config.bundling,
+    perforation: config.perforation,
+    perfDir: config.perfDir,
+    perfPositions: config.perfPositions,
+    roundCorner: config.roundCorner,
+    artwork: config.artwork,
+    bleed: config.bleed,
+    proof: config.proof,
+    proofAddrSame: config.proofAddrSame,
+    proofAddr: config.proofAddr || {},
+    canvaLink: config.canvaLink || "",
+    canvaInstructions: config.canvaInstructions || "",
+    shipState: config.shipState,
+    shipZip: config.shipAddr?.zip || "",
+    shipAddr: config.shipAddr || {},
+    needByDate: config.needByDate,
+    // Shipping — durations, not absolute dates
+    transitDays: sh.transitDays,
+    productionBizDays: sh.productionBizDays,
+    requestedBizDays: sh.bizDaysToDate || sh.freeDeliveryBizDays,
+    freeDeliveryBizDays: sh.freeDeliveryBizDays,
+    rushMultiplier: sh.rushMultiplier,
+    rushCost: sh.rushCost,
+    productionStartDate: sh.productionStartYMD,
+    mustShipByDate: sh.mustShipYMD,
+    estimatedDeliveryDate: config.needByDate || sh.freeDeliveryYMD,
+    // Computed results
+    total: result.total,
+    baseTotal: result.baseTotal,
+    perUnit: result.perUnit,
+    totalQty: result.qty,
+    days: result.days,
+    debug: result.debug,
+  });
+}
+
+// Upload a FormData via XHR with progress callback — returns parsed JSON response
+function uploadWithProgress(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      try { resolve(JSON.parse(xhr.responseText)); }
+      catch (err) { reject(new Error("Invalid server response")); }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.send(formData);
+  });
+}
+
+async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress) {
+  const PPS = window.PPS_CONFIG || {};
+
+  // ── Standalone mode: download artwork + order summary as a zip-like package ──
+  if (!PPS.ajaxUrl) {
+    console.warn("PPS: Standalone mode — triggering local download.");
+    const lines = [
+      "PPS Order Summary", "=".repeat(40), "",
+      `Total: $${total.toFixed(2)}`, `Rush: $${rushCost.toFixed(2)}`, "",
+      "Summary:", summary, "",
+      "Metadata:", metadata, "",
+      `Artwork: ${artFiles.type === "files" ? artFiles.list.map(f => f.name).join(", ") : artFiles.type === "existing" ? artFiles.path : "none"}`, ""
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "pps_order_summary.txt";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    if (artFiles.type === "files") {
+      for (const file of artFiles.list) {
+        const url = URL.createObjectURL(file);
+        const dl = document.createElement("a");
+        dl.href = url;
+        dl.download = file.name;
+        dl.click();
+        URL.revokeObjectURL(url);
+      }
+    }
+    alert(`Standalone mode: downloaded order summary${artFiles.type === "files" ? " + " + artFiles.list.length + " artwork file(s)" : ""}.`);
+    return;
+  }
+
+  // ── Server mode ──
+  let artworkPath = "";
+  const uploadedFiles = [];
+
+  if (artFiles.type === "files") {
+    const total_files = artFiles.list.length;
+    for (let fi = 0; fi < total_files; fi++) {
+      const file = artFiles.list[fi];
+      // The first file is the customer's raw artwork — required, becomes the
+      // order's artwork reference. Later entries are supplementary deliverables
+      // (front + back sheets, etc.); failures on them are logged but don't
+      // block checkout.
+      const isPrimary = fi === 0;
+      try {
+        const fd = new FormData();
+        fd.append("action", "pps_upload_artwork");
+        fd.append("nonce", PPS.uploadNonce);
+        fd.append("artwork", file, file.name);
+        if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct: 0 });
+        const data = await uploadWithProgress(PPS.ajaxUrl, fd, (pct) => {
+          if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct });
+        });
+        if (data.success && data.data && data.data.path) {
+          if (!artworkPath) artworkPath = data.data.path;
+          uploadedFiles.push({ path: data.data.path, name: file.name });
+        } else {
+          const reason = (data && data.data) || "Unknown error";
+          if (isPrimary) {
+            alert("Artwork upload failed: " + reason + "\nPlease try again.");
+            return;
+          }
+          try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload rejected: ${reason}`); } catch (e) {}
+        }
+      } catch (err) {
+        if (isPrimary) {
+          alert("Artwork upload error: " + err.message + "\nPlease try again.");
+          return;
+        }
+        try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload error: ${err.message}`); } catch (e) {}
+      }
+    }
+    if (!artworkPath) {
+      alert("Artwork upload failed: the artwork file could not be uploaded.\nPlease try again.");
+      return;
+    }
+    if (onProgress) onProgress({ phase: "cart", pct: 100 });
+  } else if (artFiles.type === "existing") {
+    artworkPath = artFiles.path;
+  }
+
+  // Add to cart
+  try {
+    const fd = new FormData();
+    fd.append("action", "pps_add_to_cart");
+    fd.append("nonce", PPS.cartNonce);
+    fd.append("product_id", PPS.productId);
+    fd.append("pps_price", total.toFixed(2));
+    fd.append("pps_rush", rushCost.toFixed(2));
+    fd.append("pps_summary", summary);
+    fd.append("pps_metadata", metadata);
+    const parsed = JSON.parse(metadata);
+    fd.append("pps_biz_days", String(parsed.requestedBizDays || parsed.freeDeliveryBizDays || 5));
+    if (artworkPath) fd.append("pps_artwork_path", artworkPath);
+    if (uploadedFiles.length) fd.append("pps_artwork_files", JSON.stringify(uploadedFiles));
+
+    const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: fd });
+    const data = await resp.json();
+    if (data.success) {
+      window.location.href = PPS.cartUrl;
+    } else {
+      alert("Error: " + (data.data || "Could not add to cart."));
+    }
+  } catch (err) {
+    alert("Network error: " + err.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
@@ -3225,6 +3474,10 @@ function App() {
   const [needByDate, setNeedByDate] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [mobPricing, setMobPricing] = useState(false);
+  // Cart submission state — matches saddle stitch + perfect bound
+  const [artFiles, setArtFiles] = useState({ type: "none" });
+  const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
   // Question form modal state
   const [qOpen, setQOpen] = useState(false);
   const [qName, setQName] = useState("");
@@ -3295,6 +3548,12 @@ function App() {
       // Shipping (no date — recalculated fresh)
       if (rc.shipState) setShipState(rc.shipState);
       if (rc.shipAddr) setShipAddr(rc.shipAddr);
+
+      // Existing artwork (edit mode — file already on server)
+      if (rc.artworkPath) setArtFiles({ type: "existing", path: rc.artworkPath });
+      else if (PPS.existingArtwork && PPS.existingArtwork.path) {
+        setArtFiles({ type: "existing", path: PPS.existingArtwork.path });
+      }
 
       // Open all sections so customer can see everything
       setOp({ s1: true, s2: true, s3: true, s4: true, s5: true });
@@ -3415,6 +3674,30 @@ function App() {
     });
   };
 
+  const handleAddToOrder = async () => {
+    if (!result || result.error || submitting) return;
+    setSubmitting(true);
+    setUploadProgress(null);
+    const config = {
+      jobName, qty,
+      sizeMode, sizeLabel, longEdge, shortEdge,
+      foldType, foldDir, frontColor, backColor, sides,
+      paper, vivid, coating, coatSides, bundling,
+      perforation, perfDir, perfPositions, roundCorner,
+      artwork, bleed, proof,
+      proofAddrSame, proofAddr,
+      canvaLink, canvaInstructions,
+      shipState, shipAddr, needByDate,
+    };
+    const summary  = buildSummary(config, result);
+    const metadata = buildMetadata(config, result);
+    const rushCost = result.shipping?.rushCost || 0;
+    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress);
+    // If still here (standalone mode), re-enable
+    setUploadProgress(null);
+    setSubmitting(false);
+  };
+
   const handleQuestionSubmit = async (e) => {
     e.preventDefault();
     if (qStatus === "sending" || qStatus === "sent") return;
@@ -3516,7 +3799,7 @@ function App() {
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sec num={1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
+          <Sec num={1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
@@ -3682,7 +3965,7 @@ function App() {
                     setLongEdge(parseFloat(long.toFixed(3)));
                     setShortEdge(parseFloat(short.toFixed(3)));
                   }}
-                  onArtwork={(a) => {/* artFiles state if needed */}}
+                  onArtwork={setArtFiles}
                   onCoverArt={setCoverArt}
                   openPreviewModalRef={openPreviewModalRef}
                   debug={proofDebug}
@@ -3843,6 +4126,19 @@ function App() {
             <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} />
           </div>
+          <button type="button" onClick={handleAddToOrder} disabled={!!result?.error || submitting} style={{ width: "100%", marginTop: 10, padding: submitting && uploadProgress ? "10px 12px 6px" : "12px", borderRadius: 6, border: "none", background: (result?.error || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error || submitting) ? .5 : 1, transition: "all .2s", overflow: "hidden" }}>
+            {submitting && uploadProgress ? (
+              <div>
+                <div style={{ fontSize: 12 }}>{uploadProgress.phase === "upload" ? `Uploading file(s)… ${uploadProgress.pct}%` : "Adding…"}</div>
+                <div style={{ width: "100%", height: 3, borderRadius: 2, background: "rgba(255,255,255,.2)", overflow: "hidden", marginTop: 4 }}>
+                  <div style={{ height: "100%", borderRadius: 2, background: "#fff", transition: "width .15s", width: uploadProgress.phase === "upload"
+                    ? `${((uploadProgress.fileIdx / uploadProgress.fileCount) + (uploadProgress.pct / 100 / uploadProgress.fileCount)) * 100}%`
+                    : "100%"
+                  }}/>
+                </div>
+              </div>
+            ) : submitting ? "Uploading…" : "Add to Order"}
+          </button>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
@@ -3961,7 +4257,20 @@ function App() {
             {debugUnlocked&&<button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
               {showDebug ? "✕" : "⚙"}
             </button>}
-            <button type="button" style={{ flexShrink: 0, padding: "12px 16px", borderRadius: 6, border: "none", background: result?.error ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: result?.error ? "default" : "pointer", fontFamily: "inherit", opacity: result?.error ? .5 : 1 }} disabled={!!result?.error}>Add to Order</button>
+            <button type="button" onClick={handleAddToOrder} style={{ flexShrink: 0, padding: "12px 18px", borderRadius: 6, border: "none", background: (result?.error || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error || submitting) ? .5 : 1, whiteSpace: "nowrap", minWidth: submitting && uploadProgress ? 140 : undefined }}
+              disabled={!!result?.error || submitting}>
+              {submitting && uploadProgress ? (
+                <div>
+                  <div style={{ fontSize: 12 }}>{uploadProgress.phase === "upload" ? `Uploading… ${uploadProgress.pct}%` : "Adding…"}</div>
+                  <div style={{ width: "100%", height: 3, borderRadius: 2, background: "rgba(255,255,255,.2)", overflow: "hidden", marginTop: 4 }}>
+                    <div style={{ height: "100%", borderRadius: 2, background: "#fff", transition: "width .15s", width: uploadProgress.phase === "upload"
+                      ? `${((uploadProgress.fileIdx / uploadProgress.fileCount) + (uploadProgress.pct / 100 / uploadProgress.fileCount)) * 100}%`
+                      : "100%"
+                    }}/>
+                  </div>
+                </div>
+              ) : submitting ? "Uploading…" : "Add to Order"}
+            </button>
           </div>
         </div>
       </>}
