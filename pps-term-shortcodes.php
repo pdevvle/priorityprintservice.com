@@ -69,6 +69,7 @@ add_action( 'wp_head', function() {
 .pps-cat-badge--stock{background:#dcfce7;color:#166534}
 .pps-cat-badge--factory{background:#fef9c3;color:#854d0e}
 .pps-cat-badge--coat{background:#ede9fe;color:#5b21b6}
+.pps-cat-badge--cs{background:#dbeafe;color:#1e40af}
 
 /* ── Turnaround callout ── */
 .pps-cat-callout{background:linear-gradient(135deg,#eef2ff 0%,#f5f3ff 100%);border-radius:10px;padding:24px 28px;margin:24px 0;border:1px solid #c7d2fe;position:relative;overflow:hidden}
@@ -302,10 +303,11 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 
     // ── Step data ──
 
-    $papers = array_merge(
-        isset( $cfg['papers_nc'] ) ? $cfg['papers_nc'] : array(),
-        isset( $cfg['papers_cs'] ) ? $cfg['papers_cs'] : array()
-    );
+    $nc = isset( $cfg['papers_nc'] ) ? $cfg['papers_nc'] : array();
+    $cs = isset( $cfg['papers_cs'] ) ? $cfg['papers_cs'] : array();
+    foreach ( $cs as &$_p ) { $_p['_cs'] = true; }
+    unset( $_p );
+    $papers = array_merge( $nc, $cs );
 
     $paper_hints = array(
         '70lb Uncoated Opaque Text'  => 'Lightweight, natural feel — inserts & newsletters',
@@ -389,10 +391,13 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         $coat  = ! empty( $p['coatable'] )
             ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
             : '';
+        $cs_badge = ! empty( $p['_cs'] )
+            ? '<span class="pps-cat-badge pps-cat-badge--cs">Cardstock</span>'
+            : '';
         $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $p['val'] ) . '" data-label="' . esc_attr( $p['label'] ) . '">'
               . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . '</div>'
               . ( $hint ? '<div class="pps-wiz-opt-desc">' . esc_html( $hint ) . '</div>' : '' )
-              . '<div class="pps-wiz-opt-badges">' . $stock . $coat . '</div>'
+              . '<div class="pps-wiz-opt-badges">' . $cs_badge . $stock . $coat . '</div>'
               . '</button>';
     }
     $out .= '</div></div>';
