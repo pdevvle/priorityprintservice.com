@@ -21,6 +21,14 @@ define( 'PPS_CALC_OPTION', 'pps_calculators_registry' );
 define( 'PPS_UPLOAD_SUBDIR', 'pps-calculators' );
 
 // ═══════════════════════════════════════════════════════════════
+// ALLOW RICH HTML IN WOOCOMMERCE CATEGORY DESCRIPTIONS
+// ═══════════════════════════════════════════════════════════════
+
+remove_filter( 'pre_term_description', 'wp_filter_kses' );
+remove_filter( 'term_description', 'wp_kses_data' );
+add_filter( 'pre_term_description', 'wp_filter_post_kses' );
+
+// ═══════════════════════════════════════════════════════════════
 // SHOP CLOSURES & TRANSIT (from config admin or fallback)
 // ═══════════════════════════════════════════════════════════════
 
