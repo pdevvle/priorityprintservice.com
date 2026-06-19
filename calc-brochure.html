@@ -1281,6 +1281,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const bLabel = hasIO ? "Back / Inside" : "Back";
   const [frontArt, setFrontArt] = useState(null); // {dataUrl, file, dims:{w,h}}
   const [backArt, setBackArt] = useState(null);
+  useEffect(() => { if (sides === 1) { setBackArt(null); setSide("front"); } }, [sides]);
   // Push frontArt up to the parent so the sidebar preview can mirror it
   useEffect(() => { if (onCoverArt) onCoverArt(frontArt); }, [frontArt, onCoverArt]);
   // Expose imperative open-preview hook for the sidebar preview card
@@ -2427,8 +2428,8 @@ generate();
           })()}
 
           {/* Individual side upload slots */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-            {[{s:"front",label:fLabel,art:frontArt,setArt:setFrontArt,inputRef:frontInputRef},{s:"back",label:bLabel,art:backArt,setArt:setBackArt,inputRef:backInputRef}].map(({s,label,art,setArt,inputRef}) => {
+          <div style={{ display: "grid", gridTemplateColumns: sides === 1 ? "1fr" : "1fr 1fr", gap: 8, marginTop: 8 }}>
+            {[{s:"front",label:fLabel,art:frontArt,setArt:setFrontArt,inputRef:frontInputRef},...(sides === 2 ? [{s:"back",label:bLabel,art:backArt,setArt:setBackArt,inputRef:backInputRef}] : [])].map(({s,label,art,setArt,inputRef}) => {
               const handleSlotFile = async (file) => {
                 if (!file) return;
                 const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
