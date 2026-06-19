@@ -127,6 +127,29 @@ ul.products li.product img{border-radius:8px}
 .pps-cat-callout{padding:18px 20px}
 .pps-cat-callout .pps-cat-num{font-size:26px}
 }
+
+/* ── Wizard ── */
+.pps-wiz-step{display:none;margin-bottom:24px}
+.pps-wiz-step.is-active{display:block;animation:ppsFadeIn .35s ease}
+@keyframes ppsFadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.pps-wiz-prompt{font-size:16px;font-weight:600;color:#1e293b;margin-bottom:14px;line-height:1.5}
+.pps-wiz-prompt .pps-wiz-prev{color:#4f46e5;font-weight:700}
+.pps-wiz-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.pps-wiz-opt{all:unset;position:relative;cursor:pointer;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;background:#fff;transition:border-color .15s,box-shadow .15s}
+.pps-wiz-opt:hover{border-color:#a5b4fc;box-shadow:0 2px 8px rgba(79,70,229,.1)}
+.pps-wiz-opt.is-selected{border-color:#4f46e5;box-shadow:0 0 0 2px rgba(79,70,229,.2);background:#f5f3ff}
+.pps-wiz-opt-name{font-weight:600;font-size:14px;color:#0f172a;margin-bottom:4px}
+.pps-wiz-opt.is-selected .pps-wiz-opt-name{color:#4f46e5}
+.pps-wiz-opt-desc{font-size:12px;color:#64748b;line-height:1.5;margin-bottom:6px}
+.pps-wiz-opt-badges{display:flex;flex-wrap:wrap;gap:4px}
+.pps-wiz-done{background:linear-gradient(135deg,#eef2ff 0%,#f5f3ff 100%);border:1px solid #c7d2fe;border-radius:10px;padding:24px 28px;text-align:center}
+.pps-wiz-summary{font-size:15px;color:#334155;margin-bottom:16px;line-height:1.6}
+.pps-wiz-summary strong{color:#1e293b}
+.pps-wiz-cta{display:inline-block;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px;text-decoration:none;transition:background .15s}
+.pps-wiz-cta:hover{background:#4338ca;color:#fff}
+.pps-wiz-reset{display:inline-block;margin-top:10px;font-size:13px;color:#64748b;cursor:pointer;text-decoration:underline;border:0;background:0}
+.pps-wiz-reset:hover{color:#4f46e5}
+@media(max-width:480px){.pps-wiz-grid{grid-template-columns:1fr}}
 </style>
     <?php
 } );
@@ -237,5 +260,170 @@ add_shortcode( 'pps_cat_addons', function( $atts ) {
               . '</div>';
     }
     $out .= '</div>';
+    return $out;
+} );
+
+// ── [pps_cat_wizard calc="brochure" link="/product/..."] ──
+
+add_shortcode( 'pps_cat_wizard', function( $atts ) {
+    if ( ! function_exists( 'pps_get_config' ) ) return '';
+    $a   = shortcode_atts( array( 'calc' => 'brochure', 'link' => '' ), $atts );
+    $cfg = pps_get_config();
+    $link = trim( $a['link'] );
+    if ( ! $link ) return '';
+
+    $id = 'pps-wiz-' . wp_unique_id();
+
+    // ── Step data ──
+
+    $papers = array_merge(
+        isset( $cfg['papers_nc'] ) ? $cfg['papers_nc'] : array(),
+        isset( $cfg['papers_cs'] ) ? $cfg['papers_cs'] : array()
+    );
+
+    $paper_hints = array(
+        '70lb Uncoated Opaque Text'  => 'Lightweight, natural feel — inserts & newsletters',
+        '80lb Matte Text'            => 'Smooth matte — versatile for brochures & catalogs',
+        '100lb Gloss Text'           => 'Glossy, vibrant — premium marketing materials',
+        '60lb Offset Smooth Opaque'  => 'Economy weight — budget-friendly for large runs',
+        '80lb Offset Smooth Opaque'  => 'Mid-weight offset — solid quality at great value',
+        '80lb Gloss Factory Coated'  => 'Pre-coated gloss — vivid colors out of the box',
+        '100lb Matte Factory Coated' => 'Pre-coated matte — rich feel, great ink holdout',
+        '80lb Opaque Uncoated'       => 'Sturdy uncoated cardstock — professional feel',
+        '80lb Matte Cardstock'       => 'Smooth matte cardstock — elegant & substantial',
+        '100lb Gloss Cardstock'      => 'Glossy cardstock — bold colors, sharp images',
+        '14pt Gloss C1S'             => 'Thick, coated one side — postcards & covers',
+        '16pt Coated C2S'            => 'Premium double-coated — maximum durability',
+    );
+
+    $folds = array(
+        array( 'val' => 'flat',        'label' => 'Flat — No Folding',       'desc' => 'Single sheet — flyers, handouts, inserts' ),
+        array( 'val' => 'bifold',      'label' => 'Bifold (2 Panel)',        'desc' => 'Folded in half — menus, programs, invitations' ),
+        array( 'val' => 'trifold',     'label' => 'Trifold (3 Panel)',       'desc' => 'The classic brochure fold — most popular' ),
+        array( 'val' => 'z3',          'label' => 'Z-Fold (3 Panel)',        'desc' => 'Zigzag — each panel fully visible when open' ),
+        array( 'val' => 'gate3',       'label' => 'Gate Fold (3 Panel)',     'desc' => 'Two flaps fold inward — dramatic reveal' ),
+        array( 'val' => 'accordion4',  'label' => 'Accordion (4 Panel)',     'desc' => 'Zigzag with 4 panels — guides & timelines' ),
+        array( 'val' => 'roll4',       'label' => 'Roll Fold (4 Panel)',     'desc' => 'Panels roll inward — mailers & menus' ),
+        array( 'val' => 'dgate4',      'label' => 'Double Gate (4 Panel)',   'desc' => 'Four panels folding in — maximum impact' ),
+        array( 'val' => 'dparallel4',  'label' => 'Double Parallel (4 Panel)', 'desc' => 'Two parallel folds — compact, detailed' ),
+    );
+
+    $sizes = array(
+        array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5',  'desc' => 'Half letter — compact' ),
+        array( 'val' => '6x9',     'label' => '6 × 9',       'desc' => 'Common mailer size' ),
+        array( 'val' => '8.5x11',  'label' => '8.5 × 11',    'desc' => 'Letter — the standard' ),
+        array( 'val' => '8.5x14',  'label' => '8.5 × 14',    'desc' => 'Legal — extra room' ),
+        array( 'val' => '9x12',    'label' => '9 × 12',      'desc' => 'Fits inside folders' ),
+        array( 'val' => '11x17',   'label' => '11 × 17',     'desc' => 'Tabloid — large format' ),
+        array( 'val' => '12x18',   'label' => '12 × 18',     'desc' => 'Oversized tabloid' ),
+        array( 'val' => '11x25.5', 'label' => '11 × 25.5',   'desc' => 'Extra-long mailer' ),
+    );
+
+    // ── Render ──
+
+    $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '">';
+
+    // Step 1: Paper
+    $out .= '<div class="pps-wiz-step is-active" data-step="paper">';
+    $out .= '<div class="pps-wiz-prompt">What type of paper works best for your project?</div>';
+    $out .= '<div class="pps-wiz-grid">';
+    foreach ( $papers as $p ) {
+        $hint  = isset( $paper_hints[ $p['label'] ] ) ? $paper_hints[ $p['label'] ] : '';
+        $stock = empty( $p['factory'] )
+            ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
+            : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+        $coat  = ! empty( $p['coatable'] )
+            ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
+            : '';
+        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $p['val'] ) . '" data-label="' . esc_attr( $p['label'] ) . '">'
+              . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . '</div>'
+              . ( $hint ? '<div class="pps-wiz-opt-desc">' . esc_html( $hint ) . '</div>' : '' )
+              . '<div class="pps-wiz-opt-badges">' . $stock . $coat . '</div>'
+              . '</button>';
+    }
+    $out .= '</div></div>';
+
+    // Step 2: Fold
+    $out .= '<div class="pps-wiz-step" data-step="fold">';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="paper"></span> — now, which type of fold?</div>';
+    $out .= '<div class="pps-wiz-grid">';
+    foreach ( $folds as $f ) {
+        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $f['val'] ) . '" data-label="' . esc_attr( $f['label'] ) . '">'
+              . '<div class="pps-wiz-opt-name">' . esc_html( $f['label'] ) . '</div>'
+              . '<div class="pps-wiz-opt-desc">' . esc_html( $f['desc'] ) . '</div>'
+              . '</button>';
+    }
+    $out .= '</div></div>';
+
+    // Step 3: Size
+    $out .= '<div class="pps-wiz-step" data-step="size">';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="fold"></span> — what size?</div>';
+    $out .= '<div class="pps-wiz-grid">';
+    foreach ( $sizes as $s ) {
+        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $s['val'] ) . '" data-label="' . esc_attr( $s['label'] ) . '">'
+              . '<div class="pps-wiz-opt-name">' . esc_html( $s['label'] ) . '</div>'
+              . '<div class="pps-wiz-opt-desc">' . esc_html( $s['desc'] ) . '</div>'
+              . '</button>';
+    }
+    $out .= '<button type="button" class="pps-wiz-opt" data-val="" data-label="Custom Size">'
+          . '<div class="pps-wiz-opt-name">Custom Size</div>'
+          . '<div class="pps-wiz-opt-desc">I\'ll enter dimensions in the calculator</div>'
+          . '</button>';
+    $out .= '</div></div>';
+
+    // Step 4: Done
+    $out .= '<div class="pps-wiz-step" data-step="done">';
+    $out .= '<div class="pps-wiz-done">'
+          . '<div class="pps-wiz-summary"></div>'
+          . '<a class="pps-wiz-cta" href="' . esc_url( $link ) . '">Finish Customization &rarr;</a><br>'
+          . '<button type="button" class="pps-wiz-reset">Start over</button>'
+          . '</div></div>';
+
+    $out .= '</div>';
+
+    // ── Inline JS ──
+    $out .= '<script>'
+          . '(function(){'
+          . 'var w=document.getElementById(' . wp_json_encode( $id ) . ');'
+          . 'if(!w)return;'
+          . 'var steps=["paper","fold","size","done"],state={},base=w.dataset.link;'
+          . 'function show(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e){e.classList.add("is-active");e.scrollIntoView({behavior:"smooth",block:"nearest"})}}'
+          . 'function hide(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e)e.classList.remove("is-active")}'
+          . 'function pick(step,val,label){'
+          .   'state[step]={val:val,label:label};'
+          .   'var opts=w.querySelectorAll(\'[data-step="\'+step+\'"] .pps-wiz-opt\');'
+          .   'opts.forEach(function(o){o.classList.toggle("is-selected",o.dataset.val===val)});'
+          .   'var si=steps.indexOf(step);'
+          .   'for(var i=si+2;i<steps.length;i++){hide(steps[i]);delete state[steps[i]]}'
+          .   'if(si<steps.length-1)setTimeout(function(){show(steps[si+1])},150);'
+          .   'updatePrev();updateDone();'
+          . '}'
+          . 'function updatePrev(){'
+          .   'w.querySelectorAll(".pps-wiz-prev").forEach(function(el){'
+          .     'var k=el.dataset.show;if(state[k])el.textContent=state[k].label;'
+          .   '});'
+          . '}'
+          . 'function updateDone(){'
+          .   'if(!state.paper||!state.fold||!state.size)return;'
+          .   'var s=w.querySelector(".pps-wiz-summary");'
+          .   'if(s)s.innerHTML="<strong>"+state.paper.label+"<\\/strong> \\u00b7 <strong>"+state.fold.label+"<\\/strong> \\u00b7 <strong>"+state.size.label+"<\\/strong>";'
+          .   'var a=w.querySelector(".pps-wiz-cta");if(!a)return;'
+          .   'var u=base+(base.indexOf("?")>-1?"&":"?")+"paper="+encodeURIComponent(state.paper.val)+"&fold="+encodeURIComponent(state.fold.val);'
+          .   'if(state.size.val)u+="&size="+encodeURIComponent(state.size.val);'
+          .   'a.href=u;'
+          . '}'
+          . 'w.addEventListener("click",function(e){'
+          .   'var opt=e.target.closest(".pps-wiz-opt");'
+          .   'if(opt){var st=opt.closest(".pps-wiz-step");if(st)pick(st.dataset.step,opt.dataset.val,opt.dataset.label);return}'
+          .   'if(e.target.closest(".pps-wiz-reset")){'
+          .     'state={};'
+          .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected")});'
+          .     'steps.forEach(function(s,i){if(i>0)hide(s)});'
+          .     'w.querySelector(\'[data-step="paper"]\').scrollIntoView({behavior:"smooth",block:"nearest"});'
+          .   '}'
+          . '});'
+          . '})();'
+          . '</script>';
+
     return $out;
 } );

@@ -3309,13 +3309,19 @@ function App() {
     }
   }, []);
 
-  // ── URL param: ?paper=<val> preselects a paper stock ──
+  // ── URL params: ?paper=&fold=&size= preselect options ──
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const pv = params.get('paper');
-    if (!pv) return;
-    const match = ALL_PAPERS.find(p => String(p.val) === pv);
-    if (match) setPaper(match);
+    if (pv) { const m = ALL_PAPERS.find(p => String(p.val) === pv); if (m) setPaper(m); }
+    const fv = params.get('fold');
+    if (fv) { const m = FOLD_TYPES.find(f => f.val === fv); if (m) setFoldType(fv); }
+    const sv = params.get('size');
+    if (sv) {
+      const norm = sv.replace(/×/g, 'x').toLowerCase();
+      const m = SIZE_PRESETS.find(s => s.label.replace(/×/g, 'x').toLowerCase() === norm);
+      if (m) { setSizeMode('preset'); setSizeLabel(m.label); }
+    }
   }, []);
 
   const shipZip = shipAddr.zip || "";
