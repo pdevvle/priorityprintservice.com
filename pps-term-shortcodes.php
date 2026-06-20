@@ -196,6 +196,20 @@ textarea.pps-wiz-input{min-height:70px;resize:vertical}
 .pps-wiz-email-status{margin-top:8px;font-size:13px;font-weight:500}
 .pps-wiz-email-status.is-ok{color:#166534}
 .pps-wiz-email-status.is-err{color:#dc2626}
+.pps-wiz-upload{margin-bottom:8px}
+.pps-wiz-upload-zone{display:block;border:2px dashed #e2e8f0;border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:all .15s}
+.pps-wiz-upload-zone:hover,.pps-wiz-upload-zone.is-dragover{border-color:#60a5fa;background:#eff6ff}
+.pps-wiz-upload-zone input[type="file"]{display:none}
+.pps-wiz-upload-icon{font-size:13px;font-weight:600;color:#334155;margin-bottom:2px}
+.pps-wiz-upload-hint{font-size:11px;color:#94a3b8}
+.pps-wiz-file-list{margin-top:6px}
+.pps-wiz-file{display:flex;align-items:center;gap:6px;padding:5px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;color:#334155;margin-bottom:3px}
+.pps-wiz-file-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pps-wiz-file-size{color:#94a3b8;font-size:11px;flex-shrink:0}
+.pps-wiz-file-rm{cursor:pointer;color:#dc2626;font-size:14px;line-height:1;flex-shrink:0;padding:0 2px;background:none;border:0}
+.pps-wiz-file-rm:hover{color:#b91c1c}
+.pps-wiz-file-total{font-size:11px;color:#64748b;margin-top:2px}
+.pps-wiz-file-total.is-warn{color:#dc2626;font-weight:600}
 </style>
     <?php
 } );
@@ -662,6 +676,14 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '<input type="text" name="website" style="display:none" tabindex="-1" autocomplete="off" data-field="hp">'
           . '<label class="pps-wiz-cb"><input type="checkbox" data-field="callback"> Request Callback</label>'
           . '<textarea class="pps-wiz-input" data-field="message" placeholder="Additional details (optional)"></textarea>'
+          . '<div class="pps-wiz-upload">'
+          . '<label class="pps-wiz-upload-zone">'
+          . '<input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.ai,.psd,.eps" data-field="files">'
+          . '<div class="pps-wiz-upload-icon">Attach Files (optional)</div>'
+          . '<div class="pps-wiz-upload-hint">PDF, PNG, JPG, TIFF, AI, PSD, EPS</div>'
+          . '</label>'
+          . '<div class="pps-wiz-file-list"></div>'
+          . '</div>'
           . '<button type="button" class="pps-wiz-send">Send Quote Request</button>'
           . '<div class="pps-wiz-email-status"></div>'
           . '</div>';
@@ -678,6 +700,33 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . 'var steps=[];w.querySelectorAll(".pps-wiz-step").forEach(function(el){steps.push(el.dataset.step)});'
           . 'var state={},base=w.dataset.link;'
           . 'var bar=w.querySelector(".pps-wiz-actions");'
+          . 'var wizFiles=[];'
+          . 'var fileInput=w.querySelector(\'[data-field="files"]\');'
+          . 'var fileZone=w.querySelector(".pps-wiz-upload-zone");'
+          . 'var fileList=w.querySelector(".pps-wiz-file-list");'
+          . 'function fmtSz(b){return(b/1048576).toFixed(1)+" MB"}'
+          . 'function renderFiles(){'
+          .   'fileList.innerHTML="";var total=0;'
+          .   'wizFiles.forEach(function(f,i){'
+          .     'total+=f.size;var d=document.createElement("div");d.className="pps-wiz-file";'
+          .     'var nm=document.createElement("span");nm.className="pps-wiz-file-name";nm.textContent=f.name;'
+          .     'var sz=document.createElement("span");sz.className="pps-wiz-file-size";sz.textContent=fmtSz(f.size);'
+          .     'var rm=document.createElement("button");rm.type="button";rm.className="pps-wiz-file-rm";rm.dataset.fi=i;rm.innerHTML="&times;";'
+          .     'd.appendChild(nm);d.appendChild(sz);d.appendChild(rm);fileList.appendChild(d);'
+          .   '});'
+          .   'if(wizFiles.length){'
+          .     'var t=document.createElement("div");'
+          .     't.className="pps-wiz-file-total"+(total>20971520?" is-warn":"");'
+          .     't.textContent="Total: "+fmtSz(total)+(total>20971520?" — large files will be uploaded to a secure link":"");'
+          .     'fileList.appendChild(t);'
+          .   '}'
+          . '}'
+          . 'if(fileInput){fileInput.addEventListener("change",function(){Array.from(this.files).forEach(function(f){wizFiles.push(f)});this.value="";renderFiles()})}'
+          . 'if(fileZone){'
+          .   'fileZone.addEventListener("dragover",function(e){e.preventDefault();this.classList.add("is-dragover")});'
+          .   'fileZone.addEventListener("dragleave",function(){this.classList.remove("is-dragover")});'
+          .   'fileZone.addEventListener("drop",function(e){e.preventDefault();this.classList.remove("is-dragover");Array.from(e.dataTransfer.files).forEach(function(f){wizFiles.push(f)});renderFiles()});'
+          . '}'
           . 'function show(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e){e.classList.add("is-active");e.scrollIntoView({behavior:"smooth",block:"nearest"})}}'
           . 'function hide(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e)e.classList.remove("is-active")}'
           . 'function filterPapers(ptype){'
@@ -747,6 +796,8 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'updatePrev();updateActions();'
           . '}'
           . 'w.addEventListener("click",function(e){'
+          .   'var frm=e.target.closest(".pps-wiz-file-rm");'
+          .   'if(frm){wizFiles.splice(parseInt(frm.dataset.fi),1);renderFiles();return}'
           .   'if(e.target.closest(".pps-wiz-clear")){'
           .     'var st=e.target.closest(".pps-wiz-step");'
           .     'if(st)clearStep(st.dataset.step);'
@@ -774,6 +825,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'steps.forEach(function(s,i){if(i>0)hide(s)});'
           .     'bar.classList.remove("is-visible");'
           .     'var ef=w.querySelector(".pps-wiz-email-form");if(ef)ef.style.display="none";'
+          .     'wizFiles=[];renderFiles();'
           .     'w.querySelector(\'[data-step="size"]\').scrollIntoView({behavior:"smooth",block:"nearest"});'
           .     'return;'
           .   '}'
@@ -801,11 +853,12 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'fd.append("specs",w.querySelector(".pps-wiz-summary").textContent);'
           .     'fd.append("url",w.querySelector(".pps-wiz-act-pricing").href);'
           .     'fd.append("message",msg);'
+          .     'wizFiles.forEach(function(f){fd.append("files[]",f)});'
           .     'var btn=e.target.closest(".pps-wiz-send");btn.disabled=true;btn.textContent="Sending...";'
           .     'fetch(bar.dataset.ajax,{method:"POST",body:fd})'
           .       '.then(function(r){return r.json()})'
           .       '.then(function(r){'
-          .         'if(r.success){statusEl.className="pps-wiz-email-status is-ok";statusEl.textContent=r.data;btn.textContent="Sent!"}'
+          .         'if(r.success){statusEl.className="pps-wiz-email-status is-ok";statusEl.textContent=r.data;btn.textContent="Sent!";wizFiles=[];renderFiles()}'
           .         'else{statusEl.className="pps-wiz-email-status is-err";statusEl.textContent=r.data||"Could not send. Please try again.";btn.disabled=false;btn.textContent="Send Quote Request"}'
           .       '})'
           .       '.catch(function(){statusEl.className="pps-wiz-email-status is-err";statusEl.textContent="Network error. Please try again.";btn.disabled=false;btn.textContent="Send Quote Request"});'
@@ -849,8 +902,70 @@ function pps_wizard_email_handler() {
     $body .= "\n\nSelected Specs:\n{$specs}\n\nCalculator Link:\n{$url}";
     if ( $msg ) $body .= "\n\nMessage:\n{$msg}";
 
-    $headers = array( 'Reply-To: ' . $name . ' <' . $email . '>' );
-    $sent    = wp_mail( $admin, $subj, $body, $headers );
+    $headers     = array( 'Reply-To: ' . $name . ' <' . $email . '>' );
+    $attachments = array();
+    $cleanup     = array();
+    $upload_urls = array();
+
+    $allowed_ext = array( 'pdf', 'png', 'jpg', 'jpeg', 'tiff', 'tif', 'ai', 'psd', 'eps' );
+    $max_per_file = 20 * 1024 * 1024; // 20 MB
+    $max_email    = 20 * 1024 * 1024;
+
+    if ( ! empty( $_FILES['files'] ) && is_array( $_FILES['files']['name'] ) ) {
+        $count = count( $_FILES['files']['name'] );
+        $total = 0;
+        $valid = array();
+
+        for ( $i = 0; $i < $count; $i++ ) {
+            if ( $_FILES['files']['error'][ $i ] !== UPLOAD_ERR_OK ) continue;
+            $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
+            $ext  = strtolower( pathinfo( $orig, PATHINFO_EXTENSION ) );
+            if ( ! in_array( $ext, $allowed_ext, true ) ) continue;
+            if ( $_FILES['files']['size'][ $i ] > $max_per_file ) continue;
+            $total += $_FILES['files']['size'][ $i ];
+            $valid[] = $i;
+        }
+
+        if ( $total <= $max_email ) {
+            $tmp_dir = get_temp_dir() . 'pps-quote-' . wp_generate_password( 8, false );
+            wp_mkdir_p( $tmp_dir );
+            foreach ( $valid as $i ) {
+                $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
+                $dest = $tmp_dir . '/' . $orig;
+                if ( move_uploaded_file( $_FILES['files']['tmp_name'][ $i ], $dest ) ) {
+                    $attachments[] = $dest;
+                }
+            }
+            $cleanup[] = $tmp_dir;
+        } else {
+            $token   = wp_generate_password( 16, false );
+            $upl_dir = wp_upload_dir();
+            $quote_dir = $upl_dir['basedir'] . '/pps-quotes/' . $token;
+            wp_mkdir_p( $quote_dir );
+            $htaccess = $quote_dir . '/.htaccess';
+            if ( ! file_exists( $htaccess ) ) {
+                file_put_contents( $htaccess, "Options -Indexes\n" );
+            }
+            foreach ( $valid as $i ) {
+                $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
+                $dest = $quote_dir . '/' . $orig;
+                if ( move_uploaded_file( $_FILES['files']['tmp_name'][ $i ], $dest ) ) {
+                    $upload_urls[] = $upl_dir['baseurl'] . '/pps-quotes/' . $token . '/' . $orig;
+                }
+            }
+            if ( $upload_urls ) {
+                $body .= "\n\nUploaded Files (too large for email attachment):\n" . implode( "\n", $upload_urls );
+            }
+        }
+    }
+
+    $sent = wp_mail( $admin, $subj, $body, $headers, $attachments );
+
+    foreach ( $cleanup as $dir ) {
+        $files_in = glob( $dir . '/*' );
+        if ( $files_in ) array_map( 'unlink', $files_in );
+        @rmdir( $dir );
+    }
 
     if ( $sent ) wp_send_json_success( 'Your quote request has been sent! We\'ll be in touch shortly.' );
     else         wp_send_json_error( 'Could not send email. Please try again or call us directly.' );
