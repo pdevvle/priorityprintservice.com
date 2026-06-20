@@ -15,6 +15,34 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+// ── 301 redirect old /product-category/* URLs ──
+
+add_action( 'template_redirect', function() {
+    if ( ! isset( $_SERVER['REQUEST_URI'] ) ) return;
+    $path = trim( parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH ), '/' );
+    if ( strpos( $path, 'product-category/' ) !== 0 ) return;
+    $slug = substr( $path, strlen( 'product-category/' ) );
+    $slug = trim( $slug, '/' );
+    if ( ! $slug ) return;
+    wp_redirect( home_url( '/' . $slug . '/' ), 301 );
+    exit;
+} );
+
+// ── 301 redirect renamed page slugs ──
+
+add_action( 'template_redirect', function() {
+    if ( ! is_404() ) return;
+    $redirects = array(
+        'door-hangers'     => 'door-hanger-printing',
+        'signs-and-banners' => 'sign-and-banner-printing',
+    );
+    $path = trim( parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH ), '/' );
+    if ( isset( $redirects[ $path ] ) ) {
+        wp_redirect( home_url( '/' . $redirects[ $path ] . '/' ), 301 );
+        exit;
+    }
+} );
+
 add_filter( 'term_description', 'do_shortcode', 11 );
 
 add_filter( 'woocommerce_product_add_to_cart_text', function() {
