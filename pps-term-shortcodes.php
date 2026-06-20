@@ -130,27 +130,27 @@ ul.products li.product img{border-radius:8px}
 }
 
 /* ── Wizard ── */
-.pps-wiz-step{display:none;margin-bottom:24px}
+.pps-wiz-step{display:none;margin-bottom:18px}
 .pps-wiz-step.is-active{display:block;animation:ppsFadeIn .35s ease}
 @keyframes ppsFadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-.pps-wiz-prompt{font-size:16px;font-weight:600;color:#1e293b;margin-bottom:14px;line-height:1.5}
+.pps-wiz-prompt{font-size:14px;font-weight:600;color:#1e293b;margin-bottom:10px;line-height:1.4}
 .pps-wiz-prompt .pps-wiz-prev{color:#4f46e5;font-weight:700}
-.pps-wiz-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
-.pps-wiz-opt{all:unset;position:relative;cursor:pointer;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;background:#fff;transition:border-color .15s,box-shadow .15s}
+.pps-wiz-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
+.pps-wiz-opt{all:unset;position:relative;cursor:pointer;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;background:#fff;transition:border-color .15s,box-shadow .15s}
 .pps-wiz-opt:hover{border-color:#a5b4fc;box-shadow:0 2px 8px rgba(79,70,229,.1)}
 .pps-wiz-opt.is-selected{border-color:#4f46e5;box-shadow:0 0 0 2px rgba(79,70,229,.2);background:#f5f3ff}
-.pps-wiz-opt-name{font-weight:600;font-size:14px;color:#0f172a;margin-bottom:4px}
+.pps-wiz-opt-name{font-weight:600;font-size:12.5px;color:#0f172a;margin-bottom:2px}
 .pps-wiz-opt.is-selected .pps-wiz-opt-name{color:#4f46e5}
-.pps-wiz-opt-desc{font-size:12px;color:#64748b;line-height:1.5;margin-bottom:6px}
-.pps-wiz-opt-badges{display:flex;flex-wrap:wrap;gap:4px}
-.pps-wiz-done{background:linear-gradient(135deg,#eef2ff 0%,#f5f3ff 100%);border:1px solid #c7d2fe;border-radius:10px;padding:24px 28px;text-align:center}
-.pps-wiz-summary{font-size:15px;color:#334155;margin-bottom:16px;line-height:1.6}
+.pps-wiz-opt-desc{font-size:11px;color:#64748b;line-height:1.4;margin-bottom:3px}
+.pps-wiz-opt-badges{display:flex;flex-wrap:wrap;gap:3px}
+.pps-wiz-done{background:linear-gradient(135deg,#eef2ff 0%,#f5f3ff 100%);border:1px solid #c7d2fe;border-radius:8px;padding:18px 24px;text-align:center}
+.pps-wiz-summary{font-size:14px;color:#334155;margin-bottom:12px;line-height:1.5}
 .pps-wiz-summary strong{color:#1e293b}
-.pps-wiz-cta{display:inline-block;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px;text-decoration:none;transition:background .15s}
+.pps-wiz-cta{display:inline-block;background:#4f46e5;color:#fff;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px;text-decoration:none;transition:background .15s}
 .pps-wiz-cta:hover{background:#4338ca;color:#fff}
-.pps-wiz-reset{display:inline-block;margin-top:10px;font-size:13px;color:#64748b;cursor:pointer;text-decoration:underline;border:0;background:0}
+.pps-wiz-reset{display:inline-block;margin-top:8px;font-size:12px;color:#64748b;cursor:pointer;text-decoration:underline;border:0;background:0}
 .pps-wiz-reset:hover{color:#4f46e5}
-@media(max-width:480px){.pps-wiz-grid{grid-template-columns:1fr}}
+@media(max-width:480px){.pps-wiz-grid{grid-template-columns:1fr 1fr}}
 </style>
     <?php
 } );
