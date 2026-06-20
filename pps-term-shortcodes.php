@@ -151,6 +151,25 @@ ul.products li.product img{border-radius:8px}
 .pps-wiz-reset{display:inline-block;margin-top:8px;font-size:12px;color:#64748b;cursor:pointer;text-decoration:underline;border:0;background:0}
 .pps-wiz-reset:hover{color:#4f46e5}
 @media(max-width:480px){.pps-wiz-grid{grid-template-columns:1fr 1fr}}
+.pps-wiz-skip{margin-top:8px;font-size:12px;color:#64748b}
+.pps-wiz-skip a{color:#4f46e5;text-decoration:underline;font-weight:500}
+.pps-wiz-skip a:hover{color:#4338ca}
+.pps-wiz-continue{display:block;margin:8px auto 0;background:#4f46e5;color:#fff;font-weight:600;font-size:13px;padding:10px 24px;border-radius:6px;border:0;cursor:pointer;transition:background .15s}
+.pps-wiz-continue:hover{background:#4338ca}
+.pps-wiz-opt.is-toggled{border-color:#4f46e5;background:#f5f3ff}
+.pps-wiz-opt.is-toggled .pps-wiz-opt-name{color:#4f46e5}
+.pps-wiz-divider{margin:14px 0 10px;font-size:12px;color:#94a3b8;text-align:center}
+.pps-wiz-email-toggle{background:none;border:1px solid #c7d2fe;color:#4f46e5;font-weight:600;font-size:13px;padding:10px 24px;border-radius:6px;cursor:pointer;transition:all .15s}
+.pps-wiz-email-toggle:hover{background:#eef2ff}
+.pps-wiz-email-form{margin-top:12px;display:none;text-align:left;max-width:400px;margin-left:auto;margin-right:auto}
+.pps-wiz-input{display:block;width:100%;padding:10px 12px;margin-bottom:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box}
+.pps-wiz-input:focus{outline:none;border-color:#a5b4fc;box-shadow:0 0 0 2px rgba(79,70,229,.15)}
+textarea.pps-wiz-input{min-height:70px;resize:vertical}
+.pps-wiz-send{background:#4f46e5;color:#fff;font-weight:600;font-size:13px;padding:10px 24px;border-radius:6px;border:0;cursor:pointer;transition:background .15s;margin-top:4px}
+.pps-wiz-send:hover{background:#4338ca}
+.pps-wiz-email-status{margin-top:8px;font-size:13px;font-weight:500}
+.pps-wiz-email-status.is-ok{color:#166534}
+.pps-wiz-email-status.is-err{color:#dc2626}
 </style>
     <?php
 } );
@@ -175,6 +194,8 @@ add_action( 'wp_footer', function() {
         }
         var fv=p.get("fold");if(fv)rc.foldType=fv;
         var sv=p.get("size");if(sv){rc.sizeMode="preset";rc.sizeLabel=sv.replace(/x/gi,"×")}
+        var cv=p.get("coating");if(cv)rc.coating=cv;
+        ["vivid","bundling","rc","two_staple","perforation","outfold"].forEach(function(k){if(p.get(k)==="1")rc[k]=true});
         if(Object.keys(rc).length)c.reorder=btoa(JSON.stringify(rc));
     })();
     </script>
@@ -347,6 +368,27 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         array( 'val' => '11x25.5', 'label' => '11 × 25.5',   'desc' => 'Extra-long mailer' ),
     );
 
+    $coatings = array();
+    if ( isset( $cfg['coatings'] ) ) {
+        foreach ( $cfg['coatings'] as $c ) {
+            if ( ! empty( $c['val'] ) ) $coatings[] = $c;
+        }
+    }
+
+    $addons = array();
+    if ( function_exists( 'pps_get_addons_visibility' ) && function_exists( 'pps_addon_labels' ) ) {
+        $labels = pps_addon_labels();
+        $vis    = pps_get_addons_visibility();
+        foreach ( $vis as $addon => $calcs ) {
+            if ( $addon === 'coating' ) continue;
+            if ( isset( $calcs[ $a['calc'] ] ) && $calcs[ $a['calc'] ] && isset( $labels[ $addon ] ) ) {
+                $addons[] = array( 'slug' => $addon, 'label' => $labels[ $addon ] );
+            }
+        }
+    }
+
+    $skip_html = '<div class="pps-wiz-skip">or <a class="pps-wiz-skip-link" href="' . esc_url( $link ) . '">skip to calculator &rarr;</a></div>';
+
     // ── Render ──
 
     $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '">';
@@ -391,7 +433,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '<div class="pps-wiz-opt-name">Cardstock</div>'
           . '<div class="pps-wiz-opt-desc">Heavier, rigid stock &mdash; stands on its own, ideal for postcards, covers &amp; presentation pieces</div>'
           . '</button>';
-    $out .= '</div></div>';
+    $out .= '</div>';
+    $out .= $skip_html;
+    $out .= '</div>';
 
     // Step 4: Paper (filtered by type)
     $out .= '<div class="pps-wiz-step" data-step="paper">';
@@ -412,14 +456,63 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
               . '<div class="pps-wiz-opt-badges">' . $stock . $coat . '</div>'
               . '</button>';
     }
-    $out .= '</div></div>';
+    $out .= '</div>';
+    $out .= $skip_html;
+    $out .= '</div>';
 
-    // Step 4: Done
+    // Step 5: Coating (optional)
+    if ( ! empty( $coatings ) ) {
+        $out .= '<div class="pps-wiz-step" data-step="coating">';
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="paper"></span> — would you like a coating?</div>';
+        $out .= '<div class="pps-wiz-grid">';
+        $out .= '<button type="button" class="pps-wiz-opt" data-val="" data-label="No Coating">'
+              . '<div class="pps-wiz-opt-name">No Coating</div>'
+              . '<div class="pps-wiz-opt-desc">Standard uncoated finish</div>'
+              . '</button>';
+        foreach ( $coatings as $c ) {
+            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $c['val'] ) . '" data-label="' . esc_attr( $c['label'] ) . '">'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $c['label'] ) . '</div>'
+                  . '</button>';
+        }
+        $out .= '</div>';
+        $out .= $skip_html;
+        $out .= '</div>';
+    }
+
+    // Step 6: Add-ons (optional, multi-select)
+    if ( ! empty( $addons ) ) {
+        $out .= '<div class="pps-wiz-step" data-step="addons" data-multi="1">';
+        $out .= '<div class="pps-wiz-prompt">Any finishing touches? <span style="font-weight:400;color:#64748b">(select all that apply)</span></div>';
+        $out .= '<div class="pps-wiz-grid">';
+        foreach ( $addons as $item ) {
+            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $item['slug'] ) . '" data-label="' . esc_attr( $item['label'] ) . '">'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $item['label'] ) . '</div>'
+                  . '</button>';
+        }
+        $out .= '</div>';
+        $out .= '<button type="button" class="pps-wiz-continue">Continue &rarr;</button>';
+        $out .= $skip_html;
+        $out .= '</div>';
+    }
+
+    // Done
+    $nonce    = wp_create_nonce( 'pps_wizard_email' );
+    $ajax_url = admin_url( 'admin-ajax.php' );
     $out .= '<div class="pps-wiz-step" data-step="done">';
-    $out .= '<div class="pps-wiz-done">'
+    $out .= '<div class="pps-wiz-done" data-nonce="' . esc_attr( $nonce ) . '" data-ajax="' . esc_url( $ajax_url ) . '">'
           . '<div class="pps-wiz-summary"></div>'
           . '<a class="pps-wiz-cta" href="' . esc_url( $link ) . '">Finish Customization &rarr;</a><br>'
           . '<button type="button" class="pps-wiz-reset">Start over</button>'
+          . '<div class="pps-wiz-divider">&mdash; or &mdash;</div>'
+          . '<button type="button" class="pps-wiz-email-toggle">Email this configuration</button>'
+          . '<div class="pps-wiz-email-form">'
+          . '<input type="text" class="pps-wiz-input" data-field="name" placeholder="Your Name">'
+          . '<input type="email" class="pps-wiz-input" data-field="email" placeholder="Your Email">'
+          . '<input type="text" name="website" style="display:none" tabindex="-1" autocomplete="off" data-field="hp">'
+          . '<textarea class="pps-wiz-input" data-field="message" placeholder="Additional details (optional)"></textarea>'
+          . '<button type="button" class="pps-wiz-send">Send Quote Request</button>'
+          . '<div class="pps-wiz-email-status"></div>'
+          . '</div>'
           . '</div></div>';
 
     $out .= '</div>';
@@ -429,7 +522,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '(function(){'
           . 'var w=document.getElementById(' . wp_json_encode( $id ) . ');'
           . 'if(!w)return;'
-          . 'var steps=["size","fold","papertype","paper","done"],state={},base=w.dataset.link;'
+          // Build steps array from DOM so optional coating/addons are auto-detected
+          . 'var steps=[];w.querySelectorAll(".pps-wiz-step").forEach(function(el){steps.push(el.dataset.step)});'
+          . 'var state={},base=w.dataset.link;'
           . 'function show(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e){e.classList.add("is-active");e.scrollIntoView({behavior:"smooth",block:"nearest"})}}'
           . 'function hide(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e)e.classList.remove("is-active")}'
           . 'function filterPapers(ptype){'
@@ -437,6 +532,15 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'o.style.display=o.dataset.ptype===ptype?"":"none";'
           .     'o.classList.remove("is-selected");'
           .   '});'
+          . '}'
+          . 'function buildUrl(){'
+          .   'var params=[];'
+          .   'if(state.paper&&state.paper.val)params.push("paper="+encodeURIComponent(state.paper.val));'
+          .   'if(state.fold)params.push("fold="+encodeURIComponent(state.fold.val));'
+          .   'if(state.size&&state.size.val)params.push("size="+encodeURIComponent(state.size.val));'
+          .   'if(state.coating&&state.coating.val)params.push("coating="+encodeURIComponent(state.coating.val));'
+          .   'if(state.addons&&state.addons.val){state.addons.val.split(",").forEach(function(a){if(a)params.push(a+"=1")})}'
+          .   'return params.length?base+(base.indexOf("?")>-1?"&":"?")+params.join("&"):base;'
           . '}'
           . 'function pick(step,val,label){'
           .   'state[step]={val:val,label:label};'
@@ -454,22 +558,79 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   '});'
           . '}'
           . 'function updateDone(){'
-          .   'if(!state.size||!state.fold||!state.paper)return;'
+          .   'var parts=[];'
+          .   'if(state.size)parts.push(state.size.label);'
+          .   'if(state.fold)parts.push(state.fold.label);'
+          .   'if(state.paper)parts.push(state.paper.label);'
+          .   'if(state.coating&&state.coating.val)parts.push(state.coating.label);'
+          .   'if(state.addons&&state.addons.val)parts.push(state.addons.label);'
           .   'var s=w.querySelector(".pps-wiz-summary");'
-          .   'if(s)s.innerHTML="<strong>"+state.size.label+"<\\/strong> \\u00b7 <strong>"+state.fold.label+"<\\/strong> \\u00b7 <strong>"+state.paper.label+"<\\/strong>";'
-          .   'var a=w.querySelector(".pps-wiz-cta");if(!a)return;'
-          .   'var u=base+(base.indexOf("?")>-1?"&":"?")+"paper="+encodeURIComponent(state.paper.val)+"&fold="+encodeURIComponent(state.fold.val);'
-          .   'if(state.size.val)u+="&size="+encodeURIComponent(state.size.val);'
-          .   'a.href=u;'
+          .   'if(s&&parts.length)s.innerHTML=parts.map(function(p){return"<strong>"+p+"<\\/strong>"}).join(" \\u00b7 ");'
+          .   'var url=buildUrl();'
+          .   'var a=w.querySelector(".pps-wiz-cta");if(a)a.href=url;'
+          .   'w.querySelectorAll(".pps-wiz-skip-link").forEach(function(l){l.href=url});'
           . '}'
           . 'w.addEventListener("click",function(e){'
+          // Multi-select toggle for addons
           .   'var opt=e.target.closest(".pps-wiz-opt");'
-          .   'if(opt){var st=opt.closest(".pps-wiz-step");if(st)pick(st.dataset.step,opt.dataset.val,opt.dataset.label);return}'
+          .   'if(opt){'
+          .     'var st=opt.closest(".pps-wiz-step");'
+          .     'if(st&&st.dataset.multi==="1"){opt.classList.toggle("is-toggled");return}'
+          .     'if(st)pick(st.dataset.step,opt.dataset.val,opt.dataset.label);'
+          .     'return;'
+          .   '}'
+          // Continue button (multi-select steps)
+          .   'if(e.target.closest(".pps-wiz-continue")){'
+          .     'var st=e.target.closest(".pps-wiz-step");'
+          .     'if(st){'
+          .       'var sel=st.querySelectorAll(".pps-wiz-opt.is-toggled");'
+          .       'var labs=[],vals=[];'
+          .       'sel.forEach(function(o){labs.push(o.dataset.label);vals.push(o.dataset.val)});'
+          .       'pick(st.dataset.step,vals.join(","),labs.length?labs.join(", "):"None");'
+          .     '}'
+          .     'return;'
+          .   '}'
+          // Reset
           .   'if(e.target.closest(".pps-wiz-reset")){'
           .     'state={};'
-          .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected");o.style.display=""});'
+          .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected");o.classList.remove("is-toggled");o.style.display=""});'
           .     'steps.forEach(function(s,i){if(i>0)hide(s)});'
+          .     'var ef=w.querySelector(".pps-wiz-email-form");if(ef)ef.style.display="none";'
           .     'w.querySelector(\'[data-step="size"]\').scrollIntoView({behavior:"smooth",block:"nearest"});'
+          .     'return;'
+          .   '}'
+          // Email toggle
+          .   'if(e.target.closest(".pps-wiz-email-toggle")){'
+          .     'var ef=w.querySelector(".pps-wiz-email-form");'
+          .     'if(ef)ef.style.display=ef.style.display==="block"?"none":"block";'
+          .     'return;'
+          .   '}'
+          // Email send
+          .   'if(e.target.closest(".pps-wiz-send")){'
+          .     'var done=w.querySelector(".pps-wiz-done");'
+          .     'var name=w.querySelector(\'[data-field="name"]\').value;'
+          .     'var email=w.querySelector(\'[data-field="email"]\').value;'
+          .     'var hp=w.querySelector(\'[data-field="hp"]\');'
+          .     'var msg=w.querySelector(\'[data-field="message"]\').value;'
+          .     'var statusEl=w.querySelector(".pps-wiz-email-status");'
+          .     'if(!name||!email){statusEl.className="pps-wiz-email-status is-err";statusEl.textContent="Please enter your name and email.";return}'
+          .     'var fd=new FormData();'
+          .     'fd.append("action","pps_wizard_email");'
+          .     'fd.append("nonce",done.dataset.nonce);'
+          .     'fd.append("name",name);fd.append("email",email);'
+          .     'if(hp)fd.append("website",hp.value);'
+          .     'fd.append("specs",w.querySelector(".pps-wiz-summary").textContent);'
+          .     'fd.append("url",w.querySelector(".pps-wiz-cta").href);'
+          .     'fd.append("message",msg);'
+          .     'var btn=e.target.closest(".pps-wiz-send");btn.disabled=true;btn.textContent="Sending...";'
+          .     'fetch(done.dataset.ajax,{method:"POST",body:fd})'
+          .       '.then(function(r){return r.json()})'
+          .       '.then(function(r){'
+          .         'if(r.success){statusEl.className="pps-wiz-email-status is-ok";statusEl.textContent=r.data;btn.textContent="Sent!"}'
+          .         'else{statusEl.className="pps-wiz-email-status is-err";statusEl.textContent=r.data||"Could not send. Please try again.";btn.disabled=false;btn.textContent="Send Quote Request"}'
+          .       '})'
+          .       '.catch(function(){statusEl.className="pps-wiz-email-status is-err";statusEl.textContent="Network error. Please try again.";btn.disabled=false;btn.textContent="Send Quote Request"});'
+          .     'return;'
           .   '}'
           . '});'
           . '})();'
@@ -477,3 +638,33 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 
     return $out;
 } );
+
+// ── Wizard quote email handler ──
+
+add_action( 'wp_ajax_pps_wizard_email',        'pps_wizard_email_handler' );
+add_action( 'wp_ajax_nopriv_pps_wizard_email', 'pps_wizard_email_handler' );
+function pps_wizard_email_handler() {
+    check_ajax_referer( 'pps_wizard_email', 'nonce' );
+    if ( ! empty( $_POST['website'] ) ) wp_send_json_error( 'Invalid submission.' );
+
+    $name  = sanitize_text_field( wp_unslash( $_POST['name'] ?? '' ) );
+    $email = sanitize_email( wp_unslash( $_POST['email'] ?? '' ) );
+    $specs = sanitize_text_field( wp_unslash( $_POST['specs'] ?? '' ) );
+    $url   = esc_url_raw( wp_unslash( $_POST['url'] ?? '' ) );
+    $msg   = sanitize_textarea_field( wp_unslash( $_POST['message'] ?? '' ) );
+
+    if ( ! $name || ! $email || ! is_email( $email ) ) {
+        wp_send_json_error( 'Please provide a valid name and email.' );
+    }
+
+    $admin = get_option( 'admin_email' );
+    $subj  = 'Quote Request from ' . $name;
+    $body  = "Name: {$name}\nEmail: {$email}\n\nSelected Specs:\n{$specs}\n\nCalculator Link:\n{$url}";
+    if ( $msg ) $body .= "\n\nMessage:\n{$msg}";
+
+    $headers = array( 'Reply-To: ' . $name . ' <' . $email . '>' );
+    $sent    = wp_mail( $admin, $subj, $body, $headers );
+
+    if ( $sent ) wp_send_json_success( 'Your quote request has been sent! We\'ll be in touch shortly.' );
+    else         wp_send_json_error( 'Could not send email. Please try again or call us directly.' );
+}
