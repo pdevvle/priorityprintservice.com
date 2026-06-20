@@ -151,16 +151,17 @@ ul.products li.product img{border-radius:8px}
 .pps-wiz-reset{display:inline-block;margin-top:8px;font-size:12px;color:#64748b;cursor:pointer;text-decoration:underline;border:0;background:0}
 .pps-wiz-reset:hover{color:#4f46e5}
 @media(max-width:480px){.pps-wiz-grid{grid-template-columns:1fr 1fr}}
-.pps-wiz-skip{margin-top:8px;font-size:12px;color:#64748b}
-.pps-wiz-skip a{color:#4f46e5;text-decoration:underline;font-weight:500}
-.pps-wiz-skip a:hover{color:#4338ca}
-.pps-wiz-continue{display:block;margin:8px auto 0;background:#4f46e5;color:#fff;font-weight:600;font-size:13px;padding:10px 24px;border-radius:6px;border:0;cursor:pointer;transition:background .15s}
-.pps-wiz-continue:hover{background:#4338ca}
 .pps-wiz-opt.is-toggled{border-color:#4f46e5;background:#f5f3ff}
 .pps-wiz-opt.is-toggled .pps-wiz-opt-name{color:#4f46e5}
-.pps-wiz-divider{margin:14px 0 10px;font-size:12px;color:#94a3b8;text-align:center}
-.pps-wiz-email-toggle{background:none;border:1px solid #c7d2fe;color:#4f46e5;font-weight:600;font-size:13px;padding:10px 24px;border-radius:6px;cursor:pointer;transition:all .15s}
-.pps-wiz-email-toggle:hover{background:#eef2ff}
+.pps-wiz-clear{font-size:11px;color:#94a3b8;cursor:pointer;margin-left:8px;font-weight:400;text-decoration:underline}
+.pps-wiz-clear:hover{color:#dc2626}
+.pps-wiz-actions{margin-top:14px;background:linear-gradient(135deg,#eef2ff 0%,#f5f3ff 100%);border:1px solid #c7d2fe;border-radius:8px;padding:16px 20px;display:none;text-align:center}
+.pps-wiz-actions.is-visible{display:block;animation:ppsFadeIn .35s ease}
+.pps-wiz-actions-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:8px}
+.pps-wiz-act-pricing{display:inline-block;background:#4f46e5;color:#fff;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px;text-decoration:none;transition:background .15s}
+.pps-wiz-act-pricing:hover{background:#4338ca;color:#fff}
+.pps-wiz-act-quote{background:none;border:1px solid #c7d2fe;color:#4f46e5;font-weight:600;font-size:13px;padding:10px 24px;border-radius:6px;cursor:pointer;transition:all .15s}
+.pps-wiz-act-quote:hover{background:#eef2ff}
 .pps-wiz-email-form{margin-top:12px;display:none;text-align:left;max-width:400px;margin-left:auto;margin-right:auto}
 .pps-wiz-input{display:block;width:100%;padding:10px 12px;margin-bottom:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box}
 .pps-wiz-input:focus{outline:none;border-color:#a5b4fc;box-shadow:0 0 0 2px rgba(79,70,229,.15)}
@@ -387,15 +388,13 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         }
     }
 
-    $skip_html = '<div class="pps-wiz-skip">or <a class="pps-wiz-skip-link" href="' . esc_url( $link ) . '">skip to calculator &rarr;</a></div>';
-
     // ── Render ──
 
     $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '">';
 
     // Step 1: Size
     $out .= '<div class="pps-wiz-step is-active" data-step="size">';
-    $out .= '<div class="pps-wiz-prompt">What size brochure do you need?</div>';
+    $out .= '<div class="pps-wiz-prompt">What size brochure do you need? <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
     foreach ( $sizes as $s ) {
         $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $s['val'] ) . '" data-label="' . esc_attr( $s['label'] ) . '">'
@@ -411,7 +410,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 
     // Step 2: Fold
     $out .= '<div class="pps-wiz-step" data-step="fold">';
-    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — now, which type of fold?</div>';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — now, which type of fold? <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
     foreach ( $folds as $f ) {
         $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $f['val'] ) . '" data-label="' . esc_attr( $f['label'] ) . '">'
@@ -423,7 +422,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 
     // Step 3: Paper type (cardstock vs text weight)
     $out .= '<div class="pps-wiz-step" data-step="papertype">';
-    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="fold"></span> — great. What type of paper?</div>';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="fold"></span> — great. What type of paper? <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
     $out .= '<button type="button" class="pps-wiz-opt" data-val="text" data-label="Standard Text Weight">'
           . '<div class="pps-wiz-opt-name">Standard Text Weight</div>'
@@ -433,13 +432,11 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '<div class="pps-wiz-opt-name">Cardstock</div>'
           . '<div class="pps-wiz-opt-desc">Heavier, rigid stock &mdash; stands on its own, ideal for postcards, covers &amp; presentation pieces</div>'
           . '</button>';
-    $out .= '</div>';
-    $out .= $skip_html;
-    $out .= '</div>';
+    $out .= '</div></div>';
 
     // Step 4: Paper (filtered by type)
     $out .= '<div class="pps-wiz-step" data-step="paper">';
-    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="papertype"></span> — pick your paper stock:</div>';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="papertype"></span> — pick your paper stock: <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
     foreach ( $papers as $p ) {
         $hint  = isset( $paper_hints[ $p['label'] ] ) ? $paper_hints[ $p['label'] ] : '';
@@ -456,64 +453,57 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
               . '<div class="pps-wiz-opt-badges">' . $stock . $coat . '</div>'
               . '</button>';
     }
-    $out .= '</div>';
-    $out .= $skip_html;
-    $out .= '</div>';
+    $out .= '</div></div>';
 
     // Step 5: Coating (optional)
     if ( ! empty( $coatings ) ) {
         $out .= '<div class="pps-wiz-step" data-step="coating">';
-        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="paper"></span> — would you like a coating?</div>';
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="paper"></span> — would you like a coating? <span class="pps-wiz-clear">&times; clear</span></div>';
         $out .= '<div class="pps-wiz-grid">';
         $out .= '<button type="button" class="pps-wiz-opt" data-val="" data-label="No Coating">'
               . '<div class="pps-wiz-opt-name">No Coating</div>'
-              . '<div class="pps-wiz-opt-desc">Standard uncoated finish</div>'
+              . '<div class="pps-wiz-opt-desc">Default paper finish</div>'
               . '</button>';
         foreach ( $coatings as $c ) {
             $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $c['val'] ) . '" data-label="' . esc_attr( $c['label'] ) . '">'
                   . '<div class="pps-wiz-opt-name">' . esc_html( $c['label'] ) . '</div>'
                   . '</button>';
         }
-        $out .= '</div>';
-        $out .= $skip_html;
-        $out .= '</div>';
+        $out .= '</div></div>';
     }
 
     // Step 6: Add-ons (optional, multi-select)
     if ( ! empty( $addons ) ) {
         $out .= '<div class="pps-wiz-step" data-step="addons" data-multi="1">';
-        $out .= '<div class="pps-wiz-prompt">Any finishing touches? <span style="font-weight:400;color:#64748b">(select all that apply)</span></div>';
+        $out .= '<div class="pps-wiz-prompt">Any finishing touches? <span style="font-weight:400;color:#64748b">(select all that apply)</span> <span class="pps-wiz-clear">&times; clear</span></div>';
         $out .= '<div class="pps-wiz-grid">';
         foreach ( $addons as $item ) {
             $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $item['slug'] ) . '" data-label="' . esc_attr( $item['label'] ) . '">'
                   . '<div class="pps-wiz-opt-name">' . esc_html( $item['label'] ) . '</div>'
                   . '</button>';
         }
-        $out .= '</div>';
-        $out .= '<button type="button" class="pps-wiz-continue">Continue &rarr;</button>';
-        $out .= $skip_html;
-        $out .= '</div>';
+        $out .= '</div></div>';
     }
 
-    // Done
+    // Floating action bar
     $nonce    = wp_create_nonce( 'pps_wizard_email' );
     $ajax_url = admin_url( 'admin-ajax.php' );
-    $out .= '<div class="pps-wiz-step" data-step="done">';
-    $out .= '<div class="pps-wiz-done" data-nonce="' . esc_attr( $nonce ) . '" data-ajax="' . esc_url( $ajax_url ) . '">'
-          . '<div class="pps-wiz-summary"></div>'
-          . '<a class="pps-wiz-cta" href="' . esc_url( $link ) . '">Finish Customization &rarr;</a><br>'
-          . '<button type="button" class="pps-wiz-reset">Start over</button>'
-          . '<div class="pps-wiz-divider">&mdash; or &mdash;</div>'
-          . '<button type="button" class="pps-wiz-email-toggle">Email this configuration</button>'
-          . '<div class="pps-wiz-email-form">'
+    $out .= '<div class="pps-wiz-actions" data-nonce="' . esc_attr( $nonce ) . '" data-ajax="' . esc_url( $ajax_url ) . '">';
+    $out .= '<div class="pps-wiz-summary"></div>';
+    $out .= '<div class="pps-wiz-actions-btns">';
+    $out .= '<a class="pps-wiz-act-pricing" href="' . esc_url( $link ) . '">Proceed to Pricing &rarr;</a>';
+    $out .= '<button type="button" class="pps-wiz-act-quote">Request a Quote</button>';
+    $out .= '</div>';
+    $out .= '<div class="pps-wiz-email-form">'
           . '<input type="text" class="pps-wiz-input" data-field="name" placeholder="Your Name">'
           . '<input type="email" class="pps-wiz-input" data-field="email" placeholder="Your Email">'
           . '<input type="text" name="website" style="display:none" tabindex="-1" autocomplete="off" data-field="hp">'
           . '<textarea class="pps-wiz-input" data-field="message" placeholder="Additional details (optional)"></textarea>'
           . '<button type="button" class="pps-wiz-send">Send Quote Request</button>'
           . '<div class="pps-wiz-email-status"></div>'
-          . '</div>'
-          . '</div></div>';
+          . '</div>';
+    $out .= '<button type="button" class="pps-wiz-reset">Start over</button>';
+    $out .= '</div>';
 
     $out .= '</div>';
 
@@ -522,9 +512,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '(function(){'
           . 'var w=document.getElementById(' . wp_json_encode( $id ) . ');'
           . 'if(!w)return;'
-          // Build steps array from DOM so optional coating/addons are auto-detected
           . 'var steps=[];w.querySelectorAll(".pps-wiz-step").forEach(function(el){steps.push(el.dataset.step)});'
           . 'var state={},base=w.dataset.link;'
+          . 'var bar=w.querySelector(".pps-wiz-actions");'
           . 'function show(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e){e.classList.add("is-active");e.scrollIntoView({behavior:"smooth",block:"nearest"})}}'
           . 'function hide(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e)e.classList.remove("is-active")}'
           . 'function filterPapers(ptype){'
@@ -550,14 +540,14 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'for(var i=si+2;i<steps.length;i++){hide(steps[i]);delete state[steps[i]]}'
           .   'if(step==="papertype")filterPapers(val);'
           .   'if(si<steps.length-1)setTimeout(function(){show(steps[si+1])},150);'
-          .   'updatePrev();updateDone();'
+          .   'updatePrev();updateActions();'
           . '}'
           . 'function updatePrev(){'
           .   'w.querySelectorAll(".pps-wiz-prev").forEach(function(el){'
           .     'var k=el.dataset.show;if(state[k])el.textContent=state[k].label;'
           .   '});'
           . '}'
-          . 'function updateDone(){'
+          . 'function updateActions(){'
           .   'var parts=[];'
           .   'if(state.size)parts.push(state.size.label);'
           .   'if(state.fold)parts.push(state.fold.label);'
@@ -565,49 +555,59 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'if(state.coating&&state.coating.val)parts.push(state.coating.label);'
           .   'if(state.addons&&state.addons.val)parts.push(state.addons.label);'
           .   'var s=w.querySelector(".pps-wiz-summary");'
-          .   'if(s&&parts.length)s.innerHTML=parts.map(function(p){return"<strong>"+p+"<\\/strong>"}).join(" \\u00b7 ");'
+          .   'if(s)s.innerHTML=parts.length?parts.map(function(p){return"<strong>"+p+"<\\/strong>"}).join(" \\u00b7 "):"";'
           .   'var url=buildUrl();'
-          .   'var a=w.querySelector(".pps-wiz-cta");if(a)a.href=url;'
-          .   'w.querySelectorAll(".pps-wiz-skip-link").forEach(function(l){l.href=url});'
+          .   'var a=w.querySelector(".pps-wiz-act-pricing");if(a)a.href=url;'
+          .   'bar.classList.toggle("is-visible",parts.length>0);'
+          . '}'
+          . 'function clearStep(step){'
+          .   'var si=steps.indexOf(step);if(si<0)return;'
+          .   'delete state[step];'
+          .   'var el=w.querySelector(\'[data-step="\'+step+\'"]\');'
+          .   'if(el)el.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");if(o.dataset.ptype)o.style.display=""});'
+          .   'for(var i=si+1;i<steps.length;i++){hide(steps[i]);delete state[steps[i]];'
+          .     'var se=w.querySelector(\'[data-step="\'+steps[i]+\'"]\');'
+          .     'if(se)se.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");if(o.dataset.ptype)o.style.display=""})}'
+          .   'var ef=w.querySelector(".pps-wiz-email-form");if(ef)ef.style.display="none";'
+          .   'updatePrev();updateActions();'
           . '}'
           . 'w.addEventListener("click",function(e){'
-          // Multi-select toggle for addons
+          .   'if(e.target.closest(".pps-wiz-clear")){'
+          .     'var st=e.target.closest(".pps-wiz-step");'
+          .     'if(st)clearStep(st.dataset.step);'
+          .     'return;'
+          .   '}'
           .   'var opt=e.target.closest(".pps-wiz-opt");'
           .   'if(opt){'
           .     'var st=opt.closest(".pps-wiz-step");'
-          .     'if(st&&st.dataset.multi==="1"){opt.classList.toggle("is-toggled");return}'
-          .     'if(st)pick(st.dataset.step,opt.dataset.val,opt.dataset.label);'
-          .     'return;'
-          .   '}'
-          // Continue button (multi-select steps)
-          .   'if(e.target.closest(".pps-wiz-continue")){'
-          .     'var st=e.target.closest(".pps-wiz-step");'
-          .     'if(st){'
+          .     'if(st&&st.dataset.multi==="1"){'
+          .       'opt.classList.toggle("is-toggled");'
           .       'var sel=st.querySelectorAll(".pps-wiz-opt.is-toggled");'
           .       'var labs=[],vals=[];'
           .       'sel.forEach(function(o){labs.push(o.dataset.label);vals.push(o.dataset.val)});'
-          .       'pick(st.dataset.step,vals.join(","),labs.length?labs.join(", "):"None");'
+          .       'if(vals.length)state[st.dataset.step]={val:vals.join(","),label:labs.join(", ")};'
+          .       'else delete state[st.dataset.step];'
+          .       'updateActions();'
+          .       'return;'
           .     '}'
+          .     'if(st)pick(st.dataset.step,opt.dataset.val,opt.dataset.label);'
           .     'return;'
           .   '}'
-          // Reset
           .   'if(e.target.closest(".pps-wiz-reset")){'
           .     'state={};'
-          .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected");o.classList.remove("is-toggled");o.style.display=""});'
+          .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");o.style.display=""});'
           .     'steps.forEach(function(s,i){if(i>0)hide(s)});'
+          .     'bar.classList.remove("is-visible");'
           .     'var ef=w.querySelector(".pps-wiz-email-form");if(ef)ef.style.display="none";'
           .     'w.querySelector(\'[data-step="size"]\').scrollIntoView({behavior:"smooth",block:"nearest"});'
           .     'return;'
           .   '}'
-          // Email toggle
-          .   'if(e.target.closest(".pps-wiz-email-toggle")){'
+          .   'if(e.target.closest(".pps-wiz-act-quote")){'
           .     'var ef=w.querySelector(".pps-wiz-email-form");'
           .     'if(ef)ef.style.display=ef.style.display==="block"?"none":"block";'
           .     'return;'
           .   '}'
-          // Email send
           .   'if(e.target.closest(".pps-wiz-send")){'
-          .     'var done=w.querySelector(".pps-wiz-done");'
           .     'var name=w.querySelector(\'[data-field="name"]\').value;'
           .     'var email=w.querySelector(\'[data-field="email"]\').value;'
           .     'var hp=w.querySelector(\'[data-field="hp"]\');'
@@ -616,14 +616,14 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'if(!name||!email){statusEl.className="pps-wiz-email-status is-err";statusEl.textContent="Please enter your name and email.";return}'
           .     'var fd=new FormData();'
           .     'fd.append("action","pps_wizard_email");'
-          .     'fd.append("nonce",done.dataset.nonce);'
+          .     'fd.append("nonce",bar.dataset.nonce);'
           .     'fd.append("name",name);fd.append("email",email);'
           .     'if(hp)fd.append("website",hp.value);'
           .     'fd.append("specs",w.querySelector(".pps-wiz-summary").textContent);'
-          .     'fd.append("url",w.querySelector(".pps-wiz-cta").href);'
+          .     'fd.append("url",w.querySelector(".pps-wiz-act-pricing").href);'
           .     'fd.append("message",msg);'
           .     'var btn=e.target.closest(".pps-wiz-send");btn.disabled=true;btn.textContent="Sending...";'
-          .     'fetch(done.dataset.ajax,{method:"POST",body:fd})'
+          .     'fetch(bar.dataset.ajax,{method:"POST",body:fd})'
           .       '.then(function(r){return r.json()})'
           .       '.then(function(r){'
           .         'if(r.success){statusEl.className="pps-wiz-email-status is-ok";statusEl.textContent=r.data;btn.textContent="Sent!"}'
