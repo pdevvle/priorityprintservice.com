@@ -26,22 +26,18 @@ add_action( 'wp_head', function() {
     ?>
 <style id="pps-cat-shortcode-css">
 /* ── Page-level resets ── */
-.ast-separate-container .ast-article-post,
-.ast-separate-container .ast-article-single,
-.ast-separate-container .ast-archive-description{background:#fff;box-shadow:none;border:0}
-.ast-separate-container .site-content>.ast-container{background:#f8fafc;overflow-x:hidden}
-.ast-archive-description{padding:0!important;overflow:visible;border-radius:0;border:0;margin-bottom:28px}
-.term-description{max-width:100%}
+body.tax-product_cat{overflow-x:hidden}
+.term-description{max-width:100%;padding:0}
 
 /* ── Hero banner ── */
-.pps-cat-hero{position:relative;padding:80px 6vw 72px;color:#fff;background-size:cover;background-position:center;background-color:#0f172a;margin-left:calc(-50vw + 50%);margin-right:calc(-50vw + 50%)}
+.pps-cat-hero{position:relative;padding:80px 6vw 72px;color:#fff;background-size:cover;background-position:center;background-color:#0f172a;width:100vw;margin-left:50%;transform:translateX(-50%);box-sizing:border-box}
 .pps-cat-hero::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,rgba(15,23,42,.91) 0%,rgba(30,41,59,.88) 60%,rgba(51,65,85,.86) 100%);z-index:0}
 .pps-cat-hero>*{position:relative;z-index:1}
 .pps-cat-hero-title{font-size:36px;font-weight:800;letter-spacing:-.3px;margin:0 0 14px;line-height:1.2}
 .pps-cat-hero-sub{font-size:17px;color:#cbd5e1;line-height:1.6;margin:0;max-width:640px}
 
 /* ── USP bar ── */
-.pps-cat-usps{display:grid;grid-template-columns:repeat(4,1fr);background:#f1f5f9;border-bottom:1px solid #e2e8f0;margin-left:calc(-50vw + 50%);margin-right:calc(-50vw + 50%)}
+.pps-cat-usps{display:grid;grid-template-columns:repeat(4,1fr);background:#f1f5f9;border-bottom:1px solid #e2e8f0;width:100vw;margin-left:50%;transform:translateX(-50%);box-sizing:border-box}
 .pps-cat-usp{padding:14px 16px;font-size:13px;font-weight:600;color:#334155;display:flex;align-items:center;gap:8px;justify-content:center;text-align:center;border-right:1px solid #e2e8f0}
 .pps-cat-usp:last-child{border-right:0}
 .pps-cat-usp-icon{width:22px;height:22px;border-radius:50%;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
