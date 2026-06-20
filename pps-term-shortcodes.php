@@ -970,3 +970,36 @@ function pps_wizard_email_handler() {
     if ( $sent ) wp_send_json_success( 'Your quote request has been sent! We\'ll be in touch shortly.' );
     else         wp_send_json_error( 'Could not send email. Please try again or call us directly.' );
 }
+
+// ── Purge quote uploads older than 60 days ──
+
+add_action( 'wp_ajax_pps_purge_quotes', function() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( 'Unauthorized.', 403 );
+    }
+
+    $upl_dir   = wp_upload_dir();
+    $base      = $upl_dir['basedir'] . '/pps-quotes';
+    $cutoff    = time() - ( 60 * DAY_IN_SECONDS );
+    $deleted   = 0;
+    $freed     = 0;
+
+    if ( ! is_dir( $base ) ) {
+        wp_send_json_success( 'No pps-quotes directory found. Nothing to purge.' );
+    }
+
+    foreach ( glob( $base . '/*', GLOB_ONLYDIR ) as $dir ) {
+        if ( filemtime( $dir ) > $cutoff ) continue;
+        $size = 0;
+        $files = glob( $dir . '/*' );
+        if ( $files ) {
+            foreach ( $files as $f ) { $size += filesize( $f ); unlink( $f ); }
+        }
+        @rmdir( $dir );
+        $deleted++;
+        $freed += $size;
+    }
+
+    $mb = round( $freed / 1048576, 1 );
+    wp_send_json_success( "Purged {$deleted} upload folder(s) older than 60 days. Freed {$mb} MB." );
+} );
