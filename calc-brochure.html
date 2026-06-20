@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-20 · BR-RIGHTANGLE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-20 · BR-INDIGO</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -61,8 +61,8 @@ function useIsMobile(bp=700){const[m,s]=useState(window.innerWidth<=bp);useEffec
 // ═══════════════════════════════════════════════════════════════
 // COLORS & CONSTANTS
 // ═══════════════════════════════════════════════════════════════
-const CC={bg:"#f5f5f7",white:"#fff",dark:"#1d2327",mid:"#555",light:"#999",border:"#e5e5e5",primary:"#007eff"};
-const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#1d2327",cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
+const CC={bg:"#f8fafc",white:"#fff",dark:"#0f172a",mid:"#475569",light:"#94a3b8",border:"#e2e8f0",primary:"#4f46e5"};
+const CK={cyan:"#4f46e5",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",cyanLight:"#eef2ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
 // Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
@@ -2321,7 +2321,7 @@ generate();
           style={{
             padding: mob ? "24px 16px" : "32px 20px", borderRadius: 8,
             border: `2px dashed ${dropHover ? CK.cyan : CC.border}`,
-            background: dropHover ? CK.cyanLight : "#fafafa",
+            background: dropHover ? CK.cyanLight : "#f8fafc",
             cursor: "pointer", textAlign: "center", transition: "all .15s",
           }}>
           <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif" onChange={e => processFile(e.target.files)} style={{ display: "none" }} />
@@ -2441,7 +2441,7 @@ generate();
                       onClick={() => inputRef.current?.click()}
                       style={{
                         aspectRatio: `${longEdge}/${shortEdge}`, borderRadius: 6,
-                        border: `2px dashed ${CC.border}`, background: "#fafafa",
+                        border: `2px dashed ${CC.border}`, background: "#f8fafc",
                         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                         cursor: "pointer", transition: "all .15s",
                       }}>
@@ -2995,7 +2995,7 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
           {_hasExtra && <div style={{ padding: "5px 14px", borderBottom: `1px solid ${CC.border}`, background: "#fffbeb" }}>
             <div style={{ fontSize: 10.5, color: "#92400e", lineHeight: 1.4 }}>+{Math.round(_extraDays)} day{Math.round(_extraDays) !== 1 ? "s" : ""} due to {_factors.join(", ")}</div>
           </div>}
-          {sh.freeDeliveryDate && <div style={{ padding: "6px 14px", borderBottom: `1px solid ${CC.border}`, background: "#fafafa" }}>
+          {sh.freeDeliveryDate && <div style={{ padding: "6px 14px", borderBottom: `1px solid ${CC.border}`, background: "#f8fafc" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 10.5, color: CC.light }}>Free delivery by</span>
               <span style={{ fontSize: 11, fontWeight: 600, color: CC.mid }}>{sh.freeDeliveryDate}</span>
@@ -3035,7 +3035,7 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
       {_hasExtra&&<div style={{padding:"5px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
         <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>* +{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
       </div>}
-      {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#fafafa", fontSize: 11, color: CC.mid, pointerEvents: "none" }}>
+      {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#f8fafc", fontSize: 11, color: CC.mid, pointerEvents: "none" }}>
         Free delivery est: <strong>{sh.freeDeliveryDate}</strong> ({sh.freeDeliveryBizDays} biz days)
       </div>}
       {r.grouped.length > 0 && <div style={{ padding: "10px 18px" }}>
@@ -3154,15 +3154,15 @@ function RichTip({ children, tipKey, title, content, dark }) {
       </span>
       {open && <>
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 99999 }} />
-        <div style={{ position: "fixed", ...(mob ? { bottom: 0, left: 0, right: 0, borderRadius: "16px 16px 0 0", maxHeight: "80vh" } : { top: "50%", left: "50%", transform: "translate(-50%, -50%)", borderRadius: 12, maxHeight: "80vh", width: "min(420px, 90vw)" }), background: dark ? "#1a1d23" : "#fff", border: `1px solid ${dark ? "rgba(255,255,255,.1)" : "#ddd"}`, boxShadow: "0 16px 48px rgba(0,0,0,.25)", zIndex: 100000, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-          <div style={{ padding: "14px 18px 10px", borderBottom: `1px solid ${dark ? "rgba(255,255,255,.08)" : "#eee"}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: dark ? "#1a1d23" : "#fff", zIndex: 1 }}>
+        <div style={{ position: "fixed", ...(mob ? { bottom: 0, left: 0, right: 0, borderRadius: "16px 16px 0 0", maxHeight: "80vh" } : { top: "50%", left: "50%", transform: "translate(-50%, -50%)", borderRadius: 12, maxHeight: "80vh", width: "min(420px, 90vw)" }), background: dark ? "#1a1d23" : "#fff", border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CC.border}`, boxShadow: "0 16px 48px rgba(0,0,0,.25)", zIndex: 100000, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+          <div style={{ padding: "14px 18px 10px", borderBottom: `1px solid ${dark ? "rgba(255,255,255,.08)" : CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: dark ? "#1a1d23" : "#fff", zIndex: 1 }}>
             <span style={{ fontWeight: 700, fontSize: 14, color: dark ? "#fff" : CC.dark }}>{resolvedTitle || "Info"}</span>
             <button type="button" onClick={() => setOpen(false)} style={{ background: "none", border: "none", fontSize: 18, color: dark ? "rgba(255,255,255,.4)" : CC.light, cursor: "pointer", padding: "0 4px" }}>✕</button>
           </div>
           <div style={{ padding: "12px 18px 18px" }}>
             {blocks.map((b, i) => {
               if (b.type === "text") return <p key={i} style={{ fontSize: 13, lineHeight: 1.6, color: dark ? "rgba(255,255,255,.7)" : CC.mid, margin: i === 0 ? 0 : "10px 0 0" }}>{b.value}</p>;
-              if (b.type === "image") return <img key={i} src={b.src} alt={b.alt || ""} loading="lazy" style={{ width: "100%", borderRadius: 6, marginTop: i === 0 ? 0 : 10, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : "#eee"}` }} />;
+              if (b.type === "image") return <img key={i} src={b.src} alt={b.alt || ""} loading="lazy" style={{ width: "100%", borderRadius: 6, marginTop: i === 0 ? 0 : 10, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CC.border}` }} />;
               if (b.type === "video") return <div key={i} style={{ marginTop: i === 0 ? 0 : 10, borderRadius: 6, overflow: "hidden" }}><video src={b.src} controls playsInline preload="metadata" style={{ width: "100%", display: "block" }} poster={b.poster} /></div>;
               if (b.type === "youtube") return <div key={i} style={{ marginTop: i === 0 ? 0 : 10, borderRadius: 6, overflow: "hidden", position: "relative", paddingBottom: "56.25%", height: 0 }}><iframe src={b.src} title={b.alt || "Video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }} /></div>;
               return null;
@@ -3623,7 +3623,7 @@ function App() {
                 )}
               </>
             ) : (
-              <div style={{...ST.f, opacity: 0.4}}><label style={ST.lbl}>Additional Coating</label><div style={{padding:"8px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#f5f5f5",fontSize:13,color:CC.light}}>Not available for this paper type</div></div>
+              <div style={{...ST.f, opacity: 0.4}}><label style={ST.lbl}>Additional Coating</label><div style={{padding:"8px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#f1f5f9",fontSize:13,color:CC.light}}>Not available for this paper type</div></div>
             ))}
             {(_AD.coating !== false || coating > 0) && <div style={ST.hr} />}
             {(_AD.bundling !== false || bundling > 0) && <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
@@ -3814,14 +3814,14 @@ function App() {
                 <div style={{fontSize:10.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:CK.cyan,marginBottom:2}}>Free Delivery Estimate</div>
                 <div style={{fontSize:mob?14:15,fontWeight:700,color:CC.dark}}>{r.shipping.freeDeliveryDate}</div>
                 <div style={{fontSize:mob?10.5:11,color:CC.mid,marginTop:2}}>{r.shipping.freeDeliveryBizDays} business days</div>
-                <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #b3dff044",display:"flex",flexWrap:"wrap",gap:"2px 16px",fontSize:10.5}}>
+                <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #c7d2fe44",display:"flex",flexWrap:"wrap",gap:"2px 16px",fontSize:10.5}}>
                   <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Production starts:</span> {r.shipping.productionStartDate}</span>
                   <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Must ship by:</span> {r.shipping.mustShipDate}</span>
                   <span style={{color: r.shipping.effectiveTransit < r.shipping.transitDays ? "#f59e0b" : CC.light}}>
                     ({r.shipping.effectiveTransit}d {r.shipping.effectiveTransit < r.shipping.transitDays ? "overnight" : "ground"} transit)
                   </span>
                 </div>
-                <div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,paddingTop:4,borderTop:"1px solid #b3dff044"}}>
+                <div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,paddingTop:4,borderTop:"1px solid #c7d2fe44"}}>
                   {mob?<>{r.shipping.earliestDate} earliest</>:<>Earliest possible: <strong style={{color:CC.mid}}>{r.shipping.earliestDate}</strong> ({r.shipping.earliestBizDays} biz days) · Shop: {r.shipping.shopToday}</>}
                 </div>
               </div>
@@ -3865,8 +3865,8 @@ function App() {
             <Panel result={result} />
           </div>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
-            <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
+            <div style={{padding:"10px 18px",background:"#f8fafc",borderBottom:`1px solid ${CC.border}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.primary}}>Quantity Pricing</div>
             </div>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
               <thead>
@@ -3878,7 +3878,7 @@ function App() {
               </thead>
               <tbody>
                 {projections.map((p,i) => p.total !== null && (
-                  <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?"#f0f9ff":"transparent",cursor:p.current?"default":"pointer"}}
+                  <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?"#eef2ff":"transparent",cursor:p.current?"default":"pointer"}}
                     onClick={() => {if(!p.current) setQty(p.qty)}}>
                     <td style={{padding:"6px 18px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>
                       {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
@@ -3890,10 +3890,10 @@ function App() {
               </tbody>
             </table>
           </div>}
-          <button type="button" onClick={handleShareLink} style={{ width: "100%", marginTop: 8, padding: "8px", borderRadius: 4, border: `1px solid ${shareCopied ? "#86efac" : "#ddd"}`, background: shareCopied ? "#f0fdf4" : "#fafafa", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
+          <button type="button" onClick={handleShareLink} style={{ width: "100%", marginTop: 8, padding: "8px", borderRadius: 6, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : "#f8fafc", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
-          {debugUnlocked&&<button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : "#ddd"}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
+          {debugUnlocked&&<button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#f8fafc", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
             {showDebug ? "▼ Hide" : "▶ Show"} Debug Panel
           </button>}
           {debugUnlocked && showDebug && r.debug && (
@@ -3941,7 +3941,7 @@ function App() {
           ))}
         </div>}
         {mobPricing && projections && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)" }}>
-          <div style={{ padding: "8px 14px", background: "#fafafa", borderBottom: `1px solid ${CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ padding: "8px 14px", background: "#f8fafc", borderBottom: `1px solid ${CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: CC.light }}>Quantity Pricing</span>
             <button type="button" onClick={handleShareLink} style={{ fontSize: 10, fontWeight: 600, color: shareCopied ? "#16a34a" : CK.cyan, background: "none", border: "none", cursor: "pointer", padding: "2px 6px", fontFamily: "inherit" }}>
               {shareCopied ? "Copied!" : "Share Link"}
@@ -3976,10 +3976,10 @@ function App() {
               <Panel result={result} compact expanded={mobExpanded} onToggleExpand={() => { setMobExpanded(p => !p); if (mobPricing) setMobPricing(false); if (showDebug) setShowDebug(false); }} />
               {!mobExpanded && <div style={{ fontSize: 8, textAlign: "center", color: mobPricing ? CK.cyan : CC.light, marginTop: 2, letterSpacing: ".5px", textTransform: "uppercase", fontWeight: 600, cursor: "pointer" }} onClick={() => { setMobPricing(p => !p); if (showDebug) setShowDebug(false); }}>{mobPricing ? "▼ Hide Pricing" : "▲ Qty Pricing"}</div>}
             </div>
-            {!mobExpanded && <button type="button" onClick={handleShareLink} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : "#fafafa", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s", lineHeight: 1 }} title="Share link">
+            {!mobExpanded && <button type="button" onClick={handleShareLink} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : "#f8fafc", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s", lineHeight: 1 }} title="Share link">
               {shareCopied ? "✓" : "🔗"}
             </button>}
-            {!mobExpanded && debugUnlocked&&<button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#fafafa", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
+            {!mobExpanded && debugUnlocked&&<button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#f8fafc", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
               {showDebug ? "✕" : "⚙"}
             </button>}
             <button type="button" style={{ flexShrink: 0, padding: "12px 16px", borderRadius: 6, border: "none", background: result?.error ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: result?.error ? "default" : "pointer", fontFamily: "inherit", opacity: result?.error ? .5 : 1, width: mobExpanded ? "100%" : undefined }} disabled={!!result?.error}>Add to Order</button>
@@ -4000,7 +4000,7 @@ function App() {
                 <div style={{ fontSize: 34, marginBottom: 8 }}>✓</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: CC.dark, marginBottom: 6 }}>Question sent!</div>
                 <div style={{ fontSize: 13, color: CC.mid, lineHeight: 1.5, maxWidth: 380, margin: "0 auto" }}>We&rsquo;ve emailed a copy of your quote to <strong>{qEmail}</strong>. A team member will reply within 1 business day.</div>
-                <button type="button" onClick={resetQuestionForm} style={{ marginTop: 18, padding: "9px 20px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#fafafa", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
+                <button type="button" onClick={resetQuestionForm} style={{ marginTop: 18, padding: "9px 20px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#f8fafc", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
               </div>
             ) : (
               <form onSubmit={handleQuestionSubmit} style={{ padding: "16px 20px" }}>
@@ -4028,7 +4028,7 @@ function App() {
                   <div style={{ padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 4, fontSize: 12, color: "#b91c1c", marginBottom: 10 }}>{qErrorMsg}</div>
                 )}
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                  <button type="button" onClick={resetQuestionForm} style={{ padding: "9px 16px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#fafafa", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }} disabled={qStatus === "sending"}>Cancel</button>
+                  <button type="button" onClick={resetQuestionForm} style={{ padding: "9px 16px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#f8fafc", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }} disabled={qStatus === "sending"}>Cancel</button>
                   <button type="submit" disabled={qStatus === "sending"} style={{ padding: "9px 18px", borderRadius: 5, border: "none", background: qStatus === "sending" ? CC.light : CK.cyan, color: "#fff", fontSize: 13, fontWeight: 700, cursor: qStatus === "sending" ? "wait" : "pointer", fontFamily: "inherit" }}>{qStatus === "sending" ? "Sending…" : "Send question"}</button>
                 </div>
               </form>
@@ -4046,21 +4046,21 @@ function App() {
 const ST = {
   f:{marginTop:10},
   lbl:{display:"block",fontSize:13,fontWeight:600,color:CC.mid,marginBottom:5},
-  sel:{width:"100%",padding:"10px 32px 10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"linear-gradient(180deg, #fff 0%, #f9f9fa 100%)",fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 3px rgba(0,0,0,.04)"},
+  sel:{width:"100%",padding:"10px 32px 10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(0,0,0,.05)"},
   selA:{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
-  inp:{width:"100%",padding:"10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"linear-gradient(180deg, #fff 0%, #f9f9fa 100%)",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 3px rgba(0,0,0,.04)"},
-  pills:{display:"flex",borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,.06)"},
-  pill:{flex:1,padding:"9px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRight:`1px solid ${CC.border}`,background:`linear-gradient(180deg, #fff 0%, #f7f7f8 100%)`,color:"#555",cursor:"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"inset 0 1px 0 rgba(255,255,255,.8), inset 0 -1px 0 rgba(0,0,0,.04)"},
-  pillOn:{background:`linear-gradient(135deg, ${CK.cyan} 0%, #0070e6 40%, #3d9cff 50%, #0070e6 60%, #005cc8 100%)`,color:"#fff",fontWeight:600,boxShadow:"inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(0,0,0,.15), 0 1px 3px rgba(0,126,255,.2)"},
+  inp:{width:"100%",padding:"10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(0,0,0,.05)"},
+  pills:{display:"flex",borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(0,0,0,.05)"},
+  pill:{flex:1,padding:"9px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRight:`1px solid ${CC.border}`,background:"#fff",color:CC.mid,cursor:"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
+  pillOn:{background:`linear-gradient(135deg, ${CK.cyan} 0%, #4338ca 40%, #6366f1 50%, #4338ca 60%, #3730a3 100%)`,color:"#fff",fontWeight:600,boxShadow:"inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(0,0,0,.15), 0 1px 3px rgba(79,70,229,.2)"},
   row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12},
   row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12},
-  hr:{height:1,background:"#eee",margin:"14px 0 4px"},
+  hr:{height:1,background:CC.border,margin:"14px 0 4px"},
   note:{fontSize:12,color:CC.light,margin:"4px 0 0"},
   err:{color:"#dc2626",fontSize:13,margin:"8px 0 0",padding:"8px 10px",background:"#fef2f2",borderRadius:4,border:"1px solid #f5cccc"},
-  card:{background:CC.white,borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",marginBottom:10},
-  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"#fafafa",border:"none",borderBottom:"1px solid #eee",cursor:"pointer",fontFamily:"inherit",fontSize:15},
-  pnl:{background:CC.white,borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden"},
-  secNum:{fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",fontSize:11,fontWeight:600,color:CC.light,letterSpacing:".08em",flexShrink:0,minWidth:18},
+  card:{background:CC.white,borderRadius:8,border:`1px solid ${CC.border}`,borderLeft:`3px solid ${CC.primary}`,overflow:"hidden",marginBottom:10},
+  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"#f8fafc",border:"none",borderBottom:`1px solid ${CC.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:15},
+  pnl:{background:CC.white,borderRadius:8,border:`1px solid ${CC.border}`,overflow:"hidden"},
+  secNum:{fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",fontSize:11,fontWeight:700,color:CC.primary,letterSpacing:".08em",flexShrink:0,minWidth:18},
 };
 
 ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<App />);
