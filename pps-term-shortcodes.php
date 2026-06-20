@@ -95,6 +95,25 @@ ul.products{max-width:var(--pps-max-w,1200px)!important;margin-left:auto!importa
 .pps-cat-addon-dot--two_staple{background:#f59e0b}
 .pps-cat-addon-dot--perforation{background:#ef4444}
 .pps-cat-addon-dot--outfold{background:#6366f1}
+.pps-cat-card-name{display:flex;align-items:center;gap:6px}
+.pps-cat-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:10px;font-weight:700;cursor:pointer;flex-shrink:0;margin-left:auto;transition:all .15s;line-height:1;user-select:none}
+.pps-cat-tip:hover{background:#007eff;color:#fff}
+.pps-cat-chip .pps-cat-tip{margin-left:6px}
+.pps-cat-tip-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:99999;align-items:center;justify-content:center}
+.pps-cat-tip-overlay.is-open{display:flex}
+.pps-cat-tip-modal{background:#fff;border-radius:12px;max-width:420px;width:calc(100vw - 32px);max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);animation:ppsTipIn .2s ease}
+@keyframes ppsTipIn{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:none}}
+.pps-cat-tip-close{position:absolute;top:10px;right:14px;font-size:20px;color:#94a3b8;cursor:pointer;line-height:1;z-index:1;background:none;border:0;padding:4px}
+.pps-cat-tip-close:hover{color:#0f172a}
+.pps-cat-tip-modal-inner{position:relative;padding:24px}
+.pps-cat-tip-modal h3{margin:0 0 14px;font-size:17px;font-weight:700;color:#0f172a;padding-right:24px}
+.pps-cat-tip-modal p{margin:0 0 10px;font-size:14px;line-height:1.65;color:#475569}
+.pps-cat-tip-modal p:last-child{margin-bottom:0}
+.pps-cat-tip-modal img{max-width:100%;border-radius:6px;border:1px solid #e2e8f0;margin:6px 0}
+.pps-cat-tip-modal video{max-width:100%;border-radius:6px;margin:6px 0}
+.pps-cat-tip-modal .pps-cat-tip-yt{position:relative;width:100%;padding-top:56.25%;margin:6px 0}
+.pps-cat-tip-modal .pps-cat-tip-yt iframe{position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:6px}
+@media(max-width:600px){.pps-cat-tip-modal{border-radius:12px 12px 0 0;position:fixed;bottom:0;left:0;right:0;max-width:100%;width:100%;max-height:80vh}}
 
 /* ── Product grid ── */
 ul.products{padding:0 4px!important}
@@ -209,6 +228,56 @@ add_action( 'wp_footer', function() {
     <?php
 }, 1 );
 
+// ── Tooltip modal (category pages) ──
+
+add_action( 'wp_footer', function() {
+    if ( ! is_product_category() && ! is_product_taxonomy() ) return;
+    $tips = get_option( 'pps_tooltips', array() );
+    if ( empty( $tips ) || ! is_array( $tips ) ) return;
+
+    $tip_json = wp_json_encode( $tips, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE );
+    ?>
+    <div class="pps-cat-tip-overlay" id="pps-tip-overlay">
+        <div class="pps-cat-tip-modal">
+            <div class="pps-cat-tip-modal-inner">
+                <button class="pps-cat-tip-close" id="pps-tip-close">&times;</button>
+                <div id="pps-tip-content"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function(){
+        var tips=<?php echo $tip_json; ?>;
+        var overlay=document.getElementById('pps-tip-overlay');
+        var content=document.getElementById('pps-tip-content');
+        function close(){overlay.classList.remove('is-open');content.innerHTML=''}
+        document.getElementById('pps-tip-close').addEventListener('click',close);
+        overlay.addEventListener('click',function(e){if(e.target===overlay)close()});
+        document.addEventListener('keydown',function(e){if(e.key==='Escape')close()});
+        document.addEventListener('click',function(e){
+            var trigger=e.target.closest('.pps-cat-tip');
+            if(!trigger)return;
+            e.preventDefault();
+            e.stopPropagation();
+            var key=trigger.getAttribute('data-tip');
+            var tip=tips[key];
+            if(!tip)return;
+            var html='<h3>'+esc(tip.title||key)+'</h3>';
+            (tip.content||[]).forEach(function(b){
+                if(b.type==='text')html+='<p>'+esc(b.value||'')+'</p>';
+                else if(b.type==='image')html+='<img src="'+esc(b.src||'')+'" alt="'+esc(b.alt||'')+'" loading="lazy" onerror="this.style.display=\'none\'">';
+                else if(b.type==='video')html+='<video controls preload="metadata"'+(b.poster?' poster="'+esc(b.poster)+'"':'')+'><source src="'+esc(b.src||'')+'" type="video/mp4"></video>';
+                else if(b.type==='youtube')html+='<div class="pps-cat-tip-yt"><iframe src="'+esc(b.src||'')+'" allowfullscreen loading="lazy" title="'+esc(b.alt||'Video')+'"></iframe></div>';
+            });
+            content.innerHTML=html;
+            overlay.classList.add('is-open');
+        });
+        function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+    })();
+    </script>
+    <?php
+}, 20 );
+
 // ── [pps_cat_papers type="text|cover|all" factory="yes|no"] ──
 
 add_shortcode( 'pps_cat_papers', function( $atts ) {
@@ -218,28 +287,42 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
 
     $papers = array();
     if ( $a['type'] === 'text' || $a['type'] === 'all' ) {
-        $papers = array_merge( $papers, isset( $cfg['papers_nc'] ) ? $cfg['papers_nc'] : array() );
+        foreach ( ( isset( $cfg['papers_nc'] ) ? $cfg['papers_nc'] : array() ) as $p ) {
+            $p['_tip'] = 'paper_text_' . sanitize_key( str_replace( ' ', '_', $p['label'] ) );
+            $p['_tip_fallback'] = 'paper_text_weight';
+            $papers[] = $p;
+        }
     }
     if ( $a['type'] === 'cover' || $a['type'] === 'all' ) {
-        $papers = array_merge( $papers, isset( $cfg['papers_cs'] ) ? $cfg['papers_cs'] : array() );
+        foreach ( ( isset( $cfg['papers_cs'] ) ? $cfg['papers_cs'] : array() ) as $p ) {
+            $p['_tip'] = 'paper_cs_' . sanitize_key( str_replace( ' ', '_', $p['label'] ) );
+            $p['_tip_fallback'] = 'paper_cardstock';
+            $papers[] = $p;
+        }
     }
     if ( $a['factory'] === 'no' ) {
         $papers = array_filter( $papers, function( $p ) { return empty( $p['factory'] ); } );
     }
     if ( empty( $papers ) ) return '';
 
+    $tips      = get_option( 'pps_tooltips', array() );
     $base_link = trim( $a['link'] );
 
     $out = '<div class="pps-cat-grid">';
     foreach ( $papers as $p ) {
-        $label = esc_html( $p['label'] );
+        $label   = esc_html( $p['label'] );
+        $tip_key = $p['_tip'] ?? '';
+        $tip_fb  = $p['_tip_fallback'] ?? '';
+        $has_tip = $tip_key && isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] );
+        if ( ! $has_tip && $tip_fb ) { $tip_key = $tip_fb; $has_tip = isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] ); }
         $stock = empty( $p['factory'] )
             ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
             : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
         $coat  = ! empty( $p['coatable'] )
             ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
             : '';
-        $inner = '<div class="pps-cat-card-name">' . $label . '</div>'
+        $tip_btn = $has_tip ? '<span class="pps-cat-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>' : '';
+        $inner = '<div class="pps-cat-card-name">' . $label . $tip_btn . '</div>'
                . '<div class="pps-cat-card-meta">' . $stock . $coat . '</div>';
 
         if ( $base_link ) {
@@ -281,9 +364,14 @@ add_shortcode( 'pps_cat_coatings', function() {
     $coatings = array_filter( $coatings, function( $c ) { return ! empty( $c['val'] ); } );
     if ( empty( $coatings ) ) return '';
 
+    $tips    = get_option( 'pps_tooltips', array() );
+    $has_tip = isset( $tips['coating'] ) && ! empty( $tips['coating']['title'] );
+
     $out = '<div class="pps-cat-chips">';
     foreach ( $coatings as $c ) {
-        $out .= '<span class="pps-cat-chip"><b>&#10022;</b> ' . esc_html( $c['label'] ) . '</span>';
+        $out .= '<span class="pps-cat-chip"><b>&#10022;</b> ' . esc_html( $c['label'] )
+              . ( $has_tip ? ' <span class="pps-cat-tip" data-tip="coating">?</span>' : '' )
+              . '</span>';
     }
     $out .= '</div>';
     return $out;
@@ -307,11 +395,21 @@ add_shortcode( 'pps_cat_addons', function( $atts ) {
     }
     if ( empty( $items ) ) return '';
 
+    $addon_tip_map = array(
+        'vivid' => 'vivid', 'coating' => 'coating', 'bundling' => 'bundling',
+        'rc' => 'round_cornering', 'two_staple' => 'saddle_stitch',
+        'perforation' => 'perforation', 'outfold' => 'outfold',
+    );
+    $tips = get_option( 'pps_tooltips', array() );
+
     $out = '<div class="pps-cat-addon-grid">';
     foreach ( $items as $item ) {
+        $tip_key = isset( $addon_tip_map[ $item['slug'] ] ) ? $addon_tip_map[ $item['slug'] ] : '';
+        $has_tip = $tip_key && isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] );
         $out .= '<div class="pps-cat-addon">'
               . '<span class="pps-cat-addon-dot pps-cat-addon-dot--' . esc_attr( $item['slug'] ) . '"></span>'
               . esc_html( $item['label'] )
+              . ( $has_tip ? '<span class="pps-cat-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>' : '' )
               . '</div>';
     }
     $out .= '</div>';
