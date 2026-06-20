@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-20 · BR-INDIGO</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-20 · BR-BLUE</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -61,8 +61,8 @@ function useIsMobile(bp=700){const[m,s]=useState(window.innerWidth<=bp);useEffec
 // ═══════════════════════════════════════════════════════════════
 // COLORS & CONSTANTS
 // ═══════════════════════════════════════════════════════════════
-const CC={bg:"#f8fafc",white:"#fff",dark:"#0f172a",mid:"#475569",light:"#94a3b8",border:"#e2e8f0",primary:"#4f46e5"};
-const CK={cyan:"#4f46e5",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",cyanLight:"#eef2ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
+const CC={bg:"#f8fafc",white:"#fff",dark:"#0f172a",mid:"#475569",light:"#94a3b8",border:"#e2e8f0",primary:"#007eff"};
+const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
 // Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
@@ -4119,14 +4119,14 @@ function App() {
                 <div style={{fontSize:10.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:CK.cyan,marginBottom:2}}>Free Delivery Estimate</div>
                 <div style={{fontSize:mob?14:15,fontWeight:700,color:CC.dark}}>{r.shipping.freeDeliveryDate}</div>
                 <div style={{fontSize:mob?10.5:11,color:CC.mid,marginTop:2}}>{r.shipping.freeDeliveryBizDays} business days</div>
-                <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #c7d2fe44",display:"flex",flexWrap:"wrap",gap:"2px 16px",fontSize:10.5}}>
+                <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #b3dff044",display:"flex",flexWrap:"wrap",gap:"2px 16px",fontSize:10.5}}>
                   <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Production starts:</span> {r.shipping.productionStartDate}</span>
                   <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Must ship by:</span> {r.shipping.mustShipDate}</span>
                   <span style={{color: r.shipping.effectiveTransit < r.shipping.transitDays ? "#f59e0b" : CC.light}}>
                     ({r.shipping.effectiveTransit}d {r.shipping.effectiveTransit < r.shipping.transitDays ? "overnight" : "ground"} transit)
                   </span>
                 </div>
-                <div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,paddingTop:4,borderTop:"1px solid #c7d2fe44"}}>
+                <div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,paddingTop:4,borderTop:"1px solid #b3dff044"}}>
                   {mob?<>{r.shipping.earliestDate} earliest</>:<>Earliest possible: <strong style={{color:CC.mid}}>{r.shipping.earliestDate}</strong> ({r.shipping.earliestBizDays} biz days) · Shop: {r.shipping.shopToday}</>}
                 </div>
               </div>
@@ -4196,7 +4196,7 @@ function App() {
               </thead>
               <tbody>
                 {projections.map((p,i) => p.total !== null && (
-                  <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?"#eef2ff":"transparent",cursor:p.current?"default":"pointer"}}
+                  <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?"#f0f9ff":"transparent",cursor:p.current?"default":"pointer"}}
                     onClick={() => {if(!p.current) setQty(p.qty)}}>
                     <td style={{padding:"6px 18px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>
                       {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
@@ -4382,7 +4382,7 @@ const ST = {
   inp:{width:"100%",padding:"10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(0,0,0,.05)"},
   pills:{display:"flex",borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(0,0,0,.05)"},
   pill:{flex:1,padding:"9px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRight:`1px solid ${CC.border}`,background:"#fff",color:CC.mid,cursor:"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
-  pillOn:{background:`linear-gradient(135deg, ${CK.cyan} 0%, #4338ca 40%, #6366f1 50%, #4338ca 60%, #3730a3 100%)`,color:"#fff",fontWeight:600,boxShadow:"inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(0,0,0,.15), 0 1px 3px rgba(79,70,229,.2)"},
+  pillOn:{background:`linear-gradient(135deg, ${CK.cyan} 0%, #0070e6 40%, #3d9cff 50%, #0070e6 60%, #005cc8 100%)`,color:"#fff",fontWeight:600,boxShadow:"inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(0,0,0,.15), 0 1px 3px rgba(0,126,255,.2)"},
   row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12},
   row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12},
   hr:{height:1,background:CC.border,margin:"14px 0 4px"},
