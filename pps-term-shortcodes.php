@@ -163,6 +163,9 @@ ul.products li.product img{border-radius:8px}
 .pps-wiz-act-quote{background:none;border:1px solid #c7d2fe;color:#4f46e5;font-weight:600;font-size:13px;padding:10px 24px;border-radius:6px;cursor:pointer;transition:all .15s}
 .pps-wiz-act-quote:hover{background:#eef2ff}
 .pps-wiz-email-form{margin-top:12px;display:none;text-align:left;max-width:400px;margin-left:auto;margin-right:auto}
+.pps-wiz-phone-hint{font-size:11px;color:#94a3b8;margin:-4px 0 8px 2px;line-height:1.4}
+.pps-wiz-cb{display:flex;align-items:center;gap:6px;font-size:13px;color:#334155;cursor:pointer;margin-bottom:8px;font-weight:500}
+.pps-wiz-cb input[type="checkbox"]{width:16px;height:16px;accent-color:#4f46e5;cursor:pointer}
 .pps-wiz-input{display:block;width:100%;padding:10px 12px;margin-bottom:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box}
 .pps-wiz-input:focus{outline:none;border-color:#a5b4fc;box-shadow:0 0 0 2px rgba(79,70,229,.15)}
 textarea.pps-wiz-input{min-height:70px;resize:vertical}
@@ -497,7 +500,10 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $out .= '<div class="pps-wiz-email-form">'
           . '<input type="text" class="pps-wiz-input" data-field="name" placeholder="Your Name">'
           . '<input type="email" class="pps-wiz-input" data-field="email" placeholder="Your Email">'
+          . '<input type="tel" class="pps-wiz-input" data-field="phone" placeholder="Phone Number">'
+          . '<div class="pps-wiz-phone-hint">Only used to communicate about this project &mdash; never used for advertising purposes.</div>'
           . '<input type="text" name="website" style="display:none" tabindex="-1" autocomplete="off" data-field="hp">'
+          . '<label class="pps-wiz-cb"><input type="checkbox" data-field="callback"> Request Callback</label>'
           . '<textarea class="pps-wiz-input" data-field="message" placeholder="Additional details (optional)"></textarea>'
           . '<button type="button" class="pps-wiz-send">Send Quote Request</button>'
           . '<div class="pps-wiz-email-status"></div>'
@@ -610,15 +616,19 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'if(e.target.closest(".pps-wiz-send")){'
           .     'var name=w.querySelector(\'[data-field="name"]\').value;'
           .     'var email=w.querySelector(\'[data-field="email"]\').value;'
+          .     'var phone=w.querySelector(\'[data-field="phone"]\').value;'
           .     'var hp=w.querySelector(\'[data-field="hp"]\');'
+          .     'var cb=w.querySelector(\'[data-field="callback"]\');'
           .     'var msg=w.querySelector(\'[data-field="message"]\').value;'
           .     'var statusEl=w.querySelector(".pps-wiz-email-status");'
-          .     'if(!name||!email){statusEl.className="pps-wiz-email-status is-err";statusEl.textContent="Please enter your name and email.";return}'
+          .     'if(!name||!email||!phone){statusEl.className="pps-wiz-email-status is-err";statusEl.textContent="Please enter your name, email, and phone number.";return}'
+          .     'var digits=phone.replace(/\\D/g,"");if(digits.length<7||digits.length>15){statusEl.className="pps-wiz-email-status is-err";statusEl.textContent="Please enter a valid phone number.";return}'
           .     'var fd=new FormData();'
           .     'fd.append("action","pps_wizard_email");'
           .     'fd.append("nonce",bar.dataset.nonce);'
-          .     'fd.append("name",name);fd.append("email",email);'
+          .     'fd.append("name",name);fd.append("email",email);fd.append("phone",phone);'
           .     'if(hp)fd.append("website",hp.value);'
+          .     'if(cb&&cb.checked)fd.append("callback","1");'
           .     'fd.append("specs",w.querySelector(".pps-wiz-summary").textContent);'
           .     'fd.append("url",w.querySelector(".pps-wiz-act-pricing").href);'
           .     'fd.append("message",msg);'
@@ -647,19 +657,27 @@ function pps_wizard_email_handler() {
     check_ajax_referer( 'pps_wizard_email', 'nonce' );
     if ( ! empty( $_POST['website'] ) ) wp_send_json_error( 'Invalid submission.' );
 
-    $name  = sanitize_text_field( wp_unslash( $_POST['name'] ?? '' ) );
-    $email = sanitize_email( wp_unslash( $_POST['email'] ?? '' ) );
-    $specs = sanitize_text_field( wp_unslash( $_POST['specs'] ?? '' ) );
-    $url   = esc_url_raw( wp_unslash( $_POST['url'] ?? '' ) );
-    $msg   = sanitize_textarea_field( wp_unslash( $_POST['message'] ?? '' ) );
+    $name     = sanitize_text_field( wp_unslash( $_POST['name'] ?? '' ) );
+    $email    = sanitize_email( wp_unslash( $_POST['email'] ?? '' ) );
+    $phone    = sanitize_text_field( wp_unslash( $_POST['phone'] ?? '' ) );
+    $callback = ! empty( $_POST['callback'] );
+    $specs    = sanitize_text_field( wp_unslash( $_POST['specs'] ?? '' ) );
+    $url      = esc_url_raw( wp_unslash( $_POST['url'] ?? '' ) );
+    $msg      = sanitize_textarea_field( wp_unslash( $_POST['message'] ?? '' ) );
 
-    if ( ! $name || ! $email || ! is_email( $email ) ) {
-        wp_send_json_error( 'Please provide a valid name and email.' );
+    if ( ! $name || ! $email || ! is_email( $email ) || ! $phone ) {
+        wp_send_json_error( 'Please provide a valid name, email, and phone number.' );
+    }
+    $digits = preg_replace( '/\D/', '', $phone );
+    if ( strlen( $digits ) < 7 || strlen( $digits ) > 15 ) {
+        wp_send_json_error( 'Please provide a valid phone number.' );
     }
 
     $admin = get_option( 'admin_email' );
-    $subj  = 'Quote Request from ' . $name;
-    $body  = "Name: {$name}\nEmail: {$email}\n\nSelected Specs:\n{$specs}\n\nCalculator Link:\n{$url}";
+    $subj  = $callback ? 'Quote + Callback Request from ' . $name : 'Quote Request from ' . $name;
+    $body  = "Name: {$name}\nEmail: {$email}\nPhone: {$phone}";
+    if ( $callback ) $body .= "\n*** CALLBACK REQUESTED ***";
+    $body .= "\n\nSelected Specs:\n{$specs}\n\nCalculator Link:\n{$url}";
     if ( $msg ) $body .= "\n\nMessage:\n{$msg}";
 
     $headers = array( 'Reply-To: ' . $name . ' <' . $email . '>' );
