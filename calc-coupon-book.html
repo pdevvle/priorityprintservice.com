@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-05-30 · CB-SALE-ADDONS-PARITY</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-16 · CB-TOGGLE-FIRST</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -325,8 +325,11 @@ const SIZE_PRESETS = _CFG.size_presets || [
 const ALL_SIZES = SIZE_PRESETS.flatMap(g => g.items);
 // TWO_STAPLE_THRESH removed — not applicable to perfect bound
 
-function calcCustomImp(longest, shortest, bindDir) {
-  const sA=x=>{const r=18.5/x;return r<.5?0:r<1?.5:r<2?1:r<3?2:r<4?3:r<5?4:4};
+// sheetLong = usable long-axis inches of the press sheet.
+//   18.5 → 13×19 stock (default); 27 → 13×27.5 stock. Short axis is always 12.5.
+function calcCustomImp(longest, shortest, bindDir, sheetLong) {
+  const L=sheetLong||18.5;
+  const sA=x=>{const r=L/x;return r<.5?0:r<1?.5:r<2?1:r<3?2:r<4?3:r<5?4:4};
   const sB=x=>{const r=12.5/x;return r<2?1:r<3?2:2};
   return bindDir==="short"?sA(longest)*sB(shortest):sA(shortest)*sB(longest);
 }
@@ -356,7 +359,10 @@ const PAPERS_CS = _CFG.papers_cs || [
 const COVER_SAME=_CFG.cover_same||{label:"Same as Inside Pages",val:0.001,days:0,price:0.01,oversizePrice:0.01,factory:false,coatable:false};
 const COVER_SCORING_VALS=_CFG.cover_scoring_vals||[0.01,0.02,0.03,1.01,1.02,2.21,2.22,2.23,2.24,2.25];
 const _INV_NC=_CFG.inv_nc||[0.001,0.002,0.003], _INV_CS=_CFG.inv_cs||[0.01,0.02,0.03,1.01,1.02];
-const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_CS];
+const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_NC,...INV_CS];
+// Papers stocked at the larger 13×27.5 press sheet (everything else is 13×19 only).
+// Oversized jobs (imp<1 on 13×19) must run here; non-stock papers incur the non-inventory fee.
+const LARGE_SHEET_VALS=_CFG.large_sheet_vals||[0.003,0.03]; // 100lb Gloss Text, 100lb Gloss Cardstock
 // Combined paper lists: text weight first, then cardstock with suffix
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
 const isCardstockVal=v=>PAPERS_CS.some(p=>p.val===v);
@@ -404,7 +410,7 @@ function resolveSize(c) {
       const pw=parseFloat(m[1]),ph=parseFloat(m[2]);
       return Math.abs(longest-Math.max(pw,ph))<0.05&&Math.abs(shortest-Math.min(pw,ph))<0.05;
     });
-    if(match) return {imp:match.imp,bindEdge:match.bindEdge,isCustom:false,errors:[],clamped:null};
+    if(match) return {imp:match.imp,bindEdge:match.bindEdge,isCustom:false,errors:[],clamped:null,sheet:"13x19",needsLargeSheet:false};
 
     // Determine spine and open side based on bind direction
     const bindEdge = c.bindDir==="short" ? shortest : longest;
@@ -431,13 +437,21 @@ function resolveSize(c) {
       shortest = newShort;
     }
 
-    const imp = calcCustomImp(longest, shortest, c.bindDir);
+    let imp = calcCustomImp(longest, shortest, c.bindDir);   // 13×19 sheet
+    let sheet = "13x19", needsLargeSheet = false;
+    if (imp < 1) {
+      // Too big to image even one-up on 13×19 → run on the 13×27.5 press sheet
+      // (stocked only for select papers; the non-inventory fee covers the rest).
+      imp = calcCustomImp(longest, shortest, c.bindDir, 27);
+      sheet = "13x27.5";
+      needsLargeSheet = true;
+    }
     const finalBindEdge = c.bindDir==="short" ? shortest : longest;
     if(imp<=0) errors.push("Cannot produce — adjust dimensions.");
-    return {imp:Math.max(imp,0.5),bindEdge:finalBindEdge,isCustom:true,errors,clamped};
+    return {imp:Math.max(imp,0.5),bindEdge:finalBindEdge,isCustom:true,errors,clamped,sheet,needsLargeSheet};
   }
   const p=ALL_SIZES.find(s=>s.label===c.sizeLabel)||ALL_SIZES[0];
-  return {imp:p.imp,bindEdge:p.bindEdge,isCustom:false,errors:[],clamped:null};
+  return {imp:p.imp,bindEdge:p.bindEdge,isCustom:false,errors:[],clamped:null,sheet:"13x19",needsLargeSheet:false};
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -674,7 +688,17 @@ function calculate(c) {
   P.baseRate=PCF.base_rate;
   P.diffSize=P.finishingCuts; // finishing cuts serve as the difficult size surcharge
   const iInv=c.insidePaperType==="cardstock"?INV_CS.includes(c.insidePaper.val):INV_NC.includes(c.insidePaper.val);
-  P.nonInv=(iInv&&COVER_INV.includes(cvr.val))?0:PCF.non_inventory_fee;
+  // Oversized jobs (sz.needsLargeSheet) run on 13×27.5, stocked only for select papers;
+  // there "in stock" means both inside AND cover are 13×27.5 papers. Normal jobs use 13×19.
+  let paperInStock;
+  if(sz.needsLargeSheet){
+    const insideLarge=LARGE_SHEET_VALS.includes(c.insidePaper.val);
+    const coverLarge=c.coverMode==="same"?insideLarge:LARGE_SHEET_VALS.includes(cvr.val);
+    paperInStock=insideLarge&&coverLarge;
+  } else {
+    paperInStock=iInv&&COVER_INV.includes(cvr.val);
+  }
+  P.nonInv=paperInStock?0:PCF.non_inventory_fee;
   // BW discount proportional to fraction of BW pages
   P.discBW = bwFraction > 0 ? -(P.press * PCF.bw_discount_rate * bwFraction) : 0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
@@ -835,6 +859,8 @@ function calculate(c) {
     hardcopyEligible:hcOK,
     insideInventory:iInv,
     coverInventory:COVER_INV.includes(cvr.val),
+    pressSheet:sz.sheet,
+    needsLargeSheet:sz.needsLargeSheet,
     coverPaperUsed:cvr.label,
     // Size
     bindingEdge:sz.bindEdge,
@@ -1131,7 +1157,7 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
   );
 }
 
-function Panel({result,compact,expanded,onToggleExpand}){
+function Panel({result,compact,debugUnlocked}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
@@ -1241,12 +1267,12 @@ function Panel({result,compact,expanded,onToggleExpand}){
           <span style={{fontSize:13,fontWeight:600,color:CK.rush}}>+${sh.rushCost.toFixed(2)}</span>
         </div>}
       </div>
-      <details style={{borderTop:`1px solid ${CC.border}`}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
+      {debugUnlocked&&<details style={{borderTop:`1px solid ${CC.border}`}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
         <div style={{padding:"0 18px 14px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
           <span style={{fontSize:11.5,color:CC.light}}>{r.l}</span>
           <span style={{fontSize:11.5,fontWeight:600,color:r.v<0?CK.cyan:CC.mid}}>{r.v<0?"−":""}${Math.abs(r.v).toFixed(2)}</span>
         </div>))}</div>
-      </details>
+      </details>}
     </div>
   );
 }
@@ -1286,7 +1312,8 @@ function DebugPanel({debug}){
         {d.perSetSheets.map((s,i)=><Row key={i} label={`${s.name}: ${s.qty.toLocaleString()} qty × ${s.pages} pg ÷ 4`} value={s.bookletSheets} unit="booklet sheets" indent/>)}
         <Row label="Booklet sheets total (Σ)" value={d.bookletSheetsTotal} unit="sheets"/>
         <Row label="Imposition (imp)" value={d.imp} unit={`(÷${d.impHalf} for parent)`}/>
-        <Row label="Parent 13×19 sheets (totalSheets)" value={d.parentSheets} unit="sheets"/>
+        <Row label="Press sheet" value={d.pressSheet}/>
+        <Row label={`Parent ${d.pressSheet} sheets (totalSheets)`} value={d.parentSheets} unit="sheets"/>
 
         <Hdr>Volume & Pricing</Hdr>
         <Row label="Total quantity" value={d.totalQty} unit="pcs"/>
@@ -4360,13 +4387,13 @@ function App(){
           {/* SECTION 1: Size */}
           <Sec num={1} title="Coupon Book Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
             <div style={r2}>
+              <Pil label="Booklet Size" value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
                 ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"10px 32px 10px 12px":"10px 32px 10px 12px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;return `${lo}×${sh}" — Opens to ${nonSpine*2}×${spine}"`})():"Enter dimensions below"}</option></select><span style={ST.selA}><Chev/></span></div></div>
                 : <Sel label="Select Size" value={sizeLabel} onChange={handleSizeLabel}>
                     {SIZE_PRESETS.map(g=><optgroup key={g.group} label={g.group}>{g.items.map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup>)}
                   </Sel>
               }
-              <Pil label="Booklet Size" value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
             </div>
             {isCustom&&<><div style={r3}>
               <TxtNum label="Width (in)" value={customLong} onChange={setCustomLong} min={2.5} max={13.25}/>
@@ -4744,9 +4771,9 @@ function App(){
           </table>
         </div>}
         </div>
-        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:18,display:"flex",flexDirection:"column",gap:10}}>
+        {!mob&&<div style={{width:320,flexShrink:0,display:"flex",flexDirection:"column",gap:10}}>
           <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
-          <Panel result={result}/>
+          <Panel result={result} debugUnlocked={debugUnlocked}/>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>

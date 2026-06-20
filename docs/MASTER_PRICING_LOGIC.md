@@ -211,6 +211,44 @@ Defaults updated to match all calculators:
 2. **Disabled `easydiscount` and `common_discount`.** These ad-hoc discount caps were redundant with the new curve and created non-monotonic pricing. Both max caps set to 0.
 3. **Size-based discount** (booklets only). New `P.discSize` line item: 15% off the subtotal when `imp < 4`. Shows as "Size Adj." in the price breakdown. Hides automatically for 5.5×8.5 (imp=4).
 
+### Rollout: two-sheet model to all calculators (2026-06-17)
+
+The 13×19 + 13×27.5 two-sheet rule (below) was rolled out from saddle stitch to **perfect bound**, **coupon book**, and **brochure**. Same rule everywhere: **yield/`imp` is computed on 13×19; if `imp < 1` the piece images on the 13×27.5 sheet**, and the non-inventory fee applies unless the paper(s) are stocked at 13×27.5 (`LARGE_SHEET_VALS`, default `[0.003, 0.03]` = 100lb Gloss Text / 100lb Gloss Cardstock — identical paper vals across all four calcs).
+
+- **Perfect bound & coupon book** — structural twins of saddle: `calcCustomImp` gained the `sheetLong` arg; `resolveSize` switches to 27″ when `imp<1` (`sheet`/`needsLargeSheet`); `calculate()` fee requires both inside+cover to be 13×27.5 papers on oversized jobs. Also picked up the same `COVER_INV` text-weight fix (`…INV_NC,…INV_CS`). The throwaway `calcSaddle` comparison helper was left as-is.
+- **Brochure** — flat/single-paper, its own `calcBrochureImp` (the long axis divisor is now parameterized 18.5→27). After imp is resolved (preset or custom), `imp<1` re-images on 27″ and sets `needsLargeSheet`; the single-paper `nonInv` then checks `LARGE_SHEET_VALS` instead of `INV_VALS`. Note the `11×25.5` preset (`imp:0.5`) now correctly routes to the 13×27.5 sheet.
+
+Presets with `imp ≥ 1` and normal custom sizes are unchanged in all four calcs (default `sheetLong` keeps the 13×19 math byte-identical).
+
+### Saddle stitch: two-sheet inventory model (13×19 + 13×27.5) (2026-06-17)
+
+Stock reality: most papers are inventoried only at **13×19**; **100lb Gloss Text** (`val 0.003`) and **100lb Gloss Cardstock** (`val 0.03`) are *also* stocked at **13×27.5**. The calculator's `imp` (books per press sheet) is defined on the **13×19** sheet — so all preset prices (every preset is `imp ≥ 1`) are unchanged.
+
+Rule (per operator): **`imp < 1` on 13×19 → run the job on the 13×27.5 sheet.** This only happens on large *custom* sizes (presets never go below 1).
+
+Implementation:
+- `calcCustomImp(longest, shortest, bindDir, sheetLong)` gained an optional `sheetLong` (usable long-axis inches; default `18.5` = 13×19, `27` = 13×27.5). Short axis stays `12.5`. Default arg keeps all existing 13×19 calls byte-identical.
+- `resolveSize()` computes `imp` on 13×19; if `imp < 1` it re-images on 13×27.5 (`sheetLong=27`) and returns `sheet:"13x27.5"`, `needsLargeSheet:true`. Otherwise `sheet:"13x19"`, `needsLargeSheet:false`. (Presets return `13x19`/`false`.)
+- `LARGE_SHEET_VALS` (`_CFG.large_sheet_vals || [0.003, 0.03]`) lists the papers stocked at 13×27.5.
+- Non-inventory fee: when `needsLargeSheet`, "in stock" means **both inside and cover are 13×27.5 papers** (cover "same as inside" inherits the inside check); otherwise the `non_inventory_fee` applies (special-order at the big sheet). Normal (`imp ≥ 1`) jobs keep the existing 13×19 inventory test (`INV_NC`/`INV_CS`/`COVER_INV`).
+
+Net effect: oversized custom jobs are now priced on their real (larger, more-efficient) press sheet instead of being floored at `imp 0.5` on 13×19, and a special-order fee is added unless the chosen papers are the two 13×27.5 stocks. Debug panel exposes **Press sheet** and a **Needs 13×27.5 sheet** flag. PHP default + `$json_keys` carry `large_sheet_vals`.
+
+### Saddle stitch: in-stock text-weight covers exempt from non-inventory fee (2026-06-17)
+
+The `$35` `non_inventory_fee` is meant for genuinely non-stock papers. But the cover-inventory set was `COVER_INV = [COVER_SAME.val, ...INV_CS]` — it only recognized "Same as Inside" plus in-stock **cardstocks** as stocked covers. A text-weight sheet that is in-stock for *interiors* (e.g. 100lb Gloss Text, `val 0.003`, which is in `INV_NC`) was therefore tagged non-inventory the moment it was chosen as a *separate cover*, adding `$35` (further inflated by the 30% `booklet_surcharge`). Net effect: a pricier 80lb cardstock cover could come out cheaper than a 100lb Gloss Text cover.
+
+Fix (calc-preview-test.html, `COVER_INV` definition): include the in-stock text weights too.
+
+```javascript
+// before
+const COVER_INV = [COVER_SAME.val, ...INV_CS];
+// after
+const COVER_INV = [COVER_SAME.val, ...INV_NC, ...INV_CS];
+```
+
+Now `P.nonInv` is `0` for any in-stock cover (text-weight *or* cardstock); the fee still applies to non-stock/factory cover papers. `COVER_INV` is derived in the HTML only (no config key), so this is an HTML-only change — `inv_nc`/`inv_cs` PHP config is unchanged.
+
 ### Saddle stitch: 8-up markup bonus (2026-05-12)
 
 The smallest saddle sizes (`imp >= 8` — 3.5×5.5, 4×6, 4.25×5.5, Square 4×4, 6×4 Landscape, etc.) print 8 books per press sheet, so material costs scale down accordingly. But the customer perception of value doesn't scale 1:1 with sheet-count, and labor (press time, cutting, stitching) is roughly the same per-book regardless of imp. New PCF knob `booklet_8up_markup_bonus` (default `0.15`) multiplies `mk` by `(1 + bonus)` when `imp >= 8`:

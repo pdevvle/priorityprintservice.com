@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-07 · SS-DRIVE-PACKAGE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-16 · SS-TOGGLE-FIRST</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -388,8 +388,11 @@ const SIZE_PRESETS = _CFG.size_presets || [
 const ALL_SIZES = SIZE_PRESETS.flatMap(g => g.items);
 const TWO_STAPLE_THRESH = PCF.two_staple_threshold;
 
-function calcCustomImp(longest, shortest, bindDir) {
-  const sA=x=>{const r=18.5/x;return r<.5?0:r<1?.5:r<2?1:r<3?2:r<4?3:r<5?4:4};
+// sheetLong = usable long-axis inches of the press sheet.
+//   18.5 → 13×19 stock (default); 27 → 13×27.5 stock. Short axis is always 12.5.
+function calcCustomImp(longest, shortest, bindDir, sheetLong) {
+  const L=sheetLong||18.5;
+  const sA=x=>{const r=L/x;return r<.5?0:r<1?.5:r<2?1:r<3?2:r<4?3:r<5?4:4};
   const sB=x=>{const r=12.5/x;return r<2?1:r<3?2:2};
   return bindDir==="short"?sA(longest)*sB(shortest):sA(shortest)*sB(longest);
 }
@@ -419,7 +422,10 @@ const PAPERS_CS = _CFG.papers_cs || [
 const COVER_SAME=_CFG.cover_same||{label:"Same as Inside Pages",val:0.001,price:0.01,factory:false,coatable:false};
 const COVER_SCORING_VALS=_CFG.cover_scoring_vals||[0.01,0.02,0.03,1.01,1.02,2.21,2.22,2.23,2.24,2.25];
 const _INV_NC=_CFG.inv_nc||[0.001,0.002,0.003], _INV_CS=_CFG.inv_cs||[0.01,0.02,0.03,1.01,1.02];
-const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_CS];
+const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_NC,...INV_CS];
+// Papers stocked at the larger 13×27.5 press sheet (everything else is 13×19 only).
+// Oversized jobs (imp<1 on 13×19) must run here; non-stock papers incur the non-inventory fee.
+const LARGE_SHEET_VALS=_CFG.large_sheet_vals||[0.003,0.03]; // 100lb Gloss Text, 100lb Gloss Cardstock
 // Combined paper lists: text weight first, then cardstock with suffix
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
 const isCardstockVal=v=>PAPERS_CS.some(p=>p.val===v);
@@ -460,7 +466,7 @@ function resolveSize(c) {
       const pw=parseFloat(m[1]),ph=parseFloat(m[2]);
       return Math.abs(longest-Math.max(pw,ph))<0.05&&Math.abs(shortest-Math.min(pw,ph))<0.05;
     });
-    if(match) return {imp:match.imp,bindEdge:match.bindEdge,isCustom:false,errors:[],clamped:null};
+    if(match) return {imp:match.imp,bindEdge:match.bindEdge,isCustom:false,errors:[],clamped:null,sheet:"13x19",needsLargeSheet:false};
 
     // Determine spine and open side based on bind direction
     const bindEdge = c.bindDir==="short" ? shortest : longest;
@@ -487,13 +493,21 @@ function resolveSize(c) {
       shortest = newShort;
     }
 
-    const imp = calcCustomImp(longest, shortest, c.bindDir);
+    let imp = calcCustomImp(longest, shortest, c.bindDir);   // 13×19 sheet
+    let sheet = "13x19", needsLargeSheet = false;
+    if (imp < 1) {
+      // Too big to image even one-up on 13×19 → run on the 13×27.5 press sheet
+      // (stocked only for select papers; the non-inventory fee covers the rest).
+      imp = calcCustomImp(longest, shortest, c.bindDir, 27);
+      sheet = "13x27.5";
+      needsLargeSheet = true;
+    }
     const finalBindEdge = c.bindDir==="short" ? shortest : longest;
     if(imp<=0) errors.push("Cannot produce — adjust dimensions.");
-    return {imp:Math.max(imp,0.5),bindEdge:finalBindEdge,isCustom:true,errors,clamped};
+    return {imp:Math.max(imp,0.5),bindEdge:finalBindEdge,isCustom:true,errors,clamped,sheet,needsLargeSheet};
   }
   const p=ALL_SIZES.find(s=>s.label===c.sizeLabel)||ALL_SIZES[0];
-  return {imp:p.imp,bindEdge:p.bindEdge,isCustom:false,errors:[],clamped:null};
+  return {imp:p.imp,bindEdge:p.bindEdge,isCustom:false,errors:[],clamped:null,sheet:"13x19",needsLargeSheet:false};
 }
 
 function calculate(c) {
@@ -579,7 +593,18 @@ function calculate(c) {
   if(c.proof>0){const sf=(PCF.sheetsforlowcosthardcopyproof/tS)>1?1:(PCF.sheetsforlowcosthardcopyproof/tS);P.proof=((c.proof>=3?PCF.proof_hardcopy_cost:PCF.proof_digital_cost)*sf)*N}
   P.diffSize=(sz.bindEdge<=3.5&&sz.bindEdge<=TWO_STAPLE_THRESH&&csInside)?Math.ceil(P.stitching):0;
   const iInv=c.insidePaperType==="cardstock"?INV_CS.includes(c.insidePaper.val):INV_NC.includes(c.insidePaper.val);
-  P.nonInv=(iInv&&COVER_INV.includes(cvr.val))?0:PCF.non_inventory_fee;
+  // Non-inventory fee: in-stock papers are free, non-stock/factory papers pay it.
+  // Oversized jobs (sz.needsLargeSheet) must run on 13×27.5, stocked only for select
+  // papers — so there, "in stock" means both inside AND cover are 13×27.5 papers.
+  let paperInStock;
+  if(sz.needsLargeSheet){
+    const insideLarge=LARGE_SHEET_VALS.includes(c.insidePaper.val);
+    const coverLarge=c.coverMode==="same"?insideLarge:LARGE_SHEET_VALS.includes(cvr.val);
+    paperInStock=insideLarge&&coverLarge;
+  } else {
+    paperInStock=iInv&&COVER_INV.includes(cvr.val);
+  }
+  P.nonInv=paperInStock?0:PCF.non_inventory_fee;
   P.discBW=c.insideColor==="bw"?-(P.press*PCF.bw_discount_rate):0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
   P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate,PCF.easydiscount_max):0;
@@ -731,6 +756,8 @@ function calculate(c) {
     // Size
     bindingEdge:sz.bindEdge,
     isCustom:sz.isCustom,
+    pressSheet:sz.sheet,
+    needsLargeSheet:sz.needsLargeSheet,
     easySize,
     commonSize,
     // Two staple
@@ -1011,7 +1038,7 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
   );
 }
 
-function Panel({result,compact,expanded,onToggleExpand}){
+function Panel({result,compact,debugUnlocked}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
@@ -1131,12 +1158,12 @@ function Panel({result,compact,expanded,onToggleExpand}){
           <div style={{fontSize:10,color:CC.light,marginTop:1}}>{sh.freeDeliveryBizDays}d · included</div>
         </div>
       </div>}
-      <details style={{borderTop:`1px solid ${CC.border}`}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
+      {debugUnlocked&&<details style={{borderTop:`1px solid ${CC.border}`}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
         <div style={{padding:"0 18px 14px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
           <span style={{fontSize:11.5,color:CC.light}}>{r.l}</span>
           <span style={{fontSize:11.5,fontWeight:600,color:r.v<0?CK.cyan:CC.mid}}>{r.v<0?"−":""}${Math.abs(r.v).toFixed(2)}</span>
         </div>))}</div>
-      </details>
+      </details>}
     </div>
   );
 }
@@ -1199,7 +1226,9 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
     {dataUrl:coverArt||placeholder,isBlank:false},
     {dataUrl:backCoverArt||coverArt||backCover,isBlank:false},
   ],[coverArt,backCoverArt,placeholder,backCover]);
-  const clickable=hasArt&&typeof onOpenPreview==="function";
+  // Always clickable when handler is wired — opens the 3D preview modal even
+  // before artwork is uploaded so customers can see how the format previews.
+  const clickable=typeof onOpenPreview==="function";
   return (
     <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
       <div
@@ -1212,7 +1241,7 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
         style={{height:190,borderRadius:0,border:"none",cursor:clickable?"zoom-in":"default"}}>
         {/* drop shadow */}
         <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
-        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
+        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="contain"/>
         {/* top-left eyebrow overlay */}
         <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
           <span style={{display:"inline-flex",gap:3}}>
@@ -1254,7 +1283,8 @@ function MobilePreviewBar(props){
   const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
   const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
   const hasArt=!!coverArt;
-  const clickable=hasArt&&typeof onOpenPreview==="function";
+  // Always clickable when handler is wired — opens preview modal regardless of upload state.
+  const clickable=typeof onOpenPreview==="function";
   return (
     <>
       {/* Inline full card — shows by default above the sections */}
@@ -1283,7 +1313,7 @@ function MobilePreviewBar(props){
         {/* Thumbnail — aspect ratio preserved */}
         <div style={{width:32,height:Math.max(24,Math.min(48,(32*hIn)/wIn)),borderRadius:3,overflow:"hidden",flexShrink:0,background:"#2a2e36",boxShadow:"0 0 0 1px rgba(255,255,255,.12)"}}>
           {hasArt
-            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+            ? <img src={coverArt} alt="" style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>
             : <div style={{width:"100%",height:"100%",background:"linear-gradient(135deg,#e0edff,#f7f3e8)"}}/>
           }
         </div>
@@ -1371,7 +1401,7 @@ function DebugPanel({debug}){
         {d.perSetSheets.map((s,i)=><Row key={i} label={`${s.name}: ${s.qty.toLocaleString()} qty × ${s.pages} pg ÷ 4`} value={s.bookletSheets} unit="booklet sheets" indent/>)}
         <Row label="Booklet sheets total (Σ)" value={d.bookletSheetsTotal} unit="sheets"/>
         <Row label="Imposition (imp)" value={d.imp} unit={`(÷${d.impHalf} for parent)`}/>
-        <Row label="Parent 13×19 sheets (totalSheets)" value={d.parentSheets} unit="sheets"/>
+        <Row label={`Parent ${d.pressSheet} sheets (totalSheets)`} value={d.parentSheets} unit="sheets"/>
 
         <Hdr>Volume & Pricing</Hdr>
         <Row label="Total quantity" value={d.totalQty} unit="pcs"/>
@@ -1383,9 +1413,11 @@ function DebugPanel({debug}){
 
         <Hdr>Size & Binding</Hdr>
         <Row label="Binding edge" value={d.bindingEdge} unit="inches"/>
+        <Row label="Press sheet" value={d.pressSheet}/>
         <Row label="Two staple mode" value={d.twoStapleMode}/>
         <div style={{padding:"4px 0",display:"flex",flexWrap:"wrap"}}>
           <Flag label="Custom size" value={d.isCustom}/>
+          <Flag label="Needs 13×27.5 sheet" value={d.needsLargeSheet}/>
           <Flag label="Easy size" value={d.easySize}/>
           <Flag label="Common size" value={d.commonSize}/>
         </div>
@@ -2943,11 +2975,43 @@ update();
   const PF = { pass: { dot: "#4ade80", text: "#3a7124" }, warn: { dot: "#fbbf24", text: "#b8860b" }, fail: { dot: "#f87171", text: "#c2185b" }, info: { dot: "#60a5fa", text: "#2563eb" } };
 
   // Expose an imperative open-preview hook for the sidebar preview card.
+  // Always set (not gated on hasFile) so the sidebar/mobile preview thumbnails
+  // are clickable even before artwork is uploaded — they open the 3D preview
+  // modal showing placeholder pages so customers can see the format.
   useEffect(() => {
     if (!openPreviewModalRef) return;
-    openPreviewModalRef.current = hasFile ? () => setActiveModal("preview") : null;
+    openPreviewModalRef.current = () => setActiveModal("preview");
     return () => { if (openPreviewModalRef) openPreviewModalRef.current = null; };
-  }, [hasFile, openPreviewModalRef]);
+  }, [openPreviewModalRef]);
+
+  // ── External event bridge for the product-page gallery (pps-calculators.php) ──
+  // Lets the WC gallery (rendered above the calc) swap its image to the user's
+  // uploaded artwork thumbnail, and lets gallery overscroll gestures open the
+  // proof modal showing the artwork with bleed/trim/safety guides.
+  useEffect(() => {
+    // Only emit a thumbnail when the customer has actually uploaded artwork.
+    // displayPages[0].dataUrl is the blank-page placeholder before upload, so
+    // sending it would cause the WC gallery bridge to swap the catalog image
+    // with a blank slate.
+    const thumb = hasFile && displayPages && displayPages[0] && !displayPages[0].isBlank
+      ? displayPages[0].dataUrl
+      : null;
+    try {
+      window.dispatchEvent(new CustomEvent("pps:artwork-changed", {
+        detail: { available: hasFile, thumbnail: thumb }
+      }));
+    } catch (e) { /* CustomEvent unsupported (very old browsers) — ignore */ }
+  }, [hasFile, displayPages]);
+
+  useEffect(() => {
+    const h = (e) => {
+      if (!hasFile) return;
+      const which = (e && e.detail && e.detail.modal === "preview") ? "preview" : "proof";
+      setActiveModal(which);
+    };
+    window.addEventListener("pps:request-proof", h);
+    return () => window.removeEventListener("pps:request-proof", h);
+  }, [hasFile]);
 
   // ── Per-slot upload logic ──
   const slotInputRef = useRef(null);
@@ -3761,7 +3825,7 @@ update();
       {/* ════════════════════════════════════════════════════════════
            PREVIEW MODAL — 3D closed book, page spreads, animations
          ════════════════════════════════════════════════════════════ */}
-      {activeModal === "preview" && hasFile && (
+      {activeModal === "preview" && (
         <div className="bp-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) setActiveModal(null); }}>
           <div className="bp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
@@ -4539,13 +4603,13 @@ function App(){
           {/* SECTION 1: Size */}
           <Sec num={1} title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
             <div style={r2}>
+              <Pil label="Booklet Size" value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
                 ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"10px 32px 10px 12px":"10px 32px 10px 12px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;return `${lo}×${sh}" — Opens to ${nonSpine*2}×${spine}"`})():"Enter dimensions below"}</option></select><span style={ST.selA}><Chev/></span></div></div>
                 : <Sel label="Select Size" value={sizeLabel} onChange={handleSizeLabel}>
                     {SIZE_PRESETS.map(g=><optgroup key={g.group} label={g.group}>{g.items.map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup>)}
                   </Sel>
               }
-              <Pil label="Booklet Size" value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
             </div>
             {isCustom&&<><div style={r3}>
               <TxtNum label="Width (in)" value={customLong} onChange={setCustomLong} min={2.5} max={13.25}/>
@@ -4878,9 +4942,9 @@ function App(){
 
         </div>
         {!mob&&<div style={{width:320,flexShrink:0}}>
-          <div style={{position:"sticky",top:18,zIndex:2,display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
+          <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
             <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
-            <Panel result={result}/>
+            <Panel result={result} debugUnlocked={debugUnlocked}/>
           </div>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>

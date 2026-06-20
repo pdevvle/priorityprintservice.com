@@ -99,6 +99,8 @@ const PCF = Object.assign({
 // DATA: SIZES, FOLDS, PAPERS, OPTIONS
 // ═══════════════════════════════════════════════════════════════
 const SIZE_PRESETS = _CFG.brochure_sizes || [
+  {label:"4.25×5.5",imp:8,long:5.5,short:4.25,easy:true},
+  {label:"4×6",imp:9,long:6,short:4,easy:true},
   {label:"5.5×8.5",imp:4,long:8.5,short:5.5,easy:true},
   {label:"6×9",imp:4,long:9,short:6,easy:true},
   {label:"8.5×11",imp:2,long:11,short:8.5,easy:true},
@@ -186,6 +188,9 @@ const PAPERS_CS = _CFG.papers_cs || [
 ];
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
 const INV_VALS=[0.001,0.002,0.003,0.01,0.02,0.03,1.01,1.02];
+// Papers stocked at the larger 13×27.5 press sheet. Oversized flats (imp<1 on 13×19)
+// must run here; non-stock papers incur the non-inventory fee.
+const LARGE_SHEET_VALS=_CFG.large_sheet_vals||[0.003,0.03]; // 100lb Gloss Text, 100lb Gloss Cardstock
 
 const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
 const COAT_SIDES=[{label:"Front Only",val:1,mult:1,daysMult:1},{label:"Back Only",val:1.02,mult:1,daysMult:1},{label:"Both Sides",val:2,mult:2,daysMult:2}];
@@ -253,12 +258,18 @@ const MNAMES=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov",
 // ═══════════════════════════════════════════════════════════════
 // IMPOSITION CALCULATION
 // ═══════════════════════════════════════════════════════════════
-function calcBrochureImp(longEdge, shortEdge) {
-  const r1 = 18.5 / longEdge;
-  const across = r1 < 0.5 ? 0 : r1 < 1 ? 0.5 : r1 < 1.48 ? 1 : r1 < 3 ? 2 : r1 < 4 ? 3 : r1 < 5 ? 4 : r1 < 6 ? 5 : r1 < 7 ? 6 : r1 < 8 ? 7 : 8;
-  const r2 = 12.5 / shortEdge;
-  const down = r2 < 2 ? 1 : r2 < 3 ? 2 : r2 < 4 ? 3 : 4;
-  return across * down;
+// sheetLong = usable long-axis inches. 18.5 → 13×19 stock (default); 27 → 13×27.5 stock.
+// Tries both sheet orientations and keeps the better yield.
+function calcBrochureImp(longEdge, shortEdge, sheetLong) {
+  const L = sheetLong || 18.5;
+  function calc(w, h) {
+    const r1 = L / w;
+    const across = r1 < 0.5 ? 0 : r1 < 1 ? 0.5 : r1 < 1.48 ? 1 : r1 < 3 ? 2 : r1 < 4 ? 3 : r1 < 5 ? 4 : r1 < 6 ? 5 : r1 < 7 ? 6 : r1 < 8 ? 7 : 8;
+    const r2 = 12.5 / h;
+    const down = r2 < 1 ? 0 : r2 < 2 ? 1 : r2 < 3 ? 2 : r2 < 4 ? 3 : 4;
+    return across * down;
+  }
+  return Math.max(calc(longEdge, shortEdge), calc(shortEdge, longEdge));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -287,6 +298,15 @@ function calculate(c) {
     if (longE > 27 || shortE > 12.5) return { error: ["Maximum size: 27×12.5 inches flat"] };
     imp = calcBrochureImp(longE, shortE);
     if (imp <= 0) return { error: ["Size too large for press sheet"] };
+  }
+
+  // Two-sheet rule: a flat piece too big to image one-up on 13×19 (imp<1) runs on the
+  // larger 13×27.5 press sheet — stocked only for select papers (non-stock pays the fee).
+  let needsLargeSheet = false, pressSheet = "13x19";
+  if (imp < 1) {
+    imp = calcBrochureImp(longE, shortE, 27);
+    needsLargeSheet = true;
+    pressSheet = "13x27.5";
   }
 
   const qty = c.qty;
@@ -322,7 +342,7 @@ function calculate(c) {
     if (!exactMatch) {
       const similar = SIZE_PRESETS.some(s => Math.abs(s.long - longE) <= 0.5 && Math.abs(s.short - shortE) <= 0.5);
       if (similar) sizeTierMult = 1.15;
-      else if (fold.val === "flat") sizeTierMult = 1.25;
+      else if (fold.val === "flat") sizeTierMult = 1.10;
       else sizeTierMult = 1.5;
     }
   }
@@ -451,8 +471,9 @@ function calculate(c) {
     P.proof = (c.proof >= 3 ? PCF.proof_hardcopy_cost : PCF.proof_digital_cost) * sf;
   }
 
-  // Non-inventory surcharge
-  P.nonInv = INV_VALS.includes(paper.val) ? 0 : PCF.non_inventory_fee;
+  // Non-inventory surcharge. Oversized flats (needsLargeSheet) must run on 13×27.5,
+  // stocked only for LARGE_SHEET_VALS papers; everything else there pays the fee.
+  P.nonInv = (needsLargeSheet ? LARGE_SHEET_VALS.includes(paper.val) : INV_VALS.includes(paper.val)) ? 0 : PCF.non_inventory_fee;
 
   // Flat base rate per order
   P.baseRate = PCF.backend_base_rate;
@@ -1260,6 +1281,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const bLabel = hasIO ? "Back / Inside" : "Back";
   const [frontArt, setFrontArt] = useState(null); // {dataUrl, file, dims:{w,h}}
   const [backArt, setBackArt] = useState(null);
+  useEffect(() => { if (sides === 1) { setBackArt(null); setSide("front"); } }, [sides]);
   // Push frontArt up to the parent so the sidebar preview can mirror it
   useEffect(() => { if (onCoverArt) onCoverArt(frontArt); }, [frontArt, onCoverArt]);
   // Expose imperative open-preview hook for the sidebar preview card
@@ -2406,8 +2428,8 @@ generate();
           })()}
 
           {/* Individual side upload slots */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-            {[{s:"front",label:fLabel,art:frontArt,setArt:setFrontArt,inputRef:frontInputRef},{s:"back",label:bLabel,art:backArt,setArt:setBackArt,inputRef:backInputRef}].map(({s,label,art,setArt,inputRef}) => {
+          <div style={{ display: "grid", gridTemplateColumns: sides === 1 ? "1fr" : "1fr 1fr", gap: 8, marginTop: 8 }}>
+            {[{s:"front",label:fLabel,art:frontArt,setArt:setFrontArt,inputRef:frontInputRef},...(sides === 2 ? [{s:"back",label:bLabel,art:backArt,setArt:setBackArt,inputRef:backInputRef}] : [])].map(({s,label,art,setArt,inputRef}) => {
               const handleSlotFile = async (file) => {
                 if (!file) return;
                 const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
@@ -3175,6 +3197,255 @@ function RichTip({ children, tipKey, title, content, dark }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// CART-SUBMISSION HELPERS  (parity with saddle stitch + perfect bound)
+// ═══════════════════════════════════════════════════════════════
+
+function buildSummary(config, result) {
+  const lines = [];
+  const r = result;
+  const sh = r.shipping || {};
+
+  // Size + fold + quantity
+  const sizeStr = config.sizeMode === "custom"
+    ? `${config.longEdge}×${config.shortEdge}" custom`
+    : config.sizeLabel;
+  const foldName = (FOLD_TYPES.find(f => f.val === config.foldType) || { label: config.foldType }).label;
+  lines.push(`${config.qty.toLocaleString()} × ${sizeStr} · ${foldName}` + (config.jobName ? ` "${config.jobName}"` : ""));
+
+  // Paper + print
+  const cName = c => c === "bw" ? "Black & White" : "Full Color";
+  lines.push(`Paper: ${config.paper.label}`);
+  const sideStr = config.sides === 2
+    ? `Front: ${cName(config.frontColor)} · Back: ${cName(config.backColor)}`
+    : `Single-sided · ${cName(config.frontColor)}`;
+  lines.push(sideStr);
+  if (config.vivid) lines.push("Enhanced Vivid Print");
+
+  // Finishing — only when selected
+  if (config.coating > 0) {
+    const ct = COATINGS.find(o => o.val === config.coating);
+    if (ct) lines.push(`Coating: ${ct.label}` + (config.coatSides === 2 ? " (both sides)" : ""));
+  }
+  if (config.bundling > 0) {
+    const b = BUNDLING.find(o => o.val === config.bundling);
+    if (b) lines.push(`Bundling: ${b.label}`);
+  }
+  if (config.perforation > 0) {
+    const p = PERF_OPTS.find(o => o.val === config.perforation);
+    if (p) lines.push(`Perforation: ${p.label} (${config.perfDir})`);
+  }
+  if (config.roundCorner > 0) {
+    const rc = CORNERS.find(o => o.val === config.roundCorner);
+    if (rc) lines.push(`Round Corner: ${rc.label}`);
+  }
+
+  // Artwork
+  const art = ART_OPTS.find(x => x.val === config.artwork);
+  if (art) lines.push(art.label);
+  if (config.bleed > 0) {
+    const b = BLEED_OPTS.find(x => x.val === config.bleed);
+    if (b) lines.push(b.label);
+  }
+  if (config.proof > 0) lines.push(config.proof >= 3 ? "Hardcopy Proof" : "Digital Proof");
+
+  // Delivery
+  if (config.needByDate && sh.rushCost > 0) {
+    lines.push(`Rush: ${sh.bizDaysToDate} business days · ${sh.rushMultiplier.toFixed(2)}×`);
+  } else {
+    lines.push(`Standard delivery: ${sh.freeDeliveryBizDays} business days`);
+  }
+  lines.push(`Ship to: ${config.shipState}${config.shipAddr?.zip ? " " + config.shipAddr.zip : ""}`);
+
+  return lines.join("\n");
+}
+
+function buildMetadata(config, result) {
+  const sh = result.shipping || {};
+  return JSON.stringify({
+    // Calc identification
+    calcType: "brochure",
+    calcLabel: "Brochure / Flat Print",
+    // Customer selections
+    jobName: config.jobName || "",
+    qty: config.qty,
+    sizeMode: config.sizeMode,
+    sizeLabel: config.sizeLabel,
+    longEdge: config.longEdge,
+    shortEdge: config.shortEdge,
+    foldType: config.foldType,
+    foldDir: config.foldDir,
+    frontColor: config.frontColor,
+    backColor: config.backColor,
+    sides: config.sides,
+    paper: config.paper,
+    vivid: config.vivid,
+    coating: config.coating,
+    coatSides: config.coatSides,
+    bundling: config.bundling,
+    perforation: config.perforation,
+    perfDir: config.perfDir,
+    perfPositions: config.perfPositions,
+    roundCorner: config.roundCorner,
+    artwork: config.artwork,
+    bleed: config.bleed,
+    proof: config.proof,
+    proofAddrSame: config.proofAddrSame,
+    proofAddr: config.proofAddr || {},
+    canvaLink: config.canvaLink || "",
+    canvaInstructions: config.canvaInstructions || "",
+    shipState: config.shipState,
+    shipZip: config.shipAddr?.zip || "",
+    shipAddr: config.shipAddr || {},
+    needByDate: config.needByDate,
+    // Shipping — durations, not absolute dates
+    transitDays: sh.transitDays,
+    productionBizDays: sh.productionBizDays,
+    requestedBizDays: sh.bizDaysToDate || sh.freeDeliveryBizDays,
+    freeDeliveryBizDays: sh.freeDeliveryBizDays,
+    rushMultiplier: sh.rushMultiplier,
+    rushCost: sh.rushCost,
+    productionStartDate: sh.productionStartYMD,
+    mustShipByDate: sh.mustShipYMD,
+    estimatedDeliveryDate: config.needByDate || sh.freeDeliveryYMD,
+    // Computed results
+    total: result.total,
+    baseTotal: result.baseTotal,
+    perUnit: result.perUnit,
+    totalQty: result.qty,
+    days: result.days,
+    debug: result.debug,
+  });
+}
+
+// Upload a FormData via XHR with progress callback — returns parsed JSON response
+function uploadWithProgress(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      try { resolve(JSON.parse(xhr.responseText)); }
+      catch (err) { reject(new Error("Invalid server response")); }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.send(formData);
+  });
+}
+
+async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress) {
+  const PPS = window.PPS_CONFIG || {};
+
+  // ── Standalone mode: download artwork + order summary as a zip-like package ──
+  if (!PPS.ajaxUrl) {
+    console.warn("PPS: Standalone mode — triggering local download.");
+    const lines = [
+      "PPS Order Summary", "=".repeat(40), "",
+      `Total: $${total.toFixed(2)}`, `Rush: $${rushCost.toFixed(2)}`, "",
+      "Summary:", summary, "",
+      "Metadata:", metadata, "",
+      `Artwork: ${artFiles.type === "files" ? artFiles.list.map(f => f.name).join(", ") : artFiles.type === "existing" ? artFiles.path : "none"}`, ""
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "pps_order_summary.txt";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    if (artFiles.type === "files") {
+      for (const file of artFiles.list) {
+        const url = URL.createObjectURL(file);
+        const dl = document.createElement("a");
+        dl.href = url;
+        dl.download = file.name;
+        dl.click();
+        URL.revokeObjectURL(url);
+      }
+    }
+    alert(`Standalone mode: downloaded order summary${artFiles.type === "files" ? " + " + artFiles.list.length + " artwork file(s)" : ""}.`);
+    return;
+  }
+
+  // ── Server mode ──
+  let artworkPath = "";
+  const uploadedFiles = [];
+
+  if (artFiles.type === "files") {
+    const total_files = artFiles.list.length;
+    for (let fi = 0; fi < total_files; fi++) {
+      const file = artFiles.list[fi];
+      // The first file is the customer's raw artwork — required, becomes the
+      // order's artwork reference. Later entries are supplementary deliverables
+      // (front + back sheets, etc.); failures on them are logged but don't
+      // block checkout.
+      const isPrimary = fi === 0;
+      try {
+        const fd = new FormData();
+        fd.append("action", "pps_upload_artwork");
+        fd.append("nonce", PPS.uploadNonce);
+        fd.append("artwork", file, file.name);
+        if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct: 0 });
+        const data = await uploadWithProgress(PPS.ajaxUrl, fd, (pct) => {
+          if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct });
+        });
+        if (data.success && data.data && data.data.path) {
+          if (!artworkPath) artworkPath = data.data.path;
+          uploadedFiles.push({ path: data.data.path, name: file.name });
+        } else {
+          const reason = (data && data.data) || "Unknown error";
+          if (isPrimary) {
+            alert("Artwork upload failed: " + reason + "\nPlease try again.");
+            return;
+          }
+          try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload rejected: ${reason}`); } catch (e) {}
+        }
+      } catch (err) {
+        if (isPrimary) {
+          alert("Artwork upload error: " + err.message + "\nPlease try again.");
+          return;
+        }
+        try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload error: ${err.message}`); } catch (e) {}
+      }
+    }
+    if (!artworkPath) {
+      alert("Artwork upload failed: the artwork file could not be uploaded.\nPlease try again.");
+      return;
+    }
+    if (onProgress) onProgress({ phase: "cart", pct: 100 });
+  } else if (artFiles.type === "existing") {
+    artworkPath = artFiles.path;
+  }
+
+  // Add to cart
+  try {
+    const fd = new FormData();
+    fd.append("action", "pps_add_to_cart");
+    fd.append("nonce", PPS.cartNonce);
+    fd.append("product_id", PPS.productId);
+    fd.append("pps_price", total.toFixed(2));
+    fd.append("pps_rush", rushCost.toFixed(2));
+    fd.append("pps_summary", summary);
+    fd.append("pps_metadata", metadata);
+    const parsed = JSON.parse(metadata);
+    fd.append("pps_biz_days", String(parsed.requestedBizDays || parsed.freeDeliveryBizDays || 5));
+    if (artworkPath) fd.append("pps_artwork_path", artworkPath);
+    if (uploadedFiles.length) fd.append("pps_artwork_files", JSON.stringify(uploadedFiles));
+
+    const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: fd });
+    const data = await resp.json();
+    if (data.success) {
+      window.location.href = PPS.cartUrl;
+    } else {
+      alert("Error: " + (data.data || "Could not add to cart."));
+    }
+  } catch (err) {
+    alert("Network error: " + err.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
@@ -3231,6 +3502,10 @@ function App() {
   const [needByDate, setNeedByDate] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [mobPricing, setMobPricing] = useState(false);
+  // Cart submission state — matches saddle stitch + perfect bound
+  const [artFiles, setArtFiles] = useState({ type: "none" });
+  const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
   // Question form modal state
   const [qOpen, setQOpen] = useState(false);
   const [qName, setQName] = useState("");
@@ -3301,6 +3576,12 @@ function App() {
       // Shipping (no date — recalculated fresh)
       if (rc.shipState) setShipState(rc.shipState);
       if (rc.shipAddr) setShipAddr(rc.shipAddr);
+
+      // Existing artwork (edit mode — file already on server)
+      if (rc.artworkPath) setArtFiles({ type: "existing", path: rc.artworkPath });
+      else if (PPS.existingArtwork && PPS.existingArtwork.path) {
+        setArtFiles({ type: "existing", path: PPS.existingArtwork.path });
+      }
 
       // Open all sections so customer can see everything
       setOp({ s1: true, s2: true, s3: true, s4: true, s5: true });
@@ -3436,6 +3717,30 @@ function App() {
     });
   };
 
+  const handleAddToOrder = async () => {
+    if (!result || result.error || submitting) return;
+    setSubmitting(true);
+    setUploadProgress(null);
+    const config = {
+      jobName, qty,
+      sizeMode, sizeLabel, longEdge, shortEdge,
+      foldType, foldDir, frontColor, backColor, sides,
+      paper, vivid, coating, coatSides, bundling,
+      perforation, perfDir, perfPositions, roundCorner,
+      artwork, bleed, proof,
+      proofAddrSame, proofAddr,
+      canvaLink, canvaInstructions,
+      shipState, shipAddr, needByDate,
+    };
+    const summary  = buildSummary(config, result);
+    const metadata = buildMetadata(config, result);
+    const rushCost = result.shipping?.rushCost || 0;
+    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress);
+    // If still here (standalone mode), re-enable
+    setUploadProgress(null);
+    setSubmitting(false);
+  };
+
   const handleQuestionSubmit = async (e) => {
     e.preventDefault();
     if (qStatus === "sending" || qStatus === "sent") return;
@@ -3537,7 +3842,7 @@ function App() {
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sec num={1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")}>
+          <Sec num={1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
@@ -3703,7 +4008,7 @@ function App() {
                     setLongEdge(parseFloat(long.toFixed(3)));
                     setShortEdge(parseFloat(short.toFixed(3)));
                   }}
-                  onArtwork={(a) => {/* artFiles state if needed */}}
+                  onArtwork={setArtFiles}
                   onCoverArt={setCoverArt}
                   openPreviewModalRef={openPreviewModalRef}
                   debug={proofDebug}
@@ -3859,11 +4164,24 @@ function App() {
         {/* Desktop sidebar — pointer-events:none only on read-only preview+Panel
             so the projections rows, Share button, and Debug button (siblings
             below) still receive clicks. Mirrors the saddle calculator's split. */}
-        {!mob && <div style={{ width: 320, flexShrink: 0, position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+        {!mob && <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
             <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} />
           </div>
+          <button type="button" onClick={handleAddToOrder} disabled={!!result?.error || submitting} style={{ width: "100%", marginTop: 10, padding: submitting && uploadProgress ? "10px 12px 6px" : "12px", borderRadius: 6, border: "none", background: (result?.error || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error || submitting) ? .5 : 1, transition: "all .2s", overflow: "hidden" }}>
+            {submitting && uploadProgress ? (
+              <div>
+                <div style={{ fontSize: 12 }}>{uploadProgress.phase === "upload" ? `Uploading file(s)… ${uploadProgress.pct}%` : "Adding…"}</div>
+                <div style={{ width: "100%", height: 3, borderRadius: 2, background: "rgba(255,255,255,.2)", overflow: "hidden", marginTop: 4 }}>
+                  <div style={{ height: "100%", borderRadius: 2, background: "#fff", transition: "width .15s", width: uploadProgress.phase === "upload"
+                    ? `${((uploadProgress.fileIdx / uploadProgress.fileCount) + (uploadProgress.pct / 100 / uploadProgress.fileCount)) * 100}%`
+                    : "100%"
+                  }}/>
+                </div>
+              </div>
+            ) : submitting ? "Uploading…" : "Add to Order"}
+          </button>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#f8fafc",borderBottom:`1px solid ${CC.border}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.primary}}>Quantity Pricing</div>
@@ -3982,7 +4300,20 @@ function App() {
             {!mobExpanded && debugUnlocked&&<button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#f8fafc", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
               {showDebug ? "✕" : "⚙"}
             </button>}
-            <button type="button" style={{ flexShrink: 0, padding: "12px 16px", borderRadius: 6, border: "none", background: result?.error ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: result?.error ? "default" : "pointer", fontFamily: "inherit", opacity: result?.error ? .5 : 1, width: mobExpanded ? "100%" : undefined }} disabled={!!result?.error}>Add to Order</button>
+            <button type="button" onClick={handleAddToOrder} style={{ flexShrink: 0, padding: "12px 18px", borderRadius: 6, border: "none", background: (result?.error || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error || submitting) ? .5 : 1, whiteSpace: "nowrap", minWidth: submitting && uploadProgress ? 140 : undefined }}
+              disabled={!!result?.error || submitting}>
+              {submitting && uploadProgress ? (
+                <div>
+                  <div style={{ fontSize: 12 }}>{uploadProgress.phase === "upload" ? `Uploading… ${uploadProgress.pct}%` : "Adding…"}</div>
+                  <div style={{ width: "100%", height: 3, borderRadius: 2, background: "rgba(255,255,255,.2)", overflow: "hidden", marginTop: 4 }}>
+                    <div style={{ height: "100%", borderRadius: 2, background: "#fff", transition: "width .15s", width: uploadProgress.phase === "upload"
+                      ? `${((uploadProgress.fileIdx / uploadProgress.fileCount) + (uploadProgress.pct / 100 / uploadProgress.fileCount)) * 100}%`
+                      : "100%"
+                    }}/>
+                  </div>
+                </div>
+              ) : submitting ? "Uploading…" : "Add to Order"}
+            </button>
           </div>
         </div>
       </>}

@@ -467,30 +467,211 @@ add_action( 'wp', function() {
         wp_enqueue_script( 'pps-babel', 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
     });
 
+    // ── Kill WC's gallery slider / lightbox / zoom on calc product pages ──
+    // Theme support is read at gallery render time; turning it off here means
+    // WC outputs plain stacked images instead of Flexslider-wrapped DOM with
+    // inline height/transform styles. Lets our CSS scroll-snap carousel
+    // work on simple DOM rather than fighting JS-applied inline styles.
+    remove_theme_support( 'wc-product-gallery-slider' );
+    remove_theme_support( 'wc-product-gallery-lightbox' );
+    remove_theme_support( 'wc-product-gallery-zoom' );
+
     // ── External-JS hardening on calculator product pages ──
     // The calc's React mount is fragile to non-React DOM mutations. We
-    // suppress the two known production sources:
+    // suppress two known production sources surgically — keeping WP Rocket's
+    // page cache, minify, CSS optimization, and CDN active so we don't lose
+    // Core Web Vitals headroom on a high-SEO-value page.
+    //
     //  1) WCPA's frontend bundle — form is CSS-hidden but its JS still
     //     mounts and mutates fields that can collide with React.
-    //  2) WP Rocket lazy-load + delay-JS — both rewrite DOM attributes
-    //     post-mount, producing "Failed to execute 'removeChild' on Node"
-    //     errors after artwork approval.
+    //  2) WP Rocket Delay-JS — would defer the React/Babel/jsPDF bundle until
+    //     first user interaction, so the calc never paints on page load.
+    //     Excluded by URL pattern via rocket_delay_js_exclusions; delay-JS
+    //     stays active for analytics, social embeds, and everything else.
+    //  3) WP Rocket Lazy-Load — only the images React creates dynamically
+    //     (proof modal, 3D preview spreads, magnifier overlays) cause the
+    //     "Failed to execute 'removeChild' on Node" errors. Excluded by
+    //     selector via rocket_lazyload_excluded_attributes; header, gallery,
+    //     and footer images keep lazy-load for LCP.
     add_action( 'wp_enqueue_scripts', function() {
         foreach ( array( 'wcpa-front', 'wcpa-shared', 'wcpa_front', 'wcpa-modal', 'wcpa-frontend' ) as $h ) {
             wp_dequeue_script( $h );
             wp_dequeue_style( $h );
         }
+        // Belt-and-suspenders: theme support is gone (above), but some themes
+        // enqueue these unconditionally. Dropping them here keeps the page
+        // payload trim.
+        foreach ( array( 'flexslider', 'photoswipe', 'photoswipe-ui-default', 'wc-single-product', 'zoom' ) as $h ) {
+            wp_dequeue_script( $h );
+            wp_dequeue_style( $h );
+        }
     }, 100 );
-    add_filter( 'do_rocket_lazyload',          '__return_false' );
-    add_filter( 'do_rocket_lazyload_iframes',  '__return_false' );
-    add_filter( 'do_rocket_delay_js',          '__return_false' );
-    add_filter( 'rocket_lazyload_excluded_src', function( $excluded ) {
+    add_filter( 'rocket_delay_js_exclusions', function( $excluded ) {
+        $excluded[] = '/unpkg\.com/react';
+        $excluded[] = '/unpkg\.com/react-dom';
+        $excluded[] = '/unpkg\.com/@babel/standalone';
+        $excluded[] = '/unpkg\.com/jspdf';
+        $excluded[] = '/cdnjs\.cloudflare\.com/ajax/libs/pdf\.js';
         $excluded[] = 'pps-calculator';
         return $excluded;
     } );
+    add_filter( 'rocket_lazyload_excluded_attributes', function( $excluded ) {
+        // Exclude only images inside the calc's React-controlled DOM. Modal
+        // panels (.bp-modal-bg / .bp-modal), 3D book scenes (.bp-scene), and
+        // page faces (.bp-page, .bp-face) cover every dynamically-created
+        // <img> the calc renders. WC gallery, hero, and chrome images stay
+        // lazy-loaded.
+        $excluded[] = 'class*="bp-modal"';
+        $excluded[] = 'class*="bp-scene"';
+        $excluded[] = 'class*="bp-page"';
+        $excluded[] = 'class*="bp-face"';
+        $excluded[] = 'data-pps-calc';
+        return $excluded;
+    } );
 
-    // Embed calculator inline
-    add_action( 'woocommerce_after_single_product_summary', function() use ( $filepath, $product_id ) {
+    // ── Peek-carousel gallery + artwork-hides-gallery bridge ──
+    // ── Custom gallery — replace WC default render entirely ──
+    // Strategy: skip WooCommerce's default gallery render (and everything
+    // any third-party plugin like Astra Pro / WC Gallery Slider / PhotoSwipe
+    // adds on top of it) by removing the woocommerce_show_product_images
+    // callback. We emit our own .pps-gallery markup at the same hook so the
+    // calc still renders directly below. Anyone hooked into the WC gallery
+    // classes finds nothing to enhance.
+    remove_action( 'woocommerce_before_single_product_summary', 'woocommerce_show_product_images', 20 );
+    add_action( 'woocommerce_before_single_product_summary', function() use ( $product_id ) {
+        $product = wc_get_product( $product_id );
+        if ( ! $product ) return;
+        $image_ids = array();
+        $featured  = $product->get_image_id();
+        if ( $featured ) $image_ids[] = (int) $featured;
+        foreach ( (array) $product->get_gallery_image_ids() as $gid ) {
+            if ( $gid && ! in_array( (int) $gid, $image_ids, true ) ) $image_ids[] = (int) $gid;
+        }
+        if ( empty( $image_ids ) ) return;
+        echo '<div class="pps-gallery" role="region" aria-label="Product images">';
+        echo '<div class="pps-gallery__track">';
+        foreach ( $image_ids as $id ) {
+            $src = wp_get_attachment_image_url( $id, 'woocommerce_single' );
+            if ( ! $src ) $src = wp_get_attachment_image_url( $id, 'large' );
+            if ( ! $src ) continue;
+            $alt = trim( strip_tags( get_post_meta( $id, '_wp_attachment_image_alt', true ) ) );
+            printf(
+                '<div class="pps-gallery__slide"><img src="%s" alt="%s" loading="lazy" decoding="async" /></div>',
+                esc_url( $src ),
+                esc_attr( $alt )
+            );
+        }
+        echo '</div></div>';
+    }, 20 );
+
+    // ── Peek-carousel CSS + artwork-hides-gallery bridge ──
+    // Native CSS scroll-snap; each slide is 85% wide, 7.5% gutters reveal the
+    // prev/next image edges. No JS slider, no lightbox. When the calc emits
+    // pps:artwork-changed { available: true }, body.pps-artwork-uploaded hides
+    // .pps-gallery — calc sidebar preview becomes the only artwork surface.
+    add_action( 'wp_head', function() {
+        ?>
+        <style id="pps-peek-carousel">
+        /* Hide WC default gallery if any plugin re-injects it after our
+           remove_action above (e.g. Astra Pro's gallery enhancer).
+           Our own .pps-gallery is the only carousel that should show. */
+        .woocommerce-product-gallery,
+        .astra-product-images,
+        .ast-product-gallery-layout-vertical { display: none !important; }
+
+        /* Sticky parallax needs overflow: visible up the ancestor chain.
+           Common WC/theme containers get the override. */
+        .single-product .product,
+        .single-product .content-area,
+        .single-product .site-main,
+        .single-product .entry-content,
+        .single-product main { overflow: visible !important; }
+
+        .pps-gallery {
+            position: sticky;
+            top: 0;
+            z-index: 0;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        /* Parallax overlay — the calc wrap slides up over the sticky gallery. */
+        #pps-calculator-wrap {
+            position: relative !important;
+            z-index: 1 !important;
+            background: #fff !important;
+            margin-top: -28px !important;
+            padding-top: 28px !important;
+            border-radius: 24px 24px 0 0 !important;
+            box-shadow: 0 -12px 32px rgba(0,0,0,.08) !important;
+        }
+        .pps-gallery__track {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            scroll-padding-inline: 7.5%;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+            margin: 0;
+            padding: 0 7.5%;
+            max-height: 60vh;
+        }
+        .pps-gallery__track::-webkit-scrollbar { display: none; }
+        .pps-gallery__slide {
+            flex: 0 0 85%;
+            scroll-snap-align: center;
+            margin: 0;
+            padding: 0;
+            display: block;
+            background: transparent;
+        }
+        .pps-gallery__slide img {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-width: 100%;
+            max-height: 60vh;
+            margin: 0;
+            padding: 0;
+            object-fit: contain;
+            cursor: grab;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        .pps-gallery__slide img:active { cursor: grabbing; }
+        /* Artwork-uploaded state — calc owns the visual now. */
+        body.pps-artwork-uploaded .pps-gallery { display: none !important; }
+        </style>
+        <?php
+    } );
+    add_action( 'wp_footer', function() {
+        ?>
+        <script>
+        (function() {
+            const body = document.body;
+            window.addEventListener('pps:artwork-changed', (e) => {
+                const detail = (e && e.detail) || {};
+                if (detail.available) {
+                    body.classList.add('pps-artwork-uploaded');
+                } else {
+                    body.classList.remove('pps-artwork-uploaded');
+                }
+            });
+        })();
+        </script>
+        <?php
+    } );
+
+    // Embed calculator inline — render immediately after the product gallery.
+    // WC hooks pps_show_product_images into woocommerce_before_single_product_summary
+    // at priority 20, so priority 25 fires right after the gallery and before
+    // the summary block (price/title/add-to-cart, which we hide via CSS anyway).
+    add_action( 'woocommerce_before_single_product_summary', function() use ( $filepath, $product_id ) {
         $html  = file_get_contents( $filepath );
         $parts = pps_parse_calculator_html( $html );
 
@@ -621,7 +802,7 @@ add_action( 'wp', function() {
         if ( $parts['app_code'] ) {
             echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
         }
-    }, 5 );
+    }, 25 );
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -2399,9 +2580,26 @@ add_action( 'wp_enqueue_scripts', function() {
 }, 100 );
 add_action( 'wp', function() {
     if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
-    add_filter( 'do_rocket_lazyload',         '__return_false' );
-    add_filter( 'do_rocket_lazyload_iframes', '__return_false' );
-    add_filter( 'do_rocket_delay_js',         '__return_false' );
+    // Surgical exclusions only — keep page cache, minify, CSS optimization,
+    // and CDN active on preset URLs (same SEO rationale as the product-page
+    // block above). See that block for the per-filter explanation.
+    add_filter( 'rocket_delay_js_exclusions', function( $excluded ) {
+        $excluded[] = '/unpkg\.com/react';
+        $excluded[] = '/unpkg\.com/react-dom';
+        $excluded[] = '/unpkg\.com/@babel/standalone';
+        $excluded[] = '/unpkg\.com/jspdf';
+        $excluded[] = '/cdnjs\.cloudflare\.com/ajax/libs/pdf\.js';
+        $excluded[] = 'pps-calculator';
+        return $excluded;
+    } );
+    add_filter( 'rocket_lazyload_excluded_attributes', function( $excluded ) {
+        $excluded[] = 'class*="bp-modal"';
+        $excluded[] = 'class*="bp-scene"';
+        $excluded[] = 'class*="bp-page"';
+        $excluded[] = 'class*="bp-face"';
+        $excluded[] = 'data-pps-calc';
+        return $excluded;
+    } );
 }, 5 );
 
 /**
