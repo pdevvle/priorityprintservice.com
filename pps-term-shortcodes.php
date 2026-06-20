@@ -30,7 +30,7 @@ body.tax-product_cat{overflow-x:hidden}
 .term-description{max-width:100%;padding:0}
 
 /* ── Hero banner ── */
-.pps-cat-hero{position:relative;padding:80px 6vw 72px;color:#fff;background-size:cover;background-position:center;background-color:#0f172a;width:100vw;margin-left:50%;transform:translateX(-50%);box-sizing:border-box}
+.pps-cat-hero{position:relative;padding:80px max(40px,calc((100vw - var(--pps-max-w,1200px))/2 + 40px)) 72px;color:#fff;background-size:cover;background-position:center;background-color:#0f172a;width:100vw;margin-left:50%;transform:translateX(-50%);box-sizing:border-box}
 .pps-cat-hero::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,rgba(15,23,42,.91) 0%,rgba(30,41,59,.88) 60%,rgba(51,65,85,.86) 100%);z-index:0}
 .pps-cat-hero>*{position:relative;z-index:1}
 .pps-cat-hero-title{font-size:36px;font-weight:800;letter-spacing:-.3px;margin:0 0 14px;line-height:1.2}
@@ -43,7 +43,9 @@ body.tax-product_cat{overflow-x:hidden}
 .pps-cat-usp-icon{width:22px;height:22px;border-radius:50%;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
 
 /* ── Content body ── */
-.pps-cat-body{padding:32px 40px 24px}
+.woocommerce-products-header{max-width:var(--pps-max-w,1200px);margin:0 auto;padding:24px 40px 0;box-sizing:border-box}
+.pps-cat-body{max-width:var(--pps-max-w,1200px);margin:0 auto;padding:32px 40px 24px;box-sizing:border-box}
+ul.products{max-width:var(--pps-max-w,1200px)!important;margin-left:auto!important;margin-right:auto!important;padding-left:40px!important;padding-right:40px!important;box-sizing:border-box}
 .term-description h2{font-size:20px;font-weight:700;color:#0f172a;margin:32px 0 12px;padding:0 0 0 14px;border-left:3px solid #4f46e5;border-bottom:none;line-height:1.3}
 .term-description h2:first-of-type{margin-top:8px}
 .term-description>p,.pps-cat-body>p{font-size:15px;line-height:1.75;color:#475569;margin-bottom:16px}
@@ -110,7 +112,9 @@ ul.products li.product img{border-radius:8px}
 .pps-cat-usps{grid-template-columns:1fr 1fr}
 .pps-cat-usp{border-bottom:1px solid #e2e8f0}
 .pps-cat-usp:nth-child(2){border-right:0}
+.woocommerce-products-header{padding:20px 24px 0}
 .pps-cat-body{padding:24px 24px 16px}
+ul.products{padding-left:24px!important;padding-right:24px!important}
 }
 @media(max-width:480px){
 .pps-cat-hero{padding:44px 20px 36px}
@@ -118,7 +122,9 @@ ul.products li.product img{border-radius:8px}
 .pps-cat-hero-sub{font-size:14px}
 .pps-cat-usps{grid-template-columns:1fr}
 .pps-cat-usp{border-right:0;justify-content:flex-start}
+.woocommerce-products-header{padding:16px 16px 0}
 .pps-cat-body{padding:20px 16px 12px}
+ul.products{padding-left:16px!important;padding-right:16px!important}
 .pps-cat-grid{grid-template-columns:1fr}
 .pps-cat-addon-grid{grid-template-columns:1fr}
 .pps-cat-callout{padding:18px 20px}
