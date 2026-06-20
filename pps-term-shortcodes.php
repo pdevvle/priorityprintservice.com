@@ -327,6 +327,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $link = trim( $a['link'] );
     if ( ! $link ) return '';
 
+    $calc = $a['calc'];
+    $is_booklet = in_array( $calc, array( 'saddle', 'perfect-bound', 'coupon' ), true );
+
     $id = 'pps-wiz-' . wp_unique_id();
 
     // ── Step data ──
@@ -352,28 +355,42 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         '16pt Coated C2S'            => 'Premium double-coated — maximum durability',
     );
 
-    $folds = array(
-        array( 'val' => 'flat',        'label' => 'Flat — No Folding',       'desc' => 'Single sheet — flyers, handouts, inserts' ),
-        array( 'val' => 'bifold',      'label' => 'Bifold (2 Panel)',        'desc' => 'Folded in half — menus, programs, invitations' ),
-        array( 'val' => 'trifold',     'label' => 'Trifold (3 Panel)',       'desc' => 'The classic brochure fold — most popular' ),
-        array( 'val' => 'z3',          'label' => 'Z-Fold (3 Panel)',        'desc' => 'Zigzag — each panel fully visible when open' ),
-        array( 'val' => 'gate3',       'label' => 'Gate Fold (3 Panel)',     'desc' => 'Two flaps fold inward — dramatic reveal' ),
-        array( 'val' => 'accordion4',  'label' => 'Accordion (4 Panel)',     'desc' => 'Zigzag with 4 panels — guides & timelines' ),
-        array( 'val' => 'roll4',       'label' => 'Roll Fold (4 Panel)',     'desc' => 'Panels roll inward — mailers & menus' ),
-        array( 'val' => 'dgate4',      'label' => 'Double Gate (4 Panel)',   'desc' => 'Four panels folding in — maximum impact' ),
-        array( 'val' => 'dparallel4',  'label' => 'Double Parallel (4 Panel)', 'desc' => 'Two parallel folds — compact, detailed' ),
-    );
+    if ( $is_booklet ) {
+        $sizes = array();
+        if ( isset( $cfg['size_presets'] ) ) {
+            foreach ( $cfg['size_presets'] as $group ) {
+                foreach ( $group['items'] as $item ) {
+                    $sizes[] = array( 'val' => $item['label'], 'label' => $item['label'], 'desc' => '' );
+                }
+            }
+        }
+        $page_counts = isset( $cfg['page_counts'] ) ? $cfg['page_counts'] : array( 8, 12, 16, 20, 24, 28, 32 );
+        $folds = array();
+    } else {
+        $folds = array(
+            array( 'val' => 'flat',        'label' => 'Flat — No Folding',       'desc' => 'Single sheet — flyers, handouts, inserts' ),
+            array( 'val' => 'bifold',      'label' => 'Bifold (2 Panel)',        'desc' => 'Folded in half — menus, programs, invitations' ),
+            array( 'val' => 'trifold',     'label' => 'Trifold (3 Panel)',       'desc' => 'The classic brochure fold — most popular' ),
+            array( 'val' => 'z3',          'label' => 'Z-Fold (3 Panel)',        'desc' => 'Zigzag — each panel fully visible when open' ),
+            array( 'val' => 'gate3',       'label' => 'Gate Fold (3 Panel)',     'desc' => 'Two flaps fold inward — dramatic reveal' ),
+            array( 'val' => 'accordion4',  'label' => 'Accordion (4 Panel)',     'desc' => 'Zigzag with 4 panels — guides & timelines' ),
+            array( 'val' => 'roll4',       'label' => 'Roll Fold (4 Panel)',     'desc' => 'Panels roll inward — mailers & menus' ),
+            array( 'val' => 'dgate4',      'label' => 'Double Gate (4 Panel)',   'desc' => 'Four panels folding in — maximum impact' ),
+            array( 'val' => 'dparallel4',  'label' => 'Double Parallel (4 Panel)', 'desc' => 'Two parallel folds — compact, detailed' ),
+        );
 
-    $sizes = array(
-        array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5',  'desc' => 'Half letter — compact' ),
-        array( 'val' => '6x9',     'label' => '6 × 9',       'desc' => 'Common mailer size' ),
-        array( 'val' => '8.5x11',  'label' => '8.5 × 11',    'desc' => 'Letter — the standard' ),
-        array( 'val' => '8.5x14',  'label' => '8.5 × 14',    'desc' => 'Legal — extra room' ),
-        array( 'val' => '9x12',    'label' => '9 × 12',      'desc' => 'Fits inside folders' ),
-        array( 'val' => '11x17',   'label' => '11 × 17',     'desc' => 'Tabloid — large format' ),
-        array( 'val' => '12x18',   'label' => '12 × 18',     'desc' => 'Oversized tabloid' ),
-        array( 'val' => '11x25.5', 'label' => '11 × 25.5',   'desc' => 'Extra-long mailer' ),
-    );
+        $sizes = array(
+            array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5',  'desc' => 'Half letter — compact' ),
+            array( 'val' => '6x9',     'label' => '6 × 9',       'desc' => 'Common mailer size' ),
+            array( 'val' => '8.5x11',  'label' => '8.5 × 11',    'desc' => 'Letter — the standard' ),
+            array( 'val' => '8.5x14',  'label' => '8.5 × 14',    'desc' => 'Legal — extra room' ),
+            array( 'val' => '9x12',    'label' => '9 × 12',      'desc' => 'Fits inside folders' ),
+            array( 'val' => '11x17',   'label' => '11 × 17',     'desc' => 'Tabloid — large format' ),
+            array( 'val' => '12x18',   'label' => '12 × 18',     'desc' => 'Oversized tabloid' ),
+            array( 'val' => '11x25.5', 'label' => '11 × 25.5',   'desc' => 'Extra-long mailer' ),
+        );
+        $page_counts = array();
+    }
 
     $coatings = array();
     if ( isset( $cfg['coatings'] ) ) {
@@ -396,11 +413,12 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 
     // ── Render ──
 
-    $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '">';
+    $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '" data-calc="' . esc_attr( $calc ) . '">';
 
     // Step 1: Size
+    $size_prompt = $is_booklet ? 'What size do you need?' : 'What size brochure do you need?';
     $out .= '<div class="pps-wiz-step is-active" data-step="size">';
-    $out .= '<div class="pps-wiz-prompt">What size brochure do you need? <span class="pps-wiz-clear">&times; clear</span></div>';
+    $out .= '<div class="pps-wiz-prompt">' . esc_html( $size_prompt ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
     foreach ( $sizes as $s ) {
         $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $s['val'] ) . '" data-label="' . esc_attr( $s['label'] ) . '">'
@@ -414,21 +432,37 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '</button>';
     $out .= '</div></div>';
 
-    // Step 2: Fold
-    $out .= '<div class="pps-wiz-step" data-step="fold">';
-    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — now, which type of fold? <span class="pps-wiz-clear">&times; clear</span></div>';
-    $out .= '<div class="pps-wiz-grid">';
-    foreach ( $folds as $f ) {
-        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $f['val'] ) . '" data-label="' . esc_attr( $f['label'] ) . '">'
-              . '<div class="pps-wiz-opt-name">' . esc_html( $f['label'] ) . '</div>'
-              . '<div class="pps-wiz-opt-desc">' . esc_html( $f['desc'] ) . '</div>'
-              . '</button>';
+    if ( $is_booklet ) {
+        // Step 2: Page Count
+        $out .= '<div class="pps-wiz-step" data-step="pages">';
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — how many pages? <span class="pps-wiz-clear">&times; clear</span></div>';
+        $out .= '<div class="pps-wiz-grid">';
+        foreach ( $page_counts as $pc ) {
+            $pc = intval( $pc );
+            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . $pc . '" data-label="' . $pc . ' pages">'
+                  . '<div class="pps-wiz-opt-name">' . $pc . ' Pages</div>'
+                  . '</button>';
+        }
+        $out .= '</div></div>';
+    } else {
+        // Step 2: Fold
+        $out .= '<div class="pps-wiz-step" data-step="fold">';
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — now, which type of fold? <span class="pps-wiz-clear">&times; clear</span></div>';
+        $out .= '<div class="pps-wiz-grid">';
+        foreach ( $folds as $f ) {
+            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $f['val'] ) . '" data-label="' . esc_attr( $f['label'] ) . '">'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $f['label'] ) . '</div>'
+                  . '<div class="pps-wiz-opt-desc">' . esc_html( $f['desc'] ) . '</div>'
+                  . '</button>';
+        }
+        $out .= '</div></div>';
     }
-    $out .= '</div></div>';
 
     // Step 3: Paper type (cardstock vs text weight)
+    $pt_prev = $is_booklet ? 'pages' : 'fold';
+    $pt_prompt = $is_booklet ? 'What type of paper for the inside pages?' : 'great. What type of paper?';
     $out .= '<div class="pps-wiz-step" data-step="papertype">';
-    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="fold"></span> — great. What type of paper? <span class="pps-wiz-clear">&times; clear</span></div>';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="' . $pt_prev . '"></span> — ' . esc_html( $pt_prompt ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
     $out .= '<button type="button" class="pps-wiz-opt" data-val="text" data-label="Standard Text Weight">'
           . '<div class="pps-wiz-opt-name">Standard Text Weight</div>'
@@ -461,10 +495,32 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     }
     $out .= '</div></div>';
 
-    // Step 5: Coating (optional)
+    // Step 5 (booklets only): Cover stock
+    if ( $is_booklet ) {
+        $out .= '<div class="pps-wiz-step" data-step="cover">';
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="paper"></span> — and the cover stock? <span class="pps-wiz-clear">&times; clear</span></div>';
+        $out .= '<div class="pps-wiz-grid">';
+        $out .= '<button type="button" class="pps-wiz-opt" data-val="same" data-label="Same as Inside">'
+              . '<div class="pps-wiz-opt-name">Same as Inside Pages</div>'
+              . '<div class="pps-wiz-opt-desc">Use the same paper stock for the cover</div>'
+              . '</button>';
+        foreach ( $cs as $p ) {
+            $stock = empty( $p['factory'] )
+                ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
+                : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $p['val'] ) . '" data-label="' . esc_attr( $p['label'] ) . '">'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . '</div>'
+                  . '<div class="pps-wiz-opt-badges">' . $stock . '</div>'
+                  . '</button>';
+        }
+        $out .= '</div></div>';
+    }
+
+    // Coating (optional)
+    $coat_prev = $is_booklet ? 'cover' : 'paper';
     if ( ! empty( $coatings ) ) {
         $out .= '<div class="pps-wiz-step" data-step="coating">';
-        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="paper"></span> — would you like a coating? <span class="pps-wiz-clear">&times; clear</span></div>';
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="' . $coat_prev . '"></span> — would you like a coating? <span class="pps-wiz-clear">&times; clear</span></div>';
         $out .= '<div class="pps-wiz-grid">';
         $out .= '<button type="button" class="pps-wiz-opt" data-val="" data-label="No Coating">'
               . '<div class="pps-wiz-opt-name">No Coating</div>'
@@ -532,13 +588,23 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'o.classList.remove("is-selected");'
           .   '});'
           . '}'
+          . 'var calc=w.dataset.calc;'
           . 'function buildUrl(){'
           .   'var params=[];'
-          .   'if(state.paper&&state.paper.val)params.push("paper="+encodeURIComponent(state.paper.val));'
-          .   'if(state.fold)params.push("fold="+encodeURIComponent(state.fold.val));'
-          .   'if(state.size&&state.size.val)params.push("size="+encodeURIComponent(state.size.val));'
-          .   'if(state.coating&&state.coating.val)params.push("coating="+encodeURIComponent(state.coating.val));'
-          .   'if(state.addons&&state.addons.val){state.addons.val.split(",").forEach(function(a){if(a)params.push(a+"=1")})}'
+          .   'if(calc==="brochure"){'
+          .     'if(state.paper&&state.paper.val)params.push("paper="+encodeURIComponent(state.paper.val));'
+          .     'if(state.fold)params.push("fold="+encodeURIComponent(state.fold.val));'
+          .     'if(state.size&&state.size.val)params.push("size="+encodeURIComponent(state.size.val));'
+          .     'if(state.coating&&state.coating.val)params.push("coating="+encodeURIComponent(state.coating.val));'
+          .     'if(state.addons&&state.addons.val){state.addons.val.split(",").forEach(function(a){if(a)params.push(a+"=1")})}'
+          .   '}else{'
+          .     'if(state.size&&state.size.val)params.push("size="+encodeURIComponent(state.size.val));'
+          .     'if(state.pages)params.push("pages="+encodeURIComponent(state.pages.val));'
+          .     'if(state.paper&&state.paper.val)params.push("paper="+encodeURIComponent(state.paper.val));'
+          .     'if(state.cover){if(state.cover.val==="same")params.push("covermode=same");else params.push("coverpaper="+encodeURIComponent(state.cover.val))}'
+          .     'if(state.coating&&state.coating.val)params.push("coating="+encodeURIComponent(state.coating.val));'
+          .     'if(state.addons&&state.addons.val){state.addons.val.split(",").forEach(function(a){if(a==="vivid")params.push("vivid=true");else if(a==="two_staple")params.push("staple=true");else if(a==="bundling")params.push("bundling=750");else if(a==="rc")params.push("corner=108");else if(a==="perforation")params.push("perf=1");else if(a==="outfold")params.push("outfold=1");else params.push(a+"=1")})}'
+          .   '}'
           .   'return params.length?base+(base.indexOf("?")>-1?"&":"?")+params.join("&"):base;'
           . '}'
           . 'function pick(step,val,label){'
@@ -559,8 +625,10 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . 'function updateActions(){'
           .   'var parts=[];'
           .   'if(state.size)parts.push(state.size.label);'
+          .   'if(state.pages)parts.push(state.pages.label);'
           .   'if(state.fold)parts.push(state.fold.label);'
           .   'if(state.paper)parts.push(state.paper.label);'
+          .   'if(state.cover&&state.cover.val)parts.push("Cover: "+state.cover.label);'
           .   'if(state.coating&&state.coating.val)parts.push(state.coating.label);'
           .   'if(state.addons&&state.addons.val)parts.push(state.addons.label);'
           .   'var s=w.querySelector(".pps-wiz-summary");'
