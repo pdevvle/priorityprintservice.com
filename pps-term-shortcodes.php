@@ -43,7 +43,8 @@ body.tax-product_cat{overflow-x:hidden}
 .pps-cat-usp-icon{width:22px;height:22px;border-radius:50%;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
 
 /* ── Content body ── */
-.woocommerce-products-header{max-width:var(--pps-max-w,1200px);margin:0 auto;padding:24px 40px 0;box-sizing:border-box}
+.woocommerce-products-header{max-width:var(--pps-max-w,1200px);margin:0 auto;padding:24px 40px 16px;box-sizing:border-box}
+.woocommerce-products-header__title{margin:0;padding:8px 0}
 .pps-cat-body{max-width:var(--pps-max-w,1200px);margin:0 auto;padding:32px 40px 24px;box-sizing:border-box}
 ul.products{max-width:var(--pps-max-w,1200px)!important;margin-left:auto!important;margin-right:auto!important;padding-left:40px!important;padding-right:40px!important;box-sizing:border-box}
 .term-description h2{font-size:20px;font-weight:700;color:#0f172a;margin:32px 0 12px;padding:0 0 0 14px;border-left:3px solid #4f46e5;border-bottom:none;line-height:1.3}
