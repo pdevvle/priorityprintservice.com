@@ -28,15 +28,31 @@ add_action( 'template_redirect', function() {
     exit;
 } );
 
-// ── 301 redirect renamed page slugs ──
+// ── 301 redirect old landing pages → category pages ──
 
 add_action( 'template_redirect', function() {
-    if ( ! is_404() ) return;
-    $redirects = array(
-        'door-hangers'     => 'door-hanger-printing',
-        'signs-and-banners' => 'sign-and-banner-printing',
-    );
     $path = trim( parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH ), '/' );
+    $redirects = array(
+        'brochure-printing-services'     => 'brochures',
+        'custom-booklet-printing'        => 'booklets',
+        'business-card-printing-services' => 'business-cards',
+        'business-form-printing-services' => 'business-forms',
+        'online-flyer-printing-service'  => 'flyers',
+        'postcard-printing-services'     => 'postcards',
+        'rack-card-printing'             => 'rack-cards',
+        'door-hanger-printing'           => 'door-hangers',
+        'sign-and-banner-printing'       => 'signs-and-banners',
+        'custom-notepad-printing'        => 'notepads',
+        'stationery-printing'            => 'stationery',
+        'custom-presentation-folders'    => 'folders',
+        'custom-menu-printing'           => 'menus',
+        'printing-and-mailing-services'  => 'mailers',
+        'eddm-full-service'              => 'eddm',
+        'square-brochure-printing'       => 'square-brochures',
+        'coupon-pads-coupon-booklets'     => 'coupon-booklets',
+        'door-hangers'                   => 'door-hangers',
+        'signs-and-banners'              => 'signs-and-banners',
+    );
     if ( isset( $redirects[ $path ] ) ) {
         wp_redirect( home_url( '/' . $redirects[ $path ] . '/' ), 301 );
         exit;
