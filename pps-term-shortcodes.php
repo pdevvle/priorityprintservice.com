@@ -379,25 +379,37 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     }
     $out .= '</div></div>';
 
-    // Step 3: Paper
+    // Step 3: Paper type (cardstock vs text weight)
+    $out .= '<div class="pps-wiz-step" data-step="papertype">';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="fold"></span> — great. What type of paper?</div>';
+    $out .= '<div class="pps-wiz-grid">';
+    $out .= '<button type="button" class="pps-wiz-opt" data-val="text" data-label="Standard Text Weight">'
+          . '<div class="pps-wiz-opt-name">Standard Text Weight</div>'
+          . '<div class="pps-wiz-opt-desc">Lighter, flexible sheets &mdash; folds cleanly, great for brochures, newsletters &amp; inserts</div>'
+          . '</button>';
+    $out .= '<button type="button" class="pps-wiz-opt" data-val="cs" data-label="Cardstock">'
+          . '<div class="pps-wiz-opt-name">Cardstock</div>'
+          . '<div class="pps-wiz-opt-desc">Heavier, rigid stock &mdash; stands on its own, ideal for postcards, covers &amp; presentation pieces</div>'
+          . '</button>';
+    $out .= '</div></div>';
+
+    // Step 4: Paper (filtered by type)
     $out .= '<div class="pps-wiz-step" data-step="paper">';
-    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="fold"></span> — and which paper stock?</div>';
+    $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="papertype"></span> — pick your paper stock:</div>';
     $out .= '<div class="pps-wiz-grid">';
     foreach ( $papers as $p ) {
         $hint  = isset( $paper_hints[ $p['label'] ] ) ? $paper_hints[ $p['label'] ] : '';
+        $ptype = ! empty( $p['_cs'] ) ? 'cs' : 'text';
         $stock = empty( $p['factory'] )
             ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
             : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
         $coat  = ! empty( $p['coatable'] )
             ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
             : '';
-        $cs_badge = ! empty( $p['_cs'] )
-            ? '<span class="pps-cat-badge pps-cat-badge--cs">Cardstock</span>'
-            : '';
-        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $p['val'] ) . '" data-label="' . esc_attr( $p['label'] ) . '">'
+        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $p['val'] ) . '" data-label="' . esc_attr( $p['label'] ) . '" data-ptype="' . esc_attr( $ptype ) . '">'
               . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . '</div>'
               . ( $hint ? '<div class="pps-wiz-opt-desc">' . esc_html( $hint ) . '</div>' : '' )
-              . '<div class="pps-wiz-opt-badges">' . $cs_badge . $stock . $coat . '</div>'
+              . '<div class="pps-wiz-opt-badges">' . $stock . $coat . '</div>'
               . '</button>';
     }
     $out .= '</div></div>';
@@ -417,15 +429,22 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '(function(){'
           . 'var w=document.getElementById(' . wp_json_encode( $id ) . ');'
           . 'if(!w)return;'
-          . 'var steps=["size","fold","paper","done"],state={},base=w.dataset.link;'
+          . 'var steps=["size","fold","papertype","paper","done"],state={},base=w.dataset.link;'
           . 'function show(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e){e.classList.add("is-active");e.scrollIntoView({behavior:"smooth",block:"nearest"})}}'
           . 'function hide(s){var e=w.querySelector(\'[data-step="\'+s+\'"]\');if(e)e.classList.remove("is-active")}'
+          . 'function filterPapers(ptype){'
+          .   'w.querySelectorAll(\'[data-step="paper"] .pps-wiz-opt\').forEach(function(o){'
+          .     'o.style.display=o.dataset.ptype===ptype?"":"none";'
+          .     'o.classList.remove("is-selected");'
+          .   '});'
+          . '}'
           . 'function pick(step,val,label){'
           .   'state[step]={val:val,label:label};'
           .   'var opts=w.querySelectorAll(\'[data-step="\'+step+\'"] .pps-wiz-opt\');'
           .   'opts.forEach(function(o){o.classList.toggle("is-selected",o.dataset.val===val)});'
           .   'var si=steps.indexOf(step);'
           .   'for(var i=si+2;i<steps.length;i++){hide(steps[i]);delete state[steps[i]]}'
+          .   'if(step==="papertype")filterPapers(val);'
           .   'if(si<steps.length-1)setTimeout(function(){show(steps[si+1])},150);'
           .   'updatePrev();updateDone();'
           . '}'
@@ -448,7 +467,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'if(opt){var st=opt.closest(".pps-wiz-step");if(st)pick(st.dataset.step,opt.dataset.val,opt.dataset.label);return}'
           .   'if(e.target.closest(".pps-wiz-reset")){'
           .     'state={};'
-          .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected")});'
+          .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected");o.style.display=""});'
           .     'steps.forEach(function(s,i){if(i>0)hide(s)});'
           .     'w.querySelector(\'[data-step="size"]\').scrollIntoView({behavior:"smooth",block:"nearest"});'
           .   '}'
