@@ -15,67 +15,21 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// ── Clean product-category URLs: serve /{slug}/ instead of /product-category/{slug}/ ──
-
-// Route /{slug}/ to product_cat when slug matches a WooCommerce category.
-// WP sets `name` (post slug rule) or `pagename` (page rule) — check both.
-add_filter( 'request', function( $query_vars ) {
-    if ( ! empty( $query_vars['product_cat'] ) ) return $query_vars;
-    $slug = null;
-    $from = null;
-    if ( ! empty( $query_vars['name'] ) ) {
-        $slug = $query_vars['name'];
-        $from = 'name';
-    } elseif ( ! empty( $query_vars['pagename'] ) ) {
-        $slug = trim( $query_vars['pagename'], '/' );
-        $from = 'pagename';
+// ── Enable Rank Math's WooCommerce category base removal ──
+add_filter( 'option_rank-math-options-general', function( $value ) {
+    if ( is_array( $value ) ) {
+        $value['wc_remove_category_base'] = 'on';
     }
-    if ( $slug ) {
-        $term = get_term_by( 'slug', $slug, 'product_cat' );
-        if ( $term && ! is_wp_error( $term ) ) {
-            unset( $query_vars['name'] );
-            unset( $query_vars['pagename'] );
-            unset( $query_vars['page'] );
-            unset( $query_vars['post_type'] );
-            $query_vars['product_cat'] = $term->slug;
-        }
-    }
-    return $query_vars;
+    return $value;
 } );
 
-// Make get_term_link() return /{slug}/ so WP considers clean URLs canonical
-add_filter( 'term_link', function( $url, $term, $taxonomy ) {
-    if ( $taxonomy === 'product_cat' ) {
-        return home_url( '/' . $term->slug . '/' );
+// One-time rewrite flush after enabling category base removal
+add_action( 'init', function() {
+    if ( get_option( 'pps_rm_catbase_flushed' ) !== 'v1' ) {
+        flush_rewrite_rules();
+        update_option( 'pps_rm_catbase_flushed', 'v1', true );
     }
-    return $url;
-}, 10, 3 );
-
-// Block canonical redirect when already on a clean category URL
-add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
-    if ( ! $redirect_url ) return $redirect_url;
-    if ( is_tax( 'product_cat' ) ) return false;
-    $redir_path = parse_url( $redirect_url, PHP_URL_PATH );
-    $req_path   = parse_url( $requested_url, PHP_URL_PATH );
-    if ( strpos( $redir_path, '/product-category/' ) !== false
-      && strpos( $req_path, '/product-category/' ) === false ) {
-        return false;
-    }
-    return $redirect_url;
-}, 10, 2 );
-
-// ── 301 redirect old /product-category/* URLs ──
-
-add_action( 'template_redirect', function() {
-    if ( ! isset( $_SERVER['REQUEST_URI'] ) ) return;
-    $path = trim( parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH ), '/' );
-    if ( strpos( $path, 'product-category/' ) !== 0 ) return;
-    $slug = substr( $path, strlen( 'product-category/' ) );
-    $slug = trim( $slug, '/' );
-    if ( ! $slug ) return;
-    wp_redirect( home_url( '/' . $slug . '/' ), 301 );
-    exit;
-} );
+}, 99 );
 
 // ── 301 redirect old landing pages → category pages ──
 
