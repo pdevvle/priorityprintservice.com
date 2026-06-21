@@ -2366,6 +2366,18 @@ function pps_save_preset( $slug, $data ) {
         }
     }
 
+    // ── Categories (array of product_cat slugs for category-page lineup injection) ──
+    $categories = array();
+    if ( isset( $data['categories'] ) && is_array( $data['categories'] ) ) {
+        foreach ( $data['categories'] as $cat_slug ) {
+            $cat_slug = sanitize_key( (string) $cat_slug );
+            if ( $cat_slug !== '' && strlen( $cat_slug ) <= 80 ) {
+                $categories[] = $cat_slug;
+            }
+        }
+        $categories = array_unique( array_slice( $categories, 0, 20 ) );
+    }
+
     // ── Per-preset FAQs (overrides calc-type defaults; same shape as wp_options['pps_faqs'][calc]) ──
     $faqs = array();
     if ( isset( $data['faqs'] ) && is_array( $data['faqs'] ) ) {
@@ -2398,6 +2410,7 @@ function pps_save_preset( $slug, $data ) {
         'currency'          => $currency,
         'sale_discount_pct' => $sale_discount_pct,
         'sale_label'        => $sale_label,
+        'categories'        => $categories,
         'overrides'         => $overrides,
         'schema_overrides'  => $schema_overrides,
         'schema_extras'     => $schema_extras,

@@ -96,6 +96,11 @@ function pps_presets_render_page() {
                 }
             }
 
+            $categories_arr = array();
+            if ( isset( $_POST['preset_categories'] ) && is_array( $_POST['preset_categories'] ) ) {
+                $categories_arr = array_map( 'sanitize_key', wp_unslash( $_POST['preset_categories'] ) );
+            }
+
             $data = array(
                 'calc'              => isset( $_POST['preset_calc'] )              ? wp_unslash( $_POST['preset_calc'] )              : '',
                 'title'             => isset( $_POST['preset_title'] )             ? wp_unslash( $_POST['preset_title'] )             : '',
@@ -106,6 +111,7 @@ function pps_presets_render_page() {
                 'sale_discount_pct' => isset( $_POST['preset_sale_discount_pct'] ) ? wp_unslash( $_POST['preset_sale_discount_pct'] ) : '',
                 'sale_label'        => isset( $_POST['preset_sale_label'] )        ? wp_unslash( $_POST['preset_sale_label'] )        : '',
                 'defaults'          => $defaults_arr,
+                'categories'        => $categories_arr,
                 'overrides'         => $overrides,
                 'schema_overrides'  => $schema_overrides,
                 'schema_extras'     => $schema_extras,
@@ -363,6 +369,25 @@ function pps_presets_render_edit_form( $preset ) {
     echo '<input id="preset_sale_label" type="text" name="preset_sale_label" value="' . esc_attr( $preset['sale_label'] ?? '' ) . '" maxlength="80">';
     echo '<span class="hint">Shown in price breakdown + badge. Blank = use site-wide PCF label.</span>';
     echo '</div>';
+
+    // Categories
+    $all_cats    = get_terms( array( 'taxonomy' => 'product_cat', 'hide_empty' => false, 'orderby' => 'name' ) );
+    $preset_cats = isset( $preset['categories'] ) && is_array( $preset['categories'] ) ? $preset['categories'] : array();
+    if ( ! is_wp_error( $all_cats ) && ! empty( $all_cats ) ) {
+        echo '<div class="pps-preset-field pps-preset-wide">';
+        echo '<label>Category pages</label>';
+        echo '<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:4px">';
+        foreach ( $all_cats as $cat ) {
+            $checked = in_array( $cat->slug, $preset_cats, true ) ? ' checked' : '';
+            echo '<label style="font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer">';
+            echo '<input type="checkbox" name="preset_categories[]" value="' . esc_attr( $cat->slug ) . '"' . $checked . '>';
+            echo esc_html( $cat->name );
+            echo '</label>';
+        }
+        echo '</div>';
+        echo '<span class="hint">Preset card appears in the product lineup on checked category pages.</span>';
+        echo '</div>';
+    }
 
     echo '</div>';
 

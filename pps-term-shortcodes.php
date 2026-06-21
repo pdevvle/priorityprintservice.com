@@ -260,6 +260,22 @@ ul.products li.product .button{background:#007eff;color:#fff;border-radius:6px;f
 ul.products li.product .button:hover{background:#0070e6}
 ul.products li.product img{border-radius:8px}
 
+/* ── Preset cards (injected after product grid) ── */
+.pps-preset-lineup{max-width:var(--pps-max-w,1200px);margin:0 auto;padding:0 40px 32px;box-sizing:border-box}
+.pps-preset-lineup h2{font-size:20px;font-weight:700;color:#0f172a;margin:0 0 16px;padding:0 0 0 14px;border-left:3px solid #007eff;line-height:1.3}
+.pps-preset-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+.pps-preset-card{background:#fff;border-radius:10px;border:1px solid #e2e8f0;overflow:hidden;transition:box-shadow .2s,transform .15s;display:flex;flex-direction:column;text-decoration:none;color:inherit}
+.pps-preset-card:hover{box-shadow:0 6px 20px rgba(0,0,0,.08);transform:translateY(-2px)}
+.pps-preset-card-img{width:100%;aspect-ratio:4/3;object-fit:cover;background:#f1f5f9;display:block}
+.pps-preset-card-body{padding:16px 18px;flex:1;display:flex;flex-direction:column}
+.pps-preset-card-title{font-size:15px;font-weight:600;color:#0f172a;margin:0 0 6px;line-height:1.3}
+.pps-preset-card:hover .pps-preset-card-title{color:#007eff}
+.pps-preset-card-desc{font-size:13px;color:#64748b;line-height:1.5;margin:0 0 12px;flex:1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pps-preset-card-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pps-preset-card-price{font-size:14px;font-weight:700;color:#007eff}
+.pps-preset-card-cta{font-size:12px;font-weight:600;color:#fff;background:#007eff;padding:7px 16px;border-radius:6px;text-transform:none;letter-spacing:.3px;transition:background .15s;white-space:nowrap}
+.pps-preset-card:hover .pps-preset-card-cta{background:#0070e6}
+
 /* ── Responsive ── */
 @media(max-width:768px){
 .pps-cat-hero{padding:56px 24px 48px}
@@ -270,6 +286,7 @@ ul.products li.product img{border-radius:8px}
 .woocommerce-products-header{padding:20px 24px 0}
 .pps-cat-body{padding:24px 24px 16px}
 ul.products{padding-left:24px!important;padding-right:24px!important}
+.pps-preset-lineup{padding:0 24px 28px}
 }
 @media(max-width:480px){
 .pps-cat-hero{padding:44px 20px 36px}
@@ -284,6 +301,8 @@ ul.products{padding-left:16px!important;padding-right:16px!important}
 .pps-cat-addon-grid{grid-template-columns:1fr}
 .pps-cat-callout{padding:18px 20px}
 .pps-cat-callout .pps-cat-num{font-size:26px}
+.pps-preset-lineup{padding:0 16px 24px}
+.pps-preset-grid{grid-template-columns:1fr}
 }
 
 /* ── Wizard ── */
@@ -426,6 +445,74 @@ add_action( 'wp_footer', function() {
     </script>
     <?php
 }, 20 );
+
+// ── Preset cards on category pages (after product grid) ──
+
+add_action( 'woocommerce_after_shop_loop', function() {
+    if ( ! is_product_category() ) return;
+
+    $category = get_queried_object();
+    if ( ! $category || ! is_a( $category, 'WP_Term' ) ) return;
+
+    if ( ! function_exists( 'pps_get_presets' ) || ! function_exists( 'pps_get_preset_url' ) ) return;
+
+    $all_presets = pps_get_presets();
+    if ( empty( $all_presets ) ) return;
+
+    $cat_slug = $category->slug;
+    $matching = array();
+    foreach ( $all_presets as $preset ) {
+        if ( ! is_array( $preset ) ) continue;
+        $cats = isset( $preset['categories'] ) && is_array( $preset['categories'] ) ? $preset['categories'] : array();
+        if ( in_array( $cat_slug, $cats, true ) ) {
+            $matching[] = $preset;
+        }
+    }
+
+    if ( empty( $matching ) ) return;
+
+    echo '<div class="pps-preset-lineup">';
+    echo '<h2>More ' . esc_html( $category->name ) . ' Options</h2>';
+    echo '<div class="pps-preset-grid">';
+
+    foreach ( $matching as $p ) {
+        $slug  = isset( $p['slug'] ) ? $p['slug'] : '';
+        $url   = pps_get_preset_url( $slug );
+        $title = isset( $p['title'] ) ? $p['title'] : $slug;
+        $desc  = isset( $p['description'] ) ? $p['description'] : '';
+        $image = isset( $p['image'] ) && $p['image'] !== '' ? $p['image'] : '';
+        $price = isset( $p['price_from'] ) && $p['price_from'] !== null ? $p['price_from'] : null;
+        $curr  = isset( $p['currency'] ) ? $p['currency'] : 'USD';
+
+        echo '<a class="pps-preset-card" href="' . esc_url( $url ) . '">';
+
+        if ( $image ) {
+            echo '<img class="pps-preset-card-img" src="' . esc_url( $image ) . '" alt="' . esc_attr( $title ) . '" loading="lazy" onerror="this.style.display=\'none\'">';
+        } else {
+            echo '<div class="pps-preset-card-img" style="display:flex;align-items:center;justify-content:center;font-size:36px;color:#cbd5e1">&#9997;</div>';
+        }
+
+        echo '<div class="pps-preset-card-body">';
+        echo '<h3 class="pps-preset-card-title">' . esc_html( $title ) . '</h3>';
+        if ( $desc ) {
+            echo '<p class="pps-preset-card-desc">' . esc_html( $desc ) . '</p>';
+        }
+        echo '<div class="pps-preset-card-footer">';
+        if ( $price !== null ) {
+            $sym = $curr === 'USD' ? '$' : $curr . ' ';
+            echo '<span class="pps-preset-card-price">From ' . esc_html( $sym . number_format( $price, 2 ) ) . '</span>';
+        } else {
+            echo '<span class="pps-preset-card-price"></span>';
+        }
+        echo '<span class="pps-preset-card-cta">Customize Order</span>';
+        echo '</div>';
+        echo '</div>';
+        echo '</a>';
+    }
+
+    echo '</div>';
+    echo '</div>';
+}, 15 );
 
 // ── [pps_cat_papers type="text|cover|all" factory="yes|no"] ──
 
