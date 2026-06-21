@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 // ── Enable Rank Math's WooCommerce category base removal ──
 add_action( 'init', function() {
-    if ( get_option( 'pps_rm_catbase_set' ) === 'v3' ) return;
+    if ( get_option( 'pps_rm_catbase_set' ) === 'v4' ) return;
     $raw = get_option( 'rank-math-options-general', '' );
     $is_json = is_string( $raw );
     $opts = $is_json ? json_decode( $raw, true ) : $raw;
@@ -26,7 +26,7 @@ add_action( 'init', function() {
         update_option( 'rank-math-options-general', $is_json ? wp_json_encode( $opts ) : $opts );
     }
     flush_rewrite_rules();
-    update_option( 'pps_rm_catbase_set', 'v3', true );
+    update_option( 'pps_rm_catbase_set', 'v4', true );
 }, 99 );
 
 // ── 301 redirect old landing pages → category pages ──
