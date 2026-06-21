@@ -183,6 +183,36 @@ add_action( 'template_redirect', function() {
     }
 } , -999 );
 
+// ── Diagnostic: log full query state and template for category slug URLs ──
+add_filter( 'template_include', function( $template ) {
+    $path = trim( parse_url( $_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH ), '/' );
+    if ( ! $path || strpos( $path, '/' ) !== false ) return $template;
+    $term = get_term_by( 'slug', $path, 'product_cat' );
+    if ( ! $term ) return $template;
+
+    global $wp_query;
+    update_option( 'pps_catroute_diag', array(
+        'time'     => date( 'H:i:s' ),
+        'uri'      => $_SERVER['REQUEST_URI'] ?? '',
+        'template' => basename( $template ),
+        'is_cat'   => is_product_category(),
+        'is_tax'   => is_tax(),
+        'is_arch'  => is_archive(),
+        'is_att'   => is_attachment(),
+        'is_404'   => is_404(),
+        'is_page'  => is_page(),
+        'is_sing'  => is_singular(),
+        'qo_type'  => is_object( $wp_query->queried_object ) ? get_class( $wp_query->queried_object ) : gettype( $wp_query->queried_object ),
+        'qo_id'    => $wp_query->queried_object_id ?? null,
+        'qv_pcat'  => $wp_query->get( 'product_cat' ),
+        'qv_name'  => $wp_query->get( 'name' ),
+        'qv_pname' => $wp_query->get( 'pagename' ),
+        'qv_ptype' => $wp_query->get( 'post_type' ),
+        'found'    => $wp_query->found_posts,
+    ), false );
+    return $template;
+} );
+
 add_filter( 'term_description', 'do_shortcode', 11 );
 
 add_filter( 'woocommerce_product_add_to_cart_text', function() {
