@@ -15,44 +15,25 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// ── Enable Rank Math's WooCommerce category base removal ──
+// ── Disable Rank Math's wc_remove_category_base (causes redirect loop; we handle it ourselves) ──
 add_action( 'init', function() {
-    $cur = get_option( 'pps_rm_catbase_set' );
-    if ( $cur === 'v6' ) return;
-
+    if ( get_option( 'pps_rm_catbase_set' ) === 'v7' ) return;
     $raw = get_option( 'rank-math-options-general', '' );
     $is_json = is_string( $raw );
     $opts = $is_json ? json_decode( $raw, true ) : $raw;
-    if ( is_array( $opts ) && ( ! isset( $opts['wc_remove_category_base'] ) || $opts['wc_remove_category_base'] !== 'on' ) ) {
-        $opts['wc_remove_category_base'] = 'on';
+    if ( is_array( $opts ) ) {
+        $opts['wc_remove_category_base'] = 'off';
         update_option( 'rank-math-options-general', $is_json ? wp_json_encode( $opts ) : $opts );
     }
-
     flush_rewrite_rules();
-
-    $test_slugs = array( 'postcards', 'brochures', 'booklets', 'business-cards', 'flyers', 'rack-cards', 'door-hangers' );
-    $terms = array();
-    foreach ( $test_slugs as $s ) {
-        $t = get_term_by( 'slug', $s, 'product_cat' );
-        $terms[ $s ] = $t ? $t->term_id : false;
-    }
-    $rules = get_option( 'rewrite_rules', array() );
-    $pfree = array();
-    foreach ( $rules as $pat => $target ) {
-        if ( strpos( $target, 'product_cat=' ) !== false && strpos( $pat, 'product-category' ) === false ) {
-            $pfree[ $pat ] = $target;
-        }
-    }
-    update_option( 'pps_catbase_selftest', array(
-        'time'               => date( 'Y-m-d H:i:s' ),
-        'phase'              => $cur === 'v5' ? 'v5->v6 (second flush)' : 'fresh',
-        'terms'              => $terms,
-        'prefix_free_rules'  => $pfree,
-        'total_rules'        => count( $rules ),
-    ), false );
-
-    update_option( 'pps_rm_catbase_set', 'v6', true );
+    update_option( 'pps_rm_catbase_set', 'v7', true );
 }, 999 );
+
+// ── Strip /product-category/ from generated WooCommerce category URLs ──
+add_filter( 'term_link', function( $url, $term, $taxonomy ) {
+    if ( $taxonomy !== 'product_cat' ) return $url;
+    return str_replace( '/product-category/', '/', $url );
+}, 10, 3 );
 
 // ── Route clean category slugs to product_cat (fixes %postname% rule conflict) ──
 add_filter( 'request', function( $qv ) {
@@ -64,19 +45,6 @@ add_filter( 'request', function( $qv ) {
     if ( ! $slug ) return $qv;
 
     $term = get_term_by( 'slug', $slug, 'product_cat' );
-
-    if ( empty( $qv['rest_route'] ) ) {
-        update_option( 'pps_catroute_log', array(
-            'hook'  => 'request',
-            'time'  => date( 'H:i:s' ),
-            'uri'   => $_SERVER['REQUEST_URI'] ?? '',
-            'slug'  => $slug,
-            'src'   => ! empty( $qv['name'] ) ? 'name' : 'pagename',
-            'found' => $term ? $term->term_id : false,
-            'keys'  => array_keys( $qv ),
-        ), false );
-    }
-
     if ( $term && ! is_wp_error( $term ) ) {
         unset( $qv['name'], $qv['pagename'], $qv['page'], $qv['post_type'] );
         $qv['product_cat'] = $term->slug;
@@ -84,58 +52,18 @@ add_filter( 'request', function( $qv ) {
     return $qv;
 }, 1 );
 
-// ── Safety net: force category query if request filter was overridden ──
-add_action( 'pre_get_posts', function( $query ) {
-    if ( ! $query->is_main_query() || is_admin() ) return;
-    if ( $query->get( 'product_cat' ) ) return;
-
-    $path = trim( parse_url( $_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH ), '/' );
-    if ( ! $path || strpos( $path, '/' ) !== false ) return;
-
-    $term = get_term_by( 'slug', $path, 'product_cat' );
-    if ( ! $term || is_wp_error( $term ) ) return;
-
-    update_option( 'pps_catroute_log', array(
-        'hook'  => 'pre_get_posts (request filter missed)',
-        'time'  => date( 'H:i:s' ),
-        'uri'   => $_SERVER['REQUEST_URI'] ?? '',
-        'path'  => $path,
-        'term'  => $term->term_id,
-        'had'   => array(
-            'pagename'  => $query->get( 'pagename' ),
-            'name'      => $query->get( 'name' ),
-            'post_type' => $query->get( 'post_type' ),
-        ),
-    ), false );
-
-    $query->set( 'product_cat', $term->slug );
-    $query->set( 'pagename', '' );
-    $query->set( 'name', '' );
-    $query->set( 'page', '' );
-    $query->set( 'attachment', '' );
-    $query->set( 'post_type', '' );
-    $query->is_page       = false;
-    $query->is_single     = false;
-    $query->is_singular   = false;
-    $query->is_attachment = false;
-    $query->is_tax        = true;
-    $query->is_archive    = true;
-}, 1 );
-
-// ── Prevent redirect_canonical loop on clean category URLs ──
+// ── Prevent redirect_canonical from redirecting clean category URLs ──
 add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
     if ( is_product_category() ) return false;
     $path = trim( parse_url( $requested_url, PHP_URL_PATH ), '/' );
-    if ( $path && ! strpos( $path, '/' ) ) {
+    if ( $path && strpos( $path, '/' ) === false ) {
         $term = get_term_by( 'slug', $path, 'product_cat' );
         if ( $term && ! is_wp_error( $term ) ) return false;
     }
     return $redirect_url;
 }, 1, 2 );
 
-// ── 301 redirect old landing pages → category pages ──
-// ── Also: last-resort fix if WP resolved attachment/404 for a category slug ──
-
+// ── 301 redirects: old landing pages + /product-category/slug/ → /slug/ ──
 add_action( 'template_redirect', function() {
     $path = trim( parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH ), '/' );
 
@@ -163,54 +91,11 @@ add_action( 'template_redirect', function() {
         exit;
     }
 
-    if ( ( is_attachment() || is_404() || is_page() || is_single() ) && $path && strpos( $path, '/' ) === false ) {
-        $term = get_term_by( 'slug', $path, 'product_cat' );
-        if ( $term && ! is_wp_error( $term ) ) {
-            update_option( 'pps_catroute_log', array(
-                'hook' => 'template_redirect (last resort)',
-                'time' => date( 'H:i:s' ),
-                'uri'  => $_SERVER['REQUEST_URI'] ?? '',
-                'was'  => is_attachment() ? 'attachment' : ( is_404() ? '404' : ( is_page() ? 'page' : 'single' ) ),
-                'term' => $term->term_id,
-            ), false );
-            global $wp_query;
-            $wp_query = new WP_Query( array( 'product_cat' => $term->slug ) );
-            $wp_query->is_tax     = true;
-            $wp_query->is_archive = true;
-            $wp_query->queried_object    = $term;
-            $wp_query->queried_object_id = $term->term_id;
-        }
+    if ( is_product_category() && strpos( $path, 'product-category/' ) === 0 ) {
+        $cat_path = substr( $path, strlen( 'product-category/' ) );
+        wp_redirect( home_url( '/' . $cat_path . '/' ), 301 );
+        exit;
     }
-} , -999 );
-
-// ── Diagnostic: log full query state and template for category slug URLs ──
-add_filter( 'template_include', function( $template ) {
-    $path = trim( parse_url( $_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH ), '/' );
-    if ( ! $path || strpos( $path, '/' ) !== false ) return $template;
-    $term = get_term_by( 'slug', $path, 'product_cat' );
-    if ( ! $term ) return $template;
-
-    global $wp_query;
-    update_option( 'pps_catroute_diag', array(
-        'time'     => date( 'H:i:s' ),
-        'uri'      => $_SERVER['REQUEST_URI'] ?? '',
-        'template' => basename( $template ),
-        'is_cat'   => is_product_category(),
-        'is_tax'   => is_tax(),
-        'is_arch'  => is_archive(),
-        'is_att'   => is_attachment(),
-        'is_404'   => is_404(),
-        'is_page'  => is_page(),
-        'is_sing'  => is_singular(),
-        'qo_type'  => is_object( $wp_query->queried_object ) ? get_class( $wp_query->queried_object ) : gettype( $wp_query->queried_object ),
-        'qo_id'    => $wp_query->queried_object_id ?? null,
-        'qv_pcat'  => $wp_query->get( 'product_cat' ),
-        'qv_name'  => $wp_query->get( 'name' ),
-        'qv_pname' => $wp_query->get( 'pagename' ),
-        'qv_ptype' => $wp_query->get( 'post_type' ),
-        'found'    => $wp_query->found_posts,
-    ), false );
-    return $template;
 } );
 
 add_filter( 'term_description', 'do_shortcode', 11 );
