@@ -17,6 +17,36 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 // ── Clean product-category URLs: serve /{slug}/ instead of /product-category/{slug}/ ──
 
+// 0. Audit & purge Redirection plugin rules that conflict with category slugs
+add_action( 'init', function() {
+    global $wpdb;
+    $table = $wpdb->prefix . 'redirection_items';
+    if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) ) {
+        $rows = $wpdb->get_results( "SELECT id, url, action_data FROM {$table} WHERE status = 'enabled'" );
+        $cat_slugs = array();
+        $terms = get_terms( array( 'taxonomy' => 'product_cat', 'hide_empty' => false, 'fields' => 'id=>slug' ) );
+        if ( is_array( $terms ) ) {
+            $cat_slugs = array_values( $terms );
+        }
+        $audit   = array();
+        $deleted = array();
+        foreach ( (array) $rows as $row ) {
+            $clean = trim( $row->url, '/' );
+            $audit[] = array( 'id' => $row->id, 'url' => $row->url, 'target' => $row->action_data );
+            if ( in_array( $clean, $cat_slugs, true )
+              || in_array( 'product-category/' . $clean, array_map( function( $s ) { return 'product-category/' . $s; }, $cat_slugs ), true ) ) {
+                $wpdb->delete( $table, array( 'id' => $row->id ), array( '%d' ) );
+                $deleted[] = $row->url;
+            }
+        }
+        update_option( 'pps_redirect_audit', wp_json_encode( array(
+            'total'   => count( $audit ),
+            'rules'   => $audit,
+            'deleted' => $deleted,
+        ) ), false );
+    }
+}, 6 );
+
 // 1. Route /{slug}/ to product_cat query when slug matches a WooCommerce category
 add_filter( 'request', function( $query_vars ) {
     if ( ! empty( $query_vars['pagename'] ) && empty( $query_vars['product_cat'] ) ) {
@@ -50,6 +80,26 @@ add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
     }
     return $redirect_url;
 }, 10, 2 );
+
+// 4. Prevent Redirection plugin from firing on clean category URLs
+add_action( 'template_redirect', function() {
+    $path = trim( parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH ), '/' );
+    if ( ! $path || strpos( $path, '/' ) !== false ) return;
+    if ( is_tax( 'product_cat' ) ) {
+        // Remove the Redirection plugin's template_redirect hook if present
+        global $wp_filter;
+        if ( isset( $wp_filter['template_redirect'] ) ) {
+            foreach ( $wp_filter['template_redirect']->callbacks as $priority => &$hooks ) {
+                foreach ( $hooks as $key => $hook ) {
+                    if ( is_array( $hook['function'] ) && is_object( $hook['function'][0] )
+                      && get_class( $hook['function'][0] ) === 'Red_Module_WordPress' ) {
+                        unset( $hooks[ $key ] );
+                    }
+                }
+            }
+        }
+    }
+}, 0 );
 
 // ── 301 redirect old /product-category/* URLs ──
 
