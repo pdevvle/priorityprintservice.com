@@ -15,6 +15,17 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+// ── Remove /product-category/ base from WooCommerce URLs ──
+add_action( 'init', function() {
+    $perms = get_option( 'woocommerce_permalinks', array() );
+    if ( ! empty( $perms['category_base'] ) || isset( $perms[0] ) ) {
+        $perms['category_base'] = '';
+        unset( $perms[0] );
+        update_option( 'woocommerce_permalinks', $perms );
+        flush_rewrite_rules();
+    }
+}, 99 );
+
 // ── 301 redirect old /product-category/* URLs ──
 
 add_action( 'template_redirect', function() {
