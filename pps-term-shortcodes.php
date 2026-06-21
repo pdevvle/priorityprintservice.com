@@ -17,45 +17,31 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 // ── Clean product-category URLs: serve /{slug}/ instead of /product-category/{slug}/ ──
 
-// DIAGNOSTIC: log every request to trace redirect chain (temporary — remove after debugging)
+// Route /{slug}/ to product_cat when slug matches a WooCommerce category.
+// WP sets `name` (post slug rule) or `pagename` (page rule) — check both.
 add_filter( 'request', function( $query_vars ) {
-    $entry = array(
-        't'    => time(),
-        'uri'  => $_SERVER['REQUEST_URI'],
-        'pn'   => isset( $query_vars['pagename'] ) ? $query_vars['pagename'] : null,
-        'pc'   => isset( $query_vars['product_cat'] ) ? $query_vars['product_cat'] : null,
-        'name' => isset( $query_vars['name'] ) ? $query_vars['name'] : null,
-    );
-    if ( ! empty( $query_vars['pagename'] ) && empty( $query_vars['product_cat'] ) ) {
+    if ( ! empty( $query_vars['product_cat'] ) ) return $query_vars;
+    $slug = null;
+    $from = null;
+    if ( ! empty( $query_vars['name'] ) ) {
+        $slug = $query_vars['name'];
+        $from = 'name';
+    } elseif ( ! empty( $query_vars['pagename'] ) ) {
         $slug = trim( $query_vars['pagename'], '/' );
+        $from = 'pagename';
+    }
+    if ( $slug ) {
         $term = get_term_by( 'slug', $slug, 'product_cat' );
-        $entry['term'] = $term ? $term->slug : false;
         if ( $term && ! is_wp_error( $term ) ) {
+            unset( $query_vars['name'] );
             unset( $query_vars['pagename'] );
             unset( $query_vars['page'] );
+            unset( $query_vars['post_type'] );
             $query_vars['product_cat'] = $term->slug;
-            $entry['action'] = 'routed';
         }
     }
-    $log = json_decode( get_option( 'pps_req_log', '[]' ), true ) ?: array();
-    $log[] = $entry;
-    update_option( 'pps_req_log', wp_json_encode( array_slice( $log, -15 ) ), false );
     return $query_vars;
-}, 1 );
-
-// DIAGNOSTIC: log template_redirect state
-add_action( 'template_redirect', function() {
-    $entry = array(
-        't'     => time(),
-        'uri'   => $_SERVER['REQUEST_URI'],
-        'tax'   => is_tax( 'product_cat' ),
-        '404'   => is_404(),
-        'page'  => is_page(),
-    );
-    $log = json_decode( get_option( 'pps_tpl_log', '[]' ), true ) ?: array();
-    $log[] = $entry;
-    update_option( 'pps_tpl_log', wp_json_encode( array_slice( $log, -15 ) ), false );
-}, -1 );
+} );
 
 // Make get_term_link() return /{slug}/ so WP considers clean URLs canonical
 add_filter( 'term_link', function( $url, $term, $taxonomy ) {
@@ -65,17 +51,14 @@ add_filter( 'term_link', function( $url, $term, $taxonomy ) {
     return $url;
 }, 10, 3 );
 
-// Block ANY canonical redirect that would reintroduce /product-category/
+// Block canonical redirect when already on a clean category URL
 add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
     if ( ! $redirect_url ) return $redirect_url;
-    $redir_path  = parse_url( $redirect_url, PHP_URL_PATH );
-    $req_path    = parse_url( $requested_url, PHP_URL_PATH );
+    if ( is_tax( 'product_cat' ) ) return false;
+    $redir_path = parse_url( $redirect_url, PHP_URL_PATH );
+    $req_path   = parse_url( $requested_url, PHP_URL_PATH );
     if ( strpos( $redir_path, '/product-category/' ) !== false
       && strpos( $req_path, '/product-category/' ) === false ) {
-        return false;
-    }
-    // Also block redirect from category slug to a page with similar name
-    if ( is_tax( 'product_cat' ) ) {
         return false;
     }
     return $redirect_url;
