@@ -15,14 +15,19 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// ── Remove /product-category/ base from WooCommerce URLs ──
-add_action( 'init', function() {
-    $perms = get_option( 'woocommerce_permalinks', array() );
-    if ( ! empty( $perms['category_base'] ) || isset( $perms[0] ) ) {
+// ── Remove /product-category/ base from WooCommerce category URLs ──
+add_filter( 'option_woocommerce_permalinks', function( $perms ) {
+    if ( is_array( $perms ) ) {
         $perms['category_base'] = '';
         unset( $perms[0] );
-        update_option( 'woocommerce_permalinks', $perms );
+    }
+    return $perms;
+} );
+
+add_action( 'init', function() {
+    if ( ! get_transient( 'pps_catbase_flush' ) ) {
         flush_rewrite_rules();
+        set_transient( 'pps_catbase_flush', 1, WEEK_IN_SECONDS );
     }
 }, 99 );
 
