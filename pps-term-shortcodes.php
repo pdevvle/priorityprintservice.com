@@ -15,6 +15,25 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+// ── Trace + block the redirect that causes the loop ──
+add_filter( 'wp_redirect', function( $location, $status ) {
+    $path = trim( parse_url( $_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH ), '/' );
+    if ( ! $path || strpos( $path, 'wp-' ) === 0 || strpos( $path, 'rest_route' ) !== false ) return $location;
+
+    $term = get_term_by( 'slug', $path, 'product_cat' );
+    if ( ! $term || is_wp_error( $term ) ) return $location;
+
+    update_option( 'pps_redirect_trace', array(
+        'time'   => date( 'H:i:s' ),
+        'from'   => $_SERVER['REQUEST_URI'] ?? '',
+        'to'     => $location,
+        'status' => $status,
+        'trace'  => wp_debug_backtrace_summary(),
+    ), false );
+
+    return false;
+}, 1, 2 );
+
 // ── Disable Rank Math's wc_remove_category_base (causes redirect loop; we handle it ourselves) ──
 add_action( 'init', function() {
     if ( get_option( 'pps_rm_catbase_set' ) === 'v7' ) return;
@@ -52,13 +71,16 @@ add_filter( 'request', function( $qv ) {
     return $qv;
 }, 1 );
 
-// ── Kill ALL redirect functions on category pages to prevent redirect loops ──
+// ── Kill ALL redirect functions when URL matches a product_cat slug ──
 add_action( 'template_redirect', function() {
-    if ( ! is_product_category() ) return;
+    $path = trim( parse_url( $_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH ), '/' );
+    if ( ! $path || strpos( $path, '/' ) !== false ) return;
+    $term = get_term_by( 'slug', $path, 'product_cat' );
+    if ( ! $term || is_wp_error( $term ) ) return;
     remove_action( 'template_redirect', 'redirect_canonical' );
     remove_action( 'template_redirect', 'wp_old_slug_redirect' );
     remove_action( 'template_redirect', 'wp_shortlink_header' );
-}, 0 );
+}, -999 );
 
 // ── Fallback: filter redirect_canonical for non-category pages with category slugs ──
 add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
