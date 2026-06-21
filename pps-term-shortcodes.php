@@ -50,8 +50,6 @@ add_action( 'template_redirect', function() {
         'eddm-full-service'              => 'eddm',
         'square-brochure-printing'       => 'square-brochures',
         'coupon-pads-coupon-booklets'     => 'coupon-booklets',
-        'door-hangers'                   => 'door-hangers',
-        'signs-and-banners'              => 'signs-and-banners',
     );
     if ( isset( $redirects[ $path ] ) ) {
         wp_redirect( home_url( '/' . $redirects[ $path ] . '/' ), 301 );
