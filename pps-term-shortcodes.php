@@ -52,9 +52,16 @@ add_filter( 'request', function( $qv ) {
     return $qv;
 }, 1 );
 
-// ── Prevent redirect_canonical from redirecting clean category URLs ──
+// ── Kill ALL redirect functions on category pages to prevent redirect loops ──
+add_action( 'template_redirect', function() {
+    if ( ! is_product_category() ) return;
+    remove_action( 'template_redirect', 'redirect_canonical' );
+    remove_action( 'template_redirect', 'wp_old_slug_redirect' );
+    remove_action( 'template_redirect', 'wp_shortlink_header' );
+}, 0 );
+
+// ── Fallback: filter redirect_canonical for non-category pages with category slugs ──
 add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
-    if ( is_product_category() ) return false;
     $path = trim( parse_url( $requested_url, PHP_URL_PATH ), '/' );
     if ( $path && strpos( $path, '/' ) === false ) {
         $term = get_term_by( 'slug', $path, 'product_cat' );
