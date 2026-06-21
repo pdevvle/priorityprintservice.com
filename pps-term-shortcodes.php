@@ -15,21 +15,19 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// ── Remove /product-category/ base from WooCommerce category URLs ──
-add_filter( 'option_woocommerce_permalinks', function( $perms ) {
-    if ( is_array( $perms ) ) {
-        $perms['category_base'] = '';
-        unset( $perms[0] );
+// ── Resolve /{slug}/ as product category (removes /product-category/ prefix) ──
+add_filter( 'request', function( $query_vars ) {
+    if ( ! empty( $query_vars['pagename'] ) && empty( $query_vars['product_cat'] ) ) {
+        $slug = trim( $query_vars['pagename'], '/' );
+        $term = get_term_by( 'slug', $slug, 'product_cat' );
+        if ( $term && ! is_wp_error( $term ) ) {
+            unset( $query_vars['pagename'] );
+            unset( $query_vars['page'] );
+            $query_vars['product_cat'] = $term->slug;
+        }
     }
-    return $perms;
+    return $query_vars;
 } );
-
-add_action( 'init', function() {
-    if ( ! get_transient( 'pps_catbase_flush' ) ) {
-        flush_rewrite_rules();
-        set_transient( 'pps_catbase_flush', 1, WEEK_IN_SECONDS );
-    }
-}, 99 );
 
 // ── 301 redirect old /product-category/* URLs ──
 
