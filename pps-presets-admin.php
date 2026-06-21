@@ -122,6 +122,18 @@ function pps_presets_render_page() {
             if ( is_wp_error( $result ) ) {
                 $notice = pps_presets_notice( 'error', esc_html( $result->get_error_message() ) );
             } else {
+                // Merge categories into the saved preset. pps_save_preset() will
+                // handle this natively once pps-calculators.php is updated; until
+                // then this bridge ensures the field persists across saves.
+                $presets = pps_get_presets();
+                if ( isset( $presets[ $slug ] ) && is_array( $presets[ $slug ] ) ) {
+                    $clean_cats = array_values( array_unique( array_filter(
+                        array_map( 'sanitize_key', $categories_arr )
+                    ) ) );
+                    $presets[ $slug ]['categories'] = $clean_cats;
+                    update_option( PPS_PRESETS_OPTION, $presets, false );
+                }
+
                 // If the slug changed during edit, remove the old entry
                 if ( $orig !== '' && $orig !== $slug ) {
                     pps_delete_preset( $orig );
