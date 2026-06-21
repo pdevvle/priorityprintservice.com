@@ -64,6 +64,19 @@ add_filter( 'request', function( $qv ) {
     if ( ! $slug ) return $qv;
 
     $term = get_term_by( 'slug', $slug, 'product_cat' );
+
+    if ( empty( $qv['rest_route'] ) ) {
+        update_option( 'pps_catroute_log', array(
+            'hook'  => 'request',
+            'time'  => date( 'H:i:s' ),
+            'uri'   => $_SERVER['REQUEST_URI'] ?? '',
+            'slug'  => $slug,
+            'src'   => ! empty( $qv['name'] ) ? 'name' : 'pagename',
+            'found' => $term ? $term->term_id : false,
+            'keys'  => array_keys( $qv ),
+        ), false );
+    }
+
     if ( $term && ! is_wp_error( $term ) ) {
         unset( $qv['name'], $qv['pagename'], $qv['page'], $qv['post_type'] );
         $qv['product_cat'] = $term->slug;
@@ -71,11 +84,49 @@ add_filter( 'request', function( $qv ) {
     return $qv;
 }, 1 );
 
+// ── Safety net: force category query if request filter was overridden ──
+add_action( 'pre_get_posts', function( $query ) {
+    if ( ! $query->is_main_query() || is_admin() ) return;
+    if ( $query->get( 'product_cat' ) ) return;
+
+    $path = trim( parse_url( $_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH ), '/' );
+    if ( ! $path || strpos( $path, '/' ) !== false ) return;
+
+    $term = get_term_by( 'slug', $path, 'product_cat' );
+    if ( ! $term || is_wp_error( $term ) ) return;
+
+    update_option( 'pps_catroute_log', array(
+        'hook'  => 'pre_get_posts (request filter missed)',
+        'time'  => date( 'H:i:s' ),
+        'uri'   => $_SERVER['REQUEST_URI'] ?? '',
+        'path'  => $path,
+        'term'  => $term->term_id,
+        'had'   => array(
+            'pagename'  => $query->get( 'pagename' ),
+            'name'      => $query->get( 'name' ),
+            'post_type' => $query->get( 'post_type' ),
+        ),
+    ), false );
+
+    $query->set( 'product_cat', $term->slug );
+    $query->set( 'pagename', '' );
+    $query->set( 'name', '' );
+    $query->set( 'page', '' );
+    $query->set( 'attachment', '' );
+    $query->set( 'post_type', '' );
+    $query->is_page       = false;
+    $query->is_single     = false;
+    $query->is_singular   = false;
+    $query->is_attachment = false;
+    $query->is_tax        = true;
+    $query->is_archive    = true;
+}, 1 );
+
 // ── Prevent redirect_canonical loop on clean category URLs ──
 add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
     if ( is_product_category() ) return false;
     $path = trim( parse_url( $requested_url, PHP_URL_PATH ), '/' );
-    if ( $path ) {
+    if ( $path && ! strpos( $path, '/' ) ) {
         $term = get_term_by( 'slug', $path, 'product_cat' );
         if ( $term && ! is_wp_error( $term ) ) return false;
     }
@@ -83,9 +134,11 @@ add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
 }, 1, 2 );
 
 // ── 301 redirect old landing pages → category pages ──
+// ── Also: last-resort fix if WP resolved attachment/404 for a category slug ──
 
 add_action( 'template_redirect', function() {
     $path = trim( parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH ), '/' );
+
     $redirects = array(
         'brochure-printing-services'     => 'brochures',
         'custom-booklet-printing'        => 'booklets',
@@ -109,7 +162,26 @@ add_action( 'template_redirect', function() {
         wp_redirect( home_url( '/' . $redirects[ $path ] . '/' ), 301 );
         exit;
     }
-} );
+
+    if ( ( is_attachment() || is_404() || is_page() || is_single() ) && $path && strpos( $path, '/' ) === false ) {
+        $term = get_term_by( 'slug', $path, 'product_cat' );
+        if ( $term && ! is_wp_error( $term ) ) {
+            update_option( 'pps_catroute_log', array(
+                'hook' => 'template_redirect (last resort)',
+                'time' => date( 'H:i:s' ),
+                'uri'  => $_SERVER['REQUEST_URI'] ?? '',
+                'was'  => is_attachment() ? 'attachment' : ( is_404() ? '404' : ( is_page() ? 'page' : 'single' ) ),
+                'term' => $term->term_id,
+            ), false );
+            global $wp_query;
+            $wp_query = new WP_Query( array( 'product_cat' => $term->slug ) );
+            $wp_query->is_tax     = true;
+            $wp_query->is_archive = true;
+            $wp_query->queried_object    = $term;
+            $wp_query->queried_object_id = $term->term_id;
+        }
+    }
+} , -999 );
 
 add_filter( 'term_description', 'do_shortcode', 11 );
 
