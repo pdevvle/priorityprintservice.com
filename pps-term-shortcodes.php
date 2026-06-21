@@ -17,20 +17,47 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 // ── Enable Rank Math's WooCommerce category base removal ──
 add_action( 'init', function() {
-    if ( get_option( 'pps_rm_catbase_set' ) === 'v4' ) return;
+    $cur = get_option( 'pps_rm_catbase_set' );
+    if ( $cur === 'v6' ) return;
+
     $raw = get_option( 'rank-math-options-general', '' );
     $is_json = is_string( $raw );
     $opts = $is_json ? json_decode( $raw, true ) : $raw;
-    if ( is_array( $opts ) ) {
+    if ( is_array( $opts ) && ( ! isset( $opts['wc_remove_category_base'] ) || $opts['wc_remove_category_base'] !== 'on' ) ) {
         $opts['wc_remove_category_base'] = 'on';
         update_option( 'rank-math-options-general', $is_json ? wp_json_encode( $opts ) : $opts );
     }
+
     flush_rewrite_rules();
-    update_option( 'pps_rm_catbase_set', 'v4', true );
-}, 99 );
+
+    $test_slugs = array( 'postcards', 'brochures', 'booklets', 'business-cards', 'flyers', 'rack-cards', 'door-hangers' );
+    $terms = array();
+    foreach ( $test_slugs as $s ) {
+        $t = get_term_by( 'slug', $s, 'product_cat' );
+        $terms[ $s ] = $t ? $t->term_id : false;
+    }
+    $rules = get_option( 'rewrite_rules', array() );
+    $pfree = array();
+    foreach ( $rules as $pat => $target ) {
+        if ( strpos( $target, 'product_cat=' ) !== false && strpos( $pat, 'product-category' ) === false ) {
+            $pfree[ $pat ] = $target;
+        }
+    }
+    update_option( 'pps_catbase_selftest', array(
+        'time'               => date( 'Y-m-d H:i:s' ),
+        'phase'              => $cur === 'v5' ? 'v5->v6 (second flush)' : 'fresh',
+        'terms'              => $terms,
+        'prefix_free_rules'  => $pfree,
+        'total_rules'        => count( $rules ),
+    ), false );
+
+    update_option( 'pps_rm_catbase_set', 'v6', true );
+}, 999 );
 
 // ── Route clean category slugs to product_cat (fixes %postname% rule conflict) ──
 add_filter( 'request', function( $qv ) {
+    if ( ! empty( $qv['product_cat'] ) ) return $qv;
+
     $slug = '';
     if ( ! empty( $qv['name'] ) )     $slug = $qv['name'];
     if ( ! $slug && ! empty( $qv['pagename'] ) ) $slug = $qv['pagename'];
