@@ -15,22 +15,45 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// ── Trace + block the redirect that causes the loop ──
+// ── One-time: delete Rank Math stored redirects that conflict with category slugs ──
+add_action( 'init', function() {
+    if ( get_option( 'pps_rm_redirects_cleaned' ) === 'v2' ) return;
+    global $wpdb;
+    $table = $wpdb->prefix . 'rank_math_redirections';
+    if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) !== $table ) {
+        update_option( 'pps_rm_redirects_cleaned', 'v2', true );
+        return;
+    }
+    $terms = get_terms( array( 'taxonomy' => 'product_cat', 'hide_empty' => false, 'fields' => 'slugs' ) );
+    if ( is_wp_error( $terms ) || empty( $terms ) ) {
+        update_option( 'pps_rm_redirects_cleaned', 'v2', true );
+        return;
+    }
+    $deleted = array();
+    foreach ( $terms as $slug ) {
+        $count = $wpdb->query( $wpdb->prepare(
+            "DELETE FROM $table WHERE sources LIKE %s OR sources LIKE %s OR sources LIKE %s OR sources LIKE %s",
+            '%' . $wpdb->esc_like( '"pattern":"' . $slug . '"' ) . '%',
+            '%' . $wpdb->esc_like( '"pattern":"' . $slug . '/"' ) . '%',
+            '%' . $wpdb->esc_like( '"pattern":"/' . $slug . '"' ) . '%',
+            '%' . $wpdb->esc_like( '"pattern":"/' . $slug . '/"' ) . '%'
+        ) );
+        if ( $count ) $deleted[] = $slug;
+    }
+    $also = $wpdb->prefix . 'rank_math_redirections_cache';
+    if ( $wpdb->get_var( "SHOW TABLES LIKE '$also'" ) === $also ) {
+        $wpdb->query( "TRUNCATE TABLE $also" );
+    }
+    update_option( 'pps_rm_redirects_cleaned', 'v2', true );
+    update_option( 'pps_rm_redirects_deleted', $deleted, false );
+}, 5 );
+
+// ── Block any remaining wp_redirect on category slug URLs (safety net) ──
 add_filter( 'wp_redirect', function( $location, $status ) {
     $path = trim( parse_url( $_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH ), '/' );
-    if ( ! $path || strpos( $path, 'wp-' ) === 0 || strpos( $path, 'rest_route' ) !== false ) return $location;
-
+    if ( ! $path || strpos( $path, '/' ) !== false ) return $location;
     $term = get_term_by( 'slug', $path, 'product_cat' );
     if ( ! $term || is_wp_error( $term ) ) return $location;
-
-    update_option( 'pps_redirect_trace', array(
-        'time'   => date( 'H:i:s' ),
-        'from'   => $_SERVER['REQUEST_URI'] ?? '',
-        'to'     => $location,
-        'status' => $status,
-        'trace'  => wp_debug_backtrace_summary(),
-    ), false );
-
     return false;
 }, 1, 2 );
 
