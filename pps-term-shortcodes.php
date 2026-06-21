@@ -29,6 +29,32 @@ add_action( 'init', function() {
     update_option( 'pps_rm_catbase_set', 'v4', true );
 }, 99 );
 
+// ── Route clean category slugs to product_cat (fixes %postname% rule conflict) ──
+add_filter( 'request', function( $qv ) {
+    $slug = '';
+    if ( ! empty( $qv['name'] ) )     $slug = $qv['name'];
+    if ( ! $slug && ! empty( $qv['pagename'] ) ) $slug = $qv['pagename'];
+    if ( ! $slug ) return $qv;
+
+    $term = get_term_by( 'slug', $slug, 'product_cat' );
+    if ( $term && ! is_wp_error( $term ) ) {
+        unset( $qv['name'], $qv['pagename'], $qv['page'], $qv['post_type'] );
+        $qv['product_cat'] = $term->slug;
+    }
+    return $qv;
+}, 1 );
+
+// ── Prevent redirect_canonical loop on clean category URLs ──
+add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
+    if ( is_product_category() ) return false;
+    $path = trim( parse_url( $requested_url, PHP_URL_PATH ), '/' );
+    if ( $path ) {
+        $term = get_term_by( 'slug', $path, 'product_cat' );
+        if ( $term && ! is_wp_error( $term ) ) return false;
+    }
+    return $redirect_url;
+}, 1, 2 );
+
 // ── 301 redirect old landing pages → category pages ──
 
 add_action( 'template_redirect', function() {
