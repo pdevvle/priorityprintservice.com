@@ -16,19 +16,15 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 // ── Enable Rank Math's WooCommerce category base removal ──
-add_filter( 'option_rank-math-options-general', function( $value ) {
-    if ( is_array( $value ) ) {
-        $value['wc_remove_category_base'] = 'on';
-    }
-    return $value;
-} );
-
-// One-time rewrite flush after enabling category base removal
 add_action( 'init', function() {
-    if ( get_option( 'pps_rm_catbase_flushed' ) !== 'v1' ) {
-        flush_rewrite_rules();
-        update_option( 'pps_rm_catbase_flushed', 'v1', true );
+    if ( get_option( 'pps_rm_catbase_set' ) === 'v2' ) return;
+    $opts = get_option( 'rank-math-options-general', array() );
+    if ( is_array( $opts ) && ( ! isset( $opts['wc_remove_category_base'] ) || $opts['wc_remove_category_base'] !== 'on' ) ) {
+        $opts['wc_remove_category_base'] = 'on';
+        update_option( 'rank-math-options-general', $opts );
     }
+    flush_rewrite_rules();
+    update_option( 'pps_rm_catbase_set', 'v2', true );
 }, 99 );
 
 // ── 301 redirect old landing pages → category pages ──
