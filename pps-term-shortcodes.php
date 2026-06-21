@@ -29,6 +29,17 @@ add_filter( 'request', function( $query_vars ) {
     return $query_vars;
 } );
 
+// Block WP canonical redirect from sending /{slug}/ back to /product-category/{slug}/
+add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
+    if ( is_tax( 'product_cat' ) ) {
+        $path = trim( parse_url( $requested_url, PHP_URL_PATH ), '/' );
+        if ( strpos( $path, 'product-category/' ) === false ) {
+            return false;
+        }
+    }
+    return $redirect_url;
+}, 10, 2 );
+
 // ── 301 redirect old /product-category/* URLs ──
 
 add_action( 'template_redirect', function() {
