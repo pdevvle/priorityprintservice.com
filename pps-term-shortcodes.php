@@ -15,7 +15,9 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// ── Resolve /{slug}/ as product category (removes /product-category/ prefix) ──
+// ── Clean product-category URLs: serve /{slug}/ instead of /product-category/{slug}/ ──
+
+// 1. Route /{slug}/ to product_cat query when slug matches a WooCommerce category
 add_filter( 'request', function( $query_vars ) {
     if ( ! empty( $query_vars['pagename'] ) && empty( $query_vars['product_cat'] ) ) {
         $slug = trim( $query_vars['pagename'], '/' );
@@ -29,13 +31,22 @@ add_filter( 'request', function( $query_vars ) {
     return $query_vars;
 } );
 
-// Block WP canonical redirect from sending /{slug}/ back to /product-category/{slug}/
+// 2. Make get_term_link() return /{slug}/ so WP considers clean URLs canonical
+add_filter( 'term_link', function( $url, $term, $taxonomy ) {
+    if ( $taxonomy === 'product_cat' ) {
+        return home_url( '/' . $term->slug . '/' );
+    }
+    return $url;
+}, 10, 3 );
+
+// 3. Block ANY canonical redirect that would reintroduce /product-category/
 add_filter( 'redirect_canonical', function( $redirect_url, $requested_url ) {
-    if ( is_tax( 'product_cat' ) ) {
-        $path = trim( parse_url( $requested_url, PHP_URL_PATH ), '/' );
-        if ( strpos( $path, 'product-category/' ) === false ) {
-            return false;
-        }
+    if ( ! $redirect_url ) return $redirect_url;
+    $redir_path  = parse_url( $redirect_url, PHP_URL_PATH );
+    $req_path    = parse_url( $requested_url, PHP_URL_PATH );
+    if ( strpos( $redir_path, '/product-category/' ) !== false
+      && strpos( $req_path, '/product-category/' ) === false ) {
+        return false;
     }
     return $redirect_url;
 }, 10, 2 );
