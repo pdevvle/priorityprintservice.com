@@ -189,21 +189,12 @@ ul.products{max-width:var(--pps-max-w,1200px)!important;margin-left:auto!importa
 .term-description ul li{padding:6px 0 6px 22px;position:relative;font-size:15px;color:#475569;line-height:1.6}
 .term-description ul li::before{content:"\25B8";position:absolute;left:0;color:#007eff;font-weight:700}
 
-/* ── Paper cards ── */
-.pps-cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin:16px 0 24px}
-.pps-cat-card{position:relative;border:1px solid #e2e8f0;border-left:3px solid #007eff;border-radius:8px;padding:14px 16px;background:#fff;transition:box-shadow .2s,transform .15s}
-.pps-cat-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.08);transform:translateY(-2px)}
-.pps-cat-card--link{text-decoration:none;color:inherit;cursor:pointer}
-.pps-cat-card--link:hover .pps-cat-card-name{color:#007eff}
-.pps-cat-card-arrow{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:20px;color:#cbd5e1;font-weight:300;transition:color .15s,transform .15s}
-.pps-cat-card--link:hover .pps-cat-card-arrow{color:#007eff;transform:translateY(-50%) translateX(3px)}
-.pps-cat-card-name{font-weight:600;font-size:14px;color:#0f172a;margin-bottom:6px}
-.pps-cat-card-meta{display:flex;flex-wrap:wrap;gap:5px}
-.pps-cat-badge{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 8px;border-radius:4px}
-.pps-cat-badge--stock{background:#dcfce7;color:#166534}
-.pps-cat-badge--factory{background:#fef9c3;color:#854d0e}
-.pps-cat-badge--coat{background:#ede9fe;color:#5b21b6}
-.pps-cat-badge--cs{background:#dbeafe;color:#1e40af}
+/* ── Features list (papers, coatings, add-ons) ── */
+.pps-cat-features{list-style:none;padding:0;margin:14px 0 24px;columns:2;column-gap:32px}
+.pps-cat-features li{padding:5px 0 5px 20px;position:relative;font-size:14px;color:#475569;line-height:1.6;break-inside:avoid}
+.pps-cat-features li::before{content:"\2713";position:absolute;left:0;color:#007eff;font-weight:700;font-size:13px}
+.pps-cat-features strong{color:#1e293b;font-weight:600}
+.pps-cat-features em{color:#92400e;font-style:normal;font-size:12px}
 
 /* ── Turnaround callout ── */
 .pps-cat-callout{background:linear-gradient(135deg,#e8f4ff 0%,#eff6ff 100%);border-radius:10px;padding:24px 28px;margin:24px 0;border:1px solid #93c5fd;position:relative;overflow:hidden}
@@ -212,28 +203,9 @@ ul.products{max-width:var(--pps-max-w,1200px)!important;margin-left:auto!importa
 .pps-cat-callout-body{margin:0;color:#475569;font-size:15px;line-height:1.65}
 .pps-cat-callout .pps-cat-num{font-size:32px;font-weight:800;color:#007eff;vertical-align:baseline}
 
-/* ── Coating chips ── */
-.pps-cat-chips{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 24px}
-.pps-cat-chip{background:#f8fafc;border:1px solid #e2e8f0;border-radius:22px;padding:8px 18px;font-size:13px;color:#334155;transition:all .15s}
-.pps-cat-chip:hover{background:#e8f4ff;border-color:#93c5fd}
-.pps-cat-chip b{color:#007eff;margin-right:4px}
-
-/* ── Add-on grid ── */
-.pps-cat-addon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:14px 0 24px}
-.pps-cat-addon{display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;font-size:13px;font-weight:500;color:#334155;transition:all .15s}
-.pps-cat-addon:hover{background:#e8f4ff;border-color:#93c5fd}
-.pps-cat-addon-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.pps-cat-addon-dot--vivid{background:#ec4899}
-.pps-cat-addon-dot--coating{background:#8b5cf6}
-.pps-cat-addon-dot--bundling{background:#3b82f6}
-.pps-cat-addon-dot--rc{background:#10b981}
-.pps-cat-addon-dot--two_staple{background:#f59e0b}
-.pps-cat-addon-dot--perforation{background:#ef4444}
-.pps-cat-addon-dot--outfold{background:#6366f1}
-.pps-cat-card-name{display:flex;align-items:center;gap:6px}
+/* ── Tooltip trigger (still used by wizard) ── */
 .pps-cat-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:10px;font-weight:700;cursor:pointer;flex-shrink:0;margin-left:auto;transition:all .15s;line-height:1;user-select:none}
 .pps-cat-tip:hover{background:#007eff;color:#fff}
-.pps-cat-chip .pps-cat-tip{margin-left:6px}
 .pps-cat-tip-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:99999;align-items:center;justify-content:center}
 .pps-cat-tip-overlay.is-open{display:flex}
 .pps-cat-tip-modal{background:#fff;border-radius:12px;max-width:420px;width:calc(100vw - 32px);max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);animation:ppsTipIn .2s ease}
@@ -297,8 +269,7 @@ ul.products{padding-left:24px!important;padding-right:24px!important}
 .woocommerce-products-header{padding:16px 16px 0}
 .pps-cat-body{padding:20px 16px 12px}
 ul.products{padding-left:16px!important;padding-right:16px!important}
-.pps-cat-grid{grid-template-columns:1fr}
-.pps-cat-addon-grid{grid-template-columns:1fr}
+.pps-cat-features{columns:1}
 .pps-cat-callout{padding:18px 20px}
 .pps-cat-callout .pps-cat-num{font-size:26px}
 .pps-preset-lineup{padding:0 16px 24px}
@@ -524,15 +495,11 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
     $papers = array();
     if ( $a['type'] === 'text' || $a['type'] === 'all' ) {
         foreach ( ( isset( $cfg['papers_nc'] ) ? $cfg['papers_nc'] : array() ) as $p ) {
-            $p['_tip'] = 'paper_text_' . sanitize_key( str_replace( ' ', '_', $p['label'] ) );
-            $p['_tip_fallback'] = 'paper_text_weight';
             $papers[] = $p;
         }
     }
     if ( $a['type'] === 'cover' || $a['type'] === 'all' ) {
         foreach ( ( isset( $cfg['papers_cs'] ) ? $cfg['papers_cs'] : array() ) as $p ) {
-            $p['_tip'] = 'paper_cs_' . sanitize_key( str_replace( ' ', '_', $p['label'] ) );
-            $p['_tip_fallback'] = 'paper_cardstock';
             $papers[] = $p;
         }
     }
@@ -541,37 +508,29 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
     }
     if ( empty( $papers ) ) return '';
 
-    $tips      = get_option( 'pps_tooltips', array() );
-    $base_link = trim( $a['link'] );
+    $hints = array(
+        '70lb Uncoated Opaque Text'  => 'lightweight, natural feel for inserts and newsletters',
+        '80lb Matte Text'            => 'smooth matte finish, versatile for brochures and catalogs',
+        '100lb Gloss Text'           => 'glossy and vibrant for premium marketing materials',
+        '60lb Offset Smooth Opaque'  => 'economy weight, budget-friendly for large runs',
+        '80lb Offset Smooth Opaque'  => 'mid-weight offset with solid quality at great value',
+        '80lb Gloss Factory Coated'  => 'pre-coated gloss with vivid color reproduction',
+        '100lb Matte Factory Coated' => 'pre-coated matte with rich feel and great ink holdout',
+        '80lb Opaque Uncoated'       => 'sturdy uncoated cardstock with a professional feel',
+        '80lb Matte Cardstock'       => 'smooth matte cardstock, elegant and substantial',
+        '100lb Gloss Cardstock'      => 'glossy cardstock for bold colors and sharp images',
+        '14pt Gloss C1S'             => 'thick, coated one side for postcards and covers',
+        '16pt Coated C2S'            => 'premium double-coated for maximum durability',
+    );
 
-    $out = '<div class="pps-cat-grid">';
+    $out = '<ul class="pps-cat-features">';
     foreach ( $papers as $p ) {
-        $label   = esc_html( $p['label'] );
-        $tip_key = $p['_tip'] ?? '';
-        $tip_fb  = $p['_tip_fallback'] ?? '';
-        $has_tip = $tip_key && isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] );
-        if ( ! $has_tip && $tip_fb ) { $tip_key = $tip_fb; $has_tip = isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] ); }
-        $stock = empty( $p['factory'] )
-            ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
-            : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
-        $coat  = ! empty( $p['coatable'] )
-            ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
-            : '';
-        $tip_btn = $has_tip ? '<span class="pps-cat-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>' : '';
-        $inner = '<div class="pps-cat-card-name">' . $label . $tip_btn . '</div>'
-               . '<div class="pps-cat-card-meta">' . $stock . $coat . '</div>';
-
-        if ( $base_link ) {
-            $href = esc_url( add_query_arg( 'paper', $p['val'], $base_link ) );
-            $out .= '<a href="' . $href . '" class="pps-cat-card pps-cat-card--link">'
-                  . $inner
-                  . '<span class="pps-cat-card-arrow">&#8250;</span>'
-                  . '</a>';
-        } else {
-            $out .= '<div class="pps-cat-card">' . $inner . '</div>';
-        }
+        $label = esc_html( $p['label'] );
+        $hint  = isset( $hints[ $p['label'] ] ) ? ' &mdash; ' . esc_html( $hints[ $p['label'] ] ) : '';
+        $stock = empty( $p['factory'] ) ? '' : ' <em>(factory order)</em>';
+        $out  .= '<li><strong>' . $label . '</strong>' . $hint . $stock . '</li>';
     }
-    $out .= '</div>';
+    $out .= '</ul>';
     return $out;
 } );
 
@@ -600,16 +559,20 @@ add_shortcode( 'pps_cat_coatings', function() {
     $coatings = array_filter( $coatings, function( $c ) { return ! empty( $c['val'] ); } );
     if ( empty( $coatings ) ) return '';
 
-    $tips    = get_option( 'pps_tooltips', array() );
-    $has_tip = isset( $tips['coating'] ) && ! empty( $tips['coating']['title'] );
+    $descs = array(
+        'Gloss UV'     => 'high-shine protective finish that makes colors pop',
+        'Matte UV'     => 'smooth, non-reflective finish with a premium feel',
+        'Soft Touch'   => 'velvety texture coating for a luxurious tactile experience',
+        'Aqueous'      => 'water-based protective coating, fast-drying and eco-friendly',
+    );
 
-    $out = '<div class="pps-cat-chips">';
+    $out = '<ul class="pps-cat-features">';
     foreach ( $coatings as $c ) {
-        $out .= '<span class="pps-cat-chip"><b>&#10022;</b> ' . esc_html( $c['label'] )
-              . ( $has_tip ? ' <span class="pps-cat-tip" data-tip="coating">?</span>' : '' )
-              . '</span>';
+        $label = esc_html( $c['label'] );
+        $desc  = isset( $descs[ $c['label'] ] ) ? ' &mdash; ' . esc_html( $descs[ $c['label'] ] ) : '';
+        $out  .= '<li><strong>' . $label . '</strong>' . $desc . '</li>';
     }
-    $out .= '</div>';
+    $out .= '</ul>';
     return $out;
 } );
 
@@ -631,24 +594,23 @@ add_shortcode( 'pps_cat_addons', function( $atts ) {
     }
     if ( empty( $items ) ) return '';
 
-    $addon_tip_map = array(
-        'vivid' => 'vivid', 'coating' => 'coating', 'bundling' => 'bundling',
-        'rc' => 'round_cornering', 'two_staple' => 'saddle_stitch',
-        'perforation' => 'perforation', 'outfold' => 'outfold',
+    $descs = array(
+        'vivid'       => 'enhanced color vibrancy for photos and graphics',
+        'coating'     => 'protective UV or aqueous finish',
+        'bundling'    => 'shrink-wrapped in sets for easy distribution',
+        'rc'          => 'smooth rounded corners for a polished look',
+        'two_staple'  => 'dual-staple binding for secure page hold',
+        'perforation' => 'tear-away perforated sections for coupons or reply cards',
+        'outfold'     => 'oversized cover wrap for a premium presentation',
     );
-    $tips = get_option( 'pps_tooltips', array() );
 
-    $out = '<div class="pps-cat-addon-grid">';
+    $out = '<ul class="pps-cat-features">';
     foreach ( $items as $item ) {
-        $tip_key = isset( $addon_tip_map[ $item['slug'] ] ) ? $addon_tip_map[ $item['slug'] ] : '';
-        $has_tip = $tip_key && isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] );
-        $out .= '<div class="pps-cat-addon">'
-              . '<span class="pps-cat-addon-dot pps-cat-addon-dot--' . esc_attr( $item['slug'] ) . '"></span>'
-              . esc_html( $item['label'] )
-              . ( $has_tip ? '<span class="pps-cat-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>' : '' )
-              . '</div>';
+        $label = esc_html( $item['label'] );
+        $desc  = isset( $descs[ $item['slug'] ] ) ? ' &mdash; ' . esc_html( $descs[ $item['slug'] ] ) : '';
+        $out  .= '<li><strong>' . $label . '</strong>' . $desc . '</li>';
     }
-    $out .= '</div>';
+    $out .= '</ul>';
     return $out;
 } );
 
