@@ -546,7 +546,7 @@ add_shortcode( 'pps_cat_turnaround', function() {
          . '<p class="pps-cat-callout-body">'
          . 'Production starts in as few as <span class="pps-cat-num">' . $days . '</span> business days. '
          . 'Our pricing calculator shows real-time delivery dates based on your ZIP code &mdash; '
-         . 'you&#8217;ll see exactly when your order arrives before you place it.'
+         . 'you&#8217;ll see an accurate eta before the order is placed.'
          . '</p></div>';
 } );
 
@@ -712,7 +712,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '" data-calc="' . esc_attr( $calc ) . '">';
 
     // Step 1: Size
-    $size_prompt = $is_booklet ? 'What size do you need?' : 'What size brochure do you need?';
+    $size_prompt = 'What size do you need?';
     $out .= '<div class="pps-wiz-step is-active" data-step="size">';
     $out .= '<div class="pps-wiz-prompt">' . esc_html( $size_prompt ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
