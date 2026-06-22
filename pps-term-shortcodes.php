@@ -617,22 +617,78 @@ add_shortcode( 'pps_cat_addons', function( $atts ) {
     return $out;
 } );
 
-// ── [pps_cat_wizard calc="brochure" link="/product/..."] ──
+// ── [pps_cat_wizard calc="brochure|signs|..." link="/product/..."] ──
 
 add_shortcode( 'pps_cat_wizard', function( $atts ) {
-    if ( ! function_exists( 'pps_get_config' ) ) return '';
-    $a   = shortcode_atts( array( 'calc' => 'brochure', 'link' => '' ), $atts );
-    $cfg = pps_get_config();
-    $link = trim( $a['link'] );
-    $lead_mode = empty( $link );
-
+    $a    = shortcode_atts( array( 'calc' => 'brochure', 'link' => '' ), $atts );
     $calc = $a['calc'];
-    $is_booklet = in_array( $calc, array( 'saddle', 'perfect-bound', 'coupon' ), true );
+    $link = trim( $a['link'] );
+
+    // ── Lead wizard configurations (no calculator product needed) ──
+    $lead_configs = array(
+        'signs' => array(
+            array( 'key' => 'signtype', 'prompt' => 'What type of sign or banner?', 'options' => array(
+                array( 'val' => 'vinyl-banner',      'label' => 'Vinyl Banner',        'desc' => 'Durable, weather-resistant for outdoor advertising' ),
+                array( 'val' => 'retractable-banner', 'label' => 'Retractable Banner',  'desc' => 'Portable pull-up display with stand' ),
+                array( 'val' => 'yard-sign',          'label' => 'Yard Sign',           'desc' => 'Corrugated plastic — real estate, events, campaigns' ),
+                array( 'val' => 'foam-board',         'label' => 'Foam Board Sign',     'desc' => 'Lightweight rigid board for indoor display' ),
+                array( 'val' => 'poster',             'label' => 'Poster',              'desc' => 'Large-format print on paper or card stock' ),
+                array( 'val' => 'a-frame',            'label' => 'A-Frame Sign',        'desc' => 'Double-sided sidewalk display' ),
+                array( 'val' => 'window-graphic',     'label' => 'Window Graphic',      'desc' => 'Clings or adhesive vinyl for storefronts' ),
+                array( 'val' => 'vehicle-magnet',     'label' => 'Vehicle Magnet',      'desc' => 'Removable magnetic sign for cars &amp; trucks' ),
+            ) ),
+            array( 'key' => 'size', 'prompt' => 'What size do you need?', 'options' => array(
+                array( 'val' => '12x18',   'label' => '12 × 18"',    'desc' => 'Small sign' ),
+                array( 'val' => '18x24',   'label' => '18 × 24"',    'desc' => 'Standard yard sign' ),
+                array( 'val' => '24x36',   'label' => '24 × 36"',    'desc' => 'Large sign' ),
+                array( 'val' => '2x4',     'label' => '2\' × 4\'',   'desc' => 'Small banner' ),
+                array( 'val' => '3x6',     'label' => '3\' × 6\'',   'desc' => 'Medium banner' ),
+                array( 'val' => '4x8',     'label' => '4\' × 8\'',   'desc' => 'Large banner' ),
+                array( 'val' => '33x80',   'label' => '33" × 80"',   'desc' => 'Retractable banner' ),
+                array( 'val' => 'custom',  'label' => 'Custom Size',  'desc' => 'I\'ll specify in the message' ),
+            ) ),
+            array( 'key' => 'environment', 'prompt' => 'Where will it be used?', 'options' => array(
+                array( 'val' => 'indoor',  'label' => 'Indoor',  'desc' => 'Controlled environment, no weather exposure' ),
+                array( 'val' => 'outdoor', 'label' => 'Outdoor', 'desc' => 'Weather-resistant materials needed' ),
+                array( 'val' => 'both',    'label' => 'Both',    'desc' => 'Versatile for indoor and outdoor use' ),
+            ) ),
+            array( 'key' => 'sides', 'prompt' => 'Single or double-sided?', 'options' => array(
+                array( 'val' => 'single', 'label' => 'Single-Sided', 'desc' => 'Printed on one side' ),
+                array( 'val' => 'double', 'label' => 'Double-Sided', 'desc' => 'Printed on both sides' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many do you need?', 'options' => array(
+                array( 'val' => '1',     'label' => 'Just 1',  'desc' => '' ),
+                array( 'val' => '2-5',   'label' => '2–5',     'desc' => '' ),
+                array( 'val' => '6-10',  'label' => '6–10',    'desc' => '' ),
+                array( 'val' => '11-25', 'label' => '11–25',   'desc' => '' ),
+                array( 'val' => '26-50', 'label' => '26–50',   'desc' => '' ),
+                array( 'val' => '50+',   'label' => '50+',     'desc' => '' ),
+            ) ),
+            array( 'key' => 'finishing', 'prompt' => 'Any finishing or mounting?', 'multi' => true, 'options' => array(
+                array( 'val' => 'grommets',    'label' => 'Grommets',      'desc' => 'Metal eyelets for hanging' ),
+                array( 'val' => 'pole-pockets','label' => 'Pole Pockets',  'desc' => 'Sewn sleeves for poles' ),
+                array( 'val' => 'hemmed',      'label' => 'Hemmed Edges',  'desc' => 'Reinforced borders' ),
+                array( 'val' => 'h-stakes',    'label' => 'H-Wire Stakes', 'desc' => 'For yard sign installation' ),
+                array( 'val' => 'easel',       'label' => 'Easel Back',    'desc' => 'Self-standing support' ),
+                array( 'val' => 'lamination',  'label' => 'Lamination',    'desc' => 'Protective glossy or matte coating' ),
+                array( 'val' => 'mounting',    'label' => 'Rigid Mounting','desc' => 'Board or substrate backing' ),
+            ) ),
+        ),
+    );
+
+    $is_lead_type = isset( $lead_configs[ $calc ] );
+    $lead_mode    = $is_lead_type || empty( $link );
+
+    if ( ! $is_lead_type && ! function_exists( 'pps_get_config' ) ) return '';
+    $cfg = $is_lead_type ? array() : pps_get_config();
+
+    $is_booklet = ! $is_lead_type && in_array( $calc, array( 'saddle', 'perfect-bound', 'coupon' ), true );
 
     $id = 'pps-wiz-' . wp_unique_id();
 
-    // ── Step data ──
+    // ── Step data (PPS calculator types only) ──
 
+    if ( ! $is_lead_type ) {
     $nc = isset( $cfg['papers_nc'] ) ? $cfg['papers_nc'] : array();
     $cs = isset( $cfg['papers_cs'] ) ? $cfg['papers_cs'] : array();
     foreach ( $cs as &$_p ) { $_p['_cs'] = true; }
@@ -709,10 +765,36 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
             }
         }
     }
+    } // end if ( ! $is_lead_type )
 
     // ── Render ──
 
     $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '" data-calc="' . esc_attr( $calc ) . '"' . ( $lead_mode ? ' data-lead="1"' : '' ) . '>';
+
+    if ( $is_lead_type ) {
+        // ── Lead wizard: render steps from config ──
+        $lc_steps = $lead_configs[ $calc ];
+        foreach ( $lc_steps as $si => $lstep ) {
+            $active = $si === 0 ? ' is-active' : '';
+            $multi  = ! empty( $lstep['multi'] ) ? ' data-multi="1"' : '';
+            $out .= '<div class="pps-wiz-step' . $active . '" data-step="' . esc_attr( $lstep['key'] ) . '"' . $multi . '>';
+            if ( $si === 0 ) {
+                $out .= '<div class="pps-wiz-prompt">' . esc_html( $lstep['prompt'] ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
+            } else {
+                $prev_key = $lc_steps[ $si - 1 ]['key'];
+                $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="' . esc_attr( $prev_key ) . '"></span> &mdash; ' . esc_html( $lstep['prompt'] ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
+            }
+            $out .= '<div class="pps-wiz-grid">';
+            foreach ( $lstep['options'] as $opt ) {
+                $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $opt['val'] ) . '" data-label="' . esc_attr( $opt['label'] ) . '">'
+                      . '<div class="pps-wiz-opt-name">' . esc_html( $opt['label'] ) . '</div>'
+                      . ( ! empty( $opt['desc'] ) ? '<div class="pps-wiz-opt-desc">' . $opt['desc'] . '</div>' : '' )
+                      . '</button>';
+            }
+            $out .= '</div></div>';
+        }
+    } else {
+    // ── PPS calculator steps ──
 
     // Step 1: Size
     $size_prompt = 'What size do you need?';
@@ -845,6 +927,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         }
         $out .= '</div></div>';
     }
+    } // end PPS calculator steps else
 
     // Floating action bar
     $nonce    = wp_create_nonce( 'pps_wizard_email' );
@@ -958,13 +1041,17 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '}'
           . 'function updateActions(){'
           .   'var parts=[];'
-          .   'if(state.size)parts.push(state.size.label);'
-          .   'if(state.pages)parts.push(state.pages.label);'
-          .   'if(state.fold)parts.push(state.fold.label);'
-          .   'if(state.paper)parts.push(state.paper.label);'
-          .   'if(state.cover&&state.cover.val)parts.push("Cover: "+state.cover.label);'
-          .   'if(state.coating&&state.coating.val)parts.push(state.coating.label);'
-          .   'if(state.addons&&state.addons.val)parts.push(state.addons.label);'
+          .   'if(w.dataset.lead){'
+          .     'steps.forEach(function(s){if(state[s])parts.push(state[s].label)});'
+          .   '}else{'
+          .     'if(state.size)parts.push(state.size.label);'
+          .     'if(state.pages)parts.push(state.pages.label);'
+          .     'if(state.fold)parts.push(state.fold.label);'
+          .     'if(state.paper)parts.push(state.paper.label);'
+          .     'if(state.cover&&state.cover.val)parts.push("Cover: "+state.cover.label);'
+          .     'if(state.coating&&state.coating.val)parts.push(state.coating.label);'
+          .     'if(state.addons&&state.addons.val)parts.push(state.addons.label);'
+          .   '}'
           .   'var s=w.querySelector(".pps-wiz-summary");'
           .   'if(s)s.innerHTML=parts.length?parts.map(function(p){return"<strong>"+p+"<\\/strong>"}).join(" \\u00b7 "):"";'
           .   'if(!w.dataset.lead){'
