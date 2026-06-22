@@ -220,6 +220,8 @@ const PCF = Object.assign({
   // configs while eliminating the separate pages knob.
   booklet_maximummarkup:3.6, booklet_minimummarkup:1.45,
   booklet_markup_coef_tS:0.295,
+  booklet_cover_maximummarkup:6.0, booklet_cover_minimummarkup:1.8,
+  booklet_cover_markup_coef:0.38,
   booklet_size_discount:0, booklet_surcharge:0.30,
   booklet_8up_markup_bonus:0.15, // raises mk by this % for imp>=8 sizes (materials/print only, not labor)
   roundcornerperhour:75, bundlesperhour:50, addon_roundcornermaxdays:30,
@@ -543,6 +545,9 @@ function calculate(c) {
   // is roughly the same regardless of imp). 0 = off; admin-tunable via Production tab.
   const mkBase=Math.max(PCF.booklet_maximummarkup-dL,PCF.booklet_minimummarkup);
   const mk=imp>=8 ? mkBase*(1+(PCF.booklet_8up_markup_bonus||0)) : mkBase;
+  const cvrSheets=tQ/imp;
+  const cvrDL=PCF.booklet_cover_markup_coef*Math.log(Math.max(cvrSheets,1));
+  const mkCvr=Math.max(PCF.booklet_cover_maximummarkup-cvrDL,PCF.booklet_cover_minimummarkup);
   const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
   const csOK=sets.every(s=>s.pages<=24);
 
@@ -570,9 +575,9 @@ function calculate(c) {
   // Cover is 1 sheet per book — cost should not depend on page count. Old formula:
   //   ((PCF.printing_fullcolor_cost*tS)*2)/imp)*mk
   // caused saddle-stitch to overcharge by 2-8x at 16-32pp configurations.
-  P.coverPrint=c.coverColor==="bw"?(((PCF.printing_black_cost*2)*tQ)/imp)*mk:(((PCF.printing_fullcolor_cost*2)*tQ)/imp)*mk;
+  P.coverPrint=c.coverColor==="bw"?(((PCF.printing_black_cost*2)*tQ)/imp)*mkCvr:(((PCF.printing_fullcolor_cost*2)*tQ)/imp)*mkCvr;
   P.insidePaper=(c.insidePaper.price*tS)*mk;
-  P.coverPaper=((cvr.price*tQ)/imp)*mk;
+  P.coverPaper=((cvr.price*tQ)/imp)*mkCvr;
   P.press=(tS/PCF.press_printsperhour)*PCF.labor_press_hr;
   P.cutting=((tS*imp)/PCF.cutter_sheetsperhour)*(PCF.labor_cutting_hr+mk)+PCF.cutterbasefee;
   P.scoreCover=cvrScoring?(tQ/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
@@ -740,6 +745,7 @@ function calculate(c) {
     totalPages:tP,
     // Pricing intermediates
     markup:mk,
+    coverMarkup:mkCvr,
     discountLog:dL,
     spineThickness:spine,
     materialsSubtotal:pComp,
@@ -1408,6 +1414,7 @@ function DebugPanel({debug}){
         <Row label="Total pages" value={d.totalPages} unit="pg"/>
         <Row label="Discount log" value={d.discountLog}/>
         <Row label="Markup multiplier" value={d.markup} unit="×"/>
+        <Row label="Cover markup" value={d.coverMarkup} unit="×"/>
         <Row label="Spine thickness (proxy)" value={d.spineThickness}/>
         <Row label="Materials subtotal" value={d.materialsSubtotal} unit="$"/>
 

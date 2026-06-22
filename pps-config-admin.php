@@ -118,6 +118,9 @@ function pps_default_config() {
             'booklet_size_discount'             => 0,
             'booklet_surcharge'                 => 0.30,
             'booklet_8up_markup_bonus'          => 0.15,    // multiplier added to mk when imp >= 8 (small saddle sizes); affects materials/print only, not labor
+            'booklet_cover_maximummarkup'       => 6.0,
+            'booklet_cover_minimummarkup'       => 1.8,
+            'booklet_cover_markup_coef'         => 0.38,
             // Perfect-bound markup — saddle-mirrored, slightly lower coefS to offset PB-only fixed adders
             'perfectbound_maximummarkup'        => 3.6,
             'perfectbound_minimummarkup'        => 1.45,
@@ -1143,6 +1146,11 @@ function pps_config_tab_production( $cfg ) {
             'booklet_size_discount'      => array( '8.5×11 Size Disc.', '×' ),
             'booklet_8up_markup_bonus'   => array( '8-up Markup Bonus', '×' ),
             'booklet_surcharge'          => array( 'Pricing Surcharge', '×' ),
+        ),
+        'Booklet Cover Markup' => array(
+            'booklet_cover_maximummarkup' => array( 'Cover Max Markup', '×' ),
+            'booklet_cover_minimummarkup' => array( 'Cover Min Markup', '×' ),
+            'booklet_cover_markup_coef'   => array( 'Cover Decay Coef', '×ln(sheets)' ),
         ),
         'Perfect Bound Markup' => array(
             'perfectbound_maximummarkup'   => array( 'Max Markup', '×' ),
