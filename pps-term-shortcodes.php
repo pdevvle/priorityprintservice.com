@@ -309,6 +309,9 @@ ul.products{padding-left:16px!important;padding-right:16px!important}
 .pps-wiz-act-pricing:hover{background:#0070e6;color:#fff}
 .pps-wiz-act-quote{background:none;border:1px solid #93c5fd;color:#007eff;font-weight:600;font-size:13px;padding:10px 24px;border-radius:6px;cursor:pointer;transition:all .15s}
 .pps-wiz-act-quote:hover{background:#e8f4ff}
+.pps-wiz[data-lead="1"] .pps-wiz-act-pricing{display:none}
+.pps-wiz[data-lead="1"] .pps-wiz-act-quote{background:#007eff;color:#fff;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px;border:0}
+.pps-wiz[data-lead="1"] .pps-wiz-act-quote:hover{background:#0070e6;color:#fff}
 .pps-wiz-email-form{margin-top:12px;display:none;text-align:left;max-width:400px;margin-left:auto;margin-right:auto}
 .pps-wiz-phone-hint{font-size:11px;color:#94a3b8;margin:-4px 0 8px 2px;line-height:1.4}
 .pps-wiz-cb{display:flex;align-items:center;gap:6px;font-size:13px;color:#334155;cursor:pointer;margin-bottom:8px;font-weight:500}
@@ -621,7 +624,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $a   = shortcode_atts( array( 'calc' => 'brochure', 'link' => '' ), $atts );
     $cfg = pps_get_config();
     $link = trim( $a['link'] );
-    if ( ! $link ) return '';
+    $lead_mode = empty( $link );
 
     $calc = $a['calc'];
     $is_booklet = in_array( $calc, array( 'saddle', 'perfect-bound', 'coupon' ), true );
@@ -709,7 +712,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 
     // ── Render ──
 
-    $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '" data-calc="' . esc_attr( $calc ) . '">';
+    $out = '<div class="pps-wiz" id="' . esc_attr( $id ) . '" data-link="' . esc_attr( $link ) . '" data-calc="' . esc_attr( $calc ) . '"' . ( $lead_mode ? ' data-lead="1"' : '' ) . '>';
 
     // Step 1: Size
     $size_prompt = 'What size do you need?';
@@ -850,7 +853,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $out .= '<div class="pps-wiz-summary"></div>';
     $out .= '<div class="pps-wiz-actions-btns">';
     $out .= '<a class="pps-wiz-act-pricing" href="' . esc_url( $link ) . '">Proceed to Pricing &rarr;</a>';
-    $out .= '<button type="button" class="pps-wiz-act-quote">Request a Quote</button>';
+    $out .= '<button type="button" class="pps-wiz-act-quote">' . ( $lead_mode ? 'Get a Quote' : 'Request a Quote' ) . '</button>';
     $out .= '</div>';
     $out .= '<div class="pps-wiz-email-form">'
           . '<input type="text" class="pps-wiz-input" data-field="name" placeholder="Your Name">'
@@ -964,8 +967,10 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'if(state.addons&&state.addons.val)parts.push(state.addons.label);'
           .   'var s=w.querySelector(".pps-wiz-summary");'
           .   'if(s)s.innerHTML=parts.length?parts.map(function(p){return"<strong>"+p+"<\\/strong>"}).join(" \\u00b7 "):"";'
-          .   'var url=buildUrl();'
-          .   'var a=w.querySelector(".pps-wiz-act-pricing");if(a)a.href=url;'
+          .   'if(!w.dataset.lead){'
+          .     'var url=buildUrl();'
+          .     'var a=w.querySelector(".pps-wiz-act-pricing");if(a)a.href=url;'
+          .   '}'
           .   'bar.classList.toggle("is-visible",parts.length>0);'
           . '}'
           . 'function clearStep(step){'
@@ -1035,7 +1040,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'if(hp)fd.append("website",hp.value);'
           .     'if(cb&&cb.checked)fd.append("callback","1");'
           .     'fd.append("specs",w.querySelector(".pps-wiz-summary").textContent);'
-          .     'fd.append("url",w.querySelector(".pps-wiz-act-pricing").href);'
+          .     'fd.append("url",w.dataset.lead?window.location.href:w.querySelector(".pps-wiz-act-pricing").href);'
           .     'fd.append("message",msg);'
           .     'wizFiles.forEach(function(f){fd.append("files[]",f)});'
           .     'var btn=e.target.closest(".pps-wiz-send");btn.disabled=true;btn.textContent="Sending...";'
