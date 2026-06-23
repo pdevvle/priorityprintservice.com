@@ -655,6 +655,53 @@ function pps_config_render_page() {
             }
         }
 
+        // ── Tooltips (separate wp_option) ──
+        if ( isset( $_POST['pps_tooltips_json'] ) ) {
+            $tip_raw = wp_unslash( $_POST['pps_tooltips_json'] );
+            if ( strlen( $tip_raw ) > 524288 ) {
+                $json_errors[] = 'Tooltips: payload too large (max 512KB).';
+            } else {
+                $decoded = json_decode( $tip_raw, true );
+                if ( json_last_error() !== JSON_ERROR_NONE || ! is_array( $decoded ) ) {
+                    $json_errors[] = 'Tooltips: ' . json_last_error_msg();
+                } else {
+                    $clean = array();
+                    $count = 0;
+                    foreach ( $decoded as $key => $tip ) {
+                        if ( ++$count > 100 ) break;
+                        $k = sanitize_key( $key );
+                        if ( $k === '' ) continue;
+                        $clean[ $k ] = array(
+                            'title'   => sanitize_text_field( $tip['title'] ?? '' ),
+                            'content' => array(),
+                        );
+                        if ( ! empty( $tip['content'] ) && is_array( $tip['content'] ) ) {
+                            $bc = 0;
+                            foreach ( $tip['content'] as $block ) {
+                                if ( ++$bc > 20 ) break;
+                                $type = sanitize_key( $block['type'] ?? 'text' );
+                                $b = array( 'type' => $type );
+                                if ( $type === 'text' ) {
+                                    $b['value'] = sanitize_textarea_field( $block['value'] ?? '' );
+                                } elseif ( $type === 'image' ) {
+                                    $b['src'] = esc_url_raw( $block['src'] ?? '' );
+                                    $b['alt'] = sanitize_text_field( $block['alt'] ?? '' );
+                                } elseif ( $type === 'video' ) {
+                                    $b['src'] = esc_url_raw( $block['src'] ?? '' );
+                                    $b['poster'] = esc_url_raw( $block['poster'] ?? '' );
+                                } elseif ( $type === 'youtube' ) {
+                                    $b['src'] = esc_url_raw( $block['src'] ?? '' );
+                                    $b['alt'] = sanitize_text_field( $block['alt'] ?? '' );
+                                }
+                                $clean[ $k ]['content'][] = $b;
+                            }
+                        }
+                    }
+                    update_option( 'pps_tooltips', $clean, false );
+                }
+            }
+        }
+
         // ── Zone Map (separate wp_option) ──
         $zone_updated = false;
 
@@ -742,6 +789,7 @@ function pps_config_render_page() {
         'sizes'      => 'Sizes',
         'shipping'   => 'Shipping',
         'seo'        => 'SEO',
+        'tooltips'   => 'Tooltips',
     );
 
     ?>
@@ -773,6 +821,7 @@ function pps_config_render_page() {
                 case 'sizes':      pps_config_tab_sizes( $cfg ); break;
                 case 'shipping':   pps_config_tab_shipping( $cfg ); break;
                 case 'seo':        pps_config_tab_seo( $cfg ); break;
+                case 'tooltips':   pps_config_tab_tooltips( $cfg ); break;
             }
             ?>
 
@@ -847,6 +896,33 @@ function pps_config_render_page() {
         .pps-faq-del:hover { background:#fce4e4; border-radius:2px; }
         .pps-faq-add { font-size:11px; color:#007eff; cursor:pointer; display:inline-block; margin-top:8px; padding:3px 10px; border:1px dashed #007eff; border-radius:3px; background:none; }
         .pps-faq-add:hover { background:#e8f4ff; }
+
+        /* Tooltips tab */
+        .pps-tip-card { background:#fafafa; border:1px solid #ddd; border-radius:4px; padding:10px 12px; margin-bottom:10px; }
+        .pps-tip-header { display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
+        .pps-tip-arrow { font-size:10px; color:#999; transition:transform .15s; width:12px; }
+        .pps-tip-card.is-open .pps-tip-arrow { transform:rotate(90deg); }
+        .pps-tip-key { font-family:monospace; font-size:12px; color:#007eff; font-weight:600; min-width:140px; }
+        .pps-tip-title-preview { font-size:12px; color:#555; flex:1; }
+        .pps-tip-del { cursor:pointer; color:#b32d2e; font-size:16px; line-height:1; user-select:none; margin-left:auto; padding:0 4px; }
+        .pps-tip-del:hover { background:#fce4e4; border-radius:2px; }
+        .pps-tip-body { display:none; margin-top:10px; padding-top:10px; border-top:1px solid #e0e0e0; }
+        .pps-tip-card.is-open .pps-tip-body { display:block; }
+        .pps-tip-fields { display:grid; grid-template-columns:180px 1fr; gap:6px 12px; margin-bottom:10px; align-items:center; }
+        .pps-tip-fields label { font-size:11px; font-weight:600; color:#555; text-transform:uppercase; }
+        .pps-tip-fields input { padding:4px 8px; border:1px solid #ccc; border-radius:3px; font-size:12px; box-sizing:border-box; }
+        .pps-tip-block { display:grid; grid-template-columns:90px 1fr 20px; gap:6px; align-items:start; padding:6px; background:#fff; border:1px solid #e0e0e0; border-radius:3px; margin-bottom:4px; }
+        .pps-tip-block select { padding:3px 4px; border:1px solid #ccc; border-radius:2px; font-size:11px; }
+        .pps-tip-block textarea { width:100%; padding:4px 6px; border:1px solid #ccc; border-radius:2px; font-size:12px; box-sizing:border-box; font-family:inherit; resize:vertical; min-height:36px; }
+        .pps-tip-block input[type="text"], .pps-tip-block input[type="url"] { width:100%; padding:4px 6px; border:1px solid #ccc; border-radius:2px; font-size:12px; box-sizing:border-box; }
+        .pps-tip-block-fields { display:flex; flex-direction:column; gap:4px; }
+        .pps-tip-block-del { cursor:pointer; color:#b32d2e; font-size:14px; text-align:center; line-height:24px; user-select:none; }
+        .pps-tip-block-del:hover { background:#fce4e4; border-radius:2px; }
+        .pps-tip-block-add { font-size:11px; color:#007eff; cursor:pointer; display:inline-block; margin-top:4px; padding:2px 8px; border:1px dashed #007eff; border-radius:3px; background:none; }
+        .pps-tip-block-add:hover { background:#e8f4ff; }
+        .pps-tip-add { font-size:11px; color:#007eff; cursor:pointer; display:inline-block; margin-top:6px; padding:3px 10px; border:1px dashed #007eff; border-radius:3px; background:none; }
+        .pps-tip-add:hover { background:#e8f4ff; }
+        .pps-tip-count { font-size:11px; color:#888; margin-left:8px; }
     </style>
 
     <script>
@@ -1031,8 +1107,6 @@ function pps_config_render_page() {
             var row = del.closest('[data-pps-faq-row]');
             var rowsWrap = row && row.parentNode;
             if (row && rowsWrap) {
-                // Always leave at least one (possibly empty) row so the
-                // template clone above keeps working.
                 if (rowsWrap.querySelectorAll('[data-pps-faq-row]').length > 1) {
                     row.remove();
                 } else {
@@ -1040,6 +1114,151 @@ function pps_config_render_page() {
                 }
             }
         });
+
+        // ── Tooltips: toggle card expand/collapse ──
+        document.addEventListener('click', function(e) {
+            var header = e.target.closest('.pps-tip-header');
+            if (!header) return;
+            if (e.target.closest('.pps-tip-del')) return;
+            header.closest('.pps-tip-card').classList.toggle('is-open');
+        });
+
+        // ── Tooltips: delete card ──
+        document.addEventListener('click', function(e) {
+            var del = e.target.closest('.pps-tip-del');
+            if (!del) return;
+            var card = del.closest('.pps-tip-card');
+            if (card && confirm('Delete this tooltip?')) card.remove();
+        });
+
+        // ── Tooltips: delete content block ──
+        document.addEventListener('click', function(e) {
+            var del = e.target.closest('.pps-tip-block-del');
+            if (!del) return;
+            del.closest('.pps-tip-block').remove();
+        });
+
+        // ── Tooltips: add content block ──
+        document.addEventListener('click', function(e) {
+            var btn = e.target.closest('.pps-tip-block-add');
+            if (!btn) return;
+            var blocks = btn.closest('.pps-tip-body').querySelector('.pps-tip-blocks');
+            var block = document.createElement('div');
+            block.className = 'pps-tip-block';
+            block.innerHTML =
+                '<select data-tip-block-type>' +
+                    '<option value="text">Text</option>' +
+                    '<option value="image">Image</option>' +
+                    '<option value="video">Video</option>' +
+                    '<option value="youtube">YouTube</option>' +
+                '</select>' +
+                '<div class="pps-tip-block-fields">' +
+                    '<textarea data-tip-val="" placeholder="Text content" rows="2"></textarea>' +
+                '</div>' +
+                '<span class="pps-tip-block-del" title="Remove block">&times;</span>';
+            blocks.appendChild(block);
+        });
+
+        // ── Tooltips: type change swaps fields ──
+        document.addEventListener('change', function(e) {
+            if (!e.target.matches('[data-tip-block-type]')) return;
+            var type = e.target.value;
+            var fieldsDiv = e.target.closest('.pps-tip-block').querySelector('.pps-tip-block-fields');
+            if (type === 'text') {
+                fieldsDiv.innerHTML = '<textarea data-tip-val="" placeholder="Text content" rows="2"></textarea>';
+            } else if (type === 'image') {
+                fieldsDiv.innerHTML =
+                    '<input type="url" data-tip-val="src" placeholder="Image URL">' +
+                    '<input type="text" data-tip-val="alt" placeholder="Alt text">';
+            } else if (type === 'video') {
+                fieldsDiv.innerHTML =
+                    '<input type="url" data-tip-val="src" placeholder="Video URL (.mp4)">' +
+                    '<input type="url" data-tip-val="poster" placeholder="Poster image URL (optional)">';
+            } else if (type === 'youtube') {
+                fieldsDiv.innerHTML =
+                    '<input type="url" data-tip-val="src" placeholder="YouTube embed URL">' +
+                    '<input type="text" data-tip-val="alt" placeholder="Video title">';
+            }
+        });
+
+        // ── Tooltips: add new tooltip card ──
+        document.addEventListener('click', function(e) {
+            var btn = e.target.closest('.pps-tip-add');
+            if (!btn) return;
+            var wrap = document.getElementById('pps-tip-cards');
+            if (!wrap) return;
+            var card = document.createElement('div');
+            card.className = 'pps-tip-card is-open';
+            card.innerHTML =
+                '<div class="pps-tip-header">' +
+                    '<span class="pps-tip-arrow">&#9654;</span>' +
+                    '<span class="pps-tip-key">new_tooltip</span>' +
+                    '<span class="pps-tip-title-preview"></span>' +
+                    '<span class="pps-tip-del" title="Delete tooltip">&times;</span>' +
+                '</div>' +
+                '<div class="pps-tip-body">' +
+                    '<div class="pps-tip-fields">' +
+                        '<label>Key (slug)</label>' +
+                        '<input type="text" data-tip-key="" value="new_tooltip" placeholder="e.g. vivid">' +
+                        '<label>Title</label>' +
+                        '<input type="text" data-tip-title="" value="" placeholder="Tooltip heading">' +
+                    '</div>' +
+                    '<div class="pps-tip-blocks"></div>' +
+                    '<button type="button" class="pps-tip-block-add">+ Add Content Block</button>' +
+                '</div>';
+            wrap.appendChild(card);
+            card.querySelector('[data-tip-key]').focus();
+        });
+
+        // ── Tooltips: sync key/title to header preview ──
+        document.addEventListener('input', function(e) {
+            if (e.target.matches('[data-tip-key]')) {
+                var card = e.target.closest('.pps-tip-card');
+                if (card) card.querySelector('.pps-tip-key').textContent = e.target.value || 'untitled';
+            }
+            if (e.target.matches('[data-tip-title]')) {
+                var card = e.target.closest('.pps-tip-card');
+                if (card) card.querySelector('.pps-tip-title-preview').textContent = e.target.value;
+            }
+        });
+
+        // ── Tooltips: serialize to JSON on submit ──
+        var form = document.getElementById('pps-config-form');
+        if (form) {
+            form.addEventListener('submit', function() {
+                var tipHidden = document.querySelector('textarea[name="pps_tooltips_json"]');
+                if (!tipHidden) return;
+                var out = {};
+                document.querySelectorAll('.pps-tip-card').forEach(function(card) {
+                    var keyEl = card.querySelector('[data-tip-key]');
+                    var titleEl = card.querySelector('[data-tip-title]');
+                    var key = keyEl ? keyEl.value.trim().replace(/[^a-z0-9_]/g, '') : '';
+                    if (!key) return;
+                    var tip = { title: titleEl ? titleEl.value.trim() : '', content: [] };
+                    card.querySelectorAll('.pps-tip-block').forEach(function(block) {
+                        var typeEl = block.querySelector('[data-tip-block-type]');
+                        var type = typeEl ? typeEl.value : 'text';
+                        var b = { type: type };
+                        if (type === 'text') {
+                            var ta = block.querySelector('[data-tip-val=""]');
+                            b.value = ta ? ta.value.trim() : '';
+                        } else if (type === 'image') {
+                            b.src = (block.querySelector('[data-tip-val="src"]') || {}).value || '';
+                            b.alt = (block.querySelector('[data-tip-val="alt"]') || {}).value || '';
+                        } else if (type === 'video') {
+                            b.src = (block.querySelector('[data-tip-val="src"]') || {}).value || '';
+                            b.poster = (block.querySelector('[data-tip-val="poster"]') || {}).value || '';
+                        } else if (type === 'youtube') {
+                            b.src = (block.querySelector('[data-tip-val="src"]') || {}).value || '';
+                            b.alt = (block.querySelector('[data-tip-val="alt"]') || {}).value || '';
+                        }
+                        if (type === 'text' ? b.value : b.src) tip.content.push(b);
+                    });
+                    out[key] = tip;
+                });
+                tipHidden.value = JSON.stringify(out);
+            }, true);
+        }
     });
     </script>
     <?php
@@ -1552,4 +1771,77 @@ function pps_config_tab_seo( $cfg ) {
     }
 
     echo '<p style="font-size:11px;color:#888;margin:0">Empty entries are not emitted. Per-calc cap: 50 FAQs. Q max 512 chars, A max 4096 chars. HTML in answers is stripped at emit time (schema.org Answer.text is plain text).</p>';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TAB: TOOLTIPS
+// ═══════════════════════════════════════════════════════════════
+
+function pps_config_tab_tooltips( $cfg ) {
+    $tips = get_option( 'pps_tooltips', array() );
+    if ( ! is_array( $tips ) ) $tips = array();
+    if ( empty( $tips ) && function_exists( 'pps_default_tooltips' ) ) {
+        $tips = pps_default_tooltips();
+    }
+
+    echo '<textarea name="pps_tooltips_json" class="pps-json-hidden">' . esc_textarea( wp_json_encode( $tips, JSON_UNESCAPED_UNICODE ) ) . '</textarea>';
+
+    echo '<div class="pps-ss-section">RichTip Tooltips <span class="pps-ss-hint">shown on calculator pages &amp; category pages via tipKey</span></div>';
+    echo '<p style="font-size:11px;color:#888;margin:0 0 10px">Each tooltip has a key (used in code via <code>tipKey="key"</code>), a title, and one or more content blocks. Blocks can be text, image, video, or YouTube embed. Click a row to expand.</p>';
+
+    echo '<div id="pps-tip-cards">';
+    foreach ( $tips as $key => $tip ) {
+        $title   = $tip['title'] ?? '';
+        $blocks  = ( isset( $tip['content'] ) && is_array( $tip['content'] ) ) ? $tip['content'] : array();
+
+        echo '<div class="pps-tip-card">';
+        echo   '<div class="pps-tip-header">';
+        echo     '<span class="pps-tip-arrow">&#9654;</span>';
+        echo     '<span class="pps-tip-key">' . esc_html( $key ) . '</span>';
+        echo     '<span class="pps-tip-title-preview">' . esc_html( $title ) . '</span>';
+        echo     '<span class="pps-tip-count">' . count( $blocks ) . ' block' . ( count( $blocks ) !== 1 ? 's' : '' ) . '</span>';
+        echo     '<span class="pps-tip-del" title="Delete tooltip">&times;</span>';
+        echo   '</div>';
+        echo   '<div class="pps-tip-body">';
+        echo     '<div class="pps-tip-fields">';
+        echo       '<label>Key (slug)</label>';
+        echo       '<input type="text" data-tip-key="" value="' . esc_attr( $key ) . '" placeholder="e.g. vivid">';
+        echo       '<label>Title</label>';
+        echo       '<input type="text" data-tip-title="" value="' . esc_attr( $title ) . '" placeholder="Tooltip heading">';
+        echo     '</div>';
+        echo     '<div class="pps-tip-blocks">';
+        foreach ( $blocks as $block ) {
+            $type = $block['type'] ?? 'text';
+            echo '<div class="pps-tip-block">';
+            echo   '<select data-tip-block-type>';
+            foreach ( array( 'text', 'image', 'video', 'youtube' ) as $opt ) {
+                $sel = $opt === $type ? ' selected' : '';
+                echo '<option value="' . $opt . '"' . $sel . '>' . ucfirst( $opt ) . '</option>';
+            }
+            echo   '</select>';
+            echo   '<div class="pps-tip-block-fields">';
+            if ( $type === 'text' ) {
+                echo '<textarea data-tip-val="" placeholder="Text content" rows="2">' . esc_textarea( $block['value'] ?? '' ) . '</textarea>';
+            } elseif ( $type === 'image' ) {
+                echo '<input type="url" data-tip-val="src" placeholder="Image URL" value="' . esc_attr( $block['src'] ?? '' ) . '">';
+                echo '<input type="text" data-tip-val="alt" placeholder="Alt text" value="' . esc_attr( $block['alt'] ?? '' ) . '">';
+            } elseif ( $type === 'video' ) {
+                echo '<input type="url" data-tip-val="src" placeholder="Video URL (.mp4)" value="' . esc_attr( $block['src'] ?? '' ) . '">';
+                echo '<input type="url" data-tip-val="poster" placeholder="Poster image URL" value="' . esc_attr( $block['poster'] ?? '' ) . '">';
+            } elseif ( $type === 'youtube' ) {
+                echo '<input type="url" data-tip-val="src" placeholder="YouTube embed URL" value="' . esc_attr( $block['src'] ?? '' ) . '">';
+                echo '<input type="text" data-tip-val="alt" placeholder="Video title" value="' . esc_attr( $block['alt'] ?? '' ) . '">';
+            }
+            echo   '</div>';
+            echo   '<span class="pps-tip-block-del" title="Remove block">&times;</span>';
+            echo '</div>';
+        }
+        echo     '</div>';
+        echo     '<button type="button" class="pps-tip-block-add">+ Add Content Block</button>';
+        echo   '</div>';
+        echo '</div>';
+    }
+    echo '</div>';
+    echo '<button type="button" class="pps-tip-add">+ Add Tooltip</button>';
+    echo '<p style="font-size:11px;color:#888;margin:8px 0 0">Max 100 tooltips, 20 blocks per tooltip. Keys must be lowercase alphanumeric with underscores. Changes here update both calculator pages and category pages.</p>';
 }

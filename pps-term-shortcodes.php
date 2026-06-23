@@ -203,9 +203,28 @@ ul.products{max-width:var(--pps-max-w,1200px)!important;margin-left:auto!importa
 .pps-cat-callout-body{margin:0;color:#475569;font-size:15px;line-height:1.65}
 .pps-cat-callout .pps-cat-num{font-size:32px;font-weight:800;color:#007eff;vertical-align:baseline}
 
-/* ── Tooltip trigger (still used by wizard) ── */
+/* ── Coating chips ── */
+.pps-cat-chips{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 24px}
+.pps-cat-chip{background:#f8fafc;border:1px solid #e2e8f0;border-radius:22px;padding:8px 18px;font-size:13px;color:#334155;transition:all .15s}
+.pps-cat-chip:hover{background:#e8f4ff;border-color:#93c5fd}
+.pps-cat-chip b{color:#007eff;margin-right:4px}
+
+/* ── Add-on grid ── */
+.pps-cat-addon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:14px 0 24px}
+.pps-cat-addon{display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;font-size:13px;font-weight:500;color:#334155;transition:all .15s}
+.pps-cat-addon:hover{background:#e8f4ff;border-color:#93c5fd}
+.pps-cat-addon-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.pps-cat-addon-dot--vivid{background:#ec4899}
+.pps-cat-addon-dot--coating{background:#8b5cf6}
+.pps-cat-addon-dot--bundling{background:#3b82f6}
+.pps-cat-addon-dot--rc{background:#10b981}
+.pps-cat-addon-dot--two_staple{background:#f59e0b}
+.pps-cat-addon-dot--perforation{background:#ef4444}
+.pps-cat-addon-dot--outfold{background:#6366f1}
+.pps-cat-card-name{display:flex;align-items:center;gap:6px}
 .pps-cat-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:10px;font-weight:700;cursor:pointer;flex-shrink:0;margin-left:auto;transition:all .15s;line-height:1;user-select:none}
 .pps-cat-tip:hover{background:#007eff;color:#fff}
+.pps-cat-chip .pps-cat-tip{margin-left:6px}
 .pps-cat-tip-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:99999;align-items:center;justify-content:center}
 .pps-cat-tip-overlay.is-open{display:flex}
 .pps-cat-tip-modal{background:#fff;border-radius:12px;max-width:420px;width:calc(100vw - 32px);max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);animation:ppsTipIn .2s ease}
@@ -488,6 +507,7 @@ add_action( 'woocommerce_after_shop_loop', function() {
     echo '</div>';
 }, 15 );
 
+
 // ── [pps_cat_papers type="text|cover|all" factory="yes|no"] ──
 
 add_shortcode( 'pps_cat_papers', function( $atts ) {
@@ -498,12 +518,14 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
     $papers = array();
     if ( $a['type'] === 'text' || $a['type'] === 'all' ) {
         foreach ( ( isset( $cfg['papers_nc'] ) ? $cfg['papers_nc'] : array() ) as $p ) {
-            $papers[] = $p;
+            $p['_tip'] = 'paper_text_weight';
+            $papers[]  = $p;
         }
     }
     if ( $a['type'] === 'cover' || $a['type'] === 'all' ) {
         foreach ( ( isset( $cfg['papers_cs'] ) ? $cfg['papers_cs'] : array() ) as $p ) {
-            $papers[] = $p;
+            $p['_tip'] = 'paper_cardstock';
+            $papers[]  = $p;
         }
     }
     if ( $a['factory'] === 'no' ) {
@@ -511,27 +533,33 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
     }
     if ( empty( $papers ) ) return '';
 
-    $hints = array(
-        '70lb Uncoated Opaque Text'  => 'lightweight, natural feel for inserts and newsletters',
-        '80lb Matte Text'            => 'smooth matte finish, versatile for brochures and catalogs',
-        '100lb Gloss Text'           => 'glossy and vibrant for premium marketing materials',
-        '60lb Offset Smooth Opaque'  => 'economy weight, budget-friendly for large runs',
-        '80lb Offset Smooth Opaque'  => 'mid-weight offset with solid quality at great value',
-        '80lb Gloss Factory Coated'  => 'pre-coated gloss with vivid color reproduction',
-        '100lb Matte Factory Coated' => 'pre-coated matte with rich feel and great ink holdout',
-        '80lb Opaque Uncoated'       => 'sturdy uncoated cardstock with a professional feel',
-        '80lb Matte Cardstock'       => 'smooth matte cardstock, elegant and substantial',
-        '100lb Gloss Cardstock'      => 'glossy cardstock for bold colors and sharp images',
-        '14pt Gloss C1S'             => 'thick, coated one side for postcards and covers',
-        '16pt Coated C2S'            => 'premium double-coated for maximum durability',
-    );
+    $tips      = get_option( 'pps_tooltips', array() );
+    $base_link = trim( $a['link'] );
 
     $out = '<ul class="pps-cat-features">';
     foreach ( $papers as $p ) {
-        $label = esc_html( $p['label'] );
-        $hint  = isset( $hints[ $p['label'] ] ) ? ' &mdash; ' . esc_html( $hints[ $p['label'] ] ) : '';
-        $stock = empty( $p['factory'] ) ? '' : ' <em>(factory order)</em>';
-        $out  .= '<li><strong>' . $label . '</strong>' . $hint . $stock . '</li>';
+        $label   = esc_html( $p['label'] );
+        $tip_key = $p['_tip'] ?? '';
+        $has_tip = $tip_key && isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] );
+        $stock = empty( $p['factory'] )
+            ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
+            : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+        $coat  = ! empty( $p['coatable'] )
+            ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
+            : '';
+        $tip_btn = $has_tip ? '<span class="pps-cat-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>' : '';
+        $inner = '<div class="pps-cat-card-name">' . $label . $tip_btn . '</div>'
+               . '<div class="pps-cat-card-meta">' . $stock . $coat . '</div>';
+
+        if ( $base_link ) {
+            $href = esc_url( add_query_arg( 'paper', $p['val'], $base_link ) );
+            $out .= '<a href="' . $href . '" class="pps-cat-card pps-cat-card--link">'
+                  . $inner
+                  . '<span class="pps-cat-card-arrow">&#8250;</span>'
+                  . '</a>';
+        } else {
+            $out .= '<div class="pps-cat-card">' . $inner . '</div>';
+        }
     }
     $out .= '</ul>';
     return $out;
@@ -562,20 +590,16 @@ add_shortcode( 'pps_cat_coatings', function() {
     $coatings = array_filter( $coatings, function( $c ) { return ! empty( $c['val'] ); } );
     if ( empty( $coatings ) ) return '';
 
-    $descs = array(
-        'Gloss UV'     => 'high-shine protective finish that makes colors pop',
-        'Matte UV'     => 'smooth, non-reflective finish with a premium feel',
-        'Soft Touch'   => 'velvety texture coating for a luxurious tactile experience',
-        'Aqueous'      => 'water-based protective coating, fast-drying and eco-friendly',
-    );
+    $tips    = get_option( 'pps_tooltips', array() );
+    $has_tip = isset( $tips['coating'] ) && ! empty( $tips['coating']['title'] );
 
-    $out = '<ul class="pps-cat-features">';
+    $out = '<div class="pps-cat-chips">';
     foreach ( $coatings as $c ) {
-        $label = esc_html( $c['label'] );
-        $desc  = isset( $descs[ $c['label'] ] ) ? ' &mdash; ' . esc_html( $descs[ $c['label'] ] ) : '';
-        $out  .= '<li><strong>' . $label . '</strong>' . $desc . '</li>';
+        $out .= '<span class="pps-cat-chip"><b>&#10022;</b> ' . esc_html( $c['label'] )
+              . ( $has_tip ? ' <span class="pps-cat-tip" data-tip="coating">?</span>' : '' )
+              . '</span>';
     }
-    $out .= '</ul>';
+    $out .= '</div>';
     return $out;
 } );
 
@@ -597,23 +621,24 @@ add_shortcode( 'pps_cat_addons', function( $atts ) {
     }
     if ( empty( $items ) ) return '';
 
-    $descs = array(
-        'vivid'       => 'enhanced color vibrancy for photos and graphics',
-        'coating'     => 'protective UV or aqueous finish',
-        'bundling'    => 'shrink-wrapped in sets for easy distribution',
-        'rc'          => 'smooth rounded corners for a polished look',
-        'two_staple'  => 'dual-staple binding for secure page hold',
-        'perforation' => 'tear-away perforated sections for coupons or reply cards',
-        'outfold'     => 'oversized cover wrap for a premium presentation',
+    $addon_tip_map = array(
+        'vivid' => 'vivid', 'coating' => 'coating', 'bundling' => 'bundling',
+        'rc' => 'round_cornering', 'two_staple' => 'saddle_stitch',
+        'perforation' => 'perforation', 'outfold' => 'outfold',
     );
+    $tips = get_option( 'pps_tooltips', array() );
 
-    $out = '<ul class="pps-cat-features">';
+    $out = '<div class="pps-cat-addon-grid">';
     foreach ( $items as $item ) {
-        $label = esc_html( $item['label'] );
-        $desc  = isset( $descs[ $item['slug'] ] ) ? ' &mdash; ' . esc_html( $descs[ $item['slug'] ] ) : '';
-        $out  .= '<li><strong>' . $label . '</strong>' . $desc . '</li>';
+        $tip_key = isset( $addon_tip_map[ $item['slug'] ] ) ? $addon_tip_map[ $item['slug'] ] : '';
+        $has_tip = $tip_key && isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] );
+        $out .= '<div class="pps-cat-addon">'
+              . '<span class="pps-cat-addon-dot pps-cat-addon-dot--' . esc_attr( $item['slug'] ) . '"></span>'
+              . esc_html( $item['label'] )
+              . ( $has_tip ? '<span class="pps-cat-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>' : '' )
+              . '</div>';
     }
-    $out .= '</ul>';
+    $out .= '</div>';
     return $out;
 } );
 
