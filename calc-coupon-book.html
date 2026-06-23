@@ -479,6 +479,9 @@ function calcSaddle(c) {
   const SIZE_DISC = PCF.booklet_size_discount != null ? PCF.booklet_size_discount : 0.15;
   const EASY_RATE = PCF.easy_discount_rate != null ? PCF.easy_discount_rate : (PCF.easy_discount_rate_1 || 0.05);
   const mk = Math.max(MAXMK - dL, MINMK);
+  const cvrSheets=tQ/imp;
+  const cvrDL=(PCF.booklet_cover_markup_coef||0.38)*Math.log(Math.max(cvrSheets,1));
+  const mkCvr=Math.max((PCF.booklet_cover_maximummarkup||6.0)-cvrDL,(PCF.booklet_cover_minimummarkup||1.8));
 
   const cvrScoring = COVER_SCORING_VALS.includes(cvr.val);
   const csOK = sets.every(s => s.pages <= 24);
@@ -496,10 +499,10 @@ function calcSaddle(c) {
     : ((PCF.printing_black_cost * 2 + PCF.printing_fullcolor_cost * 2) * tS) * mk;
   // Cover print uses tQ (matches fixed saddle-stitch formula; see calc-preview-test.html line 432 FIX)
   P.coverPrint = c.coverColor === "bw"
-    ? (((PCF.printing_black_cost * 2) * tQ) / imp) * mk
-    : (((PCF.printing_fullcolor_cost * 2) * tQ) / imp) * mk;
+    ? (((PCF.printing_black_cost * 2) * tQ) / imp) * mkCvr
+    : (((PCF.printing_fullcolor_cost * 2) * tQ) / imp) * mkCvr;
   P.insidePaper = (c.insidePaper.price * tS) * mk;
-  P.coverPaper = ((cvr.price * tQ) / imp) * mk;
+  P.coverPaper = ((cvr.price * tQ) / imp) * mkCvr;
   P.press = (tS / PCF.press_printsperhour) * PCF.labor_press_hr;
   P.cutting = ((tS * imp) / PCF.cutter_sheetsperhour) * (PCF.labor_cutting_hr + mk) + PCF.cutterbasefee;
   P.scoreCover = cvrScoring ? (tQ / PCF.bindery_morgana_impressionperhour) * PCF.labor_bindery_hr : 0;
@@ -846,7 +849,7 @@ function calculate(c) {
     totalPages:tP,
     totalColorPages, totalBwPages, bwFraction,
     // Pricing intermediates
-    markup:mk,
+    markup:mk,coverMarkup:mkCvr,
     discountLog:dL,
     spineThickness:spine,
     materialsSubtotal:pComp,
@@ -1320,6 +1323,7 @@ function DebugPanel({debug}){
         <Row label="Total pages" value={d.totalPages} unit="pg"/>
         <Row label="Discount log" value={d.discountLog}/>
         <Row label="Markup multiplier" value={d.markup} unit="×"/>
+        <Row label="Cover markup" value={d.coverMarkup} unit="×"/>
         <Row label="Spine thickness (proxy)" value={d.spineThickness}/>
         <Row label="Materials subtotal" value={d.materialsSubtotal} unit="$"/>
 

@@ -127,6 +127,9 @@ function pps_default_config() {
             'perfectbound_markup_coef_tS'       => 0.275,
             'perfectbound_size_discount'        => 0,
             'perfectbound_surcharge'            => 0.30,
+            'perfectbound_cover_maximummarkup'  => 6.0,
+            'perfectbound_cover_minimummarkup'  => 1.8,
+            'perfectbound_cover_markup_coef'    => 0.38,
             // Coupon book markup — saddle/PB-mirrored single-axis (2026-05-28)
             'couponbook_maximummarkup'          => 3.6,
             'couponbook_minimummarkup'          => 1.45,
@@ -1159,6 +1162,11 @@ function pps_config_tab_production( $cfg ) {
             'perfectbound_size_discount'   => array( '8.5×11 Size Disc.', '×' ),
             'perfectbound_surcharge'       => array( 'Pricing Surcharge', '×' ),
         ),
+        'PB Cover Markup' => array(
+            'perfectbound_cover_maximummarkup' => array( 'Cover Max Markup', '×' ),
+            'perfectbound_cover_minimummarkup' => array( 'Cover Min Markup', '×' ),
+            'perfectbound_cover_markup_coef'   => array( 'Cover Decay Coef', '×ln(sheets)' ),
+        ),
         'Coupon Book Markup' => array(
             'couponbook_maximummarkup'    => array( 'Max Markup', '×' ),
             'couponbook_minimummarkup'    => array( 'Min Markup', '×' ),
@@ -1166,6 +1174,11 @@ function pps_config_tab_production( $cfg ) {
             'couponbook_size_discount'    => array( '8.5×11 Size Disc.', '×' ),
             'couponbook_surcharge'        => array( 'Pricing Surcharge', '×' ),
             'magneticstripapplication_perhour' => array( 'Magnetic Backer', '/hr' ),
+        ),
+        'Coupon Cover Markup' => array(
+            'booklet_cover_maximummarkup' => array( 'Cover Max Markup', '×' ),
+            'booklet_cover_minimummarkup' => array( 'Cover Min Markup', '×' ),
+            'booklet_cover_markup_coef'   => array( 'Cover Decay Coef', '×ln(sheets)' ),
         ),
         'Discounts' => array(
             'easydiscount_max'       => array( 'Easy Size Cap', '$' ),

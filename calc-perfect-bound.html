@@ -150,6 +150,8 @@ const PCF = Object.assign({
   perfectbound_maximummarkup:3.6, perfectbound_minimummarkup:1.45,
   perfectbound_size_discount:0,       // disabled — sheet decay differentiates imp<4 sizes
   perfectbound_markup_coef_tS:0.275,  // steepness of markup decay vs ln(tS)
+  perfectbound_cover_maximummarkup:6.0, perfectbound_cover_minimummarkup:1.8,
+  perfectbound_cover_markup_coef:0.38,
   perfectbound_surcharge:0.30,        // flat % applied to post-discount subtotal
   // ROLLBACK: pre-2026-04-14 values were easydiscount_max:1500, common_discount_max:1000
   easydiscount_max:0, uvcoaterimpressionsperhour:250,
@@ -635,6 +637,9 @@ function calculate(c) {
   // with max=22, min=3.2 — produced 2.5-3x saddle prices.
   const dL = PCF.perfectbound_markup_coef_tS * Math.log(tS);
   const mk = Math.max(PCF.perfectbound_maximummarkup - dL, PCF.perfectbound_minimummarkup);
+  const cvrSheets=tQ/(imp/2);
+  const cvrDL=(PCF.perfectbound_cover_markup_coef||0.38)*Math.log(Math.max(cvrSheets,1));
+  const mkCvr=Math.max((PCF.perfectbound_cover_maximummarkup||6.0)-cvrDL,(PCF.perfectbound_cover_minimummarkup||1.8));
 
   // Spine proxy: used for bundling/corner turnaround estimates
   const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
@@ -674,17 +679,17 @@ function calculate(c) {
     const colorCost = (((PCF.printing_fullcolor_cost / imp) * cp) * mk) * st.qty;
     return sum + bwCost + colorCost;
   }, 0);
-  // Cover print: front + back = 2 sides (uniform mk)
+  // Cover print: front + back = 2 sides
   P.coverPrint = c.coverColor === "bw"
-    ? (((PCF.printing_black_cost * 2 * tQ) / imp) * mk)
-    : (((PCF.printing_fullcolor_cost * 2 * tQ) / imp) * mk);
+    ? (((PCF.printing_black_cost * 2 * tQ) / imp) * mkCvr)
+    : (((PCF.printing_fullcolor_cost * 2 * tQ) / imp) * mkCvr);
 
   // ── Paper ──
   const lowYield = imp < 1;
   const iPaper = lowYield && c.insidePaper.oversizePrice != null ? c.insidePaper.oversizePrice : c.insidePaper.price;
   const cPaper = lowYield && cvr.oversizePrice != null ? cvr.oversizePrice : cvr.price;
   P.insidePaper=(iPaper*tS)*mk;
-  P.coverPaper=((cPaper*tQ)/(imp/2))*mk;
+  P.coverPaper=((cPaper*tQ)/(imp/2))*mkCvr;
 
   // ── Production labor ──
   P.press=(tS/PCF.press_printsperhour)*PCF.labor_press_hr;
@@ -907,7 +912,7 @@ function calculate(c) {
     totalPages:tP,
     totalColorPages, totalBwPages, bwFraction,
     // Pricing intermediates
-    markup:mk,
+    markup:mk,coverMarkup:mkCvr,
     discountLog:dL,
     spineThickness:spine,
     materialsSubtotal:pComp,
@@ -1375,6 +1380,7 @@ function DebugPanel({debug}){
         <Row label="Total pages (all sets)" value={d.totalPages} unit="pg"/>
         <Row label="Discount log" value={d.discountLog}/>
         <Row label="Markup multiplier" value={d.markup} unit="×"/>
+        <Row label="Cover markup" value={d.coverMarkup} unit="×"/>
         <Row label="Spine thickness (proxy)" value={d.spineThickness}/>
         <Row label="Materials subtotal" value={d.materialsSubtotal} unit="$"/>
 
