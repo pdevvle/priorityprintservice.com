@@ -1149,6 +1149,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'fd.append("action","pps_wizard_email");'
           .     'fd.append("nonce",bar.dataset.nonce);'
           .     'fd.append("name",name);fd.append("email",email);fd.append("phone",phone);'
+          .     'fd.append("calc",calc);'
           .     'if(hp)fd.append("website",hp.value);'
           .     'if(cb&&cb.checked)fd.append("callback","1");'
           .     'fd.append("specs",w.querySelector(".pps-wiz-summary").textContent);'
@@ -1260,7 +1261,37 @@ function pps_wizard_email_handler() {
         }
     }
 
+    $calc_type  = sanitize_key( wp_unslash( $_POST['calc'] ?? '' ) );
+    $calc_label = ucwords( str_replace( array( '-', '_' ), ' ', $calc_type ) );
+    if ( $calc_label === '' ) $calc_label = 'Category Wizard';
+    $is_lead = ( strpos( $url, 'product' ) === false );
+
+    $post_title = sprintf( '%s — %s', $name, $calc_label );
+    if ( $callback ) $post_title .= ' (callback)';
+    $post_id = wp_insert_post( array(
+        'post_type'   => 'pps_question',
+        'post_status' => 'publish',
+        'post_title'  => wp_strip_all_tags( $post_title ),
+        'post_content' => $msg !== '' ? $msg : '(no message)',
+    ), true );
+    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+        update_post_meta( $post_id, '_pps_q_name',        $name );
+        update_post_meta( $post_id, '_pps_q_email',       $email );
+        update_post_meta( $post_id, '_pps_q_phone',       $phone );
+        update_post_meta( $post_id, '_pps_q_calc_type',   $calc_type );
+        update_post_meta( $post_id, '_pps_q_calc_label',  ( $is_lead ? 'Lead: ' : 'Wizard: ' ) . $calc_label );
+        update_post_meta( $post_id, '_pps_q_summary',     $specs );
+        update_post_meta( $post_id, '_pps_q_reorder_url', $url );
+        update_post_meta( $post_id, '_pps_q_user_ip',     isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '' );
+        if ( $callback ) update_post_meta( $post_id, '_pps_q_callback', 1 );
+        if ( $upload_urls ) update_post_meta( $post_id, '_pps_q_files', $upload_urls );
+    }
+
     $sent = wp_mail( $admin, $subj, $body, $headers, $attachments );
+
+    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+        update_post_meta( $post_id, '_pps_q_email_sent', $sent ? 1 : 0 );
+    }
 
     foreach ( $cleanup as $dir ) {
         $files_in = glob( $dir . '/*' );

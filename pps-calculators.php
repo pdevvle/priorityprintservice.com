@@ -961,6 +961,7 @@ function pps_render_question_meta_box( $post ) {
         'Name'         => get_post_meta( $post->ID, '_pps_q_name', true ),
         'Email'        => get_post_meta( $post->ID, '_pps_q_email', true ),
         'Phone'        => get_post_meta( $post->ID, '_pps_q_phone', true ),
+        'Callback'     => get_post_meta( $post->ID, '_pps_q_callback', true ) ? 'Yes' : '',
         'Calculator'   => get_post_meta( $post->ID, '_pps_q_calc_label', true ),
         'Preset'       => get_post_meta( $post->ID, '_pps_q_preset_slug', true ),
         'Total'        => ( $t = (float) get_post_meta( $post->ID, '_pps_q_total', true ) ) > 0 ? '$' . number_format( $t, 2 ) : '',
@@ -979,9 +980,19 @@ function pps_render_question_meta_box( $post ) {
     if ( $summary ) {
         echo '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #ddd"><strong style="font-size:12px">Spec</strong><pre style="margin:4px 0 0;padding:8px;background:#fafafa;border-radius:3px;font-size:11px;white-space:pre-wrap">' . esc_html( $summary ) . '</pre></div>';
     }
+    $files = get_post_meta( $post->ID, '_pps_q_files', true );
+    if ( is_array( $files ) && $files ) {
+        echo '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #ddd"><strong style="font-size:12px">Uploaded Files</strong><ul style="margin:4px 0 0;font-size:11px">';
+        foreach ( $files as $furl ) {
+            echo '<li><a href="' . esc_url( $furl ) . '" target="_blank">' . esc_html( basename( $furl ) ) . '</a></li>';
+        }
+        echo '</ul></div>';
+    }
     $reorder = get_post_meta( $post->ID, '_pps_q_reorder_url', true );
     if ( $reorder ) {
-        echo '<p style="margin-top:10px"><a href="' . esc_url( $reorder ) . '" target="_blank" class="button button-primary" style="width:100%;text-align:center">Open this quote in calculator →</a></p>';
+        $btn_label = strpos( get_post_meta( $post->ID, '_pps_q_calc_label', true ), 'Lead:' ) === 0
+            ? 'View source page &rarr;' : 'Open this quote in calculator &rarr;';
+        echo '<p style="margin-top:10px"><a href="' . esc_url( $reorder ) . '" target="_blank" class="button button-primary" style="width:100%;text-align:center">' . $btn_label . '</a></p>';
     }
 }
 
