@@ -4279,6 +4279,17 @@ function App(){
   const[showDebug,setShowDebug]=useState(false);
   const[mobExpanded,setMobExpanded]=useState(false);
   const[shareCopied,setShareCopied]=useState(false);
+  const[projCopied,setProjCopied]=useState(false);
+  const copyProjections = () => {
+    if (!projections) return;
+    const rows = projections.filter(p => p.total !== null);
+    const lines = ["Qty\tUnit\tTotal", ...rows.map(p =>
+      `${p.qty.toLocaleString()}\t$${p.perUnit.toFixed(2)}\t$${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`
+    )];
+    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      setProjCopied(true); setTimeout(() => setProjCopied(false), 2000);
+    }).catch(() => prompt("Copy this:", lines.join("\n")));
+  };
   // Question form modal state
   const[qOpen,setQOpen]=useState(false);
   const[qName,setQName]=useState("");
@@ -5230,8 +5241,9 @@ function App(){
 
 
         {mob && projections && <div style={{...ST.pnl,marginTop:10,marginBottom:100,overflow:"hidden"}}>
-          <div style={{padding:"10px 14px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
+          <div style={{padding:"10px 14px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
+            <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
           </div>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
             <thead>
@@ -5260,8 +5272,9 @@ function App(){
             <Panel result={result} debugUnlocked={debugUnlocked}/>
           </div>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
-            <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
+            <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
+              <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
             </div>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
               <thead>
