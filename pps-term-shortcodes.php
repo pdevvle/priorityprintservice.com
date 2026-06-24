@@ -699,6 +699,447 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
                 array( 'val' => 'mounting',    'label' => 'Rigid Mounting','desc' => 'Board or substrate backing' ),
             ) ),
         ),
+
+        'business-forms' => array(
+            array( 'key' => 'formtype', 'prompt' => 'What type of form?', 'options' => array(
+                array( 'val' => 'invoice',        'label' => 'Invoice',          'desc' => 'Billing &amp; accounts receivable' ),
+                array( 'val' => 'purchase-order',  'label' => 'Purchase Order',   'desc' => 'Supplier &amp; vendor ordering' ),
+                array( 'val' => 'work-order',      'label' => 'Work Order',       'desc' => 'Job tracking &amp; service requests' ),
+                array( 'val' => 'receipt',          'label' => 'Receipt / Slip',   'desc' => 'Point-of-sale &amp; delivery receipts' ),
+                array( 'val' => 'estimate',         'label' => 'Estimate / Quote', 'desc' => 'Price quotes &amp; proposals' ),
+                array( 'val' => 'contract',         'label' => 'Contract / Agreement', 'desc' => 'Signatures &amp; terms' ),
+                array( 'val' => 'custom',           'label' => 'Custom Form',      'desc' => 'I\'ll provide my own layout' ),
+            ) ),
+            array( 'key' => 'parts', 'prompt' => 'How many carbonless parts?', 'options' => array(
+                array( 'val' => '2', 'label' => '2-Part (Duplicate)',  'desc' => 'White + Canary' ),
+                array( 'val' => '3', 'label' => '3-Part (Triplicate)', 'desc' => 'White + Canary + Pink' ),
+                array( 'val' => '4', 'label' => '4-Part',              'desc' => 'White + Canary + Pink + Gold' ),
+                array( 'val' => '1', 'label' => 'Single Sheet (no carbon)', 'desc' => 'Standard paper, no copies' ),
+            ) ),
+            array( 'key' => 'size', 'prompt' => 'What size?', 'options' => array(
+                array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5"', 'desc' => 'Half letter' ),
+                array( 'val' => '8.5x11',  'label' => '8.5 × 11"',  'desc' => 'Full letter' ),
+                array( 'val' => '8.5x14',  'label' => '8.5 × 14"',  'desc' => 'Legal' ),
+            ) ),
+            array( 'key' => 'color', 'prompt' => 'Ink color?', 'options' => array(
+                array( 'val' => 'black',      'label' => 'Black Ink Only',        'desc' => 'Most economical' ),
+                array( 'val' => 'spot',        'label' => '2-Color (Black + PMS)', 'desc' => 'Add a spot color for your brand' ),
+                array( 'val' => 'full-front',  'label' => 'Full Color Front',      'desc' => 'Color front, black back' ),
+                array( 'val' => 'full-both',   'label' => 'Full Color Both Sides', 'desc' => 'Vivid, professional look' ),
+            ) ),
+            array( 'key' => 'features', 'prompt' => 'Additional features?', 'multi' => true, 'options' => array(
+                array( 'val' => 'numbering',  'label' => 'Sequential Numbering', 'desc' => 'Auto-numbered for tracking' ),
+                array( 'val' => 'perforation','label' => 'Perforation',          'desc' => 'Tear-off stub or sections' ),
+                array( 'val' => 'padding',    'label' => 'Padded into Books',    'desc' => 'Glued into sets of 50 or 100' ),
+                array( 'val' => 'holes',      'label' => 'Hole Punching',        'desc' => '2- or 3-hole for binders' ),
+                array( 'val' => 'cover',      'label' => 'Wraparound Cover',     'desc' => 'Protective cardstock wrap' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many sets?', 'options' => array(
+                array( 'val' => '100',  'label' => '100',    'desc' => '' ),
+                array( 'val' => '250',  'label' => '250',    'desc' => '' ),
+                array( 'val' => '500',  'label' => '500',    'desc' => '' ),
+                array( 'val' => '1000', 'label' => '1,000',  'desc' => '' ),
+                array( 'val' => '2500', 'label' => '2,500',  'desc' => '' ),
+                array( 'val' => '5000+','label' => '5,000+', 'desc' => '' ),
+            ) ),
+        ),
+
+        'door-hangers' => array(
+            array( 'key' => 'size', 'prompt' => 'What size door hanger?', 'options' => array(
+                array( 'val' => '3.5x8.5',  'label' => '3.5 × 8.5"',  'desc' => 'Slim — fits standard doorknobs' ),
+                array( 'val' => '4.25x11',   'label' => '4.25 × 11"',  'desc' => 'Standard — most popular size' ),
+                array( 'val' => '4.25x14',   'label' => '4.25 × 14"',  'desc' => 'Tall — maximum message space' ),
+                array( 'val' => 'custom',     'label' => 'Custom Size',  'desc' => 'I\'ll specify in the message' ),
+            ) ),
+            array( 'key' => 'paper', 'prompt' => 'Paper stock?', 'options' => array(
+                array( 'val' => '14pt-gloss',    'label' => '14pt Gloss',    'desc' => 'Sturdy, vivid colors' ),
+                array( 'val' => '16pt-c2s',      'label' => '16pt Premium',  'desc' => 'Extra-thick, double-coated' ),
+                array( 'val' => '14pt-uncoated',  'label' => '14pt Uncoated', 'desc' => 'Natural, writable surface' ),
+            ) ),
+            array( 'key' => 'sides', 'prompt' => 'Single or double-sided?', 'options' => array(
+                array( 'val' => 'single', 'label' => 'Single-Sided', 'desc' => 'Front only' ),
+                array( 'val' => 'double', 'label' => 'Double-Sided', 'desc' => 'Front and back' ),
+            ) ),
+            array( 'key' => 'finish', 'prompt' => 'Coating or finish?', 'options' => array(
+                array( 'val' => 'uv-gloss',  'label' => 'UV Gloss',          'desc' => 'High-shine protective coat' ),
+                array( 'val' => 'matte-lam',  'label' => 'Matte Lamination',  'desc' => 'Smooth, elegant feel' ),
+                array( 'val' => 'spot-uv',    'label' => 'Spot UV',           'desc' => 'Selective gloss accents' ),
+                array( 'val' => 'none',        'label' => 'No Coating',        'desc' => 'Uncoated finish' ),
+            ) ),
+            array( 'key' => 'features', 'prompt' => 'Any extras?', 'multi' => true, 'options' => array(
+                array( 'val' => 'perf',      'label' => 'Tear-Off Perforation', 'desc' => 'Detachable coupon or card' ),
+                array( 'val' => 'variable',   'label' => 'Variable Data',        'desc' => 'Unique codes, names, or addresses' ),
+                array( 'val' => 'die-cut',    'label' => 'Custom Die-Cut',       'desc' => 'Shaped cutout design' ),
+                array( 'val' => 'rounded',    'label' => 'Rounded Corners',      'desc' => 'Softer, polished look' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many?', 'options' => array(
+                array( 'val' => '250',   'label' => '250',    'desc' => '' ),
+                array( 'val' => '500',   'label' => '500',    'desc' => '' ),
+                array( 'val' => '1000',  'label' => '1,000',  'desc' => '' ),
+                array( 'val' => '2500',  'label' => '2,500',  'desc' => '' ),
+                array( 'val' => '5000',  'label' => '5,000',  'desc' => '' ),
+                array( 'val' => '10000+','label' => '10,000+','desc' => '' ),
+            ) ),
+        ),
+
+        'greeting-cards' => array(
+            array( 'key' => 'size', 'prompt' => 'What size card?', 'options' => array(
+                array( 'val' => '4.25x5.5', 'label' => '4.25 × 5.5" (A2)', 'desc' => 'Classic note card' ),
+                array( 'val' => '5x7',       'label' => '5 × 7" (A7)',      'desc' => 'Standard greeting card' ),
+                array( 'val' => '4x6',       'label' => '4 × 6" (A6)',      'desc' => 'Photo card &amp; invitations' ),
+                array( 'val' => '6x9',       'label' => '6 × 9"',           'desc' => 'Large-format card' ),
+                array( 'val' => 'custom',     'label' => 'Custom Size',       'desc' => 'I\'ll specify in the message' ),
+            ) ),
+            array( 'key' => 'fold', 'prompt' => 'Fold style?', 'options' => array(
+                array( 'val' => 'half-fold', 'label' => 'Half Fold (Bifold)', 'desc' => 'Classic greeting card fold' ),
+                array( 'val' => 'tent',       'label' => 'Tent Fold',          'desc' => 'Folds along the top edge' ),
+                array( 'val' => 'trifold',    'label' => 'Trifold',            'desc' => 'Three-panel insert style' ),
+                array( 'val' => 'flat',        'label' => 'Flat (No Fold)',     'desc' => 'Postcards, photo cards, inserts' ),
+            ) ),
+            array( 'key' => 'paper', 'prompt' => 'Paper stock?', 'options' => array(
+                array( 'val' => '100lb-gloss',   'label' => '100lb Gloss',   'desc' => 'Vivid colors, sharp images' ),
+                array( 'val' => '14pt-coated',    'label' => '14pt Cardstock','desc' => 'Thick, premium feel' ),
+                array( 'val' => '80lb-matte',     'label' => '80lb Matte',    'desc' => 'Smooth, elegant finish' ),
+                array( 'val' => 'linen',           'label' => 'Linen Texture', 'desc' => 'Textured, upscale feel' ),
+                array( 'val' => 'cotton',          'label' => 'Cotton',         'desc' => 'Soft, luxurious tactile quality' ),
+            ) ),
+            array( 'key' => 'extras', 'prompt' => 'Any extras?', 'multi' => true, 'options' => array(
+                array( 'val' => 'envelopes',   'label' => 'Matching Envelopes',  'desc' => 'White or colored to match' ),
+                array( 'val' => 'env-print',    'label' => 'Printed Envelopes',   'desc' => 'Custom return address or design' ),
+                array( 'val' => 'foil',          'label' => 'Foil Stamping',       'desc' => 'Gold, silver, or colored foil accent' ),
+                array( 'val' => 'emboss',        'label' => 'Embossing',            'desc' => 'Raised lettering or design' ),
+                array( 'val' => 'rounded',       'label' => 'Rounded Corners',     'desc' => 'Softer, polished edges' ),
+                array( 'val' => 'coating',       'label' => 'UV or Matte Coating', 'desc' => 'Protective finish on the card' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many cards?', 'options' => array(
+                array( 'val' => '25',    'label' => '25',    'desc' => '' ),
+                array( 'val' => '50',    'label' => '50',    'desc' => '' ),
+                array( 'val' => '100',   'label' => '100',   'desc' => '' ),
+                array( 'val' => '250',   'label' => '250',   'desc' => '' ),
+                array( 'val' => '500',   'label' => '500',   'desc' => '' ),
+                array( 'val' => '1000+', 'label' => '1,000+','desc' => '' ),
+            ) ),
+        ),
+
+        'notepads' => array(
+            array( 'key' => 'size', 'prompt' => 'What size notepad?', 'options' => array(
+                array( 'val' => '3.5x8.5',  'label' => '3.5 × 8.5"',  'desc' => '#10 slim — desk &amp; counter pads' ),
+                array( 'val' => '4.25x5.5',  'label' => '4.25 × 5.5"', 'desc' => 'Quarter letter — pocket &amp; memo' ),
+                array( 'val' => '5.5x8.5',   'label' => '5.5 × 8.5"',  'desc' => 'Half letter — most popular' ),
+                array( 'val' => '8.5x11',    'label' => '8.5 × 11"',   'desc' => 'Full letter — legal pads &amp; forms' ),
+                array( 'val' => 'custom',     'label' => 'Custom Size',  'desc' => 'I\'ll specify in the message' ),
+            ) ),
+            array( 'key' => 'sheets', 'prompt' => 'Sheets per pad?', 'options' => array(
+                array( 'val' => '25',  'label' => '25 Sheets',  'desc' => 'Slim pad' ),
+                array( 'val' => '50',  'label' => '50 Sheets',  'desc' => 'Standard' ),
+                array( 'val' => '75',  'label' => '75 Sheets',  'desc' => 'Thick pad' ),
+                array( 'val' => '100', 'label' => '100 Sheets', 'desc' => 'Maximum thickness' ),
+            ) ),
+            array( 'key' => 'printing', 'prompt' => 'Ink printing?', 'options' => array(
+                array( 'val' => 'black',  'label' => 'Black Ink Only',     'desc' => 'Clean, economical' ),
+                array( 'val' => 'spot',    'label' => '2-Color (PMS)',      'desc' => 'Black + one brand color' ),
+                array( 'val' => 'full',    'label' => 'Full Color',         'desc' => 'Photos, logos, full graphics' ),
+            ) ),
+            array( 'key' => 'features', 'prompt' => 'Additional features?', 'multi' => true, 'options' => array(
+                array( 'val' => 'chipboard',  'label' => 'Chipboard Backing', 'desc' => 'Rigid cardboard backer' ),
+                array( 'val' => 'cover',       'label' => 'Wraparound Cover',  'desc' => 'Branded cardstock cover' ),
+                array( 'val' => 'numbering',   'label' => 'Sequential Numbering', 'desc' => 'Numbered lines or pages' ),
+                array( 'val' => 'perf',        'label' => 'Perforation',       'desc' => 'Tear-off sheets' ),
+                array( 'val' => 'magnet',      'label' => 'Magnetic Back',     'desc' => 'Sticks to fridges &amp; filing cabinets' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many pads?', 'options' => array(
+                array( 'val' => '5',    'label' => '5',     'desc' => '' ),
+                array( 'val' => '10',   'label' => '10',    'desc' => '' ),
+                array( 'val' => '25',   'label' => '25',    'desc' => '' ),
+                array( 'val' => '50',   'label' => '50',    'desc' => '' ),
+                array( 'val' => '100',  'label' => '100',   'desc' => '' ),
+                array( 'val' => '250+', 'label' => '250+',  'desc' => '' ),
+            ) ),
+        ),
+
+        'business-cards' => array(
+            array( 'key' => 'paper', 'prompt' => 'Paper stock?', 'options' => array(
+                array( 'val' => '14pt-gloss',    'label' => '14pt Gloss',     'desc' => 'Classic, vibrant — most popular' ),
+                array( 'val' => '16pt-c2s',      'label' => '16pt Premium',   'desc' => 'Extra-thick, double-coated' ),
+                array( 'val' => '14pt-uncoated',  'label' => '14pt Uncoated',  'desc' => 'Natural feel, easy to write on' ),
+                array( 'val' => 'linen',           'label' => 'Linen',          'desc' => 'Textured, distinguished look' ),
+                array( 'val' => 'cotton',          'label' => 'Cotton',          'desc' => 'Soft, luxurious hand feel' ),
+                array( 'val' => 'kraft',            'label' => 'Kraft (Brown)',   'desc' => 'Eco-friendly, rustic aesthetic' ),
+            ) ),
+            array( 'key' => 'finish', 'prompt' => 'Finish?', 'options' => array(
+                array( 'val' => 'uv-gloss', 'label' => 'UV Gloss',         'desc' => 'High-shine, scratch-resistant' ),
+                array( 'val' => 'matte',     'label' => 'Matte Lamination', 'desc' => 'Smooth, modern feel' ),
+                array( 'val' => 'soft-touch','label' => 'Soft Touch',       'desc' => 'Velvety, premium tactile finish' ),
+                array( 'val' => 'spot-uv',   'label' => 'Spot UV',          'desc' => 'Selective gloss accents on matte' ),
+                array( 'val' => 'none',       'label' => 'No Coating',       'desc' => 'Natural paper surface' ),
+            ) ),
+            array( 'key' => 'sides', 'prompt' => 'Single or double-sided?', 'options' => array(
+                array( 'val' => 'single', 'label' => 'Single-Sided', 'desc' => 'Front only' ),
+                array( 'val' => 'double', 'label' => 'Double-Sided', 'desc' => 'Front and back' ),
+            ) ),
+            array( 'key' => 'shape', 'prompt' => 'Shape &amp; corners?', 'options' => array(
+                array( 'val' => 'standard', 'label' => 'Standard (3.5 × 2")', 'desc' => 'Classic rectangle' ),
+                array( 'val' => 'rounded',   'label' => 'Rounded Corners',     'desc' => 'Softer, modern look' ),
+                array( 'val' => 'square',     'label' => 'Square (2.5 × 2.5")', 'desc' => 'Compact, standout shape' ),
+                array( 'val' => 'die-cut',    'label' => 'Custom Die-Cut',      'desc' => 'Any shape you design' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many?', 'options' => array(
+                array( 'val' => '250',  'label' => '250',   'desc' => '' ),
+                array( 'val' => '500',  'label' => '500',   'desc' => '' ),
+                array( 'val' => '1000', 'label' => '1,000', 'desc' => '' ),
+                array( 'val' => '2500', 'label' => '2,500', 'desc' => '' ),
+                array( 'val' => '5000', 'label' => '5,000', 'desc' => '' ),
+            ) ),
+        ),
+
+        'envelopes' => array(
+            array( 'key' => 'style', 'prompt' => 'Envelope style?', 'options' => array(
+                array( 'val' => 'no10',    'label' => '#10 Business (4.125 × 9.5")', 'desc' => 'Standard business envelope' ),
+                array( 'val' => 'a7',       'label' => 'A7 Invitation (5.25 × 7.25")', 'desc' => 'Fits 5×7 cards &amp; invites' ),
+                array( 'val' => '6x9',      'label' => '6 × 9" Booklet',               'desc' => 'Catalogs &amp; thick mailings' ),
+                array( 'val' => '9x12',     'label' => '9 × 12" Catalog',              'desc' => 'Full letter unfolded' ),
+                array( 'val' => '10x13',    'label' => '10 × 13" Catalog',             'desc' => 'Legal documents &amp; catalogs' ),
+                array( 'val' => 'custom',    'label' => 'Custom Size',                   'desc' => 'I\'ll specify in the message' ),
+            ) ),
+            array( 'key' => 'paper', 'prompt' => 'Paper?', 'options' => array(
+                array( 'val' => '24lb-wove',   'label' => '24lb White Wove',  'desc' => 'Standard business — clean, professional' ),
+                array( 'val' => '28lb-linen',   'label' => '28lb Linen',       'desc' => 'Textured, upscale feel' ),
+                array( 'val' => '70lb-uncoated','label' => '70lb Uncoated',    'desc' => 'Heavier weight, premium look' ),
+                array( 'val' => 'kraft',          'label' => 'Kraft (Brown)',    'desc' => 'Eco-friendly, rustic style' ),
+            ) ),
+            array( 'key' => 'printing', 'prompt' => 'Printing?', 'options' => array(
+                array( 'val' => 'none',          'label' => 'No Printing (Blank)', 'desc' => 'Plain envelopes' ),
+                array( 'val' => 'return-only',    'label' => 'Return Address Only', 'desc' => 'Logo &amp; return address on flap' ),
+                array( 'val' => 'full-front',     'label' => 'Full Color Front',    'desc' => 'Branded front design' ),
+                array( 'val' => 'full-both',       'label' => 'Full Color Front &amp; Flap', 'desc' => 'Maximum branding' ),
+            ) ),
+            array( 'key' => 'features', 'prompt' => 'Any extras?', 'multi' => true, 'options' => array(
+                array( 'val' => 'peel-seal', 'label' => 'Peel &amp; Seal',      'desc' => 'Self-adhesive strip closure' ),
+                array( 'val' => 'window',     'label' => 'Window',                'desc' => 'Address shows through window' ),
+                array( 'val' => 'lined',       'label' => 'Lined Interior',       'desc' => 'Decorative inner lining' ),
+                array( 'val' => 'foil',        'label' => 'Foil Return Address',  'desc' => 'Metallic accent on return' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many?', 'options' => array(
+                array( 'val' => '250',   'label' => '250',    'desc' => '' ),
+                array( 'val' => '500',   'label' => '500',    'desc' => '' ),
+                array( 'val' => '1000',  'label' => '1,000',  'desc' => '' ),
+                array( 'val' => '2500',  'label' => '2,500',  'desc' => '' ),
+                array( 'val' => '5000+', 'label' => '5,000+', 'desc' => '' ),
+            ) ),
+        ),
+
+        'folders' => array(
+            array( 'key' => 'type', 'prompt' => 'Folder type?', 'options' => array(
+                array( 'val' => '2-pocket',     'label' => 'Standard 2-Pocket',  'desc' => 'Interior pockets on both sides' ),
+                array( 'val' => '1-pocket',     'label' => 'Single Pocket',       'desc' => 'One interior pocket' ),
+                array( 'val' => 'reinforced',    'label' => 'Reinforced Edge',     'desc' => 'Extra durability for heavy inserts' ),
+                array( 'val' => 'tab',            'label' => 'Tab / Legal',         'desc' => 'Filing tab for cabinets' ),
+                array( 'val' => 'custom',          'label' => 'Custom Die-Cut',     'desc' => 'Any shape or special design' ),
+            ) ),
+            array( 'key' => 'size', 'prompt' => 'What size?', 'options' => array(
+                array( 'val' => '9x12',   'label' => '9 × 12" (Standard)',   'desc' => 'Holds 8.5×11 documents' ),
+                array( 'val' => '6x9',    'label' => '6 × 9" (Small)',       'desc' => 'Compact — smaller inserts' ),
+                array( 'val' => 'custom',  'label' => 'Custom Size',          'desc' => 'I\'ll specify in the message' ),
+            ) ),
+            array( 'key' => 'paper', 'prompt' => 'Paper stock?', 'options' => array(
+                array( 'val' => '14pt-gloss',    'label' => '14pt Gloss',     'desc' => 'Vibrant, professional' ),
+                array( 'val' => '16pt-c2s',      'label' => '16pt Premium',   'desc' => 'Extra-thick, double-coated' ),
+                array( 'val' => 'linen',           'label' => 'Linen Texture',  'desc' => 'Distinguished, textured feel' ),
+                array( 'val' => '14pt-uncoated',  'label' => '14pt Uncoated',  'desc' => 'Natural, writable surface' ),
+            ) ),
+            array( 'key' => 'finish', 'prompt' => 'Coating?', 'options' => array(
+                array( 'val' => 'uv-gloss',  'label' => 'UV Gloss',          'desc' => 'High-shine, scratch-resistant' ),
+                array( 'val' => 'matte-lam',  'label' => 'Matte Lamination',  'desc' => 'Smooth, modern feel' ),
+                array( 'val' => 'soft-touch', 'label' => 'Soft Touch',        'desc' => 'Velvety premium finish' ),
+                array( 'val' => 'spot-uv',    'label' => 'Spot UV',            'desc' => 'Selective gloss accents' ),
+                array( 'val' => 'none',        'label' => 'No Coating',        'desc' => 'Uncoated finish' ),
+            ) ),
+            array( 'key' => 'features', 'prompt' => 'Any extras?', 'multi' => true, 'options' => array(
+                array( 'val' => 'bc-slits',   'label' => 'Business Card Slits', 'desc' => 'Cut slots for business cards' ),
+                array( 'val' => 'foil',        'label' => 'Foil Stamping',       'desc' => 'Metallic accents on cover' ),
+                array( 'val' => 'emboss',      'label' => 'Embossing / Debossing','desc' => 'Raised or pressed design' ),
+                array( 'val' => 'spine',       'label' => 'Spine (Gusseted)',     'desc' => 'Expandable for thick inserts' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many folders?', 'options' => array(
+                array( 'val' => '100',   'label' => '100',    'desc' => '' ),
+                array( 'val' => '250',   'label' => '250',    'desc' => '' ),
+                array( 'val' => '500',   'label' => '500',    'desc' => '' ),
+                array( 'val' => '1000',  'label' => '1,000',  'desc' => '' ),
+                array( 'val' => '2500+', 'label' => '2,500+', 'desc' => '' ),
+            ) ),
+        ),
+
+        'letterhead' => array(
+            array( 'key' => 'size', 'prompt' => 'What size?', 'options' => array(
+                array( 'val' => '8.5x11',  'label' => '8.5 × 11" (Letter)', 'desc' => 'Standard business letterhead' ),
+                array( 'val' => '8.5x14',  'label' => '8.5 × 14" (Legal)',  'desc' => 'Legal documents' ),
+                array( 'val' => '7.25x10.5','label' => 'Monarch (7.25 × 10.5")', 'desc' => 'Executive correspondence' ),
+            ) ),
+            array( 'key' => 'paper', 'prompt' => 'Paper stock?', 'options' => array(
+                array( 'val' => '24lb-bond',   'label' => '24lb Bond',    'desc' => 'Standard office weight' ),
+                array( 'val' => '28lb-linen',   'label' => '28lb Linen',   'desc' => 'Textured, professional feel' ),
+                array( 'val' => '70lb-opaque',  'label' => '70lb Opaque',  'desc' => 'Heavier, premium weight' ),
+                array( 'val' => '80lb-cotton',  'label' => '80lb Cotton',  'desc' => 'Luxurious, soft hand feel' ),
+                array( 'val' => '80lb-linen',   'label' => '80lb Linen',   'desc' => 'Heavy linen — maximum elegance' ),
+            ) ),
+            array( 'key' => 'printing', 'prompt' => 'Ink printing?', 'options' => array(
+                array( 'val' => 'full',   'label' => 'Full Color',       'desc' => 'Photos, logos, gradients' ),
+                array( 'val' => 'spot',    'label' => '2-Color (PMS)',    'desc' => 'Black + one brand color' ),
+                array( 'val' => 'black',   'label' => 'Black Ink Only',   'desc' => 'Clean, classic look' ),
+            ) ),
+            array( 'key' => 'features', 'prompt' => 'Any extras?', 'multi' => true, 'options' => array(
+                array( 'val' => 'envelopes',   'label' => 'Matching Envelopes',  'desc' => 'Coordinated set' ),
+                array( 'val' => 'second-sheet', 'label' => 'Second Sheet',        'desc' => 'Continuation page (logo/address omitted)' ),
+                array( 'val' => 'foil',          'label' => 'Foil Accent',         'desc' => 'Metallic stamp on letterhead' ),
+                array( 'val' => 'watermark',     'label' => 'Watermark',            'desc' => 'Embossed watermark in paper' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many sheets?', 'options' => array(
+                array( 'val' => '250',   'label' => '250',    'desc' => '' ),
+                array( 'val' => '500',   'label' => '500',    'desc' => '' ),
+                array( 'val' => '1000',  'label' => '1,000',  'desc' => '' ),
+                array( 'val' => '2500',  'label' => '2,500',  'desc' => '' ),
+                array( 'val' => '5000+', 'label' => '5,000+', 'desc' => '' ),
+            ) ),
+        ),
+
+        'menus' => array(
+            array( 'key' => 'format', 'prompt' => 'Menu format?', 'options' => array(
+                array( 'val' => 'flat',       'label' => 'Flat Sheet',           'desc' => 'Single page — inserts &amp; specials' ),
+                array( 'val' => 'bifold',      'label' => 'Bifold (4 Panels)',    'desc' => 'Folded in half — classic menu' ),
+                array( 'val' => 'trifold',     'label' => 'Trifold (6 Panels)',   'desc' => 'Three-panel — take-out &amp; delivery' ),
+                array( 'val' => 'booklet',      'label' => 'Booklet (Multi-Page)', 'desc' => 'Stapled — extensive menus' ),
+                array( 'val' => 'placemat',     'label' => 'Placemat Menu',        'desc' => 'Disposable table mat with menu' ),
+            ) ),
+            array( 'key' => 'size', 'prompt' => 'What size?', 'options' => array(
+                array( 'val' => '8.5x11',  'label' => '8.5 × 11"',   'desc' => 'Letter — standard' ),
+                array( 'val' => '8.5x14',  'label' => '8.5 × 14"',   'desc' => 'Legal — extra room' ),
+                array( 'val' => '11x17',   'label' => '11 × 17"',    'desc' => 'Tabloid — large format' ),
+                array( 'val' => '4.25x11', 'label' => '4.25 × 11"',  'desc' => 'Slim — bar &amp; drink menus' ),
+                array( 'val' => 'custom',   'label' => 'Custom Size',  'desc' => 'I\'ll specify in the message' ),
+            ) ),
+            array( 'key' => 'paper', 'prompt' => 'Paper stock?', 'options' => array(
+                array( 'val' => '100lb-gloss',  'label' => '100lb Gloss Text',    'desc' => 'Vivid photos, vibrant colors' ),
+                array( 'val' => '80lb-matte',   'label' => '80lb Matte Text',     'desc' => 'Smooth, easy to read' ),
+                array( 'val' => '14pt-card',     'label' => '14pt Gloss Cardstock','desc' => 'Thick, durable — reusable menus' ),
+                array( 'val' => '10mil-lam',     'label' => '10mil Lamination Pouch','desc' => 'Waterproof, wipe-clean' ),
+            ) ),
+            array( 'key' => 'finish', 'prompt' => 'Coating or lamination?', 'options' => array(
+                array( 'val' => 'uv-gloss',   'label' => 'UV Gloss',              'desc' => 'Shiny, splash-resistant' ),
+                array( 'val' => 'matte-lam',   'label' => 'Matte Lamination',      'desc' => 'Smooth, fingerprint-resistant' ),
+                array( 'val' => 'encapsulated','label' => 'Full Encapsulated Lam', 'desc' => 'Sealed on all edges — waterproof' ),
+                array( 'val' => 'none',          'label' => 'No Coating',            'desc' => 'Disposable / single-use menus' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many menus?', 'options' => array(
+                array( 'val' => '25',    'label' => '25',    'desc' => '' ),
+                array( 'val' => '50',    'label' => '50',    'desc' => '' ),
+                array( 'val' => '100',   'label' => '100',   'desc' => '' ),
+                array( 'val' => '250',   'label' => '250',   'desc' => '' ),
+                array( 'val' => '500+',  'label' => '500+',  'desc' => '' ),
+            ) ),
+        ),
+
+        'rack-cards' => array(
+            array( 'key' => 'paper', 'prompt' => 'Paper stock?', 'options' => array(
+                array( 'val' => '14pt-gloss',    'label' => '14pt Gloss C1S',  'desc' => 'Industry standard — vivid colors' ),
+                array( 'val' => '16pt-c2s',      'label' => '16pt Premium',    'desc' => 'Extra-thick, double-coated' ),
+                array( 'val' => '14pt-matte',     'label' => '14pt Matte',      'desc' => 'Smooth, elegant finish' ),
+                array( 'val' => '14pt-uncoated',  'label' => '14pt Uncoated',   'desc' => 'Natural, writable surface' ),
+            ) ),
+            array( 'key' => 'sides', 'prompt' => 'Single or double-sided?', 'options' => array(
+                array( 'val' => 'single', 'label' => 'Single-Sided', 'desc' => 'Front only' ),
+                array( 'val' => 'double', 'label' => 'Double-Sided', 'desc' => 'Front and back' ),
+            ) ),
+            array( 'key' => 'finish', 'prompt' => 'Coating?', 'options' => array(
+                array( 'val' => 'uv-gloss', 'label' => 'UV Gloss',         'desc' => 'High-shine, eye-catching' ),
+                array( 'val' => 'matte-lam','label' => 'Matte Lamination', 'desc' => 'Smooth, modern feel' ),
+                array( 'val' => 'spot-uv',   'label' => 'Spot UV',          'desc' => 'Selective gloss accents' ),
+                array( 'val' => 'none',       'label' => 'No Coating',       'desc' => 'Uncoated finish' ),
+            ) ),
+            array( 'key' => 'features', 'prompt' => 'Any extras?', 'multi' => true, 'options' => array(
+                array( 'val' => 'rounded',  'label' => 'Rounded Corners',    'desc' => 'Softer, polished edges' ),
+                array( 'val' => 'perf',      'label' => 'Tear-Off Perforation','desc' => 'Detachable coupon or card' ),
+                array( 'val' => 'qr',        'label' => 'QR Code',             'desc' => 'Link to website or offer' ),
+                array( 'val' => 'variable',   'label' => 'Variable Data',       'desc' => 'Unique codes or versioning' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many rack cards?', 'options' => array(
+                array( 'val' => '250',    'label' => '250',    'desc' => '' ),
+                array( 'val' => '500',    'label' => '500',    'desc' => '' ),
+                array( 'val' => '1000',   'label' => '1,000',  'desc' => '' ),
+                array( 'val' => '2500',   'label' => '2,500',  'desc' => '' ),
+                array( 'val' => '5000+',  'label' => '5,000+', 'desc' => '' ),
+            ) ),
+        ),
+
+        'stationery' => array(
+            array( 'key' => 'items', 'prompt' => 'What items do you need?', 'multi' => true, 'options' => array(
+                array( 'val' => 'letterhead',   'label' => 'Letterhead',       'desc' => 'Branded letter paper' ),
+                array( 'val' => 'envelopes',     'label' => 'Envelopes',        'desc' => '#10 business or invitation' ),
+                array( 'val' => 'business-cards','label' => 'Business Cards',   'desc' => 'Standard 3.5×2" cards' ),
+                array( 'val' => 'notepads',       'label' => 'Notepads',         'desc' => 'Custom branded notepads' ),
+                array( 'val' => 'note-cards',     'label' => 'Note Cards',       'desc' => 'Folded or flat thank-you cards' ),
+                array( 'val' => 'labels',          'label' => 'Mailing Labels',  'desc' => 'Return address or shipping labels' ),
+            ) ),
+            array( 'key' => 'paper', 'prompt' => 'Paper feel?', 'options' => array(
+                array( 'val' => 'smooth',   'label' => 'Smooth / Bond',   'desc' => 'Clean, professional look' ),
+                array( 'val' => 'linen',     'label' => 'Linen Texture',   'desc' => 'Classic woven texture' ),
+                array( 'val' => 'cotton',    'label' => 'Cotton',           'desc' => 'Soft, luxurious hand feel' ),
+                array( 'val' => 'laid',       'label' => 'Laid Finish',     'desc' => 'Subtle parallel lines' ),
+                array( 'val' => 'recycled',   'label' => 'Recycled / Kraft','desc' => 'Eco-friendly, natural look' ),
+            ) ),
+            array( 'key' => 'printing', 'prompt' => 'Printing style?', 'options' => array(
+                array( 'val' => 'full',   'label' => 'Full Color',      'desc' => 'Photos, logos, gradients' ),
+                array( 'val' => 'spot',    'label' => '2-Color (PMS)',   'desc' => 'Black + brand color' ),
+                array( 'val' => 'black',   'label' => '1-Color (Black)', 'desc' => 'Simple, economical' ),
+                array( 'val' => 'foil',    'label' => 'Foil Stamping',   'desc' => 'Gold, silver, or colored foil' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'Quantity range per item?', 'options' => array(
+                array( 'val' => '250',   'label' => '250',    'desc' => '' ),
+                array( 'val' => '500',   'label' => '500',    'desc' => '' ),
+                array( 'val' => '1000',  'label' => '1,000',  'desc' => '' ),
+                array( 'val' => '2500',  'label' => '2,500',  'desc' => '' ),
+                array( 'val' => '5000+', 'label' => '5,000+', 'desc' => '' ),
+            ) ),
+        ),
+
+        'stickers' => array(
+            array( 'key' => 'shape', 'prompt' => 'Sticker shape?', 'options' => array(
+                array( 'val' => 'rectangle', 'label' => 'Rectangle',       'desc' => 'Labels, packaging, products' ),
+                array( 'val' => 'square',     'label' => 'Square',           'desc' => 'Clean, modern shape' ),
+                array( 'val' => 'circle',      'label' => 'Circle / Oval',   'desc' => 'Seals, badges, jar lids' ),
+                array( 'val' => 'die-cut',     'label' => 'Die-Cut Custom',  'desc' => 'Cut to match your design' ),
+                array( 'val' => 'kiss-cut',    'label' => 'Kiss-Cut Sheet',  'desc' => 'Peelable on a backing sheet' ),
+            ) ),
+            array( 'key' => 'size', 'prompt' => 'What size?', 'options' => array(
+                array( 'val' => '1x1',    'label' => '1 × 1"',    'desc' => 'Tiny — seal &amp; logo stickers' ),
+                array( 'val' => '2x2',    'label' => '2 × 2"',    'desc' => 'Small — product labels' ),
+                array( 'val' => '3x3',    'label' => '3 × 3"',    'desc' => 'Medium — popular for branding' ),
+                array( 'val' => '2x3.5',  'label' => '2 × 3.5"',  'desc' => 'Business-card sized' ),
+                array( 'val' => '4x6',    'label' => '4 × 6"',    'desc' => 'Large — shipping &amp; product labels' ),
+                array( 'val' => 'custom',  'label' => 'Custom Size','desc' => 'I\'ll specify in the message' ),
+            ) ),
+            array( 'key' => 'material', 'prompt' => 'Material?', 'options' => array(
+                array( 'val' => 'gloss-white',  'label' => 'Glossy White',    'desc' => 'Vibrant colors, sharp print' ),
+                array( 'val' => 'matte-white',  'label' => 'Matte White',     'desc' => 'No-glare, writable surface' ),
+                array( 'val' => 'clear',          'label' => 'Clear / Transparent','desc' => 'See-through — jar &amp; bottle labels' ),
+                array( 'val' => 'vinyl',           'label' => 'Vinyl (Weatherproof)','desc' => 'Outdoor durable, water-resistant' ),
+                array( 'val' => 'kraft',            'label' => 'Kraft (Brown)',       'desc' => 'Eco-friendly, handmade aesthetic' ),
+                array( 'val' => 'holo',             'label' => 'Holographic',         'desc' => 'Rainbow shimmer effect' ),
+            ) ),
+            array( 'key' => 'finish', 'prompt' => 'Finish?', 'options' => array(
+                array( 'val' => 'gloss-lam',  'label' => 'Gloss Lamination',  'desc' => 'Shiny, scratch-resistant' ),
+                array( 'val' => 'matte-lam',  'label' => 'Matte Lamination',  'desc' => 'Smooth, modern feel' ),
+                array( 'val' => 'spot-uv',     'label' => 'Spot UV',           'desc' => 'Selective gloss accents' ),
+                array( 'val' => 'none',          'label' => 'No Coating',       'desc' => 'Raw material finish' ),
+            ) ),
+            array( 'key' => 'qty', 'prompt' => 'How many stickers?', 'options' => array(
+                array( 'val' => '50',     'label' => '50',     'desc' => '' ),
+                array( 'val' => '100',    'label' => '100',    'desc' => '' ),
+                array( 'val' => '250',    'label' => '250',    'desc' => '' ),
+                array( 'val' => '500',    'label' => '500',    'desc' => '' ),
+                array( 'val' => '1000',   'label' => '1,000',  'desc' => '' ),
+                array( 'val' => '5000+',  'label' => '5,000+', 'desc' => '' ),
+            ) ),
+        ),
     );
 
     $is_lead_type = isset( $lead_configs[ $calc ] );
