@@ -4381,8 +4381,10 @@ function App(){
       if (p.has("color")) base.insideColor = p.get("color");
       if (p.has("covercolor")) base.coverColor = p.get("covercolor");
       if (p.has("paper")) base.insidePaperType = p.get("paper");
+      if (p.has("paperval")) base.insidePaper = p.get("paperval");
       if (p.has("covermode")) base.coverMode = p.get("covermode");
       if (p.has("coverpaper")) base.coverPaperType = p.get("coverpaper");
+      if (p.has("coverval")) base.coverPaper = p.get("coverval");
       if (p.has("staple")) base.twoStaple = p.get("staple") === "true";
       if (p.has("vivid")) base.vividPrint = p.get("vivid") === "true";
       if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
@@ -4738,6 +4740,30 @@ function App(){
     const base = window.location.origin + window.location.pathname;
     const qs = p.toString();
     return qs ? base + "?" + qs : base;
+  };
+
+  const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [];
+  const buildSwitchUrl = (targetUrl) => {
+    const p = new URLSearchParams();
+    p.set("qty", sets[0].qty);
+    p.set("pages", sets[0].pages);
+    if (sizeLabel !== "5.5×8.5 (Opens to 8.5×11)") p.set("size", sizeLabel);
+    if (sizeLabel === "Custom Size") { p.set("long", customLong); p.set("short", customShort); }
+    if (bindDir !== "short") p.set("bind", bindDir);
+    if (insideColor !== "color") p.set("color", insideColor);
+    if (coverColor !== "color") p.set("covercolor", coverColor);
+    p.set("paper", insidePaperType);
+    if (insidePaper && insidePaper.val != null) p.set("paperval", insidePaper.val);
+    if (coverMode !== "same") { p.set("covermode", coverMode); p.set("coverpaper", coverPaperType); }
+    if (coverPaper && coverPaper.val != null) p.set("coverval", coverPaper.val);
+    if (vividPrint) p.set("vivid", "true");
+    if (coating > 0) p.set("coating", coating);
+    if (bundling > 0) p.set("bundling", bundling);
+    if (roundCorner > 0) p.set("corner", roundCorner);
+    if (shipState !== "AZ") p.set("state", shipState);
+    p.set("from", "perfect-bound");
+    const qs = p.toString();
+    return qs ? targetUrl + (targetUrl.includes("?") ? "&" : "?") + qs : targetUrl;
   };
 
   const handleShareLink = () => {
@@ -5364,6 +5390,13 @@ function App(){
           <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
+          {switchTargets.length > 0 && <div style={{display:"flex",gap:6,marginTop:8}}>
+            {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} style={{flex:1,display:"block",padding:"8px 6px",borderRadius:4,border:"1px solid #dbeafe",background:"#eff6ff",color:"#1d4ed8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}
+              onMouseOver={e=>{e.currentTarget.style.background="#dbeafe";e.currentTarget.style.borderColor="#93c5fd"}}
+              onMouseOut={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor="#dbeafe"}}>
+              Try as {t.label} →
+            </a>)}
+          </div>}
           {debugUnlocked&&<button type="button" onClick={()=>setShowDebug(p=>!p)} style={{width:"100%",marginTop:8,padding:"6px",borderRadius:4,border:`1px solid ${showDebug?"#555":"#ddd"}`,background:showDebug?"#1a1a1a":"#fafafa",color:showDebug?"#888":"#bbb",fontSize:10,fontWeight:600,letterSpacing:".5px",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {showDebug?"▼ Hide":"▶ Show"} Debug Panel
           </button>}

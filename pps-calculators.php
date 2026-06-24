@@ -731,6 +731,27 @@ add_action( 'wp', function() {
             }
         }
 
+        // Switch targets: let booklet calculators link to each other
+        $booklet_types = array( 'saddle', 'perfect-bound', 'coupon' );
+        if ( ! empty( $calc_type ) && in_array( $calc_type, $booklet_types, true ) ) {
+            $switch = array();
+            foreach ( $booklet_types as $bt ) {
+                if ( $bt === $calc_type ) continue;
+                $bt_file = pps_get_filename_for_calc_type( $bt );
+                if ( ! $bt_file ) continue;
+                $bt_reg = pps_get_registry();
+                if ( ! isset( $bt_reg[ $bt_file ]['products'] ) ) continue;
+                $bt_ids = array_map( 'intval', array_filter( preg_split( '/[\s,]+/', $bt_reg[ $bt_file ]['products'] ) ) );
+                if ( empty( $bt_ids ) ) continue;
+                $bt_url = get_permalink( $bt_ids[0] );
+                if ( $bt_url ) {
+                    $label_map = array( 'saddle' => 'Saddle Stitch', 'perfect-bound' => 'Perfect Bound', 'coupon' => 'Coupon Book' );
+                    $switch[] = array( 'type' => $bt, 'label' => $label_map[ $bt ] ?? $bt, 'url' => $bt_url );
+                }
+            }
+            if ( $switch ) $config['switchTargets'] = $switch;
+        }
+
         // Edit mode: store edit key so add-to-cart replaces the old item
         if ( ! empty( $_GET['pps_edit_key'] ) ) {
             $edit_key = sanitize_text_field( $_GET['pps_edit_key'] );
