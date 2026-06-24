@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-16 · SS-TOGGLE-FIRST</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-24 · SS-SWITCH</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -4478,7 +4478,10 @@ function App(){
     return qs ? base + "?" + qs : base;
   };
 
-  const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [];
+  const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [
+    {type:"perfect-bound",label:"Perfect Bound",url:(location.origin+location.pathname).replace(/calc-preview-test\.html/,"calc-perfect-bound.html")},
+    {type:"coupon",label:"Coupon Book",url:(location.origin+location.pathname).replace(/calc-preview-test\.html/,"calc-coupon-book.html")},
+  ];
   const buildSwitchUrl = (targetUrl) => {
     const p = new URLSearchParams();
     p.set("qty", sets[0].qty);

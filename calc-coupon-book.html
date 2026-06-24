@@ -4310,7 +4310,10 @@ function App(){
     return qs ? base + "?" + qs : base;
   };
 
-  const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [];
+  const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [
+    {type:"saddle",label:"Saddle Stitch",url:(location.origin+location.pathname).replace(/calc-coupon-book\.html/,"calc-preview-test.html")},
+    {type:"perfect-bound",label:"Perfect Bound",url:(location.origin+location.pathname).replace(/calc-coupon-book\.html/,"calc-perfect-bound.html")},
+  ];
   const buildSwitchUrl = (targetUrl) => {
     const p = new URLSearchParams();
     p.set("qty", sets[0].qty);
