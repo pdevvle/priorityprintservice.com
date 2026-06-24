@@ -536,69 +536,6 @@ function resolveSize(c) {
   return {imp:p.imp,bindEdge:p.bindEdge,isCustom:false,errors:[],clamped:null,sheet:"13x19",needsLargeSheet:false};
 }
 
-// ──────────────────────────────────────────────────────────────────
-// TEMPORARY — Saddle-stitch price estimator for side-by-side comparison
-// in the Quantity Pricing table. Mirrors calc-preview-test.html's
-// calculate() core (print + paper + press + cutting + stitching + base
-// fees + discounts). Omits artwork/bleed/proof/addons so raw printing
-// cost can be compared cleanly against perfect bound. Remove this
-// function + its table columns when the comparison is no longer needed.
-// ──────────────────────────────────────────────────────────────────
-function calcSaddle(c) {
-  const sz = resolveSize(c); const imp = sz.imp;
-  const sets = c.sets.filter(s => s.qty > 0 && s.pages > 0);
-  if (!sets.length || sz.errors.length > 0) return null;
-
-  const cvr = c.coverMode === "same" ? COVER_SAME : c.coverPaper;
-  const tQ = sets.reduce((s,x) => s + x.qty, 0);
-  const tP = sets.reduce((s,x) => s + x.pages, 0);
-  // tS identical to perfect bound's (algebraically equal): (qty*pages/4)/(imp/2)
-  const tS = sets.reduce((s,x) => s + (x.qty*x.pages)/4, 0) / (imp/2);
-  const dL = 0.80 * Math.log(tS);
-  // Fallbacks for standalone preview — in production PPS_CONFIG supplies these
-  const MAXMK = PCF.booklet_maximummarkup != null ? PCF.booklet_maximummarkup : 8;
-  const MINMK = PCF.booklet_minimummarkup != null ? PCF.booklet_minimummarkup : 1.5;
-  const SIZE_DISC = PCF.booklet_size_discount != null ? PCF.booklet_size_discount : 0.15;
-  const EASY_RATE = PCF.easy_discount_rate != null ? PCF.easy_discount_rate : (PCF.easy_discount_rate_1 || 0.05);
-  const mk = Math.max(MAXMK - dL, MINMK);
-
-  const cvrScoring = COVER_SCORING_VALS.includes(cvr.val);
-  const csOK = sets.every(s => s.pages <= 24);
-  const csInside = c.insidePaperType === "cardstock" && csOK;
-  const easySize = !sz.isCustom ? imp >= 4 : false;
-  const commonSize = !sz.isCustom ? ["5.5×8.5 (Opens to 8.5×11)","8.5×11 (Opens to 11×17)"].includes(c.sizeLabel) : false;
-  const q250 = sets.some(s => s.qty > 250);
-
-  const P = {};
-  // Saddle-stitch treats insideColor as a simple flag (no mixed per-set splits).
-  // For "mixed" on perfect bound, approximate as fullcolor for comparison purposes.
-  const isBW = c.insideColor === "bw";
-  P.insidePrint = isBW
-    ? ((PCF.printing_black_cost * 2) * tS) * mk
-    : ((PCF.printing_black_cost * 2 + PCF.printing_fullcolor_cost * 2) * tS) * mk;
-  // Cover print uses tQ (matches fixed saddle-stitch formula; see calc-preview-test.html line 432 FIX)
-  P.coverPrint = c.coverColor === "bw"
-    ? (((PCF.printing_black_cost * 2) * tQ) / imp) * mk
-    : (((PCF.printing_fullcolor_cost * 2) * tQ) / imp) * mk;
-  P.insidePaper = (c.insidePaper.price * tS) * mk;
-  P.coverPaper = ((cvr.price * tQ) / imp) * mk;
-  P.press = (tS / PCF.press_printsperhour) * PCF.labor_press_hr;
-  P.cutting = ((tS * imp) / PCF.cutter_sheetsperhour) * (PCF.labor_cutting_hr + mk) + PCF.cutterbasefee;
-  P.scoreCover = cvrScoring ? (tQ / PCF.bindery_morgana_impressionperhour) * PCF.labor_bindery_hr : 0;
-  P.scoreInsides = csInside ? (((tS * (imp/2)) - tQ) / PCF.bindery_morgana_impressionperhour) * PCF.labor_bindery_hr : 0;
-  // Stitching (replaces perfect bind + finishing cuts)
-  P.stitching = ((((tS * imp) / 2) / PCF.horizonspf20_sheetsperhour) * PCF.labor_horizonspf20_hr) + PCF.labor_horizonspf20_setup;
-  const iInv = c.insidePaperType === "cardstock" ? INV_CS.includes(c.insidePaper.val) : INV_NC.includes(c.insidePaper.val);
-  P.nonInv = (iInv && COVER_INV.includes(cvr.val)) ? 0 : PCF.non_inventory_fee;
-  P.discBW = isBW ? -(P.press * PCF.bw_discount_rate) : 0;
-  const pComp = P.insidePaper + P.coverPaper + P.insidePrint + P.coverPrint;
-  P.discEasy = easySize ? -Math.min(pComp * EASY_RATE, PCF.easydiscount_max) : 0;
-  P.discCommon = (commonSize && q250 && PCF.common_discount_max > 0) ? -(P.press + P.cutting + P.stitching) : 0;
-  const subBeforeSize = Object.values(P).reduce((s,v) => s + v, 0);
-  P.discSize = imp < 4 ? subBeforeSize * (-SIZE_DISC) : 0;
-  const total = Object.values(P).reduce((s,v) => s + v, 0);
-  return { total: Math.max(0, total), perUnit: tQ > 0 ? total / tQ : 0 };
-}
 
 function calculate(c) {
   const sz=resolveSize(c); const imp=sz.imp;
@@ -4675,15 +4612,9 @@ function App(){
       const projNeedBy = (result.shipping?.rushCost > 0) ? needByDate : null;
       const projCfg = {...baseConfig, needByDate: projNeedBy, sets: [buildProjSet(q)]};
       const pr = calculate(projCfg);
-      if (!pr || pr.error?.length) return {qty: q, total: null, perUnit: null, saddleTotal: null, saddlePerUnit: null, current: q === currentQty};
-      // TEMPORARY: saddle-stitch comparison price for same config (base printing only)
-      let sd = null;
-      try { sd = calcSaddle(projCfg); }
-      catch (e) { console.error("calcSaddle error", e); sd = null; }
+      if (!pr || pr.error?.length) return {qty: q, total: null, perUnit: null, current: q === currentQty};
       return {
         qty: q, total: pr.total, perUnit: pr.perUnit,
-        saddleTotal: sd ? sd.total : null,
-        saddlePerUnit: sd ? sd.perUnit : null,
         current: q === currentQty,
       };
     });
@@ -5295,21 +5226,16 @@ function App(){
           </Sec>
 
 
-        {/* TEMPORARY: mobile-visible qty pricing table with saddle-stitch comparison.
-            Remove this mobile duplicate when the SS comparison is no longer needed. */}
         {mob && projections && <div style={{...ST.pnl,marginTop:10,marginBottom:100,overflow:"hidden"}}>
           <div style={{padding:"10px 14px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
             <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
-            <div style={{fontSize:9,fontStyle:"italic",color:CC.light,marginTop:2}}>SS = saddle-stitch estimate (base printing only)</div>
           </div>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
             <thead>
               <tr style={{borderBottom:`1px solid ${CC.border}`}}>
                 <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Qty</th>
                 <th style={{padding:"6px 4px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Unit</th>
-                <th style={{padding:"6px 8px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Total</th>
-                <th style={{padding:"6px 4px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase",fontStyle:"italic"}}>SS $</th>
-                <th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase",fontStyle:"italic"}}>SS Tot</th>
+                <th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Total</th>
               </tr>
             </thead>
             <tbody>
@@ -5318,9 +5244,7 @@ function App(){
                   onClick={() => {if(!p.current) upSet(0,{qty:p.qty})}}>
                   <td style={{padding:"5px 10px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>{p.qty.toLocaleString()}{p.current&&" ●"}</td>
                   <td style={{padding:"5px 4px",textAlign:"right",color:CC.mid}}>${p.perUnit.toFixed(2)}</td>
-                  <td style={{padding:"5px 8px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toFixed(0)}</td>
-                  <td style={{padding:"5px 4px",textAlign:"right",color:CC.light,fontStyle:"italic"}}>{p.saddlePerUnit!=null?`$${p.saddlePerUnit.toFixed(2)}`:"—"}</td>
-                  <td style={{padding:"5px 10px",textAlign:"right",color:CC.light,fontStyle:"italic"}}>{p.saddleTotal!=null?`$${p.saddleTotal.toFixed(0)}`:"—"}</td>
+                  <td style={{padding:"5px 10px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toFixed(0)}</td>
                 </tr>
               ))}
             </tbody>
@@ -5335,18 +5259,13 @@ function App(){
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
-              {/* TEMPORARY: saddle-stitch comparison note — remove when comparison no longer needed */}
-              <div style={{fontSize:9,fontStyle:"italic",color:CC.light,marginTop:2}}>SS column = saddle-stitch estimate for same config (base printing only, no addons)</div>
             </div>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
               <thead>
                 <tr style={{borderBottom:`1px solid ${CC.border}`}}>
                   <th style={{padding:"7px 14px",textAlign:"left",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Qty</th>
                   <th style={{padding:"7px 6px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Unit</th>
-                  <th style={{padding:"7px 10px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Total</th>
-                  {/* TEMPORARY saddle-stitch comparison columns */}
-                  <th style={{padding:"7px 6px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px",fontStyle:"italic"}}>SS Unit</th>
-                  <th style={{padding:"7px 14px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px",fontStyle:"italic"}}>SS Total</th>
+                  <th style={{padding:"7px 14px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -5357,10 +5276,7 @@ function App(){
                       {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
                     </td>
                     <td style={{padding:"6px 6px",textAlign:"right",color:CC.mid,fontWeight:500}}>${p.perUnit.toFixed(2)}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                    {/* TEMPORARY saddle-stitch comparison cells */}
-                    <td style={{padding:"6px 6px",textAlign:"right",color:CC.light,fontWeight:500,fontStyle:"italic"}}>{p.saddlePerUnit!=null?`$${p.saddlePerUnit.toFixed(2)}`:"—"}</td>
-                    <td style={{padding:"6px 14px",textAlign:"right",color:CC.light,fontWeight:500,fontStyle:"italic"}}>{p.saddleTotal!=null?`$${p.saddleTotal.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"}</td>
+                    <td style={{padding:"6px 14px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                   </tr>
                 ))}
               </tbody>
