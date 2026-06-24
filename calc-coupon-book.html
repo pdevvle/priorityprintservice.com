@@ -2030,7 +2030,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     if (sizeLabel === "Custom Size") {
       w = Math.min(customLong || 5.5, customShort || 5.5);
       h = Math.max(customLong || 8.5, customShort || 8.5);
-      if (bindDir === "long") { const t = w; w = h; h = t; }
+      if (bindDir === "short") { const t = w; w = h; h = t; }
     } else {
       const match = sizeLabel.match(/([\d.]+)×([\d.]+)/);
       if (match) { w = parseFloat(match[1]); h = parseFloat(match[2]); }
