@@ -3065,7 +3065,7 @@ function TurnBadge({days}){
 function Sec({title,open,onToggle,children,badge,num}){
   const m=useIsMobile();
   const numStr=num!=null?String(num).padStart(2,"0"):null;
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"baseline",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{num!=null&&<span style={ST.secDot}/>}<span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"baseline",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{numStr&&<span style={ST.secNum}>{numStr}</span>}<span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
 function DatePicker({value, onChange, earliestDate, freeDate}) {
@@ -4032,7 +4032,6 @@ const ST = {
   cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"#fafafa",border:"none",borderBottom:"1px solid #eee",cursor:"pointer",fontFamily:"inherit",fontSize:15},
   pnl:{background:CC.white,borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden"},
   secNum:{fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",fontSize:11,fontWeight:600,color:CC.light,letterSpacing:".08em",flexShrink:0,minWidth:18},
-  secDot:{width:9,height:9,borderRadius:"50%",background:CC.primary,flexShrink:0,alignSelf:"center"},
 };
 
 ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<App />);
