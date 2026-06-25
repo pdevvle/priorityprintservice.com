@@ -1099,7 +1099,7 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
   );
 }
 
-function Panel({result,compact,debugUnlocked}){
+function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
