@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-20 · BR-BLUE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-25 · BR-DOTS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -63,6 +63,7 @@ function useIsMobile(bp=700){const[m,s]=useState(window.innerWidth<=bp);useEffec
 // ═══════════════════════════════════════════════════════════════
 const CC={bg:"#f8fafc",white:"#fff",dark:"#0f172a",mid:"#475569",light:"#94a3b8",border:"#e2e8f0",primary:"#007eff"};
 const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
+const SEC_DOTS=[CK.cyan,CK.magenta,CK.yellow,CK.key,"#22c55e"];
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
 // Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
@@ -3099,8 +3100,7 @@ function TurnBadge({days}){
 
 function Sec({title,open,onToggle,children,badge,num}){
   const m=useIsMobile();
-  const numStr=num!=null?String(num).padStart(2,"0"):null;
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"baseline",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{numStr&&<span style={ST.secNum}>{numStr}</span>}<span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{num!=null&&<span style={{width:8,height:8,borderRadius:"50%",background:SEC_DOTS[(num-1)%5],flexShrink:0,display:"block"}} />}<span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
 function DatePicker({value, onChange, earliestDate, freeDate}) {
@@ -4408,7 +4408,6 @@ const ST = {
   card:{background:CC.white,borderRadius:8,border:`1px solid ${CC.border}`,borderLeft:`3px solid ${CC.primary}`,overflow:"hidden",marginBottom:10},
   cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"#f8fafc",border:"none",borderBottom:`1px solid ${CC.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:15},
   pnl:{background:CC.white,borderRadius:8,border:`1px solid ${CC.border}`,overflow:"hidden"},
-  secNum:{fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",fontSize:11,fontWeight:700,color:CC.primary,letterSpacing:".08em",flexShrink:0,minWidth:18},
 };
 
 ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<App />);
