@@ -4808,7 +4808,7 @@ function App(){
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
           {switchTargets.length > 0 && <div style={{display:"flex",gap:6,marginTop:8}}>
-            {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} style={{flex:1,display:"block",padding:"8px 6px",borderRadius:4,border:"1px solid #dbeafe",background:"#eff6ff",color:"#1d4ed8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}
+            {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} target="_blank" rel="noopener" style={{flex:1,display:"block",padding:"8px 6px",borderRadius:4,border:"1px solid #dbeafe",background:"#eff6ff",color:"#1d4ed8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}
               onMouseOver={e=>{e.currentTarget.style.background="#dbeafe";e.currentTarget.style.borderColor="#93c5fd"}}
               onMouseOut={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor="#dbeafe"}}>
               Try as {t.label} →
