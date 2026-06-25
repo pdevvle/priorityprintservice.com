@@ -613,7 +613,11 @@ function calculate(c) {
   P.discBW=c.insideColor==="bw"?-(P.press*PCF.bw_discount_rate):0;
   const pComp=P.insidePaper+P.coverPaper+P.insidePrint+P.coverPrint;
   P.discEasy=easySize?-Math.min(pComp*PCF.easy_discount_rate,PCF.easydiscount_max):0;
-  P.discCommon=(commonSize&&q250&&PCF.common_discount_max>0)?-(P.press+P.cutting+P.stitching):0;
+  P.discCommon=0;
+  if(commonSize&&PCF.common_discount_max>0&&tQ>100){
+    const frac=Math.min(1,Math.log(tQ/100)/Math.log(10));
+    P.discCommon=-(P.press+P.cutting+P.stitching)*frac;
+  }
   const subBeforeSize=Object.values(P).reduce((s,v)=>s+v,0);
   P.discSize=imp<4?subBeforeSize*(-PCF.booklet_size_discount):0;
   const subBeforeSurcharge=Object.values(P).reduce((s,v)=>s+v,0);
