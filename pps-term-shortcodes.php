@@ -1274,19 +1274,47 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     } else {
     // ── PPS calculator steps ──
 
+    // Size type prerequisite (when groups exist)
+    $has_sizetype = ! empty( $size_groups ) && count( $size_groups ) > 1;
+    if ( $has_sizetype ) {
+        $stype_descs = array(
+            'Standard & Small'  => 'Traditional portrait sizes &mdash; pocket cards to full letter',
+            'Square & Landscape' => 'Square formats &amp; landscape orientation &mdash; modern, distinctive layouts',
+            'Standard'          => 'Common formats &mdash; half letter, mailer &amp; letter size',
+            'Large'             => 'Legal, folder-fit &amp; tabloid',
+            'Oversized'         => 'Extra-large for maximum impact',
+        );
+        $out .= '<div class="pps-wiz-step is-active" data-step="sizetype">';
+        $out .= '<div class="pps-wiz-prompt">What type of size do you need? <span class="pps-wiz-clear">&times; clear</span></div>';
+        $out .= '<div class="pps-wiz-grid">';
+        foreach ( $size_groups as $sg ) {
+            $gname = $sg['group'];
+            $gdesc = isset( $stype_descs[ $gname ] ) ? $stype_descs[ $gname ] : count( $sg['items'] ) . ' sizes available';
+            $gval  = sanitize_title( $gname );
+            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $gval ) . '" data-label="' . esc_attr( $gname ) . '">'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $gname ) . '</div>'
+                  . '<div class="pps-wiz-opt-desc">' . $gdesc . '</div>'
+                  . '</button>';
+        }
+        $out .= '</div></div>';
+    }
+
     // Step 1: Size
-    $size_prompt = 'What size do you need?';
-    $out .= '<div class="pps-wiz-step is-active" data-step="size">';
-    $out .= '<div class="pps-wiz-prompt">' . esc_html( $size_prompt ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
+    $out .= '<div class="pps-wiz-step' . ( $has_sizetype ? '' : ' is-active' ) . '" data-step="size">';
+    if ( $has_sizetype ) {
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="sizetype"></span> &mdash; pick your size: <span class="pps-wiz-clear">&times; clear</span></div>';
+    } else {
+        $out .= '<div class="pps-wiz-prompt">What size do you need? <span class="pps-wiz-clear">&times; clear</span></div>';
+    }
     $out .= '<div class="pps-wiz-grid">';
     if ( ! empty( $size_groups ) ) {
         foreach ( $size_groups as $group ) {
-            $out .= '<div class="pps-wiz-group-label">' . esc_html( $group['group'] ) . '</div>';
+            $gslug = sanitize_title( $group['group'] );
             foreach ( $group['items'] as $item ) {
                 $lbl = isset( $item['label'] ) ? $item['label'] : '';
                 $val = isset( $item['val'] ) ? $item['val'] : $lbl;
                 $dsc = isset( $item['desc'] ) ? $item['desc'] : '';
-                $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $val ) . '" data-label="' . esc_attr( $lbl ) . '">'
+                $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $val ) . '" data-label="' . esc_attr( $lbl ) . '" data-stype="' . esc_attr( $gslug ) . '">'
                       . '<div class="pps-wiz-opt-name">' . esc_html( $lbl ) . '</div>'
                       . ( $dsc ? '<div class="pps-wiz-opt-desc">' . esc_html( $dsc ) . '</div>' : '' )
                       . '</button>';
@@ -1513,6 +1541,13 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'o.classList.remove("is-selected");'
           .   '});'
           . '}'
+          . 'function filterSizes(stype){'
+          .   'w.querySelectorAll(\'[data-step="size"] .pps-wiz-opt\').forEach(function(o){'
+          .     'if(!o.dataset.stype)return;'
+          .     'o.style.display=o.dataset.stype===stype?"":"none";'
+          .     'o.classList.remove("is-selected");'
+          .   '});'
+          . '}'
           . 'var calc=w.dataset.calc;'
           . 'function buildUrl(){'
           .   'var params=[];'
@@ -1539,6 +1574,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'var si=steps.indexOf(step);'
           .   'for(var i=si+2;i<steps.length;i++){hide(steps[i]);delete state[steps[i]]}'
           .   'if(step==="papertype")filterPapers(val);'
+          .   'if(step==="sizetype")filterSizes(val);'
           .   'if(si<steps.length-1)setTimeout(function(){show(steps[si+1])},150);'
           .   'updatePrev();updateActions();'
           . '}'
@@ -1572,10 +1608,10 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'var si=steps.indexOf(step);if(si<0)return;'
           .   'delete state[step];'
           .   'var el=w.querySelector(\'[data-step="\'+step+\'"]\');'
-          .   'if(el)el.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");if(o.dataset.ptype)o.style.display=""});'
+          .   'if(el)el.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");if(o.dataset.ptype||o.dataset.stype)o.style.display=""});'
           .   'for(var i=si+1;i<steps.length;i++){hide(steps[i]);delete state[steps[i]];'
           .     'var se=w.querySelector(\'[data-step="\'+steps[i]+\'"]\');'
-          .     'if(se)se.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");if(o.dataset.ptype)o.style.display=""})}'
+          .     'if(se)se.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");if(o.dataset.ptype||o.dataset.stype)o.style.display=""})}'
           .   'var ef=w.querySelector(".pps-wiz-email-form");if(ef)ef.style.display="none";'
           .   'updatePrev();updateActions();'
           . '}'
