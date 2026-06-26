@@ -1351,11 +1351,11 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="' . $pt_prev . '"></span> — ' . esc_html( $pt_prompt ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
     $out .= '<button type="button" class="pps-wiz-opt" data-val="text" data-label="Standard Text Weight">'
-          . '<div class="pps-wiz-opt-name">Standard Text Weight</div>'
+          . '<div class="pps-wiz-opt-name">Standard Text Weight' . $wiz_tip_icon( 'paper_text_weight' ) . '</div>'
           . '<div class="pps-wiz-opt-desc">Lighter, flexible sheets &mdash; folds cleanly, great for brochures, newsletters &amp; inserts</div>'
           . '</button>';
     $out .= '<button type="button" class="pps-wiz-opt" data-val="cs" data-label="Cardstock">'
-          . '<div class="pps-wiz-opt-name">Cardstock</div>'
+          . '<div class="pps-wiz-opt-name">Cardstock' . $wiz_tip_icon( 'paper_cardstock' ) . '</div>'
           . '<div class="pps-wiz-opt-desc">Heavier, rigid stock &mdash; stands on its own, ideal for postcards, covers &amp; presentation pieces</div>'
           . '</button>';
     $out .= '</div></div>';
