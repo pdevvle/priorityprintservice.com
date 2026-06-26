@@ -1309,7 +1309,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     if ( $is_booklet ) {
         // Step 2: Page Count
         $out .= '<div class="pps-wiz-step" data-step="pages">';
-        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — how many pages? <span class="pps-wiz-clear">&times; clear</span></div>';
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — how many pages? ' . $wiz_tip_icon( 'page_count' ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
         $out .= '<div class="pps-wiz-grid">';
         foreach ( $page_counts as $pc ) {
             $pc = intval( $pc );
