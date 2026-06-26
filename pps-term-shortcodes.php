@@ -302,6 +302,8 @@ ul.products{padding-left:16px!important;padding-right:16px!important}
 .pps-wiz-prompt{font-size:14px;font-weight:600;color:#1e293b;margin-bottom:10px;line-height:1.4}
 .pps-wiz-prompt .pps-wiz-prev{color:#007eff;font-weight:700}
 .pps-wiz-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
+.pps-wiz-group-label{grid-column:1/-1;font-size:12px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.04em;padding:8px 0 2px;border-bottom:1px solid #e2e8f0;margin-bottom:2px}
+.pps-wiz-group-label:first-child{padding-top:0}
 .pps-wiz-opt{all:unset;position:relative;cursor:pointer;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;background:#fff;transition:border-color .15s,box-shadow .15s}
 .pps-wiz-opt:hover{border-color:#60a5fa;box-shadow:0 2px 8px rgba(0,126,255,.1)}
 .pps-wiz-opt.is-selected{border-color:#007eff;box-shadow:0 0 0 2px rgba(0,126,255,.2);background:#eff6ff}
@@ -1125,12 +1127,11 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     );
 
     if ( $is_booklet ) {
+        $size_groups = isset( $cfg['size_presets'] ) ? $cfg['size_presets'] : array();
         $sizes = array();
-        if ( isset( $cfg['size_presets'] ) ) {
-            foreach ( $cfg['size_presets'] as $group ) {
-                foreach ( $group['items'] as $item ) {
-                    $sizes[] = array( 'val' => $item['label'], 'label' => $item['label'], 'desc' => '' );
-                }
+        foreach ( $size_groups as $group ) {
+            foreach ( $group['items'] as $item ) {
+                $sizes[] = array( 'val' => $item['label'], 'label' => $item['label'], 'desc' => '' );
             }
         }
         $page_counts = isset( $cfg['page_counts'] ) ? $cfg['page_counts'] : array( 8, 12, 16, 20, 24, 28, 32 );
@@ -1215,11 +1216,22 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $out .= '<div class="pps-wiz-step is-active" data-step="size">';
     $out .= '<div class="pps-wiz-prompt">' . esc_html( $size_prompt ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
-    foreach ( $sizes as $s ) {
-        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $s['val'] ) . '" data-label="' . esc_attr( $s['label'] ) . '">'
-              . '<div class="pps-wiz-opt-name">' . esc_html( $s['label'] ) . '</div>'
-              . '<div class="pps-wiz-opt-desc">' . esc_html( $s['desc'] ) . '</div>'
-              . '</button>';
+    if ( $is_booklet && ! empty( $size_groups ) ) {
+        foreach ( $size_groups as $group ) {
+            $out .= '<div class="pps-wiz-group-label">' . esc_html( $group['group'] ) . '</div>';
+            foreach ( $group['items'] as $item ) {
+                $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $item['label'] ) . '" data-label="' . esc_attr( $item['label'] ) . '">'
+                      . '<div class="pps-wiz-opt-name">' . esc_html( $item['label'] ) . '</div>'
+                      . '</button>';
+            }
+        }
+    } else {
+        foreach ( $sizes as $s ) {
+            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $s['val'] ) . '" data-label="' . esc_attr( $s['label'] ) . '">'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $s['label'] ) . '</div>'
+                  . '<div class="pps-wiz-opt-desc">' . esc_html( $s['desc'] ) . '</div>'
+                  . '</button>';
+        }
     }
     $out .= '<button type="button" class="pps-wiz-opt" data-val="" data-label="Custom Size">'
           . '<div class="pps-wiz-opt-name">Custom Size</div>'
