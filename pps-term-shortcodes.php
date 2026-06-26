@@ -305,7 +305,8 @@ ul.products{padding-left:16px!important;padding-right:16px!important}
 .pps-wiz-opt{all:unset;position:relative;cursor:pointer;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;background:#fff;transition:border-color .15s,box-shadow .15s}
 .pps-wiz-opt:hover{border-color:#60a5fa;box-shadow:0 2px 8px rgba(0,126,255,.1)}
 .pps-wiz-opt.is-selected{border-color:#007eff;box-shadow:0 0 0 2px rgba(0,126,255,.2);background:#eff6ff}
-.pps-wiz-opt-name{font-weight:600;font-size:12.5px;color:#0f172a;margin-bottom:2px}
+.pps-wiz-opt-name{font-weight:600;font-size:12.5px;color:#0f172a;margin-bottom:2px;display:flex;align-items:center;gap:4px}
+.pps-wiz-tip{width:14px;height:14px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;background:#00aeef22;color:#00aeef;border:1px solid #00aeef44;flex-shrink:0;cursor:help;line-height:1}
 .pps-wiz-opt.is-selected .pps-wiz-opt-name{color:#007eff}
 .pps-wiz-opt-desc{font-size:11px;color:#64748b;line-height:1.4;margin-bottom:3px}
 .pps-wiz-opt-badges{display:flex;flex-wrap:wrap;gap:3px}
@@ -1084,6 +1085,21 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 
     $id = 'pps-wiz-' . wp_unique_id();
 
+    // Load tooltips for "?" triggers on wizard options
+    $wiz_tips = get_option( 'pps_tooltips', array() );
+    $wiz_tip_icon = function( $tip_key ) use ( $wiz_tips ) {
+        if ( empty( $tip_key ) || ! isset( $wiz_tips[ $tip_key ] ) ) return '';
+        return ' <span class="pps-cat-tip pps-wiz-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>';
+    };
+    $paper_tip_key = function( $label, $is_cs = false ) {
+        return 'paper_' . ( $is_cs ? 'cs_' : 'text_' ) . strtolower( str_replace( ' ', '_', $label ) );
+    };
+    $wiz_addon_tip_map = array(
+        'vivid' => 'vivid', 'coating' => 'coating', 'bundling' => 'bundling',
+        'rc' => 'round_cornering', 'two_staple' => 'saddle_stitch',
+        'perforation' => 'perforation', 'outfold' => 'outfold',
+    );
+
     // ── Step data (PPS calculator types only) ──
 
     if ( ! $is_lead_type ) {
@@ -1266,8 +1282,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         $coat  = ! empty( $p['coatable'] )
             ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
             : '';
+        $ptk  = $paper_tip_key( $p['label'], ! empty( $p['_cs'] ) );
         $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $p['val'] ) . '" data-label="' . esc_attr( $p['label'] ) . '" data-ptype="' . esc_attr( $ptype ) . '">'
-              . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . '</div>'
+              . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . $wiz_tip_icon( $ptk ) . '</div>'
               . ( $hint ? '<div class="pps-wiz-opt-desc">' . esc_html( $hint ) . '</div>' : '' )
               . '<div class="pps-wiz-opt-badges">' . $stock . $coat . '</div>'
               . '</button>';
@@ -1287,8 +1304,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
             $stock = empty( $p['factory'] )
                 ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
                 : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+            $ctk   = $paper_tip_key( $p['label'], true );
             $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $p['val'] ) . '" data-label="' . esc_attr( $p['label'] ) . '">'
-                  . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . '</div>'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . $wiz_tip_icon( $ctk ) . '</div>'
                   . '<div class="pps-wiz-opt-badges">' . $stock . '</div>'
                   . '</button>';
         }
@@ -1307,7 +1325,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
               . '</button>';
         foreach ( $coatings as $c ) {
             $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $c['val'] ) . '" data-label="' . esc_attr( $c['label'] ) . '">'
-                  . '<div class="pps-wiz-opt-name">' . esc_html( $c['label'] ) . '</div>'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $c['label'] ) . $wiz_tip_icon( 'coating' ) . '</div>'
                   . '</button>';
         }
         $out .= '</div></div>';
@@ -1319,8 +1337,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         $out .= '<div class="pps-wiz-prompt">Any finishing touches? <span style="font-weight:400;color:#64748b">(select all that apply)</span> <span class="pps-wiz-clear">&times; clear</span></div>';
         $out .= '<div class="pps-wiz-grid">';
         foreach ( $addons as $item ) {
+            $atk = isset( $wiz_addon_tip_map[ $item['slug'] ] ) ? $wiz_addon_tip_map[ $item['slug'] ] : '';
             $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $item['slug'] ) . '" data-label="' . esc_attr( $item['label'] ) . '">'
-                  . '<div class="pps-wiz-opt-name">' . esc_html( $item['label'] ) . '</div>'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $item['label'] ) . $wiz_tip_icon( $atk ) . '</div>'
                   . '</button>';
         }
         $out .= '</div></div>';
@@ -1470,6 +1489,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'updatePrev();updateActions();'
           . '}'
           . 'w.addEventListener("click",function(e){'
+          .   'if(e.target.closest(".pps-cat-tip"))return;'
           .   'var frm=e.target.closest(".pps-wiz-file-rm");'
           .   'if(frm){wizFiles.splice(parseInt(frm.dataset.fi),1);renderFiles();return}'
           .   'if(e.target.closest(".pps-wiz-clear")){'
