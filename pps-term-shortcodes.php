@@ -521,13 +521,13 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
     $papers = array();
     if ( $a['type'] === 'text' || $a['type'] === 'all' ) {
         foreach ( ( isset( $cfg['papers_nc'] ) ? $cfg['papers_nc'] : array() ) as $p ) {
-            $p['_tip'] = 'paper_text_weight';
+            $p['_tip'] = 'paper_text_' . strtolower( str_replace( ' ', '_', $p['label'] ) );
             $papers[]  = $p;
         }
     }
     if ( $a['type'] === 'cover' || $a['type'] === 'all' ) {
         foreach ( ( isset( $cfg['papers_cs'] ) ? $cfg['papers_cs'] : array() ) as $p ) {
-            $p['_tip'] = 'paper_cardstock';
+            $p['_tip'] = 'paper_cs_' . strtolower( str_replace( ' ', '_', $p['label'] ) );
             $papers[]  = $p;
         }
     }
@@ -655,25 +655,37 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     // ── Lead wizard configurations (no calculator product needed) ──
     $lead_configs = array(
         'signs' => array(
-            array( 'key' => 'signtype', 'prompt' => 'What type of sign or banner?', 'options' => array(
-                array( 'val' => 'vinyl-banner',      'label' => 'Vinyl Banner',        'desc' => 'Durable, weather-resistant for outdoor advertising' ),
-                array( 'val' => 'retractable-banner', 'label' => 'Retractable Banner',  'desc' => 'Portable pull-up display with stand' ),
-                array( 'val' => 'yard-sign',          'label' => 'Yard Sign',           'desc' => 'Corrugated plastic — real estate, events, campaigns' ),
-                array( 'val' => 'foam-board',         'label' => 'Foam Board Sign',     'desc' => 'Lightweight rigid board for indoor display' ),
-                array( 'val' => 'poster',             'label' => 'Poster',              'desc' => 'Large-format print on paper or card stock' ),
-                array( 'val' => 'a-frame',            'label' => 'A-Frame Sign',        'desc' => 'Double-sided sidewalk display' ),
-                array( 'val' => 'window-graphic',     'label' => 'Window Graphic',      'desc' => 'Clings or adhesive vinyl for storefronts' ),
-                array( 'val' => 'vehicle-magnet',     'label' => 'Vehicle Magnet',      'desc' => 'Removable magnetic sign for cars &amp; trucks' ),
+            array( 'key' => 'signtype', 'prompt' => 'What type of sign or banner?', 'options' => array(), 'groups' => array(
+                array( 'group' => 'Banners', 'items' => array(
+                    array( 'val' => 'vinyl-banner',      'label' => 'Vinyl Banner',       'desc' => 'Durable, weather-resistant for outdoor advertising' ),
+                    array( 'val' => 'retractable-banner', 'label' => 'Retractable Banner', 'desc' => 'Portable pull-up display with stand' ),
+                )),
+                array( 'group' => 'Signs', 'items' => array(
+                    array( 'val' => 'yard-sign',  'label' => 'Yard Sign',      'desc' => 'Corrugated plastic — real estate, events, campaigns' ),
+                    array( 'val' => 'foam-board', 'label' => 'Foam Board Sign', 'desc' => 'Lightweight rigid board for indoor display' ),
+                    array( 'val' => 'a-frame',    'label' => 'A-Frame Sign',   'desc' => 'Double-sided sidewalk display' ),
+                    array( 'val' => 'poster',     'label' => 'Poster',         'desc' => 'Large-format print on paper or card stock' ),
+                )),
+                array( 'group' => 'Specialty', 'items' => array(
+                    array( 'val' => 'window-graphic', 'label' => 'Window Graphic', 'desc' => 'Clings or adhesive vinyl for storefronts' ),
+                    array( 'val' => 'vehicle-magnet', 'label' => 'Vehicle Magnet', 'desc' => 'Removable magnetic sign for cars &amp; trucks' ),
+                )),
             ) ),
-            array( 'key' => 'size', 'prompt' => 'What size do you need?', 'options' => array(
-                array( 'val' => '12x18',   'label' => '12 × 18"',    'desc' => 'Small sign' ),
-                array( 'val' => '18x24',   'label' => '18 × 24"',    'desc' => 'Standard yard sign' ),
-                array( 'val' => '24x36',   'label' => '24 × 36"',    'desc' => 'Large sign' ),
-                array( 'val' => '2x4',     'label' => '2\' × 4\'',   'desc' => 'Small banner' ),
-                array( 'val' => '3x6',     'label' => '3\' × 6\'',   'desc' => 'Medium banner' ),
-                array( 'val' => '4x8',     'label' => '4\' × 8\'',   'desc' => 'Large banner' ),
-                array( 'val' => '33x80',   'label' => '33" × 80"',   'desc' => 'Retractable banner' ),
-                array( 'val' => 'custom',  'label' => 'Custom Size',  'desc' => 'I\'ll specify in the message' ),
+            array( 'key' => 'size', 'prompt' => 'What size do you need?', 'options' => array(), 'groups' => array(
+                array( 'group' => 'Sign Sizes', 'items' => array(
+                    array( 'val' => '12x18', 'label' => '12 × 18"', 'desc' => 'Small sign' ),
+                    array( 'val' => '18x24', 'label' => '18 × 24"', 'desc' => 'Standard yard sign' ),
+                    array( 'val' => '24x36', 'label' => '24 × 36"', 'desc' => 'Large sign' ),
+                )),
+                array( 'group' => 'Banner Sizes', 'items' => array(
+                    array( 'val' => '2x4',   'label' => '2\' × 4\'', 'desc' => 'Small banner' ),
+                    array( 'val' => '3x6',   'label' => '3\' × 6\'', 'desc' => 'Medium banner' ),
+                    array( 'val' => '4x8',   'label' => '4\' × 8\'', 'desc' => 'Large banner' ),
+                    array( 'val' => '33x80', 'label' => '33" × 80"', 'desc' => 'Retractable banner' ),
+                )),
+                array( 'group' => 'Other', 'items' => array(
+                    array( 'val' => 'custom', 'label' => 'Custom Size', 'desc' => 'I\'ll specify in the message' ),
+                )),
             ) ),
             array( 'key' => 'environment', 'prompt' => 'Where will it be used?', 'options' => array(
                 array( 'val' => 'indoor',  'label' => 'Indoor',  'desc' => 'Controlled environment, no weather exposure' ),
@@ -861,13 +873,17 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         ),
 
         'business-cards' => array(
-            array( 'key' => 'paper', 'prompt' => 'Paper stock?', 'options' => array(
-                array( 'val' => '14pt-gloss',    'label' => '14pt Gloss',     'desc' => 'Classic, vibrant — most popular' ),
-                array( 'val' => '16pt-c2s',      'label' => '16pt Premium',   'desc' => 'Extra-thick, double-coated' ),
-                array( 'val' => '14pt-uncoated',  'label' => '14pt Uncoated',  'desc' => 'Natural feel, easy to write on' ),
-                array( 'val' => 'linen',           'label' => 'Linen',          'desc' => 'Textured, distinguished look' ),
-                array( 'val' => 'cotton',          'label' => 'Cotton',          'desc' => 'Soft, luxurious hand feel' ),
-                array( 'val' => 'kraft',            'label' => 'Kraft (Brown)',   'desc' => 'Eco-friendly, rustic aesthetic' ),
+            array( 'key' => 'paper', 'prompt' => 'Paper stock?', 'options' => array(), 'groups' => array(
+                array( 'group' => 'Standard', 'items' => array(
+                    array( 'val' => '14pt-gloss',   'label' => '14pt Gloss',    'desc' => 'Classic, vibrant — most popular' ),
+                    array( 'val' => '16pt-c2s',     'label' => '16pt Premium',  'desc' => 'Extra-thick, double-coated' ),
+                    array( 'val' => '14pt-uncoated', 'label' => '14pt Uncoated', 'desc' => 'Natural feel, easy to write on' ),
+                )),
+                array( 'group' => 'Specialty', 'items' => array(
+                    array( 'val' => 'linen',  'label' => 'Linen',        'desc' => 'Textured, distinguished look' ),
+                    array( 'val' => 'cotton', 'label' => 'Cotton',       'desc' => 'Soft, luxurious hand feel' ),
+                    array( 'val' => 'kraft',  'label' => 'Kraft (Brown)', 'desc' => 'Eco-friendly, rustic aesthetic' ),
+                )),
             ) ),
             array( 'key' => 'finish', 'prompt' => 'Finish?', 'options' => array(
                 array( 'val' => 'uv-gloss', 'label' => 'UV Gloss',         'desc' => 'High-shine, scratch-resistant' ),
@@ -896,13 +912,19 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         ),
 
         'envelopes' => array(
-            array( 'key' => 'style', 'prompt' => 'Envelope style?', 'options' => array(
-                array( 'val' => 'no10',    'label' => '#10 Business (4.125 × 9.5")', 'desc' => 'Standard business envelope' ),
-                array( 'val' => 'a7',       'label' => 'A7 Invitation (5.25 × 7.25")', 'desc' => 'Fits 5×7 cards &amp; invites' ),
-                array( 'val' => '6x9',      'label' => '6 × 9" Booklet',               'desc' => 'Catalogs &amp; thick mailings' ),
-                array( 'val' => '9x12',     'label' => '9 × 12" Catalog',              'desc' => 'Full letter unfolded' ),
-                array( 'val' => '10x13',    'label' => '10 × 13" Catalog',             'desc' => 'Legal documents &amp; catalogs' ),
-                array( 'val' => 'custom',    'label' => 'Custom Size',                   'desc' => 'I\'ll specify in the message' ),
+            array( 'key' => 'style', 'prompt' => 'Envelope style?', 'options' => array(), 'groups' => array(
+                array( 'group' => 'Business', 'items' => array(
+                    array( 'val' => 'no10', 'label' => '#10 Business (4.125 × 9.5")', 'desc' => 'Standard business envelope' ),
+                    array( 'val' => 'a7',   'label' => 'A7 Invitation (5.25 × 7.25")', 'desc' => 'Fits 5×7 cards &amp; invites' ),
+                )),
+                array( 'group' => 'Large Format', 'items' => array(
+                    array( 'val' => '6x9',   'label' => '6 × 9" Booklet',    'desc' => 'Catalogs &amp; thick mailings' ),
+                    array( 'val' => '9x12',  'label' => '9 × 12" Catalog',   'desc' => 'Full letter unfolded' ),
+                    array( 'val' => '10x13', 'label' => '10 × 13" Catalog',  'desc' => 'Legal documents &amp; catalogs' ),
+                )),
+                array( 'group' => 'Other', 'items' => array(
+                    array( 'val' => 'custom', 'label' => 'Custom Size', 'desc' => 'I\'ll specify in the message' ),
+                )),
             ) ),
             array( 'key' => 'paper', 'prompt' => 'Paper?', 'options' => array(
                 array( 'val' => '24lb-wove',   'label' => '24lb White Wove',  'desc' => 'Standard business — clean, professional' ),
@@ -932,12 +954,16 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         ),
 
         'folders' => array(
-            array( 'key' => 'type', 'prompt' => 'Folder type?', 'options' => array(
-                array( 'val' => '2-pocket',     'label' => 'Standard 2-Pocket',  'desc' => 'Interior pockets on both sides' ),
-                array( 'val' => '1-pocket',     'label' => 'Single Pocket',       'desc' => 'One interior pocket' ),
-                array( 'val' => 'reinforced',    'label' => 'Reinforced Edge',     'desc' => 'Extra durability for heavy inserts' ),
-                array( 'val' => 'tab',            'label' => 'Tab / Legal',         'desc' => 'Filing tab for cabinets' ),
-                array( 'val' => 'custom',          'label' => 'Custom Die-Cut',     'desc' => 'Any shape or special design' ),
+            array( 'key' => 'type', 'prompt' => 'Folder type?', 'options' => array(), 'groups' => array(
+                array( 'group' => 'Pocket Folders', 'items' => array(
+                    array( 'val' => '2-pocket',   'label' => 'Standard 2-Pocket', 'desc' => 'Interior pockets on both sides' ),
+                    array( 'val' => '1-pocket',   'label' => 'Single Pocket',     'desc' => 'One interior pocket' ),
+                    array( 'val' => 'reinforced', 'label' => 'Reinforced Edge',   'desc' => 'Extra durability for heavy inserts' ),
+                )),
+                array( 'group' => 'Other', 'items' => array(
+                    array( 'val' => 'tab',    'label' => 'Tab / Legal',    'desc' => 'Filing tab for cabinets' ),
+                    array( 'val' => 'custom', 'label' => 'Custom Die-Cut', 'desc' => 'Any shape or special design' ),
+                )),
             ) ),
             array( 'key' => 'size', 'prompt' => 'What size?', 'options' => array(
                 array( 'val' => '9x12',   'label' => '9 × 12" (Standard)',   'desc' => 'Holds 8.5×11 documents' ),
@@ -1037,12 +1063,16 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         ),
 
         'stickers' => array(
-            array( 'key' => 'shape', 'prompt' => 'Sticker shape?', 'options' => array(
-                array( 'val' => 'rectangle', 'label' => 'Rectangle',       'desc' => 'Labels, packaging, products' ),
-                array( 'val' => 'square',     'label' => 'Square',           'desc' => 'Clean, modern shape' ),
-                array( 'val' => 'circle',      'label' => 'Circle / Oval',   'desc' => 'Seals, badges, jar lids' ),
-                array( 'val' => 'die-cut',     'label' => 'Die-Cut Custom',  'desc' => 'Cut to match your design' ),
-                array( 'val' => 'kiss-cut',    'label' => 'Kiss-Cut Sheet',  'desc' => 'Peelable on a backing sheet' ),
+            array( 'key' => 'shape', 'prompt' => 'Sticker shape?', 'options' => array(), 'groups' => array(
+                array( 'group' => 'Standard Shapes', 'items' => array(
+                    array( 'val' => 'rectangle', 'label' => 'Rectangle',     'desc' => 'Labels, packaging, products' ),
+                    array( 'val' => 'square',    'label' => 'Square',        'desc' => 'Clean, modern shape' ),
+                    array( 'val' => 'circle',    'label' => 'Circle / Oval', 'desc' => 'Seals, badges, jar lids' ),
+                )),
+                array( 'group' => 'Custom Cut', 'items' => array(
+                    array( 'val' => 'die-cut',  'label' => 'Die-Cut Custom', 'desc' => 'Cut to match your design' ),
+                    array( 'val' => 'kiss-cut', 'label' => 'Kiss-Cut Sheet', 'desc' => 'Peelable on a backing sheet' ),
+                )),
             ) ),
             array( 'key' => 'size', 'prompt' => 'What size?', 'options' => array(
                 array( 'val' => '1x1',    'label' => '1 × 1"',    'desc' => 'Tiny — seal &amp; logo stickers' ),
@@ -1052,13 +1082,17 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
                 array( 'val' => '4x6',    'label' => '4 × 6"',    'desc' => 'Large — shipping &amp; product labels' ),
                 array( 'val' => 'custom',  'label' => 'Custom Size','desc' => 'I\'ll specify in the message' ),
             ) ),
-            array( 'key' => 'material', 'prompt' => 'Material?', 'options' => array(
-                array( 'val' => 'gloss-white',  'label' => 'Glossy White',    'desc' => 'Vibrant colors, sharp print' ),
-                array( 'val' => 'matte-white',  'label' => 'Matte White',     'desc' => 'No-glare, writable surface' ),
-                array( 'val' => 'clear',          'label' => 'Clear / Transparent','desc' => 'See-through — jar &amp; bottle labels' ),
-                array( 'val' => 'vinyl',           'label' => 'Vinyl (Weatherproof)','desc' => 'Outdoor durable, water-resistant' ),
-                array( 'val' => 'kraft',            'label' => 'Kraft (Brown)',       'desc' => 'Eco-friendly, handmade aesthetic' ),
-                array( 'val' => 'holo',             'label' => 'Holographic',         'desc' => 'Rainbow shimmer effect' ),
+            array( 'key' => 'material', 'prompt' => 'Material?', 'options' => array(), 'groups' => array(
+                array( 'group' => 'Paper', 'items' => array(
+                    array( 'val' => 'gloss-white', 'label' => 'Glossy White', 'desc' => 'Vibrant colors, sharp print' ),
+                    array( 'val' => 'matte-white', 'label' => 'Matte White',  'desc' => 'No-glare, writable surface' ),
+                    array( 'val' => 'kraft',       'label' => 'Kraft (Brown)', 'desc' => 'Eco-friendly, handmade aesthetic' ),
+                )),
+                array( 'group' => 'Specialty', 'items' => array(
+                    array( 'val' => 'clear', 'label' => 'Clear / Transparent',  'desc' => 'See-through — jar &amp; bottle labels' ),
+                    array( 'val' => 'vinyl', 'label' => 'Vinyl (Weatherproof)', 'desc' => 'Outdoor durable, water-resistant' ),
+                    array( 'val' => 'holo',  'label' => 'Holographic',          'desc' => 'Rainbow shimmer effect' ),
+                )),
             ) ),
             array( 'key' => 'finish', 'prompt' => 'Finish?', 'options' => array(
                 array( 'val' => 'gloss-lam',  'label' => 'Gloss Lamination',  'desc' => 'Shiny, scratch-resistant' ),
@@ -1136,29 +1170,46 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         }
         $page_counts = isset( $cfg['page_counts'] ) ? $cfg['page_counts'] : array( 8, 12, 16, 20, 24, 28, 32 );
         $folds = array();
+        $fold_groups = array();
     } else {
-        $folds = array(
-            array( 'val' => 'flat',        'label' => 'Flat — No Folding',       'desc' => 'Single sheet — flyers, handouts, inserts' ),
-            array( 'val' => 'bifold',      'label' => 'Bifold (2 Panel)',        'desc' => 'Folded in half — menus, programs, invitations' ),
-            array( 'val' => 'trifold',     'label' => 'Trifold (3 Panel)',       'desc' => 'The classic brochure fold — most popular' ),
-            array( 'val' => 'z3',          'label' => 'Z-Fold (3 Panel)',        'desc' => 'Zigzag — each panel fully visible when open' ),
-            array( 'val' => 'gate3',       'label' => 'Gate Fold (3 Panel)',     'desc' => 'Two flaps fold inward — dramatic reveal' ),
-            array( 'val' => 'accordion4',  'label' => 'Accordion (4 Panel)',     'desc' => 'Zigzag with 4 panels — guides & timelines' ),
-            array( 'val' => 'roll4',       'label' => 'Roll Fold (4 Panel)',     'desc' => 'Panels roll inward — mailers & menus' ),
-            array( 'val' => 'dgate4',      'label' => 'Double Gate (4 Panel)',   'desc' => 'Four panels folding in — maximum impact' ),
-            array( 'val' => 'dparallel4',  'label' => 'Double Parallel (4 Panel)', 'desc' => 'Two parallel folds — compact, detailed' ),
+        $fold_groups = array(
+            array( 'group' => 'Simple Folds', 'items' => array(
+                array( 'val' => 'flat',    'label' => 'Flat — No Folding', 'desc' => 'Single sheet — flyers, handouts, inserts' ),
+                array( 'val' => 'bifold',  'label' => 'Bifold (2 Panel)',  'desc' => 'Folded in half — menus, programs, invitations' ),
+                array( 'val' => 'trifold', 'label' => 'Trifold (3 Panel)', 'desc' => 'The classic brochure fold — most popular' ),
+            )),
+            array( 'group' => '3-Panel Folds', 'items' => array(
+                array( 'val' => 'z3',    'label' => 'Z-Fold (3 Panel)',   'desc' => 'Zigzag — each panel fully visible when open' ),
+                array( 'val' => 'gate3', 'label' => 'Gate Fold (3 Panel)', 'desc' => 'Two flaps fold inward — dramatic reveal' ),
+            )),
+            array( 'group' => '4-Panel Folds', 'items' => array(
+                array( 'val' => 'accordion4',  'label' => 'Accordion (4 Panel)',        'desc' => 'Zigzag with 4 panels — guides & timelines' ),
+                array( 'val' => 'roll4',       'label' => 'Roll Fold (4 Panel)',         'desc' => 'Panels roll inward — mailers & menus' ),
+                array( 'val' => 'dgate4',      'label' => 'Double Gate (4 Panel)',       'desc' => 'Four panels folding in — maximum impact' ),
+                array( 'val' => 'dparallel4',  'label' => 'Double Parallel (4 Panel)',   'desc' => 'Two parallel folds — compact, detailed' ),
+            )),
         );
+        $folds = array();
+        foreach ( $fold_groups as $fg ) { foreach ( $fg['items'] as $fi ) { $folds[] = $fi; } }
 
-        $sizes = array(
-            array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5',  'desc' => 'Half letter — compact' ),
-            array( 'val' => '6x9',     'label' => '6 × 9',       'desc' => 'Common mailer size' ),
-            array( 'val' => '8.5x11',  'label' => '8.5 × 11',    'desc' => 'Letter — the standard' ),
-            array( 'val' => '8.5x14',  'label' => '8.5 × 14',    'desc' => 'Legal — extra room' ),
-            array( 'val' => '9x12',    'label' => '9 × 12',      'desc' => 'Fits inside folders' ),
-            array( 'val' => '11x17',   'label' => '11 × 17',     'desc' => 'Tabloid — large format' ),
-            array( 'val' => '12x18',   'label' => '12 × 18',     'desc' => 'Oversized tabloid' ),
-            array( 'val' => '11x25.5', 'label' => '11 × 25.5',   'desc' => 'Extra-long mailer' ),
+        $size_groups = array(
+            array( 'group' => 'Standard', 'items' => array(
+                array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5', 'desc' => 'Half letter — compact' ),
+                array( 'val' => '6x9',     'label' => '6 × 9',      'desc' => 'Common mailer size' ),
+                array( 'val' => '8.5x11',  'label' => '8.5 × 11',   'desc' => 'Letter — the standard' ),
+            )),
+            array( 'group' => 'Large', 'items' => array(
+                array( 'val' => '8.5x14', 'label' => '8.5 × 14', 'desc' => 'Legal — extra room' ),
+                array( 'val' => '9x12',   'label' => '9 × 12',    'desc' => 'Fits inside folders' ),
+                array( 'val' => '11x17',  'label' => '11 × 17',   'desc' => 'Tabloid — large format' ),
+            )),
+            array( 'group' => 'Oversized', 'items' => array(
+                array( 'val' => '12x18',   'label' => '12 × 18',   'desc' => 'Oversized tabloid' ),
+                array( 'val' => '11x25.5', 'label' => '11 × 25.5', 'desc' => 'Extra-long mailer' ),
+            )),
         );
+        $sizes = array();
+        foreach ( $size_groups as $sg ) { foreach ( $sg['items'] as $si ) { $sizes[] = $si; } }
         $page_counts = array();
     }
 
@@ -1200,11 +1251,23 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
                 $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="' . esc_attr( $prev_key ) . '"></span> &mdash; ' . esc_html( $lstep['prompt'] ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
             }
             $out .= '<div class="pps-wiz-grid">';
-            foreach ( $lstep['options'] as $opt ) {
-                $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $opt['val'] ) . '" data-label="' . esc_attr( $opt['label'] ) . '">'
-                      . '<div class="pps-wiz-opt-name">' . esc_html( $opt['label'] ) . '</div>'
-                      . ( ! empty( $opt['desc'] ) ? '<div class="pps-wiz-opt-desc">' . $opt['desc'] . '</div>' : '' )
-                      . '</button>';
+            if ( ! empty( $lstep['groups'] ) ) {
+                foreach ( $lstep['groups'] as $_grp ) {
+                    $out .= '<div class="pps-wiz-group-label">' . esc_html( $_grp['group'] ) . '</div>';
+                    foreach ( $_grp['items'] as $opt ) {
+                        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $opt['val'] ) . '" data-label="' . esc_attr( $opt['label'] ) . '">'
+                              . '<div class="pps-wiz-opt-name">' . esc_html( $opt['label'] ) . '</div>'
+                              . ( ! empty( $opt['desc'] ) ? '<div class="pps-wiz-opt-desc">' . $opt['desc'] . '</div>' : '' )
+                              . '</button>';
+                    }
+                }
+            } else {
+                foreach ( $lstep['options'] as $opt ) {
+                    $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $opt['val'] ) . '" data-label="' . esc_attr( $opt['label'] ) . '">'
+                          . '<div class="pps-wiz-opt-name">' . esc_html( $opt['label'] ) . '</div>'
+                          . ( ! empty( $opt['desc'] ) ? '<div class="pps-wiz-opt-desc">' . $opt['desc'] . '</div>' : '' )
+                          . '</button>';
+                }
             }
             $out .= '</div></div>';
         }
@@ -1216,12 +1279,16 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $out .= '<div class="pps-wiz-step is-active" data-step="size">';
     $out .= '<div class="pps-wiz-prompt">' . esc_html( $size_prompt ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
-    if ( $is_booklet && ! empty( $size_groups ) ) {
+    if ( ! empty( $size_groups ) ) {
         foreach ( $size_groups as $group ) {
             $out .= '<div class="pps-wiz-group-label">' . esc_html( $group['group'] ) . '</div>';
             foreach ( $group['items'] as $item ) {
-                $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $item['label'] ) . '" data-label="' . esc_attr( $item['label'] ) . '">'
-                      . '<div class="pps-wiz-opt-name">' . esc_html( $item['label'] ) . '</div>'
+                $lbl = isset( $item['label'] ) ? $item['label'] : '';
+                $val = isset( $item['val'] ) ? $item['val'] : $lbl;
+                $dsc = isset( $item['desc'] ) ? $item['desc'] : '';
+                $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $val ) . '" data-label="' . esc_attr( $lbl ) . '">'
+                      . '<div class="pps-wiz-opt-name">' . esc_html( $lbl ) . '</div>'
+                      . ( $dsc ? '<div class="pps-wiz-opt-desc">' . esc_html( $dsc ) . '</div>' : '' )
                       . '</button>';
             }
         }
@@ -1256,11 +1323,23 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         $out .= '<div class="pps-wiz-step" data-step="fold">';
         $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — now, which type of fold? <span class="pps-wiz-clear">&times; clear</span></div>';
         $out .= '<div class="pps-wiz-grid">';
-        foreach ( $folds as $f ) {
-            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $f['val'] ) . '" data-label="' . esc_attr( $f['label'] ) . '">'
-                  . '<div class="pps-wiz-opt-name">' . esc_html( $f['label'] ) . '</div>'
-                  . '<div class="pps-wiz-opt-desc">' . esc_html( $f['desc'] ) . '</div>'
-                  . '</button>';
+        if ( ! empty( $fold_groups ) ) {
+            foreach ( $fold_groups as $fg ) {
+                $out .= '<div class="pps-wiz-group-label">' . esc_html( $fg['group'] ) . '</div>';
+                foreach ( $fg['items'] as $fi ) {
+                    $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $fi['val'] ) . '" data-label="' . esc_attr( $fi['label'] ) . '">'
+                          . '<div class="pps-wiz-opt-name">' . esc_html( $fi['label'] ) . '</div>'
+                          . '<div class="pps-wiz-opt-desc">' . esc_html( $fi['desc'] ) . '</div>'
+                          . '</button>';
+                }
+            }
+        } else {
+            foreach ( $folds as $f ) {
+                $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $f['val'] ) . '" data-label="' . esc_attr( $f['label'] ) . '">'
+                      . '<div class="pps-wiz-opt-name">' . esc_html( $f['label'] ) . '</div>'
+                      . '<div class="pps-wiz-opt-desc">' . esc_html( $f['desc'] ) . '</div>'
+                      . '</button>';
+            }
         }
         $out .= '</div></div>';
     }
