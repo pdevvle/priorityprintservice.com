@@ -4633,7 +4633,7 @@ function App(){
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
           {/* SECTION 1: Size */}
-          <Sectitle="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
+          <Sec title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
             <div style={r2}>
               <Pil label="Booklet Size" value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
@@ -4675,7 +4675,7 @@ function App(){
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
-          <Sectitle="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
+          <Sec title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
             <div style={r2}>
               <Pil label="Inside Printing" value={insideColor} onChange={setInsideColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
               <Pil label="Cover Printing" value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
@@ -4697,7 +4697,7 @@ function App(){
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
-          <Sectitle="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
+          <Sec title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
             {(_AD.vivid!==false || vividPrint===true) && <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
             {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
@@ -4725,7 +4725,7 @@ function App(){
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
-          <Sectitle="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          <Sec title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
             {/* Art options dropdown */}
             <Sel label="Artwork & Design" badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
@@ -4874,7 +4874,7 @@ function App(){
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
-          <Sectitle="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          <Sec title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
 
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>

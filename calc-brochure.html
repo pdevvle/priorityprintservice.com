@@ -3844,7 +3844,7 @@ function App() {
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sectitle="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
+          <Sec title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
@@ -3886,7 +3886,7 @@ function App() {
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
-          <Sectitle="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
+          <Sec title="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
             <Pil label="Sides Printed" value={sides} onChange={v => setSides(Number(v))} options={[{ t: "Both Sides", v: 2 }, { t: "Front Only", v: 1 }]} />
             <div style={{ ...r2, marginTop: 10 }}>
               <Pil label={frontLabel + " Color"} value={frontColor} onChange={setFrontColor} options={[
@@ -3906,7 +3906,7 @@ function App() {
           </Sec>
 
           {/* SECTION 3: Addons */}
-          <Sectitle="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
+          <Sec title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
             <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
               {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
@@ -3957,7 +3957,7 @@ function App() {
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
-          <Sectitle="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          <Sec title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
             <Sel label="Artwork & Design" badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
 
@@ -4098,7 +4098,7 @@ function App() {
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
-          <Sectitle="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          <Sec title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
             <form autoComplete="on" onSubmit={e=>e.preventDefault()}>
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>
