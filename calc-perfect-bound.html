@@ -946,7 +946,6 @@ const CK = {
   magentaLight: "#fce8ef",
   yellowLight: "#fef5e0",
 };
-const SEC_DOTS=[CK.cyan,CK.magenta,CK.yellow,CK.key,"#22c55e"];
 
 const PPS_LOGO = "data:image/png;base64,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";
 
@@ -992,9 +991,9 @@ function TurnBadge({days}){
   return <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,fontWeight:600,color:CK.magenta,background:CK.magentaLight,padding:"1px 6px",borderRadius:8,marginLeft:6,whiteSpace:"nowrap",verticalAlign:"middle"}}>⏱ {label}</span>;
 }
 
-function Sec({title,open,onToggle,children,badge,num}){
+function Sec({title,open,onToggle,children,badge}){
   const m=useIsMobile();
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{num!=null&&<span style={{width:8,height:8,borderRadius:"50%",background:SEC_DOTS[(num-1)%5],flexShrink:0,display:"block"}} />}<span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}><span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
 const DNAMES=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -1258,16 +1257,12 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
           <span style={{fontSize:11.5,fontWeight:600,color:CC.mid}}>{sh.freeDeliveryDate}</span>
         </div>
       </div>}
-      <div style={{padding:"14px 18px"}}>
-        {grouped.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0"}}>
-          <div style={{display:"flex",alignItems:"center",gap:7}}><span style={{width:7,height:7,borderRadius:"50%",background:r.c}}/><span style={{fontSize:13,color:CC.mid}}>{r.label}</span></div>
-          <span style={{fontSize:13,fontWeight:600,color:r.val<0?CK.cyan:CC.dark}}>{r.val<0?"−":""}${Math.abs(r.val).toFixed(2)}</span>
-        </div>))}
-        {hasRush&&<div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderTop:`1px dashed ${CC.border}`,marginTop:4,paddingTop:8}}>
+      {hasRush&&<div style={{padding:"14px 18px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0"}}>
           <div style={{display:"flex",alignItems:"center",gap:7}}><span style={{width:7,height:7,borderRadius:"50%",background:CK.rush}}/><span style={{fontSize:13,color:CC.mid}}>Rush Surcharge</span></div>
           <span style={{fontSize:13,fontWeight:600,color:CK.rush}}>+${sh.rushCost.toFixed(2)}</span>
-        </div>}
-      </div>
+        </div>
+      </div>}
       {debugUnlocked&&<details style={{borderTop:`1px solid ${CC.border}`}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
         <div style={{padding:"0 18px 14px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
           <span style={{fontSize:11.5,color:CC.light}}>{r.l}</span>
@@ -4835,7 +4830,7 @@ function App(){
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
           {/* SECTION 1: Size */}
-          <Sec num={1} title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
+          <Sectitle="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
             <div style={r2}>
               <Pil label="Booklet Size" value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
@@ -4863,29 +4858,35 @@ function App(){
 
             {/* Set 1 — always in the size section */}
             <div style={ST.hr}/>
-            <div style={r3}>
+            <div style={r2}>
               <TxtNum label="Quantity" value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>
-              <Pil label="Inside Print Color" value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}},{t:"Mixed",v:"mixed",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #888 100%)",color:"#fff",fontWeight:600}}]}/>
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
             </div>
             {sets[0].colorMode === "mixed" ? (
+              <>
+              <div style={{...r2, marginTop:6}}>
+                <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
+                <Pil label="Inside Print Color" value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}},{t:"Mixed",v:"mixed",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #888 100%)",color:"#fff",fontWeight:600}}]}/>
+              </div>
               <div style={{...r3, marginTop:6}}>
                 <TxtNum label="Color Pages" value={sets[0].colorPages} onChange={v=>upSet(0,{colorPages:Math.max(0,Math.round(v))})} min={0} max={350}/>
                 <TxtNum label="B&W Pages" value={sets[0].bwPages} onChange={v=>upSet(0,{bwPages:Math.max(0,Math.round(v))})} min={0} max={350}/>
                 <div style={{...ST.f, justifyContent:"center"}}><span style={{fontSize:11,color:CC.mid,fontWeight:600}}>{sets[0].colorPages+sets[0].bwPages} total pages</span></div>
               </div>
+              </>
             ) : (
-              <div style={{marginTop:6}}>
+              <div style={{...r2, marginTop:6}}>
                 <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
+                <Pil label="Inside Print Color" value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}},{t:"Mixed",v:"mixed",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #888 100%)",color:"#fff",fontWeight:600}}]}/>
               </div>
             )}
 
             {/* Perfect Binding — always applied, no toggle needed */}
-            <div style={ST.f}><label style={ST.lbl}>Binding</label><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Perfect Bound (Glue Spine)</div></div>
+            <div style={ST.f}><label style={ST.lbl}>Binding</label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Perfect Bound (Glue Spine)</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#6366f1",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
-          <Sec num={2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
+          <Sectitle="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
             <div style={r2}>
               <Pil label="Cover Printing" value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
             </div>
@@ -4930,7 +4931,7 @@ function App(){
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
-          <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
+          <Sectitle="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
             {(_AD.vivid!==false || vividPrint===true) && <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
             {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
@@ -4987,7 +4988,7 @@ function App(){
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
-          <Sec num={4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          <Sectitle="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
             {/* Art options dropdown */}
             <Sel label="Artwork & Design" badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
@@ -5136,7 +5137,7 @@ function App(){
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
-          <Sec num={5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          <Sectitle="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
 
             <form autoComplete="on" onSubmit={e=>e.preventDefault()}>
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>

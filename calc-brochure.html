@@ -63,7 +63,6 @@ function useIsMobile(bp=700){const[m,s]=useState(window.innerWidth<=bp);useEffec
 // ═══════════════════════════════════════════════════════════════
 const CC={bg:"#f8fafc",white:"#fff",dark:"#0f172a",mid:"#475569",light:"#94a3b8",border:"#e2e8f0",primary:"#007eff"};
 const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
-const SEC_DOTS=[CK.cyan,CK.magenta,CK.yellow,CK.key,"#22c55e"];
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
 // Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
@@ -3061,14 +3060,6 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
       {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#f8fafc", fontSize: 11, color: CC.mid, pointerEvents: "none" }}>
         Free delivery est: <strong>{sh.freeDeliveryDate}</strong> ({sh.freeDeliveryBizDays} biz days)
       </div>}
-      {r.grouped.length > 0 && <div style={{ padding: "10px 18px" }}>
-        {r.grouped.map((g, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}>
-            <span style={{ color: g.c, fontWeight: 500 }}>{g.label}</span>
-            <span style={{ fontWeight: 600, color: g.val < 0 ? "#16a34a" : CC.dark }}>{g.val < 0 ? "-" : ""}${Math.abs(g.val).toFixed(2)}</span>
-          </div>
-        ))}
-      </div>}
     </div>
   );
 }
@@ -3098,9 +3089,9 @@ function TurnBadge({days}){
   return <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,fontWeight:600,color:CK.magenta,background:"#fdf2f8",padding:"1px 6px",borderRadius:8,marginLeft:6,whiteSpace:"nowrap",verticalAlign:"middle"}}>⏱ {label}</span>;
 }
 
-function Sec({title,open,onToggle,children,badge,num}){
+function Sec({title,open,onToggle,children,badge}){
   const m=useIsMobile();
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{num!=null&&<span style={{width:8,height:8,borderRadius:"50%",background:SEC_DOTS[(num-1)%5],flexShrink:0,display:"block"}} />}<span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}><span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
 function DatePicker({value, onChange, earliestDate, freeDate}) {
@@ -3853,7 +3844,7 @@ function App() {
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sec num={1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
+          <Sectitle="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
@@ -3895,7 +3886,7 @@ function App() {
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
-          <Sec num={2} title="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
+          <Sectitle="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
             <Pil label="Sides Printed" value={sides} onChange={v => setSides(Number(v))} options={[{ t: "Both Sides", v: 2 }, { t: "Front Only", v: 1 }]} />
             <div style={{ ...r2, marginTop: 10 }}>
               <Pil label={frontLabel + " Color"} value={frontColor} onChange={setFrontColor} options={[
@@ -3915,7 +3906,7 @@ function App() {
           </Sec>
 
           {/* SECTION 3: Addons */}
-          <Sec num={3} title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
+          <Sectitle="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
             <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
               {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
@@ -3966,7 +3957,7 @@ function App() {
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
-          <Sec num={4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          <Sectitle="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
             <Sel label="Artwork & Design" badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
 
@@ -4107,7 +4098,7 @@ function App() {
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
-          <Sec num={5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          <Sectitle="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
             <form autoComplete="on" onSubmit={e=>e.preventDefault()}>
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>
