@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-25 · BR-DOTS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-27 · BR-DOTS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -275,6 +275,14 @@ function calcBrochureImp(longEdge, shortEdge, sheetLong) {
 // ═══════════════════════════════════════════════════════════════
 // PRICING ENGINE
 // ═══════════════════════════════════════════════════════════════
+function sheetsToDays(sheets) {
+  if (sheets > 100000) return null;
+  const t = [1000,2500,5000,7500,10000,12500,15000,17500,20000,30000,40000,50000,60000,70000,80000,90000,100000];
+  let d = 0;
+  for (const th of t) { if (sheets > th) d++; else break; }
+  return d;
+}
+
 function calculate(c) {
   // Add-on availability guard
   const _adErrs = [];
@@ -314,6 +322,7 @@ function calculate(c) {
   const fold = FOLD_TYPES.find(f => f.val === c.foldType) || FOLD_TYPES[0];
   const panels = fold.panels;
   const pressSheets = qty / imp;
+  if (sheetsToDays(pressSheets) === null) return { error: ["This job exceeds our online ordering capacity. Please contact us for a custom quote."] };
   const paper = c.paper;
   const sides = c.sides;
 
@@ -515,7 +524,7 @@ function calculate(c) {
   const rcDays = (rc.val > 0 && fold.val === "flat") ? Math.floor(Math.min(pressSheets / rc.val, PCF.addon_roundcornermaxdays)) : 0;
   const artDays = art.val >= 4 ? Math.ceil(art.val) : 0;
   const proofDays = c.proof >= 3 ? Math.ceil(paperDays + 3.01) : 0;
-  const baseDays = Math.floor(pressSheets / PCF.sheetsturnaround);
+  const baseDays = sheetsToDays(pressSheets);
   const days = Math.max(PCF.minimum_turnaround_days, baseDays + paperDays + vividDays + coatDays + bundleDays + perfDays + rcDays + artDays + proofDays);
 
   // Turnaround impact per option (for UI badges)

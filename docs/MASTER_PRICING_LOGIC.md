@@ -781,3 +781,55 @@ Re-tune `booklet_maximummarkup` upward (via WP admin, no code change) if competi
 | Perfect bound markup curve | two-branch quadratic<1000 / linear≥1000 | `0.80·ln(tS)` (old preserved as comment) |
 | Perfect bound print markup | asymmetric (mk only on BW inside) | uniform (mk on all print) |
 | Perfect bound size discount | none | 15% off for 8.5×11 (imp<4) |
+
+---
+
+## Production time — threshold-based schedule (2026-06-27)
+
+### Prior formula (ROLLBACK reference)
+
+```
+baseDays = Math.floor(tS / PCF.sheetsturnaround)   // sheetsturnaround = 2500
+days = Math.max(PCF.minimum_turnaround_days, baseDays + addon turnaround)
+```
+
+Linear: every 2,500 sheets added one production day. No upper cap on sheet count.
+
+### New formula
+
+`sheetsToDays(sheets)` — threshold lookup table, shared across all 4 calculators:
+
+| Sheets (13×19 equiv.) | Production days |
+|---|---|
+| ≤ 1,000 | 0 |
+| ≤ 2,500 | 1 |
+| ≤ 5,000 | 2 |
+| ≤ 7,500 | 3 |
+| ≤ 10,000 | 4 |
+| ≤ 12,500 | 5 |
+| ≤ 15,000 | 6 |
+| ≤ 17,500 | 7 |
+| ≤ 20,000 | 8 |
+| ≤ 30,000 | 9 |
+| ≤ 40,000 | 10 |
+| ≤ 50,000 | 11 |
+| ≤ 60,000 | 12 |
+| ≤ 70,000 | 13 |
+| ≤ 80,000 | 14 |
+| ≤ 90,000 | 15 |
+| ≤ 100,000 | 16 |
+| > 100,000 | **Quote required** (add-to-cart disabled) |
+
+Add-on turnaround (paper days, vivid, coating, bundling, perforation, etc.) still stacks on top.
+
+`PCF.minimum_turnaround_days` still enforced as the floor.
+
+`PCF.sheetsturnaround` is no longer used for base production days but remains referenced by some addon turnaround estimates (e.g., vivid second-pass time).
+
+### >100,000 sheet cap
+
+When `sheetsToDays()` returns `null`, `calculate()` early-returns `{error: ["..."]}`, which disables the Add to Order button and shows a "contact us for a custom quote" message. No pricing is computed.
+
+### Files touched
+
+- `calc-preview-test.html`, `calc-perfect-bound.html`, `calc-brochure.html`, `calc-coupon-book.html` — `sheetsToDays()` function added before `calculate()`; early return for >100k; `days` formula updated.

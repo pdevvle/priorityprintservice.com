@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-25 · CB-DOTS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-27 · CB-DOTS</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -455,6 +455,14 @@ function resolveSize(c) {
 }
 
 // ──────────────────────────────────────────────────────────────────
+function sheetsToDays(sheets) {
+  if (sheets > 100000) return null;
+  const t = [1000,2500,5000,7500,10000,12500,15000,17500,20000,30000,40000,50000,60000,70000,80000,90000,100000];
+  let d = 0;
+  for (const th of t) { if (sheets > th) d++; else break; }
+  return d;
+}
+
 // TEMPORARY — Saddle-stitch price estimator for side-by-side comparison
 function calculate(c) {
   const sz=resolveSize(c); const imp=sz.imp;
@@ -488,6 +496,7 @@ function calculate(c) {
   const tP=sets.reduce((s,x)=>s+x.pages,0);
   // Coupon book: pages / 2 per sheet (double-sided). Single-sided = 1 page per sheet = 2× tS.
   const tS=(sets.reduce((s,x)=>s+(x.qty*x.pages)/2,0)/imp)*sidesMult;
+  if (sheetsToDays(tS) === null) return {error:["This job exceeds our online ordering capacity. Please contact us for a custom quote."],sz};
 
   // Markup curve — saddle/PB-mirrored single-axis (2026-05-28).
   // ROLLBACK: prior was `dL = couponbook_discount_log_coef * Math.log(tS)` with max=22.
@@ -673,7 +682,7 @@ function calculate(c) {
   const bT=(!artWork&&bld.val>0)?Math.floor(bld.val*tP)/12:0;
   const pE=c.proof>=3?Math.ceil(pT+3.01):0;
   const artT=dT+(pE+dT)+eT+bT;
-  const days=Math.max(PCF.minimum_turnaround_days,Math.floor((tS/PCF.sheetsturnaround)+pT+aT+artT));
+  const days=Math.max(PCF.minimum_turnaround_days,Math.floor(sheetsToDays(tS)+pT+aT+artT));
 
   // Turnaround impact per option (for UI badges)
   const ti = {
