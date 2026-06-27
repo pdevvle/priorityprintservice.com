@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Brochure & Flat Printing Calculator</title>
+<title>Brochure & Flat Printing Calculator · build 2026-06-27</title>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
@@ -3911,11 +3911,11 @@ function App() {
               {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             <div style={ST.hr} />
-            {(_AD.vivid !== false || vivid === true) && <Pil label="Print Quality" value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
+            {(_AD.vivid !== false || vivid === true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
             {(_AD.vivid !== false || vivid === true) && <div style={ST.hr} />}
             {(_AD.coating !== false || coating > 0) && (paper.coatable ? (
               <>
-                <Sel label="Additional Coating" value={coating} onChange={v => setCoating(Number(v))}>
+                <Sel label={<RichTip tipKey="coating">Additional Coating</RichTip>} value={coating} onChange={v => setCoating(Number(v))}>
                   {COATINGS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
                 </Sel>
                 {coating > 0 && (
@@ -3930,13 +3930,13 @@ function App() {
                 )}
               </>
             ) : (
-              <div style={{...ST.f, opacity: 0.4}}><label style={ST.lbl}>Additional Coating</label><div style={{padding:"8px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#f1f5f9",fontSize:13,color:CC.light}}>Not available for this paper type</div></div>
+              <div style={{...ST.f, opacity: 0.4}}><label style={ST.lbl}><RichTip tipKey="coating">Additional Coating</RichTip></label><div style={{padding:"8px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#f1f5f9",fontSize:13,color:CC.light}}>Not available for this paper type</div></div>
             ))}
             {(_AD.coating !== false || coating > 0) && <div style={ST.hr} />}
-            {(_AD.bundling !== false || bundling > 0) && <Sel label="Bundling" value={bundling} onChange={v => setBundling(Number(v))}>
+            {(_AD.bundling !== false || bundling > 0) && <Sel label={<RichTip tipKey="bundling">Bundling</RichTip>} value={bundling} onChange={v => setBundling(Number(v))}>
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>}
-            {(_AD.perforation !== false || perforation > 0) && <Sel label="Perforation" value={perforation} onChange={v => setPerforation(Number(v))}
+            {(_AD.perforation !== false || perforation > 0) && <Sel label={<RichTip tipKey="perforation">Perforation</RichTip>} value={perforation} onChange={v => setPerforation(Number(v))}
               note={dimShort > 14 && perfCount > 0 ? `14" throat — ${dimShort}" perf only` : (perfCount > 0 && perfCrossDim < 4 ? `${perfCrossDim}" too short for 2 perfs` : undefined)}>
               {PERF_OPTS.filter(o => {
                 var c = o.count != null ? o.count : PERF_OPTS.indexOf(o);
@@ -3950,7 +3950,7 @@ function App() {
               ]} />
             )}
             {(_AD.rc !== false || roundCorner > 0) && foldType === "flat" && (
-              <Sel label="Round Cornering" value={roundCorner} onChange={v => setRoundCorner(Number(v))}>
+              <Sel label={<RichTip tipKey="round_cornering">Round Cornering</RichTip>} value={roundCorner} onChange={v => setRoundCorner(Number(v))}>
                 {CORNERS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
               </Sel>
             )}

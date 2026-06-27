@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Perfect Bound Booklet Calculator · build 2026-04-17</title>
+<title>Perfect Bound Booklet Calculator · build 2026-06-27</title>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
@@ -4864,7 +4864,7 @@ function App(){
             {sets[0].colorMode === "mixed" ? (
               <>
               <div style={{...r2, marginTop:6}}>
-                <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
+                <TxtNum label={<RichTip tipKey="page_count">Total Pages (incl. cover)</RichTip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
                 <Pil label="Inside Print Color" value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}},{t:"Mixed",v:"mixed",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #888 100%)",color:"#fff",fontWeight:600}}]}/>
               </div>
               <div style={{...r3, marginTop:6}}>
@@ -4875,13 +4875,13 @@ function App(){
               </>
             ) : (
               <div style={{...r2, marginTop:6}}>
-                <TxtNum label="Total Pages (incl. cover)" value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
+                <TxtNum label={<RichTip tipKey="page_count">Total Pages (incl. cover)</RichTip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
                 <Pil label="Inside Print Color" value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}},{t:"Mixed",v:"mixed",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #888 100%)",color:"#fff",fontWeight:600}}]}/>
               </div>
             )}
 
             {/* Perfect Binding — always applied, no toggle needed */}
-            <div style={ST.f}><label style={ST.lbl}>Binding</label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Perfect Bound (Glue Spine)</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#6366f1",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
+            <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="perfect_binding">Binding</RichTip></label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Perfect Bound (Glue Spine)</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#6366f1",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
@@ -4931,17 +4931,17 @@ function App(){
 
           {/* SECTION 3: Finishing & Addons */}
           <Sec title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
-            {(_AD.vivid!==false || vividPrint===true) && <Pil label="Print Quality" badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
+            {(_AD.vivid!==false || vividPrint===true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
             {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
-              {(_AD.coating!==false || coating>0) && <Sel label="Cover Coating" badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+              {(_AD.coating!==false || coating>0) && <Sel label={<RichTip tipKey="coating">Cover Coating</RichTip>} badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
               {(_AD.bundling!==false || bundling>0) && (r.q100!==false
-                ? <Sel label="Bundling" badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-                : <div style={ST.f}><label style={ST.lbl}>Bundling</label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>)}
+                ? <Sel label={<RichTip tipKey="bundling">Bundling</RichTip>} badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+                : <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="bundling">Bundling</RichTip></label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>)}
             </div>
             {(_AD.rc!==false || roundCorner>0) && <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <Sel label="Round Cornering" badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+                <Sel label={<RichTip tipKey="round_cornering">Round Cornering</RichTip>} badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
               </div>
               {coverArt && roundCorner > 0 && (() => {
                 const is4 = roundCorner === 108 || roundCorner === 107;
@@ -4957,8 +4957,8 @@ function App(){
             </div>}
 
             {/* Perfect bound specific addons */}
-            {(_AD.outfold!==false || outfold>0) && <Sel label="Outfold (Fold-Out Page)" badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
-            {(_AD.perforation!==false || perforation>0) && <Sel label="Perforation" badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+            {(_AD.outfold!==false || outfold>0) && <Sel label={<RichTip tipKey="outfold">Outfold (Fold-Out Page)</RichTip>} badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+            {(_AD.perforation!==false || perforation>0) && <Sel label={<RichTip tipKey="perforation">Perforation</RichTip>} badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
             {perfCount > 0 && (
               <div style={{ marginTop:8, padding:"10px 12px", background:"rgba(250,204,21,.08)", border:"1px solid rgba(250,204,21,.28)", borderRadius:6 }}>
                 <div style={{ fontSize:10.5, fontWeight:700, color:"#b45309", letterSpacing:".06em", textTransform:"uppercase", marginBottom:8 }}>Perforation Position</div>
@@ -5267,6 +5267,7 @@ function App(){
             <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} debugUnlocked={debugUnlocked}/>
           </div>
+          <button type="button" onClick={handleAddToOrder} style={{width:"100%",padding:"14px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:15,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",transition:"opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
