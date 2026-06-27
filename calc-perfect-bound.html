@@ -1677,9 +1677,9 @@ function RichTip({ children, tipKey, title, content, dark }) {
     const blocks = Array.isArray(resolvedContent) ? resolvedContent : [{ type: "text", value: resolvedContent || "" }];
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-      <span onClick={() => setOpen(o => !o)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
+      <span style={{ display: "inline-flex", alignItems: "center" }}>
         {children}
-        <span style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : CK.cyan, flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</span>
+        <span onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }} style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, cursor: "pointer", background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : CK.cyan, flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</span>
       </span>
       {open && <>
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 99999 }} />
