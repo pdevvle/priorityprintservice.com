@@ -1078,7 +1078,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
               <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
             </div>
             {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
-            {hasRush&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
+            {hasRush&&debugUnlocked&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["Avail.",availRange+" days"]].map(([l,v],i)=>(
@@ -1130,7 +1130,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
           <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
           {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
         </div>
-        {hasRush&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
+        {hasRush&&debugUnlocked&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
       </div>
       <div style={{display:"flex",borderBottom:`1px solid ${CC.border}`}}>
         {[["Per Unit","$"+Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()]].map(([l,v],i)=>(
@@ -4994,7 +4994,7 @@ function App(){
                 {needByDate&&!r.shipping?.needByValid&&<p style={ST.err}>Date must be in the future</p>}
               </div>
 
-              {r.shipping?.needByValid&&!r.shipping?.tooSoon&&r.shipping?.rushMultiplier>1&&(
+              {debugUnlocked&&r.shipping?.needByValid&&!r.shipping?.tooSoon&&r.shipping?.rushMultiplier>1&&(
                 <div style={{marginTop:10,padding:"10px 14px",background:CK.rushLight,borderRadius:5,border:`1px solid ${CK.rush}55`}}>
                   <div style={{display:"flex",flexDirection:mob?"column":"row",justifyContent:"space-between",alignItems:mob?"flex-start":"baseline",gap:mob?6:0}}>
                     <div>

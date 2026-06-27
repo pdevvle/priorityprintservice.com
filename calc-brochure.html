@@ -4143,7 +4143,7 @@ function App() {
                 {needByDate&&!r.shipping.needByValid&&!r.shipping.needByPast&&<p style={ST.err}>Date must be in the future</p>}
               </div>
 
-              {r.shipping.needByValid&&!r.shipping.tooSoon&&r.shipping.rushMultiplier>1&&(
+              {debugUnlocked&&r.shipping.needByValid&&!r.shipping.tooSoon&&r.shipping.rushMultiplier>1&&(
                 <div style={{marginTop:10,padding:"10px 14px",background:CK.rushLight,borderRadius:5,border:`1px solid ${CK.rush}55`}}>
                   <div style={{display:"flex",flexDirection:mob?"column":"row",justifyContent:"space-between",alignItems:mob?"flex-start":"baseline",gap:mob?6:0}}>
                     <div>
