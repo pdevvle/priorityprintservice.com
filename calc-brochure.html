@@ -3158,7 +3158,9 @@ function RichTip({ children, tipKey, title, content, dark }) {
     return () => { document.removeEventListener("mousedown", h); document.removeEventListener("touchstart", h); };
   }, [open]);
   useEffect(() => { if (open) document.body.style.overflow = mob ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [open, mob]);
+    const hasContent = !!(resolvedTitle || resolvedContent);
     const blocks = Array.isArray(resolvedContent) ? resolvedContent : [{ type: "text", value: resolvedContent || "" }];
+  if (!hasContent) return <>{children}</>;
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <span style={{ display: "inline-flex", alignItems: "center" }}>
