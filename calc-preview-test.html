@@ -4477,7 +4477,6 @@ function App(){
 
   const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [
     {type:"perfect-bound",label:"Perfect Bound",url:(location.origin+location.pathname).replace(/calc-preview-test\.html/,"calc-perfect-bound.html")},
-    {type:"coupon",label:"Coupon Book",url:(location.origin+location.pathname).replace(/calc-preview-test\.html/,"calc-coupon-book.html")},
   ];
   const buildSwitchUrl = (targetUrl) => {
     const p = new URLSearchParams();

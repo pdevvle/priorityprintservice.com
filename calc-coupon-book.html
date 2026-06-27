@@ -4414,7 +4414,6 @@ function App(){
               <Pil label="Bind Style" value={bindStyle} onChange={setBindStyle} options={[{t:"Open Faced / Padded",v:"openface"},{t:"Wraparound Cover",v:"wraparound"}]}/>
               <Pil label="Printing Sides" value={sidesPrinted} onChange={setSidesPrinted} options={[{t:"Double Sided",v:"double"},{t:"Single Sided",v:"single"}]}/>
             </div>
-            <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:4}}>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#6366f1",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div>
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
