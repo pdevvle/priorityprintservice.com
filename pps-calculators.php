@@ -2897,20 +2897,11 @@ add_action( 'wp_head', function() {
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * JSON encoding flags used for every JSON-LD <script> we emit.
+ * JSON encoding flags for auto-generated JSON-LD (FAQs, GBP, etc.).
+ * These call sites sanitize upstream so JSON_HEX_TAG is not needed here.
  *
- * JSON_UNESCAPED_SLASHES keeps https:// readable and matches the existing
- * output verbatim. We do NOT add JSON_HEX_TAG here even though it would
- * harden against '</script>' breakout, because all current call sites
- * sanitize input upstream:
- *   - FAQ Q field    → sanitize_text_field (strips tags)
- *   - FAQ A field    → wp_strip_all_tags before emit
- *   - GBP URL field  → esc_url_raw with http/https allowlist
- *   - GBP numerics   → float/int casts
- *
- * Future PRs that add user-pasted raw schema input (Tier 2/3 overrides)
- * should reintroduce JSON_HEX_TAG (or post-process '</' → '<\/') as part
- * of that work, with a deliberate diff.
+ * Tier 2/3 overrides use PPS_SCHEMA_JSON_FLAGS_RAW (adds JSON_HEX_TAG)
+ * and are sanitized at save time via pps_sanitize_jsonld_value().
  */
 if ( ! defined( 'PPS_SCHEMA_JSON_FLAGS' ) ) {
     define( 'PPS_SCHEMA_JSON_FLAGS', JSON_UNESCAPED_SLASHES );
@@ -3731,23 +3722,54 @@ add_action( 'wp_head', function() {
     // ── Robots ──
     echo "<meta name=\"robots\" content=\"index, follow, max-image-preview:large\">\n";
 
+    // ── OG image resolution: preset image → site logo fallback ──
+    $og_image    = $image;
+    $og_img_w    = '';
+    $og_img_h    = '';
+    $og_img_type = '';
+    if ( $og_image === '' ) {
+        $logo_id = get_theme_mod( 'custom_logo' );
+        if ( $logo_id ) {
+            $og_image = wp_get_attachment_url( $logo_id );
+            if ( ! $og_image ) $og_image = '';
+        }
+    }
+    if ( $og_image !== '' ) {
+        $att_id = attachment_url_to_postid( $og_image );
+        if ( $att_id ) {
+            $meta = wp_get_attachment_metadata( $att_id );
+            if ( is_array( $meta ) ) {
+                if ( ! empty( $meta['width'] ) )  $og_img_w = (int) $meta['width'];
+                if ( ! empty( $meta['height'] ) ) $og_img_h = (int) $meta['height'];
+            }
+            $og_img_type = get_post_mime_type( $att_id );
+        }
+    }
+
     // ── Open Graph ──
     echo "<meta property=\"og:type\" content=\"product\">\n";
     echo '<meta property="og:title" content="' . esc_attr( $title ) . "\">\n";
     echo '<meta property="og:description" content="' . esc_attr( $desc ) . "\">\n";
     echo '<meta property="og:url" content="' . esc_url( $url ) . "\">\n";
     echo '<meta property="og:site_name" content="' . esc_attr( $site_name ) . "\">\n";
-    if ( $image !== '' ) {
-        echo '<meta property="og:image" content="' . esc_url( $image ) . "\">\n";
+    if ( $og_image !== '' ) {
+        echo '<meta property="og:image" content="' . esc_url( $og_image ) . "\">\n";
+        if ( $og_img_w && $og_img_h ) {
+            echo '<meta property="og:image:width" content="' . esc_attr( $og_img_w ) . "\">\n";
+            echo '<meta property="og:image:height" content="' . esc_attr( $og_img_h ) . "\">\n";
+        }
+        if ( $og_img_type ) {
+            echo '<meta property="og:image:type" content="' . esc_attr( $og_img_type ) . "\">\n";
+        }
     }
 
     // ── Twitter Card ──
-    $twitter_card = $image !== '' ? 'summary_large_image' : 'summary';
+    $twitter_card = $og_image !== '' ? 'summary_large_image' : 'summary';
     echo '<meta name="twitter:card" content="' . esc_attr( $twitter_card ) . "\">\n";
     echo '<meta name="twitter:title" content="' . esc_attr( $title ) . "\">\n";
     echo '<meta name="twitter:description" content="' . esc_attr( $desc ) . "\">\n";
-    if ( $image !== '' ) {
-        echo '<meta name="twitter:image" content="' . esc_url( $image ) . "\">\n";
+    if ( $og_image !== '' ) {
+        echo '<meta name="twitter:image" content="' . esc_url( $og_image ) . "\">\n";
     }
 
     // ── Tier 2 partial-merge helper ──
@@ -4188,6 +4210,20 @@ add_action( 'template_redirect', function() {
 
     exit;
 } );
+
+/**
+ * Append Sitemap and llms.txt directives to robots.txt.
+ */
+add_filter( 'robots_txt', function( $output ) {
+    $site = home_url( '/' );
+    if ( strpos( $output, 'pps-presets-sitemap.xml' ) === false ) {
+        $output .= "\nSitemap: " . esc_url( $site . 'pps-presets-sitemap.xml' );
+    }
+    if ( strpos( $output, 'llms.txt' ) === false ) {
+        $output .= "\n\n# AI content descriptor\nAllow: /llms.txt\n";
+    }
+    return $output;
+}, 100 );
 
 // ═══════════════════════════════════════════════════════════════
 // SITEMAP: PRESET URLS
