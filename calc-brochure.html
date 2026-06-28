@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Brochure & Flat Printing Calculator · build 2026-06-27</title>
+<title>Brochure & Flat Printing Calculator · build 2026-06-28</title>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-27 · BR-DOTS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-28 · BR-DOTS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -67,6 +67,8 @@ const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",cyanLi
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
 // Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
 const _AD = (window.PPS_CONFIG || {}).addons || {};
+// Derivative product type (set via PPS Defaults → productType on the WC product)
+const PRODUCT_TYPE = ((window.PPS_CONFIG || {}).defaults || {}).productType || '';
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
   labor_press_hr:35, labor_bindery_hr:35, labor_cutting_hr:45,
@@ -178,6 +180,7 @@ const PAPERS_NC = _CFG.papers_nc || [
   {label:"80lb Offset Smooth Opaque",val:2.003,days:2,price:0.056,oversizePrice:0.056,factory:true,coatable:false},
   {label:"80lb Gloss Factory Coated",val:2.004,days:2,price:0.0525,oversizePrice:0.0525,factory:true,coatable:true},
   {label:"100lb Matte Factory Coated",val:2.005,days:2,price:0.070,oversizePrice:0.070,factory:true,coatable:true},
+  {label:"Linen",val:2.006,days:4,price:0.35,oversizePrice:0.35,factory:true,coatable:false},
 ];
 const PAPERS_CS = _CFG.papers_cs || [
   {label:"80lb Opaque Uncoated",val:0.01,days:0,price:0.0919,oversizePrice:0.0919,factory:false,coatable:false},
@@ -199,6 +202,17 @@ const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},
 const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
 const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01},{label:"Email Art After Order",val:0.02},{label:"Artwork already discussed",val:0.03},{label:"I have a design in Canva",val:0.04},{label:"Artwork needs edits",val:2.01},{label:"Design from scratch",val:4.01}];
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
+
+// Per-product display rules for derivative calculators
+const _DR = {
+  letterhead: {
+    forceFold: 'flat',
+    sizes: ['8.5×11', '8.5×14'],
+    hideAddons: { vivid:1, bundling:1, perforation:1, rc:1 },
+  },
+}[PRODUCT_TYPE] || {};
+const _SIZES = _DR.sizes ? SIZE_PRESETS.filter(s => _DR.sizes.includes(s.label)) : SIZE_PRESETS;
+const _HA = _DR.hideAddons || {};
 
 // Transit days
 const TRANSIT_DAYS = _CFG.transit_days || {AZ:1,CA:2,CO:2,ID:3,MT:3,NM:2,NV:2,OR:3,TX:3,UT:2,WA:3,WY:3,AL:4,AR:4,CT:5,DC:5,DE:5,FL:4,GA:4,HI:7,IA:4,IL:4,IN:4,KS:3,KY:4,LA:4,MA:5,MD:5,ME:6,MI:4,MN:4,MO:4,MS:4,NC:5,ND:4,NE:3,NH:6,NJ:5,NY:5,OH:4,OK:3,PA:5,RI:5,SC:5,SD:4,TN:4,VA:5,VT:6,WI:4,WV:5};
@@ -3471,10 +3485,10 @@ function App() {
   // State
   const [qty, setQty] = useState(250);
   const [sizeMode, setSizeMode] = useState("preset");
-  const [sizeLabel, setSizeLabel] = useState("8.5×11");
+  const [sizeLabel, setSizeLabel] = useState(_SIZES[0] ? _SIZES[0].label : "8.5×11");
   const [longEdge, setLongEdge] = useState(11);
   const [shortEdge, setShortEdge] = useState(8.5);
-  const [foldType, setFoldType] = useState("flat");
+  const [foldType, setFoldType] = useState(_DR.forceFold || "flat");
   const [foldDir, setFoldDir] = useState("long");
   const [frontColor, setFrontColor] = useState("color");
   const [backColor, setBackColor] = useState("color");
@@ -3857,19 +3871,20 @@ function App() {
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sec title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
+          <Sec title={_DR.forceFold ? "Size & Quantity" : "Size, Quantity & Fold"} open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
-              <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
+              {!_DR.sizes && <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />}
             </div>
             {sizeMode === "preset"
-              ? <Sel label="Flat/Unfolded Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}</Sel>
+              ? <Sel label={_DR.forceFold ? "Size" : "Flat/Unfolded Size"} value={sizeLabel} onChange={setSizeLabel}>{_SIZES.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}</Sel>
               : <div style={r2}>
                   <TxtNum label="Long Edge (in)" value={longEdge} onChange={setLongEdge} min={2} max={27} />
                   <TxtNum label="Short Edge (in)" value={shortEdge} onChange={setShortEdge} min={2} max={12.5} />
                 </div>
             }
+            {!_DR.forceFold && <>
             <div style={ST.hr} />
             <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
               {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
@@ -3896,6 +3911,7 @@ function App() {
                 <p style={{fontSize:10,color:CC.light,margin:"4px 0 0"}}>You can preview the fold once artwork is uploaded.</p>
               </>;
             })()}
+            </>}
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
@@ -3920,13 +3936,15 @@ function App() {
 
           {/* SECTION 3: Addons */}
           <Sec title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
+            {!_DR.forceFold && <>
             <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
               {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             <div style={ST.hr} />
-            {(_AD.vivid !== false || vivid === true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} value={vivid} onChange={v => setVivid(v === true || v === "true")} disabled={!r.vividOK} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
-            {(_AD.vivid !== false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-4,marginBottom:4}}>Requires matte or gloss coated paper</div>}
-            {(_AD.vivid !== false || vivid === true) && <div style={ST.hr} />}
+            </>}
+            {!_HA.vivid && (_AD.vivid !== false || vivid === true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} value={vivid} onChange={v => setVivid(v === true || v === "true")} disabled={!r.vividOK} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
+            {!_HA.vivid && (_AD.vivid !== false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-4,marginBottom:4}}>Requires matte or gloss coated paper</div>}
+            {!_HA.vivid && (_AD.vivid !== false || vivid === true) && <div style={ST.hr} />}
             {(_AD.coating !== false || coating > 0) && (paper.coatable ? (
               <>
                 <Sel label={<RichTip tipKey="coating">Additional Coating</RichTip>} value={coating} onChange={v => setCoating(Number(v))}>
@@ -3946,24 +3964,24 @@ function App() {
             ) : (
               <div style={{...ST.f, opacity: 0.4}}><label style={ST.lbl}><RichTip tipKey="coating">Additional Coating</RichTip></label><div style={{padding:"8px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#f1f5f9",fontSize:13,color:CC.light}}>Not available for this paper type</div></div>
             ))}
-            {(_AD.coating !== false || coating > 0) && <div style={ST.hr} />}
-            {(_AD.bundling !== false || bundling > 0) && <Sel label={<RichTip tipKey="bundling">Bundling</RichTip>} value={bundling} onChange={v => setBundling(Number(v))}>
+            {(_AD.coating !== false || coating > 0) && (!_HA.bundling || !_HA.perforation || !_HA.rc) && <div style={ST.hr} />}
+            {!_HA.bundling && (_AD.bundling !== false || bundling > 0) && <Sel label={<RichTip tipKey="bundling">Bundling</RichTip>} value={bundling} onChange={v => setBundling(Number(v))}>
               {BUNDLING.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>}
-            {(_AD.perforation !== false || perforation > 0) && <Sel label={<RichTip tipKey="perforation">Perforation</RichTip>} value={perforation} onChange={v => setPerforation(Number(v))}
+            {!_HA.perforation && (_AD.perforation !== false || perforation > 0) && <Sel label={<RichTip tipKey="perforation">Perforation</RichTip>} value={perforation} onChange={v => setPerforation(Number(v))}
               note={dimShort > 14 && perfCount > 0 ? `14" throat — ${dimShort}" perf only` : (perfCount > 0 && perfCrossDim < 4 ? `${perfCrossDim}" too short for 2 perfs` : undefined)}>
               {PERF_OPTS.filter(o => {
                 var c = o.count != null ? o.count : PERF_OPTS.indexOf(o);
                 return c <= maxPerfs;
               }).map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>}
-            {(_AD.perforation !== false || perforation > 0) && perfCount > 0 && dimShort <= 14 && (
+            {!_HA.perforation && (_AD.perforation !== false || perforation > 0) && perfCount > 0 && dimShort <= 14 && (
               <Pil label="Perf Direction" value={perfDir} onChange={setPerfDir} options={[
                 { t: `${dimShort}" perf`, v: "length" },
                 { t: `${dimLong}" perf`, v: "width" },
               ]} />
             )}
-            {(_AD.rc !== false || roundCorner > 0) && foldType === "flat" && (
+            {!_HA.rc && (_AD.rc !== false || roundCorner > 0) && foldType === "flat" && (
               <Sel label={<RichTip tipKey="round_cornering">Round Cornering</RichTip>} value={roundCorner} onChange={v => setRoundCorner(Number(v))}>
                 {CORNERS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
               </Sel>

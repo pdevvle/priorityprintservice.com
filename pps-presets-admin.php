@@ -299,6 +299,7 @@ function pps_presets_render_edit_form( $preset ) {
         'perfect-bound' => 'Perfect Bound Booklet',
         'brochure'      => 'Brochure / Flat',
         'coupon'        => 'Coupon Book',
+        'letterhead'    => 'Letterhead',
     );
 
     $back_url = admin_url( 'admin.php?page=pps-presets' );

@@ -33,7 +33,7 @@ function pps_addon_visibility_matrix_defaults() {
     return array(
         // key          => array of calc-types it applies to
         'vivid'         => array( 'saddle', 'perfect-bound', 'brochure', 'coupon' ),
-        'coating'       => array( 'saddle', 'perfect-bound', 'brochure', 'coupon' ),
+        'coating'       => array( 'saddle', 'perfect-bound', 'brochure', 'coupon', 'letterhead' ),
         'bundling'      => array( 'saddle', 'perfect-bound', 'brochure', 'coupon' ),
         'rc'            => array( 'saddle', 'perfect-bound', 'brochure', 'coupon' ),
         'two_staple'    => array( 'saddle' ),
@@ -631,7 +631,7 @@ function pps_config_render_page() {
                 if ( json_last_error() !== JSON_ERROR_NONE || ! is_array( $decoded ) ) {
                     $json_errors[] = 'FAQs: ' . json_last_error_msg();
                 } else {
-                    $allowed_calcs = array( 'saddle', 'perfect-bound', 'brochure', 'coupon' );
+                    $allowed_calcs = array( 'saddle', 'perfect-bound', 'brochure', 'coupon', 'letterhead' );
                     $clean = array();
                     foreach ( $decoded as $calc => $faqs ) {
                         if ( ! in_array( $calc, $allowed_calcs, true ) ) continue;
@@ -1550,6 +1550,7 @@ function pps_render_addon_availability_row( $addon_slug ) {
         'perfect-bound' => 'Perfect Bound',
         'brochure'      => 'Brochure',
         'coupon'        => 'Coupon Book',
+        'letterhead'    => 'Letterhead',
     );
     $vis    = pps_get_addons_visibility();
     $addon_labels = pps_addon_labels();
@@ -1734,6 +1735,7 @@ function pps_config_tab_seo( $cfg ) {
         'perfect-bound' => 'Perfect Bound Booklets',
         'brochure'      => 'Brochures',
         'coupon'        => 'Coupon Books',
+        'letterhead'    => 'Letterhead',
     );
 
     $defaults = function_exists( 'pps_default_faqs' ) ? pps_default_faqs() : array();
