@@ -645,6 +645,154 @@ add_shortcode( 'pps_cat_addons', function( $atts ) {
     return $out;
 } );
 
+// ── Dynamic business-card wizard config from WooCommerce products ──
+
+function pps_build_bc_wizard_config() {
+    $cached = get_transient( 'pps_bc_wizard' );
+    if ( false !== $cached ) return $cached;
+    if ( ! function_exists( 'wc_get_products' ) ) return array();
+
+    $products = wc_get_products( array(
+        'category' => array( 'business-cards' ),
+        'status'   => 'publish',
+        'limit'    => 50,
+        'orderby'  => 'menu_order',
+        'order'    => 'ASC',
+    ) );
+    if ( empty( $products ) ) return array();
+
+    $group_map = array(
+        'standard-business-cards'            => 'Classic',
+        'low-price-business-cards'           => 'Classic',
+        'fold-over-business-cards'           => 'Classic',
+        'linen-uncoated-business-cards'      => 'Paper Specialty',
+        'brown-kraft-business-cards'         => 'Paper Specialty',
+        'off-white-natural-business-cards'   => 'Paper Specialty',
+        'suede-business-cards'               => 'Finish & Texture',
+        'silk-business-cards'                => 'Finish & Texture',
+        'iridescent-business-cards'          => 'Finish & Texture',
+        'full-color-metallic-business-cards' => 'Finish & Texture',
+        'raised-spot-gloss-business-cards'   => 'Premium Effects',
+        'raised-foil-business-cards'         => 'Premium Effects',
+        'black-edge-business-cards'          => 'Premium Effects',
+        'tri-ply-extra-thick-business-cards' => 'Premium Effects',
+        'plastic-business-cards'             => 'Alternative Materials',
+        'waterproof-business-cards'          => 'Alternative Materials',
+        'leaf-business-cards'                => 'Unique Shapes',
+        'oval-business-cards'                => 'Unique Shapes',
+        'circle-business-cards'              => 'Unique Shapes',
+    );
+    $group_order = array( 'Classic', 'Paper Specialty', 'Finish & Texture', 'Premium Effects', 'Alternative Materials', 'Unique Shapes' );
+
+    $buckets    = array();
+    $all_sizes  = array();
+    $all_shapes = array();
+
+    foreach ( $products as $product ) {
+        $slug    = $product->get_slug();
+        $name    = $product->get_name();
+        $display = preg_replace( '/\s*Business Cards?\s*$/i', '', $name );
+        if ( empty( $display ) ) $display = $name;
+
+        $price = $product->get_price();
+        $desc  = $price ? 'From $' . number_format( (float) $price, 2 ) : '';
+        $url   = $product->get_permalink();
+        $group = isset( $group_map[ $slug ] ) ? $group_map[ $slug ] : 'Classic';
+
+        $buckets[ $group ][] = array(
+            'val'   => $slug,
+            'label' => $display,
+            'desc'  => $desc,
+            'url'   => $url,
+        );
+
+        $attrs = $product->get_attributes();
+        foreach ( $attrs as $attr ) {
+            if ( ! is_object( $attr ) || ! method_exists( $attr, 'is_taxonomy' ) || ! $attr->is_taxonomy() ) continue;
+            $tax   = $attr->get_taxonomy();
+            $terms = wc_get_product_terms( $product->get_id(), $tax, array( 'fields' => 'all' ) );
+            foreach ( $terms as $term ) {
+                if ( false !== strpos( $term->slug, 'not-available' ) ) continue;
+                if ( 'pa_size' === $tax && ! isset( $all_sizes[ $term->slug ] ) ) {
+                    $all_sizes[ $term->slug ] = $term->name;
+                }
+                if ( 'pa_shape' === $tax && ! isset( $all_shapes[ $term->slug ] ) ) {
+                    $all_shapes[ $term->slug ] = $term->name;
+                }
+            }
+        }
+    }
+
+    $steps = array();
+
+    // Step 1: Card type (grouped by product category)
+    $groups = array();
+    foreach ( $group_order as $gname ) {
+        if ( ! empty( $buckets[ $gname ] ) ) {
+            $groups[] = array( 'group' => $gname, 'items' => $buckets[ $gname ] );
+        }
+    }
+    if ( ! empty( $groups ) ) {
+        $steps[] = array( 'key' => 'cardtype', 'prompt' => 'What type of business card?', 'options' => array(), 'groups' => $groups );
+    }
+
+    // Step 2: Size (union of pa_size terms, ordered)
+    $size_order = array(
+        '2-x-3-5-us-standard', '2-125-x-3-375-eu-standard', '2-x-3', '2-x-4',
+        '1-75-x-3-5', '1-5-x-3-5', '2-5-x-2-5', '2-x-2', '3-5-x-4', '2-x-7',
+    );
+    $size_opts = array();
+    foreach ( $size_order as $ss ) {
+        if ( isset( $all_sizes[ $ss ] ) ) {
+            $size_opts[] = array( 'val' => $ss, 'label' => $all_sizes[ $ss ], 'desc' => '' );
+            unset( $all_sizes[ $ss ] );
+        }
+    }
+    foreach ( $all_sizes as $ss => $sn ) {
+        $size_opts[] = array( 'val' => $ss, 'label' => $sn, 'desc' => '' );
+    }
+    if ( ! empty( $size_opts ) ) {
+        $steps[] = array( 'key' => 'size', 'prompt' => 'What size?', 'options' => $size_opts );
+    }
+
+    // Step 3: Shape (union of pa_shape terms, ordered)
+    $shape_order = array( 'rectangle', 'rounded-4-corners', 'rounded-2-corners', 'square', 'round', 'oval', 'leaf' );
+    $shape_opts = array();
+    foreach ( $shape_order as $sh ) {
+        if ( isset( $all_shapes[ $sh ] ) ) {
+            $shape_opts[] = array( 'val' => $sh, 'label' => $all_shapes[ $sh ], 'desc' => '' );
+            unset( $all_shapes[ $sh ] );
+        }
+    }
+    foreach ( $all_shapes as $sh => $shn ) {
+        $shape_opts[] = array( 'val' => $sh, 'label' => $shn, 'desc' => '' );
+    }
+    if ( ! empty( $shape_opts ) ) {
+        $steps[] = array( 'key' => 'shape', 'prompt' => 'Shape & corners?', 'options' => $shape_opts );
+    }
+
+    // Step 4: Sides
+    $steps[] = array( 'key' => 'sides', 'prompt' => 'Single or double-sided?', 'options' => array(
+        array( 'val' => 'single', 'label' => 'Single-Sided', 'desc' => 'Front only' ),
+        array( 'val' => 'double', 'label' => 'Double-Sided', 'desc' => 'Front and back' ),
+    ) );
+
+    // Step 5: Quantity (sensible ranges covering actual pa_runsize span 50–100k)
+    $steps[] = array( 'key' => 'qty', 'prompt' => 'How many?', 'options' => array(
+        array( 'val' => '50',     'label' => '50',      'desc' => '' ),
+        array( 'val' => '100',    'label' => '100',     'desc' => '' ),
+        array( 'val' => '250',    'label' => '250',     'desc' => '' ),
+        array( 'val' => '500',    'label' => '500',     'desc' => '' ),
+        array( 'val' => '1000',   'label' => '1,000',   'desc' => '' ),
+        array( 'val' => '2500',   'label' => '2,500',   'desc' => '' ),
+        array( 'val' => '5000',   'label' => '5,000',   'desc' => '' ),
+        array( 'val' => '10000+', 'label' => '10,000+', 'desc' => '' ),
+    ) );
+
+    set_transient( 'pps_bc_wizard', $steps, HOUR_IN_SECONDS );
+    return $steps;
+}
+
 // ── [pps_cat_wizard calc="brochure|signs|..." link="/product/..."] ──
 
 add_shortcode( 'pps_cat_wizard', function( $atts ) {
@@ -1111,6 +1259,12 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         ),
     );
 
+    // Override business-cards with dynamic WooCommerce data when available
+    if ( 'business-cards' === $calc && function_exists( 'wc_get_products' ) ) {
+        $bc = pps_build_bc_wizard_config();
+        if ( ! empty( $bc ) ) $lead_configs['business-cards'] = $bc;
+    }
+
     $is_lead_type = isset( $lead_configs[ $calc ] );
     $lead_mode    = $is_lead_type || empty( $link );
 
@@ -1255,7 +1409,8 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
                 foreach ( $lstep['groups'] as $_grp ) {
                     $out .= '<div class="pps-wiz-group-label">' . esc_html( $_grp['group'] ) . '</div>';
                     foreach ( $_grp['items'] as $opt ) {
-                        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $opt['val'] ) . '" data-label="' . esc_attr( $opt['label'] ) . '">'
+                        $url_data = ! empty( $opt['url'] ) ? ' data-url="' . esc_attr( $opt['url'] ) . '"' : '';
+                        $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $opt['val'] ) . '" data-label="' . esc_attr( $opt['label'] ) . '"' . $url_data . '>'
                               . '<div class="pps-wiz-opt-name">' . esc_html( $opt['label'] ) . '</div>'
                               . ( ! empty( $opt['desc'] ) ? '<div class="pps-wiz-opt-desc">' . $opt['desc'] . '</div>' : '' )
                               . '</button>';
@@ -1263,7 +1418,8 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
                 }
             } else {
                 foreach ( $lstep['options'] as $opt ) {
-                    $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $opt['val'] ) . '" data-label="' . esc_attr( $opt['label'] ) . '">'
+                    $url_data = ! empty( $opt['url'] ) ? ' data-url="' . esc_attr( $opt['url'] ) . '"' : '';
+                    $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $opt['val'] ) . '" data-label="' . esc_attr( $opt['label'] ) . '"' . $url_data . '>'
                           . '<div class="pps-wiz-opt-name">' . esc_html( $opt['label'] ) . '</div>'
                           . ( ! empty( $opt['desc'] ) ? '<div class="pps-wiz-opt-desc">' . $opt['desc'] . '</div>' : '' )
                           . '</button>';
@@ -1569,6 +1725,8 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '}'
           . 'function pick(step,val,label){'
           .   'state[step]={val:val,label:label};'
+          .   'var selOpt=w.querySelector(\'[data-step="\'+step+\'"] .pps-wiz-opt[data-val="\'+val+\'"]\');'
+          .   'if(selOpt&&selOpt.dataset.url)state[step].url=selOpt.dataset.url;'
           .   'var opts=w.querySelectorAll(\'[data-step="\'+step+\'"] .pps-wiz-opt\');'
           .   'opts.forEach(function(o){o.classList.toggle("is-selected",o.dataset.val===val)});'
           .   'var si=steps.indexOf(step);'
@@ -1585,8 +1743,11 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '}'
           . 'function updateActions(){'
           .   'var parts=[];'
+          .   'var productUrl="";'
           .   'if(w.dataset.lead){'
-          .     'steps.forEach(function(s){if(state[s])parts.push(state[s].label)});'
+          .     'steps.forEach(function(s){if(state[s]){parts.push(state[s].label);if(state[s].url)productUrl=state[s].url}});'
+          .     'var a=w.querySelector(".pps-wiz-act-pricing");'
+          .     'if(a){a.href=productUrl||base;if(productUrl){a.textContent="View Product \\u2192";a.style.display=""}else if(!base){a.style.display="none"}else{a.textContent="Proceed to Pricing \\u2192"}}'
           .   '}else{'
           .     'if(state.size)parts.push(state.size.label);'
           .     'if(state.pages)parts.push(state.pages.label);'
@@ -1595,13 +1756,11 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'if(state.cover&&state.cover.val)parts.push("Cover: "+state.cover.label);'
           .     'if(state.coating&&state.coating.val)parts.push(state.coating.label);'
           .     'if(state.addons&&state.addons.val)parts.push(state.addons.label);'
-          .   '}'
-          .   'var s=w.querySelector(".pps-wiz-summary");'
-          .   'if(s)s.innerHTML=parts.length?parts.map(function(p){return"<strong>"+p+"<\\/strong>"}).join(" \\u00b7 "):"";'
-          .   'if(!w.dataset.lead){'
           .     'var url=buildUrl();'
           .     'var a=w.querySelector(".pps-wiz-act-pricing");if(a)a.href=url;'
           .   '}'
+          .   'var s=w.querySelector(".pps-wiz-summary");'
+          .   'if(s)s.innerHTML=parts.length?parts.map(function(p){return"<strong>"+p+"<\\/strong>"}).join(" \\u00b7 "):"";'
           .   'bar.classList.toggle("is-visible",parts.length>0);'
           . '}'
           . 'function clearStep(step){'
@@ -1647,7 +1806,8 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'bar.classList.remove("is-visible");'
           .     'var ef=w.querySelector(".pps-wiz-email-form");if(ef)ef.style.display="none";'
           .     'wizFiles=[];renderFiles();'
-          .     'w.querySelector(\'[data-step="size"]\').scrollIntoView({behavior:"smooth",block:"nearest"});'
+          .     'var firstStep=w.querySelector(\'[data-step="\'+steps[0]+\'"]\');'
+          .     'if(firstStep)firstStep.scrollIntoView({behavior:"smooth",block:"nearest"});'
           .     'return;'
           .   '}'
           .   'if(e.target.closest(".pps-wiz-act-quote")){'
