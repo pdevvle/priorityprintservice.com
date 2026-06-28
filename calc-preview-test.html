@@ -593,7 +593,7 @@ function calculate(c) {
   P.scoreInsides=csInside?(((tS*(imp/2))-tQ)/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
   P.stitching=((((tS*imp)/2)/PCF.horizonspf20_sheetsperhour)*PCF.labor_horizonspf20_hr)+PCF.labor_horizonspf20_setup;
   P.twoStitch=twoOptIn?Math.ceil(P.stitching*1):0;
-  P.vivid=c.vividPrint?Math.ceil(P.press):0;
+  P.vivid=(c.vividPrint&&c.insidePaper.coatable)?Math.ceil(P.press):0;
   P.coat=0;
   if(coat.val>0&&coatOK){const sc=tQ/imp;P.coat=Math.ceil((coat.price*sc*mk)+(((sc/PCF.uvcoaterimpressionsperhour)*PCF.labor_bindery_hr)*(coat.price*mk*3))+PCF.labor_bindery_hr)}
   P.bundle=(bund.val>0&&q100)?Math.ceil(((tQ/bund.price)/mk)*(PCF.labor_bindery_hr/PCF.bundlesperhour))+PCF.bundling_base_fee:0;
@@ -826,7 +826,7 @@ function calculate(c) {
   const saleActive=P.discSale<-0.005;
   const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
   const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
-  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
+  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,vividOK:c.insidePaper.coatable,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
     shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
@@ -4469,6 +4469,7 @@ function App(){
     shipState,shipZip,needByDate]);
 
   useEffect(()=>{if(r.coatOK===false)setCoating(0)},[r.coatOK]);
+  useEffect(()=>{if(r.vividOK===false)setVividPrint(false)},[r.vividOK]);
   useEffect(()=>{if(r.q100===false)setBundling(0)},[r.q100]);
   useEffect(()=>{if(r.shipping?.freeDeliveryYMD)setNeedByDate(r.shipping.freeDeliveryYMD)},[r.shipping?.freeDeliveryYMD]);
   // NOTE: hardcopy proof is NOT auto-removed — always available as option
@@ -4752,7 +4753,8 @@ function App(){
 
           {/* SECTION 3: Finishing & Addons */}
           <Sec title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
-            {(_AD.vivid!==false || vividPrint===true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
+            {(_AD.vivid!==false || vividPrint===true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} disabled={!r.vividOK} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
+            {(_AD.vivid!==false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-8,marginBottom:4}}>Requires matte or gloss coated paper</div>}
             {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
               {(_AD.coating!==false || coating>0) && <Sel label={<RichTip tipKey="coating">Cover Coating</RichTip>} badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}

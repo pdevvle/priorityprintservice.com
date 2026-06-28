@@ -409,7 +409,7 @@ function calculate(c) {
   P.folding = fold.val !== "flat" ? ((qty / PCF.bindery_morgana_impressionperhour) * PCF.labor_bindery_hr) + (PCF.labor_bindery_hr / 3) : 0;
 
   // Vivid
-  P.vivid = c.vivid ? Math.ceil(P.press) : 0;
+  P.vivid = (c.vivid && paper.coatable) ? Math.ceil(P.press) : 0;
 
   // Coating
   const coat = COATINGS.find(x => x.val === c.coating) || COATINGS[0];
@@ -598,7 +598,7 @@ function calculate(c) {
     total: Math.round(grandTotal * 100) / 100, baseTotal: Math.round(total * 100) / 100,
     perUnit: Math.round(perUnit * 100) / 100, days, qty: qty, bd, grouped,
     imp, mk, fold, panels, pressSheets, longE, shortE, approxThickness,
-    coatOK: paper.coatable, q100: qty >= 100, ti,
+    coatOK: paper.coatable, vividOK: paper.coatable, q100: qty >= 100, ti,
     saleActive, saleAmount, saleLabel: (PCF.sale_label || "Sale"), totalWithoutSale,
     shipping: {
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
@@ -3667,6 +3667,8 @@ function App() {
     }
   }, [foldType, foldDir, dimLong, dimShort, paper]);
 
+  useEffect(() => { if (!paper.coatable) setVivid(false); }, [paper]);
+
   // Perf count + constraint logic
   // The perf crosses one dimension: "length" → longEdge, "width" → shortEdge
   const perfCrossDim = perfDir === "length" ? dimLong : dimShort;
@@ -3922,7 +3924,8 @@ function App() {
               {availableFoldTypes(dimLong, dimShort, paper.type === "cardstock").map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             <div style={ST.hr} />
-            {(_AD.vivid !== false || vivid === true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
+            {(_AD.vivid !== false || vivid === true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} value={vivid} onChange={v => setVivid(v === true || v === "true")} disabled={!r.vividOK} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
+            {(_AD.vivid !== false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-4,marginBottom:4}}>Requires matte or gloss coated paper</div>}
             {(_AD.vivid !== false || vivid === true) && <div style={ST.hr} />}
             {(_AD.coating !== false || coating > 0) && (paper.coatable ? (
               <>
