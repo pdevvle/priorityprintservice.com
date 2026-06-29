@@ -711,6 +711,9 @@ add_action( 'wp', function() {
 
         // Per-product defaults — stored as product meta, overrides central config defaults
         $product_defaults = get_post_meta( $product_id, '_pps_defaults', true );
+        if ( is_string( $product_defaults ) && $product_defaults !== '' ) {
+            $product_defaults = json_decode( $product_defaults, true );
+        }
         if ( ! empty( $product_defaults ) && is_array( $product_defaults ) ) {
             $config['defaults'] = $product_defaults;
         }
@@ -1691,6 +1694,7 @@ add_action( 'woocommerce_product_data_panels', function() {
         <p style="color:#666;font-size:12px">Set default calculator values for this product. Leave blank to use the global defaults. URL parameters override these.</p>
         <?php
         $fields = array(
+            'productType'     => array( 'label' => 'Product Type', 'placeholder' => 'letterhead (derivative calc mode)' ),
             'sizeLabel'       => array( 'label' => 'Size', 'placeholder' => '5.5×8.5 (Opens to 8.5×11)' ),
             'qty'             => array( 'label' => 'Default Quantity', 'placeholder' => '100', 'type' => 'number' ),
             'pages'           => array( 'label' => 'Default Pages', 'placeholder' => '8', 'type' => 'number' ),
