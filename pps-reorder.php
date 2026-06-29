@@ -235,8 +235,19 @@ function pps_render_pps_item_card( $item, $order ) {
                 <a href="<?php echo esc_url( $reorder ); ?>" class="btn btn-primary">Reorder</a>
             <?php elseif ( $legacy_reorder ) : ?>
                 <a href="<?php echo esc_url( $legacy_reorder ); ?>" class="btn btn-primary">Reorder (same as before)</a>
-                <p class="oc-caveat">Specs can&rsquo;t be changed &mdash; contact us for edits.</p>
             <?php endif; ?>
+            <?php
+            $contact_data = array(
+                'order'   => $order->get_order_number(),
+                'item'    => $item->get_name(),
+                'specs'   => $summary ?: implode( "\n", array_map( function( $m ) {
+                    return wp_strip_all_tags( $m->display_key ) . ': ' . wp_strip_all_tags( $m->display_value );
+                }, $legacy_meta ) ),
+                'status'  => $status_lbl,
+            );
+            ?>
+            <button type="button" class="btn btn-ghost btn-contact"
+                data-contact="<?php echo esc_attr( wp_json_encode( $contact_data ) ); ?>">Contact Us</button>
         </div>
     </article>
     <?php
@@ -363,10 +374,42 @@ function pps_order_lookup_shortcode() {
         }
     }
 
+    // ── Contact form submission ──
+    $contact_sent = false;
+    if ( isset( $_POST['pps_contact_submit'] )
+         && isset( $_POST['pps_contact_nonce'] )
+         && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['pps_contact_nonce'] ) ), 'pps_order_contact' ) ) {
+
+        $c_order   = sanitize_text_field( wp_unslash( $_POST['pps_contact_order'] ?? '' ) );
+        $c_item    = sanitize_text_field( wp_unslash( $_POST['pps_contact_item'] ?? '' ) );
+        $c_specs   = sanitize_textarea_field( wp_unslash( $_POST['pps_contact_specs'] ?? '' ) );
+        $c_status  = sanitize_text_field( wp_unslash( $_POST['pps_contact_status'] ?? '' ) );
+        $c_email   = sanitize_email( wp_unslash( $_POST['pps_contact_email'] ?? '' ) );
+        $c_message = sanitize_textarea_field( wp_unslash( $_POST['pps_contact_message'] ?? '' ) );
+
+        if ( $c_order && $c_email && $c_message ) {
+            $to      = get_option( 'woocommerce_email_from_address', get_option( 'admin_email' ) );
+            $subject = 'Order Inquiry — #' . $c_order . ' — ' . $c_item;
+            $body    = "Customer inquiry from the order lookup page.\n\n";
+            $body   .= "Order #: {$c_order}\n";
+            $body   .= "Product: {$c_item}\n";
+            $body   .= "Status: {$c_status}\n";
+            $body   .= "Customer Email: {$c_email}\n";
+            if ( $c_specs ) {
+                $body .= "\n--- Specifications ---\n{$c_specs}\n";
+            }
+            $body   .= "\n--- Customer Message ---\n{$c_message}\n";
+
+            $headers = array( 'Reply-To: ' . $c_email );
+            wp_mail( $to, $subject, $body, $headers );
+            $contact_sent = true;
+        }
+    }
+
     ob_start();
     $active_email = pps_order_lookup_active_email();
     if ( $active_email ) {
-        pps_order_lookup_render_orders( $active_email );
+        pps_order_lookup_render_orders( $active_email, $contact_sent );
     } else {
         pps_order_lookup_render_form( $error_kind );
     }
@@ -439,7 +482,7 @@ function pps_order_lookup_render_form( $error_kind = '' ) {
     <?php
 }
 
-function pps_order_lookup_render_orders( $email ) {
+function pps_order_lookup_render_orders( $email, $contact_sent = false ) {
     $orders = wc_get_orders( array(
         'billing_email' => $email,
         'limit'         => 20,
@@ -473,6 +516,16 @@ function pps_order_lookup_render_orders( $email ) {
                 </form>
             </div>
 
+            <?php if ( $contact_sent ) : ?>
+                <div class="banner banner-success" role="status">
+                    <svg class="banner-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M5 8.5l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <div><strong>Message sent.</strong> We&rsquo;ll get back to you shortly.</div>
+                </div>
+            <?php endif; ?>
+
             <?php if ( $rendered === 0 ) : ?>
                 <div class="empty"><span>No print orders found for this email.</span></div>
             <?php else : ?>
@@ -481,8 +534,83 @@ function pps_order_lookup_render_orders( $email ) {
                     <p class="results-foot">Want to edit a pending order? <a href="<?php echo esc_url( $signin_url ); ?>">Sign in to your account.</a></p>
                 <?php endif; ?>
             <?php endif; ?>
+
+            <!-- Contact modal -->
+            <div id="pps-contact-modal" class="contact-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Contact us about this order">
+                <div class="contact-modal-backdrop"></div>
+                <div class="contact-modal-box">
+                    <button type="button" class="contact-modal-close" aria-label="Close">&times;</button>
+                    <h3 class="contact-modal-title">Contact Us About This Order</h3>
+                    <form method="post" class="contact-form">
+                        <?php wp_nonce_field( 'pps_order_contact', 'pps_contact_nonce' ); ?>
+                        <input type="hidden" name="pps_contact_order" id="pps-cf-order" value="">
+                        <input type="hidden" name="pps_contact_item" id="pps-cf-item" value="">
+                        <input type="hidden" name="pps_contact_specs" id="pps-cf-specs" value="">
+                        <input type="hidden" name="pps_contact_status" id="pps-cf-status" value="">
+                        <input type="hidden" name="pps_contact_email" value="<?php echo esc_attr( $email ); ?>">
+
+                        <div class="cf-details">
+                            <div class="cf-row"><span class="cf-label">Order</span> <span id="pps-cf-order-display"></span></div>
+                            <div class="cf-row"><span class="cf-label">Product</span> <span id="pps-cf-item-display"></span></div>
+                            <div class="cf-row"><span class="cf-label">Status</span> <span id="pps-cf-status-display"></span></div>
+                            <div id="pps-cf-specs-row" class="cf-row cf-row-specs" style="display:none">
+                                <span class="cf-label">Specs</span>
+                                <pre id="pps-cf-specs-display"></pre>
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="pps-cf-from">Your email</label>
+                            <input type="email" id="pps-cf-from" value="<?php echo esc_attr( $email ); ?>" disabled>
+                        </div>
+
+                        <div class="field">
+                            <label for="pps-cf-message">Message <span class="req">*</span></label>
+                            <textarea id="pps-cf-message" name="pps_contact_message" rows="4" required placeholder="How can we help with this order?"></textarea>
+                        </div>
+
+                        <button type="submit" name="pps_contact_submit" value="1" class="btn btn-primary btn-submit">Send Message</button>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
+    <script>
+    (function(){
+        var modal = document.getElementById('pps-contact-modal');
+        if (!modal) return;
+        var backdrop = modal.querySelector('.contact-modal-backdrop');
+        var closeBtn = modal.querySelector('.contact-modal-close');
+        function open(data) {
+            document.getElementById('pps-cf-order').value = data.order || '';
+            document.getElementById('pps-cf-item').value = data.item || '';
+            document.getElementById('pps-cf-specs').value = data.specs || '';
+            document.getElementById('pps-cf-status').value = data.status || '';
+            document.getElementById('pps-cf-order-display').textContent = '#' + (data.order || '');
+            document.getElementById('pps-cf-item-display').textContent = data.item || '';
+            document.getElementById('pps-cf-status-display').textContent = data.status || '';
+            var specsRow = document.getElementById('pps-cf-specs-row');
+            var specsDisp = document.getElementById('pps-cf-specs-display');
+            if (data.specs) { specsRow.style.display = ''; specsDisp.textContent = data.specs; }
+            else { specsRow.style.display = 'none'; }
+            modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+            modal.querySelector('textarea').focus();
+        }
+        function close() {
+            modal.style.display = 'none';
+            document.body.style.overflow = '';
+        }
+        closeBtn.addEventListener('click', close);
+        backdrop.addEventListener('click', close);
+        document.addEventListener('keydown', function(e) { if (e.key === 'Escape' && modal.style.display !== 'none') close(); });
+        document.querySelectorAll('.btn-contact').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                try { open(JSON.parse(this.getAttribute('data-contact'))); } catch(e) {}
+            });
+        });
+    })();
+    </script>
     <?php
 }
 
@@ -800,6 +928,50 @@ function pps_acct_ui_css() {
 .pps-acct .results-foot { margin-top: 10px; font-size: 12px; color: var(--light); text-align: center; }
 .pps-acct .results-foot a { color: var(--process-cyan); text-decoration: none; }
 .pps-acct .results-foot a:hover { text-decoration: underline; }
+
+.pps-acct .banner-success { background: #e6f3e0; border: 1px solid #b8dba8; color: #3a6b20; }
+.pps-acct .banner-success strong { font-weight: 700; }
+
+.pps-acct .contact-modal {
+  position: fixed; inset: 0; z-index: 100000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.pps-acct .contact-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
+.pps-acct .contact-modal-box {
+  position: relative; background: var(--white); border-radius: 8px;
+  padding: 28px 24px; width: 100%; max-width: 520px; max-height: 90vh;
+  overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,.2);
+}
+.pps-acct .contact-modal-close {
+  position: absolute; top: 12px; right: 14px;
+  background: none; border: none; font-size: 22px; color: var(--light);
+  cursor: pointer; padding: 4px; line-height: 1;
+}
+.pps-acct .contact-modal-close:hover { color: var(--key); }
+.pps-acct .contact-modal-title { font-size: 18px; font-weight: 700; margin: 0 0 16px; color: var(--key); }
+
+.pps-acct .cf-details {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px 14px; margin-bottom: 16px; font-size: 13px;
+}
+.pps-acct .cf-row { display: flex; gap: 8px; margin-bottom: 4px; }
+.pps-acct .cf-row:last-child { margin-bottom: 0; }
+.pps-acct .cf-label { font-weight: 600; color: var(--key); min-width: 56px; flex-shrink: 0; }
+.pps-acct .cf-row span:last-child { color: var(--mid); }
+.pps-acct .cf-row-specs { flex-direction: column; gap: 4px; }
+.pps-acct .cf-row-specs pre {
+  margin: 0; font-family: var(--font-ui); font-size: 12px; line-height: 1.5;
+  color: var(--mid); white-space: pre-wrap; background: none; padding: 0;
+}
+
+.pps-acct .contact-form .field textarea {
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: 4px;
+  font-size: 14px; font-family: var(--font-ui); background: var(--white); color: var(--key);
+  outline: none; resize: vertical; width: 100%;
+}
+.pps-acct .contact-form .field textarea:focus { border-color: var(--process-cyan); box-shadow: 0 0 0 3px rgba(0,126,255,0.18); }
+.pps-acct .contact-form .field input[disabled] { background: var(--bg); color: var(--mid); cursor: not-allowed; }
 
 @media (max-width: 639px) {
   .pps-acct .order-card { grid-template-columns: 96px 1fr; padding: 14px; gap: 14px; }
