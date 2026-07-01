@@ -2234,7 +2234,10 @@ function pps_get_preset( $slug ) {
     if ( ! is_string( $slug ) || $slug === '' ) return null;
     if ( ! preg_match( '/^[a-z0-9\-]+$/', $slug ) ) return null;
     $presets = pps_get_presets();
-    return isset( $presets[ $slug ] ) && is_array( $presets[ $slug ] ) ? $presets[ $slug ] : null;
+    if ( ! isset( $presets[ $slug ] ) || ! is_array( $presets[ $slug ] ) ) return null;
+    $row = $presets[ $slug ];
+    if ( empty( $row['slug'] ) ) $row['slug'] = $slug;
+    return $row;
 }
 
 /**
