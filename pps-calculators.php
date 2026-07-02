@@ -2207,7 +2207,7 @@ function pps_get_filename_for_calc_type( $calc_type ) {
         'perfect-bound' => 'calc-perfect-bound.html',
         'brochure'      => 'calc-brochure.html',
         'coupon'        => 'calc-coupon-book.html',
-        'letterhead'    => 'calc-brochure.html',
+        'letterhead'    => 'calc-letterhead.html',
     );
     return isset( $map[ $calc_type ] ) ? $map[ $calc_type ] : '';
 }
