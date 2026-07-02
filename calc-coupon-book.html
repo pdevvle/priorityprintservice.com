@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-01 · CB-DBGCLICK</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-02 · CB-ZFIX</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -4883,7 +4883,7 @@ function App(){
 
       {/* Fixed bottom bar — mobile */}
       {mob&&<>
-        {debugUnlocked&&showDebug&&<div style={{position:"fixed",bottom:76,left:0,right:0,zIndex:39,maxHeight:"60vh",overflowY:"auto",background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.12)",padding:"0 10px 10px",paddingBottom:"env(safe-area-inset-bottom)"}}>
+        {debugUnlocked&&showDebug&&<div style={{position:"fixed",bottom:76,left:0,right:0,zIndex:9989,maxHeight:"60vh",overflowY:"auto",background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.12)",padding:"0 10px 10px",paddingBottom:"env(safe-area-inset-bottom)"}}>
           <DebugPanel debug={result?.debug}/>
           {schemaData && (
             <div style={{...ST.pnl, marginTop:10}}>
@@ -4903,7 +4903,7 @@ function App(){
             </div>
           )}
         </div>}
-        <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:40,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
+        <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:9990,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
         <div style={{display:"flex",flexDirection:mobExpanded?"column":"row",alignItems:mobExpanded?"stretch":"center",gap:10}}>
           <div style={{flex:mobExpanded?undefined:1,minWidth:0}}>
             <Panel result={result} compact expanded={mobExpanded} onToggleExpand={()=>setMobExpanded(p=>!p)}/>
