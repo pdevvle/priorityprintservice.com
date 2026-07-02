@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-06-28 · BR-DOTS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-02 · BR-ZFIX</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -4276,7 +4276,7 @@ function App() {
 
       {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
       {mob && !qOpen && !mobExpanded && (
-        <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ position: "fixed", bottom: "calc(70px + env(safe-area-inset-bottom))", right: 12, zIndex: 39, padding: "7px 13px", borderRadius: 16, border: `1px solid ${CK.cyan}`, background: "#fff", color: CK.cyan, fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 8px rgba(0,0,0,.12)", cursor: "pointer", fontFamily: "inherit" }}>
+        <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ position: "fixed", bottom: "calc(70px + env(safe-area-inset-bottom))", right: 12, zIndex: 9989, padding: "7px 13px", borderRadius: 16, border: `1px solid ${CK.cyan}`, background: "#fff", color: CK.cyan, fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 8px rgba(0,0,0,.12)", cursor: "pointer", fontFamily: "inherit" }}>
           Have a question? →
         </button>
       )}
@@ -4284,7 +4284,7 @@ function App() {
       {/* Mobile bottom bar */}
       {mob && <>
         {/* Slide-up panels: debug or qty pricing */}
-        {debugUnlocked && showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
+        {debugUnlocked && showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 9989, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: CC.mid, marginBottom: 6 }}>DEBUG</div>
           {Object.entries(r.debug).filter(([k]) => k !== "P").map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "1px 0" }}>
@@ -4293,7 +4293,7 @@ function App() {
             </div>
           ))}
         </div>}
-        {mobPricing && projections && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 39, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)" }}>
+        {mobPricing && projections && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 9989, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)" }}>
           <div style={{ padding: "8px 14px", background: "#f8fafc", borderBottom: `1px solid ${CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: CC.light }}>Quantity Pricing</span>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -4328,7 +4328,7 @@ function App() {
           </table>
         </div>}
         {/* Fixed bottom bar */}
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.08)", padding: "8px 10px", paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}>
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 9990, background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.08)", padding: "8px 10px", paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}>
           <div style={{ display: "flex", flexDirection: mobExpanded ? "column" : "row", alignItems: mobExpanded ? "stretch" : "center", gap: 8 }}>
             <div style={{ flex: mobExpanded ? undefined : 1, minWidth: 0 }}>
               <Panel result={result} compact expanded={mobExpanded} onToggleExpand={() => { setMobExpanded(p => !p); if (mobPricing) setMobPricing(false); if (showDebug) setShowDebug(false); }} />
