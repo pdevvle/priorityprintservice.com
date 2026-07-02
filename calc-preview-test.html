@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-02 · SS-ZFIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-02 · SS-COPYSPECS</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -4484,7 +4484,16 @@ function App(){
   const copyProjections = () => {
     if (!projections) return;
     const rows = projections.filter(p => p.total !== null);
-    const lines = ["Qty\tUnit\tTotal", ...rows.map(p =>
+    const sz = sizeMode === "custom" ? `${customShort}×${customLong}` : sizeLabel;
+    const cvr = coverMode === "same" ? insidePaper : coverPaper;
+    const specs = [
+      "Saddle Stitch Booklets",
+      `Size: ${sz}`,
+      `Pages: ${sets[0].pages}`,
+      `Cover: ${coverColor === "color" ? "Full Color" : "B&W"} · ${cvr.label}`,
+      `Inside: ${insideColor === "color" ? "Full Color" : "B&W"} · ${insidePaper.label}`,
+    ];
+    const lines = [...specs, "", "Qty\tUnit\tTotal", ...rows.map(p =>
       `${p.qty.toLocaleString()}\t$${p.perUnit.toFixed(2)}\t$${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`
     )];
     navigator.clipboard.writeText(lines.join("\n")).then(() => {
