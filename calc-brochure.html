@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-02 · BR-ZFIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-02 · BR-COPYSPECS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -3521,7 +3521,19 @@ function App() {
   const copyProjections = () => {
     if (!projections) return;
     const rows = projections.filter(p => p.total !== null);
-    const lines = ["Qty\tUnit\tTotal", ...rows.map(p =>
+    const sz = sizeMode === "custom" ? `${shortEdge}×${longEdge}` : sizeLabel;
+    const fold = FOLD_TYPES.find(f => f.val === foldType);
+    const colorDesc = sides === 2
+      ? `${frontColor === "color" ? "Full Color" : "B&W"} / ${backColor === "color" ? "Full Color" : "B&W"}`
+      : `${frontColor === "color" ? "Full Color" : "B&W"} (front only)`;
+    const specs = [
+      "Brochures",
+      `Size: ${sz}`,
+      `Fold: ${fold ? fold.label : foldType}`,
+      `Color: ${colorDesc}`,
+      `Paper: ${paper.label}`,
+    ];
+    const lines = [...specs, "", "Qty\tUnit\tTotal", ...rows.map(p =>
       `${p.qty.toLocaleString()}\t$${p.perUnit.toFixed(2)}\t$${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`
     )];
     navigator.clipboard.writeText(lines.join("\n")).then(() => {
