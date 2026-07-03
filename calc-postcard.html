@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-03 · PC-SIZES</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-03 · PC-RACK</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Postcard Calculator v1
@@ -99,17 +99,21 @@ const PCF = Object.assign({
 // DATA: SIZES, FOLDS, PAPERS, OPTIONS
 // ═══════════════════════════════════════════════════════════════
 const SIZE_PRESETS = _CFG.postcard_sizes || [
-  {label:"2×3.5 (Business Card)",imp:24,long:3.5,short:2,easy:true},
+  {label:"2×3.5 (Business Card)",imp:20,long:3.5,short:2,easy:true},
   {label:"3×5 (Index Card)",imp:12,long:5,short:3,easy:true},
   {label:"4×6",imp:9,long:6,short:4,easy:true},
-  {label:"4.25×5.5",imp:8,long:5.5,short:4.25,easy:true},
-  {label:"5×7",imp:6,long:7,short:5,easy:true},
-  {label:"5.5×8.5",imp:4,long:8.5,short:5.5,easy:true},
+  {label:"4.25×5.5 (Quarter Standard Sheet)",imp:8,long:5.5,short:4.25,easy:true},
+  {label:"5×7",imp:4,long:7,short:5,easy:true},
+  {label:"5.5×8.5 (Half Standard Sheet)",imp:4,long:8.5,short:5.5,easy:true},
   {label:"6×9",imp:4,long:9,short:6,easy:true},
   {label:"6×11",imp:2,long:11,short:6,easy:true},
   {label:"8×10",imp:2,long:10,short:8,easy:true},
   {label:"8.5×11 (Letter)",imp:2,long:11,short:8.5,easy:true},
   {label:"9×12",imp:2,long:12,short:9},
+  {label:"3.5×8.5",imp:6,long:8.5,short:3.5,easy:true,rack:true},
+  {label:"3.66×8.5 (Third Standard Sheet)",imp:6,long:8.5,short:3.66,easy:true,rack:true},
+  {label:"4×9",imp:6,long:9,short:4,easy:true,rack:true},
+  {label:"4.25×11 (Vertical Half Standard Sheet)",imp:4,long:11,short:4.25,easy:true,rack:true},
 ];
 
 const FOLD_TYPES = _CFG.fold_types || [
@@ -3863,7 +3867,7 @@ function App() {
               <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
             </div>
             {sizeMode === "preset"
-              ? <Sel label="Flat/Unfolded Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}</Sel>
+              ? <Sel label="Flat/Unfolded Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.filter(s=>!s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}<optgroup label="Common Rack Card Sizes">{SIZE_PRESETS.filter(s=>s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup></Sel>
               : <div style={r2}>
                   <TxtNum label="Long Edge (in)" value={longEdge} onChange={setLongEdge} min={2} max={27} />
                   <TxtNum label="Short Edge (in)" value={shortEdge} onChange={setShortEdge} min={2} max={12.5} />
