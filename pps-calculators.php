@@ -2208,6 +2208,7 @@ function pps_get_filename_for_calc_type( $calc_type ) {
         'brochure'      => 'calc-brochure.html',
         'coupon'        => 'calc-coupon-book.html',
         'letterhead'    => 'calc-letterhead.html',
+        'postcard'      => 'calc-postcard.html',
     );
     return isset( $map[ $calc_type ] ) ? $map[ $calc_type ] : '';
 }
@@ -2252,7 +2253,7 @@ function pps_save_preset( $slug, $data ) {
         return new WP_Error( 'pps_preset_bad_slug', 'Slug must be kebab-case [a-z0-9-]+ and ≤80 chars.' );
     }
 
-    $allowed_calcs = array( 'saddle', 'perfect-bound', 'brochure', 'coupon', 'letterhead' );
+    $allowed_calcs = array( 'saddle', 'perfect-bound', 'brochure', 'coupon', 'letterhead', 'postcard' );
     $calc = isset( $data['calc'] ) ? (string) $data['calc'] : '';
     if ( ! in_array( $calc, $allowed_calcs, true ) ) {
         return new WP_Error( 'pps_preset_bad_calc', 'Calc must be one of: ' . implode( ', ', $allowed_calcs ) );
@@ -2976,6 +2977,7 @@ function pps_default_faqs() {
         'brochure'      => array(),
         'coupon'        => array(),
         'letterhead'    => array(),
+        'postcard'      => array(),
     );
 }
 
