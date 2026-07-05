@@ -1586,7 +1586,6 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
   const ti=r.ti||{};
   const _factors=[];
   if(ti.paper>0)_factors.push("paper lead time");
-  if(ti.perforation>0)_factors.push("perforation");
   if(ti.artDesign>0||ti.artEdits>0)_factors.push("artwork");
   if(ti.proof>0)_factors.push("proofing");
   const _extraDays=Object.values(ti).reduce((s,v)=>s+(v||0),0);
@@ -2145,19 +2144,34 @@ function App() {
     }
   }, []);
 
-  // ── URL params: ?paper=&size= preselect options ──
+  // ── URL params: ?paper=&size=&sizemode=&long=&short=&qty=&color=&state= preselect options ──
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const pv = params.get('paper');
     if (pv) { const m = PAPERS.find(p => String(p.val) === pv); if (m) setPaper(m); }
     const cv = params.get('coating');
     if (cv) setCoating(Number(cv));
-    const sv = params.get('size');
-    if (sv) {
-      const norm = sv.replace(/×/g, 'x').toLowerCase();
-      const m = SIZE_PRESETS.find(s => s.label.replace(/×/g, 'x').toLowerCase() === norm);
-      if (m) setSizeLabel(m.label);
+    const qv = params.get('qty');
+    if (qv) { const n = parseInt(qv, 10); if (n > 0) setQty(n); }
+    const sm = params.get('sizemode');
+    if (sm === 'custom') {
+      setSizeMode('custom');
+      const lv = parseFloat(params.get('long'));
+      const sv2 = parseFloat(params.get('short'));
+      if (lv > 0 && lv <= 17.5) setLongEdge(lv);
+      if (sv2 > 0 && sv2 <= 11.5) setShortEdge(sv2);
+    } else {
+      const sv = params.get('size');
+      if (sv) {
+        const norm = sv.replace(/×/g, 'x').toLowerCase();
+        const m = SIZE_PRESETS.find(s => s.label.replace(/×/g, 'x').toLowerCase() === norm);
+        if (m) setSizeLabel(m.label);
+      }
     }
+    const fc = params.get('color');
+    if (fc === 'bw') setFrontColor('bw');
+    const st = params.get('state');
+    if (st && st.length === 2) setShipState(st.toUpperCase());
   }, []);
 
   const shipZip = shipAddr.zip || "";
@@ -2324,18 +2338,29 @@ function App() {
         </div>
       </section>
 
-      {mob && <MobilePreviewBar longEdge={activeLongEdge} shortEdge={activeShortEdge} quantity={qty} frontArt={coverArt} frontColor={frontColor} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar longEdge={activeLongEdge} shortEdge={activeShortEdge} quantity={qty} frontArt={coverArt} frontColor={frontColor} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()} />}
 
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "0 10px 140px" : "0 24px 80px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sec title="Size & Quantity" open={op.s1} onToggle={() => tog("s1")} badge={sizeLabel}>
+          <Sec title="Size & Quantity" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "preset" ? sizeLabel : `${longEdge}" × ${shortEdge}"`}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
             </div>
-            <Sel label="Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.filter(s=>!s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}<optgroup label="Common Rack Card Sizes">{SIZE_PRESETS.filter(s=>s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup></Sel>
+            <Pil label="Size Mode" value={sizeMode} onChange={setSizeMode} options={[
+              { t: "Preset Size", v: "preset" },
+              { t: "Custom Size", v: "custom" }
+            ]} />
+            {sizeMode === "preset" ? (
+              <Sel label="Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.filter(s=>!s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}<optgroup label="Common Rack Card Sizes">{SIZE_PRESETS.filter(s=>s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup></Sel>
+            ) : (
+              <div style={r2}>
+                <TxtNum label={'Long Edge (")'} value={longEdge} onChange={v => setLongEdge(Math.max(1, Math.min(17.5, Math.round(v * 1000) / 1000)))} min={1} />
+                <TxtNum label={'Short Edge (")'} value={shortEdge} onChange={v => setShortEdge(Math.max(1, Math.min(11.5, Math.round(v * 1000) / 1000)))} min={1} />
+              </div>
+            )}
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
@@ -2348,33 +2373,16 @@ function App() {
             <Sel label="Paper" value={paper.val} onChange={v => { const f = PAPERS.find(p => String(p.val) === v); if (f) setPaper(f); }}>
               {PAPERS.map(p => <option key={p.val} value={p.val}>{p.label}</option>)}
             </Sel>
-            <div style={ST.hr} />
-            {paper.coatable && (
+            {paper.coatable && <>
+              <div style={ST.hr} />
               <Sel label={<RichTip tipKey="coating">Additional Coating</RichTip>} value={coating} onChange={v => setCoating(Number(v))}>
                 {COATINGS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
               </Sel>
-            )}
+            </>}
           </Sec>
 
-          {/* SECTION 3: Perforation */}
-          <Sec title="Perforation" open={op.s3} onToggle={() => tog("s3")}>
-            {(_AD.perforation !== false || perforation > 0) && <Sel label={<RichTip tipKey="perforation">Perforation</RichTip>} value={perforation} onChange={v => setPerforation(Number(v))}
-              note={shortEdge > 14 && perfCount > 0 ? `14" throat — ${shortEdge}" perf only` : (perfCount > 0 && perfCrossDim < 4 ? `${perfCrossDim}" too short for 2 perfs` : undefined)}>
-              {PERF_OPTS.filter(o => {
-                var c = o.count != null ? o.count : PERF_OPTS.indexOf(o);
-                return c <= maxPerfs;
-              }).map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-            </Sel>}
-            {(_AD.perforation !== false || perforation > 0) && perfCount > 0 && shortEdge <= 14 && (
-              <Pil label="Perf Direction" value={perfDir} onChange={setPerfDir} options={[
-                { t: `${shortEdge}" perf`, v: "length" },
-                { t: `${longEdge}" perf`, v: "width" },
-              ]} />
-            )}
-          </Sec>
-
-          {/* SECTION 4: Artwork & Proofing */}
-          <Sec title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          {/* SECTION 3: Artwork & Proofing */}
+          <Sec title="Artwork & Proofing" open={op.s3} onToggle={()=>tog("s3")}>
 
             <Sel label="Artwork & Design" badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
 
@@ -2412,10 +2420,8 @@ function App() {
             {artwork===0.01 && (
               <div style={{marginTop:8}}>
                 <SheetPreview
-                  longEdge={longEdge} shortEdge={shortEdge}
-                  perfCount={perfCount} perfDir={perfDir}
-                  perfPositions={perfPositions} onPerfPositions={setPerfPositions}
-                  frontColor={frontColor} backColor={backColor} sides={sides}
+                  longEdge={activeLongEdge} shortEdge={activeShortEdge}
+                  frontColor={frontColor}
                   onArtwork={setArtFiles}
                   onCoverArt={setCoverArt}
                   openPreviewModalRef={openPreviewModalRef}
@@ -2459,10 +2465,10 @@ function App() {
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:CC.dark}}>Artwork Template</div>
                 <div style={{fontSize:10,color:CC.light,marginTop:1}}>
-                  {longEdge}" × {shortEdge}" flat sheet · Bleed, trim, safety
+                  {activeLongEdge}" × {activeShortEdge}" sticker · Bleed, trim, safety
                 </div>
               </div>
-              <button type="button" onClick={() => generateLetterheadTemplate(longEdge, shortEdge, sizeLabel, perfCount, perfDir, perfPositions)} style={{
+              <button type="button" onClick={() => generateStickerTemplate(activeLongEdge, activeShortEdge, sizeMode === "preset" ? sizeLabel : activeLongEdge + "\" × " + activeShortEdge + "\"")} style={{
                 padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CK.cyan}`, background: CK.cyanLight, color: CK.cyan, whiteSpace: "nowrap",
               }}>📐 Download Template</button>
@@ -2503,8 +2509,8 @@ function App() {
             )}
           </Sec>
 
-          {/* SECTION 5: Shipping & Delivery */}
-          <Sec title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          {/* SECTION 4: Shipping & Delivery */}
+          <Sec title="Shipping & Delivery" open={op.s4} onToggle={()=>tog("s4")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
             <form autoComplete="on" onSubmit={e=>e.preventDefault()}>
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>
@@ -2574,7 +2580,7 @@ function App() {
             below) still receive clicks. Mirrors the saddle calculator's split. */}
         {!mob && <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
-            <SidebarLetterheadPreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+            <SidebarStickerPreview longEdge={activeLongEdge} shortEdge={activeShortEdge} quantity={qty} frontArt={coverArt} frontColor={frontColor} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} />
           </div>
           <button type="button" onClick={handleAddToOrder} disabled={!!result?.error || submitting} style={{ width: "100%", marginTop: 10, padding: submitting && uploadProgress ? "10px 12px 6px" : "12px", borderRadius: 6, border: "none", background: (result?.error || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error || submitting) ? .5 : 1, transition: "all .2s", overflow: "hidden" }}>
@@ -2632,7 +2638,7 @@ function App() {
                   <span style={{ fontFamily: "monospace", color: CK.cyan }}>{typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(4)) : String(v)}</span>
                 </div> : null
               ))}
-              {r.debug.P && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontWeight: 600, color: CC.mid }}>Line Items</summary>
+              {r.debug.P && <details style={{ marginTop: 8, pointerEvents: "auto" }}><summary style={{ cursor: "pointer", fontWeight: 600, color: CC.mid }}>Line Items</summary>
                 {Object.entries(r.debug.P).filter(([, v]) => Math.abs(v) > 0.005).map(([k, v]) => (
                   <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
                     <span style={{ color: CC.light }}>{k}</span>
