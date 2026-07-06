@@ -2211,6 +2211,7 @@ function pps_get_filename_for_calc_type( $calc_type ) {
         'letterhead'    => 'calc-letterhead.html',
         'postcard'      => 'calc-postcard.html',
         'sticker'       => 'calc-sticker.html',
+        'greeting-card' => 'calc-greeting-card.html',
     );
     return isset( $map[ $calc_type ] ) ? $map[ $calc_type ] : '';
 }
@@ -2246,7 +2247,7 @@ function pps_save_preset( $slug, $data ) {
         return new WP_Error( 'pps_preset_bad_slug', 'Slug must be kebab-case [a-z0-9-]+ and ≤80 chars.' );
     }
 
-    $allowed_calcs = array( 'saddle', 'perfect-bound', 'brochure', 'coupon', 'letterhead', 'postcard', 'sticker' );
+    $allowed_calcs = array( 'saddle', 'perfect-bound', 'brochure', 'coupon', 'letterhead', 'postcard', 'sticker', 'greeting-card' );
     $calc = isset( $data['calc'] ) ? (string) $data['calc'] : '';
     if ( ! in_array( $calc, $allowed_calcs, true ) ) {
         return new WP_Error( 'pps_preset_bad_calc', 'Calc must be one of: ' . implode( ', ', $allowed_calcs ) );
@@ -2923,6 +2924,10 @@ function pps_get_calc_type_for_filename( $filename ) {
         'calc-perfect-bound.html' => 'perfect-bound',
         'calc-brochure.html'      => 'brochure',
         'calc-coupon-book.html'   => 'coupon',
+        'calc-letterhead.html'    => 'letterhead',
+        'calc-postcard.html'      => 'postcard',
+        'calc-sticker.html'       => 'sticker',
+        'calc-greeting-card.html' => 'greeting-card',
     );
     return isset( $map[ $filename ] ) ? $map[ $filename ] : '';
 }
@@ -2968,6 +2973,7 @@ function pps_default_faqs() {
         'letterhead'    => array(),
         'postcard'      => array(),
         'sticker'       => array(),
+        'greeting-card' => array(),
     );
 }
 
