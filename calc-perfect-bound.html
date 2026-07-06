@@ -1567,12 +1567,6 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
         <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
         <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={spineWPx} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
         <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
-          <span style={{display:"inline-flex",gap:3}}>
-            <span style={{width:5,height:5,borderRadius:"50%",background:CK.cyan}}/>
-            <span style={{width:5,height:5,borderRadius:"50%",background:CK.magenta}}/>
-            <span style={{width:5,height:5,borderRadius:"50%",background:CK.yellow}}/>
-            <span style={{width:5,height:5,borderRadius:"50%",background:"rgba(255,255,255,.7)"}}/>
-          </span>
           <span>{hasArt?"YOUR ARTWORK · LIVE":"3D PREVIEW · LIVE"}</span>
         </div>
         {clickable&&<div style={{position:"absolute",top:10,right:12,fontSize:9,fontWeight:700,letterSpacing:".1em",color:"rgba(255,255,255,.75)",background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.18)",padding:"3px 7px",borderRadius:4,pointerEvents:"none"}}>OPEN ⤢</div>}
@@ -4832,16 +4826,7 @@ function App(){
               Perfect-bound Booklet<br/>
               <span style={{color:CK.cyan}}>Instant Quote</span>
             </h1>
-            <p style={{maxWidth:560,margin:mob?"10px 0 0":"14px 0 0",color:CC.mid,fontSize:mob?12.5:14,lineHeight:1.55}}>
-              Live pricing from our Phoenix floor. No RFQs, no sales calls — configure it, see the number, pick a delivery date.
-            </p>
           </div>
-          {!mob&&<div style={{display:"inline-flex",gap:4,alignSelf:"flex-end",paddingBottom:8}} aria-hidden="true">
-            <span style={{width:10,height:10,borderRadius:"50%",background:CK.cyan,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
-            <span style={{width:10,height:10,borderRadius:"50%",background:CK.magenta,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
-            <span style={{width:10,height:10,borderRadius:"50%",background:CK.yellow,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
-            <span style={{width:10,height:10,borderRadius:"50%",background:CK.key,boxShadow:"0 0 0 1px rgba(0,0,0,.04)"}}/>
-          </div>}
         </div>
       </section>
 
