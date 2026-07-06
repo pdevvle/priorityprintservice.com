@@ -44,7 +44,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-05 · STK-INIT</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-06 · STK-PAPERS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Sticker Calculator v1
@@ -115,7 +115,9 @@ const SIZE_PRESETS = _CFG.sticker_sizes || [
 // Sticker paper — crack-n-peel adhesive label stock (12×18 sheet).
 // Own config key (sticker_papers) so it stays independent.
 const PAPERS = _CFG.sticker_papers || [
-  {label:"Crack n Peel Permanent Adhesive Label",val:0.01,days:0,price:0.99,oversizePrice:0.99,factory:false,coatable:true},
+  {label:"Crack n Peel Gloss Adhesive Label",val:0.01,days:1,price:0.99,oversizePrice:0.99,factory:false,coatable:true},
+  {label:"Crack n Peel Matte Adhesive Label",val:0.02,days:5,price:0.99,oversizePrice:0.99,factory:true,coatable:true},
+  {label:"Crack n Peel Uncoated Adhesive Label",val:0.03,days:5,price:0.99,oversizePrice:0.99,factory:true,coatable:false},
 ];
 const ALL_PAPERS = PAPERS;
 const INV_VALS=[0.01];
