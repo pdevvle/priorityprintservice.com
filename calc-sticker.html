@@ -44,7 +44,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-06 · STK-PAPERS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-06 · STK-NODOTS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Sticker Calculator v1
@@ -558,12 +558,6 @@ function SidebarStickerPreview({ longEdge, shortEdge, quantity, frontArt, frontC
         </div>
         {/* Top-left eyebrow */}
         <div style={{ position: "absolute", top: 10, left: 14, display: "flex", alignItems: "center", gap: 6, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,.65)", letterSpacing: ".12em", pointerEvents: "none" }}>
-          <span style={{ display: "inline-flex", gap: 3 }}>
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: CK.cyan }} />
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: CK.magenta }} />
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: CK.yellow }} />
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(255,255,255,.7)" }} />
-          </span>
           <span>{hasArt ? "YOUR ARTWORK · LIVE" : "3D PREVIEW · LIVE"}</span>
         </div>
         {clickable && <div style={{ position: "absolute", top: 10, right: 12, fontSize: 9, fontWeight: 700, letterSpacing: ".1em", color: "rgba(255,255,255,.75)", background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", padding: "3px 7px", borderRadius: 4, pointerEvents: "none" }}>OPEN ⤢</div>}
@@ -610,12 +604,6 @@ function MobilePreviewBar(props){
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
           <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".12em", opacity: .6, textTransform: "uppercase" }}>{hasArt ? "Your Artwork" : "3D Preview"}</div>
           <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{wIn}×{hIn}″ · {(quantity || 0).toLocaleString()} qty</div>
-        </div>
-        <div style={{ display: "inline-flex", gap: 3, alignSelf: "center" }} aria-hidden="true">
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CK.cyan }} />
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CK.magenta }} />
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CK.yellow }} />
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,.7)" }} />
         </div>
       </div>
     </>
