@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-06 · SS-PROOFPDF</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-07 · SS-PREVIEW</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1206,16 +1206,12 @@ function DimSpec({ wIn, hIn, bindEdge, bindLabel }) {
       <rect x={x0} y={y0} width={sw} height={sh} fill="#f4efe2" stroke="#cfd8e3" strokeWidth="1" rx="1.5" />
       <rect x={x0+6} y={y0+6} width={Math.max(0, sw-12)} height={Math.max(0, sh-12)} fill="none" stroke="rgba(20,28,40,.14)" strokeWidth="0.75" strokeDasharray="3 3" />
       {spineV && <g>
-        <rect x={x0} y={y0} width={strip} height={sh} fill="rgba(20,28,40,.10)" />
-        <line x1={x0+strip} y1={y0} x2={x0+strip} y2={y0+sh} stroke="rgba(20,28,40,.30)" strokeWidth="0.75" strokeDasharray="2 2" />
-        {[0.22,0.5,0.78].map((t,i)=><rect key={i} x={x0+strip/2-1} y={y0+sh*t-4} width="2" height="8" rx="1" fill="#4a5568" />)}
-        <text x={x0+strip/2} y={y0+sh/2} fill="#59657a" fontFamily="Segoe UI, sans-serif" fontSize="7" fontWeight="800" letterSpacing="1.2" textAnchor="middle" transform={`rotate(-90 ${x0+strip/2} ${y0+sh/2})`}>{bindLabel || "BIND"}</text>
+        <line x1={x0} y1={y0} x2={x0} y2={y0+sh} stroke="#6b7890" strokeWidth="3" />
+        <text x={x0+10} y={y0+sh/2} fill="#8492a8" fontFamily="Segoe UI, sans-serif" fontSize="7.5" fontWeight="800" letterSpacing="2" textAnchor="middle" transform={`rotate(-90 ${x0+10} ${y0+sh/2})`}>SPINE</text>
       </g>}
       {spineH && <g>
-        <rect x={x0} y={y0} width={sw} height={strip} fill="rgba(20,28,40,.10)" />
-        <line x1={x0} y1={y0+strip} x2={x0+sw} y2={y0+strip} stroke="rgba(20,28,40,.30)" strokeWidth="0.75" strokeDasharray="2 2" />
-        {[0.22,0.5,0.78].map((t,i)=><rect key={i} x={x0+sw*t-4} y={y0+strip/2-1} width="8" height="2" rx="1" fill="#4a5568" />)}
-        <text x={x0+sw/2} y={y0+strip/2+3} fill="#59657a" fontFamily="Segoe UI, sans-serif" fontSize="7" fontWeight="800" letterSpacing="1.2" textAnchor="middle">{bindLabel || "BIND"}</text>
+        <line x1={x0} y1={y0} x2={x0+sw} y2={y0} stroke="#6b7890" strokeWidth="3" />
+        <text x={x0+sw/2} y={y0+12} fill="#8492a8" fontFamily="Segoe UI, sans-serif" fontSize="7.5" fontWeight="800" letterSpacing="2" textAnchor="middle">SPINE</text>
       </g>}
       <line x1={x0} y1={y0+sh+3} x2={x0} y2={dimYB+3} stroke={L} strokeWidth="0.6" opacity="0.5" />
       <line x1={x0+sw} y1={y0+sh+3} x2={x0+sw} y2={dimYB+3} stroke={L} strokeWidth="0.6" opacity="0.5" />
@@ -1295,7 +1291,7 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
   // before artwork is uploaded so customers can see how the format previews.
   const clickable=typeof onOpenPreview==="function";
   return (
-    <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
+    <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white,pointerEvents:"auto"}}>
       <div
         className="bp-viewport"
         role={clickable?"button":undefined}
