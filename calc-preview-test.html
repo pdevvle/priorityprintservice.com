@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-06 · SS-DIMSPEC</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-06 · SS-PROOFPDF</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -2049,6 +2049,21 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const setFitMode = (v) => { pushTxHistory(proofIdx); setTx(proofIdx, { fitMode: v }); };
   const setArtScale = (v) => { pushTxHistory(proofIdx); setTx(proofIdx, { artScale: v }); };
   const setRotateSteps = (v) => { pushTxHistory(proofIdx); setTx(proofIdx, { rotateSteps: v }); };
+  // Rotate EVERY page 90° in one action. Booklets are usually all one orientation,
+  // so this spares the user stepping through each page. Changing the transforms
+  // trips the clear-approval effect, forcing a fresh review.
+  const rotateAllPages = () => {
+    const n = displayPages?.length || 0;
+    if (n <= 1) { setRotateSteps(s => (s + 1) % 4); return; }
+    setPageTransforms(p => {
+      const next = { ...p };
+      for (let i = 0; i < n; i++) {
+        const cur = next[i] || DEFAULT_TX;
+        next[i] = { ...cur, rotateSteps: (cur.rotateSteps + 1) % 4 };
+      }
+      return next;
+    });
+  };
 
   // Blank page — plain off-white, no text
   const blankPage = useMemo(() => {
@@ -2527,7 +2542,34 @@ update();
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
     const previewHtmlBlob = buildPreviewHtml();
-    return { printReadyBlob, previewBlobs, manifestBlob, previewHtmlBlob, skippedGeneration: noTransforms };
+    // ── Assemble all per-page preview JPEGs into ONE multipage proof PDF ──
+    // Individual JPGs are cumbersome to review/share at high page counts, so we
+    // stitch them into a single PDF (one preview page per PDF page). Blank pages
+    // (no art) are skipped. Best-effort: any failure leaves previewPdfBlob null
+    // and the individual previews still exist as a fallback.
+    let previewPdfBlob = null;
+    try {
+      const realPreviews = previewBlobs.filter(Boolean);
+      if (realPreviews.length) {
+        await ensureJsPDF();
+        const { jsPDF } = window.jspdf;
+        const orient = bleedW > bleedH ? "landscape" : "portrait";
+        const ppdf = new jsPDF({ orientation: orient, unit: "in", format: [bleedW, bleedH] });
+        let placed = 0;
+        for (let i = 0; i < previewBlobs.length; i++) {
+          const b = previewBlobs[i];
+          if (!b) continue; // blank page — nothing to show
+          const durl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(b); });
+          if (!durl) continue;
+          if (placed > 0) ppdf.addPage([bleedW, bleedH], orient);
+          ppdf.addImage(durl, "JPEG", 0, 0, bleedW, bleedH);
+          placed++;
+        }
+        if (placed > 0) previewPdfBlob = ppdf.output("blob");
+      }
+    } catch (e) { previewPdfBlob = null; }
+
+    return { printReadyBlob, previewBlobs, previewPdfBlob, manifestBlob, previewHtmlBlob, skippedGeneration: noTransforms };
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -3230,6 +3272,12 @@ update();
           background: rotateSteps > 0 ? CK.cyan : "rgba(255,255,255,.06)",
           color: rotateSteps > 0 ? "#000" : "rgba(255,255,255,.5)",
         }}>Rotate 90°{rotateSteps > 0 ? ` (${rotateSteps * 90}°)` : ""}</button>
+        {(displayPages?.length || 0) > 1 && (
+          <button type="button" onClick={rotateAllPages} title="Rotate every page 90° — use when the whole booklet's art needs the same rotation" style={{
+            padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor:"pointer", fontFamily:"inherit",
+            background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.5)",
+          }}>Rotate All 90°</button>
+        )}
         <button type="button" onClick={undoTx} disabled={txHistory.length === 0} title={txHistory.length ? `Undo last art change (${txHistory.length} step${txHistory.length === 1 ? "" : "s"} available)` : "No changes to undo"} style={{
           padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor: txHistory.length ? "pointer" : "default", fontFamily:"inherit",
           background:"rgba(255,255,255,.06)",
@@ -3574,9 +3622,13 @@ update();
                     const files = [];
                     if (rawFileRef.current) files.push([rawFileRef.current, rawFileRef.current.name || baseName + "_raw"]);
                     if (!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob) files.push([approvalPkg.printReadyBlob, baseName + "_print-ready.pdf"]);
-                    approvalPkg.previewBlobs.forEach((b, i) => {
-                      if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
-                    });
+                    if (approvalPkg.previewPdfBlob) {
+                      files.push([approvalPkg.previewPdfBlob, baseName + "_proof.pdf"]);
+                    } else {
+                      approvalPkg.previewBlobs.forEach((b, i) => {
+                        if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
+                      });
+                    }
                     if (debug && approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
                     if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
                     for (let i = 0; i < files.length; i++) {
@@ -3606,12 +3658,17 @@ update();
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
                           }}>Print-ready PDF</button>
                         )}
-                        {previewCount > 0 && (
+                        {approvalPkg.previewPdfBlob ? (
+                          <button type="button" onClick={() => dlFile(approvalPkg.previewPdfBlob, baseName + "_proof.pdf")} style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          }}>Proof PDF ({previewCount} pp)</button>
+                        ) : previewCount > 0 ? (
                           <button type="button" onClick={() => approvalPkg.previewBlobs.forEach((b, i) => { if (b) dlFile(b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`); })} style={{
                             padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
                           }}>Previews ({previewCount})</button>
-                        )}
+                        ) : null}
                         {debug && approvalPkg.previewHtmlBlob && (
                           <button type="button" onClick={() => dlFile(approvalPkg.previewHtmlBlob, baseName + "_preview.html")} style={{
                             padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(99,102,241,.4)",
