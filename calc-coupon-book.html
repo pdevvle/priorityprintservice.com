@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-02 · CB-COPYSPECS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-07 · CB-PREVIEW</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1448,7 +1448,57 @@ function BookOpen3D({ pages, bookW, bookH, spread, scale, rotateX: rX, rotateY: 
   );
 }
 
-function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt,onOpenPreview}){
+// ── Flat dimensioned "spec" drawing shown in the preview card before artwork is
+//    uploaded. Charts width × height with dimension lines; for booklets, marks the
+//    bind (spine) edge. Swapped for the 3D render as soon as art is added.
+function DimSpec({ wIn, hIn, bindEdge, bindLabel }) {
+  const VW = 320, VH = 190;
+  const padL = 20, padT = 20, padR = 46, padB = 34;
+  const availW = VW - padL - padR, availH = VH - padT - padB;
+  const w = Math.max(0.1, Number(wIn) || 1), h = Math.max(0.1, Number(hIn) || 1);
+  const scale = Math.min(availW / w, availH / h);
+  const sw = w * scale, sh = h * scale;
+  const x0 = padL + (availW - sw) / 2, y0 = padT + (availH - sh) / 2;
+  const L = "#6fb2ff", T = "#eef4fb";
+  const fmt = n => (Math.round((Number(n) || 0) * 100) / 100).toString();
+  const dimYB = y0 + sh + 15, dimXR = x0 + sw + 16;
+  const be = Number(bindEdge) || 0;
+  const spineV = be > 0 && Math.abs(be - h) <= Math.abs(be - w);
+  const spineH = be > 0 && !spineV;
+  const ah = (x, y, d) =>
+    d === "l" ? `M${x+5},${y-3} L${x},${y} L${x+5},${y+3}` :
+    d === "r" ? `M${x-5},${y-3} L${x},${y} L${x-5},${y+3}` :
+    d === "u" ? `M${x-3},${y+5} L${x},${y} L${x+3},${y+5}` :
+                `M${x-3},${y-5} L${x},${y} L${x+3},${y-5}`;
+  return (
+    <svg width="100%" height="100%" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMid meet" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+      <rect x={x0} y={y0} width={sw} height={sh} fill="#f4efe2" stroke="#cfd8e3" strokeWidth="1" rx="1.5" />
+      <rect x={x0+6} y={y0+6} width={Math.max(0, sw-12)} height={Math.max(0, sh-12)} fill="none" stroke="rgba(20,28,40,.14)" strokeWidth="0.75" strokeDasharray="3 3" />
+      {spineV && <g>
+        <line x1={x0} y1={y0} x2={x0} y2={y0+sh} stroke="#6b7890" strokeWidth="3" />
+        <text x={x0+10} y={y0+sh/2} fill="#8492a8" fontFamily="Segoe UI, sans-serif" fontSize="7.5" fontWeight="800" letterSpacing="2" textAnchor="middle" transform={`rotate(-90 ${x0+10} ${y0+sh/2})`}>SPINE</text>
+      </g>}
+      {spineH && <g>
+        <line x1={x0} y1={y0} x2={x0+sw} y2={y0} stroke="#6b7890" strokeWidth="3" />
+        <text x={x0+sw/2} y={y0+12} fill="#8492a8" fontFamily="Segoe UI, sans-serif" fontSize="7.5" fontWeight="800" letterSpacing="2" textAnchor="middle">SPINE</text>
+      </g>}
+      <line x1={x0} y1={y0+sh+3} x2={x0} y2={dimYB+3} stroke={L} strokeWidth="0.6" opacity="0.5" />
+      <line x1={x0+sw} y1={y0+sh+3} x2={x0+sw} y2={dimYB+3} stroke={L} strokeWidth="0.6" opacity="0.5" />
+      <line x1={x0} y1={dimYB} x2={x0+sw} y2={dimYB} stroke={L} strokeWidth="1.2" />
+      <path d={ah(x0,dimYB,"l")} fill="none" stroke={L} strokeWidth="1.2" />
+      <path d={ah(x0+sw,dimYB,"r")} fill="none" stroke={L} strokeWidth="1.2" />
+      <text x={x0+sw/2} y={dimYB+13} fill={T} fontFamily="Segoe UI, sans-serif" fontSize="11" fontWeight="700" textAnchor="middle">{fmt(w)}″</text>
+      <line x1={x0+sw+3} y1={y0} x2={dimXR+3} y2={y0} stroke={L} strokeWidth="0.6" opacity="0.5" />
+      <line x1={x0+sw+3} y1={y0+sh} x2={dimXR+3} y2={y0+sh} stroke={L} strokeWidth="0.6" opacity="0.5" />
+      <line x1={dimXR} y1={y0} x2={dimXR} y2={y0+sh} stroke={L} strokeWidth="1.2" />
+      <path d={ah(dimXR,y0,"u")} fill="none" stroke={L} strokeWidth="1.2" />
+      <path d={ah(dimXR,y0+sh,"d")} fill="none" stroke={L} strokeWidth="1.2" />
+      <text x={dimXR+5} y={y0+sh/2+4} fill={T} fontFamily="Segoe UI, sans-serif" fontSize="11" fontWeight="700" textAnchor="start">{fmt(h)}″</text>
+    </svg>
+  );
+}
+
+function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt,bindEdge,onOpenPreview}){
   const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
   const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
   const maxDim=150, longSide=Math.max(wIn,hIn), px=maxDim/longSide;
@@ -1494,17 +1544,19 @@ function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insi
   ],[coverArt,backCoverArt,placeholder,backCover]);
   const clickable=hasArt&&typeof onOpenPreview==="function";
   return (
-    <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white}}>
+    <div style={{borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.white,pointerEvents:"auto"}}>
       <div className="bp-viewport"
         role={clickable?"button":undefined} tabIndex={clickable?0:undefined}
         onClick={clickable?onOpenPreview:undefined}
         onKeyDown={clickable?(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onOpenPreview();}}:undefined}
         title={clickable?"Open full preview":undefined}
         style={{height:190,borderRadius:0,border:"none",cursor:clickable?"zoom-in":"default"}}>
-        <div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>
-        <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
+        {hasArt&&<div style={{position:"absolute",bottom:24,width:"55%",height:14,background:"radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)",filter:"blur(6px)",pointerEvents:"none"}}/>}
+        {hasArt
+          ? <BookClosed3D pages={previewPages} bookW={bookW} bookH={bookH} spineW={0} rotateX={-8} rotateY={22} scale={1} fitMode="cover"/>
+          : <DimSpec wIn={wIn} hIn={hIn} bindEdge={bindEdge} />}
         <div style={{position:"absolute",top:10,left:14,display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"rgba(255,255,255,.65)",letterSpacing:".12em",pointerEvents:"none"}}>
-          <span>{hasArt?"YOUR ARTWORK · LIVE":"3D PREVIEW · LIVE"}</span>
+          <span>{hasArt?"YOUR ARTWORK · LIVE":"SIZE SPEC · LIVE"}</span>
         </div>
         {clickable&&<div style={{position:"absolute",top:10,right:12,fontSize:9,fontWeight:700,letterSpacing:".1em",color:"rgba(255,255,255,.75)",background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.18)",padding:"3px 7px",borderRadius:4,pointerEvents:"none"}}>OPEN ⤢</div>}
         <div style={{position:"absolute",bottom:10,left:14,right:14,display:"flex",justifyContent:"space-between",fontSize:9.5,fontWeight:600,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:".08em",pointerEvents:"none"}}>
@@ -1937,6 +1989,18 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const setFitMode = (v) => setTx(proofIdx, { fitMode: v });
   const setArtScale = (v) => setTx(proofIdx, { artScale: v });
   const setRotateSteps = (v) => setTx(proofIdx, { rotateSteps: v });
+  const rotateAllPages = () => {
+    const n = displayPages?.length || 0;
+    if (n <= 1) { setRotateSteps(s => (s + 1) % 4); return; }
+    setPageTransforms(p => {
+      const next = { ...p };
+      for (let i = 0; i < n; i++) {
+        const cur = next[i] || DEFAULT_TX;
+        next[i] = { ...cur, rotateSteps: (cur.rotateSteps + 1) % 4 };
+      }
+      return next;
+    });
+  };
 
   // Clear approval when ANY page's transform changes — forces re-approval
   const prevTxHash = useRef(txHash);
@@ -2312,7 +2376,29 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
-    return { printReadyBlob, previewBlobs, manifestBlob, skippedGeneration: noTransforms };
+    // ── Assemble all per-page preview JPEGs into ONE multipage proof PDF ──
+    let previewPdfBlob = null;
+    try {
+      const realPreviews = previewBlobs.filter(Boolean);
+      if (realPreviews.length) {
+        const { jsPDF } = window.jspdf;
+        const orient = bleedW > bleedH ? "landscape" : "portrait";
+        const ppdf = new jsPDF({ orientation: orient, unit: "in", format: [bleedW, bleedH] });
+        let placed = 0;
+        for (let i = 0; i < previewBlobs.length; i++) {
+          const b = previewBlobs[i];
+          if (!b) continue;
+          const durl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(b); });
+          if (!durl) continue;
+          if (placed > 0) ppdf.addPage([bleedW, bleedH], orient);
+          ppdf.addImage(durl, "JPEG", 0, 0, bleedW, bleedH);
+          placed++;
+        }
+        if (placed > 0) previewPdfBlob = ppdf.output("blob");
+      }
+    } catch (e) { previewPdfBlob = null; }
+
+    return { printReadyBlob, previewBlobs, previewPdfBlob, manifestBlob, skippedGeneration: noTransforms };
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -2914,6 +3000,12 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
           background: rotateSteps > 0 ? CK.cyan : "rgba(255,255,255,.06)",
           color: rotateSteps > 0 ? "#000" : "rgba(255,255,255,.5)",
         }}>Rotate 90°{rotateSteps > 0 ? ` (${rotateSteps * 90}°)` : ""}</button>
+        {(displayPages?.length || 0) > 1 && (
+          <button type="button" onClick={rotateAllPages} title="Rotate every page 90° — use when the whole booklet's art needs the same rotation" style={{
+            padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor:"pointer", fontFamily:"inherit",
+            background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.5)",
+          }}>Rotate All 90°</button>
+        )}
       </div>
       {fitMode === "scale" && (
         <div style={{ display:"flex", alignItems:"center", gap:3 }}>
@@ -3252,9 +3344,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                     const files = [];
                     if (rawFileRef.current) files.push([rawFileRef.current, rawFileRef.current.name || baseName + "_raw"]);
                     if (!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob) files.push([approvalPkg.printReadyBlob, baseName + "_print-ready.pdf"]);
-                    approvalPkg.previewBlobs.forEach((b, i) => {
-                      if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
-                    });
+                    if (approvalPkg.previewPdfBlob) {
+                      files.push([approvalPkg.previewPdfBlob, baseName + "_proof.pdf"]);
+                    } else {
+                      approvalPkg.previewBlobs.forEach((b, i) => {
+                        if (b) files.push([b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`]);
+                      });
+                    }
                     if (approvalPkg.manifestBlob) files.push([approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt"]);
                     for (let i = 0; i < files.length; i++) {
                       dlFile(files[i][0], files[i][1]);
@@ -3283,12 +3379,17 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
                           }}>Print-ready PDF</button>
                         )}
-                        {previewCount > 0 && (
+                        {approvalPkg.previewPdfBlob ? (
+                          <button type="button" onClick={() => dlFile(approvalPkg.previewPdfBlob, baseName + "_proof.pdf")} style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          }}>Proof PDF ({previewCount} pp)</button>
+                        ) : previewCount > 0 ? (
                           <button type="button" onClick={() => approvalPkg.previewBlobs.forEach((b, i) => { if (b) dlFile(b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`); })} style={{
                             padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
                             borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
                           }}>Previews ({previewCount})</button>
-                        )}
+                        ) : null}
                         <button type="button" onClick={() => dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt")} style={{
                           padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
                           borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
@@ -4358,7 +4459,7 @@ function App(){
         </div>
       </section>
 
-      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
 
       <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
@@ -4750,7 +4851,7 @@ function App(){
         </div>}
         </div>
         {!mob&&<div style={{width:320,flexShrink:0,display:"flex",flexDirection:"column",gap:10}}>
-          <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+          <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
           <Panel result={result} debugUnlocked={debugUnlocked}/>
           <button type="button" onClick={handleAddToOrder} style={{width:"100%",padding:"14px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:15,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",transition:"opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
