@@ -44,7 +44,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-06 · STK-NODOTS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-07 · STK-PREVIEW</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Sticker Calculator v1
@@ -516,6 +516,56 @@ function generateStickerTemplate(longE, shortE, sizeLabel) {
 // Sidebar sticker preview — flat sheet mockup with subtle perspective tilt.
 // Designed to mirror saddle stitch's SidebarBookPreview visual language: 190px viewport,
 // CMYK eyebrow, OPEN chip, size/qty caption. No fold engine — sticker is always flat.
+// ── Flat dimensioned "spec" drawing shown in the preview card before artwork is
+//    uploaded. Charts width × height with dimension lines; for booklets, marks the
+//    bind (spine) edge. Swapped for the 3D render as soon as art is added.
+function DimSpec({ wIn, hIn, bindEdge, bindLabel }) {
+  const VW = 320, VH = 190;
+  const padL = 20, padT = 20, padR = 46, padB = 34;
+  const availW = VW - padL - padR, availH = VH - padT - padB;
+  const w = Math.max(0.1, Number(wIn) || 1), h = Math.max(0.1, Number(hIn) || 1);
+  const scale = Math.min(availW / w, availH / h);
+  const sw = w * scale, sh = h * scale;
+  const x0 = padL + (availW - sw) / 2, y0 = padT + (availH - sh) / 2;
+  const L = "#6fb2ff", T = "#eef4fb";
+  const fmt = n => (Math.round((Number(n) || 0) * 100) / 100).toString();
+  const dimYB = y0 + sh + 15, dimXR = x0 + sw + 16;
+  const be = Number(bindEdge) || 0;
+  const spineV = be > 0 && Math.abs(be - h) <= Math.abs(be - w);
+  const spineH = be > 0 && !spineV;
+  const ah = (x, y, d) =>
+    d === "l" ? `M${x+5},${y-3} L${x},${y} L${x+5},${y+3}` :
+    d === "r" ? `M${x-5},${y-3} L${x},${y} L${x-5},${y+3}` :
+    d === "u" ? `M${x-3},${y+5} L${x},${y} L${x+3},${y+5}` :
+                `M${x-3},${y-5} L${x},${y} L${x+3},${y-5}`;
+  return (
+    <svg width="100%" height="100%" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMid meet" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+      <rect x={x0} y={y0} width={sw} height={sh} fill="#f4efe2" stroke="#cfd8e3" strokeWidth="1" rx="1.5" />
+      <rect x={x0+6} y={y0+6} width={Math.max(0, sw-12)} height={Math.max(0, sh-12)} fill="none" stroke="rgba(20,28,40,.14)" strokeWidth="0.75" strokeDasharray="3 3" />
+      {spineV && <g>
+        <line x1={x0} y1={y0} x2={x0} y2={y0+sh} stroke="#6b7890" strokeWidth="3" />
+        <text x={x0+10} y={y0+sh/2} fill="#8492a8" fontFamily="Segoe UI, sans-serif" fontSize="7.5" fontWeight="800" letterSpacing="2" textAnchor="middle" transform={`rotate(-90 ${x0+10} ${y0+sh/2})`}>SPINE</text>
+      </g>}
+      {spineH && <g>
+        <line x1={x0} y1={y0} x2={x0+sw} y2={y0} stroke="#6b7890" strokeWidth="3" />
+        <text x={x0+sw/2} y={y0+12} fill="#8492a8" fontFamily="Segoe UI, sans-serif" fontSize="7.5" fontWeight="800" letterSpacing="2" textAnchor="middle">SPINE</text>
+      </g>}
+      <line x1={x0} y1={y0+sh+3} x2={x0} y2={dimYB+3} stroke={L} strokeWidth="0.6" opacity="0.5" />
+      <line x1={x0+sw} y1={y0+sh+3} x2={x0+sw} y2={dimYB+3} stroke={L} strokeWidth="0.6" opacity="0.5" />
+      <line x1={x0} y1={dimYB} x2={x0+sw} y2={dimYB} stroke={L} strokeWidth="1.2" />
+      <path d={ah(x0,dimYB,"l")} fill="none" stroke={L} strokeWidth="1.2" />
+      <path d={ah(x0+sw,dimYB,"r")} fill="none" stroke={L} strokeWidth="1.2" />
+      <text x={x0+sw/2} y={dimYB+13} fill={T} fontFamily="Segoe UI, sans-serif" fontSize="11" fontWeight="700" textAnchor="middle">{fmt(w)}″</text>
+      <line x1={x0+sw+3} y1={y0} x2={dimXR+3} y2={y0} stroke={L} strokeWidth="0.6" opacity="0.5" />
+      <line x1={x0+sw+3} y1={y0+sh} x2={dimXR+3} y2={y0+sh} stroke={L} strokeWidth="0.6" opacity="0.5" />
+      <line x1={dimXR} y1={y0} x2={dimXR} y2={y0+sh} stroke={L} strokeWidth="1.2" />
+      <path d={ah(dimXR,y0,"u")} fill="none" stroke={L} strokeWidth="1.2" />
+      <path d={ah(dimXR,y0+sh,"d")} fill="none" stroke={L} strokeWidth="1.2" />
+      <text x={dimXR+5} y={y0+sh/2+4} fill={T} fontFamily="Segoe UI, sans-serif" fontSize="11" fontWeight="700" textAnchor="start">{fmt(h)}″</text>
+    </svg>
+  );
+}
+
 function SidebarStickerPreview({ longEdge, shortEdge, quantity, frontArt, frontColor, onOpenPreview }){
   const wIn = Number(longEdge) || 6;
   const hIn = Number(shortEdge) || 4;
@@ -543,22 +593,27 @@ function SidebarStickerPreview({ longEdge, shortEdge, quantity, frontArt, frontC
   const grayFilter = frontColor === "bw" ? "grayscale(1)" : "none";
   const clickable = hasArt && typeof onOpenPreview === "function";
   return (
-    <div style={{ borderRadius: 6, border: `1px solid ${CC.border}`, overflow: "hidden", background: CC.white }}>
+    <div style={{ borderRadius: 6, border: `1px solid ${CC.border}`, overflow: "hidden", background: CC.white, pointerEvents: "auto" }}>
       <div className="lh-viewport"
         role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
         onClick={clickable ? onOpenPreview : undefined}
         onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenPreview(); } } : undefined}
         title={clickable ? "Open full preview" : undefined}
         style={{ height: 190, borderRadius: 0, border: "none", cursor: clickable ? "zoom-in" : "default", perspective: 1200 }}>
-        {/* drop shadow */}
-        <div style={{ position: "absolute", bottom: 22, width: "60%", height: 12, background: "radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)", filter: "blur(6px)", pointerEvents: "none" }} />
-        {/* Tilted sheet — flat-sheet 3D card, no fold rendering */}
-        <div style={{ width: sheetW, height: sheetH, transform: "rotateX(-8deg) rotateY(22deg)", transformStyle: "preserve-3d", boxShadow: "0 12px 28px rgba(0,0,0,.4)", borderRadius: 2, overflow: "hidden", background: "#f7f3e8" }}>
-          <img src={imgSrc} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", filter: grayFilter }} />
-        </div>
+        {/* drop shadow — only under the 3D render */}
+        {hasArt && <div style={{ position: "absolute", bottom: 22, width: "60%", height: 12, background: "radial-gradient(ellipse, rgba(0,0,0,.5), transparent 70%)", filter: "blur(6px)", pointerEvents: "none" }} />}
+        {hasArt ? (
+          /* Tilted sheet — flat-sheet 3D card, no fold rendering */
+          <div style={{ width: sheetW, height: sheetH, transform: "rotateX(-8deg) rotateY(22deg)", transformStyle: "preserve-3d", boxShadow: "0 12px 28px rgba(0,0,0,.4)", borderRadius: 2, overflow: "hidden", background: "#f7f3e8" }}>
+            <img src={imgSrc} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", filter: grayFilter }} />
+          </div>
+        ) : (
+          /* Flat dimensioned spec before upload */
+          <DimSpec wIn={wIn} hIn={hIn} />
+        )}
         {/* Top-left eyebrow */}
         <div style={{ position: "absolute", top: 10, left: 14, display: "flex", alignItems: "center", gap: 6, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,.65)", letterSpacing: ".12em", pointerEvents: "none" }}>
-          <span>{hasArt ? "YOUR ARTWORK · LIVE" : "3D PREVIEW · LIVE"}</span>
+          <span>{hasArt ? "YOUR ARTWORK · LIVE" : "SIZE SPEC · LIVE"}</span>
         </div>
         {clickable && <div style={{ position: "absolute", top: 10, right: 12, fontSize: 9, fontWeight: 700, letterSpacing: ".1em", color: "rgba(255,255,255,.75)", background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", padding: "3px 7px", borderRadius: 4, pointerEvents: "none" }}>OPEN ⤢</div>}
         {/* Bottom caption */}
