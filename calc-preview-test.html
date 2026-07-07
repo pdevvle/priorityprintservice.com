@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-07 · SS-PREVIEW</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-07 · SS-ROTSPINE</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -2048,14 +2048,24 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // Rotate EVERY page 90° in one action. Booklets are usually all one orientation,
   // so this spares the user stepping through each page. Changing the transforms
   // trips the clear-approval effect, forcing a fresh review.
-  const rotateAllPages = () => {
+  // Rotate every page at once. "uniform" steps all pages the same way. "spine" and
+  // "edge" are parity-aware: facing pages bind on opposite edges, so recto (front
+  // cover + odd reader pages = EVEN index, spine on the left) and verso (even reader
+  // pages = ODD index, spine on the right) rotate in OPPOSITE directions. Assumes
+  // head-up source art. spine → heads point into the binding; edge → toward fore-edge.
+  const rotateAll = (mode) => {
     const n = displayPages?.length || 0;
     if (n <= 1) { setRotateSteps(s => (s + 1) % 4); return; }
     setPageTransforms(p => {
       const next = { ...p };
       for (let i = 0; i < n; i++) {
         const cur = next[i] || DEFAULT_TX;
-        next[i] = { ...cur, rotateSteps: (cur.rotateSteps + 1) % 4 };
+        const recto = i % 2 === 0;
+        let steps = cur.rotateSteps;
+        if (mode === "uniform") steps = (cur.rotateSteps + 1) % 4;
+        else if (mode === "spine") steps = recto ? 3 : 1;
+        else if (mode === "edge") steps = recto ? 1 : 3;
+        next[i] = { ...cur, rotateSteps: steps };
       }
       return next;
     });
@@ -3269,10 +3279,17 @@ update();
           color: rotateSteps > 0 ? "#000" : "rgba(255,255,255,.5)",
         }}>Rotate 90°{rotateSteps > 0 ? ` (${rotateSteps * 90}°)` : ""}</button>
         {(displayPages?.length || 0) > 1 && (
-          <button type="button" onClick={rotateAllPages} title="Rotate every page 90° — use when the whole booklet's art needs the same rotation" style={{
-            padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor:"pointer", fontFamily:"inherit",
-            background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.5)",
-          }}>Rotate All 90°</button>
+          <select value="" onChange={e => { const v = e.target.value; if (v) rotateAll(v); e.target.value = ""; }}
+            title="Rotate every page at once. Heads → Spine rotates facing pages in opposite directions so each head points into the binding."
+            style={{
+              padding:"6px 10px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)",
+              cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.6)",
+            }}>
+            <option value="" disabled>Rotate all…</option>
+            <option value="uniform">↻ Uniform 90°</option>
+            <option value="spine">Heads → Spine</option>
+            <option value="edge">Heads → Fore-edge</option>
+          </select>
         )}
         <button type="button" onClick={undoTx} disabled={txHistory.length === 0} title={txHistory.length ? `Undo last art change (${txHistory.length} step${txHistory.length === 1 ? "" : "s"} available)` : "No changes to undo"} style={{
           padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor: txHistory.length ? "pointer" : "default", fontFamily:"inherit",
