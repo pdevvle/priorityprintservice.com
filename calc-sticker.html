@@ -44,7 +44,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-07 · STK-PREVIEW</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · STK-SCRLOCK</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Sticker Calculator v1
@@ -687,6 +687,13 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
   const side = "front"; // Stickers are always single-sided
   const [proofOpen, setProofOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  // Lock background page scroll while a modal (proof or 3D preview) is open.
+  useEffect(() => {
+    if (!proofOpen && !previewOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [proofOpen, previewOpen]);
   const [approved, setApproved] = useState(false);
   const [dropHover, setDropHover] = useState(false);
   const [loading, setLoading] = useState(false);
