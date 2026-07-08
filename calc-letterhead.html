@@ -44,7 +44,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-07 · LH-PREVIEW</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · LH-PORTRAIT</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Letterhead Calculator v1
@@ -617,8 +617,9 @@ function DimSpec({ wIn, hIn, bindEdge, bindLabel }) {
 }
 
 function SidebarLetterheadPreview({ longEdge, shortEdge, quantity, frontArt, frontColor, sides, onOpenPreview }){
-  const wIn = Number(longEdge) || 11;
-  const hIn = Number(shortEdge) || 8.5;
+  // Letterhead is always portrait — render short edge as width, long edge as height.
+  const wIn = Number(shortEdge) || 8.5;
+  const hIn = Number(longEdge) || 11;
   const maxDim = 150, longSide = Math.max(wIn, hIn), px = maxDim / longSide;
   const sheetW = wIn * px, sheetH = hIn * px;
   const inkColor = frontColor === "bw" ? "#2b2b2b" : CK.cyan;
@@ -689,7 +690,7 @@ function MobilePreviewBar(props){
     obs.observe(el);
     return () => obs.disconnect();
   }, []);
-  const wIn = Number(longEdge) || 11, hIn = Number(shortEdge) || 8.5;
+  const wIn = Number(shortEdge) || 8.5, hIn = Number(longEdge) || 11; // portrait
   const hasArt = !!frontArt?.dataUrl;
   const clickable = hasArt && typeof onOpenPreview === "function";
   return (
