@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-07 · PC-PREVIEW</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · PC-SCRLOCK</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Postcard Calculator v1
@@ -1346,6 +1346,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   if (prevFoldType.current !== foldType) { prevFoldType.current = foldType; if (foldFlipped) setFoldFlipped(false); }
   const [proofOpen, setProofOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  // Lock background page scroll while a modal (proof or 3D preview) is open.
+  useEffect(() => {
+    if (!proofOpen && !previewOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [proofOpen, previewOpen]);
   const [previewAngle, setPreviewAngle] = useState(0);
   const [approved, setApproved] = useState(false);
   const [dropHover, setDropHover] = useState(false);
