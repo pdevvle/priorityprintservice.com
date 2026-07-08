@@ -44,7 +44,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · LH-PORTRAIT</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · LH-FRONTONLY</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Letterhead Calculator v1
@@ -2295,7 +2295,7 @@ function App() {
   const [sizeLabel, setSizeLabel] = useState(SIZE_PRESETS[0] ? SIZE_PRESETS[0].label : "8.5×11");
   const [frontColor, setFrontColor] = useState("color");
   const [backColor, setBackColor] = useState("color");
-  const [sides, setSides] = useState(2);
+  const [sides, setSides] = useState(1); // letterhead defaults to front only
   const [paper, setPaper] = useState(PAPERS_NC[0]);
   const [perforation, setPerforation] = useState(0);
   const [perfDir, setPerfDir] = useState("length");
