@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · GC-SCRLOCK</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · GC-MATCHBTN</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -2675,10 +2675,10 @@ generate();
             <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <FitToggle />
               {onSizeOverride && effectiveDims && (
-                <button type="button" onClick={handleMatchSize} style={{
-                  padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
-                  border: "1px solid rgba(255,255,255,.2)", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)",
-                }}>↔ Match size to art</button>
+                <button type="button" onClick={() => { if (confirm("This will change your selected size to match your uploaded artwork's dimensions. Continue?")) handleMatchSize(); }} style={{
+                  padding: "7px 14px", fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
+                  border: "1px solid rgba(96,165,250,.55)", background: "rgba(59,130,246,.18)", color: "#bfdbfe",
+                }}>↔ Match order size to art</button>
               )}
             </div>
             {approvalPkg && (approved || debug) && (() => {
