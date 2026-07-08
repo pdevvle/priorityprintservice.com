@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · PB-SCRLOCK</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · PB-TRIMHALO</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -2434,9 +2434,12 @@ update();
       ctx.setLineDash([6, 4]);
       ctx.strokeRect(1, 1, w - 2, h - 2);
 
-      // Trim line (white dashed)
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      // Trim: white dash with a black halo so the cut line reads on any background
       ctx.setLineDash([6, 4]);
+      const _trimLW = Math.max(1, w / 400);
+      ctx.lineWidth = _trimLW + 2.5; ctx.strokeStyle = "rgba(0,0,0,0.9)";
+      ctx.strokeRect(trimX, trimY, w - trimX * 2, h - trimY * 2);
+      ctx.lineWidth = _trimLW; ctx.strokeStyle = "#ffffff";
       ctx.strokeRect(trimX, trimY, w - trimX * 2, h - trimY * 2);
 
       // Safety line (green dashed)
@@ -3969,7 +3972,7 @@ update();
                             {/* Bleed — red dashed at container edge (art must extend to here) */}
                             <div style={{ position:"absolute", inset:0, border:"2.5px dashed #ef4444", boxSizing:"border-box", opacity:0.8 }}/>
                             {/* Trim — black dashed inset by bleed amount (where the cut happens) */}
-                            <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2.5px dashed #e2e8f0", boxSizing:"border-box", borderRadius:rcCSS }}/>
+                            <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2px dashed #fff", boxSizing:"border-box", borderRadius:rcCSS, filter:"drop-shadow(1px 0 0 #000) drop-shadow(-1px 0 0 #000) drop-shadow(0 1px 0 #000) drop-shadow(0 -1px 0 #000)" }}/>
                             {/* Safety — green dashed further inset (keep text inside) */}
                             <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2.5px dashed #38a169", boxSizing:"border-box", borderRadius:rcCSS }}/>
                             {isWrapCover ? <>
@@ -4053,7 +4056,7 @@ update();
                                   {/* Bleed — red dashed at container edge */}
                                   <div style={{ position:"absolute", inset:0, border:"2px dashed #ef4444", boxSizing:"border-box", opacity:0.8, pointerEvents:"none" }}/>
                                   {/* Trim — light dashed inset by bleed */}
-                                  <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2px dashed #e2e8f0", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
+                                  <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2px dashed #fff", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none", filter:"drop-shadow(1px 0 0 #000) drop-shadow(-1px 0 0 #000) drop-shadow(0 1px 0 #000) drop-shadow(0 -1px 0 #000)" }}/>
                                   {/* Safety — green dashed further inset */}
                                   <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2px dashed #38a169", boxSizing:"border-box", borderRadius: rcCSS, pointerEvents:"none" }}/>
                                   {/* Spine — perfect bound: always left */}
