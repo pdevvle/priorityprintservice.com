@@ -44,7 +44,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · LH-SCRLOCK</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · LH-TRIMHALO</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Letterhead Calculator v1
@@ -1135,8 +1135,12 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
       ctx.setLineDash([6, 4]);
       ctx.strokeRect(1, 1, w - 2, h - 2);
 
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      // Trim: white dash with a black halo so the cut line reads on any background
       ctx.setLineDash([6, 4]);
+      const _trimLW = Math.max(1, w / 400);
+      ctx.lineWidth = _trimLW + 2.5; ctx.strokeStyle = "rgba(0,0,0,0.9)";
+      ctx.strokeRect(trimX, trimY, w - trimX * 2, h - trimY * 2);
+      ctx.lineWidth = _trimLW; ctx.strokeStyle = "#ffffff";
       ctx.strokeRect(trimX, trimY, w - trimX * 2, h - trimY * 2);
 
       ctx.strokeStyle = "#38a169";
@@ -1656,7 +1660,7 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
                 {/* Bleed guide (red dashed) — at container edge */}
                 <div style={{ position: "absolute", inset: 0, border: "2.5px dashed #ef4444", pointerEvents: "none", zIndex: 1, opacity: 0.8 }} />
                 {/* Trim guide (white/light dashed) — inset by bleed */}
-                <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "2.5px dashed #e2e8f0", pointerEvents: "none", zIndex: 1 }} />
+                <div style={{ position: "absolute", top: `${bleedPctY}%`, left: `${bleedPctX}%`, right: `${bleedPctX}%`, bottom: `${bleedPctY}%`, border: "2px dashed #fff", pointerEvents: "none", zIndex: 1, filter: "drop-shadow(1px 0 0 #000) drop-shadow(-1px 0 0 #000) drop-shadow(0 1px 0 #000) drop-shadow(0 -1px 0 #000)" }} />
                 {/* Safety guide (green dashed) — further inset */}
                 <div style={{ position: "absolute", top: `${safetyPctY}%`, left: `${safetyPctX}%`, right: `${safetyPctX}%`, bottom: `${safetyPctY}%`, border: "2.5px dashed #38a169", pointerEvents: "none", zIndex: 1 }} />
               </>}
