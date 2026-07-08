@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · PB-SPREADS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · PB-SPREADS2</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -3396,14 +3396,6 @@ update();
       <input ref={fileInputRef} type="file" accept=".pdf,image/*" multiple onChange={handleFiles} style={{display:"none"}} />
       <input ref={slotInputRef} type="file" accept=".pdf,image/*" onChange={handleSlotFile} style={{display:"none"}} />
 
-      <label style={{ display:"flex", alignItems:"flex-start", gap:8, margin:"0 0 8px", fontSize:11.5, lineHeight:1.35, color:CC.mid, cursor:"pointer", userSelect:"none" }}
-        title="Turn on if your PDF has two pages side-by-side per sheet (reader's spreads). Each spread is split down the middle into single pages.">
-        <input type="checkbox" checked={readerSpreads}
-          onChange={e => { const v = e.target.checked; setReaderSpreads(v); if (rawFileRef.current) processFiles([rawFileRef.current], { splitSpreads: v }); }}
-          style={{ width:15, height:15, marginTop:1, cursor:"pointer", accentColor: CK.cyan, flexShrink:0 }} />
-        <span>My file has <strong>reader's spreads</strong> — two pages per sheet. Split each spread into single pages.</span>
-      </label>
-
       {!hasFile ? (
         /* ── No file yet: dropzone ── */
         <>
@@ -3688,6 +3680,13 @@ update();
                   </div>
                   <FitToggle dark />
                 </div>
+                <label style={{ display:"flex", alignItems:"center", gap:8, marginTop:8, padding:"7px 10px", borderRadius:6, background:"rgba(255,255,255,.05)", border:"1px solid rgba(255,255,255,.1)", fontSize:11, color:"rgba(255,255,255,.7)", cursor:"pointer", userSelect:"none" }}
+                  title="Turn on if your PDF has two pages side-by-side per sheet (reader's spreads). Each spread is split down the middle into single pages.">
+                  <input type="checkbox" checked={readerSpreads}
+                    onChange={e => { const v = e.target.checked; setReaderSpreads(v); if (rawFileRef.current) processFiles([rawFileRef.current], { splitSpreads: v }); }}
+                    style={{ width:15, height:15, cursor:"pointer", accentColor: CK.cyan, flexShrink:0 }} />
+                  <span><strong style={{ color:"#fff" }}>Activate Reader's Spread Formatting</strong> — your file has two pages per sheet; split each spread into single pages.</span>
+                </label>
                 <div style={{ fontSize:10, color:"rgba(255,255,255,.45)", marginTop:6, lineHeight:1.4 }}>
                   {proof === 0 && !artApproved && "Review each page, then click Approve Now to confirm your artwork is print-ready. Your approval means we print exactly what you see."}
                   {proof === 0 && artApproved && "✓ Artwork approved — we'll print exactly what you see. You can change your proof option or close this modal."}
