@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-07 · PB-ROTSPINE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · PB-SPREADS</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1409,6 +1409,48 @@ async function extractPdfPages(file, onProgress) {
   return { pages: result, dims: { wIn: pdfW, hIn: pdfH, wPx: pxW, hPx: pxH, source: "pdf" }, pdfDoc: pdf };
 }
 
+// Split a reader's-spread PDF into single pages. Any page wider than ~1.5× the
+// booklet trim width is treated as a 2-up spread and cut down the middle (left
+// half, then right half); narrower pages (standalone cover/back) pass through
+// unchanged. Splitting in document order reconstructs correct reading order.
+// Rendered at print DPI and returned as an "image" source so the existing
+// single-page pipeline (proof, per-page transforms, print-ready) needs no changes.
+async function splitReaderSpreads(pdfDoc, refWidthIn, onProgress) {
+  const DPI = 300;
+  const pages = [];
+  let sW = 0, sH = 0;
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    if (onProgress) onProgress(i, pdfDoc.numPages);
+    const pg = await pdfDoc.getPage(i);
+    const [x0, y0, x1, y1] = pg.view;
+    const pwIn = (x1 - x0) / 72, phIn = (y1 - y0) / 72;
+    const isSpread = refWidthIn > 0 && pwIn > refWidthIn * 1.5;
+    const vp = pg.getViewport({ scale: DPI / 72 });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+    await pg.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+    if (isSpread) {
+      const halfW = Math.floor(canvas.width / 2);
+      for (let s = 0; s < 2; s++) {
+        const c = document.createElement("canvas");
+        c.width = halfW; c.height = canvas.height;
+        c.getContext("2d").drawImage(canvas, s === 0 ? 0 : canvas.width - halfW, 0, halfW, canvas.height, 0, 0, halfW, canvas.height);
+        pages.push({ dataUrl: c.toDataURL("image/jpeg", 0.85) });
+      }
+      if (!sW) { sW = pwIn / 2; sH = phIn; }
+    } else {
+      pages.push({ dataUrl: canvas.toDataURL("image/jpeg", 0.85) });
+      if (!sW) { sW = pwIn; sH = phIn; }
+    }
+  }
+  pages.forEach((p, idx) => { p.label = pageLabel(idx, pages.length); });
+  return {
+    pages,
+    dims: { wIn: +sW.toFixed(3), hIn: +sH.toFixed(3), wPx: Math.round(sW * DPI), hPx: Math.round(sH * DPI), source: "image" },
+    pdfDoc: null,
+  };
+}
+
 async function extractImagePages(files, onProgress) {
   const sorted = Array.from(files).filter(f => f.type.startsWith("image/"))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -2029,6 +2071,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [spread, setSpread] = useState(0);
   const [fileName, setFileName] = useState("");
   const [uploadPageCount, setUploadPageCount] = useState(0);
+  const [readerSpreads, setReaderSpreads] = useState(false); // customer uploaded 2-up reader spreads
   // artDims and pageTransforms are now lifted to App so handleAddToOrder can
   // serialize them into WC order metadata. Received via props.
   // Per-page transforms: keyed by page idx → { fitMode, artScale, rotateSteps }
@@ -3066,14 +3109,21 @@ update();
 
   useEffect(() => { if (spread >= totalSpreads) setSpread(Math.max(0, totalSpreads - 1)); }, [totalSpreads]);
 
-  async function processFiles(fileList) {
+  async function processFiles(fileList, opts = {}) {
     if (!fileList || !fileList.length) return;
+    const splitSpreads = opts.splitSpreads != null ? opts.splitSpreads : readerSpreads;
     setLoading(true); setFileName(fileList[0].name); setLoadingProgress(null);
     try {
       const onProgress = (current, total) => setLoadingProgress({ current, total });
-      const extracted = fileList[0].type === "application/pdf"
+      let extracted = fileList[0].type === "application/pdf"
         ? await extractPdfPages(fileList[0], onProgress)
         : await extractImagePages(fileList, onProgress);
+      // Reader's-spread upload → cut each 2-up sheet into single pages so the
+      // proof, per-page transforms, and print-ready all operate on real pages.
+      if (fileList[0].type === "application/pdf" && splitSpreads && extracted.pdfDoc) {
+        const split = await splitReaderSpreads(extracted.pdfDoc, dims.w, onProgress);
+        if (split.pages.length) extracted = split;
+      }
       setRawPages(extracted.pages);
       setArtDims(extracted.dims);
       setUploadPageCount(extracted.pages.length);
@@ -3345,6 +3395,14 @@ update();
     <div style={{ marginTop: 8 }}>
       <input ref={fileInputRef} type="file" accept=".pdf,image/*" multiple onChange={handleFiles} style={{display:"none"}} />
       <input ref={slotInputRef} type="file" accept=".pdf,image/*" onChange={handleSlotFile} style={{display:"none"}} />
+
+      <label style={{ display:"flex", alignItems:"flex-start", gap:8, margin:"0 0 8px", fontSize:11.5, lineHeight:1.35, color:CC.mid, cursor:"pointer", userSelect:"none" }}
+        title="Turn on if your PDF has two pages side-by-side per sheet (reader's spreads). Each spread is split down the middle into single pages.">
+        <input type="checkbox" checked={readerSpreads}
+          onChange={e => { const v = e.target.checked; setReaderSpreads(v); if (rawFileRef.current) processFiles([rawFileRef.current], { splitSpreads: v }); }}
+          style={{ width:15, height:15, marginTop:1, cursor:"pointer", accentColor: CK.cyan, flexShrink:0 }} />
+        <span>My file has <strong>reader's spreads</strong> — two pages per sheet. Split each spread into single pages.</span>
+      </label>
 
       {!hasFile ? (
         /* ── No file yet: dropzone ── */
