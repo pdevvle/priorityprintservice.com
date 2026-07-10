@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · GC-TRIMHALO</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-10 · GC-TMPLFIX</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -4178,7 +4178,7 @@ function App() {
                   {dimLong}" × {dimShort}" {fold.panels > 1 ? `· ${fold.panels} panels` : "flat"} · Bleed, trim, safety{fold.panels > 1 ? ", fold lines" : ""}
                 </div>
               </div>
-              <button type="button" onClick={() => generateGreetingTemplate(dimLong, dimShort, foldType, fold.panels, foldDir, sizeLabel, perfCount, perfDir, perfPositions)} style={{
+              <button type="button" onClick={() => generateGreetingTemplate(dimLong, dimShort, foldType, fold.panels, foldDir, (sizeMode === "custom" ? `${dimShort}×${dimLong}` : sizeLabel), perfCount, perfDir, perfPositions)} style={{
                 padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CK.cyan}`, background: CK.cyanLight, color: CK.cyan, whiteSpace: "nowrap",
               }}>📐 Download Template</button>
