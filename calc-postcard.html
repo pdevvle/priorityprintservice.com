@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-10 · PC-TMPLFIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · PC-TIPUI</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Postcard Calculator v1
@@ -2452,7 +2452,7 @@ generate();
           {/* Fold selection + 3D Preview */}
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>
-              <Sel label="Fold Type" value={foldType} onChange={onFoldChange}>
+              <Sel label={<Tip k="fold_type">Fold Type</Tip>} value={foldType} onChange={onFoldChange}>
                 {availableFoldTypes(longEdge, shortEdge, true).map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
               </Sel>
             </div>
@@ -2465,7 +2465,7 @@ generate();
             )}
           </div>
           {panels > 1 && sizeMode === "custom" && (
-            <Pil label="Fold Direction" value={foldDir} onChange={onFoldDirChange} options={[
+            <Pil label={<Tip k="fold_direction">Fold Direction</Tip>} value={foldDir} onChange={onFoldDirChange} options={[
               { t: `Fold Long Side (${longEdge}")`, v: "long" },
               { t: `Fold Short Side (${shortEdge}")`, v: "short" },
             ]} />
@@ -3203,13 +3203,56 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
   </>);
 }
 
+// Inline explanatory copy for every option's tooltip. Server content
+// (PPS_CONFIG.tips[key]) and per-browser edits both override this fallback.
+const TT = {
+  quantity:{t:"Quantity",c:"How many finished pieces you need. Larger runs lower the per-piece price — check the quantity price breaks to find the best value."},
+  size:{t:"Size",c:"The finished trim size of your piece. Pick a standard size or switch to Custom to enter exact dimensions."},
+  custom_long:{t:"Long Edge",c:"The longer of your two custom dimensions, in inches."},
+  custom_short:{t:"Short Edge",c:"The shorter of your two custom dimensions, in inches."},
+  custom_width:{t:"Width",c:"The width of your custom size, in inches."},
+  custom_height:{t:"Height",c:"The height of your custom size, in inches."},
+  paper:{t:"Paper Stock",c:"The stock your piece prints on. Heavier weights feel more substantial; coated stocks add sheen and durability."},
+  sides:{t:"Sides Printed",c:"Print on the front only, or on both sides of the sheet."},
+  print_color:{t:"Print Color",c:"Full color (CMYK) reproduces photos and color artwork. Greyscale prints in black only — a lower-cost choice for text-heavy pieces."},
+  fold_type:{t:"Fold Type",c:"How the flat sheet is folded into its finished form. Each style changes the panel layout — upload artwork to preview the fold."},
+  fold_direction:{t:"Fold Direction",c:"Which edge the folds run along — fold the long side or the short side of the sheet."},
+  coating_sides:{t:"Sides to Coat",c:"Apply the coating to the front only, or to both sides."},
+  perf_direction:{t:"Perforation Direction",c:"Which way the tear-off perforation line runs across the sheet."},
+  proofing:{t:"Proofing",c:"Whether we send a digital proof for your approval before we print. Proofs catch mistakes but add a little turnaround time."},
+  artwork_design:{t:"Artwork & Design",c:"How you'll provide artwork — upload now, email later, or have us design it. Design options add production time."},
+  pages_edits:{t:"Pages Needing Edits",c:"How many of your pages our team needs to edit or fix. More edit pages add design turnaround."},
+  ship_state:{t:"Ship-To State",c:"Where your order ships. We estimate transit time and any rush cost from your delivery state."},
+  spine_side:{t:"Spine Side",c:"Which edge the binding runs along — where the spine sits on the finished book."},
+  cover_paper:{t:"Cover Paper",c:"The stock used for the cover. A heavier cover gives the book a sturdier feel."},
+  inside_paper:{t:"Inside Paper",c:"The stock used for the inside pages."},
+  cover_print:{t:"Cover Printing",c:"Full color or greyscale printing on the cover."},
+  inside_print:{t:"Inside Printing",c:"Full color or greyscale printing on the inside pages."},
+  color_pages:{t:"Color Pages",c:"How many interior pages print in full color. The remaining pages print in black & white."},
+  bw_pages:{t:"Black & White Pages",c:"How many interior pages print in black only."},
+  cover_layout:{t:"Cover Layout",c:"How the cover is imposed on press, which affects the spine wrap and pricing."},
+  bind_style:{t:"Bind Style",c:"How the book is bound along its spine edge."},
+  magnetic_backer:{t:"Magnetic Backer",c:"Add a magnet to the back so the finished piece sticks to metal surfaces."},
+  size_mode:{t:"Size Mode",c:"Choose a standard preset size or enter your own custom dimensions."},
+};
+function readTipOv(k){ if(!k) return null; try{ return (JSON.parse(localStorage.getItem("ppsTipOverrides")||"{}"))[k]||null; }catch(e){ return null; } }
+function writeTipOv(k,v){ try{ const a=JSON.parse(localStorage.getItem("ppsTipOverrides")||"{}"); a[k]=v; localStorage.setItem("ppsTipOverrides",JSON.stringify(a)); }catch(e){} }
+function tipOvJSON(){ try{ const a=JSON.parse(localStorage.getItem("ppsTipOverrides")||"{}"); const o={}; Object.keys(a).forEach(k=>o[k]={title:a[k].title||"",content:[{type:"text",value:a[k].content||""}]}); return JSON.stringify(o,null,2); }catch(e){ return "{}"; } }
+function Tip({ k, children, dark }){ const d=(typeof TT!=="undefined"&&TT[k])||{}; return <RichTip tipKey={k} title={d.t} content={d.c} dark={dark}>{children}</RichTip>; }
 function RichTip({ children, tipKey, title, content, dark }) {
+  const editOn = typeof window !== "undefined" && window.__ppsTipEdit;
+  const [ov, setOv] = useState(() => readTipOv(tipKey));
+  const [editing, setEditing] = useState(false);
+  const [eT, setET] = useState(""); const [eC, setEC] = useState(""); const [copied, setCopied] = useState(false);
   const tip = tipKey && (window.PPS_CONFIG || {}).tips ? (window.PPS_CONFIG.tips[tipKey] || null) : null;
-  const resolvedTitle = tip ? tip.title : title;
-  const resolvedContent = tip ? tip.content : content;
+  const resolvedTitle = (ov && ov.title != null) ? ov.title : (tip ? tip.title : title);
+  const resolvedContent = (ov && ov.content != null) ? ov.content : (tip ? tip.content : content);
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const mob = useIsMobile();
+  const startEdit = () => { setET(resolvedTitle || ""); setEC(typeof resolvedContent === "string" ? resolvedContent : (Array.isArray(resolvedContent) ? resolvedContent.filter(b=>b.type==="text").map(b=>b.value).join("\n\n") : "")); setEditing(true); };
+  const saveEdit = () => { const v={title:eT,content:eC}; writeTipOv(tipKey,v); setOv(v); setEditing(false); };
+  const copyTipJSON = () => { const j=tipOvJSON(); (navigator.clipboard?navigator.clipboard.writeText(j):Promise.reject()).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),1500);}).catch(()=>prompt("Copy tooltip overrides JSON:",j)); };
   useEffect(() => {
     if (!open) return;
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -3219,7 +3262,7 @@ function RichTip({ children, tipKey, title, content, dark }) {
   useEffect(() => { if (open) document.body.style.overflow = mob ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [open, mob]);
     const hasContent = !!(resolvedTitle || resolvedContent);
     const blocks = Array.isArray(resolvedContent) ? resolvedContent : [{ type: "text", value: resolvedContent || "" }];
-  if (!hasContent) return <>{children}</>;
+  if (!hasContent && !editOn) return <>{children}</>;
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <span style={{ display: "inline-flex", alignItems: "center" }}>
@@ -3230,11 +3273,25 @@ function RichTip({ children, tipKey, title, content, dark }) {
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 99999 }} />
         <div style={{ position: "fixed", ...(mob ? { bottom: 0, left: 0, right: 0, borderRadius: "16px 16px 0 0", maxHeight: "80vh" } : { top: "50%", left: "50%", transform: "translate(-50%, -50%)", borderRadius: 12, maxHeight: "80vh", width: "min(420px, 90vw)" }), background: dark ? "#1a1d23" : "#fff", border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CC.border}`, boxShadow: "0 16px 48px rgba(0,0,0,.25)", zIndex: 100000, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
           <div style={{ padding: "14px 18px 10px", borderBottom: `1px solid ${dark ? "rgba(255,255,255,.08)" : CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: dark ? "#1a1d23" : "#fff", zIndex: 1 }}>
-            <span style={{ fontWeight: 700, fontSize: 14, color: dark ? "#fff" : CC.dark }}>{resolvedTitle || "Info"}</span>
-            <button type="button" onClick={() => setOpen(false)} style={{ background: "none", border: "none", fontSize: 18, color: dark ? "rgba(255,255,255,.4)" : CC.light, cursor: "pointer", padding: "0 4px" }}>✕</button>
+            <span style={{ fontWeight: 700, fontSize: 14, color: dark ? "#fff" : CC.dark }}>{editing ? "Edit Tooltip" : (resolvedTitle || "Info")}</span>
+            <span style={{ display:"flex", gap:8, alignItems:"center" }}>
+              {editOn && !editing && <button type="button" onClick={startEdit} title="Edit this tooltip" style={{ background:"none", border:`1px solid ${CK.cyan}44`, color:CK.cyan, fontSize:11, fontWeight:700, cursor:"pointer", padding:"2px 8px", borderRadius:4, fontFamily:"inherit" }}>✎ Edit</button>}
+              <button type="button" onClick={() => { setOpen(false); setEditing(false); }} style={{ background: "none", border: "none", fontSize: 18, color: dark ? "rgba(255,255,255,.4)" : CC.light, cursor: "pointer", padding: "0 4px" }}>✕</button>
+            </span>
           </div>
           <div style={{ padding: "12px 18px 18px" }}>
-            {blocks.map((b, i) => {
+            {editing ? <>
+              <label style={{ fontSize:11, fontWeight:700, color:CC.mid, display:"block", marginBottom:4 }}>Title</label>
+              <input type="text" value={eT} onChange={e=>setET(e.target.value)} style={{ width:"100%", padding:"7px 9px", fontSize:13, border:`1px solid ${CC.border}`, borderRadius:5, fontFamily:"inherit", marginBottom:10, boxSizing:"border-box" }} />
+              <label style={{ fontSize:11, fontWeight:700, color:CC.mid, display:"block", marginBottom:4 }}>Text</label>
+              <textarea value={eC} onChange={e=>setEC(e.target.value)} rows={5} style={{ width:"100%", padding:"7px 9px", fontSize:13, lineHeight:1.5, border:`1px solid ${CC.border}`, borderRadius:5, fontFamily:"inherit", resize:"vertical", boxSizing:"border-box" }} />
+              <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap", alignItems:"center" }}>
+                <button type="button" onClick={saveEdit} style={{ padding:"7px 14px", fontSize:12, fontWeight:700, border:"none", borderRadius:6, cursor:"pointer", background:CK.cyan, color:"#fff", fontFamily:"inherit" }}>Save</button>
+                <button type="button" onClick={()=>setEditing(false)} style={{ padding:"7px 14px", fontSize:12, fontWeight:600, border:`1px solid ${CC.border}`, borderRadius:6, cursor:"pointer", background:"#fff", color:CC.mid, fontFamily:"inherit" }}>Cancel</button>
+                <button type="button" onClick={copyTipJSON} title="Copy all edited tooltips as JSON for the admin Tooltips tab" style={{ padding:"7px 14px", fontSize:12, fontWeight:600, border:`1px solid ${CC.border}`, borderRadius:6, cursor:"pointer", background:"#fff", color:CC.mid, fontFamily:"inherit", marginLeft:"auto" }}>{copied?"Copied ✓":"Copy JSON"}</button>
+              </div>
+              <p style={{ fontSize:10, color:CC.light, margin:"10px 0 0" }}>Saved to this browser only. Use “Copy JSON” and paste into the admin Tooltips tab for a permanent, site-wide change.</p>
+            </> : blocks.map((b, i) => {
               if (b.type === "text") return <p key={i} style={{ fontSize: 13, lineHeight: 1.6, color: dark ? "rgba(255,255,255,.7)" : CC.mid, margin: i === 0 ? 0 : "10px 0 0" }}>{b.value}</p>;
               if (b.type === "image") return <img key={i} src={b.src} alt={b.alt || ""} loading="lazy" style={{ width: "100%", borderRadius: 6, marginTop: i === 0 ? 0 : 10, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CC.border}` }} />;
               if (b.type === "video") return <div key={i} style={{ marginTop: i === 0 ? 0 : 10, borderRadius: 6, overflow: "hidden" }}><video src={b.src} controls playsInline preload="metadata" style={{ width: "100%", display: "block" }} poster={b.poster} /></div>;
@@ -3517,6 +3574,7 @@ function App() {
   const [mobExpanded, setMobExpanded] = useState(false);
   const [jobName, setJobName] = useState("");
   const debugUnlocked = jobName === "%3414";
+  if (typeof window !== "undefined") window.__ppsTipEdit = debugUnlocked;
 
   // State
   const [qty, setQty] = useState(250);
@@ -3907,23 +3965,29 @@ function App() {
           {/* SECTION 1: Size & Quantity */}
           <Sec title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
             <div style={r2}>
-              <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
+              <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
-              <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
             </div>
-            {sizeMode === "preset"
-              ? <Sel label="Flat/Unfolded Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.filter(s=>!s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}<optgroup label="Common Rack Card Sizes">{SIZE_PRESETS.filter(s=>s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup></Sel>
-              : <div style={r2}>
-                  <TxtNum label="Long Edge (in)" value={longEdge} onChange={setLongEdge} min={2} max={27} />
-                  <TxtNum label="Short Edge (in)" value={shortEdge} onChange={setShortEdge} min={2} max={12.5} />
-                </div>
-            }
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                {sizeMode === "preset"
+                  ? <Sel label={<Tip k="size">Flat/Unfolded Size</Tip>} value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.filter(s=>!s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}<optgroup label="Common Rack Card Sizes">{SIZE_PRESETS.filter(s=>s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup></Sel>
+                  : <div style={r2}>
+                      <TxtNum label={<Tip k="custom_long">Long Edge (in)</Tip>} value={longEdge} onChange={setLongEdge} min={2} max={27} />
+                      <TxtNum label={<Tip k="custom_short">Short Edge (in)</Tip>} value={shortEdge} onChange={setShortEdge} min={2} max={12.5} />
+                    </div>
+                }
+              </div>
+              <div style={{ flexShrink: 0 }}>
+                <Pil label={<Tip k="size_mode">Size Mode</Tip>} value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
+              </div>
+            </div>
             <div style={ST.hr} />
-            <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
+            <Sel label={<Tip k="fold_type">Fold Type</Tip>} value={foldType} onChange={setFoldType}>
               {availableFoldTypes(dimLong, dimShort, true).map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             {fold.panels > 1 && sizeMode === "custom" && (
-              <Pil label="Fold Direction" value={foldDir} onChange={setFoldDir} options={[
+              <Pil label={<Tip k="fold_direction">Fold Direction</Tip>} value={foldDir} onChange={setFoldDir} options={[
                 { t: `Fold Long Side (${dimLong}")`, v: "long" },
                 { t: `Fold Short Side (${dimShort}")`, v: "short" },
               ]} />
@@ -3948,7 +4012,7 @@ function App() {
 
           {/* SECTION 2: Printing & Paper */}
           <Sec title="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
-            <Pil label="Sides Printed" value={sides} onChange={v => setSides(Number(v))} options={[{ t: "Both Sides", v: 2 }, { t: "Front Only", v: 1 }]} />
+            <Pil label={<Tip k="sides">Sides Printed</Tip>} value={sides} onChange={v => setSides(Number(v))} options={[{ t: "Both Sides", v: 2 }, { t: "Front Only", v: 1 }]} />
             <div style={{ ...r2, marginTop: 10 }}>
               <Pil label={frontLabel + " Color"} value={frontColor} onChange={setFrontColor} options={[
                 { t: "Full Color", v: "color", onStyle: { background: "conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)", color: "#fff", fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,.5)" } },
@@ -3960,14 +4024,14 @@ function App() {
               ]} />}
             </div>
             <div style={ST.hr} />
-            <Sel label="Paper" value={paper.val} onChange={v => { const f = ALL_PAPERS.find(p => String(p.val) === v); if (f) setPaper(f); }}>
+            <Sel label={<Tip k="paper">Paper</Tip>} value={paper.val} onChange={v => { const f = ALL_PAPERS.find(p => String(p.val) === v); if (f) setPaper(f); }}>
               {PAPERS.map(p => <option key={p.val} value={p.val}>{p.label}</option>)}
             </Sel>
           </Sec>
 
           {/* SECTION 3: Addons */}
           <Sec title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
-            <Sel label="Fold Type" value={foldType} onChange={setFoldType}>
+            <Sel label={<Tip k="fold_type">Fold Type</Tip>} value={foldType} onChange={setFoldType}>
               {availableFoldTypes(dimLong, dimShort, true).map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             <div style={ST.hr} />
@@ -3981,7 +4045,7 @@ function App() {
                 </Sel>
                 {coating > 0 && (
                   <>
-                    <Pil label="Sides to Coat" value={coatSides} onChange={v => setCoatSides(Number(v))} options={
+                    <Pil label={<Tip k="coating_sides">Sides to Coat</Tip>} value={coatSides} onChange={v => setCoatSides(Number(v))} options={
                       paper.val === 1.01
                         ? [{ t: "Front Only", v: 1 }]
                         : COAT_SIDES.map(o => ({ t: o.label, v: o.val }))
@@ -4005,7 +4069,7 @@ function App() {
               }).map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </Sel>}
             {(_AD.perforation !== false || perforation > 0) && perfCount > 0 && dimShort <= 14 && (
-              <Pil label="Perf Direction" value={perfDir} onChange={setPerfDir} options={[
+              <Pil label={<Tip k="perf_direction">Perf Direction</Tip>} value={perfDir} onChange={setPerfDir} options={[
                 { t: `${dimShort}" perf`, v: "length" },
                 { t: `${dimLong}" perf`, v: "width" },
               ]} />
@@ -4020,9 +4084,9 @@ function App() {
           {/* SECTION 4: Artwork & Proofing */}
           <Sec title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
-            <Sel label="Artwork & Design" badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+            <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
 
-            {artwork>=2&&artwork<4&&<TxtNum label="Pages Needing Edits" value={artEditPages} onChange={setArtEditPages} min={0}/>}
+            {artwork>=2&&artwork<4&&<TxtNum label={<Tip k="pages_edits">Pages Needing Edits</Tip>} value={artEditPages} onChange={setArtEditPages} min={0}/>}
 
             {artwork>=2 && (
               <div style={{marginTop:8,padding:"12px 14px",borderRadius:6,background:"#f8f8fa",border:`1px solid ${CC.border}`}}>
@@ -4123,7 +4187,7 @@ function App() {
             </div>
 
             <div style={{marginTop:10}}/>
-            <Sel label="Proofing" badge={<TurnBadge days={r.ti?.proof}/>} value={proof} onChange={v=>setProof(Number(v))}>
+            <Sel label={<Tip k="proofing">Proofing</Tip>} badge={<TurnBadge days={r.ti?.proof}/>} value={proof} onChange={v=>setProof(Number(v))}>
               {artwork===0.01 && <option value={0}>Proof & Approve Online (included)</option>}
               {artwork!==0.01 && artwork!==0.04 && <option value={0}>No Proof Needed</option>}
               <option value={0.01}>{`Manual Digital Proof ($${PCF.proof_digital_cost})`}</option>
@@ -4169,7 +4233,7 @@ function App() {
             <div style={{...ST.f,marginTop:6}}><label style={ST.lbl}>Address Line 2 <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" name="shipping-address-line2" autoComplete="shipping address-line2" value={shipAddr.street2} onChange={e=>setShipAddr(p=>({...p,street2:e.target.value}))} placeholder="Apt, suite, unit, etc." style={ST.inp}/></div>
             <div style={{...r3,marginTop:6}}>
               <div style={ST.f}><label style={ST.lbl}>City</label><input type="text" name="shipping-address-level2" autoComplete="shipping address-level2" value={shipAddr.city} onChange={e=>setShipAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={ST.inp}/></div>
-              <Sel label="State" value={shipState} onChange={setShipState} name="shipping-address-level1" autoComplete="shipping address-level1">
+              <Sel label={<Tip k="ship_state">State</Tip>} value={shipState} onChange={setShipState} name="shipping-address-level1" autoComplete="shipping address-level1">
                 {US_STATES.map(st=><option key={st} value={st}>{st}</option>)}
               </Sel>
               <div style={ST.f}><label style={ST.lbl}>ZIP Code</label><input type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:e.target.value.replace(/[^\d-]/g,"").slice(0,10)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
