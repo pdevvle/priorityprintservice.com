@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · BR-TOOLTIPS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · BR-TIPUI</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -3990,13 +3990,22 @@ function App() {
             <div style={r2}>
               <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
-              {!_DR.sizes && <Pil label={<Tip k="size">Size</Tip>} value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />}
             </div>
-            {sizeMode === "preset"
+            {_DR.sizes
               ? <Sel label={_DR.forceFold ? "Size" : "Flat/Unfolded Size"} value={sizeLabel} onChange={setSizeLabel}>{_SIZES.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}</Sel>
-              : <div style={r2}>
-                  <TxtNum label={<Tip k="custom_long">Long Edge (in)</Tip>} value={longEdge} onChange={setLongEdge} min={2} max={27} />
-                  <TxtNum label={<Tip k="custom_short">Short Edge (in)</Tip>} value={shortEdge} onChange={setShortEdge} min={2} max={12.5} />
+              : <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                    {sizeMode === "preset"
+                      ? <Sel label={_DR.forceFold ? "Size" : "Flat/Unfolded Size"} value={sizeLabel} onChange={setSizeLabel}>{_SIZES.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}</Sel>
+                      : <div style={r2}>
+                          <TxtNum label={<Tip k="custom_long">Long Edge (in)</Tip>} value={longEdge} onChange={setLongEdge} min={2} max={27} />
+                          <TxtNum label={<Tip k="custom_short">Short Edge (in)</Tip>} value={shortEdge} onChange={setShortEdge} min={2} max={12.5} />
+                        </div>
+                    }
+                  </div>
+                  <div style={{ flexShrink: 0 }}>
+                    <Pil label={<Tip k="size_mode">Size Mode</Tip>} value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
+                  </div>
                 </div>
             }
             {!_DR.forceFold && <>
