@@ -44,7 +44,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-08 · LH-TRIMHALO</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · LH-CUSTOMSZ</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Letterhead Calculator v1
@@ -210,10 +210,20 @@ function calculate(c) {
   if (_AD.perforation === false && Number(c.perforation) > 0) _adErrs.push("Perforation is currently unavailable. Please change Perforation to None to continue.");
   if (_adErrs.length) return { error: _adErrs };
 
-  // Letterhead is preset-size-only (8.5×11 / 8.5×14) — no custom dimension mode.
-  const preset = SIZE_PRESETS.find(s => s.label === c.sizeLabel);
-  if (!preset) return { error: ["Select a size"] };
-  let imp = preset.imp, longE = preset.long, shortE = preset.short;
+  // Size: preset (from the size list) or custom dimensions.
+  let imp, longE, shortE;
+  if (c.sizeMode === "custom") {
+    longE = Math.max(Number(c.longEdge) || 0, Number(c.shortEdge) || 0);
+    shortE = Math.min(Number(c.longEdge) || 0, Number(c.shortEdge) || 0);
+    if (longE < 2 || shortE < 2) return { error: ["Minimum dimension is 2 inches"] };
+    if (longE > 27 || shortE > 12.5) return { error: ["Maximum custom size: 27 × 12.5 inches"] };
+    imp = calcLetterheadImp(longE, shortE);
+    if (imp <= 0) return { error: ["Size too large for press sheet"] };
+  } else {
+    const preset = SIZE_PRESETS.find(s => s.label === c.sizeLabel);
+    if (!preset) return { error: ["Select a size"] };
+    imp = preset.imp; longE = preset.long; shortE = preset.short;
+  }
 
   // Two-sheet rule: a flat piece too big to image one-up on 13×19 (imp<1) runs on the
   // larger 13×27.5 press sheet — stocked only for select papers (non-stock pays the fee).
@@ -2062,7 +2072,7 @@ function buildSummary(config, result) {
   const sh = r.shipping || {};
 
   // Size + quantity — letterhead is always a preset flat sheet, no fold
-  lines.push(`${config.qty.toLocaleString()} × ${config.sizeLabel}` + (config.jobName ? ` "${config.jobName}"` : ""));
+  lines.push(`${config.qty.toLocaleString()} × ${config.sizeMode === "custom" ? config.longEdge + "×" + config.shortEdge : config.sizeLabel}` + (config.jobName ? ` "${config.jobName}"` : ""));
 
   // Paper + print
   const cName = c => c === "bw" ? "Black & White" : "Full Color";
@@ -2107,7 +2117,8 @@ function buildMetadata(config, result) {
     // Customer selections
     jobName: config.jobName || "",
     qty: config.qty,
-    sizeLabel: config.sizeLabel,
+    sizeMode: config.sizeMode || "preset",
+    sizeLabel: config.sizeMode === "custom" ? `${config.longEdge}×${config.shortEdge}` : config.sizeLabel,
     longEdge: config.longEdge,
     shortEdge: config.shortEdge,
     frontColor: config.frontColor,
@@ -2304,6 +2315,9 @@ function App() {
   // has to guard against).
   const [qty, setQty] = useState(250);
   const [sizeLabel, setSizeLabel] = useState(SIZE_PRESETS[0] ? SIZE_PRESETS[0].label : "8.5×11");
+  const [sizeMode, setSizeMode] = useState("preset");
+  const [customLong, setCustomLong] = useState(11);
+  const [customShort, setCustomShort] = useState(8.5);
   const [frontColor, setFrontColor] = useState("color");
   const [backColor, setBackColor] = useState("color");
   const [sides, setSides] = useState(1); // letterhead defaults to front only
@@ -2335,7 +2349,7 @@ function App() {
       : `${frontColor === "color" ? "Full Color" : "B&W"} (front only)`;
     const specs = [
       "Letterhead",
-      `Size: ${sizeLabel}`,
+      `Size: ${sizeMode === "custom" ? longEdge + "″ × " + shortEdge + "″" : sizeLabel}`,
       `Color: ${colorDesc}`,
       `Paper: ${paper.label}`,
     ];
@@ -2377,7 +2391,12 @@ function App() {
 
       // Size — letterhead is preset-only; any legacy custom-size reorder config
       // just falls through (sizeLabel keeps its default) rather than erroring.
-      if (rc.sizeLabel && SIZE_PRESETS.some(s => s.label === rc.sizeLabel)) {
+      const rcPreset = rc.sizeLabel && SIZE_PRESETS.some(s => s.label === rc.sizeLabel);
+      if (!rcPreset && (rc.longEdge != null || rc.sizeMode === "custom")) {
+        setSizeMode("custom");
+        if (rc.longEdge != null) setCustomLong(Number(rc.longEdge));
+        if (rc.shortEdge != null) setCustomShort(Number(rc.shortEdge));
+      } else if (rcPreset) {
         setSizeLabel(rc.sizeLabel);
       }
 
@@ -2428,7 +2447,12 @@ function App() {
     const pv = params.get('paper');
     if (pv) { const m = PAPERS_NC.find(p => String(p.val) === pv); if (m) setPaper(m); }
     const sv = params.get('size');
-    if (sv) {
+    if (sv === 'custom') {
+      setSizeMode('custom');
+      const lv = parseFloat(params.get('long')), sh = parseFloat(params.get('short'));
+      if (!isNaN(lv)) setCustomLong(lv);
+      if (!isNaN(sh)) setCustomShort(sh);
+    } else if (sv) {
       const norm = sv.replace(/×/g, 'x').toLowerCase();
       const m = SIZE_PRESETS.find(s => s.label.replace(/×/g, 'x').toLowerCase() === norm);
       if (m) setSizeLabel(m.label);
@@ -2437,15 +2461,15 @@ function App() {
 
   const shipZip = shipAddr.zip || "";
   const preset = SIZE_PRESETS.find(s => s.label === sizeLabel) || SIZE_PRESETS[0];
-  const longEdge = preset.long;
-  const shortEdge = preset.short;
+  const longEdge  = sizeMode === "custom" ? Math.max(Number(customLong) || 0, Number(customShort) || 0) : preset.long;
+  const shortEdge = sizeMode === "custom" ? Math.min(Number(customLong) || 0, Number(customShort) || 0) : preset.short;
 
   const result = useMemo(() => calculate({
-    qty, sizeLabel,
+    qty, sizeLabel, sizeMode, longEdge, shortEdge,
     frontColor, backColor, sides,
     paper, perforation, perfDir, perfPositions,
     artwork, bleed, proof, shipState, shipZip, needByDate,
-  }), [qty, sizeLabel, frontColor, backColor, sides, paper, perforation, perfDir, perfPositions, artwork, bleed, proof, shipState, shipZip, needByDate]);
+  }), [qty, sizeLabel, sizeMode, longEdge, shortEdge, frontColor, backColor, sides, paper, perforation, perfDir, perfPositions, artwork, bleed, proof, shipState, shipZip, needByDate]);
 
   const r = result || {};
 
@@ -2453,7 +2477,7 @@ function App() {
   const projections = useMemo(() => {
     if (!result || result.error) return null;
     const baseConfig = {
-      qty, sizeLabel,
+      qty, sizeLabel, sizeMode, longEdge, shortEdge,
       frontColor, backColor, sides,
       paper, perforation, perfDir, perfPositions,
       artwork, bleed, proof, shipState, shipZip,
@@ -2466,7 +2490,7 @@ function App() {
       if (!pr || pr.error) return {qty: q, total: null, perUnit: null, current: q === qty};
       return {qty: q, total: pr.total, perUnit: pr.perUnit, current: q === qty};
     });
-  }, [result, qty, sizeLabel, frontColor, backColor, sides, paper, perforation, perfDir, perfPositions, artwork, bleed, proof, shipState, shipZip, needByDate]);
+  }, [result, qty, sizeLabel, sizeMode, longEdge, shortEdge, frontColor, backColor, sides, paper, perforation, perfDir, perfPositions, artwork, bleed, proof, shipState, shipZip, needByDate]);
 
   const r2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
   const r3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
@@ -2500,7 +2524,8 @@ function App() {
   const buildShareUrl = () => {
     const p = new URLSearchParams();
     if (qty !== 250) p.set("qty", qty);
-    if (sizeLabel !== SIZE_PRESETS[0].label) p.set("size", sizeLabel);
+    if (sizeMode === "custom") { p.set("size", "custom"); p.set("long", longEdge); p.set("short", shortEdge); }
+    else if (sizeLabel !== SIZE_PRESETS[0].label) p.set("size", sizeLabel);
     if (frontColor !== "color") p.set("color", frontColor);
     if (backColor !== "color") p.set("backcolor", backColor);
     if (sides !== 2) p.set("sides", sides);
@@ -2530,7 +2555,7 @@ function App() {
     setUploadProgress(null);
     const config = {
       jobName, qty,
-      sizeLabel, longEdge, shortEdge,
+      sizeLabel, sizeMode, longEdge, shortEdge,
       frontColor, backColor, sides,
       paper,
       perforation, perfDir, perfPositions,
@@ -2565,7 +2590,7 @@ function App() {
     let summary = "";
     try {
       const lines = [];
-      lines.push(`${qty.toLocaleString()} × ${sizeLabel}`);
+      lines.push(`${qty.toLocaleString()} × ${sizeMode === "custom" ? longEdge + "×" + shortEdge : sizeLabel}`);
       lines.push(`Paper: ${paper.label}`);
       const cName = c => c === "bw" ? "Black & White" : "Full Color";
       lines.push(`Front: ${cName(frontColor)}` + (sides === 2 ? ` · Back: ${cName(backColor)}` : " · Single-sided"));
@@ -2624,12 +2649,19 @@ function App() {
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sec title="Size & Quantity" open={op.s1} onToggle={() => tog("s1")} badge={sizeLabel}>
+          <Sec title="Size & Quantity" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
             <div style={r2}>
               <TxtNum label="Quantity" value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
+              <Pil label="Size" value={sizeMode} onChange={setSizeMode} options={[{ t: "Preset Sizes", v: "preset" }, { t: "Custom Size", v: "custom" }]} />
             </div>
-            <Sel label="Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}</Sel>
+            {sizeMode === "preset"
+              ? <Sel label="Size" value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}</Sel>
+              : <div style={r2}>
+                  <TxtNum label="Long Edge (in)" value={customLong} onChange={setCustomLong} min={2} max={27} />
+                  <TxtNum label="Short Edge (in)" value={customShort} onChange={setCustomShort} min={2} max={12.5} />
+                </div>
+            }
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
@@ -2757,7 +2789,7 @@ function App() {
                   {longEdge}" × {shortEdge}" flat sheet · Bleed, trim, safety
                 </div>
               </div>
-              <button type="button" onClick={() => generateLetterheadTemplate(longEdge, shortEdge, sizeLabel, perfCount, perfDir, perfPositions)} style={{
+              <button type="button" onClick={() => generateLetterheadTemplate(longEdge, shortEdge, (sizeMode === "custom" ? `${shortEdge}×${longEdge}` : sizeLabel), perfCount, perfDir, perfPositions)} style={{
                 padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CK.cyan}`, background: CK.cyanLight, color: CK.cyan, whiteSpace: "nowrap",
               }}>📐 Download Template</button>
