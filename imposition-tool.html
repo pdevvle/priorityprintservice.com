@@ -50,7 +50,7 @@
 // Vector-preserving sheetwise step-and-repeat imposition in the browser.
 // Engine design per docs/IMPOSITION_TOOL_BRIEF.md — the four historical
 // failure modes and their fixes are tagged (a)(b)(c)(d) below.
-const { useState, useEffect, useMemo, useRef, useCallback } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 const PL = window.PDFLib;
 const CFG = window.PPS_IMPOSE_CFG || null; // injected by pps-imposition.php in wp-admin
 
@@ -77,8 +77,10 @@ const CALC_TYPES = [
   { val:"saddle",        label:"Saddle Stitch Booklet (signatures)" },
 ];
 const FLAT_CALCS = ["brochure","postcard","letterhead","greeting-card"];
-const BOOKLET_CALCS = ["saddle","perfect-bound","coupon"];
-const UNSUPPORTED_BOOKLETS = ["perfect-bound","coupon"];
+const UNSUPPORTED_BOOKLETS = ["perfect-bound","coupon"]; // saddle is supported; these need their own pagination (v2)
+// 12×18 crack-n-peel sticker sheet: single source for both the priced count
+// (stickerImp) and the placed grid (computeLayout) — they must never drift.
+const STICKER = { L: 17.75, S: 11.75, pitch: 0.25 };
 
 // Verbatim port of calcBrochureImp / calcPostcardImp / calcLetterheadImp /
 // calcGreetingImp (identical JS in all four calculators).
@@ -94,10 +96,15 @@ function flatImp(longEdge, shortEdge, sheetLong) {
   return Math.max(flatGrid(longEdge, shortEdge, L), flatGrid(shortEdge, longEdge, L));
 }
 // Verbatim port of calcStickerImp (12×18 sheet, 0.25″ pitch, edge bleed into margins).
+function stickerGrid(w, h) {
+  return {
+    a: Math.max(0, Math.floor(STICKER.L / (w + STICKER.pitch))),
+    d: Math.max(0, Math.floor(STICKER.S / (h + STICKER.pitch))),
+  };
+}
 function stickerImp(longEdge, shortEdge) {
-  const L = 17.75, S = 11.75;
-  const calc = (w, h) => Math.max(0, Math.floor(L / (w + 0.25))) * Math.max(0, Math.floor(S / (h + 0.25)));
-  return Math.max(calc(longEdge, shortEdge), calc(shortEdge, longEdge));
+  const g0 = stickerGrid(longEdge, shortEdge), g1 = stickerGrid(shortEdge, longEdge);
+  return Math.max(g0.a * g0.d, g1.a * g1.d);
 }
 
 // ── Saddle stitch booklet spec (mirror of calc-preview-test.html) ──
@@ -106,7 +113,7 @@ function stickerImp(longEdge, shortEdge) {
 // verbatim calcCustomImp port. bindEdge = page HEIGHT (spine is always the
 // left, vertical edge in every preset: portrait, square, and landscape).
 // Page dims are width×height as in the preset labels.
-const SADDLE_PRESETS = [
+const SADDLE_PRESETS_FALLBACK = [
   { w:3.5,  h:5.5,  imp:8 }, { w:4,    h:6,   imp:8 }, { w:4.25, h:5.5,  imp:8 },
   { w:5,    h:7,    imp:4 }, { w:5.5,  h:8.5, imp:4 }, { w:6,    h:9,    imp:4 },
   { w:8.5,  h:11,   imp:2 }, { w:9,    h:12,  imp:2 },
@@ -116,7 +123,26 @@ const SADDLE_PRESETS = [
   { w:9,    h:6,    imp:4 }, { w:11,   h:8.5, imp:1 }, { w:12,   h:9,    imp:1 },
 ];
 
-// Verbatim port of the saddle calculator's calcCustomImp.
+// In wp-admin the PHP injects the LIVE saddle size_presets (the same
+// wp_options config the calculator prices with), so an admin preset edit
+// can never drift production away from pricing. The embedded fallback only
+// applies standalone (GitHub Pages / local file).
+function parseSaddlePresetGroups(groups) {
+  const out = [];
+  (groups || []).forEach(g => (g.items || []).forEach(it => {
+    const m = String(it.label || "").match(/([\d.]+)\s*[×x]\s*([\d.]+)/);
+    if (m && it.imp >= 1) out.push({ w: +m[1], h: +m[2], imp: +it.imp });
+  }));
+  return out;
+}
+const SADDLE_PRESETS = (CFG && CFG.sizePresets && parseSaddlePresetGroups(CFG.sizePresets).length)
+  ? parseSaddlePresetGroups(CFG.sizePresets)
+  : SADDLE_PRESETS_FALLBACK;
+
+// Verbatim port of the saddle calculator's calcCustomImp. The trailing
+// `r < 3 ? 2 : 2` / `r < 5 ? 4 : 4` tails look redundant but are kept
+// byte-for-byte from the calculator — do NOT "simplify" them; parity with
+// pricing is verified by tests/imposition/parity.mjs.
 function bookletImp(longest, shortest, bindDir, sheetLong) {
   const L = sheetLong || 18.5;
   const sA = x => { const r = L / x; return r < .5 ? 0 : r < 1 ? .5 : r < 2 ? 1 : r < 3 ? 2 : r < 4 ? 3 : r < 5 ? 4 : 4; };
@@ -225,12 +251,10 @@ function computeLayout(calc, trimA, trimB, opts) {
     priced = stickerImp(pieceLong, pieceShort);
     if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not fit the 12×18 sticker sheet`);
     sheet = SHEETS["12x18"];
-    const pitch = 0.25;
-    const gridOf = (w, h) => ({ a: Math.max(0, Math.floor(17.75 / (w + pitch))), d: Math.max(0, Math.floor(11.75 / (h + pitch))) });
-    const g0 = gridOf(pieceLong, pieceShort), g1 = gridOf(pieceShort, pieceLong);
+    const g0 = stickerGrid(pieceLong, pieceShort), g1 = stickerGrid(pieceShort, pieceLong);
     const rotated = g1.a * g1.d > g0.a * g0.d;
     const gg = rotated ? g1 : g0;
-    grid = { a: gg.a, d: gg.d, rotated, g: pitch };
+    grid = { a: gg.a, d: gg.d, rotated, g: STICKER.pitch };
   } else if (FLAT_CALCS.includes(calc)) {
     priced = flatImp(pieceLong, pieceShort);
     sheet = SHEETS["13x19"];
@@ -450,31 +474,37 @@ function placeInCell(outPage, embedded, art, cell, extraRotate) {
 // axis (columns mirror). PPS layouts are center-symmetric so this is
 // currently an identity — kept exact for future gang/asymmetric runs.
 function mirrorCells(cells, layout, sheetFlip) {
-  const W = layout.sheet.long, H = layout.sheet.short;
-  return cells.map(c => {
-    const m = r => sheetFlip === "short"
-      ? { x: W - r.x - r.w, y: r.y, w: r.w, h: r.h }
-      : { x: r.x, y: H - r.y - r.h, w: r.w, h: r.h };
-    return { col: c.col, row: c.row, trim: m(c.trim), clip: m(c.clip) };
-  });
+  return cells.map(c => ({
+    col: c.col, row: c.row,
+    trim: mirrorRect(c.trim, layout, sheetFlip),
+    clip: mirrorRect(c.clip, layout, sheetFlip),
+  }));
 }
 
 // ── Marks layer: cut guides in the sheet margins + slug line ──
 // Marks live entirely in the margins (outside the usable image area), so
 // they can never collide with art or bleed.
+// Shared mark-band geometry: cut marks and fold guides must sit in the same
+// margin band so they line up — one source for both.
+function markGeometry(sheet) {
+  const mLong = (sheet.long - sheet.usableLong) / 2;   // per-side margin along X (in)
+  const mShort = (sheet.short - sheet.usableShort) / 2; // per-side margin along Y (in)
+  return {
+    gap: 0.02, // clearance from sheet edge, in
+    lenX: Math.max(mShort - BLEED - 0.02, 0.06), // vertical marks in top/bottom margins
+    lenY: Math.max(mLong - BLEED - 0.02, 0.06),  // horizontal marks in left/right margins
+  };
+}
+
 function drawMarks(page, layout, cells) {
   const s = layout.sheet;
-  const mLong = (s.long - s.usableLong) / 2;   // per-side margin along X (in)
-  const mShort = (s.short - s.usableShort) / 2; // per-side margin along Y (in)
   const black = PL.rgb(0, 0, 0);
   const xs = new Set(), ys = new Set();
   cells.forEach(c => {
     xs.add(+(c.trim.x).toFixed(4)); xs.add(+(c.trim.x + c.trim.w).toFixed(4));
     ys.add(+(c.trim.y).toFixed(4)); ys.add(+(c.trim.y + c.trim.h).toFixed(4));
   });
-  const gap = 0.02; // clearance from sheet edge, in
-  const markLenX = Math.max(mShort - BLEED - 0.02, 0.06); // vertical marks in top/bottom margins
-  const markLenY = Math.max(mLong - BLEED - 0.02, 0.06);  // horizontal marks in left/right margins
+  const { gap, lenX: markLenX, lenY: markLenY } = markGeometry(s);
   const line = (x1, y1, x2, y2) => page.drawLine({
     start: { x: x1 * PT, y: y1 * PT }, end: { x: x2 * PT, y: y2 * PT },
     thickness: 0.5, color: black,
@@ -550,9 +580,7 @@ function bookletSlots(layout) {
 // Dashed fold guides in the margins at each spine position.
 function drawFoldMarks(page, layout) {
   const s = layout.sheet;
-  const gap = 0.02;
-  const mShort = (s.short - s.usableShort) / 2, mLong = (s.long - s.usableLong) / 2;
-  const lenX = Math.max(mShort - BLEED - 0.02, 0.06), lenY = Math.max(mLong - BLEED - 0.02, 0.06);
+  const { gap, lenX, lenY } = markGeometry(s);
   const dash = { thickness: 0.5, color: PL.rgb(0, 0, 0), dashArray: [2, 2] };
   const seen = new Set();
   for (const cell of layout.cells) {
@@ -589,7 +617,18 @@ async function imposeSaddle(artBytes, spec, layout) {
   // space — each slot is pw×ph regardless of how the grid rotated the spread.
   const slotLandscape = bk.pw >= bk.ph;
   const arts = [];
-  for (let i = 0; i < n; i++) arts.push(resolveSideArt(src.getPage(i), Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape));
+  const artCache = new Map(); // pages with identical geometry share one resolution
+  for (let i = 0; i < n; i++) {
+    const p = src.getPage(i);
+    const mb = p.getMediaBox();
+    const key = `${p.getRotation().angle}|${mb.x},${mb.y},${mb.width},${mb.height}|${JSON.stringify(getPageBox(p, "TrimBox"))}|${JSON.stringify(getPageBox(p, "BleedBox"))}`;
+    let art = artCache.get(key);
+    if (!art) {
+      art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape);
+      artCache.set(key, art);
+    }
+    arts.push(art);
+  }
   arts[0].notes.forEach(nt => warnings.push("page 1: " + nt));
   const scaled = arts.filter(a => a.scale !== 1).length;
   if (scaled) warnings.push(`${scaled} of ${n} pages required fit-to-trim scaling`);
@@ -648,11 +687,17 @@ async function imposeSaddle(artBytes, spec, layout) {
   const issues = [];
   if (check.getPageCount() !== 2 * S) issues.push(`page count ${check.getPageCount()} ≠ ${2 * S} signature sides`);
   check.getPages().forEach((p, i) => {
+    const m = p.getMediaBox();
+    if (Math.abs(m.width - layout.sheet.long * PT) > 0.5 || Math.abs(m.height - layout.sheet.short * PT) > 0.5)
+      issues.push(`sheet ${i + 1} MediaBox ${(m.width / PT).toFixed(2)}×${(m.height / PT).toFixed(2)}″ ≠ ${layout.sheet.long}×${layout.sheet.short}″`);
     if (!getPageBox(p, "TrimBox")) issues.push(`sheet ${i + 1} missing TrimBox`);
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
   });
   if (!layout.mismatch && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
     issues.push(`placed ${layout.imp} pages/side ≠ priced ${layout.pricedImp}`);
+  // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that down
+  if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && layout.sheet.key === "13x27.5"))
+    issues.push(`imp:1 size expected 1 spread/side on 13×27.5, got ${bk.spreadsPerSide} on ${layout.sheet.key}`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
   return {
@@ -694,14 +739,24 @@ async function imposePdf(artBytes, backBytes, spec) {
     const srcPage = sd.doc.getPage(sd.pno);
     const art = resolveSideArt(srcPage, layout.pieceLong, layout.pieceShort, cellLandscape);
     art.notes.forEach(n => warnings.push(`${sd.label.toLowerCase()}: ${n}`));
-    const mb = srcPage.getMediaBox();
     // Embed the source page ONCE as a vector XObject (fix a) and stamp it
     // into every cell — deterministic step-and-repeat (fix d).
     const [embedded] = await out.embedPdf(sd.doc, [sd.pno]);
     const page = out.addPage([layout.sheet.long * PT, layout.sheet.short * PT]);
     const cells = i === 0 ? layout.cells : mirrorCells(layout.cells, layout, spec.sheetFlip || "short");
-    const extraRot = i === 1 && spec.backRotate === 180 ? 180 : 0;
-    if (extraRot) warnings.push("back rotated 180° (tumble)");
+    // Back tumble: 180° whenever the press flip axis is perpendicular to the
+    // placed art's head axis — same rule the saddle path derives, PROVEN by
+    // physical duplex simulation (rotated cells + short-edge flip read 180°
+    // off without this). "auto" derives it; 0/180 are manual overrides.
+    let extraRot = 0;
+    if (i === 1) {
+      const flip = spec.sheetFlip || "short";
+      const headVertical = art.cellRotate % 180 === 0;
+      const autoTumble = flip === "short" ? !headVertical : headVertical;
+      const mode = spec.backRotate === 0 || spec.backRotate === 180 ? spec.backRotate : "auto";
+      extraRot = mode === "auto" ? (autoTumble ? 180 : 0) : mode;
+      if (extraRot) warnings.push(`back rotated 180° (${mode === "auto" ? "auto — registers with front under " + flip + "-edge flip" : "manual tumble"})`);
+    }
     for (const cell of cells) placeInCell(page, embedded, art, cell, extraRot);
     if (spec.marks !== false) {
       drawMarks(page, layout, cells);
@@ -761,7 +816,9 @@ function sanitizeName(s) { return String(s || "").replace(/[^\w.\-]+/g, "_").rep
 
 function imposedFilename(spec, layout) {
   const bits = ["IMPOSED"];
-  if (spec.orderRef) bits.push("Order-" + sanitizeName(spec.orderRef));
+  // Order-<id>-i<item> lets the admin queue mark IMPOSED per line item, not
+  // per order — keep in sync with pps_impose_is_output_name() in PHP.
+  if (spec.orderRef) bits.push("Order-" + sanitizeName(spec.orderRef) + (spec.itemRef ? "-i" + sanitizeName(spec.itemRef) : ""));
   if (spec.jobName) bits.push(sanitizeName(spec.jobName).replace(/\.pdf$/i, ""));
   if (layout.booklet) bits.push(`${layout.booklet.pw}x${layout.booklet.ph}`, "saddle", `${layout.booklet.spreadsPerSide}spread`, layout.sheet.key);
   else bits.push(`${layout.pieceLong}x${layout.pieceShort}`, `${layout.imp}up`, layout.sheet.key);
@@ -889,22 +946,40 @@ function ajax(action, params, opts) {
   return fetch(CFG.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin", ...(opts || {}) });
 }
 
-function OrderQueue({ onLoad, busyId, refreshKey }) {
-  const [rows, setRows] = useState(null);
-  const [err, setErr] = useState("");
-  useEffect(() => {
-    let dead = false;
-    setErr("");
-    ajax("pps_impose_list", {})
-      .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(j => {
-        if (dead) return;
-        if (!j.success) throw new Error((j.data && j.data.message) || "list failed");
-        setRows(j.data.items);
-      })
-      .catch(e => !dead && setErr(e.message));
-    return () => { dead = true; };
-  }, [refreshKey]);
+// Surface the endpoint's real reason on failure: try the JSON error message
+// first (wp_send_json_error), fall back to the HTTP status.
+async function ajaxFail(r, what) {
+  let msg = "";
+  try { const j = await r.json(); msg = (j && j.data && j.data.message) || ""; } catch (e) { /* not JSON */ }
+  return new Error(`${what} failed (HTTP ${r.status}${msg ? ": " + msg : ""})`);
+}
+
+// Row → engine spec: single source for both the per-row Impose flow and the
+// bulk "Impose all pending" path. For saddle, width×height (spine = height)
+// is recovered from size_label, falling back to bind_dir orientation.
+function specFromRow(row) {
+  let w = row.long_edge, h = row.short_edge;
+  if (row.calc === "saddle") {
+    const m = String(row.size_label || "").match(/([\d.]+)\s*[×x]\s*([\d.]+)/);
+    if (m) { w = +m[1]; h = +m[2]; }
+    else if (row.bind_dir !== "short") { w = row.short_edge; h = row.long_edge; }
+  }
+  return {
+    calc: row.calc, trimLong: w, trimShort: h,
+    sides: row.sides || 1, qty: row.qty || 0,
+    sheetFlip: "short", backRotate: "auto",
+    jobName: row.job_name || row.product || "",
+    orderRef: String(row.order_id), itemRef: String(row.item_id || ""),
+    marks: true, allowBestFit: false,
+  };
+}
+
+function rowPending(r) {
+  return !r.imposed && r.files_listed && r.calc && r.long_edge && r.short_edge
+    && r.art_file_id && !UNSUPPORTED_BOOKLETS.includes(r.calc);
+}
+
+function OrderQueue({ rows, err, onLoad, busyId }) {
   if (err) return <div style={{ color: "#f87171", fontSize: 13 }}>Order list failed: {err}</div>;
   if (!rows) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>Loading orders…</div>;
   if (!rows.length) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>No recent orders with Drive artwork found.</div>;
@@ -917,14 +992,16 @@ function OrderQueue({ onLoad, busyId, refreshKey }) {
           const specOk = r.calc && r.long_edge && r.short_edge;
           const artOk = !!(r.art_file_id);
           const bookish = UNSUPPORTED_BOOKLETS.includes(r.calc);
+          const driveErr = !r.files_listed; // Drive listing failed ≠ empty folder
           return (
             <tr key={key}>
               <td><a href={r.folder_url} target="_blank" rel="noreferrer" style={{ color: "#7ab8ff" }}>#{r.order_id}</a></td>
               <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.job_name || r.product || "—"}</td>
-              <td style={{ fontSize: 12 }}>{r.calc || "?"} · {r.long_edge}×{r.short_edge}″ · {r.sides === 2 ? "2-sided" : "1-sided"} · qty {r.qty}</td>
-              <td style={{ fontSize: 12 }}>{artOk ? r.art_file_name : <span style={{ color: "#f87171" }}>none found</span>}</td>
-              <td>{r.imposed ? <span className="imp-badge ok">IMPOSED</span>
-                : bookish ? <span className="imp-badge warn">BOOKLET — v2</span>
+              <td style={{ fontSize: 12 }}>{r.calc || "?"} · {r.long_edge}×{r.short_edge}″ · {r.calc === "saddle" ? "booklet" : r.sides === 2 ? "2-sided" : "1-sided"} · qty {r.qty}</td>
+              <td style={{ fontSize: 12 }}>{artOk ? r.art_file_name : <span style={{ color: "#f87171" }}>{driveErr ? "Drive list failed" : "none found"}</span>}</td>
+              <td>{driveErr ? <span className="imp-badge err">DRIVE ERROR</span>
+                : r.imposed ? <span className="imp-badge ok">IMPOSED</span>
+                : bookish ? <span className="imp-badge warn">{r.calc.toUpperCase()} — v2</span>
                 : !specOk ? <span className="imp-badge warn">NO SPEC</span>
                 : !artOk ? <span className="imp-badge err">NO ART</span>
                 : <span className="imp-badge warn">PENDING</span>}</td>
@@ -948,9 +1025,10 @@ function App() {
   const [sides, setSides] = useState(1);
   const [qty, setQty] = useState(500);
   const [sheetFlip, setSheetFlip] = useState("short"); // Fiery presses feed 13" sheets short-edge first — duplex flips on the short edge
-  const [backRotate, setBackRotate] = useState(0);
+  const [backRotate, setBackRotate] = useState("auto");
   const [jobName, setJobName] = useState("");
   const [orderRef, setOrderRef] = useState("");
+  const [itemRef, setItemRef] = useState(""); // order item id — tags the output filename so per-item IMPOSED detection works
   const [marks, setMarks] = useState(true);
   const [allowBestFit, setAllowBestFit] = useState(false);
   const isSaddle = calc === "saddle";
@@ -964,13 +1042,33 @@ function App() {
   const [notice, setNotice] = useState("");
   const [uploadState, setUploadState] = useState("");     // "", "uploading", "done", "failed: …"
   const [activeOrder, setActiveOrder] = useState(null);   // queue row currently loaded
+  const [rows, setRows] = useState(null);                  // admin queue rows (WP mode)
+  const [queueErr, setQueueErr] = useState("");
+  const [bulkState, setBulkState] = useState(null);        // { done, total, current, failures[] }
   const genSeq = useRef(0);
+
+  // Fetch the order queue (WP mode only)
+  useEffect(() => {
+    if (!CFG) return;
+    let dead = false;
+    setQueueErr("");
+    ajax("pps_impose_list", refreshKey > 0 ? { refresh: 1 } : {})
+      .then(async r => { if (!r.ok) throw await ajaxFail(r, "order list"); return r.json(); })
+      .then(j => {
+        if (dead) return;
+        if (!j.success) throw new Error((j.data && j.data.message) || "list failed");
+        setRows(j.data.items);
+      })
+      .catch(e => !dead && setQueueErr(e.message));
+    return () => { dead = true; };
+  }, [refreshKey]);
 
   const spec = useMemo(() => ({
     calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0,
-    sides: +sides, qty: +qty || 0, sheetFlip, backRotate: +backRotate,
-    jobName, orderRef, marks, allowBestFit,
-  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, marks, allowBestFit]);
+    sides: +sides, qty: +qty || 0, sheetFlip,
+    backRotate: backRotate === "auto" ? "auto" : +backRotate,
+    jobName, orderRef, itemRef, marks, allowBestFit,
+  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -1022,7 +1120,12 @@ function App() {
       else {
         setArt({ bytes, name: f.name, pageCount });
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
-        if (pageCount >= 2 && sides === 1) setSides(2);
+        // A 2-page file usually means front+back — switch, but say so, since
+        // page 2 could also be notes/a proof sheet the operator must exclude.
+        if (pageCount >= 2 && sides === 1 && !isSaddle) {
+          setSides(2);
+          setNotice(`"${f.name}" has ${pageCount} pages — switched to 2-sided (page 1 = front, page 2 = back). Set Sides back to 1 if page 2 isn't the back.`);
+        }
       }
     }
   };
@@ -1032,21 +1135,14 @@ function App() {
     const key = row.order_id + ":" + row.item_id;
     setQueueBusy(key); setError(""); setNotice(""); setUploadState("");
     try {
-      setCalc(row.calc);
-      if (row.calc === "saddle") {
-        // saddle needs width×height (spine = height), not normalized long/short
-        const m = String(row.size_label || "").match(/([\d.]+)\s*[×x]\s*([\d.]+)/);
-        if (m) { setTrimLong(+m[1]); setTrimShort(+m[2]); }
-        else if (row.bind_dir === "short") { setTrimLong(row.long_edge); setTrimShort(row.short_edge); }
-        else { setTrimLong(row.short_edge); setTrimShort(row.long_edge); }
-      } else {
-        setTrimLong(row.long_edge); setTrimShort(row.short_edge);
-      }
-      setSides(row.sides || 1); setQty(row.qty || 0);
-      setJobName(row.job_name || row.product || ""); setOrderRef(String(row.order_id));
+      const s = specFromRow(row);
+      setItemRef(s.itemRef); setCalc(s.calc);
+      setTrimLong(s.trimLong); setTrimShort(s.trimShort);
+      setSides(s.sides); setQty(s.qty);
+      setJobName(s.jobName); setOrderRef(s.orderRef);
       setActiveOrder(row);
       const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
-      if (!r.ok) throw new Error("artwork download failed (HTTP " + r.status + ")");
+      if (!r.ok) throw await ajaxFail(r, "artwork download");
       const bytes = new Uint8Array(await r.arrayBuffer());
       const pageCount = (await PL.PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount();
       setArt({ bytes, name: row.art_file_name, pageCount });
@@ -1067,6 +1163,7 @@ function App() {
       fd.append("filename", result.filename);
       fd.append("file", new Blob([result.bytes], { type: "application/pdf" }), result.filename);
       const r = await fetch(CFG.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin" });
+      if (!r.ok) throw await ajaxFail(r, "upload");
       const j = await r.json();
       if (!j.success) throw new Error((j.data && j.data.message) || "upload failed");
       setUploadState("done");
@@ -1074,6 +1171,47 @@ function App() {
       setRefreshKey(k => k + 1);
     } catch (e) { setUploadState("failed: " + e.message); }
   };
+
+  // Bulk: impose + file every pending row, sequentially, headless (does not
+  // touch the form). Each row uses the exact spec the per-row flow would.
+  const imposeAll = async () => {
+    const pending = (rows || []).filter(rowPending);
+    if (!pending.length) return;
+    setBulkState({ done: 0, total: pending.length, current: "", failures: [] });
+    const failures = [];
+    for (let i = 0; i < pending.length; i++) {
+      const row = pending[i];
+      const label = `#${row.order_id} ${row.job_name || row.product || ""}`.trim();
+      setBulkState({ done: i, total: pending.length, current: label, failures });
+      try {
+        const s = specFromRow(row);
+        const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
+        if (!r.ok) throw await ajaxFail(r, "artwork download");
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        const res = await imposePdf(bytes, null, s);
+        const filename = imposedFilename(s, res.layout);
+        const fd = new FormData();
+        fd.append("action", "pps_impose_upload");
+        fd.append("nonce", CFG.nonce);
+        fd.append("order_id", row.order_id);
+        fd.append("filename", filename);
+        fd.append("file", new Blob([res.bytes], { type: "application/pdf" }), filename);
+        const up = await fetch(CFG.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin" });
+        if (!up.ok) throw await ajaxFail(up, "upload");
+        const j = await up.json();
+        if (!j.success) throw new Error((j.data && j.data.message) || "upload failed");
+      } catch (e) {
+        failures.push(`${label}: ${e.message}`);
+      }
+    }
+    setBulkState({ done: pending.length, total: pending.length, current: "", failures });
+    setNotice(`Bulk impose finished: ${pending.length - failures.length}/${pending.length} filed to Drive.`
+      + (failures.length ? " Failures listed below." : ""));
+    setError(failures.join("\n"));
+    setRefreshKey(k => k + 1);
+  };
+
+  const pendingCount = (rows || []).filter(rowPending).length;
 
   const lay = layoutInfo.layout;
   const parityOk = lay && !lay.mismatch && (lay.booklet
@@ -1089,13 +1227,30 @@ function App() {
         </span>
       </div>
 
+      {CFG && CFG.gdrive === false && (
+        <div className="imp-card" style={{ marginBottom: 16, borderColor: "rgba(239,68,68,.4)" }}>
+          <div style={{ fontSize: 13, color: "#f87171" }}>
+            Google Drive is not connected — connect it under <b>PPS Calculators → Google Drive</b>. The order queue, artwork downloads, and uploads will fail until then.
+          </div>
+        </div>
+      )}
       {CFG && (
         <div className="imp-card" style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 10, flexWrap: "wrap" }}>
             <span className="lbl" style={{ marginBottom: 0 }}>Recent orders with artwork on Drive</span>
-            <button className="imp-btn sec" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => setRefreshKey(k => k + 1)}>Refresh</button>
+            <span style={{ display: "flex", gap: 8 }}>
+              {pendingCount > 0 && (
+                <button className="imp-btn" style={{ padding: "5px 12px", fontSize: 12 }}
+                  disabled={!!bulkState && bulkState.done < bulkState.total} onClick={imposeAll}>
+                  {bulkState && bulkState.done < bulkState.total
+                    ? `Imposing ${bulkState.done + 1}/${bulkState.total}… ${bulkState.current}`
+                    : `⚡ Impose all pending (${pendingCount})`}
+                </button>
+              )}
+              <button className="imp-btn sec" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => setRefreshKey(k => k + 1)}>Refresh</button>
+            </span>
           </div>
-          <OrderQueue onLoad={loadOrder} busyId={queueBusy} refreshKey={refreshKey} />
+          <OrderQueue rows={rows} err={queueErr} onLoad={loadOrder} busyId={queueBusy} />
         </div>
       )}
 
@@ -1153,9 +1308,10 @@ function App() {
                 </Field>
                 {!isSaddle && (
                   <Field label="Back rotation" style={{ flex: 1 }}>
-                    <select value={backRotate} onChange={e => setBackRotate(+e.target.value)}>
-                      <option value={0}>None (head-to-head)</option>
-                      <option value={180}>180° (tumble)</option>
+                    <select value={backRotate} onChange={e => setBackRotate(e.target.value)}>
+                      <option value="auto">Auto (register with front)</option>
+                      <option value="0">Force none</option>
+                      <option value="180">Force 180° (tumble)</option>
                     </select>
                   </Field>
                 )}
@@ -1211,7 +1367,7 @@ function App() {
 
           {(notice || error) && (
             <div className="imp-card" style={{ marginBottom: 14, borderColor: error ? "rgba(239,68,68,.4)" : "rgba(34,197,94,.3)" }}>
-              <div style={{ fontSize: 13, color: error ? "#f87171" : "#4ade80", lineHeight: 1.5 }}>{error || notice}</div>
+              <div style={{ fontSize: 13, color: error ? "#f87171" : "#4ade80", lineHeight: 1.5, whiteSpace: "pre-line" }}>{error || notice}</div>
             </div>
           )}
 
@@ -1232,6 +1388,13 @@ function App() {
               {result.warnings.length > 0 && (
                 <div style={{ marginBottom: 10 }}>
                   {result.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
+                </div>
+              )}
+              {result.sideReports && (
+                <div style={{ marginBottom: 10, fontSize: 11.5, color: "rgba(255,255,255,.45)", lineHeight: 1.7 }}>
+                  {result.sideReports.map((s, i) => s.side === "BOOKLET"
+                    ? <div key={i}>Booklet: {s.pages} pages{s.padded !== s.pages ? ` (padded to ${s.padded})` : ""} · {s.signatures} signatures · {s.spreadsPerSide} spread{s.spreadsPerSide === 1 ? "" : "s"}/side · back {s.tumble ? "tumbled 180°" : "upright"}{s.srcRotPages ? ` · ${s.srcRotPages} source pages carried /Rotate (normalized)` : ""}</div>
+                    : <div key={i}>{s.side}: {s.rot ? `source /Rotate ${s.rot}° normalized · ` : ""}cell rotation {s.cellRotate}° · scale ×{s.scale.toFixed(3)} · {s.hasBleed ? "bleed present" : "no bleed"}</div>)}
                 </div>
               )}
               <PdfPreview bytes={result.bytes} labels={result.pageLabels} />

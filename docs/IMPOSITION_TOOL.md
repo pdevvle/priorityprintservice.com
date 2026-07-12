@@ -24,13 +24,20 @@ Drive artwork folder, with the spec already parsed from each line item's
 `_pps_metadata` (calc type, trim size, sides, qty). Click **Impose** on a row:
 
 1. The artwork is pulled from the order's Drive folder through the site's
-   existing Drive connection (prefers `*_print-ready.pdf`, falls back to the
-   raw upload; previews/manifests are ignored).
+   existing Drive connection. Matching is **per line item** (via the item's
+   `_pps_artwork_files` deliverable names / `_pps_gdrive_file_id`), preferring
+   its `*_print-ready.pdf` — a multi-item order can never impose the wrong
+   item's art. Folder listings are cached ~3 min (Refresh busts the cache).
 2. The engine imposes it and shows a rendered preview of every sheet side.
 3. Review, then **Send to order's Drive folder** — the file lands next to the
-   artwork as `IMPOSED_Order-<id>_<job>_<trim>_<imp>up_<sheet>.pdf`, and an
-   order note is added. Rows already containing an `IMPOSED_*` file show a
-   green IMPOSED badge.
+   artwork as `IMPOSED_Order-<id>-i<item>_<job>_<trim>_<imp>up_<sheet>.pdf`,
+   and an order note is added. The IMPOSED badge is per item (the `-i<item>`
+   tag), and a failed Drive listing shows DRIVE ERROR instead of a
+   misleading "no art".
+
+**⚡ Impose all pending** runs the whole queue in one click: for every row
+with a spec, artwork, and no IMPOSED file yet, it downloads, imposes, and
+files the result back to Drive, then reports any failures.
 
 No new Google login — it reuses the refresh token stored by `pps-gdrive.php`.
 
@@ -53,8 +60,12 @@ download the imposed PDF. Useful for testing and one-off jobs.
   compensated; a cell is rotated 90° **only** when the art's own displayed
   orientation differs from the cell's. Duplex backs use mirrored cell
   positions per the press flip edge (default **short edge** — Fiery
-  short-edge feed on 13″ sheets; long-edge selectable) with an optional
-  180° tumble.
+  short-edge feed on 13″ sheets; long-edge selectable) and the back's 180°
+  tumble is **derived automatically** (needed exactly when the flip axis is
+  perpendicular to the placed art's head axis — flats and booklets share the
+  rule). Auto is the default; force-0/force-180 remain as overrides. All
+  four flip×rotation combinations are asserted by the physical duplex
+  simulator in `tests/imposition/duplex_sim.py`.
 - **(c) Wrong cropping** — art is located by **TrimBox** (fallback:
   BleedBox − 0.125″, then MediaBox size heuristics: bleed-inclusive /
   exact-trim / fit-to-trim). Scaling is always **fit-to-trim (contain)** —
@@ -107,10 +118,12 @@ drop a multi-page PDF in reading order (cover = page 1). The engine:
   they read in order, outermost sheet = cover (slug-labelled `COVER` so it
   can run on cover stock);
 - lays out **impHalf spreads per sheet side** where imp comes from the
-  saddle calculator's preset table (authoritative — e.g. 6×4 is 8/side even
-  though `calcCustomImp` says 6) with the verbatim `calcCustomImp` port for
-  custom sizes. The `imp:1` presets (12×12, 11×8.5 L, 12×9 L) move to the
-  13×27.5 sheet at 1 spread/side, as `resolveSize`'s signature limits imply;
+  saddle preset table — **injected live from `pps_get_config()['size_presets']`
+  in wp-admin** (an admin preset edit can never drift production from
+  pricing; the embedded copy is only the standalone fallback) — with the
+  verbatim `calcCustomImp` port for custom sizes. The `imp:1` presets
+  (12×12, 11×8.5 L, 12×9 L) move to the 13×27.5 sheet at 1 spread/side, as
+  `resolveSize`'s signature limits imply;
 - gives the spine **no bleed** (pages meet exactly at the fold; dashed fold
   guides drawn in the margins) while outer edges keep full bleed + clip;
 - backs up the inside with mirrored slots and automatic tumble: 180° only

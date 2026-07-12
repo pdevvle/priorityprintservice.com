@@ -53,10 +53,21 @@ add_action( 'wp_ajax_pps_impose_app', function() {
     $file = PPS_CALC_DIR . 'imposition-tool.html';
     if ( ! file_exists( $file ) ) wp_die( 'imposition-tool.html not found in plugin directory' );
     $html = file_get_contents( $file );
+    // sizePresets: the LIVE saddle preset table (same wp_options config the
+    // calculator prices with) so tool and pricing can never drift; the tool
+    // falls back to its embedded copy only when this is absent (standalone).
+    $size_presets = null;
+    if ( function_exists( 'pps_get_config' ) ) {
+        $conf = pps_get_config();
+        if ( ! empty( $conf['size_presets'] ) && is_array( $conf['size_presets'] ) ) {
+            $size_presets = $conf['size_presets'];
+        }
+    }
     $cfg  = wp_json_encode( array(
-        'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-        'nonce'   => wp_create_nonce( PPS_IMPOSE_NONCE ),
-        'gdrive'  => function_exists( 'pps_gdrive_is_connected' ) ? pps_gdrive_is_connected() : false,
+        'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
+        'nonce'       => wp_create_nonce( PPS_IMPOSE_NONCE ),
+        'gdrive'      => function_exists( 'pps_gdrive_is_connected' ) ? pps_gdrive_is_connected() : false,
+        'sizePresets' => $size_presets,
     ), JSON_HEX_TAG );
     $inject = '<script>window.PPS_IMPOSE_CFG = ' . $cfg . ';</script>';
     $html   = str_replace( '</head>', $inject . "\n</head>", $html );
@@ -70,7 +81,14 @@ add_action( 'wp_ajax_pps_impose_app', function() {
 // DRIVE HELPERS (read side — upload reuses pps_gdrive_upload_file)
 // ═══════════════════════════════════════════════════════════════
 
-function pps_impose_drive_list( $folder_id ) {
+function pps_impose_drive_list( $folder_id, $bypass_cache = false ) {
+    // The queue lists many orders in one request — cache each folder listing
+    // briefly so repeat opens don't fan out a Drive API call per order.
+    $cache_key = 'pps_impose_ls_' . md5( $folder_id );
+    if ( ! $bypass_cache ) {
+        $cached = get_transient( $cache_key );
+        if ( is_array( $cached ) ) return $cached;
+    }
     if ( ! function_exists( 'pps_gdrive_get_access_token' ) ) return null;
     $token = pps_gdrive_get_access_token();
     if ( ! $token ) return null;
@@ -78,11 +96,81 @@ function pps_impose_drive_list( $folder_id ) {
          . '&fields=' . rawurlencode( 'files(id,name,mimeType,size)' ) . '&pageSize=100';
     $resp = wp_remote_get( $url, array(
         'headers' => array( 'Authorization' => 'Bearer ' . $token ),
-        'timeout' => 30,
+        'timeout' => 15,
     ) );
     if ( is_wp_error( $resp ) || wp_remote_retrieve_response_code( $resp ) !== 200 ) return null;
     $body = json_decode( wp_remote_retrieve_body( $resp ), true );
-    return isset( $body['files'] ) && is_array( $body['files'] ) ? $body['files'] : null;
+    $files = isset( $body['files'] ) && is_array( $body['files'] ) ? $body['files'] : null;
+    if ( is_array( $files ) ) set_transient( $cache_key, $files, 3 * MINUTE_IN_SECONDS );
+    return $files;
+}
+
+/**
+ * Single source for the imposed-output filename contract — keep in sync
+ * with imposedFilename() in imposition-tool.html (which always emits
+ * "IMPOSED_..."). Match liberally (space/hyphen, any case) so manually
+ * renamed outputs are still recognized as ours.
+ */
+function pps_impose_is_output_name( $name ) {
+    return (bool) preg_match( '/^IMPOSED[_\s-]/i', (string) $name );
+}
+
+/**
+ * Per-ITEM imposed detection: outputs are named IMPOSED_Order-<oid>-i<item>_…
+ * When $sole_item is true (the order has one PPS item), any IMPOSED_* file
+ * counts — covers files produced before item tagging existed.
+ */
+function pps_impose_item_imposed( $files, $order_id, $item_id, $sole_item ) {
+    if ( ! is_array( $files ) ) return false;
+    foreach ( $files as $f ) {
+        $name = $f['name'] ?? '';
+        if ( ! pps_impose_is_output_name( $name ) ) continue;
+        if ( $sole_item ) return true;
+        if ( preg_match( '/^IMPOSED[_\s-]Order-' . preg_quote( (string) $order_id, '/' ) . '-i' . preg_quote( (string) $item_id, '/' ) . '[_\s-]/i', $name ) ) return true;
+    }
+    return false;
+}
+
+/**
+ * Per-ITEM artwork: match the folder listing against the deliverable names
+ * this item uploaded (_pps_artwork_files), preferring its *_print-ready.pdf.
+ * Fallbacks: the item's raw Drive file id (_pps_gdrive_file_id), then the
+ * order-level pick — but ONLY when the order has a single PPS item, so a
+ * multi-item order can never impose the wrong item's art.
+ */
+function pps_impose_item_artwork( $files, $item, $sole_item ) {
+    if ( ! is_array( $files ) ) return null;
+
+    $names = array();
+    $meta  = $item->get_meta( '_pps_artwork_files' );
+    if ( $meta ) {
+        $dec = is_array( $meta ) ? $meta : json_decode( (string) $meta, true );
+        if ( is_array( $dec ) ) {
+            foreach ( $dec as $f ) {
+                if ( ! empty( $f['name'] ) ) $names[ sanitize_file_name( $f['name'] ) ] = true;
+            }
+        }
+    }
+    if ( $names ) {
+        $print_ready = null; $raw = null;
+        foreach ( $files as $f ) {
+            $name = $f['name'] ?? '';
+            if ( ! isset( $names[ $name ] ) && ! isset( $names[ sanitize_file_name( $name ) ] ) ) continue;
+            if ( ! preg_match( '/\.pdf$/i', $name ) || preg_match( '/_preview/i', $name ) ) continue;
+            if ( preg_match( '/_print-ready\.pdf$/i', $name ) ) $print_ready = $f;
+            elseif ( ! $raw ) $raw = $f;
+        }
+        if ( $print_ready || $raw ) return $print_ready ?: $raw;
+    }
+
+    $raw_id = $item->get_meta( '_pps_gdrive_file_id' );
+    if ( $raw_id ) {
+        foreach ( $files as $f ) {
+            if ( ( $f['id'] ?? '' ) === $raw_id && preg_match( '/\.pdf$/i', $f['name'] ?? '' ) ) return $f;
+        }
+    }
+
+    return $sole_item ? pps_impose_pick_artwork( $files ) : null;
 }
 
 /**
@@ -92,20 +180,10 @@ function pps_impose_drive_list( $folder_id ) {
  */
 function pps_impose_calc_type( $meta, $item ) {
     if ( ! empty( $meta['calcType'] ) ) return (string) $meta['calcType'];
-    if ( ! function_exists( 'pps_get_calculator_for_product' ) ) return '';
+    if ( ! function_exists( 'pps_get_calculator_for_product' ) || ! function_exists( 'pps_get_calc_type_for_filename' ) ) return '';
     $product_id = method_exists( $item, 'get_product_id' ) ? $item->get_product_id() : 0;
     $file = $product_id ? pps_get_calculator_for_product( $product_id ) : false;
-    $map  = array(
-        'calc-preview-test.html'  => 'saddle',
-        'calc-perfect-bound.html' => 'perfect-bound',
-        'calc-coupon-book.html'   => 'coupon',
-        'calc-brochure.html'      => 'brochure',
-        'calc-postcard.html'      => 'postcard',
-        'calc-letterhead.html'    => 'letterhead',
-        'calc-greeting-card.html' => 'greeting-card',
-        'calc-sticker.html'       => 'sticker',
-    );
-    return $file && isset( $map[ $file ] ) ? $map[ $file ] : '';
+    return $file ? pps_get_calc_type_for_filename( $file ) : '';
 }
 
 /**
@@ -119,7 +197,7 @@ function pps_impose_pick_artwork( $files ) {
     foreach ( $files as $f ) {
         $name = $f['name'] ?? '';
         if ( ! preg_match( '/\.pdf$/i', $name ) ) continue;
-        if ( preg_match( '/^IMPOSED[_\s-]/i', $name ) ) continue;
+        if ( pps_impose_is_output_name( $name ) ) continue;
         if ( preg_match( '/_preview/i', $name ) ) continue;
         if ( preg_match( '/_print-ready\.pdf$/i', $name ) ) {
             $print_ready = $f;
@@ -142,8 +220,9 @@ add_action( 'wp_ajax_pps_impose_list', function() {
         wp_send_json_error( array( 'message' => 'WooCommerce not active' ) );
     }
 
+    $bypass = ! empty( $_POST['refresh'] );
     $orders = wc_get_orders( array(
-        'limit'   => 40,
+        'limit'   => 30,
         'orderby' => 'date',
         'order'   => 'DESC',
         'status'  => array( 'wc-processing', 'wc-on-hold', 'wc-pending', 'wc-completed' ),
@@ -154,20 +233,22 @@ add_action( 'wp_ajax_pps_impose_list', function() {
         $folder_id = $order->get_meta( '_pps_gdrive_folder_id' );
         if ( ! $folder_id ) continue;
 
-        $files = pps_impose_drive_list( $folder_id );
-        $art   = $files ? pps_impose_pick_artwork( $files ) : null;
-        $imposed = false;
-        if ( $files ) {
-            foreach ( $files as $f ) {
-                if ( preg_match( '/^IMPOSED[_\s-]/i', $f['name'] ?? '' ) ) { $imposed = true; break; }
-            }
-        }
+        $files = pps_impose_drive_list( $folder_id, $bypass );
 
-        foreach ( $order->get_items() as $item_id => $item ) {
+        // Count PPS items first: with a single item the order-level artwork
+        // fallbacks are safe; with several they are not.
+        $pps_items = array();
+        foreach ( $order->get_items() as $iid => $it ) {
+            if ( $it->get_meta( '_pps_metadata' ) ) $pps_items[ $iid ] = $it;
+        }
+        $sole_item = count( $pps_items ) === 1;
+
+        foreach ( $pps_items as $item_id => $item ) {
             $meta_json = $item->get_meta( '_pps_metadata' );
-            if ( ! $meta_json ) continue;
             $m = json_decode( $meta_json, true );
             if ( ! is_array( $m ) ) continue;
+            $art     = pps_impose_item_artwork( $files, $item, $sole_item );
+            $imposed = pps_impose_item_imposed( $files, $order->get_id(), $item_id, $sole_item );
 
             // Trim dims: flat customs carry longEdge/shortEdge; saddle customs
             // carry customLong/customShort; presets parse out of the size
@@ -222,27 +303,42 @@ add_action( 'wp_ajax_pps_impose_list', function() {
 // ═══════════════════════════════════════════════════════════════
 
 add_action( 'wp_ajax_pps_impose_download', function() {
+    // Errors go out as JSON (wp_send_json_error) so the client can show the
+    // real reason ("Google Drive not connected") instead of a bare status.
     if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( PPS_IMPOSE_NONCE, 'nonce', false ) ) {
-        wp_die( 'Unauthorized', '', array( 'response' => 403 ) );
+        wp_send_json_error( array( 'message' => 'Unauthorized' ), 403 );
     }
     $file_id = sanitize_text_field( $_POST['file_id'] ?? '' );
     if ( ! $file_id || ! preg_match( '/^[\w-]+$/', $file_id ) ) {
-        wp_die( 'Bad file id', '', array( 'response' => 400 ) );
+        wp_send_json_error( array( 'message' => 'Bad file id' ), 400 );
     }
     $token = function_exists( 'pps_gdrive_get_access_token' ) ? pps_gdrive_get_access_token() : false;
-    if ( ! $token ) wp_die( 'Google Drive not connected', '', array( 'response' => 502 ) );
+    if ( ! $token ) {
+        wp_send_json_error( array( 'message' => 'Google Drive not connected — reconnect under PPS Calculators → Google Drive' ), 502 );
+    }
 
+    // Stream to a temp file instead of buffering the whole PDF in memory.
     $resp = wp_remote_get( 'https://www.googleapis.com/drive/v3/files/' . rawurlencode( $file_id ) . '?alt=media', array(
-        'headers' => array( 'Authorization' => 'Bearer ' . $token ),
-        'timeout' => 120,
+        'headers'  => array( 'Authorization' => 'Bearer ' . $token ),
+        'timeout'  => 120,
+        'stream'   => true,
+        'filename' => wp_tempnam( 'pps-impose-art' ),
     ) );
-    if ( is_wp_error( $resp ) ) wp_die( esc_html( $resp->get_error_message() ), '', array( 'response' => 502 ) );
+    if ( is_wp_error( $resp ) ) {
+        wp_send_json_error( array( 'message' => 'Drive download failed: ' . $resp->get_error_message() ), 502 );
+    }
+    $tmp  = $resp['filename'] ?? '';
     $code = wp_remote_retrieve_response_code( $resp );
-    if ( $code !== 200 ) wp_die( 'Drive returned HTTP ' . intval( $code ), '', array( 'response' => 502 ) );
+    if ( $code !== 200 || ! $tmp || ! file_exists( $tmp ) ) {
+        if ( $tmp && file_exists( $tmp ) ) @unlink( $tmp );
+        wp_send_json_error( array( 'message' => 'Drive returned HTTP ' . intval( $code ) ), 502 );
+    }
 
     header( 'Content-Type: application/pdf' );
     header( 'Content-Disposition: inline; filename="artwork.pdf"' );
-    echo wp_remote_retrieve_body( $resp ); // binary PDF bytes — not HTML output
+    header( 'Content-Length: ' . filesize( $tmp ) );
+    readfile( $tmp ); // binary PDF bytes — not HTML output
+    @unlink( $tmp );
     wp_die();
 });
 
@@ -282,6 +378,7 @@ add_action( 'wp_ajax_pps_impose_upload', function() {
     $file_id = pps_gdrive_upload_file( $_FILES['file']['tmp_name'], $filename, $folder_id );
     if ( ! $file_id ) wp_send_json_error( array( 'message' => 'Drive upload failed — see error log' ) );
 
+    delete_transient( 'pps_impose_ls_' . md5( $folder_id ) ); // listing changed — new IMPOSED file
     $order->add_order_note( 'Imposed press-ready PDF filed to Drive: ' . $filename );
 
     wp_send_json_success( array(
