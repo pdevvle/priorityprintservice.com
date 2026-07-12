@@ -86,6 +86,29 @@ function pps_impose_drive_list( $folder_id ) {
 }
 
 /**
+ * Calc type for an order item. Newer calculators stamp calcType into
+ * _pps_metadata; older ones (saddle/perfect-bound/coupon) don't — fall back
+ * to the product registry (calculator filename → calc type).
+ */
+function pps_impose_calc_type( $meta, $item ) {
+    if ( ! empty( $meta['calcType'] ) ) return (string) $meta['calcType'];
+    if ( ! function_exists( 'pps_get_calculator_for_product' ) ) return '';
+    $product_id = method_exists( $item, 'get_product_id' ) ? $item->get_product_id() : 0;
+    $file = $product_id ? pps_get_calculator_for_product( $product_id ) : false;
+    $map  = array(
+        'calc-preview-test.html'  => 'saddle',
+        'calc-perfect-bound.html' => 'perfect-bound',
+        'calc-coupon-book.html'   => 'coupon',
+        'calc-brochure.html'      => 'brochure',
+        'calc-postcard.html'      => 'postcard',
+        'calc-letterhead.html'    => 'letterhead',
+        'calc-greeting-card.html' => 'greeting-card',
+        'calc-sticker.html'       => 'sticker',
+    );
+    return $file && isset( $map[ $file ] ) ? $map[ $file ] : '';
+}
+
+/**
  * Pick the imposition input among an order folder's files.
  * Preference: *_print-ready.pdf (customer-approved transforms baked in),
  * else any other PDF that isn't one of our outputs or a preview deliverable.
@@ -146,29 +169,42 @@ add_action( 'wp_ajax_pps_impose_list', function() {
             $m = json_decode( $meta_json, true );
             if ( ! is_array( $m ) ) continue;
 
-            // Trim dims: custom mode carries longEdge/shortEdge directly;
-            // preset mode parses them out of the size label ("8.5×11 …").
+            // Trim dims: flat customs carry longEdge/shortEdge; saddle customs
+            // carry customLong/customShort; presets parse out of the size
+            // label ("8.5×11 …"). Client re-derives width/height for saddle
+            // (spine orientation) from size_label / bind_dir.
             $long = 0; $short = 0;
             if ( ( $m['sizeMode'] ?? '' ) !== 'preset' && ! empty( $m['longEdge'] ) && ! empty( $m['shortEdge'] ) ) {
                 $long  = floatval( $m['longEdge'] );
                 $short = floatval( $m['shortEdge'] );
+            } elseif ( ! empty( $m['customLong'] ) && ! empty( $m['customShort'] ) ) {
+                $long  = floatval( $m['customLong'] );
+                $short = floatval( $m['customShort'] );
             } elseif ( preg_match( '/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/u', (string) ( $m['sizeLabel'] ?? '' ), $mm ) ) {
                 $long  = floatval( $mm[1] );
                 $short = floatval( $mm[2] );
             }
             if ( $long && $short && $long < $short ) { $t = $long; $long = $short; $short = $t; }
 
+            // Booklets: quantity lives in sets[] (qty per set)
+            $qty = intval( $m['totalQty'] ?? $m['qty'] ?? 0 );
+            if ( ! $qty && is_array( $m['sets'] ?? null ) ) {
+                $qty = array_sum( array_map( 'intval', array_column( $m['sets'], 'qty' ) ) );
+            }
+            if ( ! $qty ) $qty = $item->get_quantity();
+
             $items[] = array(
                 'order_id'      => $order->get_id(),
                 'item_id'       => $item_id,
                 'product'       => $item->get_name(),
                 'job_name'      => (string) ( $m['jobName'] ?? '' ),
-                'calc'          => (string) ( $m['calcType'] ?? '' ),
+                'calc'          => pps_impose_calc_type( $m, $item ),
                 'size_label'    => (string) ( $m['sizeLabel'] ?? '' ),
                 'long_edge'     => $long,
                 'short_edge'    => $short,
                 'sides'         => intval( $m['sides'] ?? 1 ) === 2 ? 2 : 1,
-                'qty'           => intval( $m['totalQty'] ?? $m['qty'] ?? $item->get_quantity() ),
+                'bind_dir'      => (string) ( $m['bindDir'] ?? '' ),
+                'qty'           => $qty,
                 'folder_url'    => 'https://drive.google.com/drive/folders/' . rawurlencode( $folder_id ),
                 'art_file_id'   => $art['id'] ?? '',
                 'art_file_name' => $art['name'] ?? '',

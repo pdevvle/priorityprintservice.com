@@ -74,9 +74,11 @@ const CALC_TYPES = [
   { val:"letterhead",    label:"Letterhead" },
   { val:"greeting-card", label:"Greeting Card" },
   { val:"sticker",       label:"Sticker (12×18 crack-n-peel)" },
+  { val:"saddle",        label:"Saddle Stitch Booklet (signatures)" },
 ];
 const FLAT_CALCS = ["brochure","postcard","letterhead","greeting-card"];
 const BOOKLET_CALCS = ["saddle","perfect-bound","coupon"];
+const UNSUPPORTED_BOOKLETS = ["perfect-bound","coupon"];
 
 // Verbatim port of calcBrochureImp / calcPostcardImp / calcLetterheadImp /
 // calcGreetingImp (identical JS in all four calculators).
@@ -96,6 +98,40 @@ function stickerImp(longEdge, shortEdge) {
   const L = 17.75, S = 11.75;
   const calc = (w, h) => Math.max(0, Math.floor(L / (w + 0.25))) * Math.max(0, Math.floor(S / (h + 0.25)));
   return Math.max(calc(longEdge, shortEdge), calc(shortEdge, longEdge));
+}
+
+// ── Saddle stitch booklet spec (mirror of calc-preview-test.html) ──
+// Preset table is authoritative for preset sizes (imp values don't always
+// equal calcCustomImp — e.g. 6×4 is priced 8-up); customs fall back to the
+// verbatim calcCustomImp port. bindEdge = page HEIGHT (spine is always the
+// left, vertical edge in every preset: portrait, square, and landscape).
+// Page dims are width×height as in the preset labels.
+const SADDLE_PRESETS = [
+  { w:3.5,  h:5.5,  imp:8 }, { w:4,    h:6,   imp:8 }, { w:4.25, h:5.5,  imp:8 },
+  { w:5,    h:7,    imp:4 }, { w:5.5,  h:8.5, imp:4 }, { w:6,    h:9,    imp:4 },
+  { w:8.5,  h:11,   imp:2 }, { w:9,    h:12,  imp:2 },
+  { w:4,    h:4,    imp:8 }, { w:5.5,  h:5.5, imp:6 }, { w:6,    h:6,    imp:6 },
+  { w:8,    h:8,    imp:2 }, { w:9,    h:9,   imp:2 }, { w:12,   h:12,   imp:1 },
+  { w:6,    h:4,    imp:8 }, { w:5.5,  h:4.25, imp:8 }, { w:8.5,  h:5.5, imp:4 },
+  { w:9,    h:6,    imp:4 }, { w:11,   h:8.5, imp:1 }, { w:12,   h:9,    imp:1 },
+];
+
+// Verbatim port of the saddle calculator's calcCustomImp.
+function bookletImp(longest, shortest, bindDir, sheetLong) {
+  const L = sheetLong || 18.5;
+  const sA = x => { const r = L / x; return r < .5 ? 0 : r < 1 ? .5 : r < 2 ? 1 : r < 3 ? 2 : r < 4 ? 3 : r < 5 ? 4 : 4; };
+  const sB = x => { const r = 12.5 / x; return r < 2 ? 1 : r < 3 ? 2 : 2; };
+  return bindDir === "short" ? sA(longest) * sB(shortest) : sA(shortest) * sB(longest);
+}
+
+// Page width×height → priced pages-per-13×19-side. Preset table first
+// (authoritative), calcCustomImp for customs — same order as resolveSize.
+function resolveSaddleImp(pw, ph) {
+  const preset = SADDLE_PRESETS.find(p => Math.abs(p.w - pw) < 0.01 && Math.abs(p.h - ph) < 0.01);
+  if (preset) return { imp: preset.imp, source: "preset" };
+  const longest = Math.max(pw, ph), shortest = Math.min(pw, ph);
+  const bindDir = ph < pw ? "short" : "long"; // spine = page height
+  return { imp: bookletImp(longest, shortest, bindDir), source: "custom" };
 }
 
 // ── Physical layout: priced imp → deterministic cell geometry ──
@@ -177,11 +213,12 @@ function bestPhysicalGrid(pieceLong, pieceShort, sheet) {
 }
 
 function computeLayout(calc, trimA, trimB, opts) {
+  if (calc === "saddle") return computeSaddleLayout(trimA, trimB, opts); // trimA = page WIDTH, trimB = page HEIGHT (not normalized — spine is the height edge)
   const pieceLong = Math.max(trimA, trimB), pieceShort = Math.min(trimA, trimB);
   const warnings = [];
   let mismatch = false;
-  if (BOOKLET_CALCS.includes(calc)) {
-    throw new Error("Booklet imposition (saddle / perfect bound / coupon) needs signature pagination and is not in v1 — flat products and stickers only.");
+  if (UNSUPPORTED_BOOKLETS.includes(calc)) {
+    throw new Error("Perfect bound / coupon book imposition is not in v1 — flats, stickers, and saddle stitch booklets only.");
   }
   let sheet, priced, grid;
   if (calc === "sticker") {
@@ -225,6 +262,61 @@ function computeLayout(calc, trimA, trimB, opts) {
     imp: grid.a * grid.d, pricedImp: priced, mismatch, warnings,
     cellW: grid.rotated ? pieceShort : pieceLong,
     cellH: grid.rotated ? pieceLong : pieceShort,
+  };
+  buildCells(layout);
+  return layout;
+}
+
+// ── Saddle stitch layout: cells are reader SPREADS (2 pages joined at a
+// vertical spine), impHalf spreads per sheet side = the priced pages/side ──
+function computeSaddleLayout(pw, ph, opts) {
+  if (!(pw >= 2 && ph >= 2)) throw new Error("Enter page width × height (min 2″)");
+  const warnings = [];
+  let mismatch = false;
+  const { imp, source } = resolveSaddleImp(pw, ph);
+  if (imp < 1) throw new Error(`${pw}×${ph}″ pages do not image on any press sheet (imp=${imp})`);
+  const spreadW = 2 * pw, spreadH = ph; // spine vertical in spread space
+  let sheet, target;
+  if (imp >= 2) {
+    sheet = SHEETS["13x19"];
+    target = Math.floor(imp / 2);
+    if (imp % 2) { mismatch = true; warnings.push(`MISMATCH: priced ${imp} pages/side is odd — placing ${target} whole spread(s) (${target * 2} pages/side). Review pricing for this size.`); }
+  } else {
+    // imp:1 presets (12×12, 11×8.5 L, 12×9 L): the open spread only fits the
+    // 13×27.5 oversize sheet, 1 spread per side — same page throughput the
+    // pricing assumes (1 page per 13×19-side equivalent).
+    sheet = SHEETS["13x27.5"];
+    target = 1;
+    warnings.push("Open spread requires the 13×27.5 oversize sheet (1 spread per side).");
+  }
+  let grid = bestGridForCount(target, Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet);
+  if (!grid) {
+    if (!(opts && opts.allowBestFit)) {
+      throw new Error(`${target} spread(s) of ${spreadW}×${spreadH}″ (pages ${pw}×${ph}″, priced ${imp}/side${source === "custom" ? ", custom size" : ""}) do not physically fit on ${sheet.label}. Pricing/production mismatch — enable "allow best physical fit" to place fewer (flagged).`);
+    }
+    grid = bestPhysicalGrid(Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet);
+    if (!grid) throw new Error(`A ${spreadW}×${spreadH}″ spread does not fit on ${sheet.label} at all.`);
+    mismatch = true;
+    warnings.push(`MISMATCH: placing ${grid.a * grid.d} spread(s)/side but pricing assumed ${target}. Review before printing.`);
+  }
+  if (grid.g < 0.25 && grid.a * grid.d > 1) warnings.push(grid.g === 0
+    ? "Butt-cut spread layout (no gutter) — adjacent spreads share cut lines."
+    : `Gutter squeezed to ${grid.g}″ between spreads.`);
+  const pieceLong = Math.max(spreadW, spreadH), pieceShort = Math.min(spreadW, spreadH);
+  const layout = {
+    sheet, calc: "saddle", pieceLong, pieceShort,
+    across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
+    imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
+    pricedImp: imp,                 // pages per side the calculator priced
+    mismatch, warnings,
+    cellW: grid.rotated ? pieceShort : pieceLong,
+    cellH: grid.rotated ? pieceLong : pieceShort,
+    booklet: {
+      pw, ph, spreadW, spreadH,
+      spreadsPerSide: grid.a * grid.d,
+      // spread runs along X unless the grid put its long axis vertical
+      spreadAlongX: (spreadW >= spreadH) ? !grid.rotated : grid.rotated,
+    },
   };
   buildCells(layout);
   return layout;
@@ -322,18 +414,18 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape) {
   return { page, rot, mediaW: W, mediaH: H, trimRaw, cellRotate, scale, hasBleed, notes };
 }
 
-// Stamp the art into one cell: art trim centered on cell trim, hard-clipped
-// to the cell's allowed bleed box so neighbours can never overlap (fix c/d).
-function placeInCell(outPage, embedded, art, cell, extraRotate) {
+// Stamp the art with its trim centered on targetTrim (inches, y-up),
+// hard-clipped to clipRect so neighbours can never overlap (fix c/d).
+function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
   const drawRot = (((art.cellRotate + (extraRotate || 0) - art.rot) % 360) + 360) % 360; // CCW for pdf-lib degrees()
   const s = art.scale;
-  const C = { x: (cell.trim.x + cell.trim.w / 2) * PT, y: (cell.trim.y + cell.trim.h / 2) * PT };
+  const C = { x: (targetTrim.x + targetTrim.w / 2) * PT, y: (targetTrim.y + targetTrim.h / 2) * PT };
   const tc = { x: art.trimRaw.x + art.trimRaw.w / 2, y: art.trimRaw.y + art.trimRaw.h / 2 };
   // anchor = C − s·Rot(tc): drawPage maps raw (u,v) → anchor + s·Rot_ccw(u,v)
   const R = drawRot === 90 ? [-tc.y, tc.x] : drawRot === 180 ? [-tc.x, -tc.y] : drawRot === 270 ? [tc.y, -tc.x] : [tc.x, tc.y];
   const ax = C.x - s * R[0], ay = C.y - s * R[1];
 
-  const cl = cell.clip;
+  const cl = clipRect;
   outPage.pushOperators(
     PL.pushGraphicsState(),
     PL.moveTo(cl.x * PT, cl.y * PT),
@@ -346,6 +438,10 @@ function placeInCell(outPage, embedded, art, cell, extraRotate) {
   );
   outPage.drawPage(embedded, { x: ax, y: ay, xScale: s, yScale: s, rotate: PL.degrees(drawRot) });
   outPage.pushOperators(PL.popGraphicsState());
+}
+
+function placeInCell(outPage, embedded, art, cell, extraRotate) {
+  placeArt(outPage, embedded, art, cell.trim, cell.clip, extraRotate);
 }
 
 // Mirror cell positions for the back side so front/back register after the
@@ -400,7 +496,7 @@ function drawSlug(page, layout, font, info) {
     "PPS IMPOSED", info.side,
     info.orderRef ? `Order ${info.orderRef}` : null,
     info.jobName ? String(info.jobName).replace(/[^\x20-\x7E]/g, "?") : null,
-    `${layout.pieceLong}x${layout.pieceShort}in`,
+    layout.booklet ? `pages ${layout.booklet.pw}x${layout.booklet.ph}in` : `${layout.pieceLong}x${layout.pieceShort}in`,
     layout.mismatch ? `MISMATCH ${layout.imp}-up placed vs ${layout.pricedImp}-up priced` : `${layout.imp}-up on ${layout.sheet.key}`,
     layout.gutter < 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
@@ -412,12 +508,166 @@ function drawSlug(page, layout, font, info) {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════
+// SADDLE STITCH — printer-spread signature imposition
+// ═══════════════════════════════════════════════════════════════
+// Classic saddle pagination: pad to a multiple of 4; signature sheet k
+// (0 = outermost = cover) carries pages [P−2k | 2k+1] on the outside and
+// [2k+2 | P−2k−1] on the inside; folded and nested they read in order.
+function mate(p) { return p % 2 ? p + 1 : p - 1; } // leaf-mate: back of page 1 is 2, etc.
+
+function mirrorRect(r, layout, flip) {
+  const W = layout.sheet.long, H = layout.sheet.short;
+  return flip === "short" ? { x: W - r.x - r.w, y: r.y, w: r.w, h: r.h }
+                          : { x: r.x, y: H - r.y - r.h, w: r.w, h: r.h };
+}
+
+// Split each spread cell into two page slots. Spine gets NO bleed — the two
+// pages meet exactly at the fold; outer edges keep the cell's bleed clip.
+// When the grid rotated the spread (90° CCW), the spread-left page lands in
+// the bottom half of the cell.
+function bookletSlots(layout) {
+  const slots = [];
+  for (const cell of layout.cells) {
+    const t = cell.trim, cl = cell.clip;
+    if (layout.booklet.spreadAlongX) {
+      const cx = t.x + t.w / 2;
+      slots.push(
+        { half: "left",  rect: { x: t.x, y: t.y, w: t.w / 2, h: t.h }, clip: { x: cl.x, y: cl.y, w: cx - cl.x, h: cl.h } },
+        { half: "right", rect: { x: cx,  y: t.y, w: t.w / 2, h: t.h }, clip: { x: cx,   y: cl.y, w: cl.x + cl.w - cx, h: cl.h } },
+      );
+    } else {
+      const cy = t.y + t.h / 2;
+      slots.push(
+        { half: "left",  rect: { x: t.x, y: t.y, w: t.w, h: t.h / 2 }, clip: { x: cl.x, y: cl.y, w: cl.w, h: cy - cl.y } },
+        { half: "right", rect: { x: t.x, y: cy,  w: t.w, h: t.h / 2 }, clip: { x: cl.x, y: cy,   w: cl.w, h: cl.y + cl.h - cy } },
+      );
+    }
+  }
+  return slots;
+}
+
+// Dashed fold guides in the margins at each spine position.
+function drawFoldMarks(page, layout) {
+  const s = layout.sheet;
+  const gap = 0.02;
+  const mShort = (s.short - s.usableShort) / 2, mLong = (s.long - s.usableLong) / 2;
+  const lenX = Math.max(mShort - BLEED - 0.02, 0.06), lenY = Math.max(mLong - BLEED - 0.02, 0.06);
+  const dash = { thickness: 0.5, color: PL.rgb(0, 0, 0), dashArray: [2, 2] };
+  const seen = new Set();
+  for (const cell of layout.cells) {
+    if (layout.booklet.spreadAlongX) {
+      const x = +(cell.trim.x + cell.trim.w / 2).toFixed(4);
+      if (seen.has(x)) continue; seen.add(x);
+      page.drawLine({ start: { x: x * PT, y: gap * PT }, end: { x: x * PT, y: (gap + lenX) * PT }, ...dash });
+      page.drawLine({ start: { x: x * PT, y: (s.short - gap - lenX) * PT }, end: { x: x * PT, y: (s.short - gap) * PT }, ...dash });
+    } else {
+      const y = +(cell.trim.y + cell.trim.h / 2).toFixed(4);
+      if (seen.has(y)) continue; seen.add(y);
+      page.drawLine({ start: { x: gap * PT, y: y * PT }, end: { x: (gap + lenY) * PT, y: y * PT }, ...dash });
+      page.drawLine({ start: { x: (s.long - gap - lenY) * PT, y: y * PT }, end: { x: (s.long - gap) * PT, y: y * PT }, ...dash });
+    }
+  }
+}
+
+async function imposeSaddle(artBytes, spec, layout) {
+  const warnings = [...layout.warnings];
+  const bk = layout.booklet;
+  const src = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
+  const n = src.getPageCount();
+  if (n < 3) throw new Error(`Booklet artwork must be a multi-page PDF in reading order — got ${n} page(s)`);
+  const P = Math.ceil(n / 4) * 4;
+  if (P !== n) warnings.push(`page count ${n} padded to ${P} — ${P - n} blank page(s) at the back of the book`);
+  const S = P / 4;
+  if (S >= 8) warnings.push(`${S} nested sheets — v1 applies no creep/shingling compensation; check inner-page margins on thick stock`);
+
+  const out = await PL.PDFDocument.create();
+  const font = await out.embedFont(PL.StandardFonts.Helvetica);
+  const embeds = await out.embedPdf(src, Array.from({ length: n }, (_, i) => i));
+
+  // Resolve every page once (trim location, orientation, fit) in SPREAD
+  // space — each slot is pw×ph regardless of how the grid rotated the spread.
+  const slotLandscape = bk.pw >= bk.ph;
+  const arts = [];
+  for (let i = 0; i < n; i++) arts.push(resolveSideArt(src.getPage(i), Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape));
+  arts[0].notes.forEach(nt => warnings.push("page 1: " + nt));
+  const scaled = arts.filter(a => a.scale !== 1).length;
+  if (scaled) warnings.push(`${scaled} of ${n} pages required fit-to-trim scaling`);
+
+  const spreadRot = bk.spreadAlongX ? 0 : 90;
+  const flip = spec.sheetFlip || "long";
+  // Tumble rule: the back needs 180° when the press flip axis is
+  // perpendicular to the placed pages' head-to-foot axis.
+  const headVertical = spreadRot % 180 === 0;
+  const tumble = flip === "short" ? !headVertical : headVertical;
+
+  const frontSlots = bookletSlots(layout);
+  const qty = spec.qty || 0;
+  const sheetsPerSig = qty ? Math.ceil(qty / bk.spreadsPerSide) : null;
+  const totalSheets = sheetsPerSig ? sheetsPerSig * S : null;
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const W = layout.sheet.long * PT, H = layout.sheet.short * PT;
+  const pageLabels = [];
+
+  for (let k = 0; k < S; k++) {
+    const outside = { left: P - 2 * k, right: 2 * k + 1 };
+    for (const inner of [false, true]) {
+      const page = out.addPage([W, H]);
+      const cells = inner ? mirrorCells(layout.cells, layout, flip) : layout.cells;
+      for (const slot of frontSlots) {
+        const frontPno = slot.half === "left" ? outside.left : outside.right;
+        const pno = inner ? mate(frontPno) : frontPno;      // leaf-mate backs the same physical region
+        if (pno > n) continue;                              // padded blank — cell stays empty, never filled
+        const rect = inner ? mirrorRect(slot.rect, layout, flip) : slot.rect;
+        const clip = inner ? mirrorRect(slot.clip, layout, flip) : slot.clip;
+        placeArt(page, embeds[pno - 1], arts[pno - 1], rect, clip, spreadRot + (inner && tumble ? 180 : 0));
+      }
+      const label = `SIG ${k + 1}/${S} ${inner ? "INSIDE" : "OUTSIDE"}${k === 0 ? " (COVER)" : ""}`;
+      pageLabels.push(label);
+      if (spec.marks !== false) {
+        drawMarks(page, layout, cells);
+        drawFoldMarks(page, layout);
+        drawSlug(page, layout, font, {
+          side: label + (sheetsPerSig ? ` · run ${sheetsPerSig} sheets` : ""),
+          orderRef: spec.orderRef, jobName: spec.jobName,
+          qty, sheets: totalSheets, date: dateStr,
+        });
+      }
+      page.setMediaBox(0, 0, W, H); page.setCropBox(0, 0, W, H);
+      page.setBleedBox(0, 0, W, H); page.setTrimBox(0, 0, W, H);
+    }
+  }
+
+  out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "booklet"} — ${P}pg saddle, ${bk.spreadsPerSide} spread(s)/side on ${layout.sheet.label}`);
+  out.setProducer("PPS Auto-Imposition Tool");
+  out.setCreator("PPS Auto-Imposition Tool");
+  const bytes = await out.save({ useObjectStreams: false });
+
+  // Preflight
+  const check = await PL.PDFDocument.load(bytes);
+  const issues = [];
+  if (check.getPageCount() !== 2 * S) issues.push(`page count ${check.getPageCount()} ≠ ${2 * S} signature sides`);
+  check.getPages().forEach((p, i) => {
+    if (!getPageBox(p, "TrimBox")) issues.push(`sheet ${i + 1} missing TrimBox`);
+    if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
+  });
+  if (!layout.mismatch && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
+    issues.push(`placed ${layout.imp} pages/side ≠ priced ${layout.pricedImp}`);
+  if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
+
+  return {
+    bytes, layout, warnings, sheets: totalSheets, pageLabels,
+    sideReports: [{ side: "BOOKLET", pages: n, padded: P, signatures: S, spreadsPerSide: bk.spreadsPerSide, tumble, srcRotPages: arts.filter(a => a.rot).length }],
+  };
+}
+
 // ── Main entry: impose artwork bytes onto press sheets ──
 // spec: { calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate,
 //         jobName, orderRef, marks }
 // artBytes: front (+back on page 2) PDF. backBytes: optional separate back PDF.
 async function imposePdf(artBytes, backBytes, spec) {
   const layout = computeLayout(spec.calc, spec.trimLong, spec.trimShort, { allowBestFit: !!spec.allowBestFit });
+  if (spec.calc === "saddle") return imposeSaddle(artBytes, spec, layout);
   const warnings = [...layout.warnings];
 
   const srcFront = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
@@ -494,7 +744,10 @@ async function imposePdf(artBytes, backBytes, spec) {
 function parseManifest(text) {
   const out = {};
   const trim = text.match(/Trim size:\s*([\d.]+)\s*[″"]?\s*[×x]\s*([\d.]+)/);
-  if (trim) { out.trimLong = Math.max(+trim[1], +trim[2]); out.trimShort = Math.min(+trim[1], +trim[2]); }
+  if (trim) {
+    out.rawW = +trim[1]; out.rawH = +trim[2]; // manifest order is width × height
+    out.trimLong = Math.max(+trim[1], +trim[2]); out.trimShort = Math.min(+trim[1], +trim[2]);
+  }
   if (/Booklet Specifications/i.test(text)) out.calc = "saddle";
   else if (/Brochure Specifications/i.test(text)) out.calc = "brochure";
   const sides = text.match(/Sides uploaded:\s*(.+)/);
@@ -510,7 +763,8 @@ function imposedFilename(spec, layout) {
   const bits = ["IMPOSED"];
   if (spec.orderRef) bits.push("Order-" + sanitizeName(spec.orderRef));
   if (spec.jobName) bits.push(sanitizeName(spec.jobName).replace(/\.pdf$/i, ""));
-  bits.push(`${layout.pieceLong}x${layout.pieceShort}`, `${layout.imp}up`, layout.sheet.key);
+  if (layout.booklet) bits.push(`${layout.booklet.pw}x${layout.booklet.ph}`, "saddle", `${layout.booklet.spreadsPerSide}spread`, layout.sheet.key);
+  else bits.push(`${layout.pieceLong}x${layout.pieceShort}`, `${layout.imp}up`, layout.sheet.key);
   return bits.join("_") + ".pdf";
 }
 
@@ -567,13 +821,20 @@ function LayoutSchematic({ layout }) {
             width={c.clip.w * scale} height={c.clip.h * scale} fill="rgba(233,30,140,.07)" />
           <rect x={c.trim.x * scale} y={(s.short - c.trim.y - c.trim.h) * scale}
             width={c.trim.w * scale} height={c.trim.h * scale} fill="rgba(233,30,140,.16)" stroke="#e91e8c" strokeWidth="1" />
+          {layout.booklet && (layout.booklet.spreadAlongX
+            ? <line x1={(c.trim.x + c.trim.w / 2) * scale} y1={(s.short - c.trim.y - c.trim.h) * scale}
+                x2={(c.trim.x + c.trim.w / 2) * scale} y2={(s.short - c.trim.y) * scale}
+                stroke="#e91e8c" strokeWidth="1" strokeDasharray="4 3" />
+            : <line x1={c.trim.x * scale} y1={(s.short - c.trim.y - c.trim.h / 2) * scale}
+                x2={(c.trim.x + c.trim.w) * scale} y2={(s.short - c.trim.y - c.trim.h / 2) * scale}
+                stroke="#e91e8c" strokeWidth="1" strokeDasharray="4 3" />)}
         </g>
       ))}
     </svg>
   );
 }
 
-function PdfPreview({ bytes }) {
+function PdfPreview({ bytes, labels }) {
   const holderRef = useRef(null);
   useEffect(() => {
     if (!bytes || !holderRef.current) return;
@@ -583,7 +844,14 @@ function PdfPreview({ bytes }) {
     (async () => {
       try {
         const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
-        for (let i = 1; i <= pdf.numPages && !cancelled; i++) {
+        const maxRender = 8;
+        if (pdf.numPages > maxRender) {
+          const note = document.createElement("div");
+          note.style.cssText = "font-size:12px;color:rgba(255,255,255,.5);margin-bottom:8px";
+          note.textContent = `Previewing the first ${maxRender} of ${pdf.numPages} sheet sides — the downloaded PDF contains all of them.`;
+          holder.appendChild(note);
+        }
+        for (let i = 1; i <= Math.min(pdf.numPages, maxRender) && !cancelled; i++) {
           const page = await pdf.getPage(i);
           const vp0 = page.getViewport({ scale: 1 });
           const scale = Math.min(760 / vp0.width, 2);
@@ -593,7 +861,7 @@ function PdfPreview({ bytes }) {
           canvas.style.cssText = "width:100%;height:auto;border-radius:6px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);margin-bottom:10px";
           const cap = document.createElement("div");
           cap.style.cssText = "font-size:11px;color:rgba(255,255,255,.45);margin:0 0 4px 2px;font-weight:700;letter-spacing:.5px";
-          cap.textContent = i === 1 ? "SHEET SIDE 1 — FRONT" : "SHEET SIDE 2 — BACK";
+          cap.textContent = (labels && labels[i - 1]) || (i === 1 ? "SHEET SIDE 1 — FRONT" : "SHEET SIDE 2 — BACK");
           if (!cancelled) { holder.appendChild(cap); holder.appendChild(canvas); }
           await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
         }
@@ -648,7 +916,7 @@ function OrderQueue({ onLoad, busyId, refreshKey }) {
           const key = r.order_id + ":" + r.item_id;
           const specOk = r.calc && r.long_edge && r.short_edge;
           const artOk = !!(r.art_file_id);
-          const bookish = BOOKLET_CALCS.includes(r.calc);
+          const bookish = UNSUPPORTED_BOOKLETS.includes(r.calc);
           return (
             <tr key={key}>
               <td><a href={r.folder_url} target="_blank" rel="noreferrer" style={{ color: "#7ab8ff" }}>#{r.order_id}</a></td>
@@ -685,6 +953,7 @@ function App() {
   const [orderRef, setOrderRef] = useState("");
   const [marks, setMarks] = useState(true);
   const [allowBestFit, setAllowBestFit] = useState(false);
+  const isSaddle = calc === "saddle";
   const [art, setArt] = useState(null);      // { bytes, name, pageCount }
   const [backArt, setBackArt] = useState(null);
   const [result, setResult] = useState(null); // { bytes, layout, warnings, sheets, filename }
@@ -733,7 +1002,11 @@ function App() {
       if (/\.txt$/i.test(f.name)) {
         const t = await f.text();
         const m = parseManifest(t);
-        if (m.trimLong) { setTrimLong(m.trimLong); setTrimShort(m.trimShort); }
+        // saddle keeps width×height as-is (spine = height edge); flats normalize
+        if (m.trimLong) {
+          if (m.calc === "saddle") { setTrimLong(m.rawW); setTrimShort(m.rawH); }
+          else { setTrimLong(m.trimLong); setTrimShort(m.trimShort); }
+        }
         if (m.calc) setCalc(m.calc);
         if (m.sides) setSides(m.sides);
         if (m.jobName && !jobName) setJobName(m.jobName);
@@ -759,7 +1032,16 @@ function App() {
     const key = row.order_id + ":" + row.item_id;
     setQueueBusy(key); setError(""); setNotice(""); setUploadState("");
     try {
-      setCalc(row.calc); setTrimLong(row.long_edge); setTrimShort(row.short_edge);
+      setCalc(row.calc);
+      if (row.calc === "saddle") {
+        // saddle needs width×height (spine = height), not normalized long/short
+        const m = String(row.size_label || "").match(/([\d.]+)\s*[×x]\s*([\d.]+)/);
+        if (m) { setTrimLong(+m[1]); setTrimShort(+m[2]); }
+        else if (row.bind_dir === "short") { setTrimLong(row.long_edge); setTrimShort(row.short_edge); }
+        else { setTrimLong(row.short_edge); setTrimShort(row.long_edge); }
+      } else {
+        setTrimLong(row.long_edge); setTrimShort(row.short_edge);
+      }
       setSides(row.sides || 1); setQty(row.qty || 0);
       setJobName(row.job_name || row.product || ""); setOrderRef(String(row.order_id));
       setActiveOrder(row);
@@ -794,7 +1076,9 @@ function App() {
   };
 
   const lay = layoutInfo.layout;
-  const parityOk = lay && !lay.mismatch && lay.imp === Math.round(lay.pricedImp);
+  const parityOk = lay && !lay.mismatch && (lay.booklet
+    ? (lay.pricedImp < 2 || lay.imp === lay.pricedImp)   // imp:1 presets legitimately move to the 27.5 sheet
+    : lay.imp === Math.round(lay.pricedImp));
 
   return (
     <div style={{ maxWidth: 1220, margin: "0 auto", padding: "18px 16px 60px" }}>
@@ -820,7 +1104,9 @@ function App() {
         <div style={{ flex: "0 0 340px", minWidth: 300 }}>
           <div className="imp-card" style={{ marginBottom: 14 }}>
             <span className="lbl">Artwork</span>
-            <DropZone label="Drop artwork PDF here" sub="print-ready or raw PDF · page 1 = front, page 2 = back · drop the manifest .txt to autofill the spec"
+            <DropZone label="Drop artwork PDF here"
+              sub={isSaddle ? "multi-page PDF, pages in reading order (cover = page 1) · padded to a multiple of 4 · drop the manifest .txt to autofill"
+                            : "print-ready or raw PDF · page 1 = front, page 2 = back · drop the manifest .txt to autofill the spec"}
               accept=".pdf,.txt" onFiles={f => onFiles(f, "front")} fileName={art && `${art.name} (${art.pageCount}p)`} />
             {spec.sides === 2 && art && art.pageCount < 2 && (
               <div style={{ marginTop: 10 }}>
@@ -837,25 +1123,27 @@ function App() {
               </select>
             </Field>
             <div style={{ display: "flex", gap: 10 }}>
-              <Field label="Trim long (in)" style={{ flex: 1 }}>
+              <Field label={isSaddle ? "Page width (in)" : "Trim long (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimLong} onChange={e => setTrimLong(e.target.value)} />
               </Field>
-              <Field label="Trim short (in)" style={{ flex: 1 }}>
+              <Field label={isSaddle ? "Page height (in) — spine edge" : "Trim short (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
-              <Field label="Sides" style={{ flex: 1 }}>
-                <select value={sides} onChange={e => setSides(+e.target.value)}>
-                  <option value={1}>1 — single-sided</option>
-                  <option value={2}>2 — double-sided</option>
-                </select>
-              </Field>
-              <Field label="Quantity" style={{ flex: 1 }}>
+              {!isSaddle && (
+                <Field label="Sides" style={{ flex: 1 }}>
+                  <select value={sides} onChange={e => setSides(+e.target.value)}>
+                    <option value={1}>1 — single-sided</option>
+                    <option value={2}>2 — double-sided</option>
+                  </select>
+                </Field>
+              )}
+              <Field label={isSaddle ? "Quantity (books)" : "Quantity"} style={{ flex: 1 }}>
                 <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} />
               </Field>
             </div>
-            {spec.sides === 2 && (
+            {(spec.sides === 2 || isSaddle) && (
               <div style={{ display: "flex", gap: 10 }}>
                 <Field label="Press flips sheet on" style={{ flex: 1 }}>
                   <select value={sheetFlip} onChange={e => setSheetFlip(e.target.value)}>
@@ -863,12 +1151,14 @@ function App() {
                     <option value="short">Short edge</option>
                   </select>
                 </Field>
-                <Field label="Back rotation" style={{ flex: 1 }}>
-                  <select value={backRotate} onChange={e => setBackRotate(+e.target.value)}>
-                    <option value={0}>None (head-to-head)</option>
-                    <option value={180}>180° (tumble)</option>
-                  </select>
-                </Field>
+                {!isSaddle && (
+                  <Field label="Back rotation" style={{ flex: 1 }}>
+                    <select value={backRotate} onChange={e => setBackRotate(+e.target.value)}>
+                      <option value={0}>None (head-to-head)</option>
+                      <option value={180}>180° (tumble)</option>
+                    </select>
+                  </Field>
+                )}
               </div>
             )}
             <div style={{ display: "flex", gap: 10 }}>
@@ -900,11 +1190,19 @@ function App() {
                 <LayoutSchematic layout={lay} />
                 <div style={{ fontSize: 13, lineHeight: 1.9, minWidth: 220 }}>
                   <div>Press sheet: <b>{lay.sheet.label}</b></div>
-                  <div>Grid: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.imp}-up</b>{" "}
-                    <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}-UP`}</span>
-                  </div>
+                  {lay.booklet ? (
+                    <div>Spreads: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.booklet.spreadsPerSide}/side</b> ({lay.imp} pages/side){" "}
+                      <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}/SIDE`}</span>
+                    </div>
+                  ) : (
+                    <div>Grid: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.imp}-up</b>{" "}
+                      <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}-UP`}</span>
+                    </div>
+                  )}
                   <div>Gutter: <b>{lay.gutter}″</b>{lay.gutter === 0 ? " (butt-cut)" : ""}</div>
-                  {spec.qty > 0 && <div>Sheets: <b>{Math.ceil(spec.qty / lay.imp)}</b> ({spec.qty} ÷ {lay.imp})</div>}
+                  {lay.booklet && <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)" }}>Spread {lay.booklet.spreadW}×{lay.booklet.spreadH}″ · spine gets no bleed · signatures fold + nest, outermost = cover</div>}
+                  {spec.qty > 0 && !lay.booklet && <div>Sheets: <b>{Math.ceil(spec.qty / lay.imp)}</b> ({spec.qty} ÷ {lay.imp})</div>}
+                  {spec.qty > 0 && lay.booklet && <div>Sheets per signature: <b>{Math.ceil(spec.qty / lay.booklet.spreadsPerSide)}</b> × number of signatures (from page count)</div>}
                   {lay.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12 }}>⚠ {w}</div>)}
                 </div>
               </div>
@@ -936,7 +1234,7 @@ function App() {
                   {result.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
                 </div>
               )}
-              <PdfPreview bytes={result.bytes} />
+              <PdfPreview bytes={result.bytes} labels={result.pageLabels} />
             </div>
           )}
           {busy && <div style={{ color: "rgba(255,255,255,.5)", fontSize: 13 }}>Imposing…</div>}

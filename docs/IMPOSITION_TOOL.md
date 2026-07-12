@@ -95,13 +95,40 @@ then carries a red MISMATCH badge in the UI and `MISMATCH n-up placed vs
 m-up priced` in the slug. Long-term fix belongs on the pricing side — see
 `docs/MASTER_PRICING_LOGIC.md` before touching those thresholds.
 
+## Saddle stitch booklets (printer-spread signatures)
+
+Select **Saddle Stitch Booklet** (or load a saddle order from the queue) and
+drop a multi-page PDF in reading order (cover = page 1). The engine:
+
+- pads the page count to a multiple of 4 (blanks at the back, warned);
+- paginates classic saddle signatures — sheet *k* carries pages
+  `[P−2k | 2k+1]` outside and `[2k+2 | P−2k−1]` inside; folded and nested
+  they read in order, outermost sheet = cover (slug-labelled `COVER` so it
+  can run on cover stock);
+- lays out **impHalf spreads per sheet side** where imp comes from the
+  saddle calculator's preset table (authoritative — e.g. 6×4 is 8/side even
+  though `calcCustomImp` says 6) with the verbatim `calcCustomImp` port for
+  custom sizes. The `imp:1` presets (12×12, 11×8.5 L, 12×9 L) move to the
+  13×27.5 sheet at 1 spread/side, as `resolveSize`'s signature limits imply;
+- gives the spine **no bleed** (pages meet exactly at the fold; dashed fold
+  guides drawn in the margins) while outer edges keep full bleed + clip;
+- backs up the inside with mirrored slots and automatic tumble: 180° when
+  the press flip axis is perpendicular to the placed pages' head axis
+  (long-edge flip of a horizontal spread → tumbled; short-edge → upright) —
+  verified for both flip modes with numbered-page fixtures;
+- slug shows `SIG k/S OUTSIDE|INSIDE · run N sheets`; total sheets =
+  signatures × ceil(books ÷ spreads-per-side).
+
+**No creep compensation in v1** — the tool warns at ≥8 nested sheets; thick
+books may need shingling allowance later.
+
 ## Scope (v1) and later
 
-- **In:** brochure/flat, postcard, letterhead, greeting card, sticker —
-  single-design step-and-repeat, 1- or 2-sided.
-- **Out (v2 candidates):** saddle/perfect-bound/coupon **booklet page
-  imposition** (needs printer-spread signature pagination — the tool refuses
-  these cleanly); ganging multiple orders on one sheet; fully hands-off
+- **In:** brochure/flat, postcard, letterhead, greeting card, sticker
+  (single-design step-and-repeat, 1- or 2-sided), and **saddle stitch
+  booklets** (printer-spread signatures, above).
+- **Out (v2 candidates):** perfect-bound & coupon book imposition; creep
+  compensation; ganging multiple orders on one sheet; fully hands-off
   automation (a scheduled Claude session or Make.com flow could drive the
   same Drive-in/Drive-out loop server-side; the engine is deliberately
   callable headlessly via `window.__ppsImpose`).
