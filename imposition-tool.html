@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPS Imposition Tool · build 2026-07-12</title>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; padding:0; background:#14161b; color:#e8eaf0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  ::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:#3a3e46;border-radius:5px}
+  input, select, button { font-family: inherit; }
+  input[type="number"], input[type="text"], select {
+    background:#1e2128; border:1px solid rgba(255,255,255,.12); color:#e8eaf0;
+    border-radius:6px; padding:8px 10px; font-size:14px; width:100%;
+  }
+  input:focus, select:focus { outline:none; border-color:#e91e8c; }
+  .imp-btn {
+    background:linear-gradient(135deg,#e91e8c,#c2185b); color:#fff; border:none;
+    border-radius:8px; padding:12px 18px; font-size:14px; font-weight:700;
+    cursor:pointer; transition:filter .15s;
+  }
+  .imp-btn:hover{filter:brightness(1.12)} .imp-btn:disabled{opacity:.4;cursor:not-allowed;filter:none}
+  .imp-btn.sec { background:#2a2e36; border:1px solid rgba(255,255,255,.14); }
+  .imp-card { background:#1a1d23; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px; }
+  .imp-drop { border:2px dashed rgba(255,255,255,.18); border-radius:12px; padding:22px 14px; text-align:center;
+    cursor:pointer; transition:border-color .15s, background .15s; }
+  .imp-drop:hover, .imp-drop.over { border-color:#e91e8c; background:rgba(233,30,140,.06); }
+  .imp-badge { display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; letter-spacing:.3px; }
+  .imp-badge.ok  { background:rgba(34,197,94,.15);  color:#4ade80; border:1px solid rgba(34,197,94,.35); }
+  .imp-badge.warn{ background:rgba(245,158,11,.15); color:#fbbf24; border:1px solid rgba(245,158,11,.35); }
+  .imp-badge.err { background:rgba(239,68,68,.15);  color:#f87171; border:1px solid rgba(239,68,68,.35); }
+  table.imp-q { width:100%; border-collapse:collapse; font-size:13px; }
+  table.imp-q th { text-align:left; padding:8px 10px; color:rgba(255,255,255,.45); font-size:11px; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid rgba(255,255,255,.08); }
+  table.imp-q td { padding:9px 10px; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:middle; }
+  .lbl { font-size:11px; font-weight:700; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.5px; margin-bottom:5px; display:block; }
+  @media(max-width:980px){ .imp-cols{flex-direction:column} }
+</style>
+</head>
+<body>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-12 · IMPOSE-V1</div>
+<div id="pps-impose-root"></div>
+<script type="text/babel">
+// PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
+// Vector-preserving sheetwise step-and-repeat imposition in the browser.
+// Engine design per docs/IMPOSITION_TOOL_BRIEF.md — the four historical
+// failure modes and their fixes are tagged (a)(b)(c)(d) below.
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+const PL = window.PDFLib;
+const CFG = window.PPS_IMPOSE_CFG || null; // injected by pps-imposition.php in wp-admin
+
+// ═══════════════════════════════════════════════════════════════
+// LAYOUT SPEC — mirrors the calculators' pricing imposition EXACTLY.
+// CRITICAL INVARIANT (brief §2): copies-per-sheet placed here must equal
+// what the customer was priced on. flatGrid/flatImp/stickerImp are copied
+// verbatim from the calculator HTML files — do not "fix" the thresholds.
+// ═══════════════════════════════════════════════════════════════
+const PT = 72, BLEED = 0.125, EPS = 1e-6;
+
+const SHEETS = {
+  "13x19":   { key:"13x19",   label:"13×19",              long:19,   short:13, usableLong:18.5, usableShort:12.5 },
+  "13x27.5": { key:"13x27.5", label:"13×27.5 (oversize)", long:27.5, short:13, usableLong:27,   usableShort:12.5 },
+  "12x18":   { key:"12x18",   label:"12×18 crack-n-peel", long:18,   short:12, usableLong:17.5, usableShort:11.5 },
+};
+
+const CALC_TYPES = [
+  { val:"brochure",      label:"Brochure / Flat" },
+  { val:"postcard",      label:"Postcard" },
+  { val:"letterhead",    label:"Letterhead" },
+  { val:"greeting-card", label:"Greeting Card" },
+  { val:"sticker",       label:"Sticker (12×18 crack-n-peel)" },
+];
+const FLAT_CALCS = ["brochure","postcard","letterhead","greeting-card"];
+const BOOKLET_CALCS = ["saddle","perfect-bound","coupon"];
+
+// Verbatim port of calcBrochureImp / calcPostcardImp / calcLetterheadImp /
+// calcGreetingImp (identical JS in all four calculators).
+function flatGrid(w, h, L) {
+  const r1 = L / w;
+  const across = r1 < 0.5 ? 0 : r1 < 1 ? 0.5 : r1 < 1.48 ? 1 : r1 < 3 ? 2 : r1 < 4 ? 3 : r1 < 5 ? 4 : r1 < 6 ? 5 : r1 < 7 ? 6 : r1 < 8 ? 7 : 8;
+  const r2 = 12.5 / h;
+  const down = r2 < 1 ? 0 : r2 < 2 ? 1 : r2 < 3 ? 2 : r2 < 4 ? 3 : 4;
+  return across * down;
+}
+function flatImp(longEdge, shortEdge, sheetLong) {
+  const L = sheetLong || 18.5;
+  return Math.max(flatGrid(longEdge, shortEdge, L), flatGrid(shortEdge, longEdge, L));
+}
+// Verbatim port of calcStickerImp (12×18 sheet, 0.25″ pitch, edge bleed into margins).
+function stickerImp(longEdge, shortEdge) {
+  const L = 17.75, S = 11.75;
+  const calc = (w, h) => Math.max(0, Math.floor(L / (w + 0.25))) * Math.max(0, Math.floor(S / (h + 0.25)));
+  return Math.max(calc(longEdge, shortEdge), calc(shortEdge, longEdge));
+}
+
+// ── Physical layout: priced imp → deterministic cell geometry ──
+// All cell rects are in INCHES, PDF coordinates (origin bottom-left, y-up),
+// X along the sheet's long axis.
+// Gutter policy (fix d — nothing arbitrary): prefer a full double-bleed
+// gutter (0.25″), squeeze to 0.125″ then butt-cut 0 only when the priced
+// count can't fit otherwise. Deterministic and reported.
+const GUTTERS = [0.25, 0.125, 0];
+
+function fits(n, dim, g, usable) { return n * dim + (n - 1) * g <= usable + EPS; }
+
+function bestGridForCount(target, pieceLong, pieceShort, sheet) {
+  for (const g of GUTTERS) {
+    const candidates = [];
+    for (const rotated of [false, true]) {
+      const w = rotated ? pieceShort : pieceLong;
+      const h = rotated ? pieceLong : pieceShort;
+      const maxA = Math.floor((sheet.usableLong + g + EPS) / (w + g));
+      const maxD = Math.floor((sheet.usableShort + g + EPS) / (h + g));
+      for (let a = 1; a <= maxA; a++) {
+        if (target % a) continue;
+        const d = target / a;
+        if (d <= maxD && fits(a, w, g, sheet.usableLong) && fits(d, h, g, sheet.usableShort)) {
+          candidates.push({ a, d, rotated, g });
+        }
+      }
+    }
+    if (candidates.length) {
+      // fewest rows (fewest horizontal cuts) first, then unrotated
+      candidates.sort((p, q) => p.d - q.d || (p.rotated ? 1 : 0) - (q.rotated ? 1 : 0));
+      return candidates[0];
+    }
+  }
+  return null;
+}
+
+function buildCells(layout) {
+  // Center the block on the physical sheet. Interior clip extends
+  // min(BLEED, gutter/2) toward a neighbour (butt-cut when gutter=0);
+  // perimeter clip always gets full BLEED (extends into the sheet margin).
+  const s = layout.sheet, w = layout.cellW, h = layout.cellH, g = layout.gutter;
+  const totalW = layout.across * w + (layout.across - 1) * g;
+  const totalH = layout.down * h + (layout.down - 1) * g;
+  const x0 = (s.long - totalW) / 2, y0 = (s.short - totalH) / 2;
+  const inner = Math.min(BLEED, g / 2);
+  layout.cells = [];
+  for (let row = 0; row < layout.down; row++) {
+    for (let col = 0; col < layout.across; col++) {
+      const x = x0 + col * (w + g), y = y0 + row * (h + g);
+      layout.cells.push({
+        col, row,
+        trim: { x, y, w, h },
+        clip: {
+          x: x - (col === 0 ? BLEED : inner),
+          y: y - (row === 0 ? BLEED : inner),
+          w: w + (col === 0 ? BLEED : inner) + (col === layout.across - 1 ? BLEED : inner),
+          h: h + (row === 0 ? BLEED : inner) + (row === layout.down - 1 ? BLEED : inner),
+        },
+      });
+    }
+  }
+}
+
+// Max copies that physically fit, ignoring the priced count — used ONLY on
+// explicit operator override when pricing over-promised (never silently).
+function bestPhysicalGrid(pieceLong, pieceShort, sheet) {
+  let best = null;
+  for (const g of GUTTERS) {
+    for (const rotated of [false, true]) {
+      const w = rotated ? pieceShort : pieceLong;
+      const h = rotated ? pieceLong : pieceShort;
+      const a = Math.floor((sheet.usableLong + g + EPS) / (w + g));
+      const d = Math.floor((sheet.usableShort + g + EPS) / (h + g));
+      if (a >= 1 && d >= 1 && (!best || a * d > best.a * best.d)) best = { a, d, rotated, g };
+    }
+  }
+  return best;
+}
+
+function computeLayout(calc, trimA, trimB, opts) {
+  const pieceLong = Math.max(trimA, trimB), pieceShort = Math.min(trimA, trimB);
+  const warnings = [];
+  let mismatch = false;
+  if (BOOKLET_CALCS.includes(calc)) {
+    throw new Error("Booklet imposition (saddle / perfect bound / coupon) needs signature pagination and is not in v1 — flat products and stickers only.");
+  }
+  let sheet, priced, grid;
+  if (calc === "sticker") {
+    priced = stickerImp(pieceLong, pieceShort);
+    if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not fit the 12×18 sticker sheet`);
+    sheet = SHEETS["12x18"];
+    const pitch = 0.25;
+    const gridOf = (w, h) => ({ a: Math.max(0, Math.floor(17.75 / (w + pitch))), d: Math.max(0, Math.floor(11.75 / (h + pitch))) });
+    const g0 = gridOf(pieceLong, pieceShort), g1 = gridOf(pieceShort, pieceLong);
+    const rotated = g1.a * g1.d > g0.a * g0.d;
+    const gg = rotated ? g1 : g0;
+    grid = { a: gg.a, d: gg.d, rotated, g: pitch };
+  } else if (FLAT_CALCS.includes(calc)) {
+    priced = flatImp(pieceLong, pieceShort);
+    sheet = SHEETS["13x19"];
+    if (priced < 1) { priced = flatImp(pieceLong, pieceShort, 27); sheet = SHEETS["13x27.5"]; } // calculators' two-sheet rule
+    if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not image on any press sheet`);
+    grid = bestGridForCount(Math.round(priced), pieceLong, pieceShort, sheet);
+    if (!grid) {
+      // Pricing promised more than physically fits — surface loudly, never
+      // silently under- or over-place (brief §2). Placement below the priced
+      // count happens only on explicit operator override, and is flagged in
+      // the UI, the warnings, and the sheet's slug line.
+      if (!(opts && opts.allowBestFit)) {
+        throw new Error(`Priced imposition ${priced}-up of ${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label}. Pricing/production mismatch — enable "allow best physical fit" to place the maximum that fits (flagged), and review pricing for this size.`);
+      }
+      grid = bestPhysicalGrid(pieceLong, pieceShort, sheet);
+      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label} at all.`);
+      mismatch = true;
+      warnings.push(`MISMATCH: placing ${grid.a * grid.d}-up but the customer was priced ${priced}-up — sheet count and margin will differ. Review pricing for this size.`);
+    }
+    if (grid.g < 0.25) warnings.push(grid.g === 0
+      ? `Butt-cut layout (no gutter) needed to honour the priced ${priced}-up — adjacent pieces share cut lines, no inter-piece bleed.`
+      : `Gutter squeezed to ${grid.g}″ to honour the priced ${priced}-up.`);
+  } else {
+    throw new Error(`Unknown calc type "${calc}"`);
+  }
+  const layout = {
+    sheet, calc, pieceLong, pieceShort,
+    across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
+    imp: grid.a * grid.d, pricedImp: priced, mismatch, warnings,
+    cellW: grid.rotated ? pieceShort : pieceLong,
+    cellH: grid.rotated ? pieceLong : pieceShort,
+  };
+  buildCells(layout);
+  return layout;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PDF ENGINE (pdf-lib) — vector-preserving placement.
+// (a) source pages are embedded as vector XObjects, never rasterized;
+//     output boxes are set explicitly; preflight validates the result.
+// ═══════════════════════════════════════════════════════════════
+
+// Low-level page box reader — robust across pdf-lib versions.
+function getPageBox(page, name) {
+  try {
+    let v = page.node.get(PL.PDFName.of(name));
+    if (!v) return null;
+    v = page.node.context.lookup(v);
+    if (!v || typeof v.lookup !== "function" || (v.size ? v.size() : 0) !== 4) return null;
+    const n = i => { const el = v.lookup(i); return el && typeof el.asNumber === "function" ? el.asNumber() : null; };
+    const nums = [n(0), n(1), n(2), n(3)];
+    if (nums.some(x => x === null || !isFinite(x))) return null;
+    const [x0, y0, x1, y1] = nums;
+    return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+  } catch (e) { return null; }
+}
+
+// Map a rect through the page's /Rotate into displayed coordinates (fix b:
+// never place a page whose /Rotate we haven't accounted for). Rects are
+// media-origin-relative, y-up. W/H are the RAW media dims.
+function displayRect(rect, rot, W, H) {
+  const pts = [[rect.x, rect.y], [rect.x + rect.w, rect.y + rect.h]];
+  const map = ([u, v]) => rot === 90 ? [v, W - u] : rot === 180 ? [W - u, H - v] : rot === 270 ? [H - v, u] : [u, v];
+  const [p1, p2] = pts.map(map);
+  return { x: Math.min(p1[0], p2[0]), y: Math.min(p1[1], p2[1]), w: Math.abs(p2[0] - p1[0]), h: Math.abs(p2[1] - p1[1]) };
+}
+
+const DIM_EPS = 0.02; // inches — dimension match tolerance (~1.4pt)
+
+// Resolve where the finished piece lives on a source page + how it sits in a
+// layout cell. Box priority (fix c): TrimBox → BleedBox−0.125″ → MediaBox
+// heuristics. Scaling is always fit-to-trim (contain) — NEVER fill-crop.
+function resolveSideArt(page, pieceLong, pieceShort, cellLandscape) {
+  const notes = [];
+  const rot = ((page.getRotation().angle % 360) + 360) % 360;
+  const mb = page.getMediaBox();
+  const W = mb.width, H = mb.height;
+  const rel = b => ({ x: b.x - mb.x, y: b.y - mb.y, w: b.w, h: b.h });
+
+  let trimRaw = null;
+  const tb = getPageBox(page, "TrimBox");
+  if (tb && (Math.abs(tb.w - W) > 1 || Math.abs(tb.h - H) > 1)) {
+    trimRaw = rel(tb); notes.push("art located by embedded TrimBox");
+  }
+  if (!trimRaw) {
+    const bb = getPageBox(page, "BleedBox");
+    if (bb && (Math.abs(bb.w - W) > 1 || Math.abs(bb.h - H) > 1)) {
+      const r = rel(bb);
+      trimRaw = { x: r.x + BLEED * PT, y: r.y + BLEED * PT, w: r.w - 2 * BLEED * PT, h: r.h - 2 * BLEED * PT };
+      notes.push("art located by embedded BleedBox − 0.125″ bleed");
+    }
+  }
+  const dispW = (rot % 180 ? H : W) / PT, dispH = (rot % 180 ? W : H) / PT;
+  const aLong = Math.max(dispW, dispH), aShort = Math.min(dispW, dispH);
+  if (!trimRaw) {
+    if (Math.abs(aLong - (pieceLong + 2 * BLEED)) < DIM_EPS && Math.abs(aShort - (pieceShort + 2 * BLEED)) < DIM_EPS) {
+      trimRaw = { x: BLEED * PT, y: BLEED * PT, w: W - 2 * BLEED * PT, h: H - 2 * BLEED * PT };
+      notes.push("page size = trim + 0.25″ — treated as bleed-inclusive");
+    } else if (Math.abs(aLong - pieceLong) < DIM_EPS && Math.abs(aShort - pieceShort) < DIM_EPS) {
+      trimRaw = { x: 0, y: 0, w: W, h: H };
+      notes.push("page size = exact trim — NO BLEED in source file");
+    } else {
+      trimRaw = { x: 0, y: 0, w: W, h: H };
+      notes.push(`page size ${aLong.toFixed(2)}×${aShort.toFixed(2)}″ matches neither trim nor trim+bleed — fit-to-trim scaled (content is never crop-filled)`);
+    }
+  }
+
+  const trimDisp = displayRect(trimRaw, rot, W, H);
+  // Cell rotation (fix b): rotate 90° ONLY when the art's own displayed
+  // orientation differs from the cell's — never to squeeze art in.
+  const artLandscape = trimDisp.w >= trimDisp.h;
+  const cellRotate = artLandscape === cellLandscape ? 0 : 90;
+
+  const effW = (cellRotate ? trimDisp.h : trimDisp.w) / PT;
+  const effH = (cellRotate ? trimDisp.w : trimDisp.h) / PT;
+  const cellW = cellLandscape ? pieceLong : pieceShort;
+  const cellH = cellLandscape ? pieceShort : pieceLong;
+  let scale = 1;
+  if (Math.abs(effW - cellW) >= DIM_EPS || Math.abs(effH - cellH) >= DIM_EPS) {
+    scale = Math.min(cellW / effW, cellH / effH); // contain — letterboxed, never cropped
+    notes.push(`art trim ${effW.toFixed(2)}×${effH.toFixed(2)}″ ≠ spec trim ${cellW}×${cellH}″ — fit-to-trim scaled ×${scale.toFixed(4)}`);
+  }
+  const hasBleed = (W - trimRaw.w > 1) || (H - trimRaw.h > 1);
+  if (!hasBleed) notes.push("no bleed available — cut lines may show paper white");
+
+  return { page, rot, mediaW: W, mediaH: H, trimRaw, cellRotate, scale, hasBleed, notes };
+}
+
+// Stamp the art into one cell: art trim centered on cell trim, hard-clipped
+// to the cell's allowed bleed box so neighbours can never overlap (fix c/d).
+function placeInCell(outPage, embedded, art, cell, extraRotate) {
+  const drawRot = (((art.cellRotate + (extraRotate || 0) - art.rot) % 360) + 360) % 360; // CCW for pdf-lib degrees()
+  const s = art.scale;
+  const C = { x: (cell.trim.x + cell.trim.w / 2) * PT, y: (cell.trim.y + cell.trim.h / 2) * PT };
+  const tc = { x: art.trimRaw.x + art.trimRaw.w / 2, y: art.trimRaw.y + art.trimRaw.h / 2 };
+  // anchor = C − s·Rot(tc): drawPage maps raw (u,v) → anchor + s·Rot_ccw(u,v)
+  const R = drawRot === 90 ? [-tc.y, tc.x] : drawRot === 180 ? [-tc.x, -tc.y] : drawRot === 270 ? [tc.y, -tc.x] : [tc.x, tc.y];
+  const ax = C.x - s * R[0], ay = C.y - s * R[1];
+
+  const cl = cell.clip;
+  outPage.pushOperators(
+    PL.pushGraphicsState(),
+    PL.moveTo(cl.x * PT, cl.y * PT),
+    PL.lineTo((cl.x + cl.w) * PT, cl.y * PT),
+    PL.lineTo((cl.x + cl.w) * PT, (cl.y + cl.h) * PT),
+    PL.lineTo(cl.x * PT, (cl.y + cl.h) * PT),
+    PL.closePath(),
+    PL.clip(),
+    PL.endPath(),
+  );
+  outPage.drawPage(embedded, { x: ax, y: ay, xScale: s, yScale: s, rotate: PL.degrees(drawRot) });
+  outPage.pushOperators(PL.popGraphicsState());
+}
+
+// Mirror cell positions for the back side so front/back register after the
+// press flips the sheet (fix b — the #1 duplex imposition bug). "long" =
+// sheet turns about its long axis (rows mirror); "short" = about its short
+// axis (columns mirror). PPS layouts are center-symmetric so this is
+// currently an identity — kept exact for future gang/asymmetric runs.
+function mirrorCells(cells, layout, sheetFlip) {
+  const W = layout.sheet.long, H = layout.sheet.short;
+  return cells.map(c => {
+    const m = r => sheetFlip === "short"
+      ? { x: W - r.x - r.w, y: r.y, w: r.w, h: r.h }
+      : { x: r.x, y: H - r.y - r.h, w: r.w, h: r.h };
+    return { col: c.col, row: c.row, trim: m(c.trim), clip: m(c.clip) };
+  });
+}
+
+// ── Marks layer: cut guides in the sheet margins + slug line ──
+// Marks live entirely in the margins (outside the usable image area), so
+// they can never collide with art or bleed.
+function drawMarks(page, layout, cells) {
+  const s = layout.sheet;
+  const mLong = (s.long - s.usableLong) / 2;   // per-side margin along X (in)
+  const mShort = (s.short - s.usableShort) / 2; // per-side margin along Y (in)
+  const black = PL.rgb(0, 0, 0);
+  const xs = new Set(), ys = new Set();
+  cells.forEach(c => {
+    xs.add(+(c.trim.x).toFixed(4)); xs.add(+(c.trim.x + c.trim.w).toFixed(4));
+    ys.add(+(c.trim.y).toFixed(4)); ys.add(+(c.trim.y + c.trim.h).toFixed(4));
+  });
+  const gap = 0.02; // clearance from sheet edge, in
+  const markLenX = Math.max(mShort - BLEED - 0.02, 0.06); // vertical marks in top/bottom margins
+  const markLenY = Math.max(mLong - BLEED - 0.02, 0.06);  // horizontal marks in left/right margins
+  const line = (x1, y1, x2, y2) => page.drawLine({
+    start: { x: x1 * PT, y: y1 * PT }, end: { x: x2 * PT, y: y2 * PT },
+    thickness: 0.5, color: black,
+  });
+  xs.forEach(x => {
+    line(x, gap, x, gap + markLenX);                       // bottom margin
+    line(x, s.short - gap - markLenX, x, s.short - gap);   // top margin
+  });
+  ys.forEach(y => {
+    line(gap, y, gap + markLenY, y);                       // left margin
+    line(s.long - gap - markLenY, y, s.long - gap, y);     // right margin
+  });
+}
+
+function drawSlug(page, layout, font, info) {
+  const s = layout.sheet;
+  // slug is set in standard Helvetica (WinAnsi) — ASCII only, no ″/× glyphs
+  const parts = [
+    "PPS IMPOSED", info.side,
+    info.orderRef ? `Order ${info.orderRef}` : null,
+    info.jobName ? String(info.jobName).replace(/[^\x20-\x7E]/g, "?") : null,
+    `${layout.pieceLong}x${layout.pieceShort}in`,
+    layout.mismatch ? `MISMATCH ${layout.imp}-up placed vs ${layout.pricedImp}-up priced` : `${layout.imp}-up on ${layout.sheet.key}`,
+    layout.gutter < 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
+    info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
+    info.date,
+  ].filter(Boolean);
+  page.drawText(parts.join("  ·  "), {
+    x: 0.06 * PT, y: 0.045 * PT, size: 6, font, color: PL.rgb(0, 0, 0),
+    maxWidth: (s.long - 0.12) * PT,
+  });
+}
+
+// ── Main entry: impose artwork bytes onto press sheets ──
+// spec: { calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate,
+//         jobName, orderRef, marks }
+// artBytes: front (+back on page 2) PDF. backBytes: optional separate back PDF.
+async function imposePdf(artBytes, backBytes, spec) {
+  const layout = computeLayout(spec.calc, spec.trimLong, spec.trimShort, { allowBestFit: !!spec.allowBestFit });
+  const warnings = [...layout.warnings];
+
+  const srcFront = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
+  if (srcFront.getPageCount() < 1) throw new Error("Artwork PDF has no pages");
+  let backDoc = null, backPno = 0;
+  if (spec.sides === 2) {
+    if (backBytes) { backDoc = await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }); }
+    else if (srcFront.getPageCount() >= 2) { backDoc = srcFront; backPno = 1; }
+    else throw new Error("2-sided job but artwork has only 1 page — drop a back-side PDF or use a 2-page file");
+  }
+
+  const cellLandscape = layout.cellW >= layout.cellH;
+  const out = await PL.PDFDocument.create();
+  const font = await out.embedFont(PL.StandardFonts.Helvetica);
+  const sheets = spec.qty ? Math.ceil(spec.qty / layout.imp) : null;
+  const dateStr = new Date().toISOString().slice(0, 10);
+
+  const sidesArr = [{ doc: srcFront, pno: 0, label: "FRONT" }];
+  if (backDoc) sidesArr.push({ doc: backDoc, pno: backPno, label: "BACK" });
+
+  const sideReports = [];
+  for (let i = 0; i < sidesArr.length; i++) {
+    const sd = sidesArr[i];
+    const srcPage = sd.doc.getPage(sd.pno);
+    const art = resolveSideArt(srcPage, layout.pieceLong, layout.pieceShort, cellLandscape);
+    art.notes.forEach(n => warnings.push(`${sd.label.toLowerCase()}: ${n}`));
+    const mb = srcPage.getMediaBox();
+    // Embed the source page ONCE as a vector XObject (fix a) and stamp it
+    // into every cell — deterministic step-and-repeat (fix d).
+    const [embedded] = await out.embedPdf(sd.doc, [sd.pno]);
+    const page = out.addPage([layout.sheet.long * PT, layout.sheet.short * PT]);
+    const cells = i === 0 ? layout.cells : mirrorCells(layout.cells, layout, spec.sheetFlip || "long");
+    const extraRot = i === 1 && spec.backRotate === 180 ? 180 : 0;
+    if (extraRot) warnings.push("back rotated 180° (tumble)");
+    for (const cell of cells) placeInCell(page, embedded, art, cell, extraRot);
+    if (spec.marks !== false) {
+      drawMarks(page, layout, cells);
+      drawSlug(page, layout, font, {
+        side: sd.label, orderRef: spec.orderRef, jobName: spec.jobName,
+        qty: spec.qty, sheets, date: dateStr,
+      });
+    }
+    // Explicit page boxes (fix a): the press sheet is the product at this
+    // stage — Media = Crop = Bleed = Trim = full sheet.
+    const w = layout.sheet.long * PT, h = layout.sheet.short * PT;
+    page.setMediaBox(0, 0, w, h); page.setCropBox(0, 0, w, h);
+    page.setBleedBox(0, 0, w, h); page.setTrimBox(0, 0, w, h);
+    sideReports.push({ side: sd.label, rot: art.rot, cellRotate: art.cellRotate, scale: art.scale, hasBleed: art.hasBleed });
+  }
+
+  out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "job"} — ${layout.imp}-up on ${layout.sheet.label}`);
+  out.setProducer("PPS Auto-Imposition Tool");
+  out.setCreator("PPS Auto-Imposition Tool");
+  const bytes = await out.save({ useObjectStreams: false });
+
+  // ── Preflight (fix a): reload and validate before anything ships ──
+  const check = await PL.PDFDocument.load(bytes);
+  const issues = [];
+  if (check.getPageCount() !== sidesArr.length) issues.push(`page count ${check.getPageCount()} ≠ sides ${sidesArr.length}`);
+  check.getPages().forEach((p, i) => {
+    const m = p.getMediaBox();
+    if (Math.abs(m.width - layout.sheet.long * PT) > 0.5 || Math.abs(m.height - layout.sheet.short * PT) > 0.5)
+      issues.push(`sheet ${i + 1} MediaBox ${(m.width / PT).toFixed(2)}×${(m.height / PT).toFixed(2)}″ ≠ ${layout.sheet.long}×${layout.sheet.short}″`);
+    if (!getPageBox(p, "TrimBox")) issues.push(`sheet ${i + 1} missing TrimBox`);
+    if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
+  });
+  if (!layout.mismatch && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
+  if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
+
+  return { bytes, layout, warnings, sheets, sideReports };
+}
+
+// ── Manifest parser: autofill spec from a *_manipulation_manifest.txt ──
+function parseManifest(text) {
+  const out = {};
+  const trim = text.match(/Trim size:\s*([\d.]+)\s*[″"]?\s*[×x]\s*([\d.]+)/);
+  if (trim) { out.trimLong = Math.max(+trim[1], +trim[2]); out.trimShort = Math.min(+trim[1], +trim[2]); }
+  if (/Booklet Specifications/i.test(text)) out.calc = "saddle";
+  else if (/Brochure Specifications/i.test(text)) out.calc = "brochure";
+  const sides = text.match(/Sides uploaded:\s*(.+)/);
+  if (sides) out.sides = sides[1].includes("+") ? 2 : 1;
+  const fname = text.match(/Filename:\s*(.+)/);
+  if (fname) out.jobName = fname[1].trim();
+  return out;
+}
+
+function sanitizeName(s) { return String(s || "").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(0, 60); }
+
+function imposedFilename(spec, layout) {
+  const bits = ["IMPOSED"];
+  if (spec.orderRef) bits.push("Order-" + sanitizeName(spec.orderRef));
+  if (spec.jobName) bits.push(sanitizeName(spec.jobName).replace(/\.pdf$/i, ""));
+  bits.push(`${layout.pieceLong}x${layout.pieceShort}`, `${layout.imp}up`, layout.sheet.key);
+  return bits.join("_") + ".pdf";
+}
+
+// Engine surface for headless tests / console debugging
+window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename };
+
+// ═══════════════════════════════════════════════════════════════
+// UI
+// ═══════════════════════════════════════════════════════════════
+
+function useDebounced(value, ms) {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return v;
+}
+
+function Field({ label, children, style }) {
+  return <div style={{ marginBottom: 12, ...style }}><span className="lbl">{label}</span>{children}</div>;
+}
+
+function DropZone({ label, sub, accept, onFiles, fileName }) {
+  const [over, setOver] = useState(false);
+  const inputRef = useRef(null);
+  const handle = files => { if (files && files.length) onFiles(Array.from(files)); };
+  return (
+    <div className={"imp-drop" + (over ? " over" : "")}
+      onClick={() => inputRef.current && inputRef.current.click()}
+      onDragOver={e => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={e => { e.preventDefault(); setOver(false); handle(e.dataTransfer.files); }}>
+      <input ref={inputRef} type="file" accept={accept} multiple style={{ display: "none" }}
+        onChange={e => { handle(e.target.files); e.target.value = ""; }} />
+      <div style={{ fontSize: 14, fontWeight: 700, color: fileName ? "#4ade80" : "#e8eaf0" }}>
+        {fileName || label}
+      </div>
+      <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginTop: 4 }}>{sub}</div>
+    </div>
+  );
+}
+
+// SVG schematic of the layout — instant feedback before the PDF preview lands
+function LayoutSchematic({ layout }) {
+  if (!layout) return null;
+  const s = layout.sheet, scale = 320 / s.long;
+  const W = s.long * scale, H = s.short * scale;
+  return (
+    <svg width={W} height={H} style={{ display: "block", background: "#fff", borderRadius: 4 }}>
+      <rect x={0} y={0} width={W} height={H} fill="#fff" stroke="#999" />
+      <rect x={(s.long - s.usableLong) / 2 * scale} y={(s.short - s.usableShort) / 2 * scale}
+        width={s.usableLong * scale} height={s.usableShort * scale} fill="none" stroke="#ddd" strokeDasharray="4 3" />
+      {layout.cells.map((c, i) => (
+        <g key={i}>
+          <rect x={c.clip.x * scale} y={(s.short - c.clip.y - c.clip.h) * scale}
+            width={c.clip.w * scale} height={c.clip.h * scale} fill="rgba(233,30,140,.07)" />
+          <rect x={c.trim.x * scale} y={(s.short - c.trim.y - c.trim.h) * scale}
+            width={c.trim.w * scale} height={c.trim.h * scale} fill="rgba(233,30,140,.16)" stroke="#e91e8c" strokeWidth="1" />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function PdfPreview({ bytes }) {
+  const holderRef = useRef(null);
+  useEffect(() => {
+    if (!bytes || !holderRef.current) return;
+    let cancelled = false;
+    const holder = holderRef.current;
+    holder.innerHTML = "";
+    (async () => {
+      try {
+        const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+        for (let i = 1; i <= pdf.numPages && !cancelled; i++) {
+          const page = await pdf.getPage(i);
+          const vp0 = page.getViewport({ scale: 1 });
+          const scale = Math.min(760 / vp0.width, 2);
+          const vp = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          canvas.width = vp.width; canvas.height = vp.height;
+          canvas.style.cssText = "width:100%;height:auto;border-radius:6px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);margin-bottom:10px";
+          const cap = document.createElement("div");
+          cap.style.cssText = "font-size:11px;color:rgba(255,255,255,.45);margin:0 0 4px 2px;font-weight:700;letter-spacing:.5px";
+          cap.textContent = i === 1 ? "SHEET SIDE 1 — FRONT" : "SHEET SIDE 2 — BACK";
+          if (!cancelled) { holder.appendChild(cap); holder.appendChild(canvas); }
+          await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+        }
+      } catch (e) { holder.innerHTML = '<div style="color:#f87171;font-size:12px">Preview render failed: ' + e.message + '</div>'; }
+    })();
+    return () => { cancelled = true; };
+  }, [bytes]);
+  return <div ref={holderRef} />;
+}
+
+function dlBytes(bytes, name) {
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+// ── WP-admin queue (only rendered when PPS_IMPOSE_CFG is injected) ──
+function ajax(action, params, opts) {
+  const fd = new FormData();
+  fd.append("action", action);
+  fd.append("nonce", CFG.nonce);
+  Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v));
+  return fetch(CFG.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin", ...(opts || {}) });
+}
+
+function OrderQueue({ onLoad, busyId, refreshKey }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let dead = false;
+    setErr("");
+    ajax("pps_impose_list", {})
+      .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(j => {
+        if (dead) return;
+        if (!j.success) throw new Error((j.data && j.data.message) || "list failed");
+        setRows(j.data.items);
+      })
+      .catch(e => !dead && setErr(e.message));
+    return () => { dead = true; };
+  }, [refreshKey]);
+  if (err) return <div style={{ color: "#f87171", fontSize: 13 }}>Order list failed: {err}</div>;
+  if (!rows) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>Loading orders…</div>;
+  if (!rows.length) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>No recent orders with Drive artwork found.</div>;
+  return (
+    <table className="imp-q">
+      <thead><tr><th>Order</th><th>Job</th><th>Spec</th><th>Artwork</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {rows.map(r => {
+          const key = r.order_id + ":" + r.item_id;
+          const specOk = r.calc && r.long_edge && r.short_edge;
+          const artOk = !!(r.art_file_id);
+          const bookish = BOOKLET_CALCS.includes(r.calc);
+          return (
+            <tr key={key}>
+              <td><a href={r.folder_url} target="_blank" rel="noreferrer" style={{ color: "#7ab8ff" }}>#{r.order_id}</a></td>
+              <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.job_name || r.product || "—"}</td>
+              <td style={{ fontSize: 12 }}>{r.calc || "?"} · {r.long_edge}×{r.short_edge}″ · {r.sides === 2 ? "2-sided" : "1-sided"} · qty {r.qty}</td>
+              <td style={{ fontSize: 12 }}>{artOk ? r.art_file_name : <span style={{ color: "#f87171" }}>none found</span>}</td>
+              <td>{r.imposed ? <span className="imp-badge ok">IMPOSED</span>
+                : bookish ? <span className="imp-badge warn">BOOKLET — v2</span>
+                : !specOk ? <span className="imp-badge warn">NO SPEC</span>
+                : !artOk ? <span className="imp-badge err">NO ART</span>
+                : <span className="imp-badge warn">PENDING</span>}</td>
+              <td>{specOk && artOk && !bookish &&
+                <button className="imp-btn sec" style={{ padding: "6px 12px", fontSize: 12 }}
+                  disabled={busyId === key} onClick={() => onLoad(r)}>
+                  {busyId === key ? "Working…" : r.imposed ? "Re-impose" : "Impose"}
+                </button>}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function App() {
+  const [calc, setCalc] = useState("brochure");
+  const [trimLong, setTrimLong] = useState(11);
+  const [trimShort, setTrimShort] = useState(8.5);
+  const [sides, setSides] = useState(1);
+  const [qty, setQty] = useState(500);
+  const [sheetFlip, setSheetFlip] = useState("long");
+  const [backRotate, setBackRotate] = useState(0);
+  const [jobName, setJobName] = useState("");
+  const [orderRef, setOrderRef] = useState("");
+  const [marks, setMarks] = useState(true);
+  const [allowBestFit, setAllowBestFit] = useState(false);
+  const [art, setArt] = useState(null);      // { bytes, name, pageCount }
+  const [backArt, setBackArt] = useState(null);
+  const [result, setResult] = useState(null); // { bytes, layout, warnings, sheets, filename }
+  const [busy, setBusy] = useState(false);
+  const [queueBusy, setQueueBusy] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [uploadState, setUploadState] = useState("");     // "", "uploading", "done", "failed: …"
+  const [activeOrder, setActiveOrder] = useState(null);   // queue row currently loaded
+  const genSeq = useRef(0);
+
+  const spec = useMemo(() => ({
+    calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0,
+    sides: +sides, qty: +qty || 0, sheetFlip, backRotate: +backRotate,
+    jobName, orderRef, marks, allowBestFit,
+  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, marks, allowBestFit]);
+  const debSpec = useDebounced(spec, 450);
+
+  // Live layout (no artwork needed) — schematic + parity badge
+  const layoutInfo = useMemo(() => {
+    try {
+      if (!(debSpec.trimLong >= 2 && debSpec.trimShort >= 2)) return { error: "Enter trim size (min 2″)" };
+      return { layout: computeLayout(debSpec.calc, debSpec.trimLong, debSpec.trimShort, { allowBestFit: debSpec.allowBestFit }) };
+    } catch (e) { return { error: e.message }; }
+  }, [debSpec]);
+
+  // Auto-regenerate the imposed PDF when spec or art changes
+  useEffect(() => {
+    if (!art || !layoutInfo.layout) { setResult(null); return; }
+    const seq = ++genSeq.current;
+    setBusy(true); setError(""); setUploadState("");
+    imposePdf(art.bytes, debSpec.sides === 2 ? (backArt && backArt.bytes) : null, debSpec)
+      .then(res => {
+        if (seq !== genSeq.current) return;
+        res.filename = imposedFilename(debSpec, res.layout);
+        setResult(res);
+      })
+      .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); } })
+      .finally(() => { if (seq === genSeq.current) setBusy(false); });
+  }, [art, backArt, debSpec, layoutInfo.layout ? 1 : 0]);
+
+  const onFiles = async (files, slot) => {
+    setError("");
+    for (const f of files) {
+      if (/\.txt$/i.test(f.name)) {
+        const t = await f.text();
+        const m = parseManifest(t);
+        if (m.trimLong) { setTrimLong(m.trimLong); setTrimShort(m.trimShort); }
+        if (m.calc) setCalc(m.calc);
+        if (m.sides) setSides(m.sides);
+        if (m.jobName && !jobName) setJobName(m.jobName);
+        setNotice("Spec autofilled from manifest: " + f.name);
+        continue;
+      }
+      if (!/\.pdf$/i.test(f.name)) { setError(`"${f.name}" is not a PDF — the imposition input must be the print-ready or raw PDF.`); continue; }
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      let pageCount = 0;
+      try { pageCount = (await PL.PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount(); }
+      catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
+      if (slot === "back") setBackArt({ bytes, name: f.name, pageCount });
+      else {
+        setArt({ bytes, name: f.name, pageCount });
+        if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
+        if (pageCount >= 2 && sides === 1) setSides(2);
+      }
+    }
+  };
+
+  // ── WP queue: load an order row, fetch its artwork, impose ──
+  const loadOrder = async (row) => {
+    const key = row.order_id + ":" + row.item_id;
+    setQueueBusy(key); setError(""); setNotice(""); setUploadState("");
+    try {
+      setCalc(row.calc); setTrimLong(row.long_edge); setTrimShort(row.short_edge);
+      setSides(row.sides || 1); setQty(row.qty || 0);
+      setJobName(row.job_name || row.product || ""); setOrderRef(String(row.order_id));
+      setActiveOrder(row);
+      const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
+      if (!r.ok) throw new Error("artwork download failed (HTTP " + r.status + ")");
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      const pageCount = (await PL.PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount();
+      setArt({ bytes, name: row.art_file_name, pageCount });
+      setBackArt(null);
+      setNotice(`Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`);
+    } catch (e) { setError(e.message); }
+    finally { setQueueBusy(null); }
+  };
+
+  const sendToDrive = async () => {
+    if (!result || !activeOrder) return;
+    setUploadState("uploading");
+    try {
+      const fd = new FormData();
+      fd.append("action", "pps_impose_upload");
+      fd.append("nonce", CFG.nonce);
+      fd.append("order_id", activeOrder.order_id);
+      fd.append("filename", result.filename);
+      fd.append("file", new Blob([result.bytes], { type: "application/pdf" }), result.filename);
+      const r = await fetch(CFG.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin" });
+      const j = await r.json();
+      if (!j.success) throw new Error((j.data && j.data.message) || "upload failed");
+      setUploadState("done");
+      setNotice(`Imposed PDF filed to the order #${activeOrder.order_id} Drive folder as ${result.filename}.`);
+      setRefreshKey(k => k + 1);
+    } catch (e) { setUploadState("failed: " + e.message); }
+  };
+
+  const lay = layoutInfo.layout;
+  const parityOk = lay && !lay.mismatch && lay.imp === Math.round(lay.pricedImp);
+
+  return (
+    <div style={{ maxWidth: 1220, margin: "0 auto", padding: "18px 16px 60px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 16 }}>
+        <h1 style={{ fontSize: 20, margin: 0 }}>🖨️ PPS Imposition Tool</h1>
+        <span style={{ fontSize: 12, color: "rgba(255,255,255,.4)" }}>
+          vector-preserving sheetwise step-and-repeat · {CFG ? "connected to WooCommerce + Google Drive" : "standalone mode (drag & drop)"}
+        </span>
+      </div>
+
+      {CFG && (
+        <div className="imp-card" style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span className="lbl" style={{ marginBottom: 0 }}>Recent orders with artwork on Drive</span>
+            <button className="imp-btn sec" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => setRefreshKey(k => k + 1)}>Refresh</button>
+          </div>
+          <OrderQueue onLoad={loadOrder} busyId={queueBusy} refreshKey={refreshKey} />
+        </div>
+      )}
+
+      <div className="imp-cols" style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+        {/* ── Left: job setup ── */}
+        <div style={{ flex: "0 0 340px", minWidth: 300 }}>
+          <div className="imp-card" style={{ marginBottom: 14 }}>
+            <span className="lbl">Artwork</span>
+            <DropZone label="Drop artwork PDF here" sub="print-ready or raw PDF · page 1 = front, page 2 = back · drop the manifest .txt to autofill the spec"
+              accept=".pdf,.txt" onFiles={f => onFiles(f, "front")} fileName={art && `${art.name} (${art.pageCount}p)`} />
+            {spec.sides === 2 && art && art.pageCount < 2 && (
+              <div style={{ marginTop: 10 }}>
+                <DropZone label="Drop BACK side PDF" sub="2-sided job but the front file has one page"
+                  accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
+              </div>
+            )}
+          </div>
+
+          <div className="imp-card">
+            <Field label="Product / calculator">
+              <select value={calc} onChange={e => setCalc(e.target.value)}>
+                {CALC_TYPES.map(c => <option key={c.val} value={c.val}>{c.label}</option>)}
+              </select>
+            </Field>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Field label="Trim long (in)" style={{ flex: 1 }}>
+                <input type="number" step="0.125" min="2" value={trimLong} onChange={e => setTrimLong(e.target.value)} />
+              </Field>
+              <Field label="Trim short (in)" style={{ flex: 1 }}>
+                <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Field label="Sides" style={{ flex: 1 }}>
+                <select value={sides} onChange={e => setSides(+e.target.value)}>
+                  <option value={1}>1 — single-sided</option>
+                  <option value={2}>2 — double-sided</option>
+                </select>
+              </Field>
+              <Field label="Quantity" style={{ flex: 1 }}>
+                <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} />
+              </Field>
+            </div>
+            {spec.sides === 2 && (
+              <div style={{ display: "flex", gap: 10 }}>
+                <Field label="Press flips sheet on" style={{ flex: 1 }}>
+                  <select value={sheetFlip} onChange={e => setSheetFlip(e.target.value)}>
+                    <option value="long">Long edge (default)</option>
+                    <option value="short">Short edge</option>
+                  </select>
+                </Field>
+                <Field label="Back rotation" style={{ flex: 1 }}>
+                  <select value={backRotate} onChange={e => setBackRotate(+e.target.value)}>
+                    <option value={0}>None (head-to-head)</option>
+                    <option value={180}>180° (tumble)</option>
+                  </select>
+                </Field>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <Field label="Job name" style={{ flex: 1 }}>
+                <input type="text" value={jobName} onChange={e => setJobName(e.target.value)} placeholder="slug line" />
+              </Field>
+              <Field label="Order #" style={{ flex: "0 0 90px" }}>
+                <input type="text" value={orderRef} onChange={e => setOrderRef(e.target.value)} />
+              </Field>
+            </div>
+            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
+              Cut marks + slug line in margins
+            </label>
+            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
+              <input type="checkbox" checked={allowBestFit} onChange={e => setAllowBestFit(e.target.checked)} style={{ width: "auto" }} />
+              <span>Allow best physical fit if the priced imp can't be placed <span style={{ color: "rgba(255,255,255,.4)" }}>(mismatch is flagged on sheet + slug)</span></span>
+            </label>
+          </div>
+        </div>
+
+        {/* ── Right: layout + preview + output ── */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="imp-card" style={{ marginBottom: 14 }}>
+            <span className="lbl">Computed layout (mirrors calculator pricing)</span>
+            {layoutInfo.error && <div style={{ color: "#f87171", fontSize: 13, lineHeight: 1.5 }}>{layoutInfo.error}</div>}
+            {lay && (
+              <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+                <LayoutSchematic layout={lay} />
+                <div style={{ fontSize: 13, lineHeight: 1.9, minWidth: 220 }}>
+                  <div>Press sheet: <b>{lay.sheet.label}</b></div>
+                  <div>Grid: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.imp}-up</b>{" "}
+                    <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}-UP`}</span>
+                  </div>
+                  <div>Gutter: <b>{lay.gutter}″</b>{lay.gutter === 0 ? " (butt-cut)" : ""}</div>
+                  {spec.qty > 0 && <div>Sheets: <b>{Math.ceil(spec.qty / lay.imp)}</b> ({spec.qty} ÷ {lay.imp})</div>}
+                  {lay.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12 }}>⚠ {w}</div>)}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {(notice || error) && (
+            <div className="imp-card" style={{ marginBottom: 14, borderColor: error ? "rgba(239,68,68,.4)" : "rgba(34,197,94,.3)" }}>
+              <div style={{ fontSize: 13, color: error ? "#f87171" : "#4ade80", lineHeight: 1.5 }}>{error || notice}</div>
+            </div>
+          )}
+
+          {result && (
+            <div className="imp-card" style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+                <button className="imp-btn" onClick={() => dlBytes(result.bytes, result.filename)}>⬇ Download {result.filename}</button>
+                {CFG && activeOrder && (
+                  <button className="imp-btn" disabled={uploadState === "uploading" || uploadState === "done"} onClick={sendToDrive}>
+                    {uploadState === "uploading" ? "Uploading…" : uploadState === "done" ? "✓ Filed to Drive" : "📁 Send to order's Drive folder"}
+                  </button>
+                )}
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,.45)" }}>
+                  {(result.bytes.length / 1048576).toFixed(2)} MB · preflight passed
+                </span>
+                {uploadState.startsWith("failed") && <span style={{ color: "#f87171", fontSize: 12 }}>{uploadState}</span>}
+              </div>
+              {result.warnings.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  {result.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
+                </div>
+              )}
+              <PdfPreview bytes={result.bytes} />
+            </div>
+          )}
+          {busy && <div style={{ color: "rgba(255,255,255,.5)", fontSize: 13 }}>Imposing…</div>}
+          {!art && !busy && !result && (
+            <div className="imp-card" style={{ color: "rgba(255,255,255,.45)", fontSize: 13, lineHeight: 1.7 }}>
+              Drop an artwork PDF to generate the imposed press sheet.
+              The engine places source pages as vector XObjects (never rasterized),
+              locates art by TrimBox, fits to trim without cropping, hard-clips
+              every cell, and step-and-repeats the exact count the customer was priced on.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("pps-impose-root")).render(<App />);
+</script>
+</body>
+</html>

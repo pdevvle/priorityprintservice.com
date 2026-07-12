@@ -64,6 +64,10 @@ if ( file_exists( PPS_CALC_DIR . 'pps-html-deploy.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-html-deploy.php';
 }
 
+if ( file_exists( PPS_CALC_DIR . 'pps-imposition.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-imposition.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
