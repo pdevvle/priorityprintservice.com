@@ -52,8 +52,9 @@ download the imposed PDF. Useful for testing and one-off jobs.
 - **(b) Wrong orientation** — the source page's `/Rotate` is read and
   compensated; a cell is rotated 90° **only** when the art's own displayed
   orientation differs from the cell's. Duplex backs use mirrored cell
-  positions per the press flip edge (long/short, configurable) with an
-  optional 180° tumble.
+  positions per the press flip edge (default **short edge** — Fiery
+  short-edge feed on 13″ sheets; long-edge selectable) with an optional
+  180° tumble.
 - **(c) Wrong cropping** — art is located by **TrimBox** (fallback:
   BleedBox − 0.125″, then MediaBox size heuristics: bleed-inclusive /
   exact-trim / fit-to-trim). Scaling is always **fit-to-trim (contain)** —
@@ -112,10 +113,11 @@ drop a multi-page PDF in reading order (cover = page 1). The engine:
   13×27.5 sheet at 1 spread/side, as `resolveSize`'s signature limits imply;
 - gives the spine **no bleed** (pages meet exactly at the fold; dashed fold
   guides drawn in the margins) while outer edges keep full bleed + clip;
-- backs up the inside with mirrored slots and automatic tumble: 180° when
-  the press flip axis is perpendicular to the placed pages' head axis
-  (long-edge flip of a horizontal spread → tumbled; short-edge → upright) —
-  verified for both flip modes with numbered-page fixtures;
+- backs up the inside with mirrored slots and automatic tumble: 180° only
+  when the press flip axis is perpendicular to the placed pages' head axis.
+  **Default flip is short-edge** (Fiery presses feed 13″ sheets short-edge
+  first), so horizontal spreads back up upright with no rotation; both flip
+  modes are verified with numbered-page fixtures;
 - slug shows `SIG k/S OUTSIDE|INSIDE · run N sheets`; total sheets =
   signatures × ceil(books ÷ spreads-per-side).
 

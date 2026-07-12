@@ -595,7 +595,7 @@ async function imposeSaddle(artBytes, spec, layout) {
   if (scaled) warnings.push(`${scaled} of ${n} pages required fit-to-trim scaling`);
 
   const spreadRot = bk.spreadAlongX ? 0 : 90;
-  const flip = spec.sheetFlip || "long";
+  const flip = spec.sheetFlip || "short"; // Fiery short-edge feed is the shop default
   // Tumble rule: the back needs 180° when the press flip axis is
   // perpendicular to the placed pages' head-to-foot axis.
   const headVertical = spreadRot % 180 === 0;
@@ -699,7 +699,7 @@ async function imposePdf(artBytes, backBytes, spec) {
     // into every cell — deterministic step-and-repeat (fix d).
     const [embedded] = await out.embedPdf(sd.doc, [sd.pno]);
     const page = out.addPage([layout.sheet.long * PT, layout.sheet.short * PT]);
-    const cells = i === 0 ? layout.cells : mirrorCells(layout.cells, layout, spec.sheetFlip || "long");
+    const cells = i === 0 ? layout.cells : mirrorCells(layout.cells, layout, spec.sheetFlip || "short");
     const extraRot = i === 1 && spec.backRotate === 180 ? 180 : 0;
     if (extraRot) warnings.push("back rotated 180° (tumble)");
     for (const cell of cells) placeInCell(page, embedded, art, cell, extraRot);
@@ -947,7 +947,7 @@ function App() {
   const [trimShort, setTrimShort] = useState(8.5);
   const [sides, setSides] = useState(1);
   const [qty, setQty] = useState(500);
-  const [sheetFlip, setSheetFlip] = useState("long");
+  const [sheetFlip, setSheetFlip] = useState("short"); // Fiery presses feed 13" sheets short-edge first — duplex flips on the short edge
   const [backRotate, setBackRotate] = useState(0);
   const [jobName, setJobName] = useState("");
   const [orderRef, setOrderRef] = useState("");
@@ -1147,8 +1147,8 @@ function App() {
               <div style={{ display: "flex", gap: 10 }}>
                 <Field label="Press flips sheet on" style={{ flex: 1 }}>
                   <select value={sheetFlip} onChange={e => setSheetFlip(e.target.value)}>
-                    <option value="long">Long edge (default)</option>
-                    <option value="short">Short edge</option>
+                    <option value="short">Short edge (default — Fiery SEF)</option>
+                    <option value="long">Long edge</option>
                   </select>
                 </Field>
                 {!isSaddle && (
