@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · PC-TIPUI</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · PC-OVSZ2X</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Postcard Calculator v1
@@ -308,9 +308,12 @@ function calculate(c) {
   // larger 13×27.5 press sheet — stocked only for select papers (non-stock pays the fee).
   let needsLargeSheet = false, pressSheet = "13x19";
   if (imp < 1) {
-    imp = calcPostcardImp(longE, shortE, 27);
     needsLargeSheet = true;
     pressSheet = "13x27.5";
+    // Oversized flats keep their sub-1 yield (e.g. 11×25.5 → 0.5) so size-related
+    // costs scale up (~2× at imp 0.5). Only re-image on 13×27.5 when the piece
+    // won't fit even 0.5-up on 13×19 (imp === 0), to keep pressSheets finite.
+    if (imp === 0) imp = calcPostcardImp(longE, shortE, 27);
   }
 
   const qty = c.qty;
