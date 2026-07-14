@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · PC-OVSZ2X</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · PC-SLOTPDF</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Postcard Calculator v1
@@ -2494,11 +2494,26 @@ generate();
             {[{s:"front",label:fLabel,art:frontArt,setArt:setFrontArt,inputRef:frontInputRef},...(sides === 2 ? [{s:"back",label:bLabel,art:backArt,setArt:setBackArt,inputRef:backInputRef}] : [])].map(({s,label,art,setArt,inputRef}) => {
               const handleSlotFile = async (file) => {
                 if (!file) return;
-                const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
-                if (!dataUrl) return;
-                const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
-                setArt({ dataUrl, file, dims });
-                setApproved(false);
+                try {
+                  if (file.type === "application/pdf") {
+                    const buf = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+                    const pg = await pdf.getPage(1);
+                    const vp = pg.getViewport({ scale: 2 });
+                    const c = document.createElement("canvas");
+                    c.width = vp.width; c.height = vp.height;
+                    await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+                    const [x0, y0, x1, y1] = pg.view;
+                    setArt({ dataUrl: c.toDataURL("image/jpeg", 0.85), file, dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } });
+                    setApproved(false);
+                    return;
+                  }
+                  const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
+                  if (!dataUrl) return;
+                  const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+                  setArt({ dataUrl, file, dims });
+                  setApproved(false);
+                } catch (e) { console.error("Slot file processing failed:", e); }
               };
               return (
                 <div key={s} style={{ position: "relative" }}>
@@ -2533,7 +2548,7 @@ generate();
                       <div style={{ fontSize: 10, color: CC.light }}>Drop or click</div>
                     </div>
                   )}
-                  <input ref={inputRef} type="file" accept=".jpg,.jpeg,.png,.tiff,.tif" onChange={e => { const f = e.target.files?.[0]; if (f) handleSlotFile(f); e.target.value = ""; }} style={{ display: "none" }} />
+                  <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif" onChange={e => { const f = e.target.files?.[0]; if (f) handleSlotFile(f); e.target.value = ""; }} style={{ display: "none" }} />
                 </div>
               );
             })}
