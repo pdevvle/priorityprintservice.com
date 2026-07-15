@@ -589,18 +589,23 @@ const MARK_GAP = BLEED;  // marks start just beyond the bleed
 const MARK_LEN = 0.22;   // target length, in
 const MARK_MIN = 0.05;   // less room than this → omit
 
-// Longest clear run from (x, y) heading (dx, dy).
+// Longest clear run from (x, y) heading (dx, dy). Obstacle edges count as
+// BLOCKED (edge-inclusive, ±LINE_EPS): at butt cut the mark rays would
+// otherwise ride exactly along the shared trim lines and draw across the
+// pieces — a ray probing into or along any piece's clip box returns 0.
 function freeRun(x, y, dx, dy, maxLen, P, obstacles) {
+  const LE = 0.01; // edge tolerance, in
   let len = dx > 0 ? P.x1 - x : dx < 0 ? x - P.x0 : dy > 0 ? P.y1 - y : y - P.y0;
   len = Math.min(len, maxLen);
+  const px = x + dx * 0.02, py = y + dy * 0.02; // probe just ahead of the start
   for (const o of obstacles) {
-    if (x > o.x + EPS && x < o.x + o.w - EPS && y > o.y + EPS && y < o.y + o.h - EPS) return 0; // ray starts inside a piece
+    if (px > o.x - LE && px < o.x + o.w + LE && py > o.y - LE && py < o.y + o.h + LE) return 0; // ray heads into/along a piece
     if (dx !== 0) {
-      if (y <= o.y + EPS || y >= o.y + o.h - EPS) continue;
+      if (y < o.y - LE || y > o.y + o.h + LE) continue;
       const d = dx > 0 ? o.x - x : x - (o.x + o.w);
       if (d >= -EPS) len = Math.min(len, d - 0.02);
     } else {
-      if (x <= o.x + EPS || x >= o.x + o.w - EPS) continue;
+      if (x < o.x - LE || x > o.x + o.w + LE) continue;
       const d = dy > 0 ? o.y - y : y - (o.y + o.h);
       if (d >= -EPS) len = Math.min(len, d - 0.02);
     }
