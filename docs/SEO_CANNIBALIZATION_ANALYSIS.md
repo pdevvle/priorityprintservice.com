@@ -28,6 +28,12 @@
 ### 🔜 Not yet started — the deeper consolidation
 The menu/redirect work retires the *service-page* layer. The **product-level generics** §6 flagged — `/product/cheap-booklet-printing/`, `/product/low-cost-brochure-printing/`, `/product/coupon-booklet-printing/`, etc. — still compete for the head terms and should also fold into the same category hubs (301 in Rank Math), with the specialist products retained. That's the next layer.
 
+### ⚠️ Redirect-target rule — not every service page goes to the category
+A service page whose intent is **owned by a specialized product** must 301 to **that product**, not the generic category/hub — otherwise the specific intent splits off the page that ranks for it.
+- **`/small-booklet-printing/` → `/product/small-booklet-printing/`** (not `/booklets/`). Near-slug-twin; the product owns "small/mini booklet" (1,152 clk, pos 34). §6 corrected. It is **not** in the category CSV, so add it as a **separate service→product 301** in Rank Math, and repoint (or drop) the "Mini Booklets" menu item that still links it.
+- **Review `/coupon-pads-coupon-booklets/`** — the CSV maps it to `/coupon-booklets/`, but it ranks ~pos 12 for "coupon pads" and may itself be the owner (→ *keep*), or belong on `/product/coupon-tear-pad-printing/` if that's the real "coupon pads" owner. Decide before importing.
+- Generic marketing pages with no specialized owning product (`/custom-booklet-printing/`, `/brochure-printing-services/`, `/online-flyer-printing-service/`, …) correctly go to the **category** hub.
+
 ---
 
 ## TL;DR
@@ -186,7 +192,7 @@ migrate only after the hub ranks.
 | brochure | `/mini-brochures/` + all fold/shape specialists | — | 6–20 | RETAIN | — |
 | booklet | **`/booklet-printing/` (mint, saddle calc)** | — | — | PRESET-HUB | — |
 | booklet | `/product/cheap-booklet-printing/` | 687 | 31 | 301 | `/booklet-printing/` |
-| booklet | `/small-booklet-printing/` (SERVICE) | 224 | 45 | 301 | `/booklet-printing/` |
+| booklet | `/small-booklet-printing/` (SERVICE) | 224 | 45 | 301 | **`/product/small-booklet-printing/`** (the product, **not** the generic hub/category) — near-slug-twin of the product, which owns "small/mini booklet" (1,152 clk, pos 34); sending it to the generic hub would split the mini intent off the page that owns it. (Corrected 2026-07-14.) |
 | booklet | `/custom-booklet-printing/` | 27 | 58 | 301 | `/booklet-printing/` |
 | booklet | `/product/presentation-booklet-printing/` | 15 | 43 | 301 | `/booklet-printing/` |
 | booklet | `/product/small-booklet-printing/` | 1152 | 34 | **HOLD / PHASE-2** | `/booklet-printing/` (after hub ranks) — or make THIS the hub |
