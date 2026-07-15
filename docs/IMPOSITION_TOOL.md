@@ -128,7 +128,9 @@ download the imposed PDF. Useful for testing and one-off jobs.
   **repeat single design** (page 1 [+2], default), **gang in order** (pages
   fill the cells sheet by sheet in reading order), or **cut & stack** (pages
   dealt pile-by-pile so the cut piles, stacked in reading order, yield the
-  collated sequence). 2-sided collated files read front/back interleaved
+  collated sequence), or **repeat each page** (every piece gets its own full
+  step-and-repeat sheet — for per-design run quantities; sheets = pieces ×
+  ceil(qty ÷ imp)). 2-sided collated files read front/back interleaved
   (p1 = front of piece 1, p2 = its back, …) or take a separate back file
   (page i backs piece i). Leftover cells stay deterministically blank;
   qty means copies per collated set; sheets = qty × sheets-per-set.

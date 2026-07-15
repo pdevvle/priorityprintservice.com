@@ -875,7 +875,7 @@ async function imposePdf(artBytes, backBytes, spec) {
   const nF = srcFront.getPageCount();
   if (nF < 1) throw new Error("Artwork PDF has no pages");
   const sides = spec.sides === 2 ? 2 : 1;
-  const mode = spec.multiMode === "gang" || spec.multiMode === "stack" ? spec.multiMode : "repeat";
+  const mode = ["gang", "stack", "each"].includes(spec.multiMode) ? spec.multiMode : "repeat";
   const backDoc = backBytes ? await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }) : null;
 
   // ── Piece list: each piece = one finished item {front, back} page refs.
@@ -907,8 +907,12 @@ async function imposePdf(artBytes, backBytes, spec) {
   }
 
   const imp = layout.imp;
-  const D = mode === "repeat" ? 1 : Math.ceil(pieces.length / imp); // sheets per collated set
-  if (mode !== "repeat") {
+  // sheets per collated set: gang/stack pack pieces into cells; "each" gives
+  // every piece its own full step-and-repeat sheet (own run quantity).
+  const D = mode === "repeat" ? 1 : mode === "each" ? pieces.length : Math.ceil(pieces.length / imp);
+  if (mode === "each") {
+    warnings.push(`${pieces.length} piece(s), one full ${imp}-up sheet each — print each sheet's own quantity.`);
+  } else if (mode !== "repeat") {
     const blanks = D * imp - pieces.length;
     warnings.push(`${pieces.length} collated piece(s) ${mode === "gang" ? "ganged in page order" : "distributed cut-&-stack (piles collate after cutting)"} across ${D} sheet${D === 1 ? "" : "s"}${blanks ? ` — ${blanks} leftover cell(s) stay blank` : ""}.`);
   }
@@ -917,7 +921,11 @@ async function imposePdf(artBytes, backBytes, spec) {
   const out = await PL.PDFDocument.create();
   const font = await out.embedFont(PL.StandardFonts.Helvetica);
   // qty semantics: repeat → total pieces; gang/stack → copies per collated set
-  const sheets = spec.qty ? (mode === "repeat" ? Math.ceil(spec.qty / imp) : spec.qty * D) : (mode === "repeat" ? null : D);
+  const sheets = spec.qty
+    ? (mode === "repeat" ? Math.ceil(spec.qty / imp)
+      : mode === "each" ? pieces.length * Math.ceil(spec.qty / imp)
+      : spec.qty * D)
+    : (mode === "repeat" ? null : D);
   const dateStr = new Date().toISOString().slice(0, 10);
 
   // Resolve + embed each DISTINCT source page once (fix a/d), shared across cells.
@@ -947,6 +955,7 @@ async function imposePdf(artBytes, backBytes, spec) {
   // cut piles, stacked in reading order, yield the collated sequence.
   const pieceAt = (s, slot) => {
     if (mode === "repeat") return pieces[0];
+    if (mode === "each") return pieces[s];
     const idx = mode === "gang" ? s * imp + slot : slot * D + s;
     return idx < pieces.length ? pieces[idx] : null;
   };
@@ -977,7 +986,7 @@ async function imposePdf(artBytes, backBytes, spec) {
         }
         placeInCell(page, embedded, art, cell, extraRot + (frontCell.patRot || 0));
       }
-      const label = (sideIdx === 0 ? "FRONT" : "BACK") + (D > 1 ? ` ${s + 1}/${D}` : "") + (mode === "gang" ? " · GANG" : mode === "stack" ? " · CUT&STACK" : "");
+      const label = (sideIdx === 0 ? "FRONT" : "BACK") + (D > 1 ? ` ${s + 1}/${D}` : "") + (mode === "gang" ? " · GANG" : mode === "stack" ? " · CUT&STACK" : mode === "each" ? ` · PIECE ${s + 1}` : "");
       pageLabels.push(label);
       if (spec.marks !== false) {
         drawMarks(page, layout, cellsForMarks);
@@ -1576,6 +1585,7 @@ function App() {
                     <option value="repeat">Repeat single design (page 1{spec.sides === 2 ? "+2" : ""} only)</option>
                     <option value="gang">Gang pages in order (different pieces per sheet)</option>
                     <option value="stack">Cut &amp; stack (piles collate after cutting)</option>
+                    <option value="each">Repeat each page (full sheet per piece)</option>
                   </select>
                 </Field>
                 {spec.sides === 2 && multiMode !== "repeat" && !backArt && (
@@ -1619,7 +1629,7 @@ function App() {
                   </select>
                 </Field>
               )}
-              <Field label={isSaddle ? "Quantity (books)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
+              <Field label={isSaddle ? "Quantity (books)" : multiMode === "each" ? "Quantity (per piece)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
                 <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} />
               </Field>
             </div>
@@ -1801,7 +1811,7 @@ function App() {
                   {result.sideReports.map((s, i) => s.side === "BOOKLET"
                     ? <div key={i}>Booklet: {s.pages} pages{s.padded !== s.pages ? ` (padded to ${s.padded})` : ""} · {s.signatures} signatures · {s.spreadsPerSide} spread{s.spreadsPerSide === 1 ? "" : "s"}/side · back {s.tumble ? "tumbled 180°" : "upright"}{s.srcRotPages ? ` · ${s.srcRotPages} source pages carried /Rotate (normalized)` : ""}</div>
                     : s.side === "COLLATED"
-                    ? <div key={i}>Collated: {s.pieces} piece{s.pieces === 1 ? "" : "s"} · {s.modeName === "gang" ? "ganged in order" : "cut & stack"} · {s.sheetsPerSet} sheet{s.sheetsPerSet === 1 ? "" : "s"} per set</div>
+                    ? <div key={i}>Collated: {s.pieces} piece{s.pieces === 1 ? "" : "s"} · {s.modeName === "gang" ? "ganged in order" : s.modeName === "stack" ? "cut & stack" : "one full sheet per piece"} · {s.sheetsPerSet} sheet{s.sheetsPerSet === 1 ? "" : "s"}{s.modeName === "each" ? " total" : " per set"}</div>
                     : <div key={i}>{s.side}: {s.rot ? `source /Rotate ${s.rot}° normalized · ` : ""}cell rotation {s.cellRotate}° · scale ×{typeof s.scale === "number" ? s.scale.toFixed(3) : "?"} · {s.hasBleed ? "bleed present" : "no bleed"}</div>)}
                 </div>
               )}
