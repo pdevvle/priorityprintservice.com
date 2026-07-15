@@ -101,6 +101,17 @@ download the imposed PDF. Useful for testing and one-off jobs.
   on **13×27.5**, the multiple expanding to fill the 27″ usable axis (e.g.
   11×8.5 goes from 2-up to 3-up per pass). Pricing basis stays the 13×19
   imp — badge and slug show both numbers.
+- **Piece patterns** (flats & stickers): Straight / **Head-to-head** (row
+  pairs, heads meeting at the shared cut) / **Foot-to-foot** (phase-shifted
+  complement) / **Reversal** (alternate columns 180°) / **Reversal
+  alternate** (checkerboard) / **Manual** — a per-cell tap-to-flip grid for
+  operator judgement calls (dutch-cut prep, grain, ink balance). Each
+  piece's back inherits its front's 180° automatically, so patterned sheets
+  still register through the duplex flip (simulator-verified per cell). A
+  separate **grid orientation** override forces the pieces unrotated /
+  rotated 90° on the sheet (refusing through the standard mismatch flow if
+  the priced count no longer fits). Patterns don't apply to saddle
+  signatures — the spine dictates orientation.
 - Sheets = ceil(qty ÷ imp), shown in UI and slug.
 - **Marks live INSIDE the printable image area** (12.5×18.5 / 12.5×27 /
   11.5×17.5) — the press can't image the sheet margins, so a margin mark

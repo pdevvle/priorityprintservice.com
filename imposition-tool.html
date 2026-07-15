@@ -178,10 +178,12 @@ function printableRect(sheet) {
 
 function fits(n, dim, g, usable) { return n * dim + (n - 1) * g <= usable + EPS; }
 
-function bestGridForCount(target, pieceLong, pieceShort, sheet, gutters) {
+// allowedRot: which grid orientations to consider — [false, true] normally,
+// narrowed by the operator's grid-orientation override.
+function bestGridForCount(target, pieceLong, pieceShort, sheet, gutters, allowedRot) {
   for (const g of (gutters || GUTTERS)) {
     const candidates = [];
-    for (const rotated of [false, true]) {
+    for (const rotated of (allowedRot || [false, true])) {
       const w = rotated ? pieceShort : pieceLong;
       const h = rotated ? pieceLong : pieceShort;
       const maxA = Math.floor((sheet.usableLong + g + EPS) / (w + g));
@@ -237,11 +239,29 @@ function blockOrigin(layout, offset, warnings) {
   return { x0: cx, y0: cy };
 }
 
-function buildCells(layout, offset) {
+// Per-cell 180° gang patterns. Rows are indexed bottom-up (y-up grid), so
+// "head-to-head" pairs rows (0,1), (2,3)… with heads meeting at the pair's
+// shared cut; "foot-to-foot" is the phase-shifted complement. Each piece's
+// BACK inherits its front rotation automatically, so patterned sheets still
+// register through the duplex flip.
+function patternRot(pattern, manual, col, row, across) {
+  switch (pattern) {
+    case "h2h":      return row % 2 ? 180 : 0;
+    case "f2f":      return row % 2 ? 0 : 180;
+    case "reversal": return col % 2 ? 180 : 0;
+    case "revalt":   return (col + row) % 2 ? 180 : 0;
+    case "manual":   return manual && +manual[row * across + col] === 180 ? 180 : 0;
+    default:         return 0;
+  }
+}
+
+function buildCells(layout, opts) {
   // Interior clip extends min(BLEED, gutter/2) toward a neighbour (butt-cut
   // when gutter=0); perimeter clip always gets full BLEED.
   const s = layout.sheet, w = layout.cellW, h = layout.cellH, g = layout.gutter;
-  const { x0, y0 } = blockOrigin(layout, offset, layout.warnings);
+  const { x0, y0 } = blockOrigin(layout, opts && opts.offset, layout.warnings);
+  const pattern = (opts && opts.pattern) || "straight";
+  const manual = opts && opts.manualPattern;
   const inner = Math.min(BLEED, g / 2);
   layout.cells = [];
   for (let row = 0; row < layout.down; row++) {
@@ -249,6 +269,7 @@ function buildCells(layout, offset) {
       const x = x0 + col * (w + g), y = y0 + row * (h + g);
       layout.cells.push({
         col, row,
+        patRot: patternRot(pattern, manual, col, row, layout.across),
         trim: { x, y, w, h },
         clip: {
           x: x - (col === 0 ? BLEED : inner),
@@ -263,10 +284,10 @@ function buildCells(layout, offset) {
 
 // Max copies that physically fit, ignoring the priced count — used ONLY on
 // explicit operator override when pricing over-promised (never silently).
-function bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters) {
+function bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot) {
   let best = null;
   for (const g of (gutters || GUTTERS)) {
-    for (const rotated of [false, true]) {
+    for (const rotated of (allowedRot || [false, true])) {
       const w = rotated ? pieceShort : pieceLong;
       const h = rotated ? pieceLong : pieceShort;
       const a = Math.floor((sheet.usableLong + g + EPS) / (w + g));
@@ -287,6 +308,10 @@ function computeLayout(calc, trimA, trimB, opts) {
   }
   // Gutter override: a fixed value replaces the auto policy everywhere
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : GUTTERS;
+  // Grid-orientation override: "no" = pieces long-edge along the sheet's
+  // long axis only; "yes" = rotated 90° only; anything else = auto.
+  const allowedRot = opts && opts.forceRotated === "yes" ? [true]
+                   : opts && opts.forceRotated === "no" ? [false] : [false, true];
   let sheet, priced, grid, efficient = false;
   if (calc === "sticker") {
     priced = stickerImp(pieceLong, pieceShort);
@@ -296,8 +321,12 @@ function computeLayout(calc, trimA, trimB, opts) {
       warnings.push(`Sticker pitch is fixed at ${STICKER.pitch}″ by the 12×18 crack-n-peel spec — gutter override ignored.`);
     }
     const g0 = stickerGrid(pieceLong, pieceShort), g1 = stickerGrid(pieceShort, pieceLong);
-    const rotated = g1.a * g1.d > g0.a * g0.d;
+    let rotated = g1.a * g1.d > g0.a * g0.d;
+    if (opts && opts.forceRotated === "yes") rotated = true;
+    else if (opts && opts.forceRotated === "no") rotated = false;
     const gg = rotated ? g1 : g0;
+    if (gg.a * gg.d < priced) { mismatch = true; warnings.push(`MISMATCH: forced orientation fits ${gg.a * gg.d}-up but pricing assumed ${priced}-up.`); }
+    if (gg.a * gg.d < 1) throw new Error("Forced orientation does not fit the sticker sheet.");
     grid = { a: gg.a, d: gg.d, rotated, g: STICKER.pitch };
   } else if (FLAT_CALCS.includes(calc)) {
     priced = flatImp(pieceLong, pieceShort);
@@ -309,22 +338,22 @@ function computeLayout(calc, trimA, trimB, opts) {
       // multiple expanding to whatever physically fits the 27″ usable axis.
       // Pricing basis stays the 13×19 imp — this is a press-pass saver.
       sheet = SHEETS["13x27.5"];
-      grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters);
-      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on 13×27.5 with the selected gutter.`);
+      grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot);
+      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on 13×27.5 with the selected gutter/orientation.`);
       efficient = true;
       warnings.push(`Efficient mode: ${grid.a * grid.d}-up on 13×27.5 (priced ${priced}-up per 13×19).`);
     } else {
       if (opts && opts.efficient) warnings.push("Efficient 13×27.5 mode applies to sizes imaging ≥2-up on 13×19 — ignored for this size.");
-      grid = bestGridForCount(Math.round(priced), pieceLong, pieceShort, sheet, gutters);
+      grid = bestGridForCount(Math.round(priced), pieceLong, pieceShort, sheet, gutters, allowedRot);
       if (!grid) {
         // Pricing promised more than physically fits — surface loudly, never
         // silently under- or over-place (brief §2). Placement below the priced
         // count happens only on explicit operator override, and is flagged in
         // the UI, the warnings, and the sheet's slug line.
         if (!(opts && opts.allowBestFit)) {
-          throw new Error(`Priced imposition ${priced}-up of ${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}. Pricing/production mismatch — enable "allow best physical fit" to place the maximum that fits (flagged), and review pricing for this size.`);
+          throw new Error(`Priced imposition ${priced}-up of ${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}${allowedRot.length === 1 ? " in the forced orientation" : ""}. Pricing/production mismatch — enable "allow best physical fit" to place the maximum that fits (flagged), and review pricing for this size.`);
         }
-        grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters);
+        grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot);
         if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label} at all.`);
         mismatch = true;
         warnings.push(`MISMATCH: placing ${grid.a * grid.d}-up but the customer was priced ${priced}-up — sheet count and margin will differ. Review pricing for this size.`);
@@ -343,7 +372,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     cellW: grid.rotated ? pieceShort : pieceLong,
     cellH: grid.rotated ? pieceLong : pieceShort,
   };
-  buildCells(layout, opts && opts.offset);
+  buildCells(layout, opts);
   return layout;
 }
 
@@ -399,7 +428,7 @@ function computeSaddleLayout(pw, ph, opts) {
       spreadAlongX: (spreadW >= spreadH) ? !grid.rotated : grid.rotated,
     },
   };
-  buildCells(layout, opts && opts.offset);
+  buildCells(layout, { offset: opts && opts.offset }); // patterns don't apply to signature spreads
   return layout;
 }
 
@@ -532,7 +561,7 @@ function placeInCell(outPage, embedded, art, cell, extraRotate) {
 // currently an identity — kept exact for future gang/asymmetric runs.
 function mirrorCells(cells, layout, sheetFlip) {
   return cells.map(c => ({
-    col: c.col, row: c.row,
+    col: c.col, row: c.row, patRot: c.patRot,
     trim: mirrorRect(c.trim, layout, sheetFlip),
     clip: mirrorRect(c.clip, layout, sheetFlip),
   }));
@@ -812,6 +841,9 @@ function layoutOpts(spec) {
     efficient: !!spec.efficient,
     gutter: isFinite(spec.gutter) && spec.gutter !== null && spec.gutter !== "" ? +spec.gutter : null,
     offset: { mode: spec.offsetMode || "jog", right: +spec.offsetRight || 0.5, bottom: +spec.offsetBottom || 0.5 },
+    pattern: spec.pattern || "straight",
+    manualPattern: spec.manualPattern || null,
+    forceRotated: spec.forceRotated || "auto",
   };
 }
 
@@ -862,7 +894,7 @@ async function imposePdf(artBytes, backBytes, spec) {
       extraRot = mode === "auto" ? (autoTumble ? 180 : 0) : mode;
       if (extraRot) warnings.push(`back rotated 180° (${mode === "auto" ? "auto — registers with front under " + flip + "-edge flip" : "manual tumble"})`);
     }
-    for (const cell of cells) placeInCell(page, embedded, art, cell, extraRot);
+    for (const cell of cells) placeInCell(page, embedded, art, cell, extraRot + (cell.patRot || 0));
     if (spec.marks !== false) {
       drawMarks(page, layout, cells);
       const placed = drawSlug(page, layout, font, {
@@ -984,6 +1016,14 @@ function LayoutSchematic({ layout }) {
             width={c.clip.w * scale} height={c.clip.h * scale} fill="rgba(233,30,140,.07)" />
           <rect x={c.trim.x * scale} y={(s.short - c.trim.y - c.trim.h) * scale}
             width={c.trim.w * scale} height={c.trim.h * scale} fill="rgba(233,30,140,.16)" stroke="#e91e8c" strokeWidth="1" />
+          {!layout.booklet && (() => {
+            const cx = (c.trim.x + c.trim.w / 2) * scale;
+            const cy = (s.short - c.trim.y - c.trim.h / 2) * scale;
+            const r = Math.min(5, c.trim.w * scale / 4);
+            const up = !c.patRot;
+            return <path d={up ? `M ${cx} ${cy - r} L ${cx - r} ${cy + r} L ${cx + r} ${cy + r} Z`
+                               : `M ${cx} ${cy + r} L ${cx - r} ${cy - r} L ${cx + r} ${cy - r} Z`} fill="rgba(233,30,140,.6)" />;
+          })()}
           {layout.booklet && (layout.booklet.spreadAlongX
             ? <line x1={(c.trim.x + c.trim.w / 2) * scale} y1={(s.short - c.trim.y - c.trim.h) * scale}
                 x2={(c.trim.x + c.trim.w / 2) * scale} y2={(s.short - c.trim.y) * scale}
@@ -1142,6 +1182,9 @@ function App() {
   const [offsetMode, setOffsetMode] = useState("jog");    // jog lower-right 0.5″ | center | custom
   const [offsetRight, setOffsetRight] = useState(0.5);
   const [offsetBottom, setOffsetBottom] = useState(0.5);
+  const [pattern, setPattern] = useState("straight");     // per-cell 180° gang pattern
+  const [manualPattern, setManualPattern] = useState([]); // row-major 0/180 per cell (rows bottom-up)
+  const [forceRotated, setForceRotated] = useState("auto");
   const isSaddle = calc === "saddle";
   const [art, setArt] = useState(null);      // { bytes, name, pageCount }
   const [backArt, setBackArt] = useState(null);
@@ -1181,8 +1224,9 @@ function App() {
     jobName, orderRef, itemRef, marks, allowBestFit,
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
+    pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom]);
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -1466,6 +1510,50 @@ function App() {
                 <Field label="From bottom edge (in)" style={{ flex: 1 }}>
                   <input type="number" step="0.125" min="0" value={offsetBottom} onChange={e => setOffsetBottom(e.target.value)} />
                 </Field>
+              </div>
+            )}
+            {!isSaddle && (
+              <div style={{ display: "flex", gap: 10 }}>
+                <Field label="Piece pattern" style={{ flex: 1 }}>
+                  <select value={pattern} onChange={e => setPattern(e.target.value)}>
+                    <option value="straight">Straight (all same)</option>
+                    <option value="h2h">Head-to-head (row pairs)</option>
+                    <option value="f2f">Foot-to-foot (row pairs)</option>
+                    <option value="reversal">Reversal (alt. columns 180°)</option>
+                    <option value="revalt">Reversal alternate (checkerboard)</option>
+                    <option value="manual">Manual (tap cells)…</option>
+                  </select>
+                </Field>
+                <Field label="Grid orientation" style={{ flex: "0 0 140px" }}>
+                  <select value={forceRotated} onChange={e => setForceRotated(e.target.value)}>
+                    <option value="auto">Auto</option>
+                    <option value="no">Force unrotated</option>
+                    <option value="yes">Force rotated 90°</option>
+                  </select>
+                </Field>
+              </div>
+            )}
+            {!isSaddle && pattern === "manual" && lay && (
+              <div style={{ marginBottom: 12 }}>
+                <span className="lbl">Manual pattern — tap a cell to flip it 180° (top row shown first)</span>
+                {Array.from({ length: lay.down }).map((_, rr) => {
+                  const row = lay.down - 1 - rr; // grid rows are bottom-up
+                  return (
+                    <div key={rr} style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+                      {Array.from({ length: lay.across }).map((_, col) => {
+                        const idx = row * lay.across + col;
+                        const flipped = +manualPattern[idx] === 180;
+                        return (
+                          <button key={col} type="button" className="imp-btn sec"
+                            style={{ width: 34, height: 30, padding: 0, fontSize: 14, background: flipped ? "rgba(233,30,140,.25)" : undefined }}
+                            onClick={() => setManualPattern(p => { const n = [...p]; n[idx] = flipped ? 0 : 180; return n; })}>
+                            {flipped ? "\u2193" : "\u2191"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {FLAT_CALCS.includes(calc) && (
