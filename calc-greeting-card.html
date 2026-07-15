@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · GC-SLOTPDF</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · GC-RUSHETA</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -631,6 +631,7 @@ function calculate(c) {
       needByValid, needByPast, tooSoon, productionBizDays, bufferedProdDays,
       productionStartDate: fmtDate(productionStartDate), productionStartYMD: toYMD(productionStartDate),
       mustShipDate: fmtDate(mustShipDate), mustShipYMD: toYMD(mustShipDate),
+      needByFmt: (needByValid && !tooSoon && c.needByDate) ? fmtDate(new Date(c.needByDate + "T00:00:00")) : null,
     },
     debug: { pressSheets, imp, qty, mk, dL, approxThickness, fold: fold.label, panels, longE, shortE, paperDays, baseDays, days, P },
   };
@@ -3091,13 +3092,16 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
   const _extraDays=Object.values(ti).reduce((s,v)=>s+(v||0),0);
   const _hasExtra=_extraDays>=1&&_factors.length>0;
   const availRange=sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`;
+  const hasRush = sh && sh.rushCost > 0;
+  // Availability reads as a single date: rush need-by date when rush is applied, else the free-delivery date.
+  const deliveryDate = sh ? ((hasRush && sh.needByFmt) ? sh.needByFmt : sh.freeDeliveryDate) : null;
   const moneyStr = Math.max(0, r.total).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [dPart, cPart] = moneyStr.split(".");
   const saleActive = !!r.saleActive;
   if (compact) {
     return (
       <div>
-        <div onClick={onToggleExpand} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: CK.cyan, borderRadius: expanded ? "6px 6px 0 0" : 6, padding: "8px 14px", color: "#fff", cursor: "pointer", WebkitTapHighlightColor: "transparent" }}>
+        <div onClick={onToggleExpand} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: hasRush ? CK.rush : CK.cyan, borderRadius: expanded ? "6px 6px 0 0" : 6, padding: "8px 14px", color: hasRush ? "#333" : "#fff", cursor: "pointer", WebkitTapHighlightColor: "transparent" }}>
           <div>
             <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", gap: 6 }}>
               {saleActive && <span style={{ fontSize: 13, opacity: .6, textDecoration: "line-through", fontWeight: 600 }}>${r.totalWithoutSale.toFixed(2)}</span>}
@@ -3105,9 +3109,10 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
               <span style={{ fontSize: 13, fontWeight: 600, opacity: .7, marginLeft: 1 }}>.{cPart}</span>
             </div>
             {saleActive && <div style={{ fontSize: 9, fontWeight: 700, marginTop: 1, letterSpacing: ".5px", textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</div>}
+            {hasRush && <div style={{ fontSize: 9.5, fontWeight: 700, marginTop: 2, letterSpacing: ".2px" }}>Delivery by {sh.needByFmt}</div>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {[["$/ea", r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], ["Avail.", availRange + " days"]].map(([l, v], i) => (
+            {[["$/ea", r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], [hasRush ? "Delivery" : "Avail.", deliveryDate || availRange + " days"]].map(([l, v], i) => (
               <div key={i} style={{ textAlign: "center" }}>
                 <div style={{ fontSize: 8.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", opacity: .7 }}>{l}</div>
                 <div style={{ fontSize: 13, fontWeight: 700 }}>{v}</div>
@@ -3136,14 +3141,15 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
   }
   return (
     <div style={{ background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden", pointerEvents: "none" }}>
-      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}`, pointerEvents: "none" }}>
-        <div style={{ fontSize: 11, color: CC.light, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 2 }}>Estimated Total</div>
-        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: CC.dark, gap: 10, flexWrap: "wrap" }}>
-          {saleActive && <span style={{ fontSize: 16, color: CC.light, textDecoration: "line-through", fontWeight: 700 }}>${r.totalWithoutSale.toFixed(2)}</span>}
+      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}`, background: hasRush ? CK.rush : CC.white, pointerEvents: "none" }}>
+        <div style={{ fontSize: 11, color: hasRush ? "rgba(51,51,51,.75)" : CC.light, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 2 }}>{hasRush ? "Rush Total" : "Estimated Total"}</div>
+        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: hasRush ? "#333" : CC.dark, gap: 10, flexWrap: "wrap" }}>
+          {saleActive && <span style={{ fontSize: 16, color: hasRush ? "rgba(51,51,51,.55)" : CC.light, textDecoration: "line-through", fontWeight: 700 }}>${r.totalWithoutSale.toFixed(2)}</span>}
           <span style={{ fontSize: 28, fontWeight: 800 }}>${dPart}</span>
-          <span style={{ fontSize: 18, fontWeight: 700, color: CC.light, marginLeft: -7 }}>.{cPart}</span>
+          <span style={{ fontSize: 18, fontWeight: 700, color: hasRush ? "rgba(51,51,51,.7)" : CC.light, marginLeft: -7 }}>.{cPart}</span>
           {saleActive && <span style={{ display: "inline-block", background: CK.magenta, color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: ".5px", padding: "3px 8px", borderRadius: 4, textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
         </div>
+        {hasRush && <div style={{ fontSize: 13, fontWeight: 800, marginTop: 6, color: "#333", letterSpacing: ".2px" }}>Delivery by {sh.needByFmt}</div>}
       </div>
       <div style={{ display: "flex", borderBottom: `1px solid ${CC.border}` }}>
         {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()]].map(([l, v], i) => (
@@ -3153,8 +3159,8 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
           </div>
         ))}
         <div style={{flex:1,padding:"11px 8px",textAlign:"center",background:_hasExtra?"#fffbeb":"transparent",transition:"background .3s"}}>
-          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>Availability</div>
-          <div style={{fontSize:14.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{availRange+" days"}</div>
+          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>{hasRush?"Delivery":"Availability"}</div>
+          <div style={{fontSize:13.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{deliveryDate||availRange+" days"}</div>
         </div>
       </div>
       {_hasExtra&&<div style={{padding:"5px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>

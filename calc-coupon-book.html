@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-11 · CB-TIPUI</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · CB-RUSHETA</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -878,7 +878,7 @@ function calculate(c) {
   const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
   const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
   return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,q100,coatOK,vividOK:c.insidePaper.coatable,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
-    shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,needByPast,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
+    shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,needByPast,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1113,6 +1113,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
   const hasRush=sh&&sh.rushCost>0;
   const availRange=sh?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):String(days);
+  const deliveryDate=sh?((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate):null;
 
   const ti=result.ti||{};
   const _factors=[];
@@ -1141,10 +1142,10 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
               <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
             </div>
             {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
-            {hasRush&&debugUnlocked&&<div style={{fontSize:9,opacity:.8,marginTop:1}}>Rush {sh.rushMultiplier.toFixed(1)}×</div>}
+            {hasRush&&<div style={{fontSize:9.5,fontWeight:700,marginTop:2,letterSpacing:".2px"}}>Delivery by {sh.needByFmt}{debugUnlocked?` · ${sh.rushMultiplier.toFixed(1)}×`:""}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
-            {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["Avail.",availRange+" days"]].map(([l,v],i)=>(
+            {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],[hasRush?"Delivery":"Avail.",deliveryDate||availRange+" days"]].map(([l,v],i)=>(
               <div key={i} style={{textAlign:"center"}}>
                 <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",opacity:.7}}>{l}</div>
                 <div style={{fontSize:13,fontWeight:700}}>{v}</div>
@@ -1184,6 +1185,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
           <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
           {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
         </div>
+        {hasRush&&<div style={{fontSize:13.5,fontWeight:800,marginTop:6,letterSpacing:".2px"}}>Delivery by {sh.needByFmt}</div>}
         {hasRush&&debugUnlocked&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
       </div>
       <div style={{display:"flex",borderBottom:`1px solid ${CC.border}`}}>
@@ -1194,8 +1196,8 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
           </div>
         ))}
         <div style={{flex:1,padding:"11px 8px",textAlign:"center",background:_hasExtra?"#fffbeb":"transparent",transition:"background .3s"}}>
-          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>Availability</div>
-          <div style={{fontSize:14.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{availRange+" days"}</div>
+          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>{hasRush?"Delivery":"Availability"}</div>
+          <div style={{fontSize:13.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{deliveryDate||availRange+" days"}</div>
         </div>
       </div>
       {_hasExtra&&<div style={{padding:"5px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
