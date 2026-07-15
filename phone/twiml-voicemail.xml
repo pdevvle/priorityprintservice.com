@@ -7,7 +7,7 @@
 <!-- voicemail. The recording is picked up by the Make scenario, which -->
 <!-- transcribes it, summarizes with Claude, and posts it to Missive. -->
 <Response>
-  <Dial timeout="20" answerOnBridge="true">
+  <Dial timeout="12" answerOnBridge="true">
     <Number>+10000000000</Number>
   </Dial>
   <Say voice="Polly.Joanna-Neural">Thank you for calling Priority Print Service. We're sorry we missed your call. Please leave your name, number, and a brief message after the tone, and we'll get right back to you.</Say>

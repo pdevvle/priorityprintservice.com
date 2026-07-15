@@ -15,7 +15,16 @@
       "version": 2,
       "parameters": { "__IMTCONN__": 350124 },
       "mapper": { "id": "{{1.call_sid}}" },
-      "metadata": { "designer": { "x": 300, "y": 0 } }
+      "metadata": { "designer": { "x": 300, "y": 0 } },
+      "onerror": [
+        {
+          "id": 7,
+          "module": "builtin:Resume",
+          "version": 1,
+          "mapper": { "from_formatted": "Unknown caller", "from": "", "start_time": "", "duration": "" },
+          "metadata": { "designer": { "x": 300, "y": 300 } }
+        }
+      ]
     },
     {
       "id": 3,
@@ -59,7 +68,7 @@
       "id": 6,
       "module": "missive:createAPost",
       "version": 1,
-      "parameters": { "__IMTCONN__": 434289 },
+      "parameters": { "__IMTCONN__": 1151021 },
       "mapper": {
         "notification": {
           "title": "📞 New voicemail — {{2.from_formatted}}",
@@ -90,10 +99,14 @@
   },
   "_scheduling": { "type": "indefinitely", "interval": 900 },
   "_connections_reference": {
-    "350124": "Twilio — My Twilio connection (account AC3f99…, the PPS/personal line)",
-    "4631426": "OpenAI — My OpenAI connection (Whisper / gpt-4o-transcribe)",
-    "4822595": "Anthropic Claude — My Anthropic Claude connection (Sonnet 5)",
-    "434289": "Missive — office@priorityprintservice.com",
+    "350124": "Twilio — My Twilio connection (account AC3f99…5ce8, owns the PPS/personal line)",
+    "4631426": "OpenAI — My OpenAI connection (gpt-4o-transcribe / Whisper)",
+    "4822595": "Anthropic Claude — My Anthropic Claude connection (Sonnet 5). NOTE: needs prepaid credits on the Anthropic *Developer Platform* (console.anthropic.com → Billing), which is separate from the claude.ai subscription balance.",
+    "1151021": "Missive — prestoncicala@gmail.com. Chosen over the office@ connection (434289) because Missive's API (createAPost) requires the Productive/Business plan, and this connection has it. Same Missive org (6f0a0437…), so posts land in the shared workspace.",
     "_missive_org": "6f0a0437-8237-4328-914f-341cb3cc281e"
+  },
+  "_notes": {
+    "getcall_resume": "GetCall (module 2) has a builtin:Resume error handler: some recordings' call records 404 in Twilio, and the caller lookup must never block delivery. On error the flow continues and the caller field falls back to 'Unknown caller'; Claude still extracts a callback number from the transcript.",
+    "trigger_epoch": "On first activation, set Watch Recordings 'Choose where to start' → 'From now on' so it skips old/orphan recordings."
   }
 }

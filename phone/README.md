@@ -13,7 +13,7 @@ drops the whole thing into **Missive** as a new conversation.
 Caller dials your Twilio line
         │
         ▼
-  Twilio TwiML Bin  ──►  Rings your phone (forwarding number, ~20s)
+  Twilio TwiML Bin  ──►  Rings your phone (forwarding number, ~12s)
         │                        │
         │                  you answer ──► normal call, done
         │                        │
@@ -95,8 +95,9 @@ re-import or recreate the scenario if needed).
 | 2 | Twilio · **Get a Call** | 350124 | Looks up the call by `call_sid` to get the caller's number/time |
 | 3 | Twilio · **Download a Recording Media** | 350124 | Fetches the MP3 by recording SID |
 | 4 | OpenAI · **Create a Transcription** | `My OpenAI connection` (4631426) | Model `gpt-4o-transcribe` |
+| 2b | *(error handler on step 2)* `Resume` | — | If `Get a Call` 404s, continue anyway with caller = "Unknown caller" |
 | 5 | Anthropic · **Create a Prompt** | `My Anthropic Claude connection` (4822595) | Model `claude-sonnet-5`, 1024 max tokens |
-| 6 | Missive · **Create a Post** | `office@priorityprintservice.com` (434289) | New conversation, added to Inbox |
+| 6 | Missive · **Create a Post** | `prestoncicala@gmail.com` (1151021) | New conversation, added to Inbox. Uses this connection (not office@ 434289) because Missive's API needs the Productive/Business plan — same Missive org, so it lands in the shared workspace |
 
 **Schedule:** polls every **15 minutes** (`interval: 900`). Lower it for faster
 delivery, or raise it to save operations. (At 15 min it's ~3k operations/month
@@ -140,6 +141,34 @@ Claude calls.
 - **"Your TwiML syntax is invalid":** make sure you pasted the current
   `twiml-voicemail.xml` verbatim and that no decorative `--` runs sneaked into a
   comment (XML comments may not contain a double hyphen).
+
+## Gotchas we hit (and how they're handled)
+
+Real issues encountered bringing this live, documented so they don't bite again:
+
+- **Ring-first landed in the phone's own carrier voicemail.** If you forward to a
+  cell that doesn't answer, the *carrier* voicemail picks up ~20–25s in, and
+  Twilio treats that as "answered." Fix: shortened `<Dial timeout>` to **12s** so
+  Twilio falls through to its own `<Record>` first. (For a bulletproof version,
+  use call-screening "press a key to accept" — see git history / ask.)
+- **`Get a Call` 404s on some recordings.** A recording can outlive its call
+  record in Twilio, so the caller lookup fails. That must never block a voicemail
+  from being delivered → step 2 has a **`Resume` error handler** (caller falls
+  back to "Unknown caller"; Claude still pulls a callback number from the
+  transcript).
+- **Old recordings clogged the queue.** `Watch Recordings` is oldest-first, so a
+  backlog of stale recordings blocked new ones. Fix: right-click the trigger →
+  **Choose where to start → From now on.**
+- **"Your credit balance is too low" (Anthropic).** The Make key bills the
+  **Anthropic Developer Platform** (`console.anthropic.com` → Billing), which is a
+  **separate prepaid balance** from the claude.ai / Claude Code subscription.
+  Buy credits there.
+- **"[403] API access requires the Productive or Business plan" (Missive).**
+  Missive's REST API needs the Productive/Business plan. We point the Missive
+  step at the connection that has it (`1151021`); it's in the same Missive org,
+  so posts still land in the shared workspace.
+- **Scenario auto-disables after 3 errors.** While debugging, repeated failures
+  flipped it off (Make's `maxErrors`). Just re-activate after fixing the cause.
 
 ## Future enhancements (not built yet)
 
