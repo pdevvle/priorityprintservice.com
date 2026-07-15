@@ -2,13 +2,31 @@
 
 > **Handoff note (read first).** This is a strategy/analysis document, not a spec to execute
 > blindly. It captures a Search-Console cannibalization review of priorityprintservice.com and
-> how the plugin's **preset SEO system** should be used to consolidate competing pages. Nothing
-> here has been deployed. All redirects are executed in **Rank Math**, never in PHP/.htaccess.
+> how the plugin's **preset SEO system** should be used to consolidate competing pages. **Update 2026-07-14: partly executed — the nav has been consolidated onto WooCommerce *category archives* (not presets); see the Progress section directly below. Redirects not yet shipped.** All redirects are executed in **Rank Math**, never in PHP/.htaccess.
 > Before acting, resolve the open questions in §8 with the site owner.
 >
 > Source data lived in the analysis session's scratchpad (GSC export → `gsc-pages.csv`,
 > `gsc-queries.csv`, `gsc-cannibalization.csv`, `redirect-map.csv`). Those are ephemeral; the
 > tables that matter are embedded inline below so this document is self-contained.
+
+---
+
+## Progress — reconciliation with the WooCommerce-category work (2026-07-14)
+
+**Chosen consolidation vehicle: WooCommerce category archives, not presets.** The plan below was written around minting *presets* as the canonical hubs (still the most SEO-complete page type — see §3). In execution the operator chose to consolidate onto the **WooCommerce product-category archives** (`/booklets/`, `/brochures/`, …). Those render the full landing experience — WooCommerce's default `woocommerce_taxonomy_archive_description()` runs each category's term description (hero + `[pps_cat_wizard]`/`[pps_cat_papers]` shortcodes) through `do_shortcode` on the archive, and there's no custom taxonomy template overriding it — so they work as hubs. The preset-specific guidance below still stands as an alternative/complement, but the categories are now the live hubs.
+
+### ✅ Done (live on staging)
+- **Primary nav repointed to category archives.** 18 menu items that pointed at standalone marketing Pages now point at their WC category archive: Booklets, Brochures, Square Brochures, Postcards, Flyers, Business Cards, Business Forms, Door Hangers, Notepads, Rack Cards, Stationery, Presentation Folders→Folders, Menus (all populated), plus EDDM, Mailers, Signs & Banners, Stickers (empty — the `[pps_cat_wizard]` in the description funnels to a form when no product exists), plus the coupon item. Titles / parents / order / child items preserved. Clean URLs (`/booklets/`, no `/product-category/` base).
+- **Coupons promoted to a top-level category.** The former "Coupon Booklets" sub-category of Booklets was moved to top-level (`parent 0`) and renamed **"Coupons"** (slug unchanged, so no URL break).
+
+### ⏳ Pending (operator action)
+- **Import the Page → category 301s into Rank Math.** Delivered as `redirect-map-pages-to-categories.csv` (17 clean rows + 1 needing the Stickers page's real slug). These retire the now-orphaned standalone Pages (`/custom-booklet-printing/`, `/brochure-printing-services/`, …) onto the category hubs. **Not yet imported.** After importing, set the old Pages to Draft/Trash.
+- **Higher-risk redirect to watch:** `/coupon-pads-coupon-booklets/` ranks ~pos 12 (~376 clicks for "coupon pads") — the one page §6 said to *keep*. Its 301 to `/coupon-booklets/` only pays off if the Coupons category actually targets "coupon pads"; monitor after redirect.
+- **Empty categories still need products** (EDDM, Mailers, Signs & Banners, Stickers) to appear in any auto-generated category lists and to give the archive a product grid; the wizard-funnel is the interim.
+- **Stickers page slug** — its menu URL was `/?page_id=21486` (no pretty permalink); confirm its real URL or whether it's unpublished (then no redirect needed).
+
+### 🔜 Not yet started — the deeper consolidation
+The menu/redirect work retires the *service-page* layer. The **product-level generics** §6 flagged — `/product/cheap-booklet-printing/`, `/product/low-cost-brochure-printing/`, `/product/coupon-booklet-printing/`, etc. — still compete for the head terms and should also fold into the same category hubs (301 in Rank Math), with the specialist products retained. That's the next layer.
 
 ---
 
