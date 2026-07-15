@@ -867,63 +867,137 @@ async function imposePdf(artBytes, backBytes, spec) {
   const warnings = [...layout.warnings];
 
   const srcFront = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
-  if (srcFront.getPageCount() < 1) throw new Error("Artwork PDF has no pages");
-  let backDoc = null, backPno = 0;
-  if (spec.sides === 2) {
-    if (backBytes) { backDoc = await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }); }
-    else if (srcFront.getPageCount() >= 2) { backDoc = srcFront; backPno = 1; }
-    else throw new Error("2-sided job but artwork has only 1 page — drop a back-side PDF or use a 2-page file");
+  const nF = srcFront.getPageCount();
+  if (nF < 1) throw new Error("Artwork PDF has no pages");
+  const sides = spec.sides === 2 ? 2 : 1;
+  const mode = spec.multiMode === "gang" || spec.multiMode === "stack" ? spec.multiMode : "repeat";
+  const backDoc = backBytes ? await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }) : null;
+
+  // ── Piece list: each piece = one finished item {front, back} page refs.
+  // "repeat" = single-design step-and-repeat (page 1 [+2] only). "gang" /
+  // "stack" treat a multipage COLLATED file as distinct pieces; 2-sided
+  // without a separate back file reads pages front/back INTERLEAVED
+  // (p1 = front of piece 1, p2 = its back, p3 = front of piece 2, …).
+  const pieces = [];
+  if (mode === "repeat") {
+    let back = null;
+    if (sides === 2) {
+      if (backDoc) back = { doc: backDoc, pno: 0 };
+      else if (nF >= 2) back = { doc: srcFront, pno: 1 };
+      else throw new Error("2-sided job but artwork has only 1 page — drop a back-side PDF or use a 2-page file");
+    }
+    pieces.push({ front: { doc: srcFront, pno: 0 }, back });
+    if (nF > sides) warnings.push(`file has ${nF} pages but multi-page handling is "repeat single design" — only page 1${sides === 2 && !backDoc ? "+2" : ""} used. Choose gang or cut & stack if the pages are different pieces.`);
+  } else if (backDoc) {
+    const nB = backDoc.getPageCount();
+    const M = Math.min(nF, nB);
+    if (sides === 2 && nF !== nB) warnings.push(`front file has ${nF} pages, back file ${nB} — using the first ${M} piece(s)`);
+    for (let i = 0; i < M; i++) pieces.push({ front: { doc: srcFront, pno: i }, back: sides === 2 ? { doc: backDoc, pno: i } : null });
+  } else if (sides === 2) {
+    if (nF < 2) throw new Error("2-sided collated job needs at least 2 pages (front/back interleaved)");
+    if (nF % 2) warnings.push(`odd page count (${nF}) — the last piece's back will be blank`);
+    for (let i = 0; i < Math.ceil(nF / 2); i++) pieces.push({ front: { doc: srcFront, pno: 2 * i }, back: 2 * i + 1 < nF ? { doc: srcFront, pno: 2 * i + 1 } : null });
+  } else {
+    for (let i = 0; i < nF; i++) pieces.push({ front: { doc: srcFront, pno: i }, back: null });
+  }
+
+  const imp = layout.imp;
+  const D = mode === "repeat" ? 1 : Math.ceil(pieces.length / imp); // sheets per collated set
+  if (mode !== "repeat") {
+    const blanks = D * imp - pieces.length;
+    warnings.push(`${pieces.length} collated piece(s) ${mode === "gang" ? "ganged in page order" : "distributed cut-&-stack (piles collate after cutting)"} across ${D} sheet${D === 1 ? "" : "s"}${blanks ? ` — ${blanks} leftover cell(s) stay blank` : ""}.`);
   }
 
   const cellLandscape = layout.cellW >= layout.cellH;
   const out = await PL.PDFDocument.create();
   const font = await out.embedFont(PL.StandardFonts.Helvetica);
-  const sheets = spec.qty ? Math.ceil(spec.qty / layout.imp) : null;
+  // qty semantics: repeat → total pieces; gang/stack → copies per collated set
+  const sheets = spec.qty ? (mode === "repeat" ? Math.ceil(spec.qty / imp) : spec.qty * D) : (mode === "repeat" ? null : D);
   const dateStr = new Date().toISOString().slice(0, 10);
 
-  const sidesArr = [{ doc: srcFront, pno: 0, label: "FRONT" }];
-  if (backDoc) sidesArr.push({ doc: backDoc, pno: backPno, label: "BACK" });
+  // Resolve + embed each DISTINCT source page once (fix a/d), shared across cells.
+  const artCache = new Map(), embedCache = new Map();
+  const keyOf = ref => (ref.doc === srcFront ? "F" : "B") + ref.pno;
+  let scaledPages = 0;
+  async function prepared(ref) {
+    const key = keyOf(ref);
+    if (!artCache.has(key)) {
+      const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed);
+      if (key === keyOf(pieces[0].front)) art.notes.forEach(n => warnings.push("front: " + n));
+      else if (sides === 2 && pieces[0].back && key === keyOf(pieces[0].back)) art.notes.forEach(n => warnings.push("back: " + n));
+      else if (art.scale !== 1) scaledPages++;
+      const [embedded] = await out.embedPdf(ref.doc, [ref.pno]);
+      artCache.set(key, art); embedCache.set(key, embedded);
+    }
+    return { art: artCache.get(key), embedded: embedCache.get(key) };
+  }
+
+  // Reading order for piece assignment: top row first, left → right
+  const reading = [...layout.cells].sort((a, b) => b.row - a.row || a.col - b.col);
+  const flip = spec.sheetFlip || "short";
+  const mirroredAll = mirrorCells(layout.cells, layout, flip);
+  const mirrorOf = new Map(layout.cells.map((c, i) => [c, mirroredAll[i]]));
+
+  // gang fills sheet-by-sheet in page order; stack deals pile-by-pile so the
+  // cut piles, stacked in reading order, yield the collated sequence.
+  const pieceAt = (s, slot) => {
+    if (mode === "repeat") return pieces[0];
+    const idx = mode === "gang" ? s * imp + slot : slot * D + s;
+    return idx < pieces.length ? pieces[idx] : null;
+  };
+
+  const pageLabels = [];
+  let slugWarned = false, tumbleNoted = false;
+  for (let s = 0; s < D; s++) {
+    for (const sideIdx of (sides === 2 ? [0, 1] : [0])) {
+      const page = out.addPage([layout.sheet.long * PT, layout.sheet.short * PT]);
+      const cellsForMarks = sideIdx === 0 ? layout.cells : mirroredAll;
+      for (let slot = 0; slot < reading.length; slot++) {
+        const piece = pieceAt(s, slot);
+        if (!piece) continue;                       // leftover cell stays deterministically empty
+        const ref = sideIdx === 0 ? piece.front : piece.back;
+        if (!ref) continue;                         // blank back (odd interleave)
+        const { art, embedded } = await prepared(ref);
+        const frontCell = reading[slot];
+        const cell = sideIdx === 0 ? frontCell : mirrorOf.get(frontCell);
+        // Back tumble: 180° whenever the press flip axis is perpendicular to
+        // the placed art's head axis — proven by physical duplex simulation.
+        let extraRot = 0;
+        if (sideIdx === 1) {
+          const headVertical = art.cellRotate % 180 === 0;
+          const autoTumble = flip === "short" ? !headVertical : headVertical;
+          const bmode = spec.backRotate === 0 || spec.backRotate === 180 ? spec.backRotate : "auto";
+          extraRot = bmode === "auto" ? (autoTumble ? 180 : 0) : bmode;
+          if (extraRot && !tumbleNoted) { tumbleNoted = true; warnings.push(`back rotated 180° (${bmode === "auto" ? "auto — registers with front under " + flip + "-edge flip" : "manual tumble"})`); }
+        }
+        placeInCell(page, embedded, art, cell, extraRot + (frontCell.patRot || 0));
+      }
+      const label = (sideIdx === 0 ? "FRONT" : "BACK") + (D > 1 ? ` ${s + 1}/${D}` : "") + (mode === "gang" ? " · GANG" : mode === "stack" ? " · CUT&STACK" : "");
+      pageLabels.push(label);
+      if (spec.marks !== false) {
+        drawMarks(page, layout, cellsForMarks);
+        const placed = drawSlug(page, layout, font, {
+          side: label, orderRef: spec.orderRef, jobName: spec.jobName,
+          qty: spec.qty, sheets, date: dateStr,
+        }, cellsForMarks);
+        if (!placed && !slugWarned) { slugWarned = true; warnings.push("no clear space inside the printable area for the slug line — omitted"); }
+      }
+      // Explicit page boxes (fix a)
+      const w = layout.sheet.long * PT, h = layout.sheet.short * PT;
+      page.setMediaBox(0, 0, w, h); page.setCropBox(0, 0, w, h);
+      page.setBleedBox(0, 0, w, h); page.setTrimBox(0, 0, w, h);
+    }
+  }
+  if (scaledPages) warnings.push(`${scaledPages} additional page(s) required fit-to-trim scaling`);
 
   const sideReports = [];
-  for (let i = 0; i < sidesArr.length; i++) {
-    const sd = sidesArr[i];
-    const srcPage = sd.doc.getPage(sd.pno);
-    const art = resolveSideArt(srcPage, layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed);
-    art.notes.forEach(n => warnings.push(`${sd.label.toLowerCase()}: ${n}`));
-    // Embed the source page ONCE as a vector XObject (fix a) and stamp it
-    // into every cell — deterministic step-and-repeat (fix d).
-    const [embedded] = await out.embedPdf(sd.doc, [sd.pno]);
-    const page = out.addPage([layout.sheet.long * PT, layout.sheet.short * PT]);
-    const cells = i === 0 ? layout.cells : mirrorCells(layout.cells, layout, spec.sheetFlip || "short");
-    // Back tumble: 180° whenever the press flip axis is perpendicular to the
-    // placed art's head axis — same rule the saddle path derives, PROVEN by
-    // physical duplex simulation (rotated cells + short-edge flip read 180°
-    // off without this). "auto" derives it; 0/180 are manual overrides.
-    let extraRot = 0;
-    if (i === 1) {
-      const flip = spec.sheetFlip || "short";
-      const headVertical = art.cellRotate % 180 === 0;
-      const autoTumble = flip === "short" ? !headVertical : headVertical;
-      const mode = spec.backRotate === 0 || spec.backRotate === 180 ? spec.backRotate : "auto";
-      extraRot = mode === "auto" ? (autoTumble ? 180 : 0) : mode;
-      if (extraRot) warnings.push(`back rotated 180° (${mode === "auto" ? "auto — registers with front under " + flip + "-edge flip" : "manual tumble"})`);
-    }
-    for (const cell of cells) placeInCell(page, embedded, art, cell, extraRot + (cell.patRot || 0));
-    if (spec.marks !== false) {
-      drawMarks(page, layout, cells);
-      const placed = drawSlug(page, layout, font, {
-        side: sd.label, orderRef: spec.orderRef, jobName: spec.jobName,
-        qty: spec.qty, sheets, date: dateStr,
-      }, cells);
-      if (!placed && i === 0) warnings.push("no clear space inside the printable area for the slug line — omitted");
-    }
-    // Explicit page boxes (fix a): the press sheet is the product at this
-    // stage — Media = Crop = Bleed = Trim = full sheet.
-    const w = layout.sheet.long * PT, h = layout.sheet.short * PT;
-    page.setMediaBox(0, 0, w, h); page.setCropBox(0, 0, w, h);
-    page.setBleedBox(0, 0, w, h); page.setTrimBox(0, 0, w, h);
-    sideReports.push({ side: sd.label, rot: art.rot, cellRotate: art.cellRotate, scale: art.scale, hasBleed: art.hasBleed });
+  const f0 = artCache.get(keyOf(pieces[0].front));
+  if (f0) sideReports.push({ side: "FRONT", rot: f0.rot, cellRotate: f0.cellRotate, scale: f0.scale, hasBleed: f0.hasBleed });
+  if (sides === 2 && pieces[0].back) {
+    const b0 = artCache.get(keyOf(pieces[0].back));
+    if (b0) sideReports.push({ side: "BACK", rot: b0.rot, cellRotate: b0.cellRotate, scale: b0.scale, hasBleed: b0.hasBleed });
   }
+  if (mode !== "repeat") sideReports.push({ side: "COLLATED", pieces: pieces.length, sheetsPerSet: D, modeName: mode });
 
   out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "job"} — ${layout.imp}-up on ${layout.sheet.label}`);
   out.setProducer("PPS Auto-Imposition Tool");
@@ -933,7 +1007,7 @@ async function imposePdf(artBytes, backBytes, spec) {
   // ── Preflight (fix a): reload and validate before anything ships ──
   const check = await PL.PDFDocument.load(bytes);
   const issues = [];
-  if (check.getPageCount() !== sidesArr.length) issues.push(`page count ${check.getPageCount()} ≠ sides ${sidesArr.length}`);
+  if (check.getPageCount() !== D * sides) issues.push(`page count ${check.getPageCount()} ≠ ${D * sides} sheet sides`);
   check.getPages().forEach((p, i) => {
     const m = p.getMediaBox();
     if (Math.abs(m.width - layout.sheet.long * PT) > 0.5 || Math.abs(m.height - layout.sheet.short * PT) > 0.5)
@@ -944,7 +1018,7 @@ async function imposePdf(artBytes, backBytes, spec) {
   if (!layout.mismatch && !layout.efficient && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
-  return { bytes, layout, warnings, sheets, sideReports };
+  return { bytes, layout, warnings, sheets, sideReports, pageLabels, pieces: pieces.length, sheetsPerSet: D };
 }
 
 // ── Manifest parser: autofill spec from a *_manipulation_manifest.txt ──
@@ -1226,6 +1300,7 @@ function App() {
   const [manualPattern, setManualPattern] = useState([]); // row-major 0/180 per cell (rows bottom-up)
   const [forceRotated, setForceRotated] = useState("auto");
   const [bleedIn, setBleedIn] = useState(0.125);           // per-job bleed override
+  const [multiMode, setMultiMode] = useState("repeat");    // multipage flat files: repeat | gang | stack
   const isSaddle = calc === "saddle";
   const [art, setArt] = useState(null);      // { bytes, name, pageCount }
   const [backArt, setBackArt] = useState(null);
@@ -1266,9 +1341,9 @@ function App() {
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
-    bleed: +bleedIn,
+    bleed: +bleedIn, multiMode,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn]);
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -1334,7 +1409,7 @@ function App() {
           } else {
             if (isSaddle) { setTrimLong(det.w); setTrimShort(det.h); }
             else { setTrimLong(detL); setTrimShort(detS); }
-            setNotice(`Trim auto-detected: ${det.w}×${det.h}″ (${det.method}). Adjust the fields if that's wrong.`);
+            setNotice(`Trim auto-detected: ${det.w}×${det.h}″ (${det.method}).` + (pageCount > (sides === 2 ? 2 : 1) && !isSaddle ? ` File has ${pageCount} pages — set "Multi-page file" to gang or cut & stack if they're different pieces.` : ""));
           }
         }
         // A 2-page file usually means front+back — switch, but say so, since
@@ -1489,9 +1564,25 @@ function App() {
               sub={isSaddle ? "multi-page PDF, pages in reading order (cover = page 1) · padded to a multiple of 4 · drop the manifest .txt to autofill"
                             : "print-ready or raw PDF · page 1 = front, page 2 = back · drop the manifest .txt to autofill the spec"}
               accept=".pdf,.txt" onFiles={f => onFiles(f, "front")} fileName={art && `${art.name} (${art.pageCount}p)`} />
-            {spec.sides === 2 && art && art.pageCount < 2 && (
+            {!isSaddle && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
               <div style={{ marginTop: 10 }}>
-                <DropZone label="Drop BACK side PDF" sub="2-sided job but the front file has one page"
+                <Field label={`Multi-page file (${art.pageCount} pages)`}>
+                  <select value={multiMode} onChange={e => setMultiMode(e.target.value)}>
+                    <option value="repeat">Repeat single design (page 1{spec.sides === 2 ? "+2" : ""} only)</option>
+                    <option value="gang">Gang pages in order (different pieces per sheet)</option>
+                    <option value="stack">Cut &amp; stack (piles collate after cutting)</option>
+                  </select>
+                </Field>
+                {spec.sides === 2 && multiMode !== "repeat" && !backArt && (
+                  <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginTop: -6, marginBottom: 8 }}>
+                    2-sided collated: pages read front/back interleaved (p1=front of piece 1, p2=its back, …) — or drop a separate back file below.
+                  </div>
+                )}
+              </div>
+            )}
+            {spec.sides === 2 && art && (art.pageCount < 2 || multiMode !== "repeat") && (
+              <div style={{ marginTop: 10 }}>
+                <DropZone label="Drop BACK side PDF" sub={multiMode !== "repeat" ? "optional — separate collated back file (page i backs piece i)" : "2-sided job but the front file has one page"}
                   accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
               </div>
             )}
@@ -1523,7 +1614,7 @@ function App() {
                   </select>
                 </Field>
               )}
-              <Field label={isSaddle ? "Quantity (books)" : "Quantity"} style={{ flex: 1 }}>
+              <Field label={isSaddle ? "Quantity (books)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
                 <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} />
               </Field>
             </div>
