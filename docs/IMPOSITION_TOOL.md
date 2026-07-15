@@ -112,6 +112,17 @@ download the imposed PDF. Useful for testing and one-off jobs.
   rotated 90° on the sheet (refusing through the standard mismatch flow if
   the priced count no longer fits). Patterns don't apply to saddle
   signatures — the spine dictates orientation.
+- **Size autodetect**: on file drop the trim is read from the PDF — an
+  embedded TrimBox wins; otherwise the media size is judged bleed-inclusive
+  when `media − 2×bleed` lands on a rounder size (halves beat quarters),
+  honouring `/Rotate`. Standalone drops auto-fill the trim fields; when an
+  order is loaded, the order spec stays authoritative and a measurement
+  conflict is flagged loudly instead.
+- **Bleed override** (default 0.125″/side): flows through everything bleed
+  touches — cell clip allowances, art-location heuristics, crop-mark
+  offsets, the bleed-clip warnings, and the auto gutter ladder (2×bleed →
+  bleed → butt). Non-default bleed is stamped on the slug. Sticker pitch
+  stays fixed at 0.25″ per the crack-n-peel spec.
 - Sheets = ceil(qty ÷ imp), shown in UI and slug.
 - **Marks live INSIDE the printable image area** (12.5×18.5 / 12.5×27 /
   11.5×17.5) — the press can't image the sheet margins, so a margin mark
