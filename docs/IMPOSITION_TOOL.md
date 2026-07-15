@@ -87,11 +87,30 @@ download the imposed PDF. Useful for testing and one-off jobs.
   0.25″ pitch. Bleed 0.125″ everywhere.
 - Gutter policy: 0.25″ (full double bleed) preferred, squeezed to 0.125″
   then butt-cut 0″ only when the priced count can't fit otherwise — reported
-  in the UI and slug.
+  in the UI and slug. A **gutter override** (0–0.5″) replaces the auto
+  policy; if the priced count can't fit at that gutter the tool refuses
+  (same mismatch flow as always).
+- **Layout position**: by default the trim block is **jogged 0.5″ against
+  the sheet's lower-right corner** on the front — the back mirrors across
+  the short-edge flip to the lower-LEFT, i.e. the same physical corner, so
+  the cutter jogs both sides against one registration corner. Centered and
+  custom (from-right / from-bottom) overrides available. The block is always
+  clamped so the trim stays inside the printable area; if bleed would fall
+  outside it, the tool warns.
+- **Efficient mode** (flats imaging ≥2-up on 13×19): lays the same piece out
+  on **13×27.5**, the multiple expanding to fill the 27″ usable axis (e.g.
+  11×8.5 goes from 2-up to 3-up per pass). Pricing basis stays the 13×19
+  imp — badge and slug show both numbers.
 - Sheets = ceil(qty ÷ imp), shown in UI and slug.
-- Marks: cut guides for every trim line, drawn **only in the sheet margins**;
-  slug line (order, job, trim, imp, sheet count, date, FRONT/BACK) at the
-  bottom-left.
+- **Marks live INSIDE the printable image area** (12.5×18.5 / 12.5×27 /
+  11.5×17.5) — the press can't image the sheet margins, so a margin mark
+  would never print. Each crop-mark ray extends from just beyond the bleed
+  and stops at the printable boundary or the nearest piece's bleed box,
+  drawn only "as size allows" (at standard 0.25″ gutter, bleed meets bleed
+  between pieces, so interior marks are omitted). The slug line is placed in
+  the largest clear band inside the printable area (with the default jog,
+  the strip above the block) and omitted with a warning when there's no
+  room. Fold guides follow the same rule.
 
 ## Known pricing/production mismatch (custom long-narrow flats)
 

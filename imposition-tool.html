@@ -168,10 +168,18 @@ function resolveSaddleImp(pw, ph) {
 // count can't fit otherwise. Deterministic and reported.
 const GUTTERS = [0.25, 0.125, 0];
 
+// The press images only the usable area (18.5×12.5 on 13×19; 27×12.5 on
+// 13×27.5; 17.5×11.5 on 12×18) — everything placed, including marks, must
+// live inside this rect or it simply won't print.
+function printableRect(sheet) {
+  const mx = (sheet.long - sheet.usableLong) / 2, my = (sheet.short - sheet.usableShort) / 2;
+  return { x0: mx, y0: my, x1: sheet.long - mx, y1: sheet.short - my };
+}
+
 function fits(n, dim, g, usable) { return n * dim + (n - 1) * g <= usable + EPS; }
 
-function bestGridForCount(target, pieceLong, pieceShort, sheet) {
-  for (const g of GUTTERS) {
+function bestGridForCount(target, pieceLong, pieceShort, sheet, gutters) {
+  for (const g of (gutters || GUTTERS)) {
     const candidates = [];
     for (const rotated of [false, true]) {
       const w = rotated ? pieceShort : pieceLong;
@@ -195,14 +203,45 @@ function bestGridForCount(target, pieceLong, pieceShort, sheet) {
   return null;
 }
 
-function buildCells(layout) {
-  // Center the block on the physical sheet. Interior clip extends
-  // min(BLEED, gutter/2) toward a neighbour (butt-cut when gutter=0);
-  // perimeter clip always gets full BLEED (extends into the sheet margin).
+// Trim-block origin. Default JOGS the block 0.5″ against the sheet's
+// lower-right corner (shop practice: the back mirrors across the short-edge
+// flip, landing lower-LEFT — same physical corner, so the cutter jogs both
+// sides against one registration corner). "center" and "custom" available.
+// Always clamped so the TRIM stays inside the printable image area.
+function blockOrigin(layout, offset, warnings) {
+  const s = layout.sheet;
+  const totalW = layout.across * layout.cellW + (layout.across - 1) * layout.gutter;
+  const totalH = layout.down * layout.cellH + (layout.down - 1) * layout.gutter;
+  const P = printableRect(s);
+  const mode = (offset && offset.mode) || "jog";
+  let x, y;
+  if (mode === "center") {
+    x = (s.long - totalW) / 2; y = (s.short - totalH) / 2;
+  } else {
+    const right = mode === "custom" && isFinite(offset.right) ? Math.max(+offset.right, 0) : 0.5;
+    const bottom = mode === "custom" && isFinite(offset.bottom) ? Math.max(+offset.bottom, 0) : 0.5;
+    x = s.long - right - totalW;
+    y = bottom;
+  }
+  const cx = Math.min(Math.max(x, P.x0), P.x1 - totalW);
+  const cy = Math.min(Math.max(y, P.y0), P.y1 - totalH);
+  if (mode !== "center" && (Math.abs(cx - x) > EPS || Math.abs(cy - y) > EPS)) {
+    warnings.push(`Layout offset clamped to keep the trim inside the printable area (${s.usableLong}×${s.usableShort}″).`);
+  }
+  const clipped = [];
+  if (cx - BLEED < P.x0 - EPS) clipped.push("left");
+  if (cx + totalW + BLEED > P.x1 + EPS) clipped.push("right");
+  if (cy - BLEED < P.y0 - EPS) clipped.push("bottom");
+  if (cy + totalH + BLEED > P.y1 + EPS) clipped.push("top");
+  if (clipped.length) warnings.push(`Outer bleed falls outside the printable area on the ${clipped.join("/")} edge(s) and will not image — cuts there may show paper white.`);
+  return { x0: cx, y0: cy };
+}
+
+function buildCells(layout, offset) {
+  // Interior clip extends min(BLEED, gutter/2) toward a neighbour (butt-cut
+  // when gutter=0); perimeter clip always gets full BLEED.
   const s = layout.sheet, w = layout.cellW, h = layout.cellH, g = layout.gutter;
-  const totalW = layout.across * w + (layout.across - 1) * g;
-  const totalH = layout.down * h + (layout.down - 1) * g;
-  const x0 = (s.long - totalW) / 2, y0 = (s.short - totalH) / 2;
+  const { x0, y0 } = blockOrigin(layout, offset, layout.warnings);
   const inner = Math.min(BLEED, g / 2);
   layout.cells = [];
   for (let row = 0; row < layout.down; row++) {
@@ -224,9 +263,9 @@ function buildCells(layout) {
 
 // Max copies that physically fit, ignoring the priced count — used ONLY on
 // explicit operator override when pricing over-promised (never silently).
-function bestPhysicalGrid(pieceLong, pieceShort, sheet) {
+function bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters) {
   let best = null;
-  for (const g of GUTTERS) {
+  for (const g of (gutters || GUTTERS)) {
     for (const rotated of [false, true]) {
       const w = rotated ? pieceShort : pieceLong;
       const h = rotated ? pieceLong : pieceShort;
@@ -246,11 +285,16 @@ function computeLayout(calc, trimA, trimB, opts) {
   if (UNSUPPORTED_BOOKLETS.includes(calc)) {
     throw new Error("Perfect bound / coupon book imposition is not in v1 — flats, stickers, and saddle stitch booklets only.");
   }
-  let sheet, priced, grid;
+  // Gutter override: a fixed value replaces the auto policy everywhere
+  const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : GUTTERS;
+  let sheet, priced, grid, efficient = false;
   if (calc === "sticker") {
     priced = stickerImp(pieceLong, pieceShort);
     if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not fit the 12×18 sticker sheet`);
     sheet = SHEETS["12x18"];
+    if (opts && isFinite(opts.gutter) && opts.gutter !== null && Math.abs(+opts.gutter - STICKER.pitch) > EPS) {
+      warnings.push(`Sticker pitch is fixed at ${STICKER.pitch}″ by the 12×18 crack-n-peel spec — gutter override ignored.`);
+    }
     const g0 = stickerGrid(pieceLong, pieceShort), g1 = stickerGrid(pieceShort, pieceLong);
     const rotated = g1.a * g1.d > g0.a * g0.d;
     const gg = rotated ? g1 : g0;
@@ -260,34 +304,46 @@ function computeLayout(calc, trimA, trimB, opts) {
     sheet = SHEETS["13x19"];
     if (priced < 1) { priced = flatImp(pieceLong, pieceShort, 27); sheet = SHEETS["13x27.5"]; } // calculators' two-sheet rule
     if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not image on any press sheet`);
-    grid = bestGridForCount(Math.round(priced), pieceLong, pieceShort, sheet);
-    if (!grid) {
-      // Pricing promised more than physically fits — surface loudly, never
-      // silently under- or over-place (brief §2). Placement below the priced
-      // count happens only on explicit operator override, and is flagged in
-      // the UI, the warnings, and the sheet's slug line.
-      if (!(opts && opts.allowBestFit)) {
-        throw new Error(`Priced imposition ${priced}-up of ${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label}. Pricing/production mismatch — enable "allow best physical fit" to place the maximum that fits (flagged), and review pricing for this size.`);
+    if (opts && opts.efficient && sheet.key === "13x19" && priced >= 2) {
+      // Efficient mode: same piece laid out on the 13×27.5 sheet, the
+      // multiple expanding to whatever physically fits the 27″ usable axis.
+      // Pricing basis stays the 13×19 imp — this is a press-pass saver.
+      sheet = SHEETS["13x27.5"];
+      grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters);
+      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on 13×27.5 with the selected gutter.`);
+      efficient = true;
+      warnings.push(`Efficient mode: ${grid.a * grid.d}-up on 13×27.5 (priced ${priced}-up per 13×19).`);
+    } else {
+      if (opts && opts.efficient) warnings.push("Efficient 13×27.5 mode applies to sizes imaging ≥2-up on 13×19 — ignored for this size.");
+      grid = bestGridForCount(Math.round(priced), pieceLong, pieceShort, sheet, gutters);
+      if (!grid) {
+        // Pricing promised more than physically fits — surface loudly, never
+        // silently under- or over-place (brief §2). Placement below the priced
+        // count happens only on explicit operator override, and is flagged in
+        // the UI, the warnings, and the sheet's slug line.
+        if (!(opts && opts.allowBestFit)) {
+          throw new Error(`Priced imposition ${priced}-up of ${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}. Pricing/production mismatch — enable "allow best physical fit" to place the maximum that fits (flagged), and review pricing for this size.`);
+        }
+        grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters);
+        if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label} at all.`);
+        mismatch = true;
+        warnings.push(`MISMATCH: placing ${grid.a * grid.d}-up but the customer was priced ${priced}-up — sheet count and margin will differ. Review pricing for this size.`);
       }
-      grid = bestPhysicalGrid(pieceLong, pieceShort, sheet);
-      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label} at all.`);
-      mismatch = true;
-      warnings.push(`MISMATCH: placing ${grid.a * grid.d}-up but the customer was priced ${priced}-up — sheet count and margin will differ. Review pricing for this size.`);
+      if (grid.g < 0.25 && gutters.length > 1) warnings.push(grid.g === 0
+        ? `Butt-cut layout (no gutter) needed to honour the priced ${priced}-up — adjacent pieces share cut lines, no inter-piece bleed.`
+        : `Gutter squeezed to ${grid.g}″ to honour the priced ${priced}-up.`);
     }
-    if (grid.g < 0.25) warnings.push(grid.g === 0
-      ? `Butt-cut layout (no gutter) needed to honour the priced ${priced}-up — adjacent pieces share cut lines, no inter-piece bleed.`
-      : `Gutter squeezed to ${grid.g}″ to honour the priced ${priced}-up.`);
   } else {
     throw new Error(`Unknown calc type "${calc}"`);
   }
   const layout = {
     sheet, calc, pieceLong, pieceShort,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    imp: grid.a * grid.d, pricedImp: priced, mismatch, warnings,
+    imp: grid.a * grid.d, pricedImp: priced, mismatch, efficient, warnings,
     cellW: grid.rotated ? pieceShort : pieceLong,
     cellH: grid.rotated ? pieceLong : pieceShort,
   };
-  buildCells(layout);
+  buildCells(layout, opts && opts.offset);
   return layout;
 }
 
@@ -313,17 +369,18 @@ function computeSaddleLayout(pw, ph, opts) {
     target = 1;
     warnings.push("Open spread requires the 13×27.5 oversize sheet (1 spread per side).");
   }
-  let grid = bestGridForCount(target, Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet);
+  const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : GUTTERS;
+  let grid = bestGridForCount(target, Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet, gutters);
   if (!grid) {
     if (!(opts && opts.allowBestFit)) {
-      throw new Error(`${target} spread(s) of ${spreadW}×${spreadH}″ (pages ${pw}×${ph}″, priced ${imp}/side${source === "custom" ? ", custom size" : ""}) do not physically fit on ${sheet.label}. Pricing/production mismatch — enable "allow best physical fit" to place fewer (flagged).`);
+      throw new Error(`${target} spread(s) of ${spreadW}×${spreadH}″ (pages ${pw}×${ph}″, priced ${imp}/side${source === "custom" ? ", custom size" : ""}) do not physically fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}. Pricing/production mismatch — enable "allow best physical fit" to place fewer (flagged).`);
     }
-    grid = bestPhysicalGrid(Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet);
+    grid = bestPhysicalGrid(Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet, gutters);
     if (!grid) throw new Error(`A ${spreadW}×${spreadH}″ spread does not fit on ${sheet.label} at all.`);
     mismatch = true;
     warnings.push(`MISMATCH: placing ${grid.a * grid.d} spread(s)/side but pricing assumed ${target}. Review before printing.`);
   }
-  if (grid.g < 0.25 && grid.a * grid.d > 1) warnings.push(grid.g === 0
+  if (grid.g < 0.25 && grid.a * grid.d > 1 && gutters.length > 1) warnings.push(grid.g === 0
     ? "Butt-cut spread layout (no gutter) — adjacent spreads share cut lines."
     : `Gutter squeezed to ${grid.g}″ between spreads.`);
   const pieceLong = Math.max(spreadW, spreadH), pieceShort = Math.min(spreadW, spreadH);
@@ -342,7 +399,7 @@ function computeSaddleLayout(pw, ph, opts) {
       spreadAlongX: (spreadW >= spreadH) ? !grid.rotated : grid.rotated,
     },
   };
-  buildCells(layout);
+  buildCells(layout, opts && opts.offset);
   return layout;
 }
 
@@ -481,46 +538,77 @@ function mirrorCells(cells, layout, sheetFlip) {
   }));
 }
 
-// ── Marks layer: cut guides in the sheet margins + slug line ──
-// Marks live entirely in the margins (outside the usable image area), so
-// they can never collide with art or bleed.
-// Shared mark-band geometry: cut marks and fold guides must sit in the same
-// margin band so they line up — one source for both.
-function markGeometry(sheet) {
-  const mLong = (sheet.long - sheet.usableLong) / 2;   // per-side margin along X (in)
-  const mShort = (sheet.short - sheet.usableShort) / 2; // per-side margin along Y (in)
-  return {
-    gap: 0.02, // clearance from sheet edge, in
-    lenX: Math.max(mShort - BLEED - 0.02, 0.06), // vertical marks in top/bottom margins
-    lenY: Math.max(mLong - BLEED - 0.02, 0.06),  // horizontal marks in left/right margins
-  };
+// ── Marks layer ──
+// The press images ONLY the printable area (e.g. 18.5×12.5 on 13×19) — a
+// mark in the sheet margin would never print. All marks therefore live
+// INSIDE the printable rect, sized "as size allows": each mark ray stops at
+// the printable boundary or the nearest piece's bleed (clip) box, and is
+// omitted entirely when there's no room (e.g. between pieces at standard
+// 0.25″ gutter, where bleed meets bleed).
+const MARK_GAP = BLEED;  // marks start just beyond the bleed
+const MARK_LEN = 0.22;   // target length, in
+const MARK_MIN = 0.05;   // less room than this → omit
+
+// Longest clear run from (x, y) heading (dx, dy).
+function freeRun(x, y, dx, dy, maxLen, P, obstacles) {
+  let len = dx > 0 ? P.x1 - x : dx < 0 ? x - P.x0 : dy > 0 ? P.y1 - y : y - P.y0;
+  len = Math.min(len, maxLen);
+  for (const o of obstacles) {
+    if (x > o.x + EPS && x < o.x + o.w - EPS && y > o.y + EPS && y < o.y + o.h - EPS) return 0; // ray starts inside a piece
+    if (dx !== 0) {
+      if (y <= o.y + EPS || y >= o.y + o.h - EPS) continue;
+      const d = dx > 0 ? o.x - x : x - (o.x + o.w);
+      if (d >= -EPS) len = Math.min(len, d - 0.02);
+    } else {
+      if (x <= o.x + EPS || x >= o.x + o.w - EPS) continue;
+      const d = dy > 0 ? o.y - y : y - (o.y + o.h);
+      if (d >= -EPS) len = Math.min(len, d - 0.02);
+    }
+  }
+  return len;
 }
 
 function drawMarks(page, layout, cells) {
-  const s = layout.sheet;
+  const P = printableRect(layout.sheet);
+  const obstacles = cells.map(c => c.clip);
   const black = PL.rgb(0, 0, 0);
-  const xs = new Set(), ys = new Set();
-  cells.forEach(c => {
-    xs.add(+(c.trim.x).toFixed(4)); xs.add(+(c.trim.x + c.trim.w).toFixed(4));
-    ys.add(+(c.trim.y).toFixed(4)); ys.add(+(c.trim.y + c.trim.h).toFixed(4));
-  });
-  const { gap, lenX: markLenX, lenY: markLenY } = markGeometry(s);
-  const line = (x1, y1, x2, y2) => page.drawLine({
-    start: { x: x1 * PT, y: y1 * PT }, end: { x: x2 * PT, y: y2 * PT },
-    thickness: 0.5, color: black,
-  });
-  xs.forEach(x => {
-    line(x, gap, x, gap + markLenX);                       // bottom margin
-    line(x, s.short - gap - markLenX, x, s.short - gap);   // top margin
-  });
-  ys.forEach(y => {
-    line(gap, y, gap + markLenY, y);                       // left margin
-    line(s.long - gap - markLenY, y, s.long - gap, y);     // right margin
-  });
+  const mark = (x, y, dx, dy) => {
+    const len = freeRun(x, y, dx, dy, MARK_LEN, P, obstacles);
+    if (len >= MARK_MIN) page.drawLine({
+      start: { x: x * PT, y: y * PT }, end: { x: (x + dx * len) * PT, y: (y + dy * len) * PT },
+      thickness: 0.5, color: black,
+    });
+  };
+  for (const c of cells) {
+    const t = c.trim;
+    // horizontal extensions of the bottom/top trim lines…
+    mark(t.x - MARK_GAP, t.y, -1, 0);        mark(t.x + t.w + MARK_GAP, t.y, 1, 0);
+    mark(t.x - MARK_GAP, t.y + t.h, -1, 0);  mark(t.x + t.w + MARK_GAP, t.y + t.h, 1, 0);
+    // …and vertical extensions of the left/right trim lines
+    mark(t.x, t.y - MARK_GAP, 0, -1);        mark(t.x, t.y + t.h + MARK_GAP, 0, 1);
+    mark(t.x + t.w, t.y - MARK_GAP, 0, -1);  mark(t.x + t.w, t.y + t.h + MARK_GAP, 0, 1);
+  }
 }
 
-function drawSlug(page, layout, font, info) {
-  const s = layout.sheet;
+// Slug line — placed in the largest clear band INSIDE the printable area
+// (with the default lower-right jog that's the strip above the block).
+// Returns false when no band has room, so the caller can warn.
+function drawSlug(page, layout, font, info, cells) {
+  const P = printableRect(layout.sheet);
+  const b = {
+    x0: Math.min(...cells.map(c => c.clip.x)),
+    y0: Math.min(...cells.map(c => c.clip.y)),
+    x1: Math.max(...cells.map(c => c.clip.x + c.clip.w)),
+    y1: Math.max(...cells.map(c => c.clip.y + c.clip.h)),
+  };
+  const bands = [
+    { x: P.x0 + 0.03, y: b.y1 + 0.05, h: P.y1 - b.y1 - 0.1, w: P.x1 - P.x0 - 0.06 }, // above the block
+    { x: P.x0 + 0.03, y: P.y0 + 0.03, h: b.y0 - P.y0 - 0.1, w: P.x1 - P.x0 - 0.06 }, // below the block
+    { x: P.x0 + 0.03, y: P.y0 + 0.03, h: 0.12, w: b.x0 - P.x0 - 0.08 },              // left of the block
+    { x: b.x1 + 0.05, y: P.y0 + 0.03, h: 0.12, w: P.x1 - b.x1 - 0.08 },              // right of the block
+  ];
+  const spot = bands.find(bd => bd.h >= 0.11 && bd.w >= 2.2);
+  if (!spot) return false;
   // slug is set in standard Helvetica (WinAnsi) — ASCII only, no ″/× glyphs
   const parts = [
     "PPS IMPOSED", info.side,
@@ -528,14 +616,16 @@ function drawSlug(page, layout, font, info) {
     info.jobName ? String(info.jobName).replace(/[^\x20-\x7E]/g, "?") : null,
     layout.booklet ? `pages ${layout.booklet.pw}x${layout.booklet.ph}in` : `${layout.pieceLong}x${layout.pieceShort}in`,
     layout.mismatch ? `MISMATCH ${layout.imp}-up placed vs ${layout.pricedImp}-up priced` : `${layout.imp}-up on ${layout.sheet.key}`,
-    layout.gutter < 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
+    layout.efficient ? `EFFICIENT 13x27.5 (priced ${layout.pricedImp}-up/13x19)` : null,
+    layout.gutter !== 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
     info.date,
   ].filter(Boolean);
   page.drawText(parts.join("  ·  "), {
-    x: 0.06 * PT, y: 0.045 * PT, size: 6, font, color: PL.rgb(0, 0, 0),
-    maxWidth: (s.long - 0.12) * PT,
+    x: spot.x * PT, y: spot.y * PT, size: 6, font, color: PL.rgb(0, 0, 0),
+    maxWidth: spot.w * PT,
   });
+  return true;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -577,23 +667,28 @@ function bookletSlots(layout) {
   return slots;
 }
 
-// Dashed fold guides in the margins at each spine position.
-function drawFoldMarks(page, layout) {
-  const s = layout.sheet;
-  const { gap, lenX, lenY } = markGeometry(s);
-  const dash = { thickness: 0.5, color: PL.rgb(0, 0, 0), dashArray: [2, 2] };
-  const seen = new Set();
-  for (const cell of layout.cells) {
+// Dashed fold guides at each spine position — same printable-area rule as
+// the crop marks: they extend from just outside the spread's bleed box into
+// whatever clear space exists.
+function drawFoldMarks(page, layout, cells) {
+  const P = printableRect(layout.sheet);
+  const obstacles = cells.map(c => c.clip);
+  const mark = (x, y, dx, dy) => {
+    const len = freeRun(x, y, dx, dy, MARK_LEN, P, obstacles);
+    if (len >= MARK_MIN) page.drawLine({
+      start: { x: x * PT, y: y * PT }, end: { x: (x + dx * len) * PT, y: (y + dy * len) * PT },
+      thickness: 0.5, color: PL.rgb(0, 0, 0), dashArray: [2, 2],
+    });
+  };
+  for (const c of cells) {
     if (layout.booklet.spreadAlongX) {
-      const x = +(cell.trim.x + cell.trim.w / 2).toFixed(4);
-      if (seen.has(x)) continue; seen.add(x);
-      page.drawLine({ start: { x: x * PT, y: gap * PT }, end: { x: x * PT, y: (gap + lenX) * PT }, ...dash });
-      page.drawLine({ start: { x: x * PT, y: (s.short - gap - lenX) * PT }, end: { x: x * PT, y: (s.short - gap) * PT }, ...dash });
+      const x = c.trim.x + c.trim.w / 2;
+      mark(x, c.clip.y - 0.02, 0, -1);
+      mark(x, c.clip.y + c.clip.h + 0.02, 0, 1);
     } else {
-      const y = +(cell.trim.y + cell.trim.h / 2).toFixed(4);
-      if (seen.has(y)) continue; seen.add(y);
-      page.drawLine({ start: { x: gap * PT, y: y * PT }, end: { x: (gap + lenY) * PT, y: y * PT }, ...dash });
-      page.drawLine({ start: { x: (s.long - gap - lenY) * PT, y: y * PT }, end: { x: (s.long - gap) * PT, y: y * PT }, ...dash });
+      const y = c.trim.y + c.trim.h / 2;
+      mark(c.clip.x - 0.02, y, -1, 0);
+      mark(c.clip.x + c.clip.w + 0.02, y, 1, 0);
     }
   }
 }
@@ -665,12 +760,13 @@ async function imposeSaddle(artBytes, spec, layout) {
       pageLabels.push(label);
       if (spec.marks !== false) {
         drawMarks(page, layout, cells);
-        drawFoldMarks(page, layout);
-        drawSlug(page, layout, font, {
+        drawFoldMarks(page, layout, cells);
+        const placed = drawSlug(page, layout, font, {
           side: label + (sheetsPerSig ? ` · run ${sheetsPerSig} sheets` : ""),
           orderRef: spec.orderRef, jobName: spec.jobName,
           qty, sheets: totalSheets, date: dateStr,
-        });
+        }, cells);
+        if (!placed && k === 0 && !inner) warnings.push("no clear space inside the printable area for the slug line — omitted");
       }
       page.setMediaBox(0, 0, W, H); page.setCropBox(0, 0, W, H);
       page.setBleedBox(0, 0, W, H); page.setTrimBox(0, 0, W, H);
@@ -710,8 +806,17 @@ async function imposeSaddle(artBytes, spec, layout) {
 // spec: { calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate,
 //         jobName, orderRef, marks }
 // artBytes: front (+back on page 2) PDF. backBytes: optional separate back PDF.
+function layoutOpts(spec) {
+  return {
+    allowBestFit: !!spec.allowBestFit,
+    efficient: !!spec.efficient,
+    gutter: isFinite(spec.gutter) && spec.gutter !== null && spec.gutter !== "" ? +spec.gutter : null,
+    offset: { mode: spec.offsetMode || "jog", right: +spec.offsetRight || 0.5, bottom: +spec.offsetBottom || 0.5 },
+  };
+}
+
 async function imposePdf(artBytes, backBytes, spec) {
-  const layout = computeLayout(spec.calc, spec.trimLong, spec.trimShort, { allowBestFit: !!spec.allowBestFit });
+  const layout = computeLayout(spec.calc, spec.trimLong, spec.trimShort, layoutOpts(spec));
   if (spec.calc === "saddle") return imposeSaddle(artBytes, spec, layout);
   const warnings = [...layout.warnings];
 
@@ -760,10 +865,11 @@ async function imposePdf(artBytes, backBytes, spec) {
     for (const cell of cells) placeInCell(page, embedded, art, cell, extraRot);
     if (spec.marks !== false) {
       drawMarks(page, layout, cells);
-      drawSlug(page, layout, font, {
+      const placed = drawSlug(page, layout, font, {
         side: sd.label, orderRef: spec.orderRef, jobName: spec.jobName,
         qty: spec.qty, sheets, date: dateStr,
-      });
+      }, cells);
+      if (!placed && i === 0) warnings.push("no clear space inside the printable area for the slug line — omitted");
     }
     // Explicit page boxes (fix a): the press sheet is the product at this
     // stage — Media = Crop = Bleed = Trim = full sheet.
@@ -789,7 +895,7 @@ async function imposePdf(artBytes, backBytes, spec) {
     if (!getPageBox(p, "TrimBox")) issues.push(`sheet ${i + 1} missing TrimBox`);
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
   });
-  if (!layout.mismatch && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
+  if (!layout.mismatch && !layout.efficient && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
   return { bytes, layout, warnings, sheets, sideReports };
@@ -1031,6 +1137,11 @@ function App() {
   const [itemRef, setItemRef] = useState(""); // order item id — tags the output filename so per-item IMPOSED detection works
   const [marks, setMarks] = useState(true);
   const [allowBestFit, setAllowBestFit] = useState(false);
+  const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
+  const [gutterMode, setGutterMode] = useState("auto");   // "auto" | fixed inches
+  const [offsetMode, setOffsetMode] = useState("jog");    // jog lower-right 0.5″ | center | custom
+  const [offsetRight, setOffsetRight] = useState(0.5);
+  const [offsetBottom, setOffsetBottom] = useState(0.5);
   const isSaddle = calc === "saddle";
   const [art, setArt] = useState(null);      // { bytes, name, pageCount }
   const [backArt, setBackArt] = useState(null);
@@ -1068,14 +1179,17 @@ function App() {
     sides: +sides, qty: +qty || 0, sheetFlip,
     backRotate: backRotate === "auto" ? "auto" : +backRotate,
     jobName, orderRef, itemRef, marks, allowBestFit,
-  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit]);
+    efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
+    offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
+  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
   const layoutInfo = useMemo(() => {
     try {
       if (!(debSpec.trimLong >= 2 && debSpec.trimShort >= 2)) return { error: "Enter trim size (min 2″)" };
-      return { layout: computeLayout(debSpec.calc, debSpec.trimLong, debSpec.trimShort, { allowBestFit: debSpec.allowBestFit }) };
+      return { layout: computeLayout(debSpec.calc, debSpec.trimLong, debSpec.trimShort, layoutOpts(debSpec)) };
     } catch (e) { return { error: e.message }; }
   }, [debSpec]);
 
@@ -1214,7 +1328,7 @@ function App() {
   const pendingCount = (rows || []).filter(rowPending).length;
 
   const lay = layoutInfo.layout;
-  const parityOk = lay && !lay.mismatch && (lay.booklet
+  const parityOk = lay && !lay.mismatch && !lay.efficient && (lay.booklet
     ? (lay.pricedImp < 2 || lay.imp === lay.pricedImp)   // imp:1 presets legitimately move to the 27.5 sheet
     : lay.imp === Math.round(lay.pricedImp));
 
@@ -1325,9 +1439,44 @@ function App() {
                 <input type="text" value={orderRef} onChange={e => setOrderRef(e.target.value)} />
               </Field>
             </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Field label="Layout position" style={{ flex: 1 }}>
+                <select value={offsetMode} onChange={e => setOffsetMode(e.target.value)}>
+                  <option value="jog">Jog lower-right 0.5″ (back: lower-left)</option>
+                  <option value="center">Centered</option>
+                  <option value="custom">Custom offset…</option>
+                </select>
+              </Field>
+              <Field label="Gutter" style={{ flex: "0 0 110px" }}>
+                <select value={gutterMode} onChange={e => setGutterMode(e.target.value)}>
+                  <option value="auto">Auto</option>
+                  <option value="0">0″ (butt)</option>
+                  <option value="0.125">0.125″</option>
+                  <option value="0.25">0.25″</option>
+                  <option value="0.375">0.375″</option>
+                  <option value="0.5">0.5″</option>
+                </select>
+              </Field>
+            </div>
+            {offsetMode === "custom" && (
+              <div style={{ display: "flex", gap: 10 }}>
+                <Field label="From right edge (in)" style={{ flex: 1 }}>
+                  <input type="number" step="0.125" min="0" value={offsetRight} onChange={e => setOffsetRight(e.target.value)} />
+                </Field>
+                <Field label="From bottom edge (in)" style={{ flex: 1 }}>
+                  <input type="number" step="0.125" min="0" value={offsetBottom} onChange={e => setOffsetBottom(e.target.value)} />
+                </Field>
+              </div>
+            )}
+            {FLAT_CALCS.includes(calc) && (
+              <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 8 }}>
+                <input type="checkbox" checked={efficient} onChange={e => setEfficient(e.target.checked)} style={{ width: "auto" }} />
+                <span>Lay out on 13×27.5 (efficient mode) <span style={{ color: "rgba(255,255,255,.4)" }}>— multiple expands to fill the 27″ axis</span></span>
+              </label>
+            )}
             <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
               <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
-              Cut marks + slug line in margins
+              Crop marks + slug (inside printable area, as space allows)
             </label>
             <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
               <input type="checkbox" checked={allowBestFit} onChange={e => setAllowBestFit(e.target.checked)} style={{ width: "auto" }} />
@@ -1352,7 +1501,9 @@ function App() {
                     </div>
                   ) : (
                     <div>Grid: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.imp}-up</b>{" "}
-                      <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}-UP`}</span>
+                      {lay.efficient
+                        ? <span className={"imp-badge " + (lay.imp >= lay.pricedImp ? "ok" : "warn")}>13×27.5 EFFICIENT — PRICED {lay.pricedImp}-UP/13×19</span>
+                        : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}-UP`}</span>}
                     </div>
                   )}
                   <div>Gutter: <b>{lay.gutter}″</b>{lay.gutter === 0 ? " (butt-cut)" : ""}</div>
