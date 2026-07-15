@@ -1800,7 +1800,9 @@ function App() {
                 <div style={{ marginBottom: 10, fontSize: 11.5, color: "rgba(255,255,255,.45)", lineHeight: 1.7 }}>
                   {result.sideReports.map((s, i) => s.side === "BOOKLET"
                     ? <div key={i}>Booklet: {s.pages} pages{s.padded !== s.pages ? ` (padded to ${s.padded})` : ""} · {s.signatures} signatures · {s.spreadsPerSide} spread{s.spreadsPerSide === 1 ? "" : "s"}/side · back {s.tumble ? "tumbled 180°" : "upright"}{s.srcRotPages ? ` · ${s.srcRotPages} source pages carried /Rotate (normalized)` : ""}</div>
-                    : <div key={i}>{s.side}: {s.rot ? `source /Rotate ${s.rot}° normalized · ` : ""}cell rotation {s.cellRotate}° · scale ×{s.scale.toFixed(3)} · {s.hasBleed ? "bleed present" : "no bleed"}</div>)}
+                    : s.side === "COLLATED"
+                    ? <div key={i}>Collated: {s.pieces} piece{s.pieces === 1 ? "" : "s"} · {s.modeName === "gang" ? "ganged in order" : "cut & stack"} · {s.sheetsPerSet} sheet{s.sheetsPerSet === 1 ? "" : "s"} per set</div>
+                    : <div key={i}>{s.side}: {s.rot ? `source /Rotate ${s.rot}° normalized · ` : ""}cell rotation {s.cellRotate}° · scale ×{typeof s.scale === "number" ? s.scale.toFixed(3) : "?"} · {s.hasBleed ? "bleed present" : "no bleed"}</div>)}
                 </div>
               )}
               <PdfPreview bytes={result.bytes} labels={result.pageLabels} />
@@ -1821,7 +1823,24 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("pps-impose-root")).render(<App />);
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  render() {
+    if (this.state.err) {
+      return (
+        <div style={{ maxWidth: 720, margin: "60px auto", padding: 20 }} className="imp-card">
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#f87171", marginBottom: 8 }}>The tool hit a rendering error</div>
+          <div style={{ fontSize: 12.5, color: "rgba(255,255,255,.6)", whiteSpace: "pre-wrap", marginBottom: 12 }}>{String(this.state.err && this.state.err.message || this.state.err)}</div>
+          <button className="imp-btn" onClick={() => location.reload()}>Reload the tool</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+ReactDOM.createRoot(document.getElementById("pps-impose-root")).render(<ErrorBoundary><App /></ErrorBoundary>);
 </script>
 </body>
 </html>
