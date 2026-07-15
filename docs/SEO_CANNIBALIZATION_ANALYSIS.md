@@ -20,19 +20,33 @@
 - **Coupons promoted to a top-level category.** The former "Coupon Booklets" sub-category of Booklets was moved to top-level (`parent 0`) and renamed **"Coupons"** (slug unchanged, so no URL break).
 
 ### ⏳ Pending (operator action)
-- **Import the Page → category 301s into Rank Math.** Delivered as `redirect-map-pages-to-categories.csv` (17 clean rows + 1 needing the Stickers page's real slug). These retire the now-orphaned standalone Pages (`/custom-booklet-printing/`, `/brochure-printing-services/`, …) onto the category hubs. **Not yet imported.** After importing, set the old Pages to Draft/Trash.
-- **Higher-risk redirect to watch:** `/coupon-pads-coupon-booklets/` ranks ~pos 12 (~376 clicks for "coupon pads") — the one page §6 said to *keep*. Its 301 to `/coupon-booklets/` only pays off if the Coupons category actually targets "coupon pads"; monitor after redirect.
+- **Import two 301 maps into Rank Math** (both live in the repo under `docs/seo/`):
+  - **`docs/seo/redirect-map-pages-to-categories.csv`** — the bulk. Generic service/marketing Pages → category hubs (16 clean rows + 1 needing the Stickers page's real slug). Retires the now-orphaned standalone Pages (`/custom-booklet-printing/`, `/brochure-printing-services/`, …).
+  - **`docs/seo/redirect-map-service-to-product.csv`** — the two exceptions where a specific product owns the term: `/small-booklet-printing/` → `/product/small-booklet-printing/` and `/business-form-printing-services/` → `/product/2-part-carbonless-forms/`.
+  - **Not yet imported.** After importing, set the old Pages to Draft/Trash.
+- **Higher-risk redirect to watch:** `/coupon-pads-coupon-booklets/` ranks ~pos 12 (~376 clicks for "coupon pads"). Resolved to **keep the category target** (`/coupon-booklets/`) — it's dual-intent (pads + booklets) and only the Coupons category spans both. But the payoff depends on the Coupons hub actually targeting "coupon pads"; monitor after redirect.
 - **Empty categories still need products** (EDDM, Mailers, Signs & Banners, Stickers) to appear in any auto-generated category lists and to give the archive a product grid; the wizard-funnel is the interim.
 - **Stickers page slug** — its menu URL was `/?page_id=21486` (no pretty permalink); confirm its real URL or whether it's unpublished (then no redirect needed).
 
 ### 🔜 Not yet started — the deeper consolidation
 The menu/redirect work retires the *service-page* layer. The **product-level generics** §6 flagged — `/product/cheap-booklet-printing/`, `/product/low-cost-brochure-printing/`, `/product/coupon-booklet-printing/`, etc. — still compete for the head terms and should also fold into the same category hubs (301 in Rank Math), with the specialist products retained. That's the next layer.
 
-### ⚠️ Redirect-target rule — not every service page goes to the category
-A service page whose intent is **owned by a specialized product** must 301 to **that product**, not the generic category/hub — otherwise the specific intent splits off the page that ranks for it.
-- **`/small-booklet-printing/` → `/product/small-booklet-printing/`** (not `/booklets/`). Near-slug-twin; the product owns "small/mini booklet" (1,152 clk, pos 34). §6 corrected. It is **not** in the category CSV, so add it as a **separate service→product 301** in Rank Math, and repoint (or drop) the "Mini Booklets" menu item that still links it.
-- **Review `/coupon-pads-coupon-booklets/`** — the CSV maps it to `/coupon-booklets/`, but it ranks ~pos 12 for "coupon pads" and may itself be the owner (→ *keep*), or belong on `/product/coupon-tear-pad-printing/` if that's the real "coupon pads" owner. Decide before importing.
-- Generic marketing pages with no specialized owning product (`/custom-booklet-printing/`, `/brochure-printing-services/`, `/online-flyer-printing-service/`, …) correctly go to the **category** hub.
+### ⚠️ Redirect-target rule — service page → product when a product owns the term
+**General principle (owner-stated 2026-07-15):** *when a service page overlaps significantly with a **product** page, 301 it to the product* (passing its link juice to the transactional page that owns the term) — **not** to the generic category. The discriminator is **which page owns the service page's exact intent**:
+
+- **A specific product owns the exact term** → 301 to the **product**. Test: a product's name/slug is a twin of the service page's term, or the product is the sole owner of that named intent.
+- **The intent is a generic head term** → 301 to the **category hub**. The rich category archive (hero + `[pps_cat_wizard]` + paper/coating tables) is purpose-built to rank for "brochure printing", "door hanger printing", etc. A *single-product* category still wins here when its lone product is a **specific SKU** rather than the term owner.
+
+Applied to the audited service pages, this yields exactly **two** service→product redirects (in `docs/seo/redirect-map-service-to-product.csv`); everything else goes to the category hub (`docs/seo/redirect-map-pages-to-categories.csv`):
+
+| Service page | 301 target | Why |
+|---|---|---|
+| `/small-booklet-printing/` | **`/product/small-booklet-printing/`** | Exact slug-twin; product owns "small/mini booklet" (1,152 clk, pos 34) inside a 9-product Booklets category. Generic `/booklets/` would split the mini intent off its owner. "Mini Booklets" menu item repointed. |
+| `/business-form-printing-services/` | **`/product/2-part-carbonless-forms/`** | Single-product category whose lone product is literally named **"Business Forms"** (the exact term) — the product *is* the owner. Owner picked "split business forms out" 2026-07-15. |
+| `/door-hanger-printing/` | `/door-hangers/` (category) | Single-product category, but the lone product is a **specific SKU** ("4.25×11 Standard Cut"); the rich hub owns the generic "door hanger printing". |
+| `/rack-card-printing/` | `/rack-cards/` (category) | Single-product category, but the lone product is a **specific SKU** ("Budget Rack Cards"); the rich hub owns "rack card printing". |
+| `/coupon-pads-coupon-booklets/` | `/coupon-booklets/` (category) | **Dual-intent** (pads + booklets); only the 3-product Coupons category spans both. No single product is the twin, so category wins. Monitor "coupon pads" (pos ~12) after redirect. |
+| `/custom-booklet-printing/`, `/brochure-printing-services/`, `/online-flyer-printing-service/`, … | their category hub | Generic marketing pages, no specialized owning product. |
 
 ---
 
@@ -200,7 +214,8 @@ migrate only after the hub ranks.
 | booklet | 8x8 / square / saddle-stitch / perfect-bound | — | 20–58 | RETAIN → optionally MIGRATE to own preset | — |
 | coupon | `/product/custom-coupon-book-printing/` | 781 | 18 | HUB / PROMOTE | — |
 | coupon | `/product/coupon-booklet-printing/` | 164 | 19 | 301 | `/product/custom-coupon-book-printing/` |
-| coupon | `/coupon-pads-coupon-booklets/`, `/product/coupon-tear-pad-printing/` | — | 12–17 | RETAIN | — |
+| coupon | `/coupon-pads-coupon-booklets/` (SERVICE) | — | 12 | 301 | `/coupon-booklets/` (Coupons category — dual-intent, spans pads+booklets; see reconciliation "Redirect-target rule". Monitor "coupon pads" after redirect.) |
+| coupon | `/product/coupon-tear-pad-printing/` | — | 17 | RETAIN | — (specialist "coupon pads" product) |
 | flyer | **`/flyer-printing/` (mint, brochure calc)** | — | — | PRESET-HUB | — |
 | flyer | `/product/budget-flyer-printing/` | 137 | 51 | 301 | `/flyer-printing/` |
 | flyer | `/online-flyer-printing-service/` | 17 | 22 | 301 | `/flyer-printing/` |

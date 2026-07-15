@@ -1,0 +1,18 @@
+Source (301 from),Target (301 to),Type,Notes
+/custom-booklet-printing/,/booklets/,301,
+/brochure-printing-services/,/brochures/,301,
+/square-brochure-printing/,/square-brochures/,301,
+/postcard-printing-services/,/postcards/,301,
+/online-flyer-printing-service/,/flyers/,301,
+/business-card-printing-services/,/business-cards/,301,
+/door-hanger-printing/,/door-hangers/,301,"single-product category, but the lone product is a specific SKU (4.25x11 Standard Cut) — the rich category hub owns the generic 'door hanger printing' term. Owner-confirmed category target 2026-07-15."
+/custom-notepad-printing/,/notepads/,301,
+/rack-card-printing/,/rack-cards/,301,"single-product category, but the lone product is a specific SKU (Budget Rack Cards) — the rich category hub owns the generic 'rack card printing' term. Owner-confirmed category target 2026-07-15."
+/stationery-printing/,/stationery/,301,
+/custom-presentation-folders/,/folders/,301,
+/custom-menu-printing/,/menus/,301,
+/eddm-full-service/,/eddm/,301,empty category (wizard funnels to form)
+/printing-and-mailing-services/,/mailers/,301,empty category (wizard funnels to form)
+/sign-and-banner-printing/,/signs-and-banners/,301,empty category (wizard funnels to form)
+/coupon-pads-coupon-booklets/,/coupon-booklets/,301,"dual-intent (coupon pads + coupon booklets); the Coupons category spans both (holds the tear-pad AND booklet products), so no single product is the twin — keep category target. Monitor 'coupon pads' rank (pos ~12, ~376 clk) after redirect; the Coupons hub must target that term."
+[STICKERS PAGE - need real slug],/stickers/,301,"menu URL was /?page_id=21486 — page has no pretty permalink; confirm its real URL or whether it's unpublished (then no redirect needed)"
