@@ -15,4 +15,3 @@ Source (301 from),Target (301 to),Type,Notes
 /printing-and-mailing-services/,/mailers/,301,empty category (wizard funnels to form)
 /sign-and-banner-printing/,/signs-and-banners/,301,empty category (wizard funnels to form)
 /coupon-pads-coupon-booklets/,/coupon-booklets/,301,"dual-intent (coupon pads + coupon booklets); the Coupons category spans both (holds the tear-pad AND booklet products), so no single product is the twin — keep category target. Monitor 'coupon pads' rank (pos ~12, ~376 clk) after redirect; the Coupons hub must target that term."
-[STICKERS PAGE - need real slug],/stickers/,301,"menu URL was /?page_id=21486 — page has no pretty permalink; confirm its real URL or whether it's unpublished (then no redirect needed)"
