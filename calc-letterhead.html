@@ -44,7 +44,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · LH-RUSHETA</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · LH-RUSHETA2</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Letterhead Calculator v1
@@ -1897,7 +1897,6 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
               <span style={{ fontSize: 13, fontWeight: 600, opacity: .7, marginLeft: 1 }}>.{cPart}</span>
             </div>
             {saleActive && <div style={{ fontSize: 9, fontWeight: 700, marginTop: 1, letterSpacing: ".5px", textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</div>}
-            {hasRush && <div style={{ fontSize: 9.5, fontWeight: 700, marginTop: 2, letterSpacing: ".2px" }}>Delivery by {sh.needByFmt}</div>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {[["$/ea", r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], [hasRush ? "Delivery" : "Avail.", deliveryDate || availRange + " days"]].map(([l, v], i) => (
