@@ -231,10 +231,11 @@ function blockOrigin(layout, offset, warnings) {
     warnings.push(`Layout offset clamped to keep the trim inside the printable area (${s.usableLong}×${s.usableShort}″).`);
   }
   const clipped = [];
-  if (cx - BLEED < P.x0 - EPS) clipped.push("left");
-  if (cx + totalW + BLEED > P.x1 + EPS) clipped.push("right");
-  if (cy - BLEED < P.y0 - EPS) clipped.push("bottom");
-  if (cy + totalH + BLEED > P.y1 + EPS) clipped.push("top");
+  const b = layout.bleed;
+  if (cx - b < P.x0 - EPS) clipped.push("left");
+  if (cx + totalW + b > P.x1 + EPS) clipped.push("right");
+  if (cy - b < P.y0 - EPS) clipped.push("bottom");
+  if (cy + totalH + b > P.y1 + EPS) clipped.push("top");
   if (clipped.length) warnings.push(`Outer bleed falls outside the printable area on the ${clipped.join("/")} edge(s) and will not image — cuts there may show paper white.`);
   return { x0: cx, y0: cy };
 }
@@ -262,7 +263,8 @@ function buildCells(layout, opts) {
   const { x0, y0 } = blockOrigin(layout, opts && opts.offset, layout.warnings);
   const pattern = (opts && opts.pattern) || "straight";
   const manual = opts && opts.manualPattern;
-  const inner = Math.min(BLEED, g / 2);
+  const b = layout.bleed;
+  const inner = Math.min(b, g / 2);
   layout.cells = [];
   for (let row = 0; row < layout.down; row++) {
     for (let col = 0; col < layout.across; col++) {
@@ -272,10 +274,10 @@ function buildCells(layout, opts) {
         patRot: patternRot(pattern, manual, col, row, layout.across),
         trim: { x, y, w, h },
         clip: {
-          x: x - (col === 0 ? BLEED : inner),
-          y: y - (row === 0 ? BLEED : inner),
-          w: w + (col === 0 ? BLEED : inner) + (col === layout.across - 1 ? BLEED : inner),
-          h: h + (row === 0 ? BLEED : inner) + (row === layout.down - 1 ? BLEED : inner),
+          x: x - (col === 0 ? b : inner),
+          y: y - (row === 0 ? b : inner),
+          w: w + (col === 0 ? b : inner) + (col === layout.across - 1 ? b : inner),
+          h: h + (row === 0 ? b : inner) + (row === layout.down - 1 ? b : inner),
         },
       });
     }
@@ -306,8 +308,13 @@ function computeLayout(calc, trimA, trimB, opts) {
   if (UNSUPPORTED_BOOKLETS.includes(calc)) {
     throw new Error("Perfect bound / coupon book imposition is not in v1 — flats, stickers, and saddle stitch booklets only.");
   }
+  // Per-job bleed (default 0.125). The auto gutter ladder is bleed-derived:
+  // full double bleed, single bleed, butt cut.
+  const bleed = opts && isFinite(opts.bleed) && opts.bleed !== null ? Math.min(Math.max(+opts.bleed, 0), 0.5) : BLEED;
+  if (Math.abs(bleed - BLEED) > EPS) warnings.push(`Bleed override: ${bleed}″ per side (default ${BLEED}″).`);
+  const autoGutters = bleed > 0 ? [2 * bleed, bleed, 0] : [0];
   // Gutter override: a fixed value replaces the auto policy everywhere
-  const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : GUTTERS;
+  const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : autoGutters;
   // Grid-orientation override: "no" = pieces long-edge along the sheet's
   // long axis only; "yes" = rotated 90° only; anything else = auto.
   const allowedRot = opts && opts.forceRotated === "yes" ? [true]
@@ -358,7 +365,7 @@ function computeLayout(calc, trimA, trimB, opts) {
         mismatch = true;
         warnings.push(`MISMATCH: placing ${grid.a * grid.d}-up but the customer was priced ${priced}-up — sheet count and margin will differ. Review pricing for this size.`);
       }
-      if (grid.g < 0.25 && gutters.length > 1) warnings.push(grid.g === 0
+      if (grid.g < gutters[0] && gutters.length > 1) warnings.push(grid.g === 0
         ? `Butt-cut layout (no gutter) needed to honour the priced ${priced}-up — adjacent pieces share cut lines, no inter-piece bleed.`
         : `Gutter squeezed to ${grid.g}″ to honour the priced ${priced}-up.`);
     }
@@ -366,7 +373,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     throw new Error(`Unknown calc type "${calc}"`);
   }
   const layout = {
-    sheet, calc, pieceLong, pieceShort,
+    sheet, calc, pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
     imp: grid.a * grid.d, pricedImp: priced, mismatch, efficient, warnings,
     cellW: grid.rotated ? pieceShort : pieceLong,
@@ -382,6 +389,8 @@ function computeSaddleLayout(pw, ph, opts) {
   if (!(pw >= 2 && ph >= 2)) throw new Error("Enter page width × height (min 2″)");
   const warnings = [];
   let mismatch = false;
+  const bleed = opts && isFinite(opts.bleed) && opts.bleed !== null ? Math.min(Math.max(+opts.bleed, 0), 0.5) : BLEED;
+  if (Math.abs(bleed - BLEED) > EPS) warnings.push(`Bleed override: ${bleed}″ per side (default ${BLEED}″).`);
   const { imp, source } = resolveSaddleImp(pw, ph);
   if (imp < 1) throw new Error(`${pw}×${ph}″ pages do not image on any press sheet (imp=${imp})`);
   const spreadW = 2 * pw, spreadH = ph; // spine vertical in spread space
@@ -398,7 +407,8 @@ function computeSaddleLayout(pw, ph, opts) {
     target = 1;
     warnings.push("Open spread requires the 13×27.5 oversize sheet (1 spread per side).");
   }
-  const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : GUTTERS;
+  const autoGutters = bleed > 0 ? [2 * bleed, bleed, 0] : [0];
+  const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : autoGutters;
   let grid = bestGridForCount(target, Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet, gutters);
   if (!grid) {
     if (!(opts && opts.allowBestFit)) {
@@ -409,12 +419,12 @@ function computeSaddleLayout(pw, ph, opts) {
     mismatch = true;
     warnings.push(`MISMATCH: placing ${grid.a * grid.d} spread(s)/side but pricing assumed ${target}. Review before printing.`);
   }
-  if (grid.g < 0.25 && grid.a * grid.d > 1 && gutters.length > 1) warnings.push(grid.g === 0
+  if (grid.g < gutters[0] && grid.a * grid.d > 1 && gutters.length > 1) warnings.push(grid.g === 0
     ? "Butt-cut spread layout (no gutter) — adjacent spreads share cut lines."
     : `Gutter squeezed to ${grid.g}″ between spreads.`);
   const pieceLong = Math.max(spreadW, spreadH), pieceShort = Math.min(spreadW, spreadH);
   const layout = {
-    sheet, calc: "saddle", pieceLong, pieceShort,
+    sheet, calc: "saddle", pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
     imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
     pricedImp: imp,                 // pages per side the calculator priced
@@ -468,7 +478,8 @@ const DIM_EPS = 0.02; // inches — dimension match tolerance (~1.4pt)
 // Resolve where the finished piece lives on a source page + how it sits in a
 // layout cell. Box priority (fix c): TrimBox → BleedBox−0.125″ → MediaBox
 // heuristics. Scaling is always fit-to-trim (contain) — NEVER fill-crop.
-function resolveSideArt(page, pieceLong, pieceShort, cellLandscape) {
+function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed) {
+  const B = isFinite(bleed) ? bleed : BLEED;
   const notes = [];
   const rot = ((page.getRotation().angle % 360) + 360) % 360;
   const mb = page.getMediaBox();
@@ -484,16 +495,16 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape) {
     const bb = getPageBox(page, "BleedBox");
     if (bb && (Math.abs(bb.w - W) > 1 || Math.abs(bb.h - H) > 1)) {
       const r = rel(bb);
-      trimRaw = { x: r.x + BLEED * PT, y: r.y + BLEED * PT, w: r.w - 2 * BLEED * PT, h: r.h - 2 * BLEED * PT };
-      notes.push("art located by embedded BleedBox − 0.125″ bleed");
+      trimRaw = { x: r.x + B * PT, y: r.y + B * PT, w: r.w - 2 * B * PT, h: r.h - 2 * B * PT };
+      notes.push(`art located by embedded BleedBox − ${B}″ bleed`);
     }
   }
   const dispW = (rot % 180 ? H : W) / PT, dispH = (rot % 180 ? W : H) / PT;
   const aLong = Math.max(dispW, dispH), aShort = Math.min(dispW, dispH);
   if (!trimRaw) {
-    if (Math.abs(aLong - (pieceLong + 2 * BLEED)) < DIM_EPS && Math.abs(aShort - (pieceShort + 2 * BLEED)) < DIM_EPS) {
-      trimRaw = { x: BLEED * PT, y: BLEED * PT, w: W - 2 * BLEED * PT, h: H - 2 * BLEED * PT };
-      notes.push("page size = trim + 0.25″ — treated as bleed-inclusive");
+    if (Math.abs(aLong - (pieceLong + 2 * B)) < DIM_EPS && Math.abs(aShort - (pieceShort + 2 * B)) < DIM_EPS) {
+      trimRaw = { x: B * PT, y: B * PT, w: W - 2 * B * PT, h: H - 2 * B * PT };
+      notes.push(`page size = trim + ${2 * B}″ — treated as bleed-inclusive`);
     } else if (Math.abs(aLong - pieceLong) < DIM_EPS && Math.abs(aShort - pieceShort) < DIM_EPS) {
       trimRaw = { x: 0, y: 0, w: W, h: H };
       notes.push("page size = exact trim — NO BLEED in source file");
@@ -601,6 +612,7 @@ function drawMarks(page, layout, cells) {
   const P = printableRect(layout.sheet);
   const obstacles = cells.map(c => c.clip);
   const black = PL.rgb(0, 0, 0);
+  const gap = layout.bleed;
   const mark = (x, y, dx, dy) => {
     const len = freeRun(x, y, dx, dy, MARK_LEN, P, obstacles);
     if (len >= MARK_MIN) page.drawLine({
@@ -611,11 +623,11 @@ function drawMarks(page, layout, cells) {
   for (const c of cells) {
     const t = c.trim;
     // horizontal extensions of the bottom/top trim lines…
-    mark(t.x - MARK_GAP, t.y, -1, 0);        mark(t.x + t.w + MARK_GAP, t.y, 1, 0);
-    mark(t.x - MARK_GAP, t.y + t.h, -1, 0);  mark(t.x + t.w + MARK_GAP, t.y + t.h, 1, 0);
+    mark(t.x - gap, t.y, -1, 0);        mark(t.x + t.w + gap, t.y, 1, 0);
+    mark(t.x - gap, t.y + t.h, -1, 0);  mark(t.x + t.w + gap, t.y + t.h, 1, 0);
     // …and vertical extensions of the left/right trim lines
-    mark(t.x, t.y - MARK_GAP, 0, -1);        mark(t.x, t.y + t.h + MARK_GAP, 0, 1);
-    mark(t.x + t.w, t.y - MARK_GAP, 0, -1);  mark(t.x + t.w, t.y + t.h + MARK_GAP, 0, 1);
+    mark(t.x, t.y - gap, 0, -1);        mark(t.x, t.y + t.h + gap, 0, 1);
+    mark(t.x + t.w, t.y - gap, 0, -1);  mark(t.x + t.w, t.y + t.h + gap, 0, 1);
   }
 }
 
@@ -647,6 +659,7 @@ function drawSlug(page, layout, font, info, cells) {
     layout.mismatch ? `MISMATCH ${layout.imp}-up placed vs ${layout.pricedImp}-up priced` : `${layout.imp}-up on ${layout.sheet.key}`,
     layout.efficient ? `EFFICIENT 13x27.5 (priced ${layout.pricedImp}-up/13x19)` : null,
     layout.gutter !== 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
+    Math.abs(layout.bleed - BLEED) > EPS ? `bleed ${layout.bleed}in` : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
     info.date,
   ].filter(Boolean);
@@ -748,7 +761,7 @@ async function imposeSaddle(artBytes, spec, layout) {
     const key = `${p.getRotation().angle}|${mb.x},${mb.y},${mb.width},${mb.height}|${JSON.stringify(getPageBox(p, "TrimBox"))}|${JSON.stringify(getPageBox(p, "BleedBox"))}`;
     let art = artCache.get(key);
     if (!art) {
-      art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape);
+      art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed);
       artCache.set(key, art);
     }
     arts.push(art);
@@ -844,6 +857,7 @@ function layoutOpts(spec) {
     pattern: spec.pattern || "straight",
     manualPattern: spec.manualPattern || null,
     forceRotated: spec.forceRotated || "auto",
+    bleed: isFinite(spec.bleed) && spec.bleed !== null && spec.bleed !== "" ? +spec.bleed : null,
   };
 }
 
@@ -874,7 +888,7 @@ async function imposePdf(artBytes, backBytes, spec) {
   for (let i = 0; i < sidesArr.length; i++) {
     const sd = sidesArr[i];
     const srcPage = sd.doc.getPage(sd.pno);
-    const art = resolveSideArt(srcPage, layout.pieceLong, layout.pieceShort, cellLandscape);
+    const art = resolveSideArt(srcPage, layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed);
     art.notes.forEach(n => warnings.push(`${sd.label.toLowerCase()}: ${n}`));
     // Embed the source page ONCE as a vector XObject (fix a) and stamp it
     // into every cell — deterministic step-and-repeat (fix d).
@@ -950,6 +964,32 @@ function parseManifest(text) {
   return out;
 }
 
+// Detect the finished trim size from a PDF's first page. An explicit
+// TrimBox wins; otherwise decide whether the media size is bleed-inclusive
+// by checking which interpretation lands on a "rounder" size (production
+// trims are usually halves; quarter-inch values score lower). /Rotate is
+// honoured so the detected size matches the displayed orientation.
+const r16 = v => Math.round(v * 16) / 16;
+function detectTrim(doc, bleed) {
+  const page = doc.getPage(0);
+  const rotSwap = (((page.getRotation().angle % 360) + 360) % 360) % 180 !== 0;
+  const dims = (w, h) => rotSwap ? { w: h / PT, h: w / PT } : { w: w / PT, h: h / PT };
+  const mb = page.getMediaBox();
+  const tb = getPageBox(page, "TrimBox");
+  if (tb && (Math.abs(tb.w - mb.width) > 1 || Math.abs(tb.h - mb.height) > 1)) {
+    const d = dims(tb.w, tb.h);
+    return { w: r16(d.w), h: r16(d.h), method: "embedded TrimBox" };
+  }
+  const b = isFinite(bleed) ? +bleed : BLEED;
+  const media = dims(mb.width, mb.height);
+  const inset = { w: media.w - 2 * b, h: media.h - 2 * b };
+  const nice = v => Math.abs(v * 2 - Math.round(v * 2)) < 0.02 ? 2 : Math.abs(v * 4 - Math.round(v * 4)) < 0.02 ? 1 : 0;
+  if (b > 0 && inset.w >= 1 && inset.h >= 1 && nice(inset.w) + nice(inset.h) > nice(media.w) + nice(media.h)) {
+    return { w: r16(inset.w), h: r16(inset.h), method: `media size − ${2 * b}″ bleed` };
+  }
+  return { w: r16(media.w), h: r16(media.h), method: "exact media size (no bleed detected)" };
+}
+
 function sanitizeName(s) { return String(s || "").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(0, 60); }
 
 function imposedFilename(spec, layout) {
@@ -964,7 +1004,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename };
+window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -1185,6 +1225,7 @@ function App() {
   const [pattern, setPattern] = useState("straight");     // per-cell 180° gang pattern
   const [manualPattern, setManualPattern] = useState([]); // row-major 0/180 per cell (rows bottom-up)
   const [forceRotated, setForceRotated] = useState("auto");
+  const [bleedIn, setBleedIn] = useState(0.125);           // per-job bleed override
   const isSaddle = calc === "saddle";
   const [art, setArt] = useState(null);      // { bytes, name, pageCount }
   const [backArt, setBackArt] = useState(null);
@@ -1225,8 +1266,9 @@ function App() {
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
+    bleed: +bleedIn,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated]);
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -1271,13 +1313,30 @@ function App() {
       }
       if (!/\.pdf$/i.test(f.name)) { setError(`"${f.name}" is not a PDF — the imposition input must be the print-ready or raw PDF.`); continue; }
       const bytes = new Uint8Array(await f.arrayBuffer());
-      let pageCount = 0;
-      try { pageCount = (await PL.PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount(); }
+      let pageCount = 0, det = null;
+      try {
+        const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+        pageCount = doc.getPageCount();
+        try { det = detectTrim(doc, +bleedIn); } catch (e2) { /* detection is best-effort */ }
+      }
       catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
       if (slot === "back") setBackArt({ bytes, name: f.name, pageCount });
       else {
         setArt({ bytes, name: f.name, pageCount });
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
+        if (det) {
+          const specL = Math.max(+trimLong || 0, +trimShort || 0), specS = Math.min(+trimLong || 0, +trimShort || 0);
+          const detL = Math.max(det.w, det.h), detS = Math.min(det.w, det.h);
+          const differs = Math.abs(detL - specL) > 0.03 || Math.abs(detS - specS) > 0.03;
+          if (activeOrder) {
+            // order spec is authoritative — but flag a measurement conflict loudly
+            if (differs) setNotice(`⚠ "${f.name}" measures ${det.w}×${det.h}″ (${det.method}) but the order spec is ${specL}×${specS}″ — check that this is the right file/spec before printing.`);
+          } else {
+            if (isSaddle) { setTrimLong(det.w); setTrimShort(det.h); }
+            else { setTrimLong(detL); setTrimShort(detS); }
+            setNotice(`Trim auto-detected: ${det.w}×${det.h}″ (${det.method}). Adjust the fields if that's wrong.`);
+          }
+        }
         // A 2-page file usually means front+back — switch, but say so, since
         // page 2 could also be notes/a proof sheet the operator must exclude.
         if (pageCount >= 2 && sides === 1 && !isSaddle) {
@@ -1302,10 +1361,19 @@ function App() {
       const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
       if (!r.ok) throw await ajaxFail(r, "artwork download");
       const bytes = new Uint8Array(await r.arrayBuffer());
-      const pageCount = (await PL.PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount();
+      const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+      const pageCount = doc.getPageCount();
       setArt({ bytes, name: row.art_file_name, pageCount });
       setBackArt(null);
-      setNotice(`Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`);
+      let note = `Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
+      try {
+        const det = detectTrim(doc, +bleedIn);
+        const specL = Math.max(s.trimLong, s.trimShort), specS = Math.min(s.trimLong, s.trimShort);
+        if (Math.abs(Math.max(det.w, det.h) - specL) > 0.03 || Math.abs(Math.min(det.w, det.h) - specS) > 0.03) {
+          note = `⚠ Artwork measures ${det.w}×${det.h}″ (${det.method}) but order #${row.order_id} is specced ${specL}×${specS}″ — verify before printing. ` + note;
+        }
+      } catch (e2) { /* best-effort */ }
+      setNotice(note);
     } catch (e) { setError(e.message); }
     finally { setQueueBusy(null); }
   };
@@ -1441,6 +1509,9 @@ function App() {
               </Field>
               <Field label={isSaddle ? "Page height (in) — spine edge" : "Trim short (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
+              </Field>
+              <Field label="Bleed (in)" style={{ flex: "0 0 84px" }}>
+                <input type="number" step="0.0625" min="0" max="0.5" value={bleedIn} onChange={e => setBleedIn(e.target.value)} />
               </Field>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
