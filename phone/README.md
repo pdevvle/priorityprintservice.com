@@ -156,9 +156,14 @@ Real issues encountered bringing this live, documented so they don't bite again:
   from being delivered → step 2 has a **`Resume` error handler** (caller falls
   back to "Unknown caller"; Claude still pulls a callback number from the
   transcript).
-- **Old recordings clogged the queue.** `Watch Recordings` is oldest-first, so a
-  backlog of stale recordings blocked new ones. Fix: right-click the trigger →
-  **Choose where to start → From now on.**
+- **Old recordings clogged the queue / flooded Missive.** `Watch Recordings` is
+  oldest-first, and editing the blueprint resets its start pointer — so it
+  crawled back to 5-year-old recordings and (with the Resume handler) posted
+  them all to Missive. The "Choose where to start → From now on" reset helps but
+  gets wiped on every blueprint edit. **Durable fix:** a date **filter** on step
+  2 (`date_created >= 2026-07-15`) so nothing older than go-live can ever post,
+  regardless of the trigger pointer. Old recordings still get pulled (1 op each,
+  harmless) and dropped.
 - **"Your credit balance is too low" (Anthropic).** The Make key bills the
   **Anthropic Developer Platform** (`console.anthropic.com` → Billing), which is a
   **separate prepaid balance** from the claude.ai / Claude Code subscription.

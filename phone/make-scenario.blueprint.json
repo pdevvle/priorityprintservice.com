@@ -15,6 +15,14 @@
       "version": 2,
       "parameters": { "__IMTCONN__": 350124 },
       "mapper": { "id": "{{1.call_sid}}" },
+      "filter": {
+        "name": "Only recordings from 2026-07-15 onward",
+        "conditions": [
+          [
+            { "a": "{{1.date_created}}", "o": "date:greaterorequal", "b": "2026-07-15T00:00:00" }
+          ]
+        ]
+      },
       "metadata": { "designer": { "x": 300, "y": 0 } },
       "onerror": [
         {
