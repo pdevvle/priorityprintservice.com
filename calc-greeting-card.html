@@ -51,7 +51,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · GC-RUSHETA2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · GC-FOLDDEC</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -255,6 +255,8 @@ function businessDaysBetween(a, b) {
   return count;
 }
 function fmtDate(d) { return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); }
+// Dimension label: round to 2 decimals and trim trailing zeros (8.5 -> "8.5", 11/3 -> "3.67", 8.25 -> "8.25").
+function fmtInch(n) { return (Math.round((Number(n) || 0) * 100) / 100).toString(); }
 function toYMD(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 const SHOP_CLOSURES = (_CFG.pcf || {}).closures || [];
 function isBusinessDay(d) {
@@ -346,7 +348,7 @@ function calculate(c) {
   if (panels > 1) {
     const foldDim = c.foldDir === "short" ? shortE : longE;
     const panelSize = foldDim / panels;
-    if (panelSize < 2) errors.push(`Folded panel too small (${panelSize.toFixed(1)}"). Min 2" per panel.`);
+    if (panelSize < 2) errors.push(`Folded panel too small (${fmtInch(panelSize)}"). Min 2" per panel.`);
     if (c.foldDir === "short" && longE > 13) errors.push("Cannot fold, unfolded edge exceeds 13 inches.");
   }
   if (errors.length) return { error: errors };
@@ -802,7 +804,7 @@ function generateGreetingTemplate(longE, shortE, foldType, panels, foldDir, size
       if (panels > 1) {
         var foldDim = foldDir === "long" ? trimW : trimH;
         var staticDim = foldDir === "long" ? trimH : trimW;
-        pdf.text("Folded: " + staticDim.toFixed(1) + '" \u00d7 ' + (foldDim / panels).toFixed(1) + '"  (' + panels + ' panels)', cx, docH / 2 + 0.3, { align: "center" });
+        pdf.text("Folded: " + fmtInch(staticDim) + '" \u00d7 ' + fmtInch(foldDim / panels) + '"  (' + panels + ' panels)', cx, docH / 2 + 0.3, { align: "center" });
       }
 
       // URL
@@ -2508,7 +2510,7 @@ generate();
             const throatExceeded2 = foldDir === "short" && longEdge > 13;
             return <>
               <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall2 || throatExceeded2 ? "#fef2f2" : CK.cyanLight, borderRadius: 5, fontSize: 11, color: tooSmall2 || throatExceeded2 ? "#dc2626" : CC.mid, border: tooSmall2 || throatExceeded2 ? "1px solid #f5cccc" : "none" }}>
-                Folded size: <strong>{staticDim2.toFixed(1)}" × {panelSize2.toFixed(1)}"</strong> ({panels} panels)
+                Folded size: <strong>{fmtInch(staticDim2)}" × {fmtInch(panelSize2)}"</strong> ({panels} panels)
                 {tooSmall2 && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
                 {throatExceeded2 && <span style={{marginLeft:8,fontWeight:700}}>— Cannot fold, unfolded edge exceeds 13 inches</span>}
               </div>
@@ -4066,7 +4068,7 @@ function App() {
               const throatExceeded = foldDir === "short" && dimLong > 13;
               return <>
                 <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall || throatExceeded ? "#fef2f2" : CK.cyanLight, borderRadius: 5, fontSize: 11, color: tooSmall || throatExceeded ? "#dc2626" : CC.mid, border: tooSmall || throatExceeded ? "1px solid #f5cccc" : "none" }}>
-                  Folded size: <strong>{staticDim.toFixed(1)}" × {panelSize.toFixed(1)}"</strong> ({fold.panels} panels)
+                  Folded size: <strong>{fmtInch(staticDim)}" × {fmtInch(panelSize)}"</strong> ({fold.panels} panels)
                   {tooSmall && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
                   {throatExceeded && <span style={{marginLeft:8,fontWeight:700}}>— Cannot fold, unfolded edge exceeds 13 inches</span>}
                 </div>
