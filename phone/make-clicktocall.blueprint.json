@@ -1,6 +1,7 @@
 {
-  "_about": "PPS outbound click-to-call, triggered from a Missive comment. Type `/call <number>` in any Missive conversation; Twilio rings your cell (602 541 7395), you answer, and it bridges you to <number> showing 602 560 3743 as caller ID. Reuses the same Missive-comment webhook pattern as the ChatGPT-comment scenario.",
-  "_import": "Make → Create a scenario → ⋯ menu → Import Blueprint → upload this file. On import, pick/create the Missive 'new comment' webhook for module 1 (a hook was already created: id 2773327, url https://hook.us1.make.com/r69ten0j057faektkrxsb1uu21g0yf4k), and confirm the Twilio (350124) + Missive (1151021) connections.",
+  "_about": "PPS outbound click-to-call, triggered from a Missive comment. Type `/call <number>` in any Missive conversation; Twilio rings your cell (602 541 7395), you answer, and it bridges you to <number> showing 602 560 3743 as caller ID. Live scenario id 4829559.",
+  "_import": "Make → Create a scenario → ⋯ menu → Import Blueprint → paste/upload. Confirm the Twilio (350124) + Missive (1151021) connections and module 1's Missive comment webhook (hook 2773327), then toggle ON.",
+  "_fixed": "Earlier versions used right(...) which is NOT a valid Make IML function (DataError: Function 'right' not found), and an import-fragile filter whose operator/value got dropped. This version uses substring() for extraction and has no filter (Missive's webhook already fires only on /call).",
   "name": "PPS: Missive → Click-to-Call (outbound)",
   "flow": [
     {
@@ -16,20 +17,12 @@
       "module": "twilio:CreateCall",
       "version": 2,
       "parameters": { "__IMTCONN__": 350124 },
-      "filter": {
-        "name": "Only /call comments",
-        "conditions": [
-          [
-            { "a": "{{1.comment.body}}", "o": "text:contains", "b": "/call" }
-          ]
-        ]
-      },
       "mapper": {
         "to": "+16025417395",
         "from": { "from": "+16025603743", "fromType": "phone" },
         "instructions": {
           "instructionType": "twiml",
-          "twiml": "<Response><Dial callerId=\"+16025603743\"><Number>{{\"+1\" + right(replace(1.comment.body; \"/[^0-9]/g\"; \"\"); 10)}}</Number></Dial></Response>"
+          "twiml": "<Response><Dial callerId=\"+16025603743\"><Number>+1{{substring(1.comment.body; 6)}}</Number></Dial></Response>"
         }
       },
       "metadata": { "designer": { "x": 300, "y": 0 } }
@@ -42,7 +35,7 @@
       "mapper": {
         "conversation": "{{1.conversation.id}}",
         "notification": { "title": "📞 Click-to-call", "body": "Your phone is ringing to connect the call." },
-        "markdown": "📞 **Calling {{\"+1\" + right(replace(1.comment.body; \"/[^0-9]/g\"; \"\"); 10)}}** — your phone (602 541 7395) is ringing; answer to connect. Caller ID shows 602 560 3743.",
+        "markdown": "📞 **Calling +1{{substring(1.comment.body; 6)}}** — your phone (602 541 7395) is ringing; answer to connect. Caller ID shows 602 560 3743.",
         "organization": "6f0a0437-8237-4328-914f-341cb3cc281e"
       },
       "metadata": { "designer": { "x": 600, "y": 0 } }
@@ -65,7 +58,8 @@
   },
   "_scheduling": { "type": "immediately" },
   "_notes": {
-    "number_parsing": "Takes the last 10 digits typed in the comment and prepends +1 (handles dashes/parens/spaces and a leading 1). Type the number alone after /call, e.g. `/call 602-555-1234`; extra digits elsewhere in the comment could confuse it.",
+    "extraction": "substring(1.comment.body; 6) drops the first 6 chars (`/call ` = 5 letters + 1 space) and returns the digits; a literal +1 is prepended. Assumes the body is exactly `/call ` + a 10-digit US number.",
+    "robustness_todo": "substring(;6) is brittle if the prefix/spacing varies. More robust: digits-only cleanup, replace(1.comment.body; \"/[^0-9]/g\"; emptystring), then take the last 10 digits. In the Make UI use the bare regex and the `emptystring` keyword and avoid typing quote characters (they get mangled).",
     "ring_target": "to = +16025417395 (your cell). Change here to ring a different phone.",
     "caller_id": "Both legs use +16025603743, so the person you call sees the PPS business number.",
     "connections": { "350124": "Twilio (business number account AC3f99…5ce8)", "1151021": "Missive (prestoncicala@, has API access)" }
