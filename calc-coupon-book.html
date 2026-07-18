@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · CB-A11Y</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · CB-PGMIN</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -401,7 +401,7 @@ function resolveSize(c) {
   if (c.sizeLabel==="Custom Size") {
     let longest=Math.max(c.customLong||0,c.customShort||0);
     let shortest=Math.min(c.customLong||0,c.customShort||0);
-    if(longest<2.5||shortest<2.5) return {imp:0,bindEdge:0,isCustom:true,errors:["Enter dimensions (min 2.5\")"],clamped:null};
+    if(longest<2||shortest<2) return {imp:0,bindEdge:0,isCustom:true,errors:["Enter dimensions (min 2\")"],clamped:null};
 
     // Match against known presets
     const match=ALL_SIZES.find(s=>{
@@ -1721,6 +1721,7 @@ const TT = {
   inside_print:{t:"Inside Printing",c:"Full color or greyscale printing on the inside pages."},
   color_pages:{t:"Color Pages",c:"How many interior pages print in full color. The remaining pages print in black & white."},
   bw_pages:{t:"Black & White Pages",c:"How many interior pages print in black only."},
+  page_count:{t:"Pages",c:"The total number of pages in your finished booklet, counting every printed side — the front and back of each sheet. The animation shows how to count pages.",media:[{type:"image",src:"https://priorityprintservice.com/wp-content/uploads/2025/05/how-to-count-booklet-pages.webp",alt:"How to count booklet pages"}]},
   cover_layout:{t:"Cover Layout",c:"How the cover is imposed on press, which affects the spine wrap and pricing."},
   bind_style:{t:"Bind Style",c:"How the book is bound along its spine edge."},
   magnetic_backer:{t:"Magnetic Backer",c:"Add a magnet to the back so the finished piece sticks to metal surfaces."},
@@ -1729,8 +1730,8 @@ const TT = {
 function readTipOv(k){ if(!k) return null; try{ return (JSON.parse(localStorage.getItem("ppsTipOverrides")||"{}"))[k]||null; }catch(e){ return null; } }
 function writeTipOv(k,v){ try{ const a=JSON.parse(localStorage.getItem("ppsTipOverrides")||"{}"); a[k]=v; localStorage.setItem("ppsTipOverrides",JSON.stringify(a)); }catch(e){} }
 function tipOvJSON(){ try{ const a=JSON.parse(localStorage.getItem("ppsTipOverrides")||"{}"); const o={}; Object.keys(a).forEach(k=>o[k]={title:a[k].title||"",content:[{type:"text",value:a[k].content||""}]}); return JSON.stringify(o,null,2); }catch(e){ return "{}"; } }
-function Tip({ k, children, dark }){ const d=(typeof TT!=="undefined"&&TT[k])||{}; return <RichTip tipKey={k} title={d.t} content={d.c} dark={dark}>{children}</RichTip>; }
-function RichTip({ children, tipKey, title, content, dark }) {
+function Tip({ k, children, dark }){ const d=(typeof TT!=="undefined"&&TT[k])||{}; return <RichTip tipKey={k} title={d.t} content={d.c} media={d.media} dark={dark}>{children}</RichTip>; }
+function RichTip({ children, tipKey, title, content, dark, media }) {
   const editOn = typeof window !== "undefined" && window.__ppsTipEdit;
   const [ov, setOv] = useState(() => readTipOv(tipKey));
   const [editing, setEditing] = useState(false);
@@ -1751,8 +1752,10 @@ function RichTip({ children, tipKey, title, content, dark }) {
     return () => { document.removeEventListener("mousedown", h); document.removeEventListener("touchstart", h); };
   }, [open]);
   useEffect(() => { if (open) document.body.style.overflow = mob ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [open, mob]);
-    const hasContent = !!(resolvedTitle || resolvedContent);
-    const blocks = Array.isArray(resolvedContent) ? resolvedContent : [{ type: "text", value: resolvedContent || "" }];
+    const mediaBlocks = Array.isArray(media) ? media : [];
+    const hasContent = !!(resolvedTitle || resolvedContent || mediaBlocks.length);
+    const textBlocks = Array.isArray(resolvedContent) ? resolvedContent : (resolvedContent ? [{ type: "text", value: resolvedContent }] : []);
+    const blocks = textBlocks.concat(mediaBlocks);
   if (!hasContent && !editOn) return <>{children}</>;
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
@@ -4628,8 +4631,8 @@ function App(){
               }
             </div>
             {isCustom&&<><div style={r3}>
-              <TxtNum label={<Tip k="custom_width">Width (in)</Tip>} value={customLong} onChange={setCustomLong} min={2.5} max={13.25}/>
-              <TxtNum label={<Tip k="custom_height">Height (in)</Tip>} value={customShort} onChange={setCustomShort} min={2.5} max={13.25}/>
+              <TxtNum label={<Tip k="custom_width">Width (in)</Tip>} value={customLong} onChange={setCustomLong} min={2} max={13.25}/>
+              <TxtNum label={<Tip k="custom_height">Height (in)</Tip>} value={customShort} onChange={setCustomShort} min={2} max={13.25}/>
               {(customLong&&customShort&&Number(customLong)===Number(customShort))?<div style={{...ST.f,opacity:.4,pointerEvents:"none"}}><label style={ST.lbl}>Spine Side</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"10px 32px 10px 12px":"10px 32px 10px 12px"}}><option>Square — opens to {customLong*2}×{customShort}"</option></select><span style={ST.selA}><Chev/></span></div></div>:<Sel label={<Tip k="spine_side">Spine Side</Tip>} value={bindDir} onChange={setBindDir}><option value="short">{customShort?`${Math.min(customLong||0,customShort||0)}" spine — Opens to ${Math.max(customLong||0,customShort||0)*2}×${Math.min(customLong||0,customShort||0)}"`:"Short Side"}</option><option value="long">{customLong?`${Math.max(customLong||0,customShort||0)}" spine — Opens to ${Math.min(customLong||0,customShort||0)*2}×${Math.max(customLong||0,customShort||0)}"`:"Long Side"}</option></Sel>}
             </div>
             {r.sz?.clamped && (
@@ -4658,7 +4661,7 @@ function App(){
               </div>
             ) : (
               <div style={{marginTop:6}}>
-                <TxtNum label={<RichTip tipKey="page_count">Total Pages (incl. cover)</RichTip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
+                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
               </div>
             )}
 
