@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · CB-BINDFIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · CB-BINDFIX2</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -4249,6 +4249,13 @@ function App(){
   // receives them as props and threads them through getTx/setTx.
   const[pageTransforms,setPageTransforms]=useState({});
   const[artDims,setArtDims]=useState(null); // {wIn, hIn, wPx, hPx, source}
+  // On upload, infer a standard left-edge (side-bound) spine from the art's
+  // orientation: spine on the vertical (height) edge (8.5x11 -> 11x17, not 8.5x22).
+  // Fires only on a real upload; artDims is set by the uploader, never by reorder.
+  useEffect(() => {
+    if (!artDims || !artDims.wIn || !artDims.hIn) return;
+    setBindDir(artDims.hIn >= artDims.wIn ? "long" : "short");
+  }, [artDims]);
 
   const iP=insidePaperType==="cardstock"?PAPERS_CS:PAPERS_NC;
   const cP=coverPaperType==="cardstock"?PAPERS_CS:PAPERS_NC;
