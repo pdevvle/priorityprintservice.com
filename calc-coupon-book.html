@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · CB-BINDFIX2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · CB-A11Y</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -931,7 +931,7 @@ function TxtNum({label,value,onChange,min=1,max=99999}){
 
 function Pil({label,options,value,onChange,disabled,badge}){
   const m=useIsMobile();
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={ST.pills}>{options.map(o=><button type="button" key={String(o.v)} onClick={()=>!disabled&&onChange(o.v)} style={{...ST.pill,padding:m?"11px 10px":"9px 10px",...(value===o.v?(o.onStyle||ST.pillOn):{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>)}</div></div>;
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={ST.pills}>{options.map(o=><button type="button" aria-pressed={value===o.v} key={String(o.v)} onClick={()=>!disabled&&onChange(o.v)} style={{...ST.pill,padding:m?"11px 10px":"9px 10px",...(value===o.v?(o.onStyle||ST.pillOn):{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>)}</div></div>;
 }
 
 function TurnBadge({days}){
@@ -1675,9 +1675,9 @@ function InfoTip({ children, text, dark }) {
   }, [open]);
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-      <span ref={qRef} onClick={() => setOpen(o => !o)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
+      <span style={{ display: "inline-flex", alignItems: "center" }}>
         {children}
-        <span style={{ marginLeft: 4, width: 14, height: 14, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, background: dark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.08)", color: dark ? "rgba(255,255,255,.5)" : "rgba(0,0,0,.4)", flexShrink: 0 }}>?</span>
+        <button ref={qRef} type="button" aria-label="More information" aria-expanded={open} onClick={() => setOpen(o => !o)} style={{ marginLeft: 4, width: 14, height: 14, border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, background: dark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.08)", color: dark ? "rgba(255,255,255,.5)" : "rgba(0,0,0,.4)", flexShrink: 0 }}>?</button>
       </span>
       {open && (
         <div style={{
@@ -1758,7 +1758,7 @@ function RichTip({ children, tipKey, title, content, dark }) {
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <span style={{ display: "inline-flex", alignItems: "center" }}>
         {children}
-        <span onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }} style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, cursor: "pointer", background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : CK.cyan, flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</span>
+        <button type="button" aria-label="More information" aria-expanded={open} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }} style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: "inherit", background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : CK.cyan, flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</button>
       </span>
       {open && <>
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 99999 }} />
@@ -2904,6 +2904,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   useEffect(() => { if (spread >= totalSpreads) setSpread(Math.max(0, totalSpreads - 1)); }, [totalSpreads]);
 
   async function processFiles(fileList, opts = {}) {
+    const _big = Array.from(fileList || []).find(f => f && f.size > 209715200);
+    if (_big) { alert('"' + _big.name + '" is ' + (_big.size/1048576).toFixed(0) + ' MB, over the 200 MB limit — please compress it or email your artwork.'); return; }
     if (!fileList || !fileList.length) return;
     const splitSpreads = opts.splitSpreads != null ? opts.splitSpreads : readerSpreads;
     setLoading(true); setFileName(fileList[0].name); setLoadingProgress(null);
@@ -3195,7 +3197,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   <div style={{ fontSize: 12, fontWeight: 700, color: CK.cyan }}>Drop file here</div></>
               : <><div style={{ fontSize: 18, opacity: 0.5 }}>📖</div>
                   <div style={{ fontSize: 11.5, fontWeight: 600, color: CC.mid }}>Upload complete artwork PDF</div>
-                  <div style={{ fontSize: 10, color: CC.light, marginTop: 2 }}>Drop a file or click to browse</div></>
+                  <div style={{ fontSize: 10, color: CC.light, marginTop: 2 }}>Drop a file or click to browse</div><div style={{ fontSize: 9.5, color: CC.light, marginTop: 4 }}>PDF, JPG, PNG or TIFF · up to 200 MB</div></>
             }
           </div>
           <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, (sizeLabel === "Custom Size" ? `${customShort}×${customLong}` : sizeLabel), roundCorner)} style={{
@@ -4587,7 +4589,8 @@ function App(){
   return(
     <div style={{minHeight:"100vh",background:CC.bg,fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",color:CC.dark}}>
       <style>{`
-        @media(max-width:700px){
+                button:focus-visible,[role="button"]:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid #1d6fe0 !important;outline-offset:2px;border-radius:3px;}
+@media(max-width:700px){
           select,input[type="text"],input[type="number"]{font-size:16px!important;padding:10px!important;min-height:44px!important}
           .pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}
           .pps-sec-body{padding:12px 14px!important}
