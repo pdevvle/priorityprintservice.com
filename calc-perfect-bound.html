@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · PB-BINDFIX2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · PB-COVERTPL</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1865,172 +1865,162 @@ function RichTip({ children, tipKey, title, content, dark }) {
 
 const PPS_LOGO_B64 = (window.PPS_CONFIG || {}).logoUrl || "";
 
-function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner, perforation, perfPositions) {
+function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner, perforation, perfPositions, spineInches) {
   try {
     if (!window.jspdf) { alert("PDF library not loaded. Please refresh the page."); return; }
     const { jsPDF } = window.jspdf;
     const bleed = 0.125;
     const safety = 0.125;
-    const docW = trimW + bleed * 2;
-    const docH = trimH + bleed * 2;
-    const pdf = new jsPDF({
-      orientation: docW > docH ? "l" : "p",
-      unit: "in",
-      format: [docW, docH],
-    });
+    const spine = Math.max(0, Number(spineInches) || 0);
+    const safeName = (sizeLabel || (trimW + "x" + trimH)).replace(/[^a-zA-Z0-9._-]/g, "_");
 
-    // Round corner params
+    // Round-corner params (interior pages only)
     const rcVal = roundCorner || 0;
     const rcRadius = (rcVal === 216 || rcVal === 108) ? 0.25 : (rcVal === 215 || rcVal === 107) ? 0.375 : 0;
     const rcAll4 = rcVal === 108 || rcVal === 107;
-    const rcOutside2 = rcVal === 216 || rcVal === 215;
 
-    for (let pg = 0; pg < pageCount; pg++) {
-      if (pg > 0) pdf.addPage([docW, docH], docW > docH ? "l" : "p");
-
-      // Light grey bleed zone background
-      pdf.setFillColor(240, 240, 240);
-      pdf.rect(0, 0, docW, docH, "F");
-
-      // White trim area
-      pdf.setFillColor(255, 255, 255);
-      pdf.rect(bleed, bleed, trimW, trimH, "F");
-
-      // Bleed line — red solid at document edge
-      pdf.setDrawColor(229, 62, 62);
-      pdf.setLineWidth(0.012);
-      pdf.rect(0.006, 0.006, docW - 0.012, docH - 0.012, "S");
-
-      // Trim line — black dashed (with rounded corners if selected)
-      pdf.setDrawColor(30, 30, 30);
-      pdf.setLineWidth(0.01);
-      if (rcRadius > 0) {
-        drawDashedRoundedRect(pdf, bleed, bleed, trimW, trimH, rcRadius, rcAll4, 0.08, 0.05);
-      } else {
-        drawDashedRect(pdf, bleed, bleed, trimW, trimH, 0.08, 0.05);
-      }
-
-      // Safety line — green dashed (with rounded corners if selected)
-      pdf.setDrawColor(56, 161, 105);
-      pdf.setLineWidth(0.008);
-      if (rcRadius > 0) {
-        drawDashedRoundedRect(pdf, bleed + safety, bleed + safety, trimW - safety * 2, trimH - safety * 2, Math.max(0, rcRadius - safety), rcAll4, 0.05, 0.03);
-      } else {
-        drawDashedRect(pdf, bleed + safety, bleed + safety, trimW - safety * 2, trimH - safety * 2, 0.05, 0.03);
-      }
-
-      // Bound edge indicator — perfect bound: spine always on left
-      var spineLeft = true;
-      var spineX = bleed;
-      pdf.setDrawColor(59, 130, 246);
-      pdf.setLineWidth(0.025);
-      pdf.line(spineX, bleed + 0.15, spineX, bleed + trimH - 0.15);
-      // Glue edge marks (perfect bound spine)
-      var stapleY1 = bleed + trimH * 0.25;
-      var stapleY2 = bleed + trimH * 0.50;
-      var stapleY3 = bleed + trimH * 0.75;
-      pdf.setLineWidth(0.015);
-      pdf.line(spineX - 0.04, stapleY1, spineX + 0.04, stapleY1);
-      pdf.line(spineX - 0.04, stapleY2, spineX + 0.04, stapleY2);
-      pdf.line(spineX - 0.04, stapleY3, spineX + 0.04, stapleY3);
-      // Label — rotated vertically along the spine
-      pdf.setFontSize(5.5);
-      pdf.setTextColor(59, 130, 246);
-      var labelX = bleed - 0.06;
-      pdf.text("SPINE / GLUE EDGE", labelX, bleed + trimH / 2, { angle: 90, align: "center" });
-
-      // Perforation lines — bright magenta dotted, on interior pages only.
-      // Recto pages (even pg index, idx > 0) carry the spine on the LEFT so the
-      // perf sits at (bleed + dIn) inches from the left edge; verso pages mirror
-      // each entry across the trim. Front/back covers (idx 0 and idx pageCount-1)
-      // skip. Loops over each perfPositions[i] so 2-line configs render both.
-      var isInterior = pg > 0 && pg < pageCount - 1;
-      var perfPosList = (Array.isArray(perfPositions) && perfPositions.length) ? perfPositions : [PERF_FROM_SPINE_INCHES];
-      if (perforation && perforation > 0 && isInterior) {
-        var isRecto = pg % 2 === 0;
-        for (var pi = 0; pi < perfPosList.length; pi++) {
-          var dIn = perfPosList[pi];
-          var perfX = isRecto ? (bleed + dIn) : (bleed + trimW - dIn);
-          pdf.setDrawColor(236, 0, 140); // bright magenta — distinct from bleed/trim/safety/spine
-          pdf.setLineWidth(0.012);
-          drawDashedLine(pdf, perfX, bleed + 0.05, perfX, bleed + trimH - 0.05, 0.04, 0.03);
-          // PERF label — include the index when there are multiple lines
-          pdf.setFontSize(5.5);
-          pdf.setTextColor(236, 0, 140);
-          var label = perfPosList.length > 1 ? ("PERFORATION " + (pi + 1)) : "PERFORATION";
-          pdf.text(label, perfX + (isRecto ? 0.04 : -0.04), bleed + trimH / 2, { angle: isRecto ? 90 : -90, align: "center" });
-        }
-      }
-
-      // Logo watermark — tiled step-repeat across the page within safety area
-      var tileSize = Math.min(trimW * 0.18, 1.0); // each tile ~1" or 18% of trim width
-      var tileGap = tileSize * 0.6; // gap between tiles
+    // ── Tiled logo watermark within a rectangle ──
+    function watermark(pdf, x, y, w, h) {
+      if (w <= 0 || h <= 0) return;
+      var tileSize = Math.min(w * 0.18, 1.0);
+      var tileGap = tileSize * 0.6;
       var tileStep = tileSize + tileGap;
-      var safeLeft = bleed + safety;
-      var safeTop = bleed + safety;
-      var safeRight = bleed + trimW - safety;
-      var safeBottom = bleed + trimH - safety;
-      var safeW = safeRight - safeLeft;
-      var safeH = safeBottom - safeTop;
-      var cols = Math.floor(safeW / tileStep);
-      var rows = Math.floor(safeH / tileStep);
-      // Center the grid within safety
-      var gridW = cols * tileStep - tileGap;
-      var gridH = rows * tileStep - tileGap;
-      var offsetX = safeLeft + (safeW - gridW) / 2;
-      var offsetY = safeTop + (safeH - gridH) / 2;
+      var cols = Math.floor(w / tileStep), rows = Math.floor(h / tileStep);
+      if (cols < 1 || rows < 1) return;
+      var gridW = cols * tileStep - tileGap, gridH = rows * tileStep - tileGap;
+      var ox = x + (w - gridW) / 2, oy = y + (h - gridH) / 2;
       pdf.saveGraphicsState();
       pdf.setGState(new pdf.GState({ opacity: 0.06 }));
       for (var row = 0; row < rows; row++) {
         for (var col = 0; col < cols; col++) {
-          var tx = offsetX + col * tileStep;
-          var ty = offsetY + row * tileStep;
-          try { pdf.addImage(PPS_LOGO_B64, "PNG", tx, ty, tileSize, tileSize); } catch(e) {}
-          // URL text below each logo tile
-          pdf.setFontSize(tileSize * 4.5);
-          pdf.setTextColor(180, 180, 180);
+          var tx = ox + col * tileStep, ty = oy + row * tileStep;
+          try { if (PPS_LOGO_B64) pdf.addImage(PPS_LOGO_B64, "PNG", tx, ty, tileSize, tileSize); } catch (e) {}
+          pdf.setFontSize(tileSize * 4.5); pdf.setTextColor(180, 180, 180);
           pdf.text("PriorityPrintService.com", tx + tileSize / 2, ty + tileSize + tileSize * 0.12, { align: "center" });
         }
       }
       pdf.restoreGraphicsState();
+    }
 
-      // Page label — centered
-      var cx = docW / 2;
-      var labelY = docH / 2 - 0.1;
-      pdf.setFontSize(10);
-      pdf.setTextColor(170, 170, 170);
-      var pgLabel = pageLabel(pg, pageCount);
-      pdf.text(pgLabel, cx, labelY, { align: "center" });
+    // ── White panel + trim (dashed black) + safety (dashed green) for one panel ──
+    function panelGuides(pdf, x0, y0, pw, ph, rcR, rcA) {
+      pdf.setFillColor(255, 255, 255); pdf.rect(x0, y0, pw, ph, "F");
+      pdf.setDrawColor(30, 30, 30); pdf.setLineWidth(0.01);
+      if (rcR > 0) drawDashedRoundedRect(pdf, x0, y0, pw, ph, rcR, rcA, 0.08, 0.05);
+      else drawDashedRect(pdf, x0, y0, pw, ph, 0.08, 0.05);
+      pdf.setDrawColor(56, 161, 105); pdf.setLineWidth(0.008);
+      if (rcR > 0) drawDashedRoundedRect(pdf, x0 + safety, y0 + safety, pw - safety * 2, ph - safety * 2, Math.max(0, rcR - safety), rcA, 0.05, 0.03);
+      else drawDashedRect(pdf, x0 + safety, y0 + safety, pw - safety * 2, ph - safety * 2, 0.05, 0.03);
+    }
 
-      // Dimension info
-      pdf.setFontSize(7);
-      pdf.setTextColor(190, 190, 190);
-      pdf.text("Trim: " + trimW + '" \u00d7 ' + trimH + '"  |  With bleeds: ' + docW.toFixed(3) + '" \u00d7 ' + docH.toFixed(3) + '"', cx, labelY + 0.18, { align: "center" });
-
-      // Website URL — bottom center
-      pdf.setFontSize(7);
-      pdf.setTextColor(150, 150, 150);
+    // ── One interior (book-block) page ──
+    function drawInteriorPage(pdf, idx, total) {
+      var docW = trimW + bleed * 2, docH = trimH + bleed * 2;
+      pdf.setFillColor(240, 240, 240); pdf.rect(0, 0, docW, docH, "F");
+      panelGuides(pdf, bleed, bleed, trimW, trimH, rcRadius, rcAll4);
+      pdf.setDrawColor(229, 62, 62); pdf.setLineWidth(0.012);
+      pdf.rect(0.006, 0.006, docW - 0.012, docH - 0.012, "S");
+      // Spine / glue edge — perfect bound (left)
+      pdf.setDrawColor(59, 130, 246); pdf.setLineWidth(0.025);
+      pdf.line(bleed, bleed + 0.15, bleed, bleed + trimH - 0.15);
+      pdf.setFontSize(5.5); pdf.setTextColor(59, 130, 246);
+      pdf.text("SPINE / GLUE EDGE", bleed - 0.06, bleed + trimH / 2, { angle: 90, align: "center" });
+      // Perforation (interior pages)
+      var perfPosList = (Array.isArray(perfPositions) && perfPositions.length) ? perfPositions : [PERF_FROM_SPINE_INCHES];
+      if (perforation && perforation > 0) {
+        var isRecto = idx % 2 === 0;
+        for (var pi = 0; pi < perfPosList.length; pi++) {
+          var dIn = perfPosList[pi];
+          var perfX = isRecto ? (bleed + dIn) : (bleed + trimW - dIn);
+          pdf.setDrawColor(236, 0, 140); pdf.setLineWidth(0.012);
+          drawDashedLine(pdf, perfX, bleed + 0.05, perfX, bleed + trimH - 0.05, 0.04, 0.03);
+          pdf.setFontSize(5.5); pdf.setTextColor(236, 0, 140);
+          var label = perfPosList.length > 1 ? ("PERFORATION " + (pi + 1)) : "PERFORATION";
+          pdf.text(label, perfX + (isRecto ? 0.04 : -0.04), bleed + trimH / 2, { angle: isRecto ? 90 : -90, align: "center" });
+        }
+      }
+      watermark(pdf, bleed + safety, bleed + safety, trimW - safety * 2, trimH - safety * 2);
+      var cx = docW / 2, labelY = docH / 2 - 0.1;
+      pdf.setFontSize(10); pdf.setTextColor(170, 170, 170);
+      pdf.text("Interior Page " + (idx + 1) + " of " + total, cx, labelY, { align: "center" });
+      pdf.setFontSize(7); pdf.setTextColor(190, 190, 190);
+      pdf.text("Trim: " + trimW + '" × ' + trimH + '"  |  With bleeds: ' + docW.toFixed(3) + '" × ' + docH.toFixed(3) + '"', cx, labelY + 0.18, { align: "center" });
+      pdf.setFontSize(7); pdf.setTextColor(150, 150, 150);
       pdf.text("priorityprintservice.com", cx, docH - bleed - 0.08, { align: "center" });
-
-      // Legend on first page
-      if (pg === 0) {
-        var lx = bleed + safety + 0.1;
-        var ly = docH - bleed - 0.42;
+      if (idx === 0) {
+        var lx = bleed + safety + 0.1, ly = docH - bleed - 0.42;
         pdf.setFontSize(6);
-        pdf.setTextColor(229, 62, 62);
-        pdf.text("\u2014 Bleed (extend backgrounds to this edge)", lx, ly - 0.30);
-        pdf.setTextColor(30, 30, 30);
-        pdf.text("- - Trim (cut line)", lx, ly - 0.21);
-        pdf.setTextColor(56, 161, 105);
-        pdf.text("- - Safety (keep all text inside this line)", lx, ly - 0.12);
-        pdf.setTextColor(59, 130, 246);
-        pdf.text("\u2014 Spine / glue edge (perfect bound)", lx, ly - 0.03);
+        pdf.setTextColor(229, 62, 62); pdf.text("— Bleed (extend backgrounds to this edge)", lx, ly - 0.30);
+        pdf.setTextColor(30, 30, 30); pdf.text("- - Trim (cut line)", lx, ly - 0.21);
+        pdf.setTextColor(56, 161, 105); pdf.text("- - Safety (keep text inside)", lx, ly - 0.12);
+        pdf.setTextColor(59, 130, 246); pdf.text("— Spine / glue edge", lx, ly - 0.03);
       }
     }
 
-    var safeName = (sizeLabel || (trimW + "x" + trimH)).replace(/[^a-zA-Z0-9._-]/g, "_");
-    pdf.save("PPS_PerfBound_Template_" + safeName + "_" + pageCount + "pg.pdf");
-  } catch(e) {
+    // ── One wraparound cover face: side = "outside" | "inside" ──
+    function drawCoverFace(pdf, side) {
+      var docW = 2 * trimW + spine + bleed * 2, docH = trimH + bleed * 2;
+      var leftX = bleed, spineX0 = bleed + trimW, rightX = bleed + trimW + spine;
+      pdf.setFillColor(240, 240, 240); pdf.rect(0, 0, docW, docH, "F");
+      // Panels
+      panelGuides(pdf, leftX, bleed, trimW, trimH, 0, false);
+      panelGuides(pdf, rightX, bleed, trimW, trimH, 0, false);
+      // Spine strip
+      if (spine > 0) {
+        if (side === "inside") { pdf.setFillColor(255, 244, 214); pdf.rect(spineX0, bleed, spine, trimH, "F"); }
+        else { pdf.setFillColor(255, 255, 255); pdf.rect(spineX0, bleed, spine, trimH, "F"); }
+      }
+      // Bleed line (whole sheet)
+      pdf.setDrawColor(229, 62, 62); pdf.setLineWidth(0.012);
+      pdf.rect(0.006, 0.006, docW - 0.012, docH - 0.012, "S");
+      // Spine fold lines (blue dashed) at panel boundaries
+      if (spine > 0) {
+        pdf.setDrawColor(59, 130, 246); pdf.setLineWidth(0.012);
+        drawDashedLine(pdf, spineX0, bleed, spineX0, bleed + trimH, 0.06, 0.04);
+        drawDashedLine(pdf, rightX, bleed, rightX, bleed + trimH, 0.06, 0.04);
+      }
+      // Watermark on the two panels only (never the glue spine)
+      watermark(pdf, leftX + safety, bleed + safety, trimW - safety * 2, trimH - safety * 2);
+      watermark(pdf, rightX + safety, bleed + safety, trimW - safety * 2, trimH - safety * 2);
+      // Panel labels
+      var midY = bleed + trimH / 2;
+      pdf.setFontSize(9); pdf.setTextColor(120, 120, 120);
+      pdf.text(side === "outside" ? "BACK COVER" : "INSIDE FRONT COVER", leftX + trimW / 2, midY, { align: "center" });
+      pdf.text(side === "outside" ? "FRONT COVER" : "INSIDE BACK COVER", rightX + trimW / 2, midY, { align: "center" });
+      // Spine label
+      if (spine > 0) {
+        pdf.setFontSize(5.5);
+        if (side === "inside") {
+          pdf.setTextColor(180, 120, 20);
+          pdf.text("INNER SPINE — NO PRINTING (GLUE)", spineX0 + spine / 2, midY, { angle: 90, align: "center" });
+        } else {
+          pdf.setTextColor(59, 130, 246);
+          pdf.text("SPINE · " + spine.toFixed(3) + '"', spineX0 + spine / 2, midY, { angle: 90, align: "center" });
+        }
+      }
+      // Face title + dims (bottom)
+      pdf.setFontSize(8); pdf.setTextColor(150, 150, 150);
+      pdf.text((side === "outside" ? "OUTSIDE COVER (printed)" : "INSIDE COVER") + "  ·  " + docW.toFixed(3) + '" × ' + docH.toFixed(3) + '" with bleed  ·  spine ' + spine.toFixed(3) + '"', docW / 2, docH - bleed - 0.08, { align: "center" });
+    }
+
+    // ── FILE 1: Cover (2 pages — outside, then inside) ──
+    var coverW = 2 * trimW + spine + bleed * 2, coverH = trimH + bleed * 2;
+    var coverPdf = new jsPDF({ orientation: coverW > coverH ? "l" : "p", unit: "in", format: [coverW, coverH] });
+    drawCoverFace(coverPdf, "outside");
+    coverPdf.addPage([coverW, coverH], coverW > coverH ? "l" : "p");
+    drawCoverFace(coverPdf, "inside");
+    coverPdf.save("PPS_PerfBound_Cover_" + safeName + ".pdf");
+
+    // ── FILE 2: Inside pages (book block = total pages minus the 4 cover faces) ──
+    var interior = Math.max(1, pageCount - 4);
+    var inW = trimW + bleed * 2, inH = trimH + bleed * 2;
+    var pagesPdf = new jsPDF({ orientation: inW > inH ? "l" : "p", unit: "in", format: [inW, inH] });
+    for (var i = 0; i < interior; i++) {
+      if (i > 0) pagesPdf.addPage([inW, inH], inW > inH ? "l" : "p");
+      drawInteriorPage(pagesPdf, i, interior);
+    }
+    pagesPdf.save("PPS_PerfBound_Inside-Pages_" + safeName + "_" + interior + "pg.pdf");
+  } catch (e) {
     console.error("Template generation failed:", e);
     alert("Template generation failed: " + e.message);
   }
@@ -3487,7 +3477,7 @@ update();
                   <div style={{ fontSize: 10, color: CC.light, marginTop: 2 }}>Drop a file or click to browse</div></>
             }
           </div>
-          <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, (sizeLabel === "Custom Size" ? `${customShort}×${customLong}` : sizeLabel), roundCorner, perforation, perfPositions)} style={{
+          <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, (sizeLabel === "Custom Size" ? `${customShort}×${customLong}` : sizeLabel), roundCorner, perforation, perfPositions, calcSpineInches({ pageCount, insidePaper, coverPaper, coverMode }))} style={{
             width: "100%", marginTop: 6, padding: "8px", borderRadius: 4, border: `1px dashed ${CC.border}`,
             background: "#fafafa", color: CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
           }}>📐 Download Artwork Template ({dims.w}×{dims.h}″ · {pageCount}pg)</button>
@@ -3524,7 +3514,7 @@ update();
               📄 {fileName} · {filledCount}/{pageCount}pg
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, (sizeLabel === "Custom Size" ? `${customShort}×${customLong}` : sizeLabel), roundCorner, perforation, perfPositions)} style={{
+              <button type="button" onClick={() => generateTemplate(dims.w, dims.h, pageCount, (sizeLabel === "Custom Size" ? `${customShort}×${customLong}` : sizeLabel), roundCorner, perforation, perfPositions, calcSpineInches({ pageCount, insidePaper, coverPaper, coverMode }))} style={{
                 padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CC.border}`, background: CC.white, color: CC.mid,
               }}>📐 Download Template</button>
