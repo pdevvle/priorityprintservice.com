@@ -101,7 +101,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · PB-COVERTPL</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · PB-PBUI</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1987,16 +1987,16 @@ function generateTemplate(trimW, trimH, pageCount, sizeLabel, roundCorner, perfo
       pdf.setFontSize(9); pdf.setTextColor(120, 120, 120);
       pdf.text(side === "outside" ? "BACK COVER" : "INSIDE FRONT COVER", leftX + trimW / 2, midY, { align: "center" });
       pdf.text(side === "outside" ? "FRONT COVER" : "INSIDE BACK COVER", rightX + trimW / 2, midY, { align: "center" });
-      // Spine label
+      // Spine label — sit it INSIDE the spine only when wide enough (> 0.06");
+      // for a narrower glue spine the rotated text won't fit, so set it just
+      // beside the (shaded) spine in the adjacent panel instead of overflowing.
       if (spine > 0) {
         pdf.setFontSize(5.5);
-        if (side === "inside") {
-          pdf.setTextColor(180, 120, 20);
-          pdf.text("INNER SPINE — NO PRINTING (GLUE)", spineX0 + spine / 2, midY, { angle: 90, align: "center" });
-        } else {
-          pdf.setTextColor(59, 130, 246);
-          pdf.text("SPINE · " + spine.toFixed(3) + '"', spineX0 + spine / 2, midY, { angle: 90, align: "center" });
-        }
+        if (side === "inside") pdf.setTextColor(180, 120, 20);
+        else pdf.setTextColor(59, 130, 246);
+        var spineLabel = side === "inside" ? "INNER SPINE — NO PRINTING (GLUE)" : ("SPINE · " + spine.toFixed(3) + '"');
+        var spineLabelX = spine > 0.06 ? (spineX0 + spine / 2) : (spineX0 - 0.07);
+        pdf.text(spineLabel, spineLabelX, midY, { angle: 90, align: "center" });
       }
       // Face title + dims (bottom)
       pdf.setFontSize(8); pdf.setTextColor(150, 150, 150);
@@ -5136,46 +5136,20 @@ function App(){
           {/* SECTION 2: Printing & Paper */}
           <Sec title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
             <div style={r2}>
-              <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
-            </div>
-            <div style={ST.hr}/>
-            <div style={r2}>
               <Pil label={<Tip k="inside_paper">Inside Paper</Tip>} value={insidePaperType} onChange={v=>{if(v==="cardstock"&&!csOK)return;setInsidePaperType(v);const pool=v==="cardstock"?PAPERS_CS:PAPERS_NC;setInsidePaper(pool[0])}} options={[{t:"Text Weight",v:"noncardstock"},{t:"Cardstock",v:"cardstock"}]}/>
               <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{p.label} (Cardstock)</option>)}</optgroup>}</Sel>
             </div>
             {insidePaperType==="cardstock"&&!csOK&&<p style={ST.err}>Cardstock requires all sets ≤ 24 pages</p>}
             <div style={ST.hr}/>
+            {/* Cover printing + cover paper on one line */}
             <div style={r2}>
+              <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
               <Pil label={<Tip k="cover_paper">Cover Paper</Tip>} value={coverMode} onChange={setCoverMode} options={[{t:"Same as Inside",v:"same"},{t:"Different Cover",v:"separate"}]}/>
-              {coverMode==="separate"
-                ? <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.coverPaper}/>} value={coverPaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setCoverPaper(f);setCoverPaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{p.label} (Cardstock)</option>)}</optgroup></Sel>
-                : <div style={{...ST.f,marginTop:0}}><label style={ST.lbl}>&nbsp;</label><div style={{fontSize:14,color:CC.light,padding:"10px 0"}}>Uses same paper as inside pages</div></div>
-              }
             </div>
-            <div style={ST.hr}/>
-            {/* Cover Layout — separate or wraparound. Wraparound expects a single wide image
-                (front + spine + back) sized to (2W + spine + bleed×2) × (H + bleed×2). */}
-            <div style={r2}>
-              <Pil label={<Tip k="cover_layout">Cover Layout</Tip>} value={coverWrap} onChange={setCoverWrap} options={[{t:"Separate Front/Back",v:"separate"},{t:"Wraparound (front+spine+back)",v:"wraparound"}]}/>
-              <div style={{...ST.f,marginTop:0}}>
-                <label style={ST.lbl}>Spine Thickness <InfoTip text={<>Calculated from page count and paper caliper. Formula: <code>(interior leaves × text caliper) + (2 × cover caliper) + 0.005″ glue</code>. Used for the 3D preview, the print-ready PDF spine width, and to size wraparound covers.</>}/></label>
-                <div style={{fontSize:14,fontWeight:700,color:CC.dark,padding:"10px 0",fontVariantNumeric:"tabular-nums"}}>
-                  ≈ {fmtSpine(calcSpineInches({pageCount:sets[0]?.pages||0,insidePaper,coverPaper,coverMode}))}
-                </div>
-              </div>
-            </div>
-            {coverWrap==="wraparound" && (() => {
-              const spineIn = calcSpineInches({pageCount:sets[0]?.pages||0,insidePaper,coverPaper,coverMode});
-              const trimW = isCustom ? Math.max(customLong||0,customShort||0) : (parseFloat((sizeLabel.match(/([\d.]+)×/)||[])[1])||5.5);
-              const trimH = isCustom ? Math.min(customLong||0,customShort||0) : (parseFloat((sizeLabel.match(/×([\d.]+)/)||[])[1])||8.5);
-              const wrapW = (2*trimW + spineIn + 0.25).toFixed(3);
-              const wrapH = (trimH + 0.25).toFixed(3);
-              return (
-                <div style={{padding:"10px 12px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:5,marginTop:8,fontSize:11.5,color:"#1e40af",lineHeight:1.55}}>
-                  <strong style={{color:"#1e3a8a"}}>Wraparound cover dimensions</strong> — upload one image at <strong>{wrapW}″ × {wrapH}″</strong> (back panel + spine + front panel + 0.125″ bleed all around). The proof modal will show spine guides at the panel boundaries.
-                </div>
-              );
-            })()}
+            {coverMode==="separate" && <div style={r2}>
+              <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.coverPaper}/>} value={coverPaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setCoverPaper(f);setCoverPaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{p.label} (Cardstock)</option>)}</optgroup></Sel>
+              <div style={ST.f}/>
+            </div>}
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
@@ -5241,6 +5215,30 @@ function App(){
 
             {/* Art options dropdown */}
             <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+
+            {/* Spine + cover layout — relocated from Printing & Paper */}
+            <div style={ST.hr}/>
+            <div style={r2}>
+              <div style={{...ST.f,marginTop:0}}>
+                <label style={ST.lbl}>Spine Thickness <InfoTip text={<>Calculated from page count and paper caliper. Formula: <code>(interior leaves × text caliper) + (2 × cover caliper) + 0.005″ glue</code>. Used for the 3D preview, the print-ready PDF spine width, and to size wraparound covers.</>}/></label>
+                <div style={{fontSize:14,fontWeight:700,color:CC.dark,padding:"10px 0",fontVariantNumeric:"tabular-nums"}}>
+                  ≈ {fmtSpine(calcSpineInches({pageCount:sets[0]?.pages||0,insidePaper,coverPaper,coverMode}))}
+                </div>
+              </div>
+              {(artwork===0.01 && proof===0) && <Pil label={<Tip k="cover_layout">Cover Layout</Tip>} value={coverWrap} onChange={setCoverWrap} options={[{t:"Separate Front/Back",v:"separate"},{t:"Wraparound (front+spine+back)",v:"wraparound"}]}/>}
+            </div>
+            {(artwork===0.01 && proof===0) && coverWrap==="wraparound" && (() => {
+              const spineIn = calcSpineInches({pageCount:sets[0]?.pages||0,insidePaper,coverPaper,coverMode});
+              const trimW = isCustom ? Math.max(customLong||0,customShort||0) : (parseFloat((sizeLabel.match(/([\d.]+)×/)||[])[1])||5.5);
+              const trimH = isCustom ? Math.min(customLong||0,customShort||0) : (parseFloat((sizeLabel.match(/×([\d.]+)/)||[])[1])||8.5);
+              const wrapW = (2*trimW + spineIn + 0.25).toFixed(3);
+              const wrapH = (trimH + 0.25).toFixed(3);
+              return (
+                <div style={{padding:"10px 12px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:5,marginTop:8,fontSize:11.5,color:"#1e40af",lineHeight:1.55}}>
+                  <strong style={{color:"#1e3a8a"}}>Wraparound cover dimensions</strong> — upload one image at <strong>{wrapW}″ × {wrapH}″</strong> (back panel + spine + front panel + 0.125″ bleed all around). The proof modal will show spine guides at the panel boundaries.
+                </div>
+              );
+            })()}
 
             {/* Pages needing edits — for artwork edits option */}
             {artwork>=2&&artwork<4&&<TxtNum label={<Tip k="pages_edits">Pages Needing Edits</Tip>} value={artEditPages} onChange={setArtEditPages} min={0}/>}
