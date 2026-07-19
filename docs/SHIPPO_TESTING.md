@@ -72,10 +72,14 @@ map says 5** (the live data is already correcting the over-promise); cache,
 token-free with `shippo_enabled:true`. Token in use was the exposed
 `…4ef2` key — **rerun A1+B1 after rotating it.**
 
-**Layer 2 locally: correctly reports "client not wired".** Section-expand +
-state-select + ZIP-typing all work; the static `(5d transit)` anchor renders
-with NY selected; every failure is precisely a `calls: got=0 want=1` wiring
-gap. When the wiring lands, `--acceptance` must pass 3/3 per calculator.
+**Layer 2 locally: client wiring LANDED and gated — `--acceptance` ALL PASS on
+all 8 calculators (24/24 scenarios), 2026-07-19.** Each calc makes exactly one
+debounced call per typed ZIP, swaps the live `transit_days` into the pricing
+memo (via the `pps-live-transit` event + `ltTick` dep), falls back to the
+static map on any error, and makes zero calls when `shippo_enabled` is false.
+Earlier the harness baseline correctly reported "client not wired" — that gap
+is closed; rerun `--acceptance` after any change to the shipping section or
+`getTransitDays`.
 
 Latest server results always live in the `pps_shippo_test_results` option on
 staging.
