@@ -64,6 +64,20 @@ Applied to the audited service pages, this yields exactly **two** service→prod
 | `/coupon-pads-coupon-booklets/` | `/coupon-booklets/` (category) | **Dual-intent** (pads + booklets); only the 3-product Coupons category spans both. No single product is the twin, so category wins. Monitor "coupon pads" (pos ~12) after redirect. |
 | `/custom-booklet-printing/`, `/brochure-printing-services/`, `/online-flyer-printing-service/`, … | their category hub | Generic marketing pages, no specialized owning product. |
 
+### ✅ Tag 26/27 disposition — retain-vs-preset judgment (2026-07-19)
+
+The operator tagged every undecided product 26 or 27 in WooCommerce (38 distinct; 26428 and 25086 carry both tags). Decision rule: a ranking specialist is never folded (§5), and **per-product defaults (the "PPS Defaults" product meta box) give preset-style preconfiguration on the product page itself** — so "retain + calculator with defaults" dominates "redirect to a new preset" for every established page. Result: **no new presets minted from this set**; presets stay reserved for the greenfield §3b candidates.
+
+| Group | Products | Action |
+|---|---|---|
+| ① Already calc-wired — retain (16) | 20178*, 20256, 20272, 20297, 22650, 22673, 22247, 22872, 22754, 17429, 21301, 33670†, 33714, 21873, 21901, 22122 | Nothing to do. *20178 trifold = winner / 301 target — optimize. †33670 8x8: optional later migration to an `/8x8-booklet-printing/` preset ONLY with copy ported (§5 caution). 33714 presentation: weak (15 clk, pos 43) but distinct intent + already wired → lean retain (the old §6 "301 to preset-hub" verdict predates categories-as-hubs). |
+| ③ 301 → existing winner (3) | 33672 → `/product/trifold-brochure-printing/`; 23506 → `/product/custom-coupon-book-printing/`; 17128 legacy Letterhead → `/product/standard-letterhead/` | First two are already rows in `redirect-map-product-generics.csv` (CONFIRM before import); pull both from the calc registry when retired. 17128: check GSC first — if `/product/letterhead/` holds the equity, invert (move the calc registration to 17128, retire 21873 instead). |
+| ② Retain + APPLY calculator (10) | 26428 z3, 24103 accordion4, 24107 gate3, 24109 dgate4, 24108 roll4, 24110 dparallel4, 24095 square flyers → **brochure**; 24309 square postcards → **postcard** (verify square sizes exist); 25086 menu cards → **brochure** flat (verify menu sizes/papers); 23559 note cards → **greeting-card** flat (fallback: postcard) | All WCPA-owned today. **Migration gate (CLAUDE.md):** strip WCPA fields from a product in the same change that adds it to the PPS registry — never live in both systems (double-bill). One product at a time, cart-test each. Pilot: 24107 Gate Fold. Set each product's fold/size via the PPS Defaults meta box (`foldType` values: z3, gate3, accordion4, roll4, dgate4, dparallel4). |
+| ④ Stay WCPA — no calc fits (3) | 24715 waterproof menus, 24458 plastic flyers, 19641 door hangers | Synthetic stock / plastic / die-cut hole aren't supported by any calc. Revisit only if the config gains those capabilities. |
+| ⑤ Parked (6) | 17173 business forms; 17158 + 22439 + 21242 notepads; drafts 21251 spiral booklets, 21188 magnetic notepads | 17173 = the 301 *target* of the business-forms service page — retain as-is (carbonless has no calc). Notepads await the §6 notepad decision (two generics → `/custom-notepad-printing/`, spiral retained). Drafts stay draft (no live URL). |
+
+Dependency discovered while wiring the pilot: `calc-brochure.html` did not consume `PPS_CONFIG.defaults` (only `productType`), so neither per-product defaults nor preset `defaults` JSON could pre-fill fold/size/qty on the brochure family — fixed 2026-07-19 (defaults now honored for `foldType`, `sizeLabel`, `qty`, validated against the option lists; `_DR` derivative modes still win).
+
 ---
 
 ## TL;DR
