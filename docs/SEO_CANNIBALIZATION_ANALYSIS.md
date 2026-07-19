@@ -131,6 +131,62 @@ loud, self-canonical, fully-schema'd, index/follow page by construction. That ma
 strongest possible consolidation hub, and (b) a self-cannibalization risk if minted per-variant on
 overlapping head terms.
 
+## 3b. Preset pattern — plain-language explainer (start here if the pattern is fuzzy)
+
+A "preset" is **two things in one row** of `wp_options['pps_presets']`: a **saved calculator
+configuration** *and* an **SEO landing page**. That dual nature is what makes it confusing.
+
+**The row holds:** a `slug`, which `calc` it runs, the `defaults` (size, pages, fold… — the config),
+and a few SEO fields (title, description, image, price).
+
+**What that one row does:**
+1. **Pre-fills a calculator** to a specific configuration, and
+2. **Mints a URL** — `/{slug}/`, root-level (no `/product/` or `/product-category/` prefix).
+
+**When someone (or Google) hits `/{slug}/`** there is *no real WP page* behind it — the plugin
+catches the URL, injects a virtual `WP_Post`, renders the **pre-filled calculator**, and emits the
+full SEO set (title, self-canonical, `index,follow`, OG, Twitter, 5 JSON-LD blocks, noscript) while
+**forcing Yoast/Rank Math to match** (see §3). That's why it's "the most SEO-complete page the
+plugin can produce."
+
+### The three landing-page types — pick one per search intent
+The entire plan is just choosing the right page type for each intent:
+
+| Type | URL shape | Use for | Example intent |
+|---|---|---|---|
+| **Category archive** | `/booklets/` | the **hub** for a broad head term (browse grid + wizard) | "booklet printing" |
+| **Product** | `/product/gate-fold-brochure/` | a specific **catalog SKU / specialist** (transactional) | "gate fold brochure" |
+| **Preset** | `/5.5x8.5-booklet-printing/` | a specific **calculator configuration** that deserves its own ranked page but isn't a catalog SKU | "5.5×8.5 booklet printing" |
+
+**Rule of thumb:** broad head term → **category**; specific catalog item → **product**; specific
+calculator setup you want to rank on its own → **preset**.
+
+### Why we analyzed presets but you're using categories
+The original plan (below) made **presets the head-term hubs** because they out-signal everything
+else. In execution the operator chose the **WooCommerce category archives** as the hubs instead
+(they render the hero + `[pps_cat_wizard]` + paper tables and are the nav destinations). So today
+**presets are unused / greenfield** (§4.2 — no preset URL ranks). That doesn't retire the pattern;
+it **re-slots** it: presets are no longer the hubs, they're the lever for the *next* layer —
+**specific-configuration pages** a category is too broad for and no single product owns.
+
+### First 3 preset candidates worth minting (validate volume in GSC first)
+Each is a distinct calculator config, targets a term nothing currently owns cleanly, and follows the
+§7 governance ("one preset per distinct intent; mint only to own a term and 301 the losers in").
+
+| Preset URL | Calc + defaults | Target term(s) | Rationale / what it owns |
+|---|---|---|---|
+| `/8.5x11-booklet-printing/` | saddle, 8.5×11 (opens to 11×17) | "8.5x11 booklet printing", "letter-size booklet" | Explicit-size intent. `/booklets/` is the broad hub and `small-booklet-printing` owns "small/mini" — the **full-letter size has no owning page**. |
+| `/5.5x8.5-booklet-printing/` | saddle, 5.5×8.5 (half-letter / digest) | "5.5x8.5 booklet", "half letter booklet", "digest booklet" | The most common booklet size; strong explicit-size intent; no dedicated product. |
+| `/legal-size-brochure-printing/` | brochure, 8.5×14 (tri- or bi-fold) | "legal size brochure", "8.5x14 brochure" | A distinct **format** the fold-specialist products (all letter-size) don't cover. *(Least certain — validate volume before minting.)* |
+
+**How to mint one:** `pps-presets-admin.php` → add a row (slug, calc, defaults JSON, title/desc/
+image/price), then optionally use the Tier-1/2/3 accordions to fine-tune its schema. It goes live at
+`/{slug}/` immediately and enters `/pps-presets-sitemap.xml`. Then 301 any weaker competitor into it.
+
+**Governance reminder (§7):** never mint a *family* of near-duplicate presets for one head term
+(`/cheap-`, `/affordable-`, `/low-cost-booklet-printing/`) — that's self-cannibalization. One
+intent, one preset.
+
 ## 4. Findings
 
 ### 4.1 Presets are the most SEO-complete page type
