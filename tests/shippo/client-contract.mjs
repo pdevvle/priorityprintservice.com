@@ -43,10 +43,19 @@ async function scenario(name, { enabled, respond }, expect) {
   }, { enabled, respond });
   await page.goto(CALC_URL, { waitUntil: 'load' });
   await page.waitForSelector('select', { timeout: 45000 });
-  await page.waitForTimeout(500);
-  // Type a NY ZIP into the shipping ZIP field
+  await page.waitForTimeout(1000);
+  // The Shipping & Delivery section collapses by default — the ZIP field is
+  // not in the DOM until it's expanded. Expand, pick NY (deterministic static
+  // map value: 5d), then type the ZIP.
+  const shipHdr = page.locator('text=/SHIPPING/i').first();
+  if (await shipHdr.count()) await shipHdr.click({ force: true }).catch(() => {});
+  await page.waitForTimeout(400);
+  const stateSel = page.locator('select', { has: page.locator('option[value="NY"]') }).first();
+  if (await stateSel.count()) await stateSel.selectOption('NY').catch(() => {});
+  await page.waitForTimeout(400);
   const zip = page.locator('input[placeholder="ZIP"]').first();
-  if (await zip.count()) {
+  const zipFieldFound = (await zip.count()) > 0;
+  if (zipFieldFound) {
     await zip.click();
     await zip.pressSequentially('10001', { delay: 60 });
   }
@@ -56,6 +65,7 @@ async function scenario(name, { enabled, respond }, expect) {
   await browser.close();
   const got = { calls: calls_.length, zipInPayload: calls_.some(c => c.body.includes('10001')), errors: errors.length };
   const checks = [];
+  checks.push(['zip field reachable', zipFieldFound, zipFieldFound ? 'expanded + found' : 'ZIP input not found — section expand failed']);
   if (expect.calls !== undefined) checks.push(['calls', got.calls === expect.calls, `got=${got.calls} want=${expect.calls}`]);
   if (expect.zipInPayload !== undefined) checks.push(['zipInPayload', got.zipInPayload === expect.zipInPayload, `got=${got.zipInPayload}`]);
   if (expect.bodyRe !== undefined) checks.push(['bodyRe', expect.bodyRe.test(body), String(expect.bodyRe)]);
@@ -70,7 +80,7 @@ let all = true;
 // 1. Wired + healthy server → exactly one debounced call carrying the ZIP; UI uses 3d (static NY would be 5d)
 all &= await scenario('enabled, server says 3 days', { enabled: true, respond: { json: { transit_days: 3, carrier: 'UPS', service: 'Ground', domestic: true, cached: false } } },
   { calls: 1, zipInPayload: true, bodyRe: /\(3d[^)]*transit\)/i });
-// 2. Wired + server error → zero UI breakage, static fallback (NY=5)
+// 2. Wired + server error → zero UI breakage, static fallback (state NY selected → 5d)
 all &= await scenario('enabled, server 500 → static fallback', { enabled: true, respond: { error: true } },
   { calls: 1, bodyRe: /\(5d[^)]*transit\)/i });
 // 3. Disabled → never calls

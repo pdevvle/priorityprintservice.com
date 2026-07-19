@@ -62,6 +62,20 @@ the merge gate for the wiring change, per calculator file. Setup in
 - **Before any production sync**: full Layer 1 on staging; the runner ships
   in-repo but is inert without its trigger option.
 
-## Baseline
+## Baseline (2026-07-19)
 
-First run pending (see `pps_shippo_test_results` on staging for the latest).
+**Layer 1 on staging: 14/14 PASSED, 5.0 s, PHP 8.2.31.** Highlights: raw call
+HTTP 201 with 35 rates in 2.5 s (ground = "UPS Ground Saver 2d $6.40" to
+85027); guest transit-estimate for NY 10001 returned **4 days where the static
+map says 5** (the live data is already correcting the over-promise); cache,
+400/501/429, and validate-gating all clean; browser payload confirmed
+token-free with `shippo_enabled:true`. Token in use was the exposed
+`…4ef2` key — **rerun A1+B1 after rotating it.**
+
+**Layer 2 locally: correctly reports "client not wired".** Section-expand +
+state-select + ZIP-typing all work; the static `(5d transit)` anchor renders
+with NY selected; every failure is precisely a `calls: got=0 want=1` wiring
+gap. When the wiring lands, `--acceptance` must pass 3/3 per calculator.
+
+Latest server results always live in the `pps_shippo_test_results` option on
+staging.
