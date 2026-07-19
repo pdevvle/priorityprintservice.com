@@ -715,8 +715,11 @@ add_action( 'wp', function() {
             $config['calc'] = pps_get_public_config();
         }
 
-        // Inject tooltip content for RichTip components
-        $tips = get_option( 'pps_tooltips', array() );
+        // Inject tooltip content for RichTip components. Saved entries override
+        // per key, but code-shipped defaults always ride along — otherwise a new
+        // default tooltip never reaches sites whose pps_tooltips option was
+        // seeded before it existed.
+        $tips = array_merge( pps_default_tooltips(), (array) get_option( 'pps_tooltips', array() ) );
         if ( ! empty( $tips ) ) {
             $config['tips'] = $tips;
         }
@@ -2812,7 +2815,7 @@ function pps_render_preset_calculator( $preset ) {
         $config['calc'] = pps_get_public_config();
     }
 
-    $tips = get_option( 'pps_tooltips', array() );
+    $tips = array_merge( pps_default_tooltips(), (array) get_option( 'pps_tooltips', array() ) );
     if ( ! empty( $tips ) ) $config['tips'] = $tips;
 
     $logo_url = get_option( 'pps_logo_url', '' );
