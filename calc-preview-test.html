@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · SS-MIN2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · SS-SHIPPO</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -271,7 +271,42 @@ const ZONE_MAP = _PPS.zoneMap || {};
 const HAS_ZONE_MAP = Object.keys(ZONE_MAP).length > 100;
 
 // Look up transit days: zip-prefix first (granular), state fallback
+// ── Shippo live transit (server-proxied). When the server config enables it,
+//    an unknown 5-digit ZIP triggers ONE debounced lookup against
+//    /wp-json/pps/v1/shipping/transit-estimate; the result overrides the static
+//    map inside getTransitDays and a 'pps-live-transit' event re-renders the
+//    pricing memo. Any failure leaves the static estimate untouched. The API
+//    token never reaches the browser — the endpoint holds it server-side.
+const SHIPPO_ON = !!(PCF.shippo_enabled || PCF.shippo_api_token);
+const _LIVE_TRANSIT = {};
+let _ltTimer = null;
+function queueLiveTransit(zip5, state) {
+  if (!SHIPPO_ON || _LIVE_TRANSIT[zip5] !== undefined) return;
+  clearTimeout(_ltTimer);
+  _ltTimer = setTimeout(() => {
+    if (_LIVE_TRANSIT[zip5] !== undefined) return;
+    _LIVE_TRANSIT[zip5] = 0; // in-flight sentinel: static map keeps serving; no re-queue, no retry-hammering
+    const _root = (((window.PPS_CONFIG || {}).ajaxUrl) || "").replace(/wp-admin\/admin-ajax\.php.*$/, "");
+    fetch((_root || "/") + "wp-json/pps/v1/shipping/transit-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ zip: zip5, state: state || "", country: "US" }),
+    }).then(r => (r && r.ok) ? r.json() : null).then(j => {
+      const d = j ? Number(j.transit_days) : NaN;
+      if (d >= 1 && d <= 30) {
+        _LIVE_TRANSIT[zip5] = d;
+        window.dispatchEvent(new CustomEvent("pps-live-transit"));
+      }
+    }).catch(() => {});
+  }, 600);
+}
 function getTransitDays(state, zip) {
+  const _lz = String(zip || "").replace(/[^0-9]/g, "").slice(0, 5);
+  if (_lz.length === 5) {
+    if (_LIVE_TRANSIT[_lz] >= 1) return _LIVE_TRANSIT[_lz];
+    queueLiveTransit(_lz, state);
+  }
   if (HAS_ZONE_MAP && zip && zip.length >= 3) {
     const pfx = zip.replace(/[^0-9]/g,"").substring(0,3).padStart(3,"0");
     if (ZONE_MAP[pfx]) return ZONE_MAP[pfx];
@@ -4690,6 +4725,13 @@ function App(){
   const csOK=sets.every(s=>s.pages<=24);
 
   const shipZip=shipAddr.zip||"";
+  // Shippo live transit: re-run the pricing memo when a live lookup lands.
+  const [ltTick, setLtTick] = useState(0);
+  useEffect(() => {
+    const _f = () => setLtTick(t => t + 1);
+    window.addEventListener("pps-live-transit", _f);
+    return () => window.removeEventListener("pps-live-transit", _f);
+  }, []);
   const result=useMemo(()=>calculate({
     sets,sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
     insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
@@ -4698,7 +4740,7 @@ function App(){
   }),[sets,sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
     insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
     twoStaple,vividPrint,coating,bundling,roundCorner,artwork,artEditPages,bleed,proof,
-    shipState,shipZip,needByDate]);
+    shipState,shipZip,needByDate,ltTick]);
 
   const r=result||{};
 
