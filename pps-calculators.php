@@ -1985,8 +1985,18 @@ add_action( 'rest_api_init', function() {
                 return new WP_Error( 'bad_zip', 'ZIP code must be at least 5 digits', array( 'status' => 400 ) );
             }
 
-            // Cache hit → serve instantly, no Shippo call.
-            $cache_key = 'pps_transit_v2_' . $dest_country . '_' . $dest_zip; // v2: UPS-only selection (Ground Saver excluded) — orphans v1 entries
+            // Optional weight_lb (internal ops use): when present, quote the REAL
+            // multi-carton shipment instead of the 2 lb transit sample. Owner rule
+            // 2026-07-19: goods pack in 45 lb cartons (a carton = 900 text-weight
+            // or 400 cardstock 13x19 sheets — that math lives client-side).
+            $weight_lb = isset( $data['weight_lb'] ) ? floatval( $data['weight_lb'] ) : 0;
+            if ( $weight_lb < 0 || $weight_lb > 2000 ) $weight_lb = 0;
+
+            // Cache hit → serve instantly, no Shippo call. Weighted quotes cache
+            // separately per (zip, rounded lb); transit-only keeps the v2 key.
+            $cache_key = $weight_lb > 0
+                ? 'pps_shipcost_v1_' . $dest_country . '_' . $dest_zip . '_' . (string) ceil( $weight_lb )
+                : 'pps_transit_v2_' . $dest_country . '_' . $dest_zip; // v2: UPS-only selection (Ground Saver excluded) — orphans v1 entries
             $cached    = get_transient( $cache_key );
             if ( is_array( $cached ) ) {
                 $cached['cached'] = true;
@@ -2002,7 +2012,37 @@ add_action( 'rest_api_init', function() {
             }
             set_transient( $rl_key, $hits + 1, MINUTE_IN_SECONDS );
 
-            // Create a shipment with minimal parcel to get rate estimates with transit days
+            // Parcels: real 45 lb cartons (19x13x6) when a weight was given,
+            // else the minimal 2 lb sample (transit days don't vary by weight).
+            if ( $weight_lb > 0 ) {
+                $carton_lb = 45.0;
+                $n_parcels = min( 20, max( 1, (int) ceil( $weight_lb / $carton_lb ) ) );
+                $parcels   = array();
+                $rem       = $weight_lb;
+                for ( $i = 0; $i < $n_parcels; $i++ ) {
+                    $w   = min( $carton_lb, $rem );
+                    $rem = $rem - $w;
+                    $parcels[] = array(
+                        'length'        => '19',
+                        'width'         => '13',
+                        'height'        => '6',
+                        'distance_unit' => 'in',
+                        'weight'        => (string) max( 1, round( $w, 1 ) ),
+                        'mass_unit'     => 'lb',
+                    );
+                }
+            } else {
+                $n_parcels = 1;
+                $parcels   = array( array(
+                    'length'        => '12',
+                    'width'         => '10',
+                    'height'        => '2',
+                    'distance_unit' => 'in',
+                    'weight'        => '2',
+                    'mass_unit'     => 'lb',
+                ) );
+            }
+
             $shipment = array(
                 'address_from' => array(
                     'zip'     => $origin_zip,
@@ -2013,14 +2053,7 @@ add_action( 'rest_api_init', function() {
                     'state'   => $dest_state,
                     'country' => $dest_country,
                 ),
-                'parcels' => array( array(
-                    'length'        => '12',
-                    'width'         => '10',
-                    'height'        => '2',
-                    'distance_unit' => 'in',
-                    'weight'        => '2',
-                    'mass_unit'     => 'lb',
-                ) ),
+                'parcels' => $parcels,
                 'async' => false,
             );
 
@@ -2079,6 +2112,8 @@ add_action( 'rest_api_init', function() {
                 'amount'        => $ground['amount'] ?? null,
                 'currency'      => $ground['currency'] ?? 'USD',
                 'domestic'      => $dest_country === 'US',
+                'parcels'       => $n_parcels,
+                'est_weight_lb' => $weight_lb > 0 ? round( $weight_lb, 1 ) : null,
                 'cached'        => false,
             );
             // Cache only successful lookups (30 days); UPS ground transit is stable.

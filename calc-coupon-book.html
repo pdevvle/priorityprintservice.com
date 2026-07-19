@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · CB-SHIPPO</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · CB-SHIPEST</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -184,7 +184,7 @@ const PCF = Object.assign({
   sale_label:"Sale",
   free_shipping_buffer:1.5,
   shippo_api_token:"",
-  shippo_origin_zip:"85027",
+  shippo_origin_zip:"85027", ship_carton_lb:45, ship_text_sheets_per_carton:900, ship_card_sheets_per_carton:400,
 }, _CFG.pcf || {});
 
 // Ground transit days from facility (Phoenix AZ) — state-level fallback
@@ -236,6 +236,37 @@ function queueLiveTransit(zip5, state) {
       }
     }).catch(() => {});
   }, 600);
+}
+// ── Internal ship-cost estimate (debug-only). queueShipCost fetches the real
+//    multi-carton UPS Ground price via the same server proxy (weight_lb param);
+//    results render ONLY inside the %3414 debug UI — customer sessions never
+//    trigger the lookup.
+const _LIVE_COST = {};
+let _lcTimer = null;
+function queueShipCost(zip, state, lbs) {
+  if (!SHIPPO_ON || !(lbs > 0)) return;
+  const z = String(zip || "").replace(/[^0-9]/g, "").slice(0, 5);
+  if (z.length !== 5) return;
+  const key = z + "|" + Math.ceil(lbs);
+  if (_LIVE_COST[key] !== undefined) return;
+  clearTimeout(_lcTimer);
+  _lcTimer = setTimeout(() => {
+    if (_LIVE_COST[key] !== undefined) return;
+    _LIVE_COST[key] = null; // in-flight
+    const _root = (((window.PPS_CONFIG || {}).ajaxUrl) || "").replace(/wp-admin\/admin-ajax\.php.*$/, "");
+    fetch((_root || "/") + "wp-json/pps/v1/shipping/transit-estimate", {
+      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+      body: JSON.stringify({ zip: z, state: state || "", country: "US", weight_lb: Math.ceil(lbs) }),
+    }).then(r => (r && r.ok) ? r.json() : null).then(j => {
+      const a = j ? Number(j.amount) : NaN;
+      if (a > 0) { _LIVE_COST[key] = { amount: a, parcels: Number(j.parcels) || 1, service: String(j.service || "") }; window.dispatchEvent(new CustomEvent("pps-live-transit")); }
+    }).catch(() => {});
+  }, 800);
+}
+function getShipCostEst(zip, lbs) {
+  const z = String(zip || "").replace(/[^0-9]/g, "").slice(0, 5);
+  if (z.length !== 5 || !(lbs > 0)) return null;
+  return _LIVE_COST[z + "|" + Math.ceil(lbs)] || null;
 }
 function getTransitDays(state, zip) {
   const _lz = String(zip || "").replace(/[^0-9]/g, "").slice(0, 5);
@@ -739,7 +770,15 @@ function calculate(c) {
   };
 
   // ── Shipping & Rush (all in business days) ──
-  const transitDays = getTransitDays(c.shipState, c.shipZip);
+  const transitDays = getTransitDays(c.shipState, c.shipZip);  // Internal shipping-weight estimate (owner rule 2026-07-19): a 45 lb carton
+  // holds 900 text-weight or 400 cardstock 13x19 press sheets. Debug/ops only.
+  const _cartonLb=PCF.ship_carton_lb||45;
+  const cvrSheets=tQ/Math.max(imp,1);
+  const _wInside=tS*(_cartonLb/((c.insidePaperType==="cardstock")?(PCF.ship_card_sheets_per_carton||400):(PCF.ship_text_sheets_per_carton||900)));
+  const _cvrIsCard=c.coverMode==="same"?(c.insidePaperType==="cardstock"):isCardstockVal(cvr.val);
+  const _wCover=cvrSheets*(_cartonLb/(_cvrIsCard?(PCF.ship_card_sheets_per_carton||400):(PCF.ship_text_sheets_per_carton||900)));
+  const estWeightLb=Math.round((_wInside+_wCover)*10)/10;
+  const estCartons=Math.max(1,Math.ceil(estWeightLb/_cartonLb));
   const productionBizDays = days;
   // Free shipping = minimum turnaround × 2 + ground transit
   const bufferedProdDays = productionBizDays * 2;
@@ -913,7 +952,7 @@ function calculate(c) {
   const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
   const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
   return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,q100,coatOK,vividOK:c.insidePaper.coatable,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
-    shipping:{transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,needByPast,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
+    shipping:{estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,needByPast,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -5116,6 +5155,12 @@ function App(){
           {debugUnlocked&&<button type="button" onClick={()=>setShowDebug(p=>!p)} style={{width:"100%",marginTop:8,padding:"6px",borderRadius:4,border:`1px solid ${showDebug?"#555":"#ddd"}`,background:showDebug?"#1a1a1a":"#fafafa",color:showDebug?"#888":"#bbb",fontSize:10,fontWeight:600,letterSpacing:".5px",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {showDebug?"▼ Hide":"▶ Show"} Debug Panel
           </button>}
+          {debugUnlocked&&r.shipping&&r.shipping.estWeightLb>0&&(()=>{queueShipCost(shipZip,shipState,r.shipping.estWeightLb);const _sc=getShipCostEst(shipZip,r.shipping.estWeightLb);return(
+            <div style={{marginTop:8,padding:"7px 10px",background:"#1a1a1a",color:"#9fe870",borderRadius:5,fontSize:10.5,fontFamily:"monospace",lineHeight:1.5}}>
+              SHIP EST (internal) · ~{r.shipping.estWeightLb} lb · {r.shipping.estCartons} carton{r.shipping.estCartons>1?"s":""}
+              {_sc?(" · UPS Ground $"+_sc.amount.toFixed(2)+(_sc.parcels>1?" ("+_sc.parcels+" pkg)":"")):(String(shipZip||"").replace(/[^0-9]/g,"").length>=5?" · rate…":" · enter ZIP for rate")}
+            </div>
+          );})()}
           {debugUnlocked&&showDebug&&<DebugPanel debug={result?.debug}/>}
           {debugUnlocked && showDebug && schemaData && (
             <div style={{...ST.pnl, marginTop:10}}>

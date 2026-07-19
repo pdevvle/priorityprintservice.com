@@ -139,6 +139,7 @@ function pps_shippo_test_run_suite() {
     // ── C. REST endpoint contract (front-door code path, internal dispatch) ──
     delete_transient( 'pps_transit_v2_US_10001' ); // deterministic reruns (v2 = UPS-only cache)
     delete_transient( 'pps_transit_v2_US_60601' );
+    delete_transient( 'pps_shipcost_v1_US_10001_90' ); // weighted-quote cache (C7)
 
     wp_set_current_user( 0 ); // guest — most customers are guests
 
@@ -157,6 +158,18 @@ function pps_shippo_test_run_suite() {
     $r2 = pps_shippo_test_rest( array( 'zip' => '10001', 'state' => 'NY' ) );
     $add( 'C3', 'Repeat lookup served from 30-day cache (no Shippo spend)', 200 === $r2['status'] && ! empty( $r2['data']['cached'] ),
         'cached=' . var_export( $r2['data']['cached'] ?? null, true ) );
+
+    // Weighted quote: 90 lb → two 45 lb cartons, real UPS Ground cost for the shipment.
+    $r2b = pps_shippo_test_rest( array( 'zip' => '10001', 'state' => 'NY', 'weight_lb' => 90 ) );
+    $amt = isset( $r2b['data']['amount'] ) ? floatval( $r2b['data']['amount'] ) : 0;
+    $add( 'C7', 'Weighted cost estimate (90 lb → 2 cartons, UPS non-Saver, amount sane)',
+        200 === $r2b['status'] && 2 === (int) ( $r2b['data']['parcels'] ?? 0 )
+            && ( $r2b['data']['carrier'] ?? '' ) === 'UPS'
+            && false === stripos( (string) ( $r2b['data']['service'] ?? '' ), 'saver' )
+            && $amt > 5 && $amt < 2000,
+        'HTTP ' . $r2b['status'] . ' parcels=' . var_export( $r2b['data']['parcels'] ?? null, true )
+            . ' est_weight_lb=' . var_export( $r2b['data']['est_weight_lb'] ?? null, true )
+            . ' ' . ( $r2b['data']['carrier'] ?? '?' ) . ' ' . ( $r2b['data']['service'] ?? '?' ) . ' $' . $amt );
 
     $r3 = pps_shippo_test_rest( array( 'zip' => '123' ) );
     $add( 'C4', 'Bad ZIP rejected with 400', 400 === $r3['status'], 'HTTP ' . $r3['status'] );
