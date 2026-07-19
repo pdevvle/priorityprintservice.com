@@ -1986,7 +1986,7 @@ add_action( 'rest_api_init', function() {
             }
 
             // Cache hit → serve instantly, no Shippo call.
-            $cache_key = 'pps_transit_' . $dest_country . '_' . $dest_zip;
+            $cache_key = 'pps_transit_v2_' . $dest_country . '_' . $dest_zip; // v2: UPS-only selection (Ground Saver excluded) — orphans v1 entries
             $cached    = get_transient( $cache_key );
             if ( is_array( $cached ) ) {
                 $cached['cached'] = true;
@@ -2040,22 +2040,36 @@ add_action( 'rest_api_init', function() {
             $result = json_decode( wp_remote_retrieve_body( $resp ), true );
             $rates  = $result['rates'] ?? array();
 
-            // Find UPS Ground (or cheapest ground service)
-            $ground = null;
+            // UPS only (owner rule 2026-07-19): prefer true UPS Ground; never
+            // Ground Saver / SurePost (economy USPS-handoff final mile — not
+            // representative of our shipping). Other carriers on the Shippo
+            // account (USPS, …) are ignored entirely.
+            $ups = array();
             foreach ( $rates as $rate ) {
-                $svc = strtolower( $rate['servicelevel']['token'] ?? '' );
-                if ( strpos( $svc, 'ground' ) !== false || strpos( $svc, 'ups_ground' ) !== false ) {
+                if ( strtolower( $rate['provider'] ?? '' ) !== 'ups' ) continue;
+                $tok  = strtolower( $rate['servicelevel']['token'] ?? '' );
+                $name = strtolower( $rate['servicelevel']['name'] ?? '' );
+                if ( strpos( $tok, 'ground_saver' ) !== false || strpos( $name, 'ground saver' ) !== false ) continue;
+                if ( strpos( $tok, 'surepost' ) !== false ) continue;
+                $ups[] = $rate;
+            }
+
+            $ground = null;
+            foreach ( $ups as $rate ) {
+                if ( strpos( strtolower( $rate['servicelevel']['token'] ?? '' ), 'ground' ) !== false ) {
                     $ground = $rate;
                     break;
                 }
             }
 
-            // Fallback: cheapest rate with estimated_days
-            if ( ! $ground ) {
-                usort( $rates, function( $a, $b ) {
-                    return ( $a['estimated_days'] ?? 99 ) - ( $b['estimated_days'] ?? 99 );
+            // Fallback: slowest remaining UPS service (closest stand-in for
+            // ground transit). No UPS rates at all → transit_days stays null,
+            // is never cached, and the calculator keeps its static estimate.
+            if ( ! $ground && ! empty( $ups ) ) {
+                usort( $ups, function( $a, $b ) {
+                    return ( $b['estimated_days'] ?? 0 ) - ( $a['estimated_days'] ?? 0 );
                 } );
-                $ground = $rates[0] ?? null;
+                $ground = $ups[0];
             }
 
             $payload = array(

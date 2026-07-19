@@ -80,18 +80,27 @@ function pps_shippo_test_raw_rate( $token, $from_zip, $to_zip, $to_state ) {
         return array( 'pass' => false, 'detail' => "HTTP $code " . substr( (string) wp_json_encode( $body ), 0, 160 ) . " ({$ms}ms)" );
     }
     $rates  = isset( $body['rates'] ) && is_array( $body['rates'] ) ? $body['rates'] : array();
-    $ground = null;
-    foreach ( $rates as $rate ) {
-        $svc = strtolower( $rate['servicelevel']['token'] ?? '' );
-        if ( false !== strpos( $svc, 'ground' ) ) { $ground = $rate; break; }
-    }
     if ( ! count( $rates ) ) {
         return array( 'pass' => false, 'detail' => "HTTP $code but 0 rates — no carrier enabled on the Shippo account? shipment status=" . ( $body['status'] ?? '?' ) . ' messages=' . substr( (string) wp_json_encode( $body['messages'] ?? array() ), 0, 200 ) . " ({$ms}ms)" );
     }
+    // Mirror the endpoint's selection: UPS only, Ground Saver / SurePost excluded.
+    $ups = array();
+    $saver_excluded = 0;
+    foreach ( $rates as $rate ) {
+        if ( strtolower( $rate['provider'] ?? '' ) !== 'ups' ) continue;
+        $tok  = strtolower( $rate['servicelevel']['token'] ?? '' );
+        $name = strtolower( $rate['servicelevel']['name'] ?? '' );
+        if ( false !== strpos( $tok, 'ground_saver' ) || false !== strpos( $name, 'ground saver' ) || false !== strpos( $tok, 'surepost' ) ) { $saver_excluded++; continue; }
+        $ups[] = $rate;
+    }
+    $ground = null;
+    foreach ( $ups as $rate ) {
+        if ( false !== strpos( strtolower( $rate['servicelevel']['token'] ?? '' ), 'ground' ) ) { $ground = $rate; break; }
+    }
     $desc = $ground
         ? ( ( $ground['provider'] ?? '?' ) . ' ' . ( $ground['servicelevel']['name'] ?? '' ) . ' ' . ( $ground['estimated_days'] ?? '?' ) . 'd $' . ( $ground['amount'] ?? '?' ) )
-        : ( 'no ground service among ' . count( $rates ) . ' rates' );
-    return array( 'pass' => (bool) $ground, 'detail' => "HTTP $code, " . count( $rates ) . " rates; ground: $desc ({$ms}ms)" );
+        : ( 'no true UPS Ground among ' . count( $ups ) . ' eligible UPS rates' );
+    return array( 'pass' => (bool) $ground, 'detail' => "HTTP $code, " . count( $rates ) . ' rates (' . count( $ups ) . " UPS eligible, $saver_excluded Saver/SurePost excluded); ground: $desc ({$ms}ms)" );
 }
 
 function pps_shippo_test_run_suite() {
@@ -128,8 +137,8 @@ function pps_shippo_test_run_suite() {
     $add( 'B1', 'Live Shippo API call (auth + rates round-trip)', $conn['pass'], $conn['detail'] );
 
     // ── C. REST endpoint contract (front-door code path, internal dispatch) ──
-    delete_transient( 'pps_transit_US_10001' ); // deterministic reruns
-    delete_transient( 'pps_transit_US_60601' );
+    delete_transient( 'pps_transit_v2_US_10001' ); // deterministic reruns (v2 = UPS-only cache)
+    delete_transient( 'pps_transit_v2_US_60601' );
 
     wp_set_current_user( 0 ); // guest — most customers are guests
 
@@ -137,6 +146,10 @@ function pps_shippo_test_run_suite() {
     $c1 = 200 === $r1['status'] && isset( $r1['data']['transit_days'] );
     $add( 'C1', 'transit-estimate open to guests and returns transit_days', $c1,
         'HTTP ' . $r1['status'] . ' ' . wp_json_encode( array_intersect_key( (array) $r1['data'], array_flip( array( 'transit_days', 'carrier', 'service', 'cached', 'domestic' ) ) ) ) );
+    $svc_name = (string) ( $r1['data']['service'] ?? '' );
+    $add( 'C1b', 'Selected rate is UPS and not Ground Saver (owner rule)',
+        ( $r1['data']['carrier'] ?? '' ) === 'UPS' && false === stripos( $svc_name, 'saver' ),
+        'carrier=' . var_export( $r1['data']['carrier'] ?? null, true ) . ' service=' . var_export( $svc_name, true ) );
     $days = $r1['data']['transit_days'] ?? null;
     $add( 'C2', 'NY transit days sane (1–8)', is_numeric( $days ) && $days >= 1 && $days <= 8,
         'transit_days=' . var_export( $days, true ) . ' (static state map says NY=5)' );
