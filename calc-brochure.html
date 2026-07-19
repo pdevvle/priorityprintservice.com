@@ -52,7 +52,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-15 · BR-A11Y</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · BR-DEFAULTS</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -70,6 +70,10 @@ const _CFG = (window.PPS_CONFIG || {}).calc || {};
 const _AD = (window.PPS_CONFIG || {}).addons || {};
 // Derivative product type (set via PPS Defaults → productType on the WC product)
 const PRODUCT_TYPE = ((window.PPS_CONFIG || {}).defaults || {}).productType || '';
+// Per-product defaults (PPS Defaults meta box / preset defaults JSON). Consumed
+// at the state-init sites, validated against the option lists; _DR derivative
+// modes still take precedence.
+const _PD = (window.PPS_CONFIG || {}).defaults || {};
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
   labor_press_hr:35, labor_bindery_hr:35, labor_cutting_hr:45,
@@ -3623,12 +3627,12 @@ function App() {
   if (typeof window !== "undefined") window.__ppsTipEdit = debugUnlocked;
 
   // State
-  const [qty, setQty] = useState(250);
+  const [qty, setQty] = useState(parseInt(_PD.qty, 10) > 0 ? parseInt(_PD.qty, 10) : 250);
   const [sizeMode, setSizeMode] = useState("preset");
-  const [sizeLabel, setSizeLabel] = useState(_SIZES[0] ? _SIZES[0].label : "8.5×11");
+  const [sizeLabel, setSizeLabel] = useState(_PD.sizeLabel && _SIZES.some(s => s.label === _PD.sizeLabel) ? _PD.sizeLabel : (_SIZES[0] ? _SIZES[0].label : "8.5×11"));
   const [longEdge, setLongEdge] = useState(11);
   const [shortEdge, setShortEdge] = useState(8.5);
-  const [foldType, setFoldType] = useState(_DR.forceFold || "flat");
+  const [foldType, setFoldType] = useState(_DR.forceFold || (FOLD_TYPES.some(f => f.val === _PD.foldType) ? _PD.foldType : "flat"));
   const [foldDir, setFoldDir] = useState("long");
   const [frontColor, setFrontColor] = useState("color");
   const [backColor, setBackColor] = useState("color");
