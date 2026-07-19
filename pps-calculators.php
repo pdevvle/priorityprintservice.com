@@ -40,6 +40,28 @@ function pps_get_closures() {
     return array( '01-01', '07-04', '12-24', '12-25', '11-28', '11-29' );
 }
 
+/**
+ * Client-safe copy of the central config for injection into window.PPS_CONFIG.
+ *
+ * pps_get_config() carries server-only secrets — the Shippo API token and the
+ * question-form recipient email — which must never reach page source. This
+ * helper strips them and substitutes a boolean `shippo_enabled` flag the
+ * calculator JS can gate on. Use this, NOT pps_get_config(), anywhere the
+ * config is emitted to the browser (window.PPS_CONFIG). Server-side callers
+ * (e.g. the Shippo REST proxies) keep using pps_get_config() for the real token.
+ */
+function pps_get_public_config() {
+    $cfg = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    if ( isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ) {
+        $cfg['pcf']['shippo_enabled'] = ! empty( $cfg['pcf']['shippo_api_token'] );
+        unset(
+            $cfg['pcf']['shippo_api_token'],
+            $cfg['pcf']['question_recipient_email']
+        );
+    }
+    return $cfg;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // LOAD SUB-MODULES
 // ═══════════════════════════════════════════════════════════════
@@ -690,7 +712,7 @@ add_action( 'wp', function() {
 
         // Inject central config so calculator reads from admin settings
         if ( function_exists( 'pps_get_config' ) ) {
-            $config['calc'] = pps_get_config();
+            $config['calc'] = pps_get_public_config();
         }
 
         // Inject tooltip content for RichTip components
@@ -2697,7 +2719,7 @@ function pps_render_preset_calculator( $preset ) {
     );
 
     if ( function_exists( 'pps_get_config' ) ) {
-        $config['calc'] = pps_get_config();
+        $config['calc'] = pps_get_public_config();
     }
 
     $tips = get_option( 'pps_tooltips', array() );
