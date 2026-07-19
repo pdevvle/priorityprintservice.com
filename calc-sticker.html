@@ -45,7 +45,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · STK-SHIPEST</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · STK-SHIPEST2</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Sticker Calculator v1
@@ -406,8 +406,9 @@ function calculate(c) {
   // Internal shipping-weight estimate (owner rule 2026-07-19): a 45 lb carton
   // holds 900 text-weight or 400 cardstock 13x19 press sheets. Debug/ops only.
   const _cartonLb=PCF.ship_carton_lb||45;
+  const _shFac=(12*18)/(13*19); // 12x18 label sheets, area-scaled vs the 13x19 carton rule
   const _perCarton=(PCF.ship_card_sheets_per_carton||400) /* crack-n-peel liner ≈ cardstock weight */;
-  const estWeightLb=Math.round(pressSheets*(_cartonLb/_perCarton)*10)/10;
+  const estWeightLb=Math.round(pressSheets*(_cartonLb/_perCarton)*_shFac*10)/10;
   const estCartons=Math.max(1,Math.ceil(estWeightLb/_cartonLb));
   const productionBizDays = days;
   const bufferedProdDays = productionBizDays * 2;
