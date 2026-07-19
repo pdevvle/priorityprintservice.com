@@ -27,8 +27,10 @@ so the MCP bridge can run it without wp-admin:
 | A4–A5 | Browser config payload contains **no token** and no recipient email — the leak-regression guard |
 | B1 | Raw Shippo rates call: egress OK, auth OK (401 = rotated/bad key), ≥1 rate, a *ground* service present |
 | C1 | `transit-estimate` open to guests, returns `transit_days` |
+| C1b | Selected rate is **UPS and not Ground Saver** (owner rule 2026-07-19: UPS-only; Ground Saver/SurePost excluded; no UPS rates → null → static fallback). Cache key is `pps_transit_v2_*` — the v2 bump orphaned all pre-rule entries. |
 | C2 | NY transit days sane (1–8; static map says 5) |
 | C3 | Repeat lookup returns `cached:true` (30-day transient — no spend) |
+| C7 | Weighted cost estimate: `weight_lb:90` → two 45 lb cartons (19×13×6), real UPS Ground (non-Saver) amount between $5–$2000. Weight rule (owner 2026-07-19): a 45 lb carton = 900 text-weight or 400 cardstock 13×19 sheets; client math lives in each calculator, renders ONLY in the `%3414` debug UI, and customer sessions never trigger the weighted lookup. Cost cache: `pps_shipcost_v1_{country}_{zip}_{lb}`. |
 | C4 | ZIP `123` → 400 |
 | C5 | Token removed (via option filter, config untouched) → clean 501 |
 | C6 | Per-IP rate limit trips at the cap → 429 (counter pre-seeded — no spend) |

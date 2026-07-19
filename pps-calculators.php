@@ -40,6 +40,28 @@ function pps_get_closures() {
     return array( '01-01', '07-04', '12-24', '12-25', '11-28', '11-29' );
 }
 
+/**
+ * Client-safe copy of the central config for injection into window.PPS_CONFIG.
+ *
+ * pps_get_config() carries server-only secrets — the Shippo API token and the
+ * question-form recipient email — which must never reach page source. This
+ * helper strips them and substitutes a boolean `shippo_enabled` flag the
+ * calculator JS can gate on. Use this, NOT pps_get_config(), anywhere the
+ * config is emitted to the browser (window.PPS_CONFIG). Server-side callers
+ * (e.g. the Shippo REST proxies) keep using pps_get_config() for the real token.
+ */
+function pps_get_public_config() {
+    $cfg = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    if ( isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ) {
+        $cfg['pcf']['shippo_enabled'] = ! empty( $cfg['pcf']['shippo_api_token'] );
+        unset(
+            $cfg['pcf']['shippo_api_token'],
+            $cfg['pcf']['question_recipient_email']
+        );
+    }
+    return $cfg;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // LOAD SUB-MODULES
 // ═══════════════════════════════════════════════════════════════
@@ -690,7 +712,7 @@ add_action( 'wp', function() {
 
         // Inject central config so calculator reads from admin settings
         if ( function_exists( 'pps_get_config' ) ) {
-            $config['calc'] = pps_get_config();
+            $config['calc'] = pps_get_public_config();
         }
 
         // Inject tooltip content for RichTip components
@@ -1943,24 +1965,84 @@ add_action( 'rest_api_init', function() {
     // Lightweight call: just origin zip + destination zip → UPS ground transit days
     register_rest_route( 'pps/v1', '/shipping/transit-estimate', array(
         'methods'             => 'POST',
-        'permission_callback' => function() { return is_user_logged_in(); },
+        // Public, read-only transit lookup — guests (most customers) need it.
+        // Guarded by a 30-day per-destination cache (UPS ground transit is stable)
+        // and a per-IP rate limit, so it can't be used to burn the Shippo quota.
+        'permission_callback' => '__return_true',
         'callback'            => function( $request ) {
             $cfg   = pps_get_config();
             $token = $cfg['pcf']['shippo_api_token'] ?? '';
             if ( empty( $token ) ) {
                 return new WP_Error( 'no_shippo', 'Shippo API token not configured', array( 'status' => 501 ) );
             }
-            $data        = $request->get_json_params();
-            $origin_zip  = $cfg['pcf']['shippo_origin_zip'] ?? '85027';
-            $dest_zip    = sanitize_text_field( $data['zip'] ?? '' );
-            $dest_state  = strtoupper( sanitize_text_field( $data['state'] ?? '' ) );
-            $dest_country = sanitize_text_field( $data['country'] ?? 'US' );
+            $data         = $request->get_json_params();
+            $origin_zip   = $cfg['pcf']['shippo_origin_zip'] ?? '85027';
+            $dest_zip     = substr( preg_replace( '/[^0-9]/', '', (string) ( $data['zip'] ?? '' ) ), 0, 5 );
+            $dest_state   = strtoupper( sanitize_text_field( $data['state'] ?? '' ) );
+            $dest_country = strtoupper( sanitize_text_field( $data['country'] ?? 'US' ) );
 
             if ( strlen( $dest_zip ) < 5 ) {
                 return new WP_Error( 'bad_zip', 'ZIP code must be at least 5 digits', array( 'status' => 400 ) );
             }
 
-            // Create a shipment with minimal parcel to get rate estimates with transit days
+            // Optional weight_lb (internal ops use): when present, quote the REAL
+            // multi-carton shipment instead of the 2 lb transit sample. Owner rule
+            // 2026-07-19: goods pack in 45 lb cartons (a carton = 900 text-weight
+            // or 400 cardstock 13x19 sheets — that math lives client-side).
+            $weight_lb = isset( $data['weight_lb'] ) ? floatval( $data['weight_lb'] ) : 0;
+            if ( $weight_lb < 0 || $weight_lb > 2000 ) $weight_lb = 0;
+
+            // Cache hit → serve instantly, no Shippo call. Weighted quotes cache
+            // separately per (zip, rounded lb); transit-only keeps the v2 key.
+            $cache_key = $weight_lb > 0
+                ? 'pps_shipcost_v1_' . $dest_country . '_' . $dest_zip . '_' . (string) ceil( $weight_lb )
+                : 'pps_transit_v2_' . $dest_country . '_' . $dest_zip; // v2: UPS-only selection (Ground Saver excluded) — orphans v1 entries
+            $cached    = get_transient( $cache_key );
+            if ( is_array( $cached ) ) {
+                $cached['cached'] = true;
+                return rest_ensure_response( $cached );
+            }
+
+            // Cache miss → rate-limit per IP before spending a Shippo call.
+            $ip     = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
+            $rl_key = 'pps_transit_rl_' . md5( $ip );
+            $hits   = (int) get_transient( $rl_key );
+            if ( $hits >= 20 ) {
+                return new WP_Error( 'rate_limited', 'Too many lookups — please slow down', array( 'status' => 429 ) );
+            }
+            set_transient( $rl_key, $hits + 1, MINUTE_IN_SECONDS );
+
+            // Parcels: real 45 lb cartons (19x13x6) when a weight was given,
+            // else the minimal 2 lb sample (transit days don't vary by weight).
+            if ( $weight_lb > 0 ) {
+                $carton_lb = 45.0;
+                $n_parcels = min( 20, max( 1, (int) ceil( $weight_lb / $carton_lb ) ) );
+                $parcels   = array();
+                $rem       = $weight_lb;
+                for ( $i = 0; $i < $n_parcels; $i++ ) {
+                    $w   = min( $carton_lb, $rem );
+                    $rem = $rem - $w;
+                    $parcels[] = array(
+                        'length'        => '19',
+                        'width'         => '13',
+                        'height'        => '6',
+                        'distance_unit' => 'in',
+                        'weight'        => (string) max( 1, round( $w, 1 ) ),
+                        'mass_unit'     => 'lb',
+                    );
+                }
+            } else {
+                $n_parcels = 1;
+                $parcels   = array( array(
+                    'length'        => '12',
+                    'width'         => '10',
+                    'height'        => '2',
+                    'distance_unit' => 'in',
+                    'weight'        => '2',
+                    'mass_unit'     => 'lb',
+                ) );
+            }
+
             $shipment = array(
                 'address_from' => array(
                     'zip'     => $origin_zip,
@@ -1971,14 +2053,7 @@ add_action( 'rest_api_init', function() {
                     'state'   => $dest_state,
                     'country' => $dest_country,
                 ),
-                'parcels' => array( array(
-                    'length'        => '12',
-                    'width'         => '10',
-                    'height'        => '2',
-                    'distance_unit' => 'in',
-                    'weight'        => '2',
-                    'mass_unit'     => 'lb',
-                ) ),
+                'parcels' => $parcels,
                 'async' => false,
             );
 
@@ -1998,32 +2073,54 @@ add_action( 'rest_api_init', function() {
             $result = json_decode( wp_remote_retrieve_body( $resp ), true );
             $rates  = $result['rates'] ?? array();
 
-            // Find UPS Ground (or cheapest ground service)
-            $ground = null;
+            // UPS only (owner rule 2026-07-19): prefer true UPS Ground; never
+            // Ground Saver / SurePost (economy USPS-handoff final mile — not
+            // representative of our shipping). Other carriers on the Shippo
+            // account (USPS, …) are ignored entirely.
+            $ups = array();
             foreach ( $rates as $rate ) {
-                $svc = strtolower( $rate['servicelevel']['token'] ?? '' );
-                if ( strpos( $svc, 'ground' ) !== false || strpos( $svc, 'ups_ground' ) !== false ) {
+                if ( strtolower( $rate['provider'] ?? '' ) !== 'ups' ) continue;
+                $tok  = strtolower( $rate['servicelevel']['token'] ?? '' );
+                $name = strtolower( $rate['servicelevel']['name'] ?? '' );
+                if ( strpos( $tok, 'ground_saver' ) !== false || strpos( $name, 'ground saver' ) !== false ) continue;
+                if ( strpos( $tok, 'surepost' ) !== false ) continue;
+                $ups[] = $rate;
+            }
+
+            $ground = null;
+            foreach ( $ups as $rate ) {
+                if ( strpos( strtolower( $rate['servicelevel']['token'] ?? '' ), 'ground' ) !== false ) {
                     $ground = $rate;
                     break;
                 }
             }
 
-            // Fallback: cheapest rate with estimated_days
-            if ( ! $ground ) {
-                usort( $rates, function( $a, $b ) {
-                    return ( $a['estimated_days'] ?? 99 ) - ( $b['estimated_days'] ?? 99 );
+            // Fallback: slowest remaining UPS service (closest stand-in for
+            // ground transit). No UPS rates at all → transit_days stays null,
+            // is never cached, and the calculator keeps its static estimate.
+            if ( ! $ground && ! empty( $ups ) ) {
+                usort( $ups, function( $a, $b ) {
+                    return ( $b['estimated_days'] ?? 0 ) - ( $a['estimated_days'] ?? 0 );
                 } );
-                $ground = $rates[0] ?? null;
+                $ground = $ups[0];
             }
 
-            return rest_ensure_response( array(
+            $payload = array(
                 'transit_days'  => $ground['estimated_days'] ?? null,
                 'carrier'       => $ground['provider'] ?? null,
                 'service'       => $ground['servicelevel']['name'] ?? null,
                 'amount'        => $ground['amount'] ?? null,
                 'currency'      => $ground['currency'] ?? 'USD',
-                'domestic'      => strtoupper( $dest_country ) === 'US',
-            ) );
+                'domestic'      => $dest_country === 'US',
+                'parcels'       => $n_parcels,
+                'est_weight_lb' => $weight_lb > 0 ? round( $weight_lb, 1 ) : null,
+                'cached'        => false,
+            );
+            // Cache only successful lookups (30 days); UPS ground transit is stable.
+            if ( $payload['transit_days'] !== null ) {
+                set_transient( $cache_key, $payload, 30 * DAY_IN_SECONDS );
+            }
+            return rest_ensure_response( $payload );
         },
     ) );
 
@@ -2697,7 +2794,7 @@ function pps_render_preset_calculator( $preset ) {
     );
 
     if ( function_exists( 'pps_get_config' ) ) {
-        $config['calc'] = pps_get_config();
+        $config['calc'] = pps_get_public_config();
     }
 
     $tips = get_option( 'pps_tooltips', array() );
