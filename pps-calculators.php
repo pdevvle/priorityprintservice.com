@@ -2137,6 +2137,21 @@ add_action( 'rest_api_init', function() {
  */
 function pps_default_tooltips() {
     return array(
+        'score_fold' => array(
+            'title' => 'Score & Fold vs. Score for Folding',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Score & Fold: we crease each card and machine-fold it, so your cards arrive finished and ready to use.' ),
+                array( 'type' => 'text', 'value' => 'Score for Folding: we crease (score) each card but ship it FLAT. The score line guarantees a clean, crack-free fold on heavy stock — you do the folding. Choose this when you plan to print, address, or insert before folding; flat cards also feed through desktop printers and mailing equipment more easily.' ),
+                array( 'type' => 'text', 'value' => 'Both options run the same bindery pass, so the price is the same either way.' ),
+            ),
+        ),
+        'envelopes' => array(
+            'title' => 'Blank Envelopes',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Adds blank envelopes matched to your card size, shipped with your order. Sold in full packs — your quantity is rounded up to the nearest pack.' ),
+                array( 'type' => 'text', 'value' => 'Envelopes are ordered in for each job and typically add about 5 business days to turnaround.' ),
+            ),
+        ),
         'vivid' => array(
             'title' => 'Enhanced Vivid Printing',
             'content' => array(

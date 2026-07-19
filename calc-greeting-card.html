@@ -52,7 +52,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · GC-SHIPEST2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · GC-ENVLEAD</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -90,6 +90,7 @@ const PCF = Object.assign({
   minimum_turnaround_days:3, non_inventory_fee:45,
   backend_base_rate:10,          // flat base charge per order (brochure-specific; PB uses base_rate=$40)
   envelope_package_price:60,     // blank envelopes: flat $60 per package (250 A-series / 500 #10 & 6×9)
+  envelope_lead_days:5,          // envelopes are ordered in per job — adds lead days to turnaround
 
   proof_hardcopy_cost:35, proof_digital_cost:10, bleed_minimum:15,
   default_transit_days:4,
@@ -515,6 +516,7 @@ function calculate(c) {
   const envInfo = (_envPreset && _envPreset.env) ? _envPreset.env : null;
   const envPackages = (c.envelopes && envInfo) ? Math.ceil(qty / envInfo.pack) : 0;
   P.envelopes = envPackages * PCF.envelope_package_price;
+  const envDays = envPackages > 0 ? (PCF.envelope_lead_days ?? 5) : 0;
 
   // Perforation — runtime is charged at 2x the base GW labor rate (specialty
   // operation) and marked up by mk. Setup is flat per-line. Each additional
@@ -617,7 +619,7 @@ function calculate(c) {
   const artDays = art.val >= 4 ? Math.ceil(art.val) : 0;
   const proofDays = c.proof >= 3 ? Math.ceil(paperDays + 3.01) : 0;
   const baseDays = sheetsToDays(pressSheets);
-  const days = Math.max(PCF.minimum_turnaround_days, baseDays + paperDays + vividDays + coatDays + bundleDays + perfDays + rcDays + artDays + proofDays);
+  const days = Math.max(PCF.minimum_turnaround_days, baseDays + paperDays + vividDays + coatDays + bundleDays + perfDays + rcDays + artDays + proofDays + envDays);
 
   // Turnaround impact per option (for UI badges)
   const ti = {
@@ -630,6 +632,7 @@ function calculate(c) {
     artDesign: artDays,
     artEdits: (art.val >= 2 && art.val < 4) ? 1 : 0,
     proof: proofDays,
+    envelopes: envDays,
   };
 
   // Shipping & Rush
@@ -698,7 +701,7 @@ function calculate(c) {
   return {
     total: Math.round(grandTotal * 100) / 100, baseTotal: Math.round(total * 100) / 100,
     perUnit: Math.round(perUnit * 100) / 100, days, qty: qty, bd, grouped,
-    envInfo, envPackages,
+    envInfo, envPackages, scoreFold: c.scoreFold || "scorefold",
     imp, mk, fold, panels, pressSheets, longE, shortE, approxThickness,
     coatOK: paper.coatable, vividOK: paper.coatable, q100: qty >= 100, ti,
     saleActive, saleAmount, saleLabel: (PCF.sale_label || "Sale"), totalWithoutSale,
@@ -3732,6 +3735,7 @@ function App() {
   const [perfPositions, setPerfPositions] = useState([50]);
   const [roundCorner, setRoundCorner] = useState(0);
   const [envelopes, setEnvelopes] = useState(0);
+  const [scoreFold, setScoreFold] = useState("scorefold");
   const [artwork, setArtwork] = useState(0.01);
   const [artEditPages, setArtEditPages] = useState(0);
   const [bleed, setBleed] = useState(0);
@@ -3837,6 +3841,8 @@ function App() {
         setPerfPositions(rc.perfPositions.map(Number));
       }
       if (rc.roundCorner != null) setRoundCorner(Number(rc.roundCorner));
+      if (rc.envelopes != null) setEnvelopes(Number(rc.envelopes));
+      if (rc.scoreFold) setScoreFold(rc.scoreFold);
 
       // Artwork & proofing
       if (rc.artwork != null) setArtwork(Number(rc.artwork));
@@ -3890,9 +3896,9 @@ function App() {
     qty, sizeMode, sizeLabel, longEdge, shortEdge,
     foldType, foldDir, frontColor, backColor, sides,
     paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner,
-    envelopes,
+    envelopes, scoreFold,
     artwork, bleed, proof, shipState, shipZip, needByDate,
-  }), [qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate,ltTick,envelopes]);
+  }), [qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate,ltTick,envelopes,scoreFold]);
 
   const r = result || {};
 
@@ -3903,7 +3909,7 @@ function App() {
       qty, sizeMode, sizeLabel, longEdge, shortEdge,
       foldType, foldDir, frontColor, backColor, sides,
       paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner,
-      envelopes,
+      envelopes, scoreFold,
       artwork, bleed, proof, shipState, shipZip,
     };
     const breakpoints = [25,50,100,250,500,1000,2500,5000].filter(q => q !== qty);
@@ -4008,7 +4014,7 @@ function App() {
       sizeMode, sizeLabel, longEdge, shortEdge,
       foldType, foldDir, frontColor, backColor, sides,
       paper, vivid, coating, coatSides, bundling,
-      perforation, perfDir, perfPositions, roundCorner, envelopes,
+      perforation, perfDir, perfPositions, roundCorner, envelopes, scoreFold,
       artwork, bleed, proof,
       proofAddrSame, proofAddr,
       canvaLink, canvaInstructions,
@@ -4195,11 +4201,18 @@ function App() {
             </Sel>
             <div style={ST.hr} />
             </>}
+            {foldType !== "flat" && <>
+              <Sel label={<RichTip tipKey="score_fold">Folding Service</RichTip>} value={scoreFold} onChange={setScoreFold}>
+                <option value="scorefold">Score &amp; Fold — arrives folded</option>
+                <option value="score">Score for Folding — arrives flat</option>
+              </Sel>
+              <div style={ST.hr} />
+            </>}
             {sizeMode === "preset" && (() => {
               const _ep = SIZE_PRESETS.find(s => s.label === sizeLabel);
               return _ep && _ep.env ? (
                 <>
-                  <Sel label={<RichTip tipKey="envelopes">Blank Envelopes</RichTip>} value={envelopes} onChange={v => setEnvelopes(Number(v))}>
+                  <Sel label={<RichTip tipKey="envelopes">Blank Envelopes</RichTip>} badge={<TurnBadge days={r.ti?.envelopes}/>} value={envelopes} onChange={v => setEnvelopes(Number(v))}>
                     {ENVELOPE_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
                   </Sel>
                   {envelopes > 0 && (
