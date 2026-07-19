@@ -52,7 +52,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · PC-SHIPEST2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · PC-PDEF</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Postcard Calculator v1
@@ -68,6 +68,8 @@ const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",cyanLi
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
 // Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
 const _AD = (window.PPS_CONFIG || {}).addons || {};
+// Per-product defaults (PPS Defaults meta box / preset defaults JSON), validated at use sites.
+const _PD = (window.PPS_CONFIG || {}).defaults || {};
 const PCF = Object.assign({
   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
   labor_press_hr:35, labor_bindery_hr:35, labor_cutting_hr:45,
@@ -3680,12 +3682,12 @@ function App() {
   if (typeof window !== "undefined") window.__ppsTipEdit = debugUnlocked;
 
   // State
-  const [qty, setQty] = useState(250);
+  const [qty, setQty] = useState(parseInt(_PD.qty, 10) > 0 ? parseInt(_PD.qty, 10) : 250);
   const [sizeMode, setSizeMode] = useState("preset");
-  const [sizeLabel, setSizeLabel] = useState(SIZE_PRESETS[0] ? SIZE_PRESETS[0].label : "4×6");
+  const [sizeLabel, setSizeLabel] = useState(_PD.sizeLabel && SIZE_PRESETS.some(s => s.label === _PD.sizeLabel) ? _PD.sizeLabel : (SIZE_PRESETS[0] ? SIZE_PRESETS[0].label : "4×6"));
   const [longEdge, setLongEdge] = useState(SIZE_PRESETS[0] ? SIZE_PRESETS[0].long : 6);
   const [shortEdge, setShortEdge] = useState(SIZE_PRESETS[0] ? SIZE_PRESETS[0].short : 4);
-  const [foldType, setFoldType] = useState("flat");
+  const [foldType, setFoldType] = useState(FOLD_TYPES.some(f => f.val === _PD.foldType) ? _PD.foldType : "flat");
   const [foldDir, setFoldDir] = useState("long");
   const [frontColor, setFrontColor] = useState("color");
   const [backColor, setBackColor] = useState("color");
