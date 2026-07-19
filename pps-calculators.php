@@ -1965,22 +1965,42 @@ add_action( 'rest_api_init', function() {
     // Lightweight call: just origin zip + destination zip → UPS ground transit days
     register_rest_route( 'pps/v1', '/shipping/transit-estimate', array(
         'methods'             => 'POST',
-        'permission_callback' => function() { return is_user_logged_in(); },
+        // Public, read-only transit lookup — guests (most customers) need it.
+        // Guarded by a 30-day per-destination cache (UPS ground transit is stable)
+        // and a per-IP rate limit, so it can't be used to burn the Shippo quota.
+        'permission_callback' => '__return_true',
         'callback'            => function( $request ) {
             $cfg   = pps_get_config();
             $token = $cfg['pcf']['shippo_api_token'] ?? '';
             if ( empty( $token ) ) {
                 return new WP_Error( 'no_shippo', 'Shippo API token not configured', array( 'status' => 501 ) );
             }
-            $data        = $request->get_json_params();
-            $origin_zip  = $cfg['pcf']['shippo_origin_zip'] ?? '85027';
-            $dest_zip    = sanitize_text_field( $data['zip'] ?? '' );
-            $dest_state  = strtoupper( sanitize_text_field( $data['state'] ?? '' ) );
-            $dest_country = sanitize_text_field( $data['country'] ?? 'US' );
+            $data         = $request->get_json_params();
+            $origin_zip   = $cfg['pcf']['shippo_origin_zip'] ?? '85027';
+            $dest_zip     = substr( preg_replace( '/[^0-9]/', '', (string) ( $data['zip'] ?? '' ) ), 0, 5 );
+            $dest_state   = strtoupper( sanitize_text_field( $data['state'] ?? '' ) );
+            $dest_country = strtoupper( sanitize_text_field( $data['country'] ?? 'US' ) );
 
             if ( strlen( $dest_zip ) < 5 ) {
                 return new WP_Error( 'bad_zip', 'ZIP code must be at least 5 digits', array( 'status' => 400 ) );
             }
+
+            // Cache hit → serve instantly, no Shippo call.
+            $cache_key = 'pps_transit_' . $dest_country . '_' . $dest_zip;
+            $cached    = get_transient( $cache_key );
+            if ( is_array( $cached ) ) {
+                $cached['cached'] = true;
+                return rest_ensure_response( $cached );
+            }
+
+            // Cache miss → rate-limit per IP before spending a Shippo call.
+            $ip     = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
+            $rl_key = 'pps_transit_rl_' . md5( $ip );
+            $hits   = (int) get_transient( $rl_key );
+            if ( $hits >= 20 ) {
+                return new WP_Error( 'rate_limited', 'Too many lookups — please slow down', array( 'status' => 429 ) );
+            }
+            set_transient( $rl_key, $hits + 1, MINUTE_IN_SECONDS );
 
             // Create a shipment with minimal parcel to get rate estimates with transit days
             $shipment = array(
@@ -2038,14 +2058,20 @@ add_action( 'rest_api_init', function() {
                 $ground = $rates[0] ?? null;
             }
 
-            return rest_ensure_response( array(
+            $payload = array(
                 'transit_days'  => $ground['estimated_days'] ?? null,
                 'carrier'       => $ground['provider'] ?? null,
                 'service'       => $ground['servicelevel']['name'] ?? null,
                 'amount'        => $ground['amount'] ?? null,
                 'currency'      => $ground['currency'] ?? 'USD',
-                'domestic'      => strtoupper( $dest_country ) === 'US',
-            ) );
+                'domestic'      => $dest_country === 'US',
+                'cached'        => false,
+            );
+            // Cache only successful lookups (30 days); UPS ground transit is stable.
+            if ( $payload['transit_days'] !== null ) {
+                set_transient( $cache_key, $payload, 30 * DAY_IN_SECONDS );
+            }
+            return rest_ensure_response( $payload );
         },
     ) );
 
