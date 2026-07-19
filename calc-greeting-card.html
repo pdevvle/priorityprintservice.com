@@ -52,7 +52,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · GC-SHIPEST</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · GC-SHIPEST2</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -637,8 +637,11 @@ function calculate(c) {
   // Internal shipping-weight estimate (owner rule 2026-07-19): a 45 lb carton
   // holds 900 text-weight or 400 cardstock 13x19 press sheets. Debug/ops only.
   const _cartonLb=PCF.ship_carton_lb||45;
+  const _shFac=(typeof pressSheet!=="undefined"&&pressSheet==="13x27.5")?(27.5/19):1; // area scaling: oversize sheets vs 13x19
   const _perCarton=(paper&&paper.type==="cardstock")?(PCF.ship_card_sheets_per_carton||400):(PCF.ship_text_sheets_per_carton||900);
-  const estWeightLb=Math.round(pressSheets*(_cartonLb/_perCarton)*10)/10;
+  const _wEnv=(envPackages>0&&envInfo)?(envPackages*envInfo.pack)*(_cartonLb/(PCF.ship_text_sheets_per_carton||900)):0; // envelopes add on as text (owner rule)
+  const _physSheets=(typeof pressSheet!=="undefined"&&pressSheet==="13x27.5")?pressSheets*Math.min(imp,1):pressSheets; // imp<1 = oversized-premium pricing; physical is 1-up on 13x27.5
+  const estWeightLb=Math.round((_physSheets*(_cartonLb/_perCarton)*_shFac+_wEnv)*10)/10;
   const estCartons=Math.max(1,Math.ceil(estWeightLb/_cartonLb));
   const productionBizDays = days;
   const bufferedProdDays = productionBizDays * 2;
@@ -3887,8 +3890,9 @@ function App() {
     qty, sizeMode, sizeLabel, longEdge, shortEdge,
     foldType, foldDir, frontColor, backColor, sides,
     paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner,
+    envelopes,
     artwork, bleed, proof, shipState, shipZip, needByDate,
-  }), [qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate,ltTick]);
+  }), [qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate,ltTick,envelopes]);
 
   const r = result || {};
 
@@ -3899,6 +3903,7 @@ function App() {
       qty, sizeMode, sizeLabel, longEdge, shortEdge,
       foldType, foldDir, frontColor, backColor, sides,
       paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner,
+      envelopes,
       artwork, bleed, proof, shipState, shipZip,
     };
     const breakpoints = [25,50,100,250,500,1000,2500,5000].filter(q => q !== qty);
@@ -3909,7 +3914,7 @@ function App() {
       if (!pr || pr.error) return {qty: q, total: null, perUnit: null, current: q === qty};
       return {qty: q, total: pr.total, perUnit: pr.perUnit, current: q === qty};
     });
-  }, [result, qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate]);
+  }, [result, qty, sizeMode, sizeLabel, longEdge, shortEdge, foldType, foldDir, frontColor, backColor, sides, paper, vivid, coating, coatSides, bundling, perforation, perfDir, perfPositions, roundCorner, artwork, bleed, proof, shipState, shipZip, needByDate, envelopes]);
 
   const r2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
   const r3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
