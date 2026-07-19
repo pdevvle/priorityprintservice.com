@@ -20,19 +20,49 @@
 - **Coupons promoted to a top-level category.** The former "Coupon Booklets" sub-category of Booklets was moved to top-level (`parent 0`) and renamed **"Coupons"** (slug unchanged, so no URL break).
 
 ### ⏳ Pending (operator action)
-- **Import the Page → category 301s into Rank Math.** Delivered as `redirect-map-pages-to-categories.csv` (17 clean rows + 1 needing the Stickers page's real slug). These retire the now-orphaned standalone Pages (`/custom-booklet-printing/`, `/brochure-printing-services/`, …) onto the category hubs. **Not yet imported.** After importing, set the old Pages to Draft/Trash.
-- **Higher-risk redirect to watch:** `/coupon-pads-coupon-booklets/` ranks ~pos 12 (~376 clicks for "coupon pads") — the one page §6 said to *keep*. Its 301 to `/coupon-booklets/` only pays off if the Coupons category actually targets "coupon pads"; monitor after redirect.
+- **Import the 301 maps into Rank Math** (all live in the repo under `docs/seo/`):
+  - **`docs/seo/redirect-map-pages-to-categories.csv`** — the bulk. Generic service/marketing Pages → category hubs (16 rows). Retires the now-orphaned standalone Pages (`/custom-booklet-printing/`, `/brochure-printing-services/`, …).
+  - **`docs/seo/redirect-map-service-to-product.csv`** — the two exceptions where a specific product owns the term: `/small-booklet-printing/` → `/product/small-booklet-printing/` and `/business-form-printing-services/` → `/product/2-part-carbonless-forms/`.
+  - **`docs/seo/redirect-map-product-generics.csv`** — the deeper layer (3 rows, all **CONFIRM-before-import** because they retire *live product* URLs). Generic products → the most productive product in their category. (`cheap-booklet-printing` was intentionally left out — owner's call to keep it live.) See the deeper-consolidation section below.
+  - **Not yet imported.** After importing service/marketing Pages, set them to Draft/Trash. Product-generic redirects also require setting the retired *products* to Draft/private so they leave the catalog.
+- **Higher-risk redirect to watch:** `/coupon-pads-coupon-booklets/` ranks ~pos 12 (~376 clicks for "coupon pads"). Resolved to **keep the category target** (`/coupon-booklets/`) — it's dual-intent (pads + booklets) and only the Coupons category spans both. But the payoff depends on the Coupons hub actually targeting "coupon pads"; monitor after redirect.
 - **Empty categories still need products** (EDDM, Mailers, Signs & Banners, Stickers) to appear in any auto-generated category lists and to give the archive a product grid; the wizard-funnel is the interim.
-- **Stickers page slug** — its menu URL was `/?page_id=21486` (no pretty permalink); confirm its real URL or whether it's unpublished (then no redirect needed).
+- **Stickers page — RESOLVED (no redirect).** Page 21486 is a **2019 draft** (never published; the `/?page_id=21486` menu URL is why it had no pretty permalink). Nothing to 301 — dropped from the map. The `/stickers/` slug is free for the category to own. If the draft is ever published it must *not* use the `stickers` slug (it would collide with the category archive) — trash it instead.
 
-### 🔜 Not yet started — the deeper consolidation
-The menu/redirect work retires the *service-page* layer. The **product-level generics** §6 flagged — `/product/cheap-booklet-printing/`, `/product/low-cost-brochure-printing/`, `/product/coupon-booklet-printing/`, etc. — still compete for the head terms and should also fold into the same category hubs (301 in Rank Math), with the specialist products retained. That's the next layer.
+### 🔜 The deeper consolidation — product-level generics (map drafted, CONFIRM before import)
+The menu/redirect work retires the *service-page* layer. The **product-level generics** — `/product/low-cost-brochure-printing/`, `/product/coupon-booklet-printing/`, `/product/low-price-business-cards/` — still compete for the head terms. This is the next layer.
 
-### ⚠️ Redirect-target rule — not every service page goes to the category
-A service page whose intent is **owned by a specialized product** must 301 to **that product**, not the generic category/hub — otherwise the specific intent splits off the page that ranks for it.
-- **`/small-booklet-printing/` → `/product/small-booklet-printing/`** (not `/booklets/`). Near-slug-twin; the product owns "small/mini booklet" (1,152 clk, pos 34). §6 corrected. It is **not** in the category CSV, so add it as a **separate service→product 301** in Rank Math, and repoint (or drop) the "Mini Booklets" menu item that still links it.
-- **Review `/coupon-pads-coupon-booklets/`** — the CSV maps it to `/coupon-booklets/`, but it ranks ~pos 12 for "coupon pads" and may itself be the owner (→ *keep*), or belong on `/product/coupon-tear-pad-printing/` if that's the real "coupon pads" owner. Decide before importing.
-- Generic marketing pages with no specialized owning product (`/custom-booklet-printing/`, `/brochure-printing-services/`, `/online-flyer-printing-service/`, …) correctly go to the **category** hub.
+**Rule (owner-stated 2026-07-15): a *productive* page folds into the *most productive product* in its category, not the thin category archive.** A category archive is a weak SEO target (no Product schema, no price); the highest-clicks product is a proven ranker, so concentrating a generic's link juice there gives the best ranking payoff. Non-productive stragglers can still go to the category hub; the pages carrying real authority go to the winner product.
+
+Per-category winner (highest GSC clicks) and the generic that folds in — delivered as `docs/seo/redirect-map-product-generics.csv`:
+
+| Category | Winner product (KEEP — becomes the head-term target) | Generic → winner | Confidence |
+|---|---|---|---|
+| Brochures | `/product/trifold-brochure-printing/` (201 clk, flagship fold) | `/product/low-cost-brochure-printing/` (58 clk, 131k impr) | good |
+| Coupons | `/product/custom-coupon-book-printing/` (781 clk) | `/product/coupon-booklet-printing/` (164 clk) | highest |
+| Business cards | `/product/cheap-business-card-printing/` (Standard, generic flagship) | `/product/low-price-business-cards/` | high — but merge ONLY this one; the ~18 material/shape/finish specialists stay |
+
+**Three notes the operator must weigh:**
+1. **These retire LIVE products.** 301'ing `/product/low-cost-brochure-printing/` removes it from the catalog. Weigh the SEO consolidation against lost sales; set each retired product to Draft/private on redirect.
+2. **Booklets: `cheap-booklet-printing` is deliberately left alone (owner's call 2026-07-15).** It was the one ⚠️ semantic-stretch merge (cheap≠small); at 687 clk / pos 31 it earns its keep, so it stays live alongside the `small-booklet-printing` winner — no redirect. The Booklets consolidation is therefore just the SERVICE page `/small-booklet-printing/` → the product (already mapped).
+3. **Flyers & notepads have no clear winner to fold into.** Flyer's click leader *is* the generic (`budget-flyer-printing`, 137 clk) — nothing to fold it into, so retain it as the de-facto flyer hub. Notepad has no flagship product (spiral 185 clk is a *specialist*; the generics sit at 140/15 clk) — leave notepad generics on the `/notepads/` category hub rather than force a product merge. Both excluded from the CSV pending a decision.
+
+### ⚠️ Redirect-target rule — service page → product when a product owns the term
+**General principle (owner-stated 2026-07-15):** *when a service page overlaps significantly with a **product** page, 301 it to the product* (passing its link juice to the transactional page that owns the term) — **not** to the generic category. The discriminator is **which page owns the service page's exact intent**:
+
+- **A specific product owns the exact term** → 301 to the **product**. Test: a product's name/slug is a twin of the service page's term, or the product is the sole owner of that named intent.
+- **The intent is a generic head term** → 301 to the **category hub**. The rich category archive (hero + `[pps_cat_wizard]` + paper/coating tables) is purpose-built to rank for "brochure printing", "door hanger printing", etc. A *single-product* category still wins here when its lone product is a **specific SKU** rather than the term owner.
+
+Applied to the audited service pages, this yields exactly **two** service→product redirects (in `docs/seo/redirect-map-service-to-product.csv`); everything else goes to the category hub (`docs/seo/redirect-map-pages-to-categories.csv`):
+
+| Service page | 301 target | Why |
+|---|---|---|
+| `/small-booklet-printing/` | **`/product/small-booklet-printing/`** | Exact slug-twin; product owns "small/mini booklet" (1,152 clk, pos 34) inside a 9-product Booklets category. Generic `/booklets/` would split the mini intent off its owner. "Mini Booklets" menu item repointed. |
+| `/business-form-printing-services/` | **`/product/2-part-carbonless-forms/`** | Single-product category whose lone product is literally named **"Business Forms"** (the exact term) — the product *is* the owner. Owner picked "split business forms out" 2026-07-15. |
+| `/door-hanger-printing/` | `/door-hangers/` (category) | Single-product category, but the lone product is a **specific SKU** ("4.25×11 Standard Cut"); the rich hub owns the generic "door hanger printing". |
+| `/rack-card-printing/` | `/rack-cards/` (category) | Single-product category, but the lone product is a **specific SKU** ("Budget Rack Cards"); the rich hub owns "rack card printing". |
+| `/coupon-pads-coupon-booklets/` | `/coupon-booklets/` (category) | **Dual-intent** (pads + booklets); only the 3-product Coupons category spans both. No single product is the twin, so category wins. Monitor "coupon pads" (pos ~12) after redirect. |
+| `/custom-booklet-printing/`, `/brochure-printing-services/`, `/online-flyer-printing-service/`, … | their category hub | Generic marketing pages, no specialized owning product. |
 
 ---
 
@@ -100,6 +130,62 @@ Tier-1 overrides cover only: `meta_title`, `meta_description`, `og_image`, `sche
 loud, self-canonical, fully-schema'd, index/follow page by construction. That makes it (a) the
 strongest possible consolidation hub, and (b) a self-cannibalization risk if minted per-variant on
 overlapping head terms.
+
+## 3b. Preset pattern — plain-language explainer (start here if the pattern is fuzzy)
+
+A "preset" is **two things in one row** of `wp_options['pps_presets']`: a **saved calculator
+configuration** *and* an **SEO landing page**. That dual nature is what makes it confusing.
+
+**The row holds:** a `slug`, which `calc` it runs, the `defaults` (size, pages, fold… — the config),
+and a few SEO fields (title, description, image, price).
+
+**What that one row does:**
+1. **Pre-fills a calculator** to a specific configuration, and
+2. **Mints a URL** — `/{slug}/`, root-level (no `/product/` or `/product-category/` prefix).
+
+**When someone (or Google) hits `/{slug}/`** there is *no real WP page* behind it — the plugin
+catches the URL, injects a virtual `WP_Post`, renders the **pre-filled calculator**, and emits the
+full SEO set (title, self-canonical, `index,follow`, OG, Twitter, 5 JSON-LD blocks, noscript) while
+**forcing Yoast/Rank Math to match** (see §3). That's why it's "the most SEO-complete page the
+plugin can produce."
+
+### The three landing-page types — pick one per search intent
+The entire plan is just choosing the right page type for each intent:
+
+| Type | URL shape | Use for | Example intent |
+|---|---|---|---|
+| **Category archive** | `/booklets/` | the **hub** for a broad head term (browse grid + wizard) | "booklet printing" |
+| **Product** | `/product/gate-fold-brochure/` | a specific **catalog SKU / specialist** (transactional) | "gate fold brochure" |
+| **Preset** | `/5.5x8.5-booklet-printing/` | a specific **calculator configuration** that deserves its own ranked page but isn't a catalog SKU | "5.5×8.5 booklet printing" |
+
+**Rule of thumb:** broad head term → **category**; specific catalog item → **product**; specific
+calculator setup you want to rank on its own → **preset**.
+
+### Why we analyzed presets but you're using categories
+The original plan (below) made **presets the head-term hubs** because they out-signal everything
+else. In execution the operator chose the **WooCommerce category archives** as the hubs instead
+(they render the hero + `[pps_cat_wizard]` + paper tables and are the nav destinations). So today
+**presets are unused / greenfield** (§4.2 — no preset URL ranks). That doesn't retire the pattern;
+it **re-slots** it: presets are no longer the hubs, they're the lever for the *next* layer —
+**specific-configuration pages** a category is too broad for and no single product owns.
+
+### First 3 preset candidates worth minting (validate volume in GSC first)
+Each is a distinct calculator config, targets a term nothing currently owns cleanly, and follows the
+§7 governance ("one preset per distinct intent; mint only to own a term and 301 the losers in").
+
+| Preset URL | Calc + defaults | Target term(s) | Rationale / what it owns |
+|---|---|---|---|
+| `/8.5x11-booklet-printing/` | saddle, 8.5×11 (opens to 11×17) | "8.5x11 booklet printing", "letter-size booklet" | Explicit-size intent. `/booklets/` is the broad hub and `small-booklet-printing` owns "small/mini" — the **full-letter size has no owning page**. |
+| `/5.5x8.5-booklet-printing/` | saddle, 5.5×8.5 (half-letter / digest) | "5.5x8.5 booklet", "half letter booklet", "digest booklet" | The most common booklet size; strong explicit-size intent; no dedicated product. |
+| `/legal-size-brochure-printing/` | brochure, 8.5×14 (tri- or bi-fold) | "legal size brochure", "8.5x14 brochure" | A distinct **format** the fold-specialist products (all letter-size) don't cover. *(Least certain — validate volume before minting.)* |
+
+**How to mint one:** `pps-presets-admin.php` → add a row (slug, calc, defaults JSON, title/desc/
+image/price), then optionally use the Tier-1/2/3 accordions to fine-tune its schema. It goes live at
+`/{slug}/` immediately and enters `/pps-presets-sitemap.xml`. Then 301 any weaker competitor into it.
+
+**Governance reminder (§7):** never mint a *family* of near-duplicate presets for one head term
+(`/cheap-`, `/affordable-`, `/low-cost-booklet-printing/`) — that's self-cannibalization. One
+intent, one preset.
 
 ## 4. Findings
 
@@ -184,23 +270,24 @@ migrate only after the hub ranks.
 | Cluster | Source page | Clk | Pos | Verdict | Target |
 |---|---|---|---|---|---|
 | brochure | **`/brochure-printing/` (mint, brochure calc)** | — | — | PRESET-HUB | — |
-| brochure | `/product/low-cost-brochure-printing/` | 58 | 41 | 301 | `/brochure-printing/` |
+| brochure | `/product/low-cost-brochure-printing/` | 58 | 41 | 301 | **`/product/trifold-brochure-printing/`** (winner product, 201 clk — per the product-generics rule; was `/brochure-printing/`). Updated 2026-07-15. |
 | brochure | `/brochure-printing-services/` | 24 | 35 | 301 | `/brochure-printing/` |
 | brochure | `/brochure-printing-arizona/` | 1 | 28 | 301 | `/brochure-printing/` |
 | brochure | `/square-brochure-printing/` | 87 | 32 | REVIEW | 301 or retain as square aggregator |
 | brochure | `/product/trifold-brochure-printing/` | 201 | 36 | RETAIN + OPTIMIZE | — (owns "trifold brochure") |
 | brochure | `/mini-brochures/` + all fold/shape specialists | — | 6–20 | RETAIN | — |
 | booklet | **`/booklet-printing/` (mint, saddle calc)** | — | — | PRESET-HUB | — |
-| booklet | `/product/cheap-booklet-printing/` | 687 | 31 | 301 | `/booklet-printing/` |
+| booklet | `/product/cheap-booklet-printing/` | 687 | 31 | **RETAIN** | — (owner chose to leave it alone 2026-07-15: 687 clk at pos 31 earns its keep; not folded into small-booklet or the category) |
 | booklet | `/small-booklet-printing/` (SERVICE) | 224 | 45 | 301 | **`/product/small-booklet-printing/`** (the product, **not** the generic hub/category) — near-slug-twin of the product, which owns "small/mini booklet" (1,152 clk, pos 34); sending it to the generic hub would split the mini intent off the page that owns it. (Corrected 2026-07-14.) |
 | booklet | `/custom-booklet-printing/` | 27 | 58 | 301 | `/booklet-printing/` |
 | booklet | `/product/presentation-booklet-printing/` | 15 | 43 | 301 | `/booklet-printing/` |
-| booklet | `/product/small-booklet-printing/` | 1152 | 34 | **HOLD / PHASE-2** | `/booklet-printing/` (after hub ranks) — or make THIS the hub |
+| booklet | `/product/small-booklet-printing/` | 1152 | 34 | **KEEP — booklet winner/hub** | — (resolved 2026-07-15: this IS the booklet head-term target; the `/small-booklet-printing/` SERVICE page folds into it. cheap-booklet stays live alongside it — owner's call.) |
 | booklet | `/how-to-format-a-booklet-for-print/` | 19 | 13 | RETAIN | — (informational) |
 | booklet | 8x8 / square / saddle-stitch / perfect-bound | — | 20–58 | RETAIN → optionally MIGRATE to own preset | — |
 | coupon | `/product/custom-coupon-book-printing/` | 781 | 18 | HUB / PROMOTE | — |
 | coupon | `/product/coupon-booklet-printing/` | 164 | 19 | 301 | `/product/custom-coupon-book-printing/` |
-| coupon | `/coupon-pads-coupon-booklets/`, `/product/coupon-tear-pad-printing/` | — | 12–17 | RETAIN | — |
+| coupon | `/coupon-pads-coupon-booklets/` (SERVICE) | — | 12 | 301 | `/coupon-booklets/` (Coupons category — dual-intent, spans pads+booklets; see reconciliation "Redirect-target rule". Monitor "coupon pads" after redirect.) |
+| coupon | `/product/coupon-tear-pad-printing/` | — | 17 | RETAIN | — (specialist "coupon pads" product) |
 | flyer | **`/flyer-printing/` (mint, brochure calc)** | — | — | PRESET-HUB | — |
 | flyer | `/product/budget-flyer-printing/` | 137 | 51 | 301 | `/flyer-printing/` |
 | flyer | `/online-flyer-printing-service/` | 17 | 22 | 301 | `/flyer-printing/` |

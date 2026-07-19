@@ -2182,8 +2182,8 @@ register_activation_hook( __FILE__, function() {
 // PRESET ROUTING (Phase 1)
 //
 // Each entry in wp_options['pps_presets'] registers a public URL at
-// /booklets/{slug}/ that renders the appropriate calculator HTML with
-// the preset's defaults pre-filled into PPS_CONFIG.defaults.
+// /{slug}/ that renders the appropriate calculator HTML with the
+// preset's defaults pre-filled into PPS_CONFIG.defaults.
 //
 // Preset row shape:
 //   [
@@ -2200,7 +2200,6 @@ register_activation_hook( __FILE__, function() {
 // ═══════════════════════════════════════════════════════════════
 
 define( 'PPS_PRESETS_OPTION', 'pps_presets' );
-define( 'PPS_PRESET_URL_PREFIX', 'booklets' );
 
 /**
  * Map calc type slug → calculator HTML filename. Inverse of
@@ -2225,6 +2224,12 @@ function pps_get_filename_for_calc_type( $calc_type ) {
  */
 function pps_get_presets() {
     $raw = get_option( PPS_PRESETS_OPTION, array() );
+    if ( is_string( $raw ) && $raw !== '' ) {
+        $decoded = json_decode( $raw, true );
+        if ( is_array( $decoded ) ) {
+            $raw = $decoded;
+        }
+    }
     return is_array( $raw ) ? $raw : array();
 }
 
@@ -2236,7 +2241,10 @@ function pps_get_preset( $slug ) {
     if ( ! is_string( $slug ) || $slug === '' ) return null;
     if ( ! preg_match( '/^[a-z0-9\-]+$/', $slug ) ) return null;
     $presets = pps_get_presets();
-    return isset( $presets[ $slug ] ) && is_array( $presets[ $slug ] ) ? $presets[ $slug ] : null;
+    if ( ! isset( $presets[ $slug ] ) || ! is_array( $presets[ $slug ] ) ) return null;
+    $row = $presets[ $slug ];
+    if ( empty( $row['slug'] ) ) $row['slug'] = $slug;
+    return $row;
 }
 
 /**
@@ -2466,9 +2474,6 @@ function pps_save_preset( $slug, $data ) {
     $presets[ $slug ] = $clean;
     update_option( PPS_PRESETS_OPTION, $presets, false );
 
-    // Rewrite rules don't depend on slug list (the regex catches all slugs),
-    // but flush anyway so newly-added presets are discoverable on first hit
-    // without a manual "Settings → Permalinks" save.
     flush_rewrite_rules( false );
 
     // Warnings (cross-field drops) ride along the return value but are NOT
@@ -2587,7 +2592,7 @@ add_filter( 'the_posts', function( $posts, $query ) {
     $post->post_modified_gmt = current_time( 'mysql', 1 );
     $post->post_content_filtered = '';
     $post->post_parent    = 0;
-    $post->guid           = home_url( '/' . PPS_PRESET_URL_PREFIX . '/' . $slug . '/' );
+    $post->guid           = home_url( '/' . $slug . '/' );
     $post->menu_order     = 0;
     $post->post_type      = 'page';
     $post->post_mime_type = '';
@@ -2809,31 +2814,38 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
 }, 10, 4 );
 
 /**
- * Routing: register rewrite rule + query var for /booklets/{slug}/.
+ * Routing: register one rewrite rule per preset slug at root level
+ * (e.g. /letterhead/, /saddle-stitch-booklets/). Individual rules
+ * avoid a catch-all wildcard that would collide with pages/posts.
  */
-add_action( 'init', function() {
-    add_rewrite_rule(
-        '^' . PPS_PRESET_URL_PREFIX . '/([a-z0-9\-]+)/?$',
-        'index.php?pps_preset=$matches[1]',
-        'top'
-    );
-} );
+function pps_register_preset_rewrite_rules() {
+    $presets = get_option( PPS_PRESETS_OPTION, array() );
+    if ( is_string( $presets ) && $presets !== '' ) {
+        $decoded = json_decode( $presets, true );
+        if ( is_array( $decoded ) ) $presets = $decoded;
+    }
+    if ( ! is_array( $presets ) ) return;
+    foreach ( array_keys( $presets ) as $slug ) {
+        if ( ! preg_match( '/^[a-z0-9\-]+$/', $slug ) ) continue;
+        add_rewrite_rule(
+            '^' . preg_quote( $slug, '/' ) . '/?$',
+            'index.php?pps_preset=' . $slug,
+            'top'
+        );
+    }
+}
+add_action( 'init', 'pps_register_preset_rewrite_rules' );
 add_filter( 'query_vars', function( $vars ) {
     $vars[] = 'pps_preset';
     return $vars;
 } );
 
 /**
- * Flush rewrite rules on plugin activation so the rewrite rule is live
- * immediately. (Other rewrite changes — e.g. preset add/edit/delete —
- * also call flush_rewrite_rules() in pps_save_preset/pps_delete_preset.)
+ * Flush rewrite rules on plugin activation so preset routes are live
+ * immediately. Save/delete also flush so new slugs work on first hit.
  */
 register_activation_hook( __FILE__, function() {
-    add_rewrite_rule(
-        '^' . PPS_PRESET_URL_PREFIX . '/([a-z0-9\-]+)/?$',
-        'index.php?pps_preset=$matches[1]',
-        'top'
-    );
+    pps_register_preset_rewrite_rules();
     flush_rewrite_rules( false );
 } );
 
@@ -3405,7 +3417,7 @@ function pps_build_breadcrumb_schema( array $args ) {
  * Build the canonical URL for a preset.
  */
 function pps_get_preset_url( $slug ) {
-    return home_url( '/' . PPS_PRESET_URL_PREFIX . '/' . $slug . '/' );
+    return home_url( '/' . $slug . '/' );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3905,7 +3917,6 @@ add_action( 'wp_head', function() {
     $emit_merged( 'pps-schema-breadcrumb', pps_build_breadcrumb_schema( array(
         'items' => array(
             array( 'name' => $site_name,   'url' => home_url( '/' ) ),
-            array( 'name' => 'Booklets',   'url' => home_url( '/' . PPS_PRESET_URL_PREFIX . '/' ) ),
             array( 'name' => $crumb_label ),
         ),
     ) ), 'breadcrumb' );

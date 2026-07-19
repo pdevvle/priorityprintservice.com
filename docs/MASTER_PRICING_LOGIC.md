@@ -216,9 +216,18 @@ Defaults updated to match all calculators:
 The 13×19 + 13×27.5 two-sheet rule (below) was rolled out from saddle stitch to **perfect bound**, **coupon book**, and **brochure**. Same rule everywhere: **yield/`imp` is computed on 13×19; if `imp < 1` the piece images on the 13×27.5 sheet**, and the non-inventory fee applies unless the paper(s) are stocked at 13×27.5 (`LARGE_SHEET_VALS`, default `[0.003, 0.03]` = 100lb Gloss Text / 100lb Gloss Cardstock — identical paper vals across all four calcs).
 
 - **Perfect bound & coupon book** — structural twins of saddle: `calcCustomImp` gained the `sheetLong` arg; `resolveSize` switches to 27″ when `imp<1` (`sheet`/`needsLargeSheet`); `calculate()` fee requires both inside+cover to be 13×27.5 papers on oversized jobs. Also picked up the same `COVER_INV` text-weight fix (`…INV_NC,…INV_CS`). The throwaway `calcSaddle` comparison helper was left as-is.
-- **Brochure** — flat/single-paper, its own `calcBrochureImp` (the long axis divisor is now parameterized 18.5→27). After imp is resolved (preset or custom), `imp<1` re-images on 27″ and sets `needsLargeSheet`; the single-paper `nonInv` then checks `LARGE_SHEET_VALS` instead of `INV_VALS`. Note the `11×25.5` preset (`imp:0.5`) now correctly routes to the 13×27.5 sheet.
+- **Brochure** — flat/single-paper, its own `calcBrochureImp` (the long axis divisor is now parameterized 18.5→27). After imp is resolved (preset or custom), `imp<1` re-images on 27″ and sets `needsLargeSheet`; the single-paper `nonInv` then checks `LARGE_SHEET_VALS` instead of `INV_VALS`. Note the `11×25.5` preset (`imp:0.5`) routes to the 13×27.5 sheet. **(Superseded 2026-07-11 for flats — see "Oversized flats keep their sub-1 yield" below: brochure/postcard/greeting-card/letterhead now KEEP `imp 0.5` instead of recomputing to 1, so oversized size-costs ≈2×.)**
 
 Presets with `imp ≥ 1` and normal custom sizes are unchanged in all four calcs (default `sheetLong` keeps the 13×19 math byte-identical).
+
+### Oversized flats keep their sub-1 yield — charge the oversized premium (2026-07-11)
+
+**Reverses the flat-calc half of the two-sheet rollout above** (per operator). For the flat calculators — **brochure, postcard, greeting-card, letterhead** — an oversized piece (`imp < 1` on 13×19) no longer has its `imp` recomputed up to the 13×27.5 yield. It **keeps the sub-1 13×19 yield** (e.g. the `11×25.5` preset stays `imp 0.5`), so `pressSheets = qty / imp` roughly **doubles** and every size-scaled line — paper, front/back print, press labor, coating — scales with it (≈2× at `imp 0.5`; the `ln(pressSheets)` volume-discount curve gives a small offset, hence "essentially" double). The 13×27.5 sheet flag + `non_inventory_fee` still apply.
+
+- **Change:** in each flat `calculate()`, the `imp < 1` block sets `needsLargeSheet` / `pressSheet="13x27.5"` but only re-images (`imp = calc*Imp(longE, shortE, 27)`) when **`imp === 0`** — i.e. only when a piece won't fit even 0.5-up on 13×19 (keeps `pressSheets` finite for very large customs). Applies to the `11×25.5` preset **and** any custom size in the half-yield range.
+- **Verified:** brochure debug at 11×25.5 now shows `imp 0.5000` (was 1); `pressSheets` doubles (e.g. qty 500 → 1000).
+- **Not applied to the booklets** (saddle / perfect bound / coupon) — they keep the efficient-sheet routing from the 2026-06-17 rollout below. Extend on request.
+- **Rationale:** an oversized flat consumes ~2× the press resources of a standard piece; the shop charges that premium rather than discounting it onto the big sheet.
 
 ### Saddle stitch: two-sheet inventory model (13×19 + 13×27.5) (2026-06-17)
 

@@ -237,7 +237,7 @@ function pps_presets_render_list() {
 
     if ( empty( $presets ) ) {
         echo '<div class="pps-presets-empty">';
-        echo '<p>No presets yet. Each preset publishes a public URL at <code>/' . esc_html( PPS_PRESET_URL_PREFIX ) . '/{slug}/</code> with a pre-filled calculator and its own SEO metadata.</p>';
+        echo '<p>No presets yet. Each preset publishes a public URL at <code>/{slug}/</code> with a pre-filled calculator and its own SEO metadata.</p>';
         echo '<a href="' . esc_url( admin_url( 'admin.php?page=pps-presets&new=1' ) ) . '" class="button button-primary">+ Create your first preset</a>';
         echo '</div>';
         return;
@@ -253,7 +253,7 @@ function pps_presets_render_list() {
     echo '</tr></thead><tbody>';
 
     foreach ( $presets as $slug => $row ) {
-        $url      = home_url( '/' . PPS_PRESET_URL_PREFIX . '/' . $slug . '/' );
+        $url      = function_exists( 'pps_get_preset_url' ) ? pps_get_preset_url( $slug ) : home_url( '/' . $slug . '/' );
         $edit_url = admin_url( 'admin.php?page=pps-presets&edit=' . $slug );
         $price    = isset( $row['price_from'] ) && $row['price_from'] !== null
                     ? '$' . number_format( (float) $row['price_from'], 2 )
@@ -316,7 +316,7 @@ function pps_presets_render_edit_form( $preset ) {
     echo '<div class="pps-preset-field">';
     echo '<label for="preset_slug">Slug <span class="req">*</span></label>';
     echo '<input id="preset_slug" type="text" name="preset_slug" value="' . esc_attr( $slug ) . '" pattern="[a-z0-9\-]+" maxlength="80" required>';
-    echo '<span class="hint">kebab-case, ≤80 chars. URL: <code>' . esc_html( home_url( '/' . PPS_PRESET_URL_PREFIX . '/' ) ) . '<span id="pps-slug-preview">{slug}</span>/</code></span>';
+    echo '<span class="hint">kebab-case, ≤80 chars. URL: <code>' . esc_html( home_url( '/' ) ) . '<span id="pps-slug-preview">{slug}</span>/</code></span>';
     echo '</div>';
 
     // Calc
@@ -432,7 +432,7 @@ function pps_presets_render_edit_form( $preset ) {
     echo '<button type="submit" name="pps_preset_save" class="button button-primary">💾 Save preset</button> ';
     echo '<a href="' . esc_url( $back_url ) . '" class="button">Cancel</a>';
     if ( ! $is_new ) {
-        echo '<a href="' . esc_url( home_url( '/' . PPS_PRESET_URL_PREFIX . '/' . $slug . '/' ) ) . '" class="button" target="_blank" rel="noopener" style="margin-left:auto">View preset URL ↗</a>';
+        echo '<a href="' . esc_url( home_url( '/' . $slug . '/' ) ) . '" class="button" target="_blank" rel="noopener" style="margin-left:auto">View preset URL ↗</a>';
     }
     echo '</div>';
 
