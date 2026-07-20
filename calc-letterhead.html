@@ -45,7 +45,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · LH-SHIPEST2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · LH-SHARE2</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Letterhead Calculator v1
@@ -2616,6 +2616,17 @@ function App() {
       const m = SIZE_PRESETS.find(s => s.label.replace(/×/g, 'x').toLowerCase() === norm);
       if (m) setSizeLabel(m.label);
     }
+    // Restore the remaining share-link params (the builder writes all of these;
+    // until 2026-07-20 only paper/fold/size were read back — bug-class fix).
+    const _num = (v) => { const n = Number(v); return (v == null || v === "" || isNaN(n)) ? null : n; };
+    const qv = _num(params.get('qty')); if (qv > 0) setQty(Math.round(qv));
+    const fcv = params.get('color'); if (fcv === 'bw' || fcv === 'color') setFrontColor(fcv);
+    const bcv = params.get('backcolor'); if (bcv === 'bw' || bcv === 'color') setBackColor(bcv);
+    const sdv = _num(params.get('sides')); if (sdv === 1 || sdv === 2) setSides(sdv);
+    const pfv = _num(params.get('perf')); if (pfv != null && PERF_OPTS.some(o => o.val === pfv)) setPerforation(pfv);
+    const pdv = params.get('perfdir'); if (pdv === 'length' || pdv === 'width') setPerfDir(pdv);
+    const ppv = params.get('perfpos'); if (ppv) { const arr = ppv.split(',').map(Number).filter(n => n > 0 && n < 100); if (arr.length) setPerfPositions(arr); }
+    const stv = params.get('state'); if (stv && TRANSIT_DAYS[stv] != null) setShipState(stv);
   }, []);
 
   const shipZip = shipAddr.zip || "";
