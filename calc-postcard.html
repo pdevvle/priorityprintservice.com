@@ -52,7 +52,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · PC-PDEF</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-19 · PC-SQ</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Postcard Calculator v1
@@ -113,6 +113,16 @@ const SIZE_PRESETS = _CFG.postcard_sizes || [
   {label:"8×10",imp:2,long:10,short:8,easy:true},
   {label:"8.5×11 (Letter)",imp:2,long:11,short:8.5,easy:true},
   {label:"9×12",imp:2,long:12,short:9},
+  // Square (owner rule 2026-07-19): 3x3-9x9 in 1" steps. imps computed with the
+  // calc's own custom-size imposition fn so a square preset prices identically
+  // to the same square entered as a custom size.
+  {label:"3×3",imp:24,long:3,short:3,square:true},
+  {label:"4×4",imp:12,long:4,short:4,square:true},
+  {label:"5×5",imp:6,long:5,short:5,square:true},
+  {label:"6×6",imp:6,long:6,short:6,square:true},
+  {label:"7×7",imp:2,long:7,short:7,square:true},
+  {label:"8×8",imp:2,long:8,short:8,square:true},
+  {label:"9×9",imp:2,long:9,short:9,square:true},
   {label:"3.5×8.5",imp:6,long:8.5,short:3.5,easy:true,rack:true},
   {label:"3.66×8.5 (Third Standard Sheet)",imp:6,long:8.5,short:3.66,easy:true,rack:true},
   {label:"4×9",imp:6,long:9,short:4,easy:true,rack:true},
@@ -4083,7 +4093,7 @@ function App() {
             <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
               <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                 {sizeMode === "preset"
-                  ? <Sel label={<Tip k="size">Flat/Unfolded Size</Tip>} value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.filter(s=>!s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}<optgroup label="Common Rack Card Sizes">{SIZE_PRESETS.filter(s=>s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup></Sel>
+                  ? <Sel label={<Tip k="size">Flat/Unfolded Size</Tip>} value={sizeLabel} onChange={setSizeLabel}>{SIZE_PRESETS.filter(s=>!s.rack&&!s.square).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}<optgroup label="Square">{SIZE_PRESETS.filter(s=>s.square).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup><optgroup label="Common Rack Card Sizes">{SIZE_PRESETS.filter(s=>s.rack).map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup></Sel>
                   : <div style={r2}>
                       <TxtNum label={<Tip k="custom_long">Long Edge (in)</Tip>} value={longEdge} onChange={setLongEdge} min={2} max={27} />
                       <TxtNum label={<Tip k="custom_short">Short Edge (in)</Tip>} value={shortEdge} onChange={setShortEdge} min={2} max={12.5} />
