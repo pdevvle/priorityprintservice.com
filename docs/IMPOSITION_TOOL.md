@@ -123,6 +123,22 @@ download the imposed PDF. Useful for testing and one-off jobs.
   offsets, the bleed-clip warnings, and the auto gutter ladder (2×bleed →
   bleed → butt). Non-default bleed is stamped on the slug. Sticker pitch
   stays fixed at 0.25″ per the crack-n-peel spec.
+- **Add bleed** (for files that have none): synthesizes bleed for source
+  pages that arrive exactly at trim. Two methods — **mirror edges**
+  (classic prepress mirror bleed: the art's edge content is reflected
+  outward past the trim line, all vector, content at the cut stays put)
+  and **scale up** (art enlarged just enough to cover the bleed box;
+  trim-line content shifts outward and the safety margin shrinks by the
+  bleed amount). Applies per page and ONLY to pages that genuinely lack
+  bleed — pages with a real TrimBox/bleed are never touched. Works across
+  flats, collated modes, patterns (mirror strips inherit per-cell 180°),
+  duplex backs, and saddle signatures (the spine's no-bleed clip also
+  clips the synthesized bleed, so nothing crosses the fold). Interior
+  butt cuts stay clean — the cell clip that blocks real bleed blocks the
+  synthetic kind too. The UI highlights the control whenever a no-bleed
+  warning fires. Verified by pixel tests: true mirror symmetry at every
+  trim edge on both sides, zero pixel change inside trim, and zero change
+  to files that already have bleed.
 - **Multipage collated flats**: when a flat/sticker file has more pages than
   a single design uses, a "Multi-page file" select offers three handlings —
   **repeat single design** (page 1 [+2], default), **gang in order** (pages
