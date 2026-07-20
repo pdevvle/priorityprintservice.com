@@ -1725,6 +1725,7 @@ add_action( 'woocommerce_product_data_panels', function() {
         $fields = array(
             'productType'     => array( 'label' => 'Product Type', 'placeholder' => 'letterhead (derivative calc mode)' ),
             'sizeLabel'       => array( 'label' => 'Size', 'placeholder' => '5.5×8.5 (Opens to 8.5×11)' ),
+            'foldType'        => array( 'label' => 'Fold Type (brochure/postcard family)', 'placeholder' => 'flat, bifold, trifold, z3, gate3, accordion4, roll4, dgate4, dparallel4' ),
             'qty'             => array( 'label' => 'Default Quantity', 'placeholder' => '100', 'type' => 'number' ),
             'pages'           => array( 'label' => 'Default Pages', 'placeholder' => '8', 'type' => 'number' ),
             'bindDir'         => array( 'label' => 'Bind Direction', 'placeholder' => 'short' ),
