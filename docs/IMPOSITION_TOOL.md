@@ -129,16 +129,43 @@ download the imposed PDF. Useful for testing and one-off jobs.
   outward past the trim line, all vector, content at the cut stays put)
   and **scale up** (art enlarged just enough to cover the bleed box;
   trim-line content shifts outward and the safety margin shrinks by the
-  bleed amount). Applies per page and ONLY to pages that genuinely lack
-  bleed — pages with a real TrimBox/bleed are never touched. Works across
-  flats, collated modes, patterns (mirror strips inherit per-cell 180°),
-  duplex backs, and saddle signatures (the spine's no-bleed clip also
-  clips the synthesized bleed, so nothing crosses the fold). Interior
-  butt cuts stay clean — the cell clip that blocks real bleed blocks the
-  synthetic kind too. The UI highlights the control whenever a no-bleed
-  warning fires. Verified by pixel tests: true mirror symmetry at every
-  trim edge on both sides, zero pixel change inside trim, and zero change
-  to files that already have bleed.
+  bleed amount — the better pick for photo collages and faces, where a
+  mirror would visibly reflect people at the edges). Applies per page and
+  ONLY to pages that genuinely lack bleed — pages with a real
+  TrimBox/bleed are never touched. Works across flats, collated modes,
+  patterns (mirror strips inherit per-cell 180°), duplex backs, and
+  saddle signatures (the spine's no-bleed clip also clips the synthesized
+  bleed, so nothing crosses the fold). Interior butt cuts stay clean —
+  the cell clip that blocks real bleed blocks the synthetic kind too. The
+  UI highlights the control whenever a no-bleed warning fires. Verified
+  by pixel tests: true mirror symmetry at every trim edge on both sides,
+  zero pixel change inside trim, and zero change to files that already
+  have bleed.
+- **Smart edge detect** (on by default with add-bleed): each no-bleed
+  page is rasterized (pdf.js, 144 dpi) and the actual ink is measured
+  against the trim on every edge. Three outcomes per page:
+  - ink reaches trim → synthesize normally;
+  - ink stops **just short** of trim (≤3/16″ — a full-bleed design that
+    fell shy) → the art is pre-scaled about its center so ink reaches the
+    cut first (mirror: ×h/(h−gap); scale folds the gap into its factor:
+    ×(h+b)/(h−gap)) — without this, mirroring/scaling from the page edge
+    would DOUBLE the white sliver at the cut;
+  - edges are **white by design** (all margins >3/16″: text pages,
+    bordered layouts) → synthesis is skipped entirely, page passes
+    through untouched (white bleed happens naturally).
+  Detection failures fall back to synthesizing from the page edge with a
+  warning. Verified: shy-art fixtures show ink through the cut with smart
+  on and a white sliver with it off; design-margin pages render
+  pixel-identical to add-bleed-off.
+- **Per-page add-bleed override**: for multipage files a per-page picker
+  (blank = job setting / off / mirror / scale) lets e.g. a booklet's
+  photo-collage pages use scale while others mirror or stay off. Engine:
+  `spec.addBleedPages = {pageNumber: mode}` (1-based, main file; a
+  separate back file uses the job-level mode). Overrides reset when a new
+  file is loaded. Saddle warnings summarize the per-page outcome
+  ("synthesized on 5 of 8 pages…"). Verified by reference-run comparison:
+  the per-page run's cells are pixel-identical to all-mirror/all-scale
+  runs cell-by-cell per the chosen mode.
 - **Multipage collated flats**: when a flat/sticker file has more pages than
   a single design uses, a "Multi-page file" select offers three handlings —
   **repeat single design** (page 1 [+2], default), **gang in order** (pages
