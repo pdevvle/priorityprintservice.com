@@ -33,6 +33,7 @@ function pps_shippo_test_maybe_run() {
     if ( get_transient( 'pps_shippo_test_lock' ) ) return;
     set_transient( 'pps_shippo_test_lock', 1, 120 );
     delete_option( 'pps_shippo_test_trigger' ); // consume first — a fatal must not re-run forever
+    if ( function_exists( 'rocket_clean_domain' ) ) { rocket_clean_domain(); } // stale full-page cache can pin shippo_enabled:false in the served HTML
     $results = pps_shippo_test_run_suite();
     update_option( 'pps_shippo_test_results', $results, false );
     delete_transient( 'pps_shippo_test_lock' );
@@ -140,6 +141,46 @@ function pps_shippo_test_run_suite() {
     delete_transient( 'pps_transit_v2_US_10001' ); // deterministic reruns (v2 = UPS-only cache)
     delete_transient( 'pps_transit_v2_US_60601' );
     delete_transient( 'pps_shipcost_v1_US_10001_90' ); // weighted-quote cache (C7)
+
+    // ── C0: the guest path through the REAL web stack. rest_do_request (C1)
+    // bypasses nginx/Varnish/security layers; this hits the public URL the
+    // calculators actually fetch, from the server itself.
+    delete_transient( 'pps_transit_v2_US_30301' );
+    $ext = wp_remote_post( rest_url( 'pps/v1/shipping/transit-estimate' ), array(
+        'headers'   => array( 'Content-Type' => 'application/json' ),
+        'body'      => wp_json_encode( array( 'zip' => '30301', 'state' => 'GA', 'country' => 'US' ) ),
+        'timeout'   => 25,
+        'sslverify' => false,
+    ) );
+    if ( is_wp_error( $ext ) ) {
+        $add( 'C0', 'PUBLIC endpoint reachable through the web stack (guest loopback)', false, 'transport: ' . $ext->get_error_message() . ' url=' . rest_url( 'pps/v1/shipping/transit-estimate' ) );
+    } else {
+        $ext_code = (int) wp_remote_retrieve_response_code( $ext );
+        $ext_body = json_decode( wp_remote_retrieve_body( $ext ), true );
+        $add( 'C0', 'PUBLIC endpoint reachable through the web stack (guest loopback)', 200 === $ext_code && isset( $ext_body['transit_days'] ),
+            'HTTP ' . $ext_code . ' ' . substr( (string) wp_json_encode( $ext_body ), 0, 140 ) . ' url=' . rest_url( 'pps/v1/shipping/transit-estimate' ) );
+    }
+
+    // ── C0b: what a guest's browser actually receives on a calculator page —
+    // the served HTML must carry shippo_enabled:true and a current build stamp.
+    $pp = get_permalink( 24107 );
+    if ( $pp ) {
+        $pg = wp_remote_get( $pp, array( 'timeout' => 25, 'sslverify' => false ) );
+        if ( is_wp_error( $pg ) ) {
+            $add( 'C0b', 'Served product page carries shippo_enabled:true + current build', false, 'transport: ' . $pg->get_error_message() );
+        } else {
+            $html    = (string) wp_remote_retrieve_body( $pg );
+            $flag_ok = false !== strpos( $html, '"shippo_enabled":true' );
+            $stamp   = '';
+            if ( preg_match( '/BUILD \d{4}-\d{2}-\d{2} \x{00b7} [A-Z0-9-]+/u', $html, $mm ) ) { $stamp = $mm[0]; }
+            $leak    = false !== strpos( $html, 'shippo_api_token' );
+            $add( 'C0b', 'Served product page carries shippo_enabled:true + current build (and no token)',
+                $flag_ok && ! $leak && '' !== $stamp,
+                'HTTP ' . wp_remote_retrieve_response_code( $pg ) . ' flag=' . var_export( $flag_ok, true ) . ' stamp=' . ( $stamp ?: 'NONE' ) . ' token_leak=' . var_export( $leak, true ) . ' url=' . $pp );
+        }
+    } else {
+        $add( 'C0b', 'Served product page carries shippo_enabled:true + current build', false, 'product 24107 has no permalink' );
+    }
 
     wp_set_current_user( 0 ); // guest — most customers are guests
 
