@@ -33,6 +33,7 @@ function pps_shippo_test_maybe_run() {
     if ( get_transient( 'pps_shippo_test_lock' ) ) return;
     set_transient( 'pps_shippo_test_lock', 1, 120 );
     delete_option( 'pps_shippo_test_trigger' ); // consume first — a fatal must not re-run forever
+    if ( function_exists( 'set_time_limit' ) ) { @set_time_limit( 180 ); } // loopback probes + live calls can exceed the default limit
     if ( function_exists( 'rocket_clean_domain' ) ) { rocket_clean_domain(); } // stale full-page cache can pin shippo_enabled:false in the served HTML
     $results = pps_shippo_test_run_suite();
     update_option( 'pps_shippo_test_results', $results, false );
@@ -149,7 +150,7 @@ function pps_shippo_test_run_suite() {
     $ext = wp_remote_post( rest_url( 'pps/v1/shipping/transit-estimate' ), array(
         'headers'   => array( 'Content-Type' => 'application/json' ),
         'body'      => wp_json_encode( array( 'zip' => '30301', 'state' => 'GA', 'country' => 'US' ) ),
-        'timeout'   => 25,
+        'timeout'   => 8,
         'sslverify' => false,
     ) );
     if ( is_wp_error( $ext ) ) {
@@ -165,7 +166,7 @@ function pps_shippo_test_run_suite() {
     // the served HTML must carry shippo_enabled:true and a current build stamp.
     $pp = get_permalink( 24107 );
     if ( $pp ) {
-        $pg = wp_remote_get( $pp, array( 'timeout' => 25, 'sslverify' => false ) );
+        $pg = wp_remote_get( $pp, array( 'timeout' => 8, 'sslverify' => false ) );
         if ( is_wp_error( $pg ) ) {
             $add( 'C0b', 'Served product page carries shippo_enabled:true + current build', false, 'transport: ' . $pg->get_error_message() );
         } else {
