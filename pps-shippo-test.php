@@ -172,12 +172,14 @@ function pps_shippo_test_run_suite() {
         } else {
             $html    = (string) wp_remote_retrieve_body( $pg );
             $flag_ok = false !== strpos( $html, '"shippo_enabled":true' );
-            $stamp   = '';
-            if ( preg_match( '/BUILD \d{4}-\d{2}-\d{2} \x{00b7} [A-Z0-9-]+/u', $html, $mm ) ) { $stamp = $mm[0]; }
-            $leak    = false !== strpos( $html, 'shippo_api_token' );
-            $add( 'C0b', 'Served product page carries shippo_enabled:true + current build (and no token)',
-                $flag_ok && ! $leak && '' !== $stamp,
-                'HTTP ' . wp_remote_retrieve_response_code( $pg ) . ' flag=' . var_export( $flag_ok, true ) . ' stamp=' . ( $stamp ?: 'NONE' ) . ' token_leak=' . var_export( $leak, true ) . ' url=' . $pp );
+            $root_ok = false !== strpos( $html, 'pps-calculator-root' );
+            // Real-leak check: the token VALUE must never appear. The literal key
+            // name legitimately exists in the calc's own fallback PCF ("" value),
+            // and build-stamp chips only ship on the standalone/Pages copies.
+            $leak    = '' !== $token && false !== strpos( $html, $token );
+            $add( 'C0b', 'Served product page: calculator mounts, shippo_enabled:true, token value absent',
+                $flag_ok && $root_ok && ! $leak,
+                'HTTP ' . wp_remote_retrieve_response_code( $pg ) . ' flag=' . var_export( $flag_ok, true ) . ' root=' . var_export( $root_ok, true ) . ' token_value_leak=' . var_export( $leak, true ) . ' url=' . $pp );
         }
     } else {
         $add( 'C0b', 'Served product page carries shippo_enabled:true + current build', false, 'product 24107 has no permalink' );
