@@ -1,0 +1,47 @@
+/* Record of an APPENDED block to staging's Customizer → Additional CSS (Astra),
+ * added 2026-07-21 via MCP pps_set_custom_css(append=true). custom_css post 19873.
+ *
+ * WHY: the homepage "Preferred by businesses…" client-logo band is a
+ * `wp:columns {isStackedOnMobile:false}` row of 8 Spectra (uagb) image blocks.
+ * Spectra pins each logo to fixed pixel dimensions inside an overflow:hidden
+ * figure, so at narrower viewports the images overflow their squeezed columns
+ * and are CLIPPED (reported: "logos cropped at some resolutions"). Verified
+ * headless: all logos clipped at 1280/768/390px before, 0 clipped after; the
+ * desktop single row is preserved and the strip wraps to 2–3 rows on
+ * tablet/phone with logos scaled-to-fit (contain).
+ *
+ * SCOPE: `.pps-benefits` + the uagb image selectors exist only in this band, so
+ * nothing else on the site is affected.
+ *
+ * REVERT: delete this block from Customizer → Additional CSS (everything between
+ * the START/END markers below).
+ */
+
+/* ===== HOMEPAGE CLIENT-LOGO STRIP — responsive, never cropped (2026-07-21) ===== */
+.pps-benefits .wp-block-columns.is-not-stacked-on-mobile {
+  flex-wrap: wrap !important;
+  justify-content: center;
+  align-items: center;
+  gap: 20px 24px;
+}
+.pps-benefits .wp-block-columns.is-not-stacked-on-mobile > .wp-block-column {
+  flex: 1 1 110px !important;
+  min-width: 88px;
+  max-width: 170px;
+  margin: 0 !important;
+}
+.pps-benefits .wp-block-uagb-image,
+.pps-benefits .wp-block-uagb-image__figure {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  overflow: visible !important;
+}
+.pps-benefits .wp-block-uagb-image__figure img {
+  width: 100% !important;
+  height: auto !important;
+  max-width: 100% !important;
+  aspect-ratio: auto !important;
+  object-fit: contain !important;
+}
+/* ===== END HOMEPAGE CLIENT-LOGO STRIP ===== */
