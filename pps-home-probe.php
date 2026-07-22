@@ -34,43 +34,48 @@ add_action( 'wp_loaded', function () {
         $out['band_html'] = '(uagb-block-d6f51c67 not found)';
     }
 
-    // 1b. Whitespace analysis of a source logo image (is padding baked into the file?).
-    $img_url = 'https://woocommerce-70867-4915293.cloudwaysapps.com/wp-content/uploads/2023/02/Priority-Print-Service-Online-Printing-Services-4.jpg';
-    $ir = wp_remote_get( $img_url, array( 'timeout' => 15, 'sslverify' => false ) );
-    if ( ! is_wp_error( $ir ) && function_exists( 'imagecreatefromstring' ) ) {
+    // 1b. Whitespace analysis of ALL 8 source logos (padding is baked into the files).
+    $base = 'https://woocommerce-70867-4915293.cloudwaysapps.com/wp-content/uploads/';
+    $imgs = array(
+        '1' => '2023/09/Priority-Print-Service-Online-Printing-Services-1.jpg',
+        '2' => '2023/02/Priority-Print-Service-Online-Printing-Services-2.jpg',
+        '3' => '2023/02/Priority-Print-Service-Online-Printing-Services-3.jpg',
+        '4' => '2023/02/Priority-Print-Service-Online-Printing-Services-4.jpg',
+        '5' => '2023/02/Priority-Print-Service-Online-Printing-Services-5.jpg',
+        '6' => '2023/02/Priority-Print-Service-Online-Printing-Services-6.jpg',
+        '7' => '2023/02/Priority-Print-Service-Online-Printing-Services-7.jpg',
+        '8' => '2023/02/Priority-Print-Service-Online-Printing-Services-8.jpg',
+    );
+    $rows = array(); $maxCH = 0; $maxCW = 0;
+    foreach ( $imgs as $k => $rel ) {
+        $ir = wp_remote_get( $base . $rel, array( 'timeout' => 12, 'sslverify' => false ) );
+        if ( is_wp_error( $ir ) || ! function_exists( 'imagecreatefromstring' ) ) { $rows[ $k ] = 'fetch/GD fail'; continue; }
         $im = @imagecreatefromstring( wp_remote_retrieve_body( $ir ) );
-        if ( $im ) {
-            $w = imagesx( $im ); $h = imagesy( $im );
-            $minX = $w; $minY = $h; $maxX = 0; $maxY = 0; $step = 2;
-            for ( $y = 0; $y < $h; $y += $step ) {
-                for ( $x = 0; $x < $w; $x += $step ) {
-                    $rgb = imagecolorat( $im, $x, $y );
-                    $rr = ( $rgb >> 16 ) & 0xFF; $gg = ( $rgb >> 8 ) & 0xFF; $bb = $rgb & 0xFF;
-                    if ( $rr < 240 || $gg < 240 || $bb < 240 ) { // non-white = content
-                        if ( $x < $minX ) $minX = $x; if ( $x > $maxX ) $maxX = $x;
-                        if ( $y < $minY ) $minY = $y; if ( $y > $maxY ) $maxY = $y;
-                    }
+        if ( ! $im ) { $rows[ $k ] = 'decode fail'; continue; }
+        $w = imagesx( $im ); $h = imagesy( $im );
+        $minX = $w; $minY = $h; $maxX = 0; $maxY = 0; $step = 3;
+        for ( $y = 0; $y < $h; $y += $step ) {
+            for ( $x = 0; $x < $w; $x += $step ) {
+                $rgb = imagecolorat( $im, $x, $y );
+                if ( ( ( $rgb >> 16 ) & 0xFF ) < 240 || ( ( $rgb >> 8 ) & 0xFF ) < 240 || ( $rgb & 0xFF ) < 240 ) {
+                    if ( $x < $minX ) $minX = $x; if ( $x > $maxX ) $maxX = $x;
+                    if ( $y < $minY ) $minY = $y; if ( $y > $maxY ) $maxY = $y;
                 }
             }
-            imagedestroy( $im );
-            $out['logo_img'] = array(
-                'canvas'      => $w . 'x' . $h,
-                'content_box' => ( $maxX >= $minX ) ? ( ( $maxX - $minX ) . 'x' . ( $maxY - $minY ) . ' at ' . $minX . ',' . $minY ) : 'none',
-                'pad_pct'     => ( $maxX >= $minX ) ? array(
-                    'left'   => round( 100 * $minX / $w ),
-                    'right'  => round( 100 * ( $w - $maxX ) / $w ),
-                    'top'    => round( 100 * $minY / $h ),
-                    'bottom' => round( 100 * ( $h - $maxY ) / $h ),
-                    'content_w' => round( 100 * ( $maxX - $minX ) / $w ),
-                    'content_h' => round( 100 * ( $maxY - $minY ) / $h ),
-                ) : 'n/a',
-            );
-        } else {
-            $out['logo_img'] = 'imagecreatefromstring failed';
         }
-    } else {
-        $out['logo_img'] = is_wp_error( $ir ) ? $ir->get_error_message() : 'no GD';
+        imagedestroy( $im );
+        if ( $maxX < $minX ) { $rows[ $k ] = 'blank'; continue; }
+        $cw = round( 100 * ( $maxX - $minX ) / $w );
+        $ch = round( 100 * ( $maxY - $minY ) / $h );
+        $cy = round( 100 * ( ( $minY + $maxY ) / 2 ) / $h ); // content vertical center
+        if ( $ch > $maxCH ) $maxCH = $ch;
+        if ( $cw > $maxCW ) $maxCW = $cw;
+        $rows[ $k ] = array( 'canvas' => $w . 'x' . $h, 'cw' => $cw, 'ch' => $ch, 'cy' => $cy,
+            'top' => round( 100 * $minY / $h ), 'bottom' => round( 100 * ( $h - $maxY ) / $h ) );
     }
+    $out['logos'] = $rows;
+    $out['max_content_h_pct'] = $maxCH;
+    $out['max_content_w_pct'] = $maxCW;
 
     // 2. Spectra per-block CSS + any object-fit / aspect-ratio / height rules that
     //    touch the uagb image blocks. Pull every <style> block, keep rules that
