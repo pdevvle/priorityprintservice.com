@@ -27,3 +27,11 @@ if ( file_exists( $_pps_shippo_test ) ) {
     require_once $_pps_shippo_test;
 }
 unset( $_pps_shippo_test );
+
+// ── Side-load the homepage logo-band probe (staging diagnostic).
+//    Inert unless the 'pps_home_probe_trigger' option is set.
+$_pps_home_probe = __DIR__ . '/pps-home-probe.php';
+if ( file_exists( $_pps_home_probe ) ) {
+    require_once $_pps_home_probe;
+}
+unset( $_pps_home_probe );
