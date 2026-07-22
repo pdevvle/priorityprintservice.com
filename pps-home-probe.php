@@ -56,8 +56,24 @@ add_action( 'wp_loaded', function () {
         imagejpeg( $dst, $file, 92 );
         imagedestroy( $im ); imagedestroy( $dst );
         $meta = wp_generate_attachment_metadata( $id, $file );
+        $dropped = array();
+        if ( $meta && ! empty( $meta['sizes'] ) ) {
+            // Trimmed logos are wide/short; WP's hard-cropped square 'thumbnail'
+            // (and any other aspect-changing size) would land in srcset and clip
+            // the logo. Drop every generated size whose aspect differs from full,
+            // so only the correct-aspect full image is ever served.
+            $full_a = ( $nh > 0 ) ? $nw / $nh : 1;
+            foreach ( $meta['sizes'] as $name => $sz ) {
+                $a = ( ! empty( $sz['height'] ) ) ? $sz['width'] / $sz['height'] : 0;
+                if ( abs( $a - $full_a ) > 0.08 ) {
+                    @unlink( path_join( dirname( $file ), $sz['file'] ) );
+                    unset( $meta['sizes'][ $name ] );
+                    $dropped[] = $name;
+                }
+            }
+        }
         if ( $meta ) wp_update_attachment_metadata( $id, $meta );
-        $rep[ $id ] = "trimmed {$w}x{$h} -> {$nw}x{$nh}";
+        $rep[ $id ] = "trimmed {$w}x{$h} -> {$nw}x{$nh}; dropped cropped sizes: " . ( $dropped ? implode( ',', $dropped ) : 'none' );
     }
     if ( function_exists( 'rocket_clean_domain' ) ) rocket_clean_domain();
     update_option( 'pps_home_apply_result', $rep, false );
