@@ -12,6 +12,57 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+/**
+ * APPLY mode: trim each of the 8 client logos to its own content bounding box
+ * (with a small uniform margin), overwrite the file, regenerate thumbnails, and
+ * keep a one-time backup of each original at <file>.pre-trim-bak. Reversible.
+ * Trigger: set 'pps_home_apply_trigger' to any value. Result: 'pps_home_apply_result'.
+ */
+add_action( 'wp_loaded', function () {
+    if ( '' === (string) get_option( 'pps_home_apply_trigger', '' ) ) return;
+    delete_option( 'pps_home_apply_trigger' );
+    if ( function_exists( 'set_time_limit' ) ) @set_time_limit( 180 );
+    require_once ABSPATH . 'wp-admin/includes/image.php';
+
+    $ids = array( 39221, 39222, 39223, 39224, 39225, 39226, 39227, 39228 );
+    $rep = array();
+    foreach ( $ids as $id ) {
+        $file = get_attached_file( $id );
+        if ( ! $file || ! file_exists( $file ) ) { $rep[ $id ] = 'no file'; continue; }
+        $bak = $file . '.pre-trim-bak';
+        if ( ! file_exists( $bak ) ) @copy( $file, $bak );          // one-time original backup
+        $src = file_exists( $bak ) ? $bak : $file;                  // always trim from the pristine original
+        $im  = @imagecreatefromstring( file_get_contents( $src ) );
+        if ( ! $im ) { $rep[ $id ] = 'decode fail'; continue; }
+        $w = imagesx( $im ); $h = imagesy( $im );
+        $minX = $w; $minY = $h; $maxX = -1; $maxY = -1;
+        for ( $y = 0; $y < $h; $y++ ) {
+            for ( $x = 0; $x < $w; $x++ ) {
+                $c = imagecolorat( $im, $x, $y );
+                if ( ( ( $c >> 16 ) & 255 ) < 240 || ( ( $c >> 8 ) & 255 ) < 240 || ( $c & 255 ) < 240 ) {
+                    if ( $x < $minX ) $minX = $x; if ( $x > $maxX ) $maxX = $x;
+                    if ( $y < $minY ) $minY = $y; if ( $y > $maxY ) $maxY = $y;
+                }
+            }
+        }
+        if ( $maxX < $minX ) { $rep[ $id ] = 'blank'; imagedestroy( $im ); continue; }
+        $cw = $maxX - $minX + 1; $ch = $maxY - $minY + 1;
+        $m  = max( 12, (int) round( 0.08 * min( $cw, $ch ) ) );     // small breathing margin
+        $nx = max( 0, $minX - $m ); $ny = max( 0, $minY - $m );
+        $nw = min( $w - $nx, $cw + 2 * $m ); $nh = min( $h - $ny, $ch + 2 * $m );
+        $dst = imagecreatetruecolor( $nw, $nh );
+        imagefill( $dst, 0, 0, imagecolorallocate( $dst, 255, 255, 255 ) );
+        imagecopy( $dst, $im, 0, 0, $nx, $ny, $nw, $nh );
+        imagejpeg( $dst, $file, 92 );
+        imagedestroy( $im ); imagedestroy( $dst );
+        $meta = wp_generate_attachment_metadata( $id, $file );
+        if ( $meta ) wp_update_attachment_metadata( $id, $meta );
+        $rep[ $id ] = "trimmed {$w}x{$h} -> {$nw}x{$nh}";
+    }
+    if ( function_exists( 'rocket_clean_domain' ) ) rocket_clean_domain();
+    update_option( 'pps_home_apply_result', $rep, false );
+}, 100 );
+
 add_action( 'wp_loaded', function () {
     if ( '' === (string) get_option( 'pps_home_probe_trigger', '' ) ) return;
     delete_option( 'pps_home_probe_trigger' );
