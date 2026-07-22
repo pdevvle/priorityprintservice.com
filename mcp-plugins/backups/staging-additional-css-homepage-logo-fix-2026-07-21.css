@@ -1,47 +1,69 @@
-/* Record of an APPENDED block to staging's Customizer → Additional CSS (Astra),
- * added 2026-07-21 via MCP pps_set_custom_css(append=true). custom_css post 19873.
+/* Homepage client-logo band fix — staging, 2026-07-21. THREE-PART fix; this file
+ * is the version-controlled record + revert reference. Nothing here is auto-loaded.
  *
- * WHY: the homepage "Preferred by businesses…" client-logo band is a
- * `wp:columns {isStackedOnMobile:false}` row of 8 Spectra (uagb) image blocks.
- * Spectra pins each logo to fixed pixel dimensions inside an overflow:hidden
- * figure, so at narrower viewports the images overflow their squeezed columns
- * and are CLIPPED (reported: "logos cropped at some resolutions"). Verified
- * headless: all logos clipped at 1280/768/390px before, 0 clipped after; the
- * desktop single row is preserved and the strip wraps to 2–3 rows on
- * tablet/phone with logos scaled-to-fit (contain).
+ * ROOT CAUSE (found via GD analysis, pps-home-probe.php):
+ *   The 8 "Preferred by businesses…" logos were each a short wordmark baked onto a
+ *   tall 1042x833 white canvas — content filled 96% width but as little as 25%
+ *   HEIGHT, i.e. ~35% whitespace top + bottom inside the image file. The prior
+ *   overflow-clip hid that padding (showing only the middle strip = wide logos
+ *   cropped); switching to object-fit:contain revealed all the baked whitespace
+ *   ("gigantic margin"). And WordPress/WooCommerce served a hard-cropped square
+ *   150x150 thumbnail (from the Spectra block's urlMobile), which center-crops a
+ *   wide logo = the residual clipping.
  *
- * SCOPE: `.pps-benefits` + the uagb image selectors exist only in this band, so
- * nothing else on the site is affected.
+ * WHAT WAS DONE (all on staging):
+ *   1. IMAGE TRIM (server-side GD, pps-home-probe.php apply mode): each of the 8
+ *      source logos (attach IDs 39221-39228) trimmed to its own content bbox + an
+ *      8% margin, overwriting the file. Originals backed up at <file>.pre-trim-bak.
+ *      Hard-cropped sizes (thumbnail / woocommerce_thumbnail /
+ *      woocommerce_gallery_thumbnail) removed from metadata so they can't feed srcset.
+ *   2. SRCSET REPOINT (homepage post 86861): every
+ *      Priority-Print-Service-Online-Printing-Services-N-150x150.jpg reference
+ *      (Spectra block urlMobile + srcset) repointed to the full -N.jpg (16 replaces),
+ *      so only the correct-aspect trimmed image is ever served.
+ *   3. CSS (below): a fixed-height logo wall, appended to the Astra Customizer
+ *      Additional CSS (custom_css post 19873). Replaces the earlier "never cropped"
+ *      block. Scoped to .pps-benefits + the uagb image blocks (this band only).
  *
- * REVERT: delete this block from Customizer → Additional CSS (everything between
- * the START/END markers below).
+ * REVERT:
+ *   - Images: restore each <file>.pre-trim-bak over <file>, then Regenerate
+ *     Thumbnails (or wp_generate_attachment_metadata).
+ *   - srcset: not needed if images restored (full URLs still valid); to fully
+ *     revert, re-point -N.jpg mobile refs back to -N-150x150.jpg on post 86861.
+ *   - CSS: delete the block below from Customizer → Additional CSS.
  */
 
-/* ===== HOMEPAGE CLIENT-LOGO STRIP — responsive, never cropped (2026-07-21) ===== */
+/* ===== HOMEPAGE CLIENT-LOGO STRIP v2 — fixed-height logo wall (2026-07-21) ===== */
 .pps-benefits .wp-block-columns.is-not-stacked-on-mobile {
+  display: flex !important;
   flex-wrap: wrap !important;
-  justify-content: center;
-  align-items: center;
-  gap: 20px 24px;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 26px 44px !important;
 }
 .pps-benefits .wp-block-columns.is-not-stacked-on-mobile > .wp-block-column {
-  flex: 1 1 110px !important;
-  min-width: 88px;
-  max-width: 170px;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
   margin: 0 !important;
 }
 .pps-benefits .wp-block-uagb-image,
 .pps-benefits .wp-block-uagb-image__figure {
-  width: 100% !important;
+  width: auto !important;
   max-width: 100% !important;
   margin: 0 !important;
   overflow: visible !important;
 }
 .pps-benefits .wp-block-uagb-image__figure img {
-  width: 100% !important;
-  height: auto !important;
-  max-width: 100% !important;
+  height: 48px !important;
+  width: auto !important;
+  max-width: 160px !important;
   aspect-ratio: auto !important;
   object-fit: contain !important;
+}
+@media (max-width: 600px) {
+  .pps-benefits .wp-block-columns.is-not-stacked-on-mobile { gap: 20px 30px !important; }
+  .pps-benefits .wp-block-uagb-image__figure img { height: 38px !important; max-width: 128px !important; }
 }
 /* ===== END HOMEPAGE CLIENT-LOGO STRIP ===== */
