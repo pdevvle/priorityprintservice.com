@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · IMPOSE-V1.3b</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · IMPOSE-V1.3c</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -585,7 +585,8 @@ async function detectInkGaps(pdfjsDoc, pnoZero, art) {
 // Mirror bleed would reflect a READABLE copy of such text into the bleed
 // ring — the "auto" synth method switches those edges to streak bleed.
 const TEXT_ZONE_PAD = 0.04; // in — beyond the bleed depth, catches descenders
-const STREAK_EPS = 0.025;   // in — sliver width stretched outward by streak bleed
+const STREAK_EPS = 0.025;   // in — default sliver width stretched outward by streak bleed
+const streakEpsOf = spec => Math.min(Math.max(+(spec && spec.streakEps) || STREAK_EPS, 0.005), 0.25);
 async function detectTextNearEdges(pdfjsDoc, pnoZero, art, bleed) {
   const page = await pdfjsDoc.getPage(pnoZero + 1);
   const tc = await page.getTextContent();
@@ -621,8 +622,9 @@ async function detectTextNearEdges(pdfjsDoc, pnoZero, art, bleed) {
 // fixable shortfalls fold into the scale factor so the synth never amplifies
 // a white sliver at the cut. Only applies when the source page genuinely
 // lacks bleed — files with real bleed are never touched.
-function applySynthBleed(art, mode, bleed, gaps) {
+function applySynthBleed(art, mode, bleed, gaps, streakEps) {
   if (!mode || mode === "off" || art.hasBleed) return art;
+  art.streakEps = streakEps || STREAK_EPS;
   if (gaps && [gaps.left, gaps.right, gaps.top, gaps.bottom].every(g => g > SYNTH_MAXFIX)) {
     art.notes.push("edges are white by design (no ink near trim) — bleed synthesis skipped");
     return art;
@@ -654,7 +656,7 @@ function applySynthBleed(art, mode, bleed, gaps) {
   const streaked = mode === "auto" && tn ? ["left", "right", "top", "bottom"].filter(e => tn[e]) : [];
   art.notes.push((mode === "scale"
     ? `no bleed in source — art scaled up to cover ${art.synthB}″ bleed (trim-line content shifts outward by the same amount)`
-    : mode === "streak" ? `no bleed in source — ${art.synthB}″ streak bleed synthesized (edge sliver stretched outward)`
+    : mode === "streak" ? `no bleed in source — ${art.synthB}″ streak bleed synthesized (outermost ${art.streakEps}″ stretched outward)`
     : mode === "auto" ? `no bleed in source — ${art.synthB}″ bleed synthesized (mirror${streaked.length ? `; streak on ${streaked.join("/")} — text near trim, a mirror would duplicate it` : ", no text near trim"})`
     : `no bleed in source — ${art.synthB}″ mirrored-edge bleed synthesized`)
     + (short ? ` · art stopped ${short.toFixed(3)}″ shy of trim — pre-scaled ×${f.toFixed(4)} so ink reaches the cut` : ""));
@@ -697,7 +699,7 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
     // interior butt cuts and the saddle spine stay untouched.
     const b = art.synthB, T = targetTrim;
     const xL = T.x, xR = T.x + T.w, yB = T.y, yT = T.y + T.h;
-    const K = b / STREAK_EPS;
+    const K = b / (art.streakEps || STREAK_EPS);
     const cyc = ["left", "bottom", "right", "top"]; // CCW edge cycle
     const rawEdge = e => cyc[(((cyc.indexOf(e) - drawRot / 90) % 4) + 4) % 4];
     const streaky = e => art.synth === "streak" || (art.synth === "auto" && art.textNear && art.textNear[rawEdge(e)]);
@@ -965,7 +967,7 @@ async function imposeSaddle(artBytes, spec, layout) {
             warnings.push(`text detection failed on page ${i + 1} (${e.message}) — streak bleed used on all edges`);
           }
         }
-        applySynthBleed(art, abm, layout.bleed, gaps);
+        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec));
       }
       artCache.set(key, art);
     }
@@ -1169,7 +1171,7 @@ async function imposePdf(artBytes, backBytes, spec) {
             warnings.push(`text detection failed on ${keyOf(ref)} (${e.message}) — streak bleed used on all edges`);
           }
         }
-        applySynthBleed(art, abm, layout.bleed, gaps);
+        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec));
       }
       if (key === keyOf(pieces[0].front)) art.notes.forEach(n => warnings.push("front: " + n));
       else if (sides === 2 && pieces[0].back && key === keyOf(pieces[0].back)) art.notes.forEach(n => warnings.push("back: " + n));
@@ -1551,6 +1553,7 @@ function App() {
   const [bleedIn, setBleedIn] = useState(0.125);           // per-job bleed override
   const [addBleed, setAddBleed] = useState("off");         // synthesize bleed for no-bleed files: off | mirror | scale
   const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
+  const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
   const [addBleedPages, setAddBleedPages] = useState({});  // per-page mode overrides {1-based page: mode}
   const [multiMode, setMultiMode] = useState("repeat");    // multipage flat files: repeat | gang | stack
   const isSaddle = calc === "saddle";
@@ -1593,10 +1596,10 @@ function App() {
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
-    bleed: +bleedIn, multiMode, addBleed, addBleedSmart,
+    bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps,
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, addBleedPages]);
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, addBleedPages]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -1883,6 +1886,14 @@ function App() {
                 Smart edge detect — if the art stops just short of trim (≤3/16″), pre-scale so the synthesized
                 bleed never amplifies the white sliver; big white margins are respected as design.
               </label>
+              {(["auto", "streak"].includes(addBleed) || Object.values(addBleedPages).some(v => v === "auto" || v === "streak")) && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 4 }}>
+                  Streak sampler: outermost
+                  <input type="number" step="0.005" min="0.005" max="0.25" value={streakEps}
+                         style={{ width: 64 }} onChange={e => setStreakEps(e.target.value)} />
+                  ″ of art stretched into the bleed (smaller = purer edge color, larger = softer smear)
+                </div>
+              )}
               {art && art.pageCount > 1 && (addBleed !== "off" || Object.keys(addBleedPages).length > 0
                 || (result && (result.warnings || []).some(w => /no bleed/i.test(w)))) && (
                 <div style={{ marginTop: 6 }}>

@@ -142,8 +142,10 @@ download the imposed PDF. Useful for testing and one-off jobs.
   just enough to cover the bleed box; trim-line content shifts outward
   and the safety margin shrinks by the bleed amount — the better pick for
   photo collages and faces, where a mirror would visibly reflect people
-  at the edges). **Streak** (the outermost 0.025″ sliver of art stretched
-  outward to fill the bleed — continuous at the cut, nothing readable
+  at the edges). **Streak** (the outermost sliver of art stretched
+  outward to fill the bleed — sliver width adjustable via the "Streak
+  sampler" input, default 0.025″, clamped 0.005–0.25″: smaller = purer
+  edge color, larger = softer smear — continuous at the cut, nothing readable
   survives; what auto uses on text edges, selectable outright). Per-axis
   the transform is one family: a mirrored map about the trim edge with
   stretch factor k (k=1 = mirror, k=bleed/0.025 = streak); corners
