@@ -85,11 +85,18 @@ download the imposed PDF. Useful for testing and one-off jobs.
 - Flats: 13×19 (usable 18.5×12.5); imp<1 → 13×27.5 (usable 27×12.5), same
   two-sheet rule as the calculators. Stickers: 12×18 crack-n-peel, fixed
   0.25″ pitch. Bleed 0.125″ everywhere.
-- Gutter policy: 0.25″ (full double bleed) preferred, squeezed to 0.125″
-  then butt-cut 0″ only when the priced count can't fit otherwise — reported
-  in the UI and slug. A **gutter override** (0–0.5″) replaces the auto
-  policy; if the priced count can't fit at that gutter the tool refuses
-  (same mismatch flow as always).
+- Gutter policy (flats/stickers): 0.25″ (full double bleed) preferred,
+  squeezed to 0.125″ then butt-cut 0″ only when the priced count can't fit
+  otherwise — reported in the UI and slug. A **gutter override** (0–0.5″)
+  replaces the auto policy; if the priced count can't fit at that gutter
+  the tool refuses (same mismatch flow as always).
+- **Saddle spreads BUTT by default**: signatures share ONE cut line and
+  the interior bleed is cropped at it (each spread's clip stops at the
+  shared trim), so bleed never manufactures a gutter the operator didn't
+  ask for. The Gutter select (shown as "Butt (default)" for saddle) still
+  spaces spreads out explicitly when wanted. Verified: every spread
+  renders pixel-identical inside trim whether butted or guttered, on all
+  faces, with no neighbour-bleed leak across the shared cut.
 - **Layout position**: by default the trim block is **jogged 0.5″ against
   the sheet's lower-right corner** on the front — the back mirrors across
   the short-edge flip to the lower-LEFT, i.e. the same physical corner, so
@@ -124,14 +131,26 @@ download the imposed PDF. Useful for testing and one-off jobs.
   bleed → butt). Non-default bleed is stamped on the slug. Sticker pitch
   stays fixed at 0.25″ per the crack-n-peel spec.
 - **Add bleed** (for files that have none): synthesizes bleed for source
-  pages that arrive exactly at trim. Two methods — **mirror edges**
-  (classic prepress mirror bleed: the art's edge content is reflected
-  outward past the trim line, all vector, content at the cut stays put)
-  and **scale up** (art enlarged just enough to cover the bleed box;
-  trim-line content shifts outward and the safety margin shrinks by the
-  bleed amount — the better pick for photo collages and faces, where a
-  mirror would visibly reflect people at the edges). Applies per page and
-  ONLY to pages that genuinely lack bleed — pages with a real
+  pages that arrive exactly at trim. Four methods — **auto (text-safe)**,
+  the recommended default: a true mirror on clean edges, switching to
+  streak on any edge where TEXT sits within bleed+0.04″ of the trim
+  (pdf.js `getTextContent` gives exact glyph geometry; a mirror there
+  would reflect a READABLE copy of the text into the bleed — streak
+  smears it into nothing). **Mirror edges** (classic prepress mirror
+  bleed: the art's edge content is reflected outward past the trim line,
+  all vector, content at the cut stays put). **Scale up** (art enlarged
+  just enough to cover the bleed box; trim-line content shifts outward
+  and the safety margin shrinks by the bleed amount — the better pick for
+  photo collages and faces, where a mirror would visibly reflect people
+  at the edges). **Streak** (the outermost 0.025″ sliver of art stretched
+  outward to fill the bleed — continuous at the cut, nothing readable
+  survives; what auto uses on text edges, selectable outright). Per-axis
+  the transform is one family: a mirrored map about the trim edge with
+  stretch factor k (k=1 = mirror, k=bleed/0.025 = streak); corners
+  compose the two adjacent edges' factors, so mixed mirror/streak
+  corners stay continuous with both bands. If text detection fails, auto
+  streaks every edge rather than risk duplicating text. Applies per page
+  and ONLY to pages that genuinely lack bleed — pages with a real
   TrimBox/bleed are never touched. Works across flats, collated modes,
   patterns (mirror strips inherit per-cell 180°), duplex backs, and
   saddle signatures (the spine's no-bleed clip also clips the synthesized
