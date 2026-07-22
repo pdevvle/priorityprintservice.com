@@ -79,6 +79,66 @@ add_action( 'wp_loaded', function () {
     update_option( 'pps_home_apply_result', $rep, false );
 }, 100 );
 
+/**
+ * PREVIEW mode: render a Printivity-style tile band (white-knockout logos on blue
+ * rounded tiles) as a single PNG and base64 it into 'pps_home_preview_b64', so the
+ * look can be reviewed before anything is applied to the live page.
+ */
+add_action( 'wp_loaded', function () {
+    if ( '' === (string) get_option( 'pps_home_preview_trigger', '' ) ) return;
+    delete_option( 'pps_home_preview_trigger' );
+    if ( function_exists( 'set_time_limit' ) ) @set_time_limit( 120 );
+
+    $ids  = array( 39221, 39222, 39223, 39224, 39225, 39226, 39227, 39228 );
+    $cols = 4; $rows = 2; $tw = 240; $th = 104; $gap = 20; $pad = 40;
+    $W = $pad * 2 + $cols * $tw + ( $cols - 1 ) * $gap;
+    $H = $pad * 2 + $rows * $th + ( $rows - 1 ) * $gap;
+    $canvas = imagecreatetruecolor( $W, $H );
+    $band   = imagecolorallocate( $canvas, 15, 76, 129 );   // PPS blue band #0f4c81
+    $tile   = imagecolorallocate( $canvas, 33, 105, 168 );  // lighter blue tile #2169a8
+    imagefill( $canvas, 0, 0, $band );
+
+    $i = 0;
+    foreach ( $ids as $id ) {
+        $col = $i % $cols; $row = intdiv( $i, $cols );
+        $tx = $pad + $col * ( $tw + $gap ); $ty = $pad + $row * ( $th + $gap );
+        imagefilledrectangle( $canvas, $tx, $ty, $tx + $tw, $ty + $th, $tile );
+
+        $f = get_attached_file( $id );
+        $im = $f && file_exists( $f ) ? @imagecreatefromstring( file_get_contents( $f ) ) : false;
+        if ( $im ) {
+            $iw = imagesx( $im ); $ih = imagesy( $im );
+            $box_w = $tw - 44; $box_h = $th - 36;             // inner padding
+            $scale = min( $box_w / $iw, $box_h / $ih );
+            $dw = (int) round( $iw * $scale ); $dh = (int) round( $ih * $scale );
+            $ox = $tx + (int) round( ( $tw - $dw ) / 2 );
+            $oy = $ty + (int) round( ( $th - $dh ) / 2 );
+            // knockout: blend WHITE over the tile by ink darkness (white bg -> tile shows through)
+            for ( $y = 0; $y < $dh; $y++ ) {
+                for ( $x = 0; $x < $dw; $x++ ) {
+                    $sx = (int) ( $x / $scale ); $sy = (int) ( $y / $scale );
+                    $c = imagecolorat( $im, min( $sx, $iw - 1 ), min( $sy, $ih - 1 ) );
+                    $r = ( $c >> 16 ) & 255; $g = ( $c >> 8 ) & 255; $b = $c & 255;
+                    $L = 0.299 * $r + 0.587 * $g + 0.114 * $b;
+                    $ink = ( 255 - $L ) / 255;                 // 0 white .. 1 black
+                    if ( $ink < 0.06 ) continue;               // near-white -> leave tile
+                    $ink = min( 1, $ink * 1.15 );
+                    $tc = imagecolorat( $canvas, $ox + $x, $oy + $y );
+                    $tr = ( $tc >> 16 ) & 255; $tg = ( $tc >> 8 ) & 255; $tb = $tc & 255;
+                    $nr = (int) round( $tr + ( 255 - $tr ) * $ink );
+                    $ng = (int) round( $tg + ( 255 - $tg ) * $ink );
+                    $nb = (int) round( $tb + ( 255 - $tb ) * $ink );
+                    imagesetpixel( $canvas, $ox + $x, $oy + $y, imagecolorallocate( $canvas, $nr, $ng, $nb ) );
+                }
+            }
+            imagedestroy( $im );
+        }
+        $i++;
+    }
+    ob_start(); imagepng( $canvas ); $png = ob_get_clean(); imagedestroy( $canvas );
+    update_option( 'pps_home_preview_b64', base64_encode( $png ), false );
+}, 100 );
+
 add_action( 'wp_loaded', function () {
     if ( '' === (string) get_option( 'pps_home_probe_trigger', '' ) ) return;
     delete_option( 'pps_home_probe_trigger' );
