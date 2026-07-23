@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · SS-SHARE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-23 · SS-PREVIEW-DL</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -2444,6 +2444,20 @@ update();
     return new Blob([html], { type: "text/html" });
   }
 
+  // Download the standalone, self-contained 3D-preview HTML so the customer can
+  // save it or email it for sign-off. Same artifact that ships as deliverable #4
+  // in the approval package — surfaced here as a one-click share from the preview.
+  function downloadPreviewHtml() {
+    const blob = buildPreviewHtml();
+    if (!blob) return;
+    const baseName = (fileName || "booklet").replace(/\.[^.]+$/, "");
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = baseName + "_3D-preview.html";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
   async function generateApprovalPackage() {
     const BLEED = 0.125;
     const SAFETY = 0.125;
@@ -4225,6 +4239,13 @@ update();
                     }}>{o.l}</button>
                   ))}
                 </div>
+                {hasFile && (
+                  <button type="button" onClick={downloadPreviewHtml}
+                    title="Download a self-contained HTML file of this 3D preview — save it or email it to share"
+                    style={{ marginLeft:"auto", padding:"6px 14px", fontSize:11, fontWeight:600, border:`1px solid ${CK.cyan}`, borderRadius:6, cursor:"pointer", fontFamily:"inherit", background:"rgba(0,126,255,.12)", color:CK.cyan, display:"inline-flex", alignItems:"center", gap:6 }}>
+                    ⬇ Share / Download HTML
+                  </button>
+                )}
               </div>
             </div>
 
