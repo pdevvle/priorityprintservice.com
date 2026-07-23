@@ -84,6 +84,47 @@ add_action( 'wp_loaded', function () {
  * rounded tiles) as a single PNG and base64 it into 'pps_home_preview_b64', so the
  * look can be reviewed before anything is applied to the live page.
  */
+/**
+ * KNOCKOUT mode: generate a white-on-transparent PNG for each logo (ink darkness
+ * -> white alpha), saved as <name>-white.png next to the trimmed original, for the
+ * blue-tile design. Trigger: 'pps_home_knockout_trigger'. Result: 'pps_home_knockout_result'.
+ */
+add_action( 'wp_loaded', function () {
+    if ( '' === (string) get_option( 'pps_home_knockout_trigger', '' ) ) return;
+    delete_option( 'pps_home_knockout_trigger' );
+    if ( function_exists( 'set_time_limit' ) ) @set_time_limit( 180 );
+    $ids = array( 39221, 39222, 39223, 39224, 39225, 39226, 39227, 39228 );
+    $rep = array();
+    foreach ( $ids as $id ) {
+        $file = get_attached_file( $id );
+        if ( ! $file || ! file_exists( $file ) ) { $rep[ $id ] = 'no file'; continue; }
+        $im = @imagecreatefromstring( file_get_contents( $file ) );
+        if ( ! $im ) { $rep[ $id ] = 'decode fail'; continue; }
+        $w = imagesx( $im ); $h = imagesy( $im );
+        $out = imagecreatetruecolor( $w, $h );
+        imagealphablending( $out, false );
+        imagesavealpha( $out, true );
+        imagefilledrectangle( $out, 0, 0, $w, $h, ( 127 << 24 ) | 0xFFFFFF ); // fully transparent
+        for ( $y = 0; $y < $h; $y++ ) {
+            for ( $x = 0; $x < $w; $x++ ) {
+                $c = imagecolorat( $im, $x, $y );
+                $L = 0.299 * ( ( $c >> 16 ) & 255 ) + 0.587 * ( ( $c >> 8 ) & 255 ) + 0.114 * ( $c & 255 );
+                $ink = ( 255 - $L ) / 255;
+                if ( $ink < 0.04 ) continue;                 // near-white -> stay transparent
+                $ink = min( 1, $ink * 1.15 );
+                $a = 127 - (int) round( $ink * 127 );        // 0 opaque .. 127 transparent (GD)
+                imagesetpixel( $out, $x, $y, ( $a << 24 ) | 0xFFFFFF ); // white at that alpha
+            }
+        }
+        $png = preg_replace( '/\.(jpe?g|png)$/i', '-white.png', $file );
+        imagepng( $out, $png );
+        imagedestroy( $im ); imagedestroy( $out );
+        $rep[ $id ] = basename( $png );
+    }
+    if ( function_exists( 'rocket_clean_domain' ) ) rocket_clean_domain();
+    update_option( 'pps_home_knockout_result', $rep, false );
+}, 100 );
+
 add_action( 'wp_loaded', function () {
     if ( '' === (string) get_option( 'pps_home_preview_trigger', '' ) ) return;
     delete_option( 'pps_home_preview_trigger' );
