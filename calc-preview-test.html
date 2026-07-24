@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-24 · SS-LEADSTACK</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-24 · SS-ADJTBL</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -4811,6 +4811,10 @@ function App(){
   const r=result||{};
 
   // Quantity projection table — recalculate at standard breakpoints
+  // Debug-only quoting aid (unlocked by the %3414 job-name code): mark the whole
+  // quantity table up or down by a percentage. Applies ONLY to the displayed and
+  // copied table — `result` and the price submitted to the cart are never touched.
+  const[tableAdjPct,setTableAdjPct]=useState("");
   const projections = useMemo(() => {
     if (!result || result.error?.length) return null;
     const baseConfig = {
@@ -4824,7 +4828,7 @@ function App(){
     const breakpoints = [25,50,100,250,500,1000,2500,5000].filter(q => q !== currentQty);
     // Add current qty and sort
     const qtys = [...breakpoints, currentQty].sort((a,b) => a - b);
-    return qtys.map(q => {
+    const rows = qtys.map(q => {
       // If current order has no rush, strip needByDate from projections so
       // higher quantities don't accidentally trigger rush (production time grows with qty)
       const projNeedBy = (result.shipping?.rushCost > 0) ? needByDate : null;
@@ -4832,10 +4836,16 @@ function App(){
       if (!pr || pr.error?.length) return {qty: q, total: null, perUnit: null, current: q === currentQty};
       return {qty: q, total: pr.total, perUnit: pr.perUnit, current: q === currentQty};
     });
+    // Debug-only markup/markdown applied uniformly to every row, so the table and
+    // the copied version always agree. Deliberately NOT applied to `result` — the
+    // cart price stays whatever calculate() produced.
+    const adj = 1 + (parseFloat(tableAdjPct) || 0) / 100;
+    return adj === 1 ? rows : rows.map(p => p.total === null ? p
+      : {...p, total: p.total * adj, perUnit: p.perUnit * adj});
   }, [result, sets, sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
     insidePaperType,insidePaper,coverMode,coverPaperType,coverPaper,
     twoStaple,vividPrint,coating,bundling,roundCorner,artwork,artEditPages,bleed,proof,
-    shipState,shipZip,needByDate]);
+    shipState,shipZip,needByDate,tableAdjPct]);
 
   useEffect(()=>{if(r.coatOK===false)setCoating(0)},[r.coatOK]);
   useEffect(()=>{if(r.vividOK===false)setVividPrint(false)},[r.vividOK]);
@@ -5412,8 +5422,20 @@ function App(){
           <button type="button" onClick={handleAddToOrder} style={{width:"100%",padding:"14px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:15,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",transition:"opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
-              <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
+              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing
+                {(parseFloat(tableAdjPct)||0)!==0&&<span style={{marginLeft:6,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                {debugUnlocked&&(
+                  <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3}}>
+                    <span style={{fontSize:9,fontWeight:700,color:CC.light,textTransform:"uppercase",letterSpacing:".4px"}}>Adjust Table</span>
+                    <input type="text" inputMode="decimal" value={tableAdjPct} onChange={e=>setTableAdjPct(e.target.value)} placeholder="0"
+                      style={{width:46,padding:"2px 5px",fontSize:11,textAlign:"right",border:`1px solid ${(parseFloat(tableAdjPct)||0)!==0?CK.magenta:CC.border}`,borderRadius:4,fontFamily:"inherit",color:CC.dark,background:"#fff",outline:"none"}}/>
+                    <span style={{fontSize:10,color:CC.light,fontWeight:600}}>%</span>
+                  </span>
+                )}
+                <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
+              </div>
             </div>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
               <thead>
