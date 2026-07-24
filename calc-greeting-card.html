@@ -52,7 +52,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · GC-SHARE2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-24 · GC-LEADSTACK</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
@@ -619,7 +619,13 @@ function calculate(c) {
   const artDays = art.val >= 4 ? Math.ceil(art.val) : 0;
   const proofDays = c.proof >= 3 ? Math.ceil(paperDays + 3.01) : 0;
   const baseDays = sheetsToDays(pressSheets);
-  const days = Math.max(PCF.minimum_turnaround_days, baseDays + paperDays + vividDays + coatDays + bundleDays + perfDays + rcDays + artDays + proofDays + envDays);
+  // Material lead times STACK (run concurrently) rather than accumulating: paper and
+  // envelopes are ordered from the supplier at the same time and arrive in parallel,
+  // so the wait is the longest of the two, not their sum. In-house finishing (coating,
+  // bundling, perforating, cornering) stays additive — that runs sequentially on the
+  // floor. Materials still precede production, hence added to baseDays, not maxed.
+  const materialDays = Math.max(paperDays, envDays);
+  const days = Math.max(PCF.minimum_turnaround_days, baseDays + materialDays + vividDays + coatDays + bundleDays + perfDays + rcDays + artDays + proofDays);
 
   // Turnaround impact per option (for UI badges)
   const ti = {
@@ -632,7 +638,9 @@ function calculate(c) {
     artDesign: artDays,
     artEdits: (art.val >= 2 && art.val < 4) ? 1 : 0,
     proof: proofDays,
-    envelopes: envDays,
+    // Marginal impact: envelopes stack with the paper lead, so they only extend the
+    // schedule by however much they outlast it. Keeps the badge sum equal to the real total.
+    envelopes: Math.max(0, envDays - paperDays),
   };
 
   // Shipping & Rush
