@@ -833,6 +833,47 @@ Add-on turnaround (paper days, vivid, coating, bundling, perforation, etc.) stil
 
 `PCF.minimum_turnaround_days` still enforced as the floor.
 
+### Material lead times STACK, they don't accumulate (2026-07-24)
+
+**Rule:** when a job needs more than one supplier-ordered material, those lead times run
+**concurrently** — the wait is the **longest** one, not their sum. They are ordered from the
+supplier at the same time and arrive in parallel.
+
+```
+materialDays = MAX(inside paper, cover paper, envelopes)     // NOT the sum
+days = max(minimum_turnaround_days,
+           baseDays + materialDays + addonDays + artDays + proofDays)
+```
+
+Materials still **precede** production, so `materialDays` is *added* to `baseDays` rather than
+maxed against it — you cannot print on paper that has not arrived. Only the several material
+leads overlap **each other**.
+
+**In-house finishing stays additive.** Coating, bundling, perforating, round-cornering, vivid
+second pass and artwork/proof days run sequentially on the floor, so they continue to sum.
+
+Effect of the change: a job's schedule shortens by `min(lead₁, lead₂)`.
+
+| Calculator | Combined leads | Before | After |
+|---|---|---|---|
+| Saddle stitch | inside 2d + cover 2d | 4 paper days | 2 |
+| Perfect bound | inside 4d + cover 4d | 8 paper days | 4 |
+| Greeting card | paper 4d + envelopes 5d | 9 material days | 5 |
+
+**Where implemented** (`pT` = the material stack):
+- `calc-preview-test.html` — `pT = MAX(floor(insidePaper.val), floor(cover.val))`; integer part
+  of `val` is the lead days (`2.002` → 2d factory order, `0.001` → in stock)
+- `calc-perfect-bound.html`, `calc-coupon-book.html` — `pT = MAX(inside.days ?? floor(val), cover.days ?? floor(val))`
+- `calc-greeting-card.html` — `materialDays = MAX(paperDays, envDays)`; the `ti.envelopes` UI
+  badge shows the **marginal** impact `max(0, envDays − paperDays)` so the badge total still
+  equals the real schedule
+- `calc-brochure.html`, `calc-letterhead.html`, `calc-postcard.html`, `calc-sticker.html` —
+  **unchanged**: each has exactly one material lead (`paperDays`), so `MAX` of one value is a
+  no-op. If a second material lead is ever added to these, it must join the same `MAX`.
+
+**ROLLBACK:** restore the summed forms — `pT = insideDays + coverDays` in the three booklet
+calcs, and `+ envDays` back into the greeting-card `days` expression (dropping `materialDays`).
+
 `PCF.sheetsturnaround` is no longer used for base production days but remains referenced by some addon turnaround estimates (e.g., vivid second-pass time).
 
 ### >100,000 sheet cap

@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-23 · SS-PREVIEW-DL</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-24 · SS-LEADSTACK</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -706,7 +706,12 @@ function calculate(c) {
   const total=Object.values(P).reduce((s,v)=>s+v,0);
 
   // Turnaround
-  const pT=(c.insidePaper.val||0)+(cvr.val||0);
+  // Material lead times STACK (run concurrently) rather than accumulating: the inside
+  // and cover stocks are ordered from the supplier together and arrive in parallel, so
+  // the wait is the longest of the two, not their sum. The integer part of `val` is the
+  // lead days (2.002 -> 2 days factory order, 0.001 -> in stock). Materials still
+  // precede production, so pT is added to sheetsToDays() below rather than maxed with it.
+  const pT=Math.max(Math.floor(c.insidePaper.val||0),Math.floor(cvr.val||0));
   const aT=(twoApplied?Math.floor(tQ/PCF.sheetsturnaround):0)+(c.vividPrint?Math.floor(tS/PCF.sheetsturnaround):0)+
     (coat.val>0&&coatOK?Math.floor((tQ/(imp/2))/coat.val):0)+
     (bund.val>0&&q100?Math.floor(spine/bund.val):0)+
