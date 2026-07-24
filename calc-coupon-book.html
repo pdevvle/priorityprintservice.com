@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-23 · CB-PGPERF</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-24 · CB-PGCONFIRM</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -999,29 +999,32 @@ function Sel({label,value,onChange,children,disabled,note,badge,autoComplete,nam
   return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} autoComplete={autoComplete} name={name} style={{...ST.sel,fontSize:m?16:15,padding:m?"10px 32px 10px 12px":"10px 32px 10px 12px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
 }
 
-// debounceMs > 0 defers the committed onChange until typing pauses, so a field
-// that drives expensive downstream work (page count re-renders every page of the
-// 3D preview) never fires on half-typed values — typing "240" used to commit 24
-// first. Blur and Enter always flush immediately. Default 0 = original behavior.
-function TxtNum({label,value,onChange,min=1,max=99999,debounceMs=0}){
+// confirm=true is for fields whose value drives expensive downstream work (page
+// count re-renders every page of the 3D preview). Nothing commits while typing,
+// so there's no guessing whether a half-typed "12" was meant to be "120" — the
+// value applies on Enter, on blur, or via the ✓ Apply button that appears while
+// the entry differs from what's applied. Default = commit on every keystroke.
+function TxtNum({label,value,onChange,min=1,max=99999,confirm=false}){
   const[raw,setRaw]=useState(String(value));
-  const timer=useRef(null);
-  const pending=useRef(false);
-  // Don't let a parent re-render stomp the text while a commit is still in flight.
-  useEffect(()=>{if(!pending.current)setRaw(String(value))},[value]);
-  useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current)},[]);
-  const commit=v=>{
-    if(!debounceMs){onChange(v);return}
-    if(timer.current)clearTimeout(timer.current);
-    pending.current=true;
-    timer.current=setTimeout(()=>{timer.current=null;pending.current=false;onChange(v)},debounceMs);
-  };
-  const flush=()=>{
-    if(timer.current){clearTimeout(timer.current);timer.current=null}
-    pending.current=false;
-    let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v));
-  };
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)commit(v)}} onBlur={flush} onKeyDown={e=>{if(e.key==="Enter")flush()}} style={ST.inp}/></div>;
+  useEffect(()=>setRaw(String(value)),[value]);
+  const flush=()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))};
+  // A pending edit: what's typed isn't what's actually applied to the quote yet.
+  const unapplied=confirm&&raw.trim()!==""&&raw.trim()!==String(value);
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}
+    <div style={{position:"relative"}}>
+      <input type="text" inputMode="decimal" value={raw}
+        onChange={e=>{setRaw(e.target.value);if(confirm)return;const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)onChange(v)}}
+        onBlur={flush}
+        onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();flush()}}}
+        style={{...ST.inp,...(unapplied?{paddingRight:80,borderColor:CK.cyan}:{})}}/>
+      {unapplied&&(
+        // preventDefault on mousedown keeps focus, so blur can't unmount the
+        // button out from under the click that's about to land on it.
+        <button type="button" onMouseDown={e=>e.preventDefault()} onClick={flush}
+          title="Apply this page count to the quote"
+          style={{position:"absolute",right:5,top:"50%",transform:"translateY(-50%)",padding:"5px 10px",fontSize:12,fontWeight:700,border:"none",borderRadius:4,cursor:"pointer",fontFamily:"inherit",background:CK.cyan,color:"#fff",lineHeight:1.2,whiteSpace:"nowrap"}}>✓ Apply</button>
+      )}
+    </div></div>;
 }
 
 function Pil({label,options,value,onChange,disabled,badge}){
@@ -4787,7 +4790,7 @@ function App(){
               </div>
             ) : (
               <div style={{marginTop:6}}>
-                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350} debounceMs={350}/>
+                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350} confirm/>
               </div>
             )}
 
