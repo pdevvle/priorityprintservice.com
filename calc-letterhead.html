@@ -45,7 +45,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · LH-SHARE2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-24 · LH-ADJTBL</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Letterhead Calculator v1
@@ -2651,7 +2651,7 @@ function App() {
   const r = result || {};
 
   // Quantity projection table
-  const projections = useMemo(() => {
+  const projectionsRaw = useMemo(() => {
     if (!result || result.error) return null;
     const baseConfig = {
       qty, sizeLabel, sizeMode, longEdge, shortEdge,
@@ -2668,6 +2668,18 @@ function App() {
       return {qty: q, total: pr.total, perUnit: pr.perUnit, current: q === qty};
     });
   }, [result, qty, sizeLabel, sizeMode, longEdge, shortEdge, frontColor, backColor, sides, paper, perforation, perfDir, perfPositions, artwork, bleed, proof, shipState, shipZip, needByDate]);
+
+  // Debug-only quoting aid (unlocked by the %3414 job-name code): mark the whole
+  // quantity table up or down by a percentage. Applies ONLY to the displayed and
+  // copied table — `result` is untouched, so the price submitted to the cart is
+  // never affected by this control.
+  const[tableAdjPct,setTableAdjPct]=useState("");
+  const projections = useMemo(() => {
+    if (!projectionsRaw) return null;
+    const adj = 1 + (parseFloat(tableAdjPct) || 0) / 100;
+    return adj === 1 ? projectionsRaw : projectionsRaw.map(p => p.total === null ? p
+      : {...p, total: p.total * adj, perUnit: p.perUnit * adj});
+  }, [projectionsRaw, tableAdjPct]);
 
   const r2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
   const r3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
@@ -3103,7 +3115,16 @@ function App() {
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#f8fafc",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.primary}}>Quantity Pricing</div>
-              <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
+              {debugUnlocked&&(
+                  <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3,marginLeft:"auto",marginRight:8}}>
+                    <span style={{fontSize:9,fontWeight:700,color:CC.light,textTransform:"uppercase",letterSpacing:".4px"}}>Adjust Table</span>
+                    <input type="text" inputMode="decimal" value={tableAdjPct} onChange={e=>setTableAdjPct(e.target.value)} placeholder="0"
+                      style={{width:46,padding:"2px 5px",fontSize:11,textAlign:"right",border:`1px solid ${(parseFloat(tableAdjPct)||0)!==0?CK.magenta:CC.border}`,borderRadius:4,fontFamily:"inherit",color:CC.dark,background:"#fff",outline:"none"}}/>
+                    <span style={{fontSize:10,color:CC.light,fontWeight:600}}>%</span>
+                    {(parseFloat(tableAdjPct)||0)!==0&&<span style={{fontSize:9,fontWeight:700,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
+                  </span>
+                )}
+                <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
             </div>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
               <thead>
@@ -3187,7 +3208,16 @@ function App() {
           <div style={{ padding: "8px 14px", background: "#f8fafc", borderBottom: `1px solid ${CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: CC.light }}>Quantity Pricing</span>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <button type="button" onClick={copyProjections} style={{ fontSize: 10, fontWeight: 600, color: projCopied ? "#16a34a" : CC.light, background: "none", border: "none", cursor: "pointer", padding: "2px 6px", fontFamily: "inherit" }}>
+              {debugUnlocked&&(
+                  <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3,marginLeft:"auto",marginRight:8}}>
+                    <span style={{fontSize:9,fontWeight:700,color:CC.light,textTransform:"uppercase",letterSpacing:".4px"}}>Adjust Table</span>
+                    <input type="text" inputMode="decimal" value={tableAdjPct} onChange={e=>setTableAdjPct(e.target.value)} placeholder="0"
+                      style={{width:46,padding:"2px 5px",fontSize:11,textAlign:"right",border:`1px solid ${(parseFloat(tableAdjPct)||0)!==0?CK.magenta:CC.border}`,borderRadius:4,fontFamily:"inherit",color:CC.dark,background:"#fff",outline:"none"}}/>
+                    <span style={{fontSize:10,color:CC.light,fontWeight:600}}>%</span>
+                    {(parseFloat(tableAdjPct)||0)!==0&&<span style={{fontSize:9,fontWeight:700,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
+                  </span>
+                )}
+                <button type="button" onClick={copyProjections} style={{ fontSize: 10, fontWeight: 600, color: projCopied ? "#16a34a" : CC.light, background: "none", border: "none", cursor: "pointer", padding: "2px 6px", fontFamily: "inherit" }}>
                 {projCopied ? "Copied!" : "Copy"}
               </button>
               <button type="button" onClick={handleShareLink} style={{ fontSize: 10, fontWeight: 600, color: shareCopied ? "#16a34a" : CK.cyan, background: "none", border: "none", cursor: "pointer", padding: "2px 6px", fontFamily: "inherit" }}>
