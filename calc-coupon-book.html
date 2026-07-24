@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · CB-SHARE2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-23 · CB-PGPERF</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -999,10 +999,29 @@ function Sel({label,value,onChange,children,disabled,note,badge,autoComplete,nam
   return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} autoComplete={autoComplete} name={name} style={{...ST.sel,fontSize:m?16:15,padding:m?"10px 32px 10px 12px":"10px 32px 10px 12px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
 }
 
-function TxtNum({label,value,onChange,min=1,max=99999}){
+// debounceMs > 0 defers the committed onChange until typing pauses, so a field
+// that drives expensive downstream work (page count re-renders every page of the
+// 3D preview) never fires on half-typed values — typing "240" used to commit 24
+// first. Blur and Enter always flush immediately. Default 0 = original behavior.
+function TxtNum({label,value,onChange,min=1,max=99999,debounceMs=0}){
   const[raw,setRaw]=useState(String(value));
-  useEffect(()=>setRaw(String(value)),[value]);
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
+  const timer=useRef(null);
+  const pending=useRef(false);
+  // Don't let a parent re-render stomp the text while a commit is still in flight.
+  useEffect(()=>{if(!pending.current)setRaw(String(value))},[value]);
+  useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current)},[]);
+  const commit=v=>{
+    if(!debounceMs){onChange(v);return}
+    if(timer.current)clearTimeout(timer.current);
+    pending.current=true;
+    timer.current=setTimeout(()=>{timer.current=null;pending.current=false;onChange(v)},debounceMs);
+  };
+  const flush=()=>{
+    if(timer.current){clearTimeout(timer.current);timer.current=null}
+    pending.current=false;
+    let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v));
+  };
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)commit(v)}} onBlur={flush} onKeyDown={e=>{if(e.key==="Enter")flush()}} style={ST.inp}/></div>;
 }
 
 function Pil({label,options,value,onChange,disabled,badge}){
@@ -2853,6 +2872,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [trimmedPages, setTrimmedPages] = useState([]);
   useEffect(() => {
     if (displayPages.length === 0) { setTrimmedPages([]); return; }
+    // Nothing uploaded yet (every slot still an empty placeholder): skip the whole
+    // raster pass. The 3D views already fall back to displayPages, whose blank art
+    // is a cheap 300x400 placeholder. This is what froze the tab while typing a
+    // page count — it used to encode one full-size JPEG per page, per keystroke.
+    if (displayPages.every(p => p.isBlank || !p.dataUrl)) {
+      setTrimmedPages(prev => prev.length ? [] : prev);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const BLEED = 0.125;
@@ -2866,17 +2893,29 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       const outW = canvasW - trimPxX * 2;
       const outH = canvasH - trimPxY * 2;
 
+      // Every padded blank renders to the identical image, so encode it once and
+      // share it instead of burning a canvas + JPEG encode per blank page.
+      let blankTrimUrl = null;
+      const getBlankTrim = () => {
+        if (blankTrimUrl) return blankTrimUrl;
+        const bc = document.createElement("canvas");
+        bc.width = outW; bc.height = outH;
+        const bctx = bc.getContext("2d");
+        bctx.fillStyle = "#f8f5f0";
+        bctx.fillRect(0, 0, outW, outH);
+        blankTrimUrl = bc.toDataURL("image/jpeg", 0.85);
+        return blankTrimUrl;
+      };
+
       const results = [];
       for (let i = 0; i < displayPages.length; i++) {
         if (cancelled) return;
+        // Yield periodically so a long book can still paint and so the cancel
+        // flag gets a chance to land mid-pass instead of locking the tab.
+        if (i > 0 && i % 8 === 0) await new Promise(r => setTimeout(r, 0));
         const page = displayPages[i];
         if (page.isBlank || !page.dataUrl) {
-          const bc = document.createElement("canvas");
-          bc.width = outW; bc.height = outH;
-          const bctx = bc.getContext("2d");
-          bctx.fillStyle = "#f8f5f0";
-          bctx.fillRect(0, 0, outW, outH);
-          results.push({ ...page, dataUrl: bc.toDataURL("image/jpeg", 0.85) });
+          results.push({ ...page, dataUrl: getBlankTrim() });
           continue;
         }
         const tx = getTx(i);
@@ -4748,7 +4787,7 @@ function App(){
               </div>
             ) : (
               <div style={{marginTop:6}}>
-                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350}/>
+                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350} debounceMs={350}/>
               </div>
             )}
 
