@@ -986,9 +986,9 @@ function TurnBadge({days}){
   return <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,fontWeight:600,color:CK.magenta,background:CK.magentaLight,padding:"1px 6px",borderRadius:8,marginLeft:6,whiteSpace:"nowrap",verticalAlign:"middle"}}>⏱ {label}</span>;
 }
 
-function Sec({title,open,onToggle,children,badge,subtitle}){
+function Sec({title,open,onToggle,children,badge,subtitle,step}){
   const m=useIsMobile();
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}><div style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}><div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginTop:subtitle?2:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}><div style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:"#f1f4f8",border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}<div style={{flex:1,minWidth:0}}><div style={{fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginTop:subtitle?2:0}}>{badge&&<span style={{fontSize:11,fontWeight:600,color:CC.mid,background:"#f1f4f8",border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
 const DNAMES=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -1228,7 +1228,10 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
   const brkDen=Math.max(0.01,grouped.reduce((s,r)=>s+Math.max(0,r.val),0)+(hasRush?sh.rushCost:0));
   return(
     <div style={{...ST.pnl, pointerEvents: "none"}}>
-      <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:`linear-gradient(135deg, ${CK.cyan} 0%, ${CK.cyan}dd 100%)`,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
+      {/* Ink price card, not brand cyan: cyan is reserved for the CTA and active
+          states so the Add to Order button stays the loudest thing in the rail.
+          Rush keeps its own colour — that's a state signal, not decoration. */}
+      <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:CC.dark,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
         <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol,marginBottom:6}}>{hasRush?"Rush Total":"Estimated Total"}</div>
         <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
           {saleActive&&<span style={{fontSize:18,opacity:.55,textDecoration:"line-through",fontWeight:700,letterSpacing:"-.5px"}}>${totalWithoutSale.toFixed(2)}</span>}
@@ -5086,7 +5089,7 @@ function App(){
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
           {/* SECTION 1: Size */}
-          <Sec title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
+          <Sec step={1} title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
             <div style={r2}>
               <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
@@ -5128,7 +5131,7 @@ function App(){
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
-          <Sec title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
+          <Sec step={2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
             <div style={r2}>
               <Pil label={<Tip k="inside_print">Inside Printing</Tip>} value={insideColor} onChange={setInsideColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
               <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
@@ -5150,7 +5153,7 @@ function App(){
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
-          <Sec title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
+          <Sec step={3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
             {(_AD.vivid!==false || vividPrint===true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} disabled={!r.vividOK} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
             {(_AD.vivid!==false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-8,marginBottom:4}}>Requires matte or gloss coated paper</div>}
             {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
@@ -5179,7 +5182,7 @@ function App(){
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
-          <Sec title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          <Sec step={4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
             {/* Art options dropdown */}
             <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
@@ -5331,7 +5334,7 @@ function App(){
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
-          <Sec title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          <Sec step={5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
 
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>
@@ -5430,7 +5433,9 @@ function App(){
 
 
         </div>
-        {!mob&&<div style={{width:320,flexShrink:0}}>
+        {/* Sticky quote rail — the price and CTA stay in view while the job is built,
+            instead of scrolling away on long configurations. */}
+        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:16,alignSelf:"flex-start"}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
             <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} debugUnlocked={debugUnlocked}/>
@@ -5611,13 +5616,13 @@ function App(){
 // ═══════════════════════════════════════════════════════════════
 const ST = {
   f:{marginTop:14},
-  lbl:{display:"block",fontSize:12.5,fontWeight:600,color:CC.mid,marginBottom:6,letterSpacing:".005em"},
-  sel:{width:"100%",padding:"11px 34px 11px 13px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:14.5,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  lbl:{display:"block",fontSize:13,fontWeight:600,color:CC.mid,marginBottom:6,letterSpacing:".005em"},
+  sel:{width:"100%",padding:"11px 34px 11px 13px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
   selA:{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
-  inp:{width:"100%",padding:"11px 13px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:14.5,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  inp:{width:"100%",padding:"11px 13px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
   // Segmented control: inset track + flat brand thumb (replaces the bevelled 5-stop gradient)
   pills:{display:"flex",borderRadius:10,border:`1px solid ${CC.border}`,overflow:"hidden",background:"#f1f4f8",padding:3,gap:3,boxShadow:"inset 0 1px 2px rgba(16,24,40,.04)"},
-  pill:{flex:1,padding:"8px 10px",fontSize:13.5,fontWeight:500,fontFamily:"inherit",border:"none",borderRadius:7,background:"transparent",color:CC.mid,cursor:"pointer",transition:"all .18s cubic-bezier(.4,0,.2,1)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
+  pill:{flex:1,padding:"9px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRadius:7,background:"transparent",color:CC.mid,cursor:"pointer",transition:"all .18s cubic-bezier(.4,0,.2,1)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
   pillOn:{background:CK.cyan,color:"#fff",fontWeight:600,boxShadow:"0 1px 2px rgba(0,126,255,.35)"},
   row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14},
   row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14},
