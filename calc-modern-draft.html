@@ -1330,10 +1330,27 @@ function DimSpec({ wIn, hIn, bindEdge, bindLabel }) {
   );
 }
 
-function SidebarBookPreview({sizeLabel,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt,bindEdge,onOpenPreview}){
-  // Parse "W×H" out of the size label (handles "5.5×8.5 (Opens to 8.5×11)", "Square 4×4", "6×4 Landscape", "Custom Size").
-  const m=(sizeLabel||"").match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
-  const wIn=m?parseFloat(m[1]):5.5, hIn=m?parseFloat(m[2]):8.5;
+// Trim dimensions in inches — the single source of truth, used by both the sidebar
+// preview and the proof/preview modal. Previously the sidebar parsed the numbers out
+// of the *display label* and fell back to 5.5x8.5 when that failed, so "Custom Size"
+// (a label with no digits in it) silently reported the default size while the modal,
+// which computed dimensions properly, disagreed.
+function trimDims(sizeLabel, customLong, customShort, bindDir){
+  let w = 5.5, h = 8.5;
+  if (sizeLabel === "Custom Size") {
+    w = Math.min(customLong || 5.5, customShort || 5.5);
+    h = Math.max(customLong || 8.5, customShort || 8.5);
+    if (bindDir === "short") { const t = w; w = h; h = t; }
+  } else {
+    const m = (sizeLabel || "").match(/([\d.]+)\s*[×x]\s*([\d.]+)/);
+    if (m) { w = parseFloat(m[1]); h = parseFloat(m[2]); }
+  }
+  return { w, h };
+}
+
+function SidebarBookPreview({sizeLabel,customLong,customShort,bindDir,pages,quantity,coverColor,coverPaper,insidePaper,coverMode,coverArt,backCoverArt,bindEdge,onOpenPreview}){
+  const _td=trimDims(sizeLabel,customLong,customShort,bindDir);
+  const wIn=_td.w, hIn=_td.h;
   // Fit book into ~170px viewport (sidebar is 320px, so longest side capped at 150px).
   const maxDim=150, longSide=Math.max(wIn,hIn), px=maxDim/longSide;
   const bookW=wIn*px, bookH=hIn*px;
@@ -2293,18 +2310,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   }, []);
 
   // Derive book dimensions from calculator's size settings
-  const dims = useMemo(() => {
-    let w = 5.5, h = 8.5;
-    if (sizeLabel === "Custom Size") {
-      w = Math.min(customLong || 5.5, customShort || 5.5);
-      h = Math.max(customLong || 8.5, customShort || 8.5);
-      if (bindDir === "short") { const t = w; w = h; h = t; }
-    } else {
-      const match = sizeLabel.match(/([\d.]+)×([\d.]+)/);
-      if (match) { w = parseFloat(match[1]); h = parseFloat(match[2]); }
-    }
-    return { w, h };
-  }, [sizeLabel, customLong, customShort, bindDir]);
+  const dims = useMemo(() => trimDims(sizeLabel, customLong, customShort, bindDir),
+    [sizeLabel, customLong, customShort, bindDir]);
 
   const gsFilter = insideColor === "bw" ? "grayscale(1)" : "none";
 
@@ -5149,7 +5156,7 @@ function App(){
       </section>
 
       {/* MOBILE-ONLY: product preview card + collapsing sticky top strip */}
-      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
 
       <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
@@ -5515,7 +5522,7 @@ function App(){
             instead of scrolling away on long configurations. */}
         {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:16,alignSelf:"flex-start"}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
-            <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+            <SidebarBookPreview sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} debugUnlocked={debugUnlocked}/>
           </div>
           <button type="button" onClick={handleAddToOrder} style={{width:"100%",padding:"14px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:15,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",transition:"opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
