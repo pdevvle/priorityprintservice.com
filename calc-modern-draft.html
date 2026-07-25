@@ -965,7 +965,7 @@ const Chev=()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" strok
 
 function Sel({label,value,onChange,children,disabled,note,badge}){
   const m=useIsMobile();
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} style={{...ST.sel,fontSize:m?16:15,padding:m?"10px 32px 10px 12px":"10px 32px 10px 12px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} style={{...ST.sel,fontSize:m?16:15,padding:m?"20px 32px 20px 13px":"20px 34px 20px 14px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
 }
 
 function TxtNum({label,value,onChange,min=1,max=99999}){
@@ -976,7 +976,7 @@ function TxtNum({label,value,onChange,min=1,max=99999}){
 
 function Pil({label,options,value,onChange,disabled,badge}){
   const m=useIsMobile();
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={ST.pills}>{options.map(o=><button type="button" aria-pressed={value===o.v} key={String(o.v)} onClick={()=>!disabled&&onChange(o.v)} style={{...ST.pill,padding:m?"11px 10px":"9px 10px",...(value===o.v?(o.onStyle||ST.pillOn):{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>)}</div></div>;
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={ST.pills}>{options.map(o=><button type="button" aria-pressed={value===o.v} key={String(o.v)} onClick={()=>!disabled&&onChange(o.v)} style={{...ST.pill,padding:m?"18px 10px":"17px 10px",...(value===o.v?(o.onStyle||ST.pillOn):{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>)}</div></div>;
 }
 
 function TurnBadge({days}){
@@ -4582,7 +4582,28 @@ function App(){
   const[op,setOp]=useState({s1:true,s2:true,s3:false,s4:true,s5:false,s6:false});
   const[showDebug,setShowDebug]=useState(false);
   const[mobExpanded,setMobExpanded]=useState(false);
-  const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
+  // "One section at a time" — on by default: opening a section collapses the rest so
+  // the customer is only looking at one topic. Preference is remembered per browser,
+  // because someone who prefers seeing everything at once will want that every visit.
+  const[soloSec,setSoloSec]=useState(()=>{
+    try{const v=localStorage.getItem("pps_solo_sections");return v===null?true:v==="1";}catch(e){return true;}
+  });
+  useEffect(()=>{try{localStorage.setItem("pps_solo_sections",soloSec?"1":"0");}catch(e){}},[soloSec]);
+  // Turning it on mid-session collapses down to whichever section is already open
+  // (the first one), rather than leaving several open and contradicting the setting.
+  useEffect(()=>{
+    if(!soloSec)return;
+    setOp(p=>{
+      const openKeys=Object.keys(p).filter(k=>p[k]);
+      if(openKeys.length<=1)return p;
+      const next={};for(const k in p)next[k]=false;next[openKeys[0]]=true;return next;
+    });
+  },[soloSec]);
+  const tog=k=>setOp(p=>{
+    const opening=!p[k];
+    if(soloSec&&opening){const next={};for(const key in p)next[key]=false;next[k]=true;return next;}
+    return {...p,[k]:!p[k]};
+  });
   // Proof-debug mode — see calc-perfect-bound.html for the canonical comment
   const proofDebug = useMemo(() => {
     try {
@@ -5088,12 +5109,24 @@ function App(){
       <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
+          {/* Focus-mode switch — sits above the stack, quiet by design so it reads as a
+              preference rather than another configuration choice. */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:9,padding:mob?"2px 2px 0":"0 2px 2px"}}>
+            <span style={{fontSize:12,color:CC.light,fontWeight:500}}>One section at a time</span>
+            <button type="button" role="switch" aria-checked={soloSec} aria-label="One section at a time"
+              onClick={()=>setSoloSec(v=>!v)}
+              title={soloSec?"On — opening a section collapses the others. Click to keep sections open instead.":"Off — sections stay open independently. Click to view one at a time."}
+              style={{flex:"none",width:34,height:20,borderRadius:99,border:"none",padding:0,cursor:"pointer",background:soloSec?CK.cyan:"#cbd5e1",position:"relative",transition:"background .18s ease"}}>
+              <span style={{position:"absolute",top:2,left:soloSec?16:2,width:16,height:16,borderRadius:99,background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",transition:"left .18s ease"}}/>
+            </button>
+          </div>
+
           {/* SECTION 1: Size */}
           <Sec step={1} title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
             <div style={r2}>
               <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
-                ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"10px 32px 10px 12px":"10px 32px 10px 12px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;return `${lo}×${sh}" — Opens to ${nonSpine*2}×${spine}"`})():"Enter dimensions below"}</option></select><span style={ST.selA}><Chev/></span></div></div>
+                ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"20px 32px 20px 13px":"20px 34px 20px 14px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;return `${lo}×${sh}" — Opens to ${nonSpine*2}×${spine}"`})():"Enter dimensions below"}</option></select><span style={ST.selA}><Chev/></span></div></div>
                 : <Sel label={<Tip k="size">Select Size</Tip>} value={sizeLabel} onChange={handleSizeLabel}>
                     {SIZE_PRESETS.map(g=><optgroup key={g.group} label={g.group}>{g.items.map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup>)}
                   </Sel>
@@ -5102,7 +5135,7 @@ function App(){
             {isCustom&&<><div style={r3}>
               <TxtNum label={<Tip k="custom_width">Width (in)</Tip>} value={customLong} onChange={setCustomLong} min={2} max={13.25}/>
               <TxtNum label={<Tip k="custom_height">Height (in)</Tip>} value={customShort} onChange={setCustomShort} min={2} max={13.25}/>
-              {(customLong&&customShort&&Number(customLong)===Number(customShort))?<div style={{...ST.f,opacity:.4,pointerEvents:"none"}}><label style={ST.lbl}>Spine Side</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"10px 32px 10px 12px":"10px 32px 10px 12px"}}><option>Square — opens to {customLong*2}×{customShort}"</option></select><span style={ST.selA}><Chev/></span></div></div>:<Sel label={<Tip k="spine_side">Spine Side</Tip>} value={bindDir} onChange={setBindDir}><option value="short">{customShort?`${Math.min(customLong||0,customShort||0)}" spine — Opens to ${Math.max(customLong||0,customShort||0)*2}×${Math.min(customLong||0,customShort||0)}"`:"Short Side"}</option><option value="long">{customLong?`${Math.max(customLong||0,customShort||0)}" spine — Opens to ${Math.min(customLong||0,customShort||0)*2}×${Math.max(customLong||0,customShort||0)}"`:"Long Side"}</option></Sel>}
+              {(customLong&&customShort&&Number(customLong)===Number(customShort))?<div style={{...ST.f,opacity:.4,pointerEvents:"none"}}><label style={ST.lbl}>Spine Side</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"20px 32px 20px 13px":"20px 34px 20px 14px"}}><option>Square — opens to {customLong*2}×{customShort}"</option></select><span style={ST.selA}><Chev/></span></div></div>:<Sel label={<Tip k="spine_side">Spine Side</Tip>} value={bindDir} onChange={setBindDir}><option value="short">{customShort?`${Math.min(customLong||0,customShort||0)}" spine — Opens to ${Math.max(customLong||0,customShort||0)*2}×${Math.min(customLong||0,customShort||0)}"`:"Short Side"}</option><option value="long">{customLong?`${Math.max(customLong||0,customShort||0)}" spine — Opens to ${Math.min(customLong||0,customShort||0)*2}×${Math.max(customLong||0,customShort||0)}"`:"Long Side"}</option></Sel>}
             </div>
             {r.sz?.clamped && (
               <div style={{ fontSize:11, color:"#b45309", background:"#fef3c7", border:"1px solid #fcd34d", borderRadius:4, padding:"6px 10px", marginTop:4 }}>
@@ -5133,8 +5166,8 @@ function App(){
           {/* SECTION 2: Printing & Paper */}
           <Sec step={2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
             <div style={r2}>
-              <Pil label={<Tip k="inside_print">Inside Printing</Tip>} value={insideColor} onChange={setInsideColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
-              <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
+              <Pil label={<Tip k="inside_print">Inside Printing</Tip>} value={insideColor} onChange={setInsideColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
+              <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
             </div>
             <div style={ST.hr}/>
             <div style={r2}>
@@ -5615,17 +5648,17 @@ function App(){
 // STYLES
 // ═══════════════════════════════════════════════════════════════
 const ST = {
-  f:{marginTop:14},
+  f:{marginTop:18},
   lbl:{display:"block",fontSize:13,fontWeight:600,color:CC.mid,marginBottom:6,letterSpacing:".005em"},
-  sel:{width:"100%",padding:"11px 34px 11px 13px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  sel:{width:"100%",padding:"20px 34px 20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
   selA:{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
-  inp:{width:"100%",padding:"11px 13px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  inp:{width:"100%",padding:"20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
   // Segmented control: inset track + flat brand thumb (replaces the bevelled 5-stop gradient)
   pills:{display:"flex",borderRadius:10,border:`1px solid ${CC.border}`,overflow:"hidden",background:"#f1f4f8",padding:3,gap:3,boxShadow:"inset 0 1px 2px rgba(16,24,40,.04)"},
-  pill:{flex:1,padding:"9px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRadius:7,background:"transparent",color:CC.mid,cursor:"pointer",transition:"all .18s cubic-bezier(.4,0,.2,1)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
+  pill:{flex:1,padding:"17px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRadius:7,background:"transparent",color:CC.mid,cursor:"pointer",transition:"all .18s cubic-bezier(.4,0,.2,1)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
   pillOn:{background:CK.cyan,color:"#fff",fontWeight:600,boxShadow:"0 1px 2px rgba(0,126,255,.35)"},
-  row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14},
-  row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14},
+  row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18},
+  row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:18},
   hr:{height:1,background:CC.border,margin:"16px 0 4px"},
   setBox:{marginTop:12,padding:14,borderRadius:10,background:"#f8fafc",border:`1px solid ${CC.border}`},
   addBtn:{width:"100%",marginTop:12,padding:"11px",borderRadius:10,border:`1px dashed ${CC.border}`,background:"#fff",color:CK.cyan,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .15s ease"},
