@@ -986,9 +986,9 @@ function TurnBadge({days}){
   return <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,fontWeight:600,color:CK.magenta,background:CK.magentaLight,padding:"1px 6px",borderRadius:8,marginLeft:6,whiteSpace:"nowrap",verticalAlign:"middle"}}>⏱ {label}</span>;
 }
 
-function Sec({title,open,onToggle,children,badge,subtitle,step}){
+function Sec({title,open,onToggle,children,badge,subtitle,step,summary}){
   const m=useIsMobile();
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}><div style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:"#f1f4f8",border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}<div style={{flex:1,minWidth:0}}><div style={{fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginTop:subtitle?2:0}}>{badge&&<span style={{fontSize:11,fontWeight:600,color:CC.mid,background:"#f1f4f8",border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}><div style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:"#f1f4f8",border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}<div style={{flex:1,minWidth:0}}><div style={{fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,minWidth:0,marginTop:subtitle?2:0}}>{!open&&summary&&<span style={{fontSize:12,fontWeight:400,color:CC.light,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:m?130:330,textAlign:"right"}}>{summary}</span>}{badge&&<span style={{fontSize:11,fontWeight:600,color:CC.mid,background:"#f1f4f8",border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
 const DNAMES=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -2381,6 +2381,12 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     const generated = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
     const bookH = 440;
     const bookW = Math.round(bookH * (dims.w / dims.h));
+    // Reader-spread leaf size: fit two leaves side by side inside the stage box,
+    // capped on height so portrait trims do not overflow and on width so landscape
+    // trims do not either. Portrait 5.5x8.5 -> 298x460; landscape 11x8.5 -> 370x286.
+    const SP_MAXH = 460, SP_MAXW = 740;
+    const leafH = Math.min(SP_MAXH, Math.round((SP_MAXW / 2) * (dims.h / dims.w)));
+    const leafW = Math.round(leafH * (dims.w / dims.h));
     // Saddle stitch has no real spine — use a thin depth proportional to page count
     const halfDepth = Math.max(2, Math.min(8, totalPgs * 0.15));
     const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print Preview · Saddle Stitch · ${sizeStr}</title><style>
@@ -2402,7 +2408,11 @@ h1 small{font-weight:700;font-size:18px;color:#888;display:block;margin-top:6px;
 .face.bottom{height:${halfDepth*2}px;width:${bookW}px;top:${bookH}px;transform:rotateX(-90deg) translateY(-${halfDepth*2}px);transform-origin:top center;background:repeating-linear-gradient(0deg,#f5f0e8 0,#e8e0d4 1px,#f0ebe3 2px);box-shadow:none}
 .face.fore{width:${halfDepth*2}px;left:${bookW}px;transform:rotateY(90deg) translateX(-${halfDepth}px);transform-origin:left center;background:repeating-linear-gradient(0deg,#f5f0e8 0,#e8e0d4 1px,#f0ebe3 2px);box-shadow:none}
 .shadow{position:absolute;width:80%;height:18px;left:10%;bottom:-22px;background:radial-gradient(ellipse at center,rgba(0,0,0,.35),transparent 70%);filter:blur(6px);pointer-events:none}
-.flat-page{width:100%;max-width:520px;background:#fff;box-shadow:0 14px 36px rgba(0,0,0,.18);aspect-ratio:${ratio};background-position:center;background-size:cover;border-radius:2px}
+.spread{position:relative;display:flex;background:#fff;box-shadow:0 14px 36px rgba(0,0,0,.18);border-radius:2px;overflow:hidden}
+.spread .pg{width:${leafW}px;height:${leafH}px;background:#fff center/cover no-repeat}
+/* soft gutter down the centre so the two leaves read as one open book */
+.spread::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:30px;transform:translateX(-50%);background:linear-gradient(90deg,rgba(0,0,0,0) 0%,rgba(0,0,0,.13) 48%,rgba(0,0,0,.13) 52%,rgba(0,0,0,0) 100%);pointer-events:none}
+@media(max-width:700px){.spread{transform:scale(.62);transform-origin:center}}
 .controls{margin-top:28px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
 .controls .group{display:flex;border-radius:6px;overflow:hidden;border:1px solid #d4cdbe;background:#fff}
 .controls .group button{padding:8px 14px;font-size:12px;font-weight:600;border:none;background:transparent;color:#555;cursor:pointer;font-family:inherit;border-right:1px solid #e5e0d2;transition:all .15s}
@@ -2431,7 +2441,7 @@ footer a:hover{color:#ec008c}
     <div class="shadow"></div>
   </div>
 </div>
-<div class="stage flat" id="stageFlat" style="display:none"><div class="flat-page" id="flatPage"></div></div>
+<div class="stage flat" id="stageFlat" style="display:none"><div class="spread" id="spread"><div class="pg" id="pgL"></div><div class="pg" id="pgR"></div></div></div>
 <div class="controls">
   <div class="group" id="modeGroup">
     <button class="on" data-mode="closed">3D Cover</button>
@@ -2445,16 +2455,26 @@ footer a:hover{color:#ec008c}
 <script>
 const pages=${JSON.stringify(pageSrcs)};
 const N=pages.length;
+// Reader's spreads: drop both covers, then pair the interior leaves 2-up, exactly as
+// the calculator's open-book preview does.
+const interior=pages.slice(1,Math.max(1,pages.length-1));
+const NS=Math.max(1,Math.ceil(interior.length/2));
 let mode='closed',cur=0;
-const stage3d=document.getElementById('stage3d'),stageFlat=document.getElementById('stageFlat'),flat=document.getElementById('flatPage'),ind=document.getElementById('pageInd'),prev=document.getElementById('prev'),next=document.getElementById('next'),book=document.getElementById('book'),modeGroup=document.getElementById('modeGroup');
+const stage3d=document.getElementById('stage3d'),stageFlat=document.getElementById('stageFlat'),pgL=document.getElementById('pgL'),pgR=document.getElementById('pgR'),ind=document.getElementById('pageInd'),prev=document.getElementById('prev'),next=document.getElementById('next'),book=document.getElementById('book'),modeGroup=document.getElementById('modeGroup');
 function update(){
   if(mode==='closed'){stage3d.style.display='flex';stageFlat.style.display='none';ind.textContent='Cover';prev.disabled=true;next.disabled=true;}
-  else{stage3d.style.display='none';stageFlat.style.display='flex';flat.style.backgroundImage="url('"+pages[cur]+"')";ind.textContent='Page '+(cur+1)+' / '+N;prev.disabled=cur===0;next.disabled=cur===N-1;}
+  else{stage3d.style.display='none';stageFlat.style.display='flex';
+    var li=cur*2,ri=cur*2+1,L=interior[li],R2=interior[ri];
+    pgL.style.backgroundImage=L?"url('"+L+"')":'none';
+    pgR.style.backgroundImage=R2?"url('"+R2+"')":'none';
+    pgR.style.visibility=R2?'visible':'hidden';
+    ind.textContent=interior.length?(R2?('Pages '+(li+2)+'\u2013'+(ri+2)):('Page '+(li+2))):'No interior pages';
+    prev.disabled=cur===0;next.disabled=cur>=NS-1;}
   modeGroup.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.mode===mode));
 }
 modeGroup.addEventListener('click',e=>{if(e.target.dataset.mode){mode=e.target.dataset.mode;update();}});
 prev.onclick=()=>{if(cur>0){cur--;update();}};
-next.onclick=()=>{if(cur<N-1){cur++;update();}};
+next.onclick=()=>{if(cur<NS-1){cur++;update();}};
 document.addEventListener('keydown',e=>{if(mode==='page'){if(e.key==='ArrowLeft')prev.click();else if(e.key==='ArrowRight')next.click();}});
 let drag=null,rot={x:-12,y:-22};
 book.addEventListener('mousedown',e=>{drag={sx:e.clientX,sy:e.clientY,bx:rot.x,by:rot.y};book.style.transition='none';e.preventDefault();});
@@ -4893,6 +4913,31 @@ function App(){
   useEffect(()=>{if(r.shipping?.freeDeliveryYMD)setNeedByDate(r.shipping.freeDeliveryYMD)},[r.shipping?.freeDeliveryYMD]);
   // NOTE: hardcopy proof is NOT auto-removed — always available as option
   const upSet=(i,p)=>setSets(s=>s.map((x,j)=>j===i?{...x,...p}:x));
+
+  // Collapsed-header summaries. Built from the SAME option labels the controls use,
+  // so a closed section reports exactly the wording the customer picked rather than a
+  // paraphrase that could drift out of sync with the dropdowns.
+  const secSummary=(()=>{
+    const lbl=(arr,v)=>{const o=arr.find(x=>x.val===v);return o?o.label:null;};
+    const col=v=>v==="color"?"Full Color":"Greyscale";
+    const q=sets.reduce((a,x)=>a+(x.qty||0),0)||sets[0]?.qty||0;
+    const pg=sets[0]?.pages||0;
+    const fin=[
+      coating>0&&lbl(COATINGS,coating),
+      bundling>0&&lbl(BUNDLING,bundling),
+      roundCorner>0&&lbl(CORNERS,roundCorner),
+      vividPrint&&"Enhanced Vivid Print",
+    ].filter(Boolean);
+    const sh=result?.shipping;
+    const proofLbl=proof>=3?"Hardcopy Proof":proof>0?"Manual Digital Proof":"Proof & Approve Online";
+    return {
+      s1:q.toLocaleString()+" qty · "+pg+"pp",
+      s2:col(insideColor)+" · "+insidePaper.label+(coverMode!=="same"?(" · "+coverPaper.label+" cover"):""),
+      s3:fin.length?fin.join(" · "):"No finishing added",
+      s4:[lbl(ART_OPTS,artwork),proofLbl].filter(Boolean).join(" · "),
+      s5:shipState?(shipState+(shipZip?(" "+shipZip):"")+(sh&&sh.freeDeliveryBizDays?(" · free ground "+sh.freeDeliveryBizDays+"d"):"")):"Add a destination",
+    };
+  })();
   const r2=mob?{display:"grid",gridTemplateColumns:"1fr",gap:8}:ST.row2;
   const r3=mob?{display:"grid",gridTemplateColumns:"1fr",gap:8}:ST.row3;
 
@@ -5122,7 +5167,7 @@ function App(){
           </div>
 
           {/* SECTION 1: Size */}
-          <Sec step={1} title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
+          <Sec step={1} summary={secSummary.s1} title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
             <div style={r2}>
               <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
@@ -5164,7 +5209,7 @@ function App(){
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
-          <Sec step={2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
+          <Sec step={2} summary={secSummary.s2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
             <div style={r2}>
               <Pil label={<Tip k="inside_print">Inside Printing</Tip>} value={insideColor} onChange={setInsideColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
               <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
@@ -5186,7 +5231,7 @@ function App(){
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
-          <Sec step={3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
+          <Sec step={3} summary={secSummary.s3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
             {(_AD.vivid!==false || vividPrint===true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} disabled={!r.vividOK} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
             {(_AD.vivid!==false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-8,marginBottom:4}}>Requires matte or gloss coated paper</div>}
             {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
@@ -5215,7 +5260,7 @@ function App(){
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
-          <Sec step={4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          <Sec step={4} summary={secSummary.s4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
             {/* Art options dropdown */}
             <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
@@ -5367,7 +5412,7 @@ function App(){
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
-          <Sec step={5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          <Sec step={5} summary={secSummary.s5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
 
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>
