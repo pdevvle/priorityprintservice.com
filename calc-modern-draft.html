@@ -4724,6 +4724,25 @@ function App(){
   const[coverArt,setCoverArt]=useState(null);
   const[backCoverArt,setBackCoverArt]=useState(null);
   const openPreviewModalRef=useRef(null);
+  // The preview modal is owned by SetPreview, which only exists while the Artwork
+  // section is expanded (Sec unmounts its body when collapsed). With "one section at
+  // a time" on, that section can be closed — in which case there is nothing to open
+  // and the preview card would silently do nothing. Expand Artwork first, then fire
+  // the opener on the render after it mounts.
+  const[pendingPreview,setPendingPreview]=useState(false);
+  const openPreview=()=>{
+    if(openPreviewModalRef.current){openPreviewModalRef.current();return;}
+    setOp(p=>{
+      if(p.s4)return p;
+      if(soloSec){const n={};for(const k in p)n[k]=false;n.s4=true;return n;}
+      return {...p,s4:true};
+    });
+    setPendingPreview(true);
+  };
+  useEffect(()=>{
+    if(!pendingPreview)return;
+    if(openPreviewModalRef.current){openPreviewModalRef.current();setPendingPreview(false);}
+  });
   // Unified artwork file state — one variable, no priority logic
   // { type:"none" } | { type:"files", list:[File,...] } | { type:"existing", path:"/uploads/..." }
   const[artFiles,setArtFiles]=useState({type:"none"});
@@ -5156,7 +5175,7 @@ function App(){
       </section>
 
       {/* MOBILE-ONLY: product preview card + collapsing sticky top strip */}
-      {mob && <MobilePreviewBar sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={openPreview}/>}
 
       <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
@@ -5522,7 +5541,7 @@ function App(){
             instead of scrolling away on long configurations. */}
         {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:16,alignSelf:"flex-start"}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
-            <SidebarBookPreview sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+            <SidebarBookPreview sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={openPreview}/>
             <Panel result={result} debugUnlocked={debugUnlocked}/>
           </div>
           <button type="button" onClick={handleAddToOrder} style={{width:"100%",padding:"14px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:15,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",transition:"opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
