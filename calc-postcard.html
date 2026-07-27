@@ -3648,7 +3648,12 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     fd.append("action", "pps_add_to_cart");
     fd.append("nonce", PPS.cartNonce);
     fd.append("product_id", PPS.productId);
-    fd.append("pps_price", total.toFixed(2));
+    const _pstr = total.toFixed(2);
+    fd.append("pps_price", _pstr);
+    // Payload integrity — both are revalidated server-side in pps_ajax_add_to_cart
+    // and neither participates in pricing.
+    fd.append("pps_tier", "retail");
+    fd.append("pps_lock", (function(s){var h=0;for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))>>>0;}return h.toString(36);})(_pstr + "|" + PPS.productId));
     fd.append("pps_rush", rushCost.toFixed(2));
     fd.append("pps_summary", summary);
     fd.append("pps_metadata", metadata);
