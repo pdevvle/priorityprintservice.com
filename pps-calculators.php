@@ -1354,6 +1354,92 @@ function pps_materials_price_floor( $product_id, $metadata_json ) {
     return ( is_finite( $floor ) && $floor > 0 ) ? $floor : null;
 }
 
+/**
+ * Payload tripwire — detects a hand-edited add-to-cart request.
+ *
+ * The calculator posts two fields that do not participate in pricing:
+ *   pps_tier  always the literal "retail"
+ *   pps_lock  a checksum over the posted price string + product id
+ *
+ * Neither is load-bearing, so no legitimate flow ever produces a different value.
+ * Editing pps_price in devtools without recomputing pps_lock trips it; flipping
+ * pps_tier to something that looks like a discount tier trips it unambiguously.
+ *
+ * This is DETECTION, not a control. The salt is client-side, so anyone who reads
+ * the calculator source can recompute the checksum — pps_materials_price_floor()
+ * remains the actual bound. The value here is that you find out someone tried.
+ *
+ * Absent fields are ignored so a browser holding an older cached calculator is
+ * never rejected. Returns a reason string when tripped, or '' when clean.
+ */
+function pps_cart_tripwire( $product_id ) {
+    // Decoy: any value other than the literal we ship is a deliberate edit.
+    if ( isset( $_POST['pps_tier'] ) ) {
+        $tier = (string) wp_unslash( $_POST['pps_tier'] );
+        if ( $tier !== 'retail' ) {
+            return 'tier=' . substr( sanitize_text_field( $tier ), 0, 40 );
+        }
+    }
+    // Canary: checksum must match the price string actually posted.
+    if ( isset( $_POST['pps_lock'] ) && isset( $_POST['pps_price'] ) ) {
+        $raw  = (string) wp_unslash( $_POST['pps_price'] );
+        $seed = $raw . '|' . (int) $product_id;
+        $h    = 0;
+        $len  = strlen( $seed );
+        for ( $i = 0; $i < $len; $i++ ) {
+            $h = ( $h * 31 + ord( $seed[ $i ] ) ) & 0xFFFFFFFF;
+        }
+        $expect = base_convert( (string) $h, 10, 36 );
+        $got    = strtolower( trim( (string) wp_unslash( $_POST['pps_lock'] ) ) );
+        if ( $got !== $expect ) {
+            return 'lock mismatch';
+        }
+    }
+    return '';
+}
+
+/**
+ * Record a tripwire hit: always logged, admin alerted at most once per 30 minutes
+ * so a repeated probe can't be turned into a mail flood.
+ */
+function pps_cart_tripwire_report( $product_id, $reason, $price ) {
+    $ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '?';
+    error_log( sprintf(
+        '[pps] CART TRIPWIRE pid=%d price=%s reason=%s ip=%s ua=%s',
+        (int) $product_id, $price, $reason, $ip,
+        isset( $_SERVER['HTTP_USER_AGENT'] ) ? substr( sanitize_text_field( $_SERVER['HTTP_USER_AGENT'] ), 0, 120 ) : '?'
+    ) );
+
+    if ( get_transient( 'pps_tripwire_alerted' ) ) return;
+    set_transient( 'pps_tripwire_alerted', 1, 30 * MINUTE_IN_SECONDS );
+
+    $cfg = get_option( PPS_CONFIG_OPTION, array() );
+    $pcf = isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ? $cfg['pcf'] : array();
+    $to  = '';
+    $cand = isset( $pcf['question_recipient_email'] ) ? trim( (string) $pcf['question_recipient_email'] ) : '';
+    if ( is_email( $cand ) ) $to = $cand;
+    if ( ! $to ) $to = get_option( 'admin_email' );
+    if ( ! is_email( $to ) ) return;
+
+    wp_mail(
+        $to,
+        '[PPS] Cart payload tampering detected',
+        implode( "\n", array(
+            'An add-to-cart request arrived with an edited payload.',
+            '',
+            'Product:  ' . (int) $product_id,
+            'Price:    ' . $price,
+            'Reason:   ' . $reason,
+            'IP:       ' . $ip,
+            'Time:     ' . current_time( 'M j, Y g:i a T' ),
+            '',
+            'The request was ' . ( floatval( $pcf['pps_tripwire_mode_flag'] ?? 0 ) ? 'ALLOWED and flagged on the order' : 'REJECTED' ) . '.',
+            'Further alerts are suppressed for 30 minutes.',
+        ) ),
+        array( 'Content-Type: text/plain; charset=UTF-8' )
+    );
+}
+
 function pps_ajax_add_to_cart() {
     check_ajax_referer( 'pps_add_to_cart', 'nonce' );
 
@@ -1371,6 +1457,27 @@ function pps_ajax_add_to_cart() {
     json_decode( $metadata );
     if ( json_last_error() !== JSON_ERROR_NONE ) {
         wp_send_json_error( 'Invalid metadata JSON.' );
+    }
+
+    // ── Payload tripwire (2026-07-27) ──
+    // Fires only on a deliberately edited request; see pps_cart_tripwire().
+    $trip = pps_cart_tripwire( $product_id );
+    if ( $trip !== '' ) {
+        pps_cart_tripwire_report( $product_id, $trip, (string) ( $_POST['pps_price'] ?? '' ) );
+        $cfg_t = get_option( PPS_CONFIG_OPTION, array() );
+        $pcf_t = isset( $cfg_t['pcf'] ) && is_array( $cfg_t['pcf'] ) ? $cfg_t['pcf'] : array();
+        if ( floatval( $pcf_t['pps_tripwire_mode_flag'] ?? 0 ) ) {
+            // Flag mode: accept, but mark the order so it can be reviewed before
+            // it goes to production. Catches more than rejecting, which teaches
+            // the prober exactly which field gave them away.
+            $decoded = json_decode( $metadata, true );
+            if ( is_array( $decoded ) ) {
+                $decoded['tamperFlag'] = $trip;
+                $metadata = wp_json_encode( $decoded );
+            }
+        } else {
+            wp_send_json_error( 'Could not add to cart. Please refresh the page and try again.' );
+        }
     }
 
     // ── Price-tampering defense (security, 2026-05-17) ──
