@@ -385,6 +385,12 @@ function pps_assistant_tool_schemas() {
 function pps_assistant_api_call( array $payload ) {
     $cfg = pps_assistant_config();
 
+    // Test seam — mirrors WP core's `pre_http_request`. A non-null return short-circuits
+    // the HTTP call entirely, so tests/assistant/guardrails.php can script the model's
+    // responses with no network, no API key, and no spend.
+    $pre = apply_filters( 'pps_assistant_pre_api_call', null, $payload );
+    if ( $pre !== null ) return $pre;
+
     $res = wp_remote_post( PPS_ASSISTANT_API_URL, array(
         'timeout' => 120,
         'headers' => array(
