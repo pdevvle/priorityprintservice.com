@@ -962,12 +962,12 @@ const PPS_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEwAAABMCAIAAABI
 const PALETTES = {
   light: { dark:"#0f172a", mid:"#475569", light:"#94a3b8", bg:"#f6f7f9", white:"#fff",
            border:"#e3e8ef", red:"#dc2626", track:"#f1f4f8", errBg:"#fef2f2", errBorder:"#fecaca",
-           heroBg:"#0f172a", rowHi:"#f0f9ff" },
+           heroBg:"#0f172a", rowHi:"#f0f9ff", tint:"#eff6ff", tintBorder:"#cfe6ff" },
   dark:  { dark:"#e6edf6", mid:"#9fb0c6", light:"#7183a0", bg:"#0d1117", white:"#161b22",
            border:"#2a3340", red:"#f87171", track:"#0f151d", errBg:"#2a1416", errBorder:"#5b2b2f",
            // Stays a dark surface in both themes, lifted here so it still reads as a
            // distinct card against the near-black page rather than blending into it.
-           heroBg:"#1e2a38", rowHi:"#17263a" },
+           heroBg:"#1e2a38", rowHi:"#17263a", tint:"#12243a", tintBorder:"#24405e" },
 };
 const CC = {
   primary: CK.cyan,
@@ -3739,8 +3739,8 @@ update();
                     display:"flex", alignItems:"center", justifyContent:"center", gap:6,
                     background: artApproved && proof===0
                       ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)"
-                      : "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)",
-                    color: artApproved && proof===0 ? "#fff" : "#555",
+                      : CC.white,
+                    color: artApproved && proof===0 ? "#fff" : CC.mid,
                     borderRight:`1px solid ${CC.border}`,
                   }}>
                     {artApproved && proof===0 ? "✓ Proof Approved" : "🔍 Proof"} {needsApproval && <span style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 4 }}>required</span>}
@@ -3749,7 +3749,7 @@ update();
                   <button type="button" onClick={() => { setActiveModal("preview"); setPreviewMode("closed"); setRot({x:-15,y:-25}); }} style={{
                     flex:1, padding:"11px 10px", fontSize:13, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
                     display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-                    background: "linear-gradient(180deg, #fff 0%, #f7f7f8 100%)", color: "#555",
+                    background: CC.white, color: CC.mid,
                   }}>
                     📖 Preview
                   </button>
@@ -5326,7 +5326,7 @@ function App(){
 
             {/* Staple Binding — hidden when two_staple add-on is disabled and not pre-filled */}
             {(_AD.two_staple!==false || twoStaple===true) && (r.twoAuto
-              ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip><TurnBadge days={r.ti?.twoStaple}/></label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Two Staples — standard for this size</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#6366f1",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
+              ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip><TurnBadge days={r.ti?.twoStaple}/></label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4}}>Two Staples — standard for this size</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#6366f1",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
               : <><Pil label={<RichTip tipKey="saddle_stitch">Staple Binding</RichTip>} badge={<TurnBadge days={r.ti?.twoStaple}/>} value={twoStaple} onChange={setTwoStaple} options={[{t:"Single Staple",v:false},{t:"Two Staples",v:true}]}/><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:4}}>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#6366f1",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></>
             )}
           </Sec>
@@ -5559,7 +5559,7 @@ function App(){
             </div>
 
             {result&&!result.error?.length&&<>
-              <div style={{marginTop:10,padding:mob?"8px 10px":"10px 14px",background:CK.cyanLight,borderRadius:5,border:`1px solid ${CK.cyan}33`}}>
+              <div style={{marginTop:10,padding:mob?"8px 10px":"10px 14px",background:CC.tint,borderRadius:5,border:`1px solid ${CK.cyan}33`}}>
                 <div style={{fontSize:10.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:CK.cyan,marginBottom:2}}>Free Delivery Estimate</div>
                 <div style={{fontSize:mob?14:15,fontWeight:700,color:CC.dark}}>{r.shipping?.freeDeliveryDate}</div>
                 <div style={{fontSize:mob?10.5:11,color:CC.mid,marginTop:2}}>
@@ -5706,7 +5706,7 @@ function App(){
             {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
           </button>
           {switchTargets.length > 0 && <div style={{display:"flex",gap:6,marginTop:8}}>
-            {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} target="_blank" rel="noopener" style={{flex:1,display:"block",padding:"8px 6px",borderRadius:4,border:"1px solid #dbeafe",background:"#eff6ff",color:"#1d4ed8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}
+            {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} target="_blank" rel="noopener" style={{flex:1,display:"block",padding:"8px 6px",borderRadius:4,border:"1px solid #dbeafe",background:CC.tint,color:"#1d4ed8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}
               onMouseOver={e=>{e.currentTarget.style.background="#dbeafe";e.currentTarget.style.borderColor="#93c5fd"}}
               onMouseOut={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor="#dbeafe"}}>
               Try as {t.label} →
@@ -5722,7 +5722,7 @@ function App(){
             </div>
           );})()}
           {debugUnlocked&&showDebug&&<DebugPanel debug={result?.debug}/>}
-          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px solid ${CK.cyan}55`,background:"#fff",color:CK.cyan,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px solid ${CK.cyan}55`,background:CC.white,color:CK.cyan,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             Have a question about this quote? →
           </button>
         </div>}
@@ -5730,7 +5730,7 @@ function App(){
 
       {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
       {mob&&!qOpen&&!mobExpanded&&(
-        <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{position:"fixed",bottom:"calc(70px + env(safe-area-inset-bottom))",right:12,zIndex:9989,padding:"7px 13px",borderRadius:16,border:`1px solid ${CK.cyan}`,background:"#fff",color:CK.cyan,fontSize:11.5,fontWeight:700,boxShadow:"0 2px 8px rgba(0,0,0,.12)",cursor:"pointer",fontFamily:"inherit"}}>
+        <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{position:"fixed",bottom:"calc(70px + env(safe-area-inset-bottom))",right:12,zIndex:9989,padding:"7px 13px",borderRadius:16,border:`1px solid ${CK.cyan}`,background:CC.white,color:CK.cyan,fontSize:11.5,fontWeight:700,boxShadow:"0 2px 8px rgba(0,0,0,.12)",cursor:"pointer",fontFamily:"inherit"}}>
           Have a question? →
         </button>
       )}
