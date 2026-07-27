@@ -3998,25 +3998,25 @@ function App() {
 
   const buildShareUrl = () => {
     const p = new URLSearchParams();
-    if (qty !== 100) p.set("qty", qty);
-    if (sizeMode !== "preset") p.set("sizemode", sizeMode);
-    if (sizeLabel !== "8.5×11") p.set("size", sizeLabel);
+    p.set("qty", qty);
+    p.set("sizemode", sizeMode);
+    p.set("size", sizeLabel);
     if (sizeMode === "custom") { p.set("long", longEdge); p.set("short", shortEdge); }
-    if (foldType !== "flat") p.set("fold", foldType);
-    if (foldDir !== "long") p.set("folddir", foldDir);
-    if (frontColor !== "color") p.set("color", frontColor);
-    if (backColor !== "color") p.set("backcolor", backColor);
-    if (sides !== 2) p.set("sides", sides);
-    if (paper.val !== PAPERS_NC[2]?.val) p.set("paper", paper.val);
-    if (vivid) p.set("vivid", "true");
-    if (coating > 0) p.set("coating", coating);
-    if (coatSides !== 1) p.set("coatsides", coatSides);
-    if (bundling > 0) p.set("bundling", bundling);
-    if (perforation !== 0) p.set("perf", perforation);
-    if (perfDir !== "length") p.set("perfdir", perfDir);
+    p.set("fold", foldType);
+    p.set("folddir", foldDir);
+    p.set("color", frontColor);
+    p.set("backcolor", backColor);
+    p.set("sides", sides);
+    p.set("paper", paper.val);
+    p.set("vivid", vivid ? "true" : "false");
+    p.set("coating", coating);
+    p.set("coatsides", coatSides);
+    p.set("bundling", bundling);
+    p.set("perf", perforation);
+    p.set("perfdir", perfDir);
     if (perfPositions.length && perfCount > 0) p.set("perfpos", perfPositions.slice(0, perfCount).join(","));
-    if (roundCorner > 0) p.set("corner", roundCorner);
-    if (shipState !== "AZ") p.set("state", shipState);
+    p.set("corner", roundCorner);
+    p.set("state", shipState);
     const base = window.location.origin + window.location.pathname;
     const qs = p.toString();
     return qs ? base + "?" + qs : base;
