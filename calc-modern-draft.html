@@ -963,9 +963,9 @@ const CC = {
 
 const Chev=()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>;
 
-function Sel({label,value,onChange,children,disabled,note,badge,wrapStyle}){
+function Sel({label,value,onChange,children,disabled,note,badge,wrapStyle,name,autoComplete,selectId}){
   const m=useIsMobile();
-  return <div style={{...ST.f,...wrapStyle}}>{label&&<label style={ST.lbl}>{label}</label>}<div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} style={{...ST.sel,fontSize:m?16:15,padding:m?"20px 32px 20px 13px":"20px 34px 20px 14px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
+  return <div style={{...ST.f,...wrapStyle}}>{label&&<label style={ST.lbl}>{label}</label>}<div style={{position:"relative"}}><select id={selectId} name={name} autoComplete={autoComplete} value={value} onChange={e=>onChange(e.target.value)} style={{...ST.sel,fontSize:m?16:15,padding:m?"20px 32px 20px 13px":"20px 34px 20px 14px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
 }
 
 function TxtNum({label,value,onChange,min=1,max=99999}){
@@ -5440,8 +5440,8 @@ function App(){
                 </div>
                 {!proofAddrSame && (
                   <div style={{display:"grid", gap:6}}>
-                    <input type="text" value={proofAddr.name} onChange={e=>setProofAddr(p=>({...p,name:e.target.value}))} placeholder="Full Name" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
-                    <input type="text" value={proofAddr.street} onChange={e=>setProofAddr(p=>({...p,street:e.target.value}))} placeholder="Street Address" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
+                    <input type="text" name="proof-name" autoComplete="section-proof shipping name" value={proofAddr.name} onChange={e=>setProofAddr(p=>({...p,name:e.target.value}))} placeholder="Full Name" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
+                    <input type="text" name="proof-address-line1" autoComplete="section-proof shipping address-line1" value={proofAddr.street} onChange={e=>setProofAddr(p=>({...p,street:e.target.value}))} placeholder="Street Address" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:6}}>
                       <input type="text" value={proofAddr.city} onChange={e=>setProofAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
                       <input type="text" value={proofAddr.state} onChange={e=>setProofAddr(p=>({...p,state:e.target.value}))} placeholder="State" maxLength={2} style={{...ST.inp,fontSize:12,padding:"7px 10px",textTransform:"uppercase"}}/>
@@ -5458,17 +5458,17 @@ function App(){
 
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={{...r2,marginTop:12}}>
-              <div style={addrCell}><label style={ST.lbl}>Full Name</label><input type="text" value={shipAddr.name} onChange={e=>setShipAddr(p=>({...p,name:e.target.value}))} placeholder="Full Name" style={ST.inp}/></div>
-              <div style={addrCell}><label style={ST.lbl}>Company <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" value={shipAddr.company} onChange={e=>setShipAddr(p=>({...p,company:e.target.value}))} placeholder="Company" style={ST.inp}/></div>
+              <div style={addrCell}><label htmlFor="pps-ship-name" style={ST.lbl}>Full Name</label><input type="text" id="pps-ship-name" name="ship-name" autoComplete="shipping name" value={shipAddr.name} onChange={e=>setShipAddr(p=>({...p,name:e.target.value}))} placeholder="Full Name" style={ST.inp}/></div>
+              <div style={addrCell}><label htmlFor="pps-ship-company" style={ST.lbl}>Company <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" id="pps-ship-company" name="ship-company" autoComplete="shipping organization" value={shipAddr.company} onChange={e=>setShipAddr(p=>({...p,company:e.target.value}))} placeholder="Company" style={ST.inp}/></div>
             </div>
-            <div style={{...addrCell,marginTop:12}}><label style={ST.lbl}>Street Address</label><input type="text" value={shipAddr.street1} onChange={e=>setShipAddr(p=>({...p,street1:e.target.value}))} placeholder="Street address" style={ST.inp}/></div>
-            <div style={{...addrCell,marginTop:12}}><label style={ST.lbl}>Address Line 2 <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" value={shipAddr.street2} onChange={e=>setShipAddr(p=>({...p,street2:e.target.value}))} placeholder="Apt, suite, unit, etc." style={ST.inp}/></div>
+            <div style={{...addrCell,marginTop:12}}><label htmlFor="pps-ship-street1" style={ST.lbl}>Street Address</label><input type="text" id="pps-ship-street1" name="ship-address-line1" autoComplete="shipping address-line1" value={shipAddr.street1} onChange={e=>setShipAddr(p=>({...p,street1:e.target.value}))} placeholder="Street address" style={ST.inp}/></div>
+            <div style={{...addrCell,marginTop:12}}><label htmlFor="pps-ship-street2" style={ST.lbl}>Address Line 2 <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" id="pps-ship-street2" name="ship-address-line2" autoComplete="shipping address-line2" value={shipAddr.street2} onChange={e=>setShipAddr(p=>({...p,street2:e.target.value}))} placeholder="Apt, suite, unit, etc." style={ST.inp}/></div>
             <div style={{...addrGrid,marginTop:12}}>
-              <div style={{...addrCell,gridColumn:mob?"1 / -1":"auto"}}><label style={ST.lbl}>City</label><input type="text" value={shipAddr.city} onChange={e=>setShipAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={ST.inp}/></div>
-              <Sel wrapStyle={addrCell} label={<Tip k="ship_state">State</Tip>} value={shipState} onChange={v=>{setShipState(v)}}>
+              <div style={{...addrCell,gridColumn:mob?"1 / -1":"auto"}}><label htmlFor="pps-ship-city" style={ST.lbl}>City</label><input type="text" id="pps-ship-city" name="ship-city" autoComplete="shipping address-level2" value={shipAddr.city} onChange={e=>setShipAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={ST.inp}/></div>
+              <Sel wrapStyle={addrCell} selectId="pps-ship-state" name="ship-address-level1" autoComplete="shipping address-level1" label={<Tip k="ship_state">State</Tip>} value={shipState} onChange={v=>{setShipState(v)}}>
                 {US_STATES.map(st=><option key={st} value={st}>{st}</option>)}
               </Sel>
-              <div style={addrCell}><label style={ST.lbl}>ZIP Code</label><input type="text" value={shipAddr.zip} onChange={e=>{
+              <div style={addrCell}><label htmlFor="pps-ship-zip" style={ST.lbl}>ZIP Code</label><input type="text" id="pps-ship-zip" name="ship-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>{
                 const z=e.target.value.replace(/[^\d-]/g,"").slice(0,10);
                 setShipAddr(p=>({...p,zip:z}));
                 /* Shippo groundwork: when PCF.shippo_api_token is set and zip is 5+ digits,
