@@ -106,6 +106,22 @@
   html[data-pps-theme="dark"] option{background:#161b22;color:#e6edf6}
   html[data-pps-theme="dark"] input::placeholder,html[data-pps-theme="dark"] textarea::placeholder{color:#5b6b83}
   html[data-pps-theme="dark"] [style*="rgb(250, 250, 250)"]{background:#1a212b !important}
+  /* Status tints (error / warning / success banners) are pale by construction and
+     stay bright on a dark page. Their ink lives on child spans with its own inline
+     colour, so each family remaps the container AND its descendants. Matching on the
+     rgb() React emits catches every site, including ones not enumerated by hand. */
+  html[data-pps-theme="dark"] [style*="rgb(254, 242, 242)"],
+  html[data-pps-theme="dark"] [style*="rgb(254, 226, 226)"]{background:#2a1416 !important;border-color:#5b2b2f !important}
+  html[data-pps-theme="dark"] [style*="rgb(254, 242, 242)"] *,
+  html[data-pps-theme="dark"] [style*="rgb(254, 226, 226)"] *{color:#fca5a5 !important}
+  html[data-pps-theme="dark"] [style*="rgb(254, 243, 199)"],
+  html[data-pps-theme="dark"] [style*="rgb(255, 251, 235)"]{background:#2a2210 !important;border-color:#5a4a1e !important}
+  html[data-pps-theme="dark"] [style*="rgb(254, 243, 199)"] *,
+  html[data-pps-theme="dark"] [style*="rgb(255, 251, 235)"] *{color:#fcd34d !important}
+  html[data-pps-theme="dark"] [style*="rgb(232, 245, 227)"],
+  html[data-pps-theme="dark"] [style*="rgb(240, 253, 244)"]{background:#10231a !important;border-color:#245c3a !important}
+  html[data-pps-theme="dark"] [style*="rgb(232, 245, 227)"] *,
+  html[data-pps-theme="dark"] [style*="rgb(240, 253, 244)"] *{color:#6ee7b7 !important}
   html[data-pps-theme="dark"] input:hover:not(:focus),html[data-pps-theme="dark"] select:hover:not(:focus){border-color:#3b4757 !important}
   html[data-pps-theme="dark"] ::-webkit-scrollbar-thumb{background:#2a3340;background-clip:content-box}
   html[data-pps-theme="dark"] ::-webkit-scrollbar-thumb:hover{background:#3b4757;background-clip:content-box}
