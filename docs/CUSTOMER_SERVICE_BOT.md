@@ -102,6 +102,12 @@ Already connected. Use it to trigger things (new Missive conversation → call t
 
 ## 6. Implementation — the site widget
 
+> **A working scaffold ships with this doc:**
+> - `pps-assistant.php` — the plugin. Config + kill switch, cache-shaped system prompt, five tools wired to real PPS functions, the agent loop, session store, rate limits, daily cap, widget, admin page. Ships with `enabled => false`.
+> - `assistant-widget-preview.html` — standalone widget preview for the Pages branch, canned replies, no backend needed.
+>
+> The sections below explain the decisions inside those files. Every tool handler marked `TODO` needs its function names confirmed against production before the plugin is switched on.
+
 ### 6.1 Install
 
 ```bash
@@ -385,8 +391,8 @@ At 50 conversations/day on Opus 5 that's roughly **$90/month**. Order-of-magnitu
 
 | File | Change |
 |---|---|
-| `pps-assistant.php` | New. Client, tools, REST routes, session store, rate limits. |
-| `pps-assistant-admin.php` | New. API key, model, effort, policy prompt, kill switch. Follows `pps-config-admin.php` conventions. |
+| `pps-assistant.php` | **Written.** Transport, tools, REST route, agent loop, session store, rate limits, widget, admin page. |
+| `assistant-widget-preview.html` | **Written.** Standalone widget preview for the Pages branch (canned replies, no backend). |
 | `pps-calculators.php` | Load the new plugin file; expose `pps_get_registry()` if not already public. |
 | `pps-reorder.php` | No change — `pps_order_lookup_*` reused as-is. |
 | `docs/MASTER_PRICING_LOGIC.md` | No change. Referenced as the reason the bot doesn't price. |
