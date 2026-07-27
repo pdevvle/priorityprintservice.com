@@ -4647,24 +4647,24 @@ function App(){
 
   const buildShareUrl = () => {
     const p = new URLSearchParams();
-    if (sizeLabel !== "5.5×8.5 (Opens to 8.5×11)") p.set("size", sizeLabel);
-    if (sizeLabel === "Custom Size") { p.set("long", customLong); p.set("short", customShort); }
-    if (bindDir !== "short") p.set("bind", bindDir);
-    if (insideColor !== "color") p.set("color", insideColor);
-    if (coverColor !== "color") p.set("covercolor", coverColor);
-    if (insidePaperType !== "noncardstock") p.set("paper", insidePaperType);
+    p.set("size", sizeLabel);
+    p.set("long", customLong); p.set("short", customShort);
+    p.set("bind", bindDir);
+    p.set("color", insideColor);
+    p.set("covercolor", coverColor);
+    p.set("paper", insidePaperType);
     if (insidePaper && insidePaper.val != null) p.set("paperval", insidePaper.val);
-    if (coverMode !== "same") p.set("covermode", coverMode);
-    if (coverPaperType !== "cardstock") p.set("coverpaper", coverPaperType);
+    p.set("covermode", coverMode);
+    p.set("coverpaper", coverPaperType);
     if (coverPaper && coverPaper.val != null) p.set("coverval", coverPaper.val);
-    if (twoStaple) p.set("staple", "true");
-    if (vividPrint) p.set("vivid", "true");
-    if (coating > 0) p.set("coating", coating);
-    if (bundling > 0) p.set("bundling", bundling);
-    if (roundCorner > 0) p.set("corner", roundCorner);
-    if (shipState !== "AZ") p.set("state", shipState);
-    if (sets[0].qty !== 100) p.set("qty", sets[0].qty);
-    if (sets[0].pages !== 8) p.set("pages", sets[0].pages);
+    p.set("staple", twoStaple ? "true" : "false");
+    p.set("vivid", vividPrint ? "true" : "false");
+    p.set("coating", coating);
+    p.set("bundling", bundling);
+    p.set("corner", roundCorner);
+    p.set("state", shipState);
+    p.set("qty", sets[0].qty);
+    p.set("pages", sets[0].pages);
     const base = window.location.origin + window.location.pathname;
     const qs = p.toString();
     return qs ? base + "?" + qs : base;
