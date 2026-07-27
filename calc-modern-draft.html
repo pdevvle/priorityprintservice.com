@@ -99,6 +99,17 @@
 
   /* ===== MODERN DRAFT — interaction states & page field ===== */
   body{background:#f6f7f9}
+  /* ── Dark mode. Most surfaces repaint via the CC/ST swap; these are the ones
+        inline styles can't reach: the page field, native select popups, and the
+        handful of hardcoded #fafafa chrome bars (React emits them as rgb()). ── */
+  html[data-pps-theme="dark"] body{background:#0d1117;color:#e6edf6}
+  html[data-pps-theme="dark"] option{background:#161b22;color:#e6edf6}
+  html[data-pps-theme="dark"] input::placeholder,html[data-pps-theme="dark"] textarea::placeholder{color:#5b6b83}
+  html[data-pps-theme="dark"] [style*="rgb(250, 250, 250)"]{background:#1a212b !important}
+  html[data-pps-theme="dark"] input:hover:not(:focus),html[data-pps-theme="dark"] select:hover:not(:focus){border-color:#3b4757 !important}
+  html[data-pps-theme="dark"] ::-webkit-scrollbar-thumb{background:#2a3340;background-clip:content-box}
+  html[data-pps-theme="dark"] ::-webkit-scrollbar-thumb:hover{background:#3b4757;background-clip:content-box}
+  html[data-pps-theme="dark"] input,html[data-pps-theme="dark"] select,html[data-pps-theme="dark"] textarea{color-scheme:dark}
   input:hover:not(:focus), select:hover:not(:focus){border-color:#cbd5e1 !important}
   input:focus, select:focus, textarea:focus{
     border-color:#007eff !important;
@@ -944,17 +955,25 @@ const CK = {
 
 const PPS_LOGO = "data:image/png;base64,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";
 
+// Theme palettes. CC's keys are semantic, not literal: `white` is the card surface
+// and `dark` is the ink, so both invert cleanly. Swapping happens by mutating CC in
+// place (pps_applyTheme) — components read CC/ST at render time, so a re-render picks
+// the new values up without threading a theme prop through every component.
+const PALETTES = {
+  light: { dark:"#0f172a", mid:"#475569", light:"#94a3b8", bg:"#f6f7f9", white:"#fff",
+           border:"#e3e8ef", red:"#dc2626", track:"#f1f4f8", errBg:"#fef2f2", errBorder:"#fecaca",
+           heroBg:"#0f172a", rowHi:"#f0f9ff" },
+  dark:  { dark:"#e6edf6", mid:"#9fb0c6", light:"#7183a0", bg:"#0d1117", white:"#161b22",
+           border:"#2a3340", red:"#f87171", track:"#0f151d", errBg:"#2a1416", errBorder:"#5b2b2f",
+           // Stays a dark surface in both themes, lifted here so it still reads as a
+           // distinct card against the near-black page rather than blending into it.
+           heroBg:"#1e2a38", rowHi:"#17263a" },
+};
 const CC = {
   primary: CK.cyan,
   accent: CK.magenta,
   warm: CK.yellow,
-  dark: "#0f172a",     // deep slate ink — more contrast than the old near-black grey
-  mid: "#475569",      // secondary text
-  light: "#94a3b8",    // tertiary / meta text
-  bg: "#f6f7f9",       // cooler page field
-  white: "#fff",
-  border: "#e3e8ef",   // hairline — the old #d8d8d8 read heavy against white
-  red: "#dc2626",
+  ...PALETTES.light,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -988,7 +1007,8 @@ function TurnBadge({days}){
 
 // Shared chip: the size badge and each collapsed-summary characteristic use exactly
 // this, so every value in a section header reads as the same kind of token.
-const CHIP={fontSize:11,fontWeight:600,color:CC.mid,background:"#f1f4f8",border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99,whiteSpace:"nowrap",maxWidth:170,overflow:"hidden",textOverflow:"ellipsis",display:"inline-block",lineHeight:1.3};
+function buildCHIP(){ return {fontSize:11,fontWeight:600,color:CC.mid,background:CC.track,border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99,whiteSpace:"nowrap",maxWidth:170,overflow:"hidden",textOverflow:"ellipsis",display:"inline-block",lineHeight:1.3}; }
+let CHIP = buildCHIP();
 
 function Sec({title,open,onToggle,children,badge,subtitle,step,summary}){
   const m=useIsMobile();
@@ -999,7 +1019,7 @@ function Sec({title,open,onToggle,children,badge,subtitle,step,summary}){
   const _cap=m?1:3;
   const _shown=_items.length>_cap?_items.slice(0,_cap-1):_items;
   const _extra=_items.length-_shown.length;
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}><div style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:"#f1f4f8",border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}<div style={{flex:1,minWidth:0}}><div style={{fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div></div><div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,minWidth:0,marginTop:subtitle?2:0}}>{!open&&_shown.length>0&&_shown.map((t,i)=><span key={i} style={CHIP}>{t}</span>)}{!open&&_extra>0&&<span style={{...CHIP,color:CC.light}}>+{_extra}</span>}{badge&&<span style={CHIP}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}><div style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}<div style={{flex:1,minWidth:0}}><div style={{fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div></div><div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,minWidth:0,marginTop:subtitle?2:0}}>{!open&&_shown.length>0&&_shown.map((t,i)=><span key={i} style={CHIP}>{t}</span>)}{!open&&_extra>0&&<span style={{...CHIP,color:CC.light}}>+{_extra}</span>}{badge&&<span style={CHIP}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
 }
 
 const DNAMES=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -1242,7 +1262,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
       {/* Ink price card, not brand cyan: cyan is reserved for the CTA and active
           states so the Add to Order button stays the loudest thing in the rail.
           Rush keeps its own colour — that's a state signal, not decoration. */}
-      <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:CC.dark,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
+      <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:CC.heroBg,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
         <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol,marginBottom:6}}>{hasRush?"Rush Total":"Estimated Total"}</div>
         <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
           {saleActive&&<span style={{fontSize:18,opacity:.55,textDecoration:"line-through",fontWeight:700,letterSpacing:"-.5px"}}>${totalWithoutSale.toFixed(2)}</span>}
@@ -4628,6 +4648,32 @@ function App(){
   // "One section at a time" — on by default: opening a section collapses the rest so
   // the customer is only looking at one topic. Preference is remembered per browser,
   // because someone who prefers seeing everything at once will want that every visit.
+  // Theme. Persisted per browser like the focus-mode preference; falls back to the
+  // OS setting on first visit so a dark-mode user isn't flashed a white page.
+  const[theme,setTheme]=useState(()=>{
+    try{
+      const v=localStorage.getItem("pps_theme");
+      if(v==="dark"||v==="light")return v;
+      return (window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
+    }catch(e){return "light";}
+  });
+  const[themeTick,setThemeTick]=useState(0);
+  useEffect(()=>{
+    pps_applyTheme(theme);
+    try{localStorage.setItem("pps_theme",theme);}catch(e){}
+    // CC/ST are mutated in place, so nothing re-renders on its own — bump a counter
+    // to repaint the tree with the new palette.
+    setThemeTick(t=>t+1);
+  },[theme]);
+  const[setOpen,setSetOpen]=useState(false);
+  useEffect(()=>{
+    if(!setOpen)return;
+    const onDoc=e=>{ if(!e.target.closest||!e.target.closest("[data-pps-settings]")) setSetOpen(false); };
+    const onKey=e=>{ if(e.key==="Escape") setSetOpen(false); };
+    document.addEventListener("mousedown",onDoc);
+    document.addEventListener("keydown",onKey);
+    return()=>{document.removeEventListener("mousedown",onDoc);document.removeEventListener("keydown",onKey);};
+  },[setOpen]);
   const[soloSec,setSoloSec]=useState(()=>{
     try{const v=localStorage.getItem("pps_solo_sections");return v===null?true:v==="1";}catch(e){return true;}
   });
@@ -5201,16 +5247,46 @@ function App(){
       <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
-          {/* Focus-mode switch — sits above the stack, quiet by design so it reads as a
-              preference rather than another configuration choice. */}
-          <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:9,padding:mob?"2px 2px 0":"0 2px 2px"}}>
-            <span style={{fontSize:12,color:CC.light,fontWeight:500}}>One section at a time</span>
-            <button type="button" role="switch" aria-checked={soloSec} aria-label="One section at a time"
-              onClick={()=>setSoloSec(v=>!v)}
-              title={soloSec?"On — opening a section collapses the others. Click to keep sections open instead.":"Off — sections stay open independently. Click to view one at a time."}
-              style={{flex:"none",width:34,height:20,borderRadius:99,border:"none",padding:0,cursor:"pointer",background:soloSec?CK.cyan:"#cbd5e1",position:"relative",transition:"background .18s ease"}}>
-              <span style={{position:"absolute",top:2,left:soloSec?16:2,width:16,height:16,borderRadius:99,background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",transition:"left .18s ease"}}/>
+          {/* Settings — preferences live behind a gear so they read as settings
+              rather than as more configuration choices competing with the form. */}
+          <div data-pps-settings style={{position:"relative",display:"flex",justifyContent:"flex-end",padding:mob?"2px 2px 0":"0 2px 2px"}}>
+            <button type="button" onClick={()=>setSetOpen(o=>!o)} aria-haspopup="true" aria-expanded={setOpen} aria-label="Settings"
+              title="Settings"
+              style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",
+                fontSize:12,fontWeight:600,color:setOpen?CC.dark:CC.light,background:setOpen?CC.track:"transparent",
+                border:`1px solid ${setOpen?CC.border:"transparent"}`,transition:"all .15s ease"}}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+              Settings
             </button>
+            {setOpen&&(
+              <div role="menu" style={{position:"absolute",top:"100%",right:0,marginTop:6,zIndex:60,minWidth:250,
+                background:CC.white,border:`1px solid ${CC.border}`,borderRadius:12,
+                boxShadow:"0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.14)",padding:6}}>
+                {[
+                  {k:"theme", label:"Dark mode", hint:"Easier on the eyes in low light.",
+                   on:theme==="dark", set:()=>setTheme(t=>t==="dark"?"light":"dark")},
+                  {k:"solo", label:"One section at a time", hint:"Opening a section collapses the others.",
+                   on:soloSec, set:()=>setSoloSec(v=>!v)},
+                ].map(o=>(
+                  <button key={o.k} type="button" role="menuitemcheckbox" aria-checked={o.on} onClick={o.set}
+                    style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"9px 10px",borderRadius:8,
+                      border:"none",background:"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                    <span style={{flex:1,minWidth:0}}>
+                      <span style={{display:"block",fontSize:13,fontWeight:600,color:CC.dark}}>{o.label}</span>
+                      <span style={{display:"block",fontSize:11,color:CC.light,marginTop:1}}>{o.hint}</span>
+                    </span>
+                    <span style={{flex:"none",width:34,height:20,borderRadius:99,position:"relative",
+                      background:o.on?CK.cyan:CC.border,transition:"background .18s ease"}}>
+                      <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,borderRadius:99,
+                        background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",transition:"left .18s ease"}}/>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* SECTION 1: Size */}
@@ -5593,7 +5669,7 @@ function App(){
               </thead>
               <tbody>
                 {projections.map((p,i) => p.total !== null && (
-                  <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?"#f0f9ff":"transparent",cursor:p.current?"default":"pointer"}}
+                  <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?CC.rowHi:"transparent",cursor:p.current?"default":"pointer"}}
                     onClick={() => {if(!p.current) upSet(0,{qty:p.qty})}}>
                     <td style={{padding:"6px 18px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>
                       {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
@@ -5739,34 +5815,49 @@ function App(){
 // ═══════════════════════════════════════════════════════════════
 // STYLES
 // ═══════════════════════════════════════════════════════════════
-const ST = {
+function buildST(){ return {
   f:{marginTop:18},
   lbl:{display:"block",fontSize:13,fontWeight:600,color:CC.mid,marginBottom:6,letterSpacing:".005em"},
-  sel:{width:"100%",padding:"20px 34px 20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  sel:{width:"100%",padding:"20px 34px 20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:CC.white,fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
   selA:{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
-  inp:{width:"100%",padding:"20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  inp:{width:"100%",padding:"20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:CC.white,fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
   // Segmented control: inset track + flat brand thumb (replaces the bevelled 5-stop gradient)
-  pills:{display:"flex",borderRadius:10,border:`1px solid ${CC.border}`,overflow:"hidden",background:"#f1f4f8",padding:3,gap:3,boxShadow:"inset 0 1px 2px rgba(16,24,40,.04)"},
+  pills:{display:"flex",borderRadius:10,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.track,padding:3,gap:3,boxShadow:"inset 0 1px 2px rgba(16,24,40,.04)"},
   pill:{flex:1,padding:"17px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRadius:7,background:"transparent",color:CC.mid,cursor:"pointer",transition:"all .18s cubic-bezier(.4,0,.2,1)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
   pillOn:{background:CK.cyan,color:"#fff",fontWeight:600,boxShadow:"0 1px 2px rgba(0,126,255,.35)"},
   row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18},
   row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:18},
   hr:{height:1,background:CC.border,margin:"16px 0 4px"},
-  setBox:{marginTop:12,padding:14,borderRadius:10,background:"#f8fafc",border:`1px solid ${CC.border}`},
-  addBtn:{width:"100%",marginTop:12,padding:"11px",borderRadius:10,border:`1px dashed ${CC.border}`,background:"#fff",color:CK.cyan,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .15s ease"},
-  err:{color:CC.red,fontSize:13,margin:"10px 0 0",padding:"10px 12px",background:"#fef2f2",borderRadius:9,border:"1px solid #fecaca"},
+  setBox:{marginTop:12,padding:14,borderRadius:10,background:CC.track,border:`1px solid ${CC.border}`},
+  addBtn:{width:"100%",marginTop:12,padding:"11px",borderRadius:10,border:`1px dashed ${CC.border}`,background:CC.white,color:CK.cyan,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .15s ease"},
+  err:{color:CC.red,fontSize:13,margin:"10px 0 0",padding:"10px 12px",background:CC.errBg,borderRadius:9,border:`1px solid ${CC.errBorder}`},
   note:{fontSize:12,color:CC.light,margin:"5px 0 0"},
   // Section cards: the old left-edge accent stripe is gone; depth now comes from a
   // layered shadow instead of a hard border.
   card:{background:CC.white,borderRadius:14,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(16,24,40,.04), 0 2px 6px rgba(16,24,40,.03)"},
-  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"15px 18px",background:"#fff",border:"none",borderBottom:`1px solid ${CC.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:15},
+  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"15px 18px",background:CC.white,border:"none",borderBottom:`1px solid ${CC.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:15},
   pnl:{background:CC.white,borderRadius:14,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(16,24,40,.04), 0 6px 16px rgba(16,24,40,.05)"},
   secSub:{margin:"3px 0 0",fontSize:11.5,fontWeight:400,color:CC.light,lineHeight:1.4,textTransform:"none",letterSpacing:0},
   brkBar:{height:8,borderRadius:99,background:"#eef2f6",overflow:"hidden",display:"flex",marginBottom:10},
   specCard:{background:CC.dark,color:"#e2e8f0",borderRadius:12,padding:"16px 18px",marginTop:16,fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"},
   specEye:{fontSize:10,letterSpacing:".14em",opacity:.55,marginBottom:10},
   specGrid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px 14px",fontSize:12},
-};
+}; }
+const ST = buildST();
+
+/**
+ * Swap theme in place. CC/ST are module-level objects read at render time, so
+ * mutating them and re-rendering repaints everything — no theme prop threading.
+ */
+function pps_applyTheme( name ) {
+  const p = PALETTES[ name ] || PALETTES.light;
+  Object.assign( CC, p );
+  const next = buildST();
+  for ( const k in ST ) delete ST[ k ];
+  Object.assign( ST, next );
+  CHIP = buildCHIP();
+  if ( typeof document !== "undefined" ) document.documentElement.dataset.ppsTheme = name;
+}
 
 // Mount
 ReactDOM.createRoot(document.getElementById('pps-calculator-root'))
