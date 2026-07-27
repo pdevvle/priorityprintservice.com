@@ -1237,6 +1237,123 @@ function pps_ajax_quote_question() {
     }
 }
 
+/**
+ * Materials price floor — server-authoritative lower bound for booklet calculators.
+ *
+ * Business rule (owner, 2026-07-27): nothing may sell below the minimum markup on
+ * materials, excluding labour and add-ons:
+ *
+ *     floor = ( (sheet cost + print cost) x total sheets ) x minimum markup
+ *
+ * Why this is trustworthy where the posted price is not: every input is either
+ * server-side config (paper prices, click costs, imposition, markup) or a customer
+ * selection that is SELF-ENFORCING — quantity, page count, trim size and stock all
+ * flow into PPS-Spec, so understating one to depress the floor also shrinks the job
+ * that gets produced. The debug block in pps_metadata is deliberately NOT used: it
+ * has no downstream effect, so lying about it would be free.
+ *
+ * NOTE: this is the one piece of pricing arithmetic that lives in PHP. It is a
+ * security bound, not a quote — it must never be used to price anything. See
+ * docs/MASTER_PRICING_LOGIC.md.
+ *
+ * Fails OPEN by design: any input it cannot resolve authoritatively (custom trim,
+ * unknown stock, unrecognised calculator) returns null and the check is skipped. A
+ * false rejection at add-to-cart costs a real sale; a missed check costs margin.
+ *
+ * @return float|null Floor in dollars, or null when it cannot be determined.
+ */
+function pps_materials_price_floor( $product_id, $metadata_json ) {
+    $meta = json_decode( (string) $metadata_json, true );
+    if ( ! is_array( $meta ) ) return null;
+
+    // Booklet calculators only — they share this sheet math. Others fail open.
+    $calc_file = pps_get_calculator_for_product( $product_id );
+    $calc      = $calc_file ? pps_get_calc_type_for_filename( $calc_file ) : '';
+    if ( ! in_array( $calc, array( 'saddle', 'perfect-bound', 'coupon' ), true ) ) return null;
+
+    $cfg = get_option( PPS_CONFIG_OPTION, array() );
+    $pcf = isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ? $cfg['pcf'] : array();
+
+    // ── Imposition from the trim size (server-side table). Custom trims skip. ──
+    $size_label = isset( $meta['sizeLabel'] ) ? (string) $meta['sizeLabel'] : '';
+    if ( $size_label === '' || $size_label === 'Custom Size' ) return null;
+    $imp = 0;
+    foreach ( (array) ( $cfg['size_presets'] ?? array() ) as $group ) {
+        foreach ( (array) ( $group['items'] ?? array() ) as $item ) {
+            if ( isset( $item['label'] ) && $item['label'] === $size_label ) {
+                $imp = floatval( $item['imp'] ?? 0 );
+                break 2;
+            }
+        }
+    }
+    if ( $imp <= 0 ) return null;
+
+    // ── Paper prices from config, matched by label. Never trust the posted price. ──
+    $paper_price = function( $label ) use ( $cfg ) {
+        if ( $label === '' ) return null;
+        foreach ( array( 'papers_nc', 'papers_cs' ) as $key ) {
+            foreach ( (array) ( $cfg[ $key ] ?? array() ) as $p ) {
+                if ( isset( $p['label'] ) && $p['label'] === $label ) return floatval( $p['price'] ?? 0 );
+            }
+        }
+        return null;
+    };
+    $inside_label = isset( $meta['insidePaper']['label'] ) ? (string) $meta['insidePaper']['label'] : '';
+    $inside_price = $paper_price( $inside_label );
+    if ( $inside_price === null || $inside_price <= 0 ) return null;
+
+    // Self-cover uses the COVER_SAME stub, not the inside stock: those sheets are
+    // already counted in the inside total, so the engine charges a nominal rate for
+    // them. Using the real inside price here would inflate the floor several-fold on
+    // the commonest configuration and reject legitimate orders.
+    $cover_same  = ( ( $meta['coverMode'] ?? '' ) === 'same' );
+    $cover_label = isset( $meta['coverPaper']['label'] ) ? (string) $meta['coverPaper']['label'] : '';
+    $cover_price = $cover_same
+        ? floatval( $cfg['cover_same']['price'] ?? 0.01 )
+        : $paper_price( $cover_label );
+    if ( $cover_price === null || $cover_price <= 0 ) return null;
+
+    // ── Sheet counts, mirroring the calculator's primitives ──
+    $booklet_sheets = 0.0; $total_qty = 0.0;
+    foreach ( (array) ( $meta['sets'] ?? array() ) as $set ) {
+        $q  = floatval( $set['qty'] ?? 0 );
+        $pg = floatval( $set['pages'] ?? 0 );
+        if ( $q <= 0 || $pg <= 0 ) return null;
+        $booklet_sheets += ( $q * $pg ) / 4;
+        $total_qty      += $q;
+    }
+    if ( $booklet_sheets <= 0 || $total_qty <= 0 ) return null;
+    $inside_sheets = $booklet_sheets / ( $imp / 2 );
+    $cover_sheets  = $total_qty / $imp;
+
+    // ── Click costs (both sides), same shape as the calculator's cost lines ──
+    $black = floatval( $pcf['printing_black_cost'] ?? 0.01 );
+    $color = floatval( $pcf['printing_fullcolor_cost'] ?? 0.05 );
+    $inside_print = ( ( $meta['insideColor'] ?? '' ) === 'bw' ) ? ( $black * 2 ) : ( $black * 2 + $color * 2 );
+    $cover_print  = ( ( $meta['coverColor'] ?? '' ) === 'bw' ) ? ( $black * 2 ) : ( $color * 2 );
+
+    $materials = ( $inside_price + $inside_print ) * $inside_sheets
+               + ( $cover_price  + $cover_print  ) * $cover_sheets;
+
+    // Minimum markup. The cover's own minimum is higher (1.8); deliberately using the
+    // lower inside figure for both so the bound can never exceed a legitimate quote.
+    $min_markup = floatval( $pcf['booklet_minimummarkup'] ?? 1.45 );
+    if ( $min_markup <= 0 ) return null;
+
+    $floor = $materials * $min_markup;
+
+    // A site-wide sale genuinely lowers the minimum legitimate price, so the bound has
+    // to move with it or the first big promotion starts rejecting real orders. Measured
+    // against the live engine: without this, a 20% sale falsely rejects large jobs
+    // (floor reaches 1.12x the quoted price) and a 30% sale is worse.
+    $sale = floatval( $pcf['sale_discount_pct'] ?? 0 );
+    if ( $sale > 0 && $sale < 1 ) {
+        $floor *= ( 1 - $sale );
+    }
+
+    return ( is_finite( $floor ) && $floor > 0 ) ? $floor : null;
+}
+
 function pps_ajax_add_to_cart() {
     check_ajax_referer( 'pps_add_to_cart', 'nonce' );
 
@@ -1286,6 +1403,21 @@ function pps_ajax_add_to_cart() {
         } elseif ( $price < $absolute_min ) {
             // No regular_price set — fall back to absolute floor only.
             wp_send_json_error( 'Price below minimum. Refresh and try again.' );
+        }
+    }
+
+    // ── Materials floor (2026-07-27) ──
+    // Scales with the job, unlike the flat product floor above: a large booklet order
+    // can no longer be checked out near the $5/50%-of-regular_price minimum. Returns
+    // null and skips whenever an input can't be resolved authoritatively.
+    $mat_floor = pps_materials_price_floor( $product_id, $metadata );
+    if ( $mat_floor !== null && $price < $mat_floor ) {
+        error_log( sprintf(
+            '[pps] add-to-cart materials floor rejected: pid=%d submitted=%.2f required>=%.2f',
+            $product_id, $price, $mat_floor
+        ) );
+        if ( floatval( $pcf['pps_floor_enforce'] ?? 1 ) ) {
+            wp_send_json_error( 'Price below minimum for this configuration. Refresh and try again.' );
         }
     }
 

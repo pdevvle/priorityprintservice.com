@@ -39,7 +39,12 @@ calculate(c) → reads PCF.* and the option arrays
 
 **Key insight:** the hardcoded defaults in each HTML file are **only fallbacks** for standalone preview/testing. In production (inside WordPress), the `pps_calc_config` `wp_options` row always overrides them. Admins edit values via **WP Admin → PPS Config** (tabs: Production, Papers, Finishing, Artwork, Sizes, Shipping, SEO).
 
-The PHP plugin contains **no pricing math**. It loads calculator HTMLs from `wp_upload_dir()/pps-calculators/` and injects `PPS_CONFIG`. Pricing logic lives only in the HTML files — by deliberate architecture, not by accident. Do not look for parallel PHP pricing logic; there isn't any.
+The PHP plugin contains **no pricing math**, with exactly one exception (below). It loads calculator HTMLs from `wp_upload_dir()/pps-calculators/` and injects `PPS_CONFIG`. Pricing logic lives only in the HTML files — by deliberate architecture, not by accident.
+
+> **The one exception:** `pps_materials_price_floor()` in `pps-calculators.php` computes a
+> materials lower bound to reject tampered cart prices. It is a security check, never a
+> quote, and it must not be used to price anything. See *Materials price floor* at the end
+> of this document.
 
 ---
 
@@ -883,3 +888,82 @@ When `sheetsToDays()` returns `null`, `calculate()` early-returns `{error: ["...
 ### Files touched
 
 - `calc-preview-test.html`, `calc-perfect-bound.html`, `calc-brochure.html`, `calc-coupon-book.html` — `sheetsToDays()` function added before `calculate()`; early return for >100k; `days` formula updated.
+
+## Materials price floor — server-side validation bound (2026-07-27)
+
+**This is the only pricing arithmetic that lives in PHP, and it is not a quote.** It is a
+security bound on `pps_ajax_add_to_cart`, and must never be used to price anything.
+
+### Why it exists
+
+`pps_price` is computed client-side and posted to the cart, where
+`woocommerce_before_calculate_totals` applies it verbatim as the line-item price. The only
+prior defence was a flat floor — `max($5, 50% x regular_price)` — which does not scale with
+the job. With `regular_price` set to $50 on a registry product, a $900 booklet order could be
+checked out for $25.
+
+### Rule (owner, 2026-07-27)
+
+Nothing sells below the minimum markup on materials, excluding labour and add-ons:
+
+```
+floor = ( (sheet cost + print cost) x total sheets ) x booklet_minimummarkup
+```
+
+Implemented in `pps_materials_price_floor()`, mirroring the engine's four material lines:
+
+```
+inside_sheets = SUM(qty x pages) / 4 / (imp / 2)
+cover_sheets  = SUM(qty) / imp
+inside_print  = bw ? black*2 : black*2 + fullcolor*2
+cover_print   = bw ? black*2 : fullcolor*2
+materials     = (inside_paper + inside_print) x inside_sheets
+              + (cover_paper  + cover_print ) x cover_sheets
+floor         = materials x booklet_minimummarkup x (1 - sale_discount_pct)
+```
+
+### Why these inputs can be trusted
+
+Every input is either server-side config (paper prices, click costs, imposition, markup,
+sale) or a customer selection that is **self-enforcing** — qty, pages, trim size and stock
+all flow into `PPS-Spec`, so understating one to depress the floor also shrinks the job that
+gets produced. The `debug` block in `pps_metadata` is deliberately **not** used: it has no
+downstream effect, so lying about it would be free.
+
+### Deliberate design choices
+
+- **Fails open.** Custom trims, unknown stock, unrecognised calculators and malformed
+  metadata all return `null` and skip the check. A false rejection costs a real sale; a
+  missed check costs margin.
+- **Self-cover uses the `cover_same` stub price (~$0.01), not the inside stock.** Those
+  sheets are already counted in the inside total. Using the real price here inflates the
+  floor several-fold on the commonest configuration.
+- **Cover's own minimum markup (1.8) is ignored** in favour of the lower inside figure
+  (1.45), so the bound can never exceed a legitimate quote.
+- **Tracks the sale.** A site-wide sale genuinely lowers the minimum legitimate price.
+- **Booklets only** (saddle / perfect-bound / coupon). Other calc types fail open; extending
+  means porting their sheet math.
+
+### Verification (against the live engine, not by inspection)
+
+3,096 configurations driven through the real `calculate()` — every preset size, 25-5,000 qty,
+8-100 pages, colour and B&W, self-cover and separate cover, cheapest and dearest stock:
+
+| | |
+|---|---|
+| Violations (floor > legitimate price) | **0** |
+| floor / price — median | 0.37 |
+| floor / price — max | 0.895 |
+
+Sale stress test caught a real defect pre-ship: without the `(1 - sale_discount_pct)` term, a
+20% sale falsely rejected 7 configurations (floor reached 1.12x price) and 30% rejected 16.
+With it, the worst ratio holds at 0.895 at every sale level.
+
+### Limits
+
+Worst case is bounded at roughly materials cost, not eliminated — a tampered price between
+the floor and the true total still passes. Tightening further means replicating the markup
+and discount curves in PHP, which would rot as those change. The authoritative fix remains
+porting the engine for a full server-side recompute.
+
+**Knob:** `pcf.pps_floor_enforce` (default 1). Set to 0 to log without rejecting.
