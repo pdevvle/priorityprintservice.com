@@ -97,6 +97,25 @@
   }
   .bp-approve-cta:hover{filter:brightness(1.08)}
 
+  /* ===== MODERN DRAFT — motion ===== */
+  /* Toggle knob: a coin-flip. The squash at the midpoint is what sells it — a plain
+     circle rotating on Y is otherwise invisible. Overshoot on the slide (the caller's
+     bezier) lands it with a little weight. */
+  @keyframes pps-knob-flip{
+    0%  {transform:rotateY(0deg)   scale(1)}
+    45% {transform:rotateY(90deg)  scale(.74)}
+    100%{transform:rotateY(180deg) scale(1)}
+  }
+  /* Select "pop" on choose. Two identical animations under different names so the
+     same element can re-trigger without being remounted — remounting a <select>
+     would drop focus and break keyboard use. */
+  @keyframes pps-pop-0{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
+  @keyframes pps-pop-1{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
+  /* Anyone who has asked their OS to reduce motion gets none of it. */
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+  }
+
   /* ===== MODERN DRAFT — interaction states & page field ===== */
   body{background:#f6f7f9}
   /* ── Dark mode. Most surfaces repaint via the CC/ST swap; these are the ones
@@ -1000,7 +1019,8 @@ const Chev=()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" strok
 
 function Sel({label,value,onChange,children,disabled,note,badge,wrapStyle,name,autoComplete,selectId}){
   const m=useIsMobile();
-  return <div style={{...ST.f,...wrapStyle}}>{label&&<label style={ST.lbl}>{label}</label>}<div style={{position:"relative"}}><select id={selectId} name={name} autoComplete={autoComplete} value={value} onChange={e=>onChange(e.target.value)} style={{...ST.sel,fontSize:m?16:15,padding:m?"20px 32px 20px 13px":"20px 34px 20px 14px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
+  const[pop,setPop]=useState(0);
+  return <div style={{...ST.f,...wrapStyle}}>{label&&<label style={ST.lbl}>{label}</label>}<div style={{position:"relative",animation:pop?`pps-pop-${pop%2} .28s ease`:undefined}}><select id={selectId} name={name} autoComplete={autoComplete} value={value} onChange={e=>{setPop(n=>n+1);onChange(e.target.value);}} style={{...ST.sel,fontSize:m?16:15,padding:m?"20px 32px 20px 13px":"20px 34px 20px 14px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
 }
 
 function TxtNum({label,value,onChange,min=1,max=99999}){
@@ -5304,9 +5324,16 @@ function App(){
                       <span style={{display:"block",fontSize:11,color:CC.light,marginTop:1}}>{o.hint}</span>
                     </span>
                     <span style={{flex:"none",width:34,height:20,borderRadius:99,position:"relative",
-                      background:o.on?CK.cyan:CC.border,transition:"background .18s ease"}}>
-                      <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,borderRadius:99,
-                        background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",transition:"left .18s ease"}}/>
+                      background:o.on?CK.cyan:CC.border,transition:"background .3s ease"}}>
+                      {/* Outer span carries the slide, inner one the flip: the flip is an
+                          animation that must restart on every change, and re-keying the
+                          element to restart it would also cancel a transition on itself. */}
+                      <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,
+                        transition:"left .3s cubic-bezier(.34,1.56,.64,1)"}}>
+                        <span key={o.on?"on":"off"} style={{display:"block",width:16,height:16,borderRadius:99,
+                          background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",
+                          animation:"pps-knob-flip .3s ease"}}/>
+                      </span>
                     </span>
                   </button>
                 ))}
