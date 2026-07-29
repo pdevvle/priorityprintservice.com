@@ -967,3 +967,69 @@ and discount curves in PHP, which would rot as those change. The authoritative f
 porting the engine for a full server-side recompute.
 
 **Knob:** `pcf.pps_floor_enforce` (default 1). Set to 0 to log without rejecting.
+
+## Human-touch day on art & proofing (2026-07-29)
+
+**Status: implemented in `calc-modern-draft.html` ONLY. Noted here so it can be
+applied to the other calculators — it is not in any of them yet.**
+
+### Rule (owner)
+
+Anything that needs a person in the loop before we can print costs **+1 business
+day**. The fully self-serve path stays the fastest route and adds nothing.
+
+| Selection | val | Before | After |
+|---|---|---|---|
+| Upload Art with Order | 0.01 | 0 | **0** — unchanged, deliberately |
+| Email Art After Order | 0.02 | 0 | **+1** |
+| Artwork already discussed | 0.03 | 0 | **+1** |
+| I have a design in Canva | 0.04 | 0 | **+1** |
+| Artwork needs edits | 2.01 | `eT` | unchanged (already has a day term) |
+| Design from scratch | 4.01 | `dT` | unchanged (already has a day term) |
+| Proof & Approve Online | 0 | 0 | **0** — the stated exception |
+| Manual Digital Proof | 0.01 | 0 | **+1** |
+| Hardcopy Proof | 3.01 | `pE` | unchanged (already has a day term) |
+
+`Upload Art with Order` staying at 0 was an explicit owner decision (2026-07-29):
+the literal reading of "all art variables previously 0" would have included it,
+which raises baseline turnaround on essentially every order, since it is the
+default. The self-serve path pairs with online approval as the fastest route.
+
+### Implementation notes
+
+```js
+const humanArt   = (art.val > 0.015 && art.val < 0.045) ? 1 : 0;   // 0.02 / 0.03 / 0.04
+const humanProof = (c.proof > 0 && c.proof < 3) ? 1 : 0;           // 0.01
+const hT = Math.min(1, humanArt + humanProof);
+days = Math.max(PCF.minimum_turnaround_days, Math.floor(base)) + hT;
+```
+
+Three things that are easy to get wrong when porting this:
+
+1. **`hT` must sit OUTSIDE the `minimum_turnaround_days` clamp.** Added inside it,
+   a typical small job floors at the minimum either way and the day disappears —
+   i.e. it would do nothing on exactly the orders it is meant to affect. Verified:
+   with it inside, every combination still read 3 days.
+2. **Capped at one day total, not one per dimension.** The rule is "+1 day to
+   their turnaround", so a Canva link *and* a manual proof together is still +1.
+3. **Ranges, not equality.** These vals arrive from admin config as floats.
+
+The `ti` badges attribute the day to whichever control caused it, with the art
+side taking precedence — since `hT` is capped at one, showing it on both would
+imply two days when only one is charged.
+
+### Verified matrix (saddle, 100 qty / 8pp, in-stock paper)
+
+| Art | Approve Online | Manual Digital | Hardcopy |
+|---|---|---|---|
+| Upload with Order | **3** | 4 | 4 |
+| Email After Order | 4 | 4 | 5 |
+| Already discussed | 4 | 4 | 5 |
+| Canva link | 4 | 4 | 5 |
+
+### To apply elsewhere
+
+`calc-preview-test`, `calc-perfect-bound`, `calc-coupon-book`, `calc-brochure`,
+`calc-letterhead`, `calc-postcard`, `calc-sticker`, `calc-greeting-card`. The flat
+calcs compute `artDays` separately from `proofDays`; the same two predicates and
+the same after-the-clamp placement apply.
