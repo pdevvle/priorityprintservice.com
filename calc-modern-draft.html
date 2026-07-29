@@ -5093,7 +5093,15 @@ function App(){
       s2:[col(insideColor),insidePaper.label].concat(coverMode!=="same"?[coverPaper.label+" cover"]:[]),
       s3:fin.length?fin:["No finishing added"],
       s4:[lbl(ART_OPTS,artwork),proofLbl].filter(Boolean),
-      s5:shipState?[shipState+(shipZip?(" "+shipZip):"")].concat(sh&&sh.freeDeliveryBizDays?["free ground "+sh.freeDeliveryBizDays+"d"]:[]):["Add a destination"],
+      // Destination, then the date the customer actually gets — not the service or
+      // the day count, which told them nothing they wanted at a glance. Rushed jobs
+      // show the requested need-by date; otherwise the free-delivery date. Same
+      // expression the price panel uses, so the chip can never disagree with it.
+      s5:shipState
+        ? [shipState+(shipZip?(" "+shipZip):"")]
+            .concat(sh ? [((sh.rushCost>0 && sh.needByFmt) ? sh.needByFmt : sh.freeDeliveryDate)] : [])
+            .filter(Boolean)
+        : ["Add a destination"],
     };
   })();
   const r2=mob?{display:"grid",gridTemplateColumns:"1fr",gap:8}:ST.row2;
