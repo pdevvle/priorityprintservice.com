@@ -784,8 +784,23 @@ function calculate(c) {
   const eT=(art.val>=2&&art.val<4)?Math.ceil((c.artEditPages/PCF.art_pagesperhour)/2):0;
   const bT=(!artWork&&bld.val>0)?Math.floor(bld.val*tP)/12:0;
   const pE=c.proof>=3?Math.ceil(pT+3.01):0;
+  // ── Human-touch day (owner rule 2026-07-29) ──
+  // Anything that needs a person in the loop before we can print costs a day:
+  // emailing art in later, "already discussed", handing us a Canva link, or asking
+  // for a manual digital proof. Ranges rather than equality because these vals come
+  // from admin config as floats.
+  //   art 0.02 email-after · 0.03 already-discussed · 0.04 Canva
+  //   proof 0.01 manual digital proof
+  // Deliberately NOT charged: 0.01 upload-with-order and proof 0 approve-online —
+  // the fully self-serve path stays the fastest route, at no adder. Design-from-
+  // scratch (4.01) and hardcopy (3.01) already carry their own day terms.
+  // Capped at one day total, not one per dimension: the rule is "+1 day to their
+  // turnaround", so picking both a Canva link and a manual proof still costs one.
+  const humanArt   = (art.val > 0.015 && art.val < 0.045) ? 1 : 0;
+  const humanProof = (c.proof > 0 && c.proof < 3) ? 1 : 0;
+  const hT = Math.min(1, humanArt + humanProof);
   const artT=dT+(pE+dT)+eT+bT;
-  const days=Math.max(PCF.minimum_turnaround_days,Math.floor(sheetsToDays(tS)+pT+aT+artT));
+  const days=Math.max(PCF.minimum_turnaround_days,Math.floor(sheetsToDays(tS)+pT+aT+artT))+hT;
 
   // Turnaround impact per option (for UI badges)
   const ti = {
@@ -796,10 +811,14 @@ function calculate(c) {
     coating: (coat.val>0&&coatOK) ? Math.floor((tQ/(imp/2))/coat.val) : 0,
     bundling: (bund.val>0&&q100) ? Math.floor(spine/bund.val) : 0,
     roundCorner: rc.val>0 ? Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)) : 0,
-    artDesign: dT,
+    artDesign: dT + humanArt,
     artEdits: eT,
     bleed: Math.round(bT*10)/10,
-    proof: pE,
+    // Show the human-touch day against whichever control caused it, so the "+1 day"
+    // badge lands on the option the customer actually picked. The art side takes
+    // precedence because hT is capped at one — attributing it to both would imply
+    // two days when only one is charged.
+    proof: pE + (humanArt ? 0 : humanProof),
   };
 
   // ── Shipping & Rush (all in business days) ──
