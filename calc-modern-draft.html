@@ -100,6 +100,10 @@
   }
   .bp-approve-cta:hover{filter:brightness(1.08)}
 
+  /* Primary CTA — lifts on hover so it reads as the one thing to press. */
+  [data-pps-cta]:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06);box-shadow:0 7px 20px rgba(0,126,255,.48) !important}
+  [data-pps-cta]:active:not(:disabled){transform:translateY(0);box-shadow:0 3px 10px rgba(0,126,255,.4) !important}
+
   /* ===== MODERN DRAFT — typography =====
      Montserrat for display, Work Sans for UI and body, matching the site. The
      fallbacks are the stack this page used previously, so a blocked or slow font
@@ -5735,7 +5739,15 @@ function App(){
             <SidebarBookPreview sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={openPreview}/>
             <Panel result={result} debugUnlocked={debugUnlocked}/>
           </div>
-          <button type="button" onClick={handleAddToOrder} style={{width:"100%",padding:"14px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:15,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",transition:"opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
+          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
+          {/* Secondary action, directly under the CTA: visible without scrolling past
+              the pricing table, which is where it used to sit. */}
+          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}}
+            style={{width:"100%",marginTop:9,padding:"11px 10px",borderRadius:9,border:`1px solid ${CK.cyan}55`,
+              background:CC.tint,color:CK.cyan,fontSize:13,fontWeight:650,cursor:"pointer",fontFamily:"inherit",
+              transition:"all .2s"}}>
+            Ask a question about this quote →
+          </button>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing
@@ -5775,29 +5787,8 @@ function App(){
               </tbody>
             </table>
           </div>}
-          <button type="button" onClick={handleAddToOrder} disabled={!!result?.error?.length||submitting} style={{width:"100%",marginTop:10,padding: submitting && uploadProgress ? "10px 12px 6px" : "12px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,transition:"all .2s",overflow:"hidden"}}>
-            {submitting && uploadProgress ? (
-              <div>
-                <div style={{marginBottom:6}}>
-                  {uploadProgress.phase === "upload"
-                    ? `Uploading file(s) and page(s)${uploadProgress.fileCount > 1 ? ` ${uploadProgress.fileIdx + 1}/${uploadProgress.fileCount}` : ""}… ${uploadProgress.pct}%`
-                    : "Adding to cart…"
-                  }
-                </div>
-                <div style={{width:"100%",height:4,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden"}}>
-                  <div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width: uploadProgress.phase === "upload"
-                    ? `${((uploadProgress.fileIdx / uploadProgress.fileCount) + (uploadProgress.pct / 100 / uploadProgress.fileCount)) * 100}%`
-                    : "100%"
-                  }}/>
-                </div>
-                {uploadProgress.phase === "upload" && uploadProgress.fileName && (
-                  <div style={{fontSize:10,fontWeight:500,opacity:.7,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{uploadProgress.fileName}</div>
-                )}
-              </div>
-            ) : submitting ? "Uploading file(s) and page(s)…" : "Add to Order"}
-          </button>
           <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
-            {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
+            {shareCopied ? "✓ Link copied to clipboard" : "Save configuration"}
           </button>
           {switchTargets.length > 0 && <div style={{display:"flex",gap:6,marginTop:8}}>
             {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} target="_blank" rel="noopener" style={{flex:1,display:"block",padding:"8px 6px",borderRadius:4,border:"1px solid #dbeafe",background:CC.tint,color:"#1d4ed8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}
@@ -5816,9 +5807,6 @@ function App(){
             </div>
           );})()}
           {debugUnlocked&&showDebug&&<DebugPanel debug={result?.debug}/>}
-          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px solid ${CK.cyan}55`,background:CC.white,color:CK.cyan,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
-            Have a question about this quote? →
-          </button>
         </div>}
       </div>
 
