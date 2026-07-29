@@ -120,6 +120,8 @@
      would drop focus and break keyboard use. */
   @keyframes pps-pop-0{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
   @keyframes pps-pop-1{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
+  /* Condensed desktop total sliding up as the price card leaves the viewport. */
+  @keyframes pps-mini-in{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
   /* Anyone who has asked their OS to reduce motion gets none of it. */
   @media (prefers-reduced-motion: reduce){
     *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;transition-delay:0s !important;animation-delay:0s !important}
@@ -5147,6 +5149,27 @@ function App(){
   const[uploadProgress,setUploadProgress]=useState(null); // null | {phase, pct, fileName, fileIdx, fileCount}
   const[shareCopied,setShareCopied]=useState(false);
   const[projCopied,setProjCopied]=useState(false);
+  // The quantity table is the tallest thing in the rail. Left whole it pushes the rail
+  // past the viewport, and a rail taller than the page's left column cannot stick — so
+  // the total and the CTA scroll away. Collapsed it shows a window around the current
+  // selection and the rail stays short enough to stay put.
+  const[projOpen,setProjOpen]=useState(false);
+  // Belt and braces for the same problem: when the price card does leave the viewport
+  // (very short window, or a rail taller than everything else), a condensed bar takes
+  // its place, tracked to the rail's own column so it reads as the rail folding up.
+  const railRef=useRef(null), priceRef=useRef(null);
+  const[miniBar,setMiniBar]=useState(null); // null | {left,width}
+  useEffect(()=>{
+    if(mob) { setMiniBar(null); return; }
+    const el=priceRef.current; if(!el||typeof IntersectionObserver==="undefined") return;
+    const place=()=>{ const r=railRef.current&&railRef.current.getBoundingClientRect();
+      setMiniBar(r?{left:Math.round(r.left),width:Math.round(r.width)}:null); };
+    const io=new IntersectionObserver(([e])=>{ if(e.isIntersecting) setMiniBar(null); else place(); },{threshold:0});
+    io.observe(el);
+    const onResize=()=>{ setMiniBar(v=>v?(railRef.current?{left:Math.round(railRef.current.getBoundingClientRect().left),width:Math.round(railRef.current.getBoundingClientRect().width)}:v):v); };
+    window.addEventListener("resize",onResize);
+    return ()=>{ io.disconnect(); window.removeEventListener("resize",onResize); };
+  },[mob]);
   const copyProjections = () => {
     if (!projections) return;
     const rows = projections.filter(p => p.total !== null);
@@ -5775,10 +5798,10 @@ function App(){
         </div>
         {/* Sticky quote rail — the price and CTA stay in view while the job is built,
             instead of scrolling away on long configurations. */}
-        {!mob&&<div style={{width:320,flexShrink:0,position:"sticky",top:16,alignSelf:"flex-start"}}>
+        {!mob&&<div ref={railRef} style={{width:320,flexShrink:0,position:"sticky",top:16,alignSelf:"flex-start"}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
             <SidebarBookPreview sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={openPreview}/>
-            <Panel result={result} debugUnlocked={debugUnlocked}/>
+            <div ref={priceRef}><Panel result={result} debugUnlocked={debugUnlocked}/></div>
           </div>
           <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
           {/* Secondary action, directly under the CTA: visible without scrolling past
@@ -5815,18 +5838,40 @@ function App(){
                 </tr>
               </thead>
               <tbody>
-                {projections.map((p,i) => p.total !== null && (
-                  <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?CC.rowHi:"transparent",cursor:p.current?"default":"pointer"}}
-                    onClick={() => {if(!p.current) upSet(0,{qty:p.qty})}}>
-                    <td style={{padding:"6px 18px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>
-                      {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
-                    </td>
-                    <td style={{padding:"6px 10px",textAlign:"right",color:CC.mid,fontWeight:500}}>${p.perUnit.toFixed(2)}</td>
-                    <td style={{padding:"6px 18px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                  </tr>
-                ))}
+                {(()=>{
+                  // Collapsed, the table is a window centred on the selected quantity —
+                  // two rows either side, held at five rows even when the selection sits
+                  // at one end, so the neighbours a customer wants to compare are the
+                  // ones on screen. Expanded shows every tier.
+                  const rows=projections.filter(p=>p.total!==null);
+                  const ci=Math.max(0,rows.findIndex(p=>p.current));
+                  const WIN=2;
+                  let lo=Math.max(0,ci-WIN), hi=Math.min(rows.length-1,ci+WIN);
+                  while(hi-lo<WIN*2 && (lo>0||hi<rows.length-1)){ if(lo>0)lo--; else hi++; }
+                  const shown=projOpen?rows:rows.slice(lo,hi+1);
+                  return shown.map((p,i)=>(
+                    <tr key={p.qty} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?CC.rowHi:"transparent",cursor:p.current?"default":"pointer"}}
+                      onClick={() => {if(!p.current) upSet(0,{qty:p.qty})}}>
+                      <td style={{padding:"6px 18px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>
+                        {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
+                      </td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:CC.mid,fontWeight:500}}>${p.perUnit.toFixed(2)}</td>
+                      <td style={{padding:"6px 18px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                    </tr>
+                  ));
+                })()}
               </tbody>
             </table>
+            {(()=>{
+              const n=projections.filter(p=>p.total!==null).length;
+              if(n<=5) return null;
+              return <button type="button" onClick={()=>setProjOpen(v=>!v)}
+                style={{width:"100%",padding:"8px 10px",border:"none",borderTop:`1px solid ${CC.border}`,
+                  background:CC.track,color:CK.cyan,fontSize:11,fontWeight:700,letterSpacing:".4px",
+                  textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit"}}>
+                {projOpen?"Show fewer ▴":`Show all ${n} quantities ▾`}
+              </button>;
+            })()}
           </div>}
           <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {shareCopied ? "✓ Link copied to clipboard" : "Save configuration"}
@@ -5850,6 +5895,32 @@ function App(){
           {debugUnlocked&&showDebug&&<DebugPanel debug={result?.debug}/>}
         </div>}
       </div>
+
+      {/* Desktop condensed total — only while the price card is off screen. Tracked to
+          the rail's own column so it reads as the rail folding up rather than as a new
+          element arriving. Same numbers, same action, one line. */}
+      {!mob&&miniBar&&result&&!result.error?.length&&(()=>{
+        const _t=Math.max(0,result.total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+        const _sh=result.shipping;
+        const _when=_sh?((_sh.hasDest)?(((_sh.rushCost>0)&&_sh.needByFmt)?_sh.needByFmt:_sh.freeDeliveryDate):_sh.earliestDate):null;
+        return <div style={{position:"fixed",bottom:16,left:miniBar.left,width:miniBar.width,zIndex:9990,
+          background:CC.white,border:`1px solid ${CC.border}`,borderRadius:12,
+          boxShadow:"0 6px 24px rgba(16,24,40,.16)",padding:"10px 12px",
+          display:"flex",alignItems:"center",gap:10,animation:"pps-mini-in .22s ease-out"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:19,fontWeight:800,color:CC.dark,lineHeight:1.05}}>${_t}</div>
+            <div style={{fontSize:10.5,color:CC.light,fontWeight:600,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {(result.tQ||0).toLocaleString()} qty{_when?` · as soon as ${_when}`:""}
+            </div>
+          </div>
+          <button type="button" onClick={handleAddToOrder} disabled={submitting}
+            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.light:CK.cyan,
+              color:"#fff",fontSize:14,fontWeight:750,cursor:submitting?"default":"pointer",fontFamily:"inherit",
+              opacity:submitting?.5:1,whiteSpace:"nowrap"}}>
+            {submitting?"Adding…":"Add to Order"}
+          </button>
+        </div>;
+      })()}
 
       {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
       {mob&&!qOpen&&!mobExpanded&&(
