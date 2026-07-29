@@ -5189,8 +5189,12 @@ function App(){
     return qs ? base + "?" + qs : base;
   };
 
+  // Standalone fallback only — on a product page PHP injects PPS_CONFIG.switchTargets.
+  // Swap whatever the trailing filename is rather than a specific one: this used to
+  // hardcode calc-preview-test.html, so on any other filename (calc-modern-draft.html)
+  // the replace silently no-opped and the link reloaded the current page.
   const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [
-    {type:"perfect-bound",label:"Perfect Bound",url:(location.origin+location.pathname).replace(/calc-preview-test\.html/,"calc-perfect-bound.html")},
+    {type:"perfect-bound",label:"Perfect Bound",url:(location.origin+location.pathname).replace(/[^/]+\.html$/,"calc-perfect-bound.html")},
   ];
   const buildSwitchUrl = (targetUrl) => {
     const p = new URLSearchParams();
