@@ -17,15 +17,21 @@
  * Not a pricing engine. Not an order-mutation surface. It reads, it links, it escalates.
  * The calculators price; docs/MASTER_PRICING_LOGIC.md is the source of truth.
  *
- * ── DEPLOY CHECKLIST ──
- * 1. Set the API key:  update_option('pps_assistant_config', ['api_key' => 'sk-ant-...'])
- *    or use the settings page (PPS Calculators → Assistant).
- * 2. Leave 'enabled' => false until you've tested. It ships off.
- * 3. Confirm the tool handlers below against your live function names (marked TODO).
+ * Deployed to wp-content/plugins/pps-calculators/pps-assistant.php — its own activatable
+ * plugin, exactly like pps-html-deploy.php and pps-cart-price-floor.php. Deactivating it
+ * is a second kill switch independent of the config flag.
+ *
+ * ── SETUP ──
+ * 1. Activate the plugin (it does nothing at all until you do).
+ * 2. PPS Calculators → Assistant: paste the Anthropic API key, leave "Visible to" on
+ *    "Logged-in admins only", tick Enabled, Save.
+ * 3. Load any front-end page while logged in as an admin. Customers see nothing until
+ *    "Visible to" is changed to Everyone.
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+if ( defined( 'PPS_ASSISTANT_VERSION' ) ) return;   // co-load guard
 define( 'PPS_ASSISTANT_VERSION', '0.1.0' );
 define( 'PPS_ASSISTANT_API_URL', 'https://api.anthropic.com/v1/messages' );
 
@@ -36,6 +42,7 @@ define( 'PPS_ASSISTANT_API_URL', 'https://api.anthropic.com/v1/messages' );
 function pps_assistant_config() {
     $defaults = array(
         'enabled'       => false,          // ← ships OFF. This is the kill switch.
+        'visible_to'    => 'admins',       // 'admins' | 'everyone' — who sees the widget
         'api_key'       => '',
         'model'         => 'claude-opus-5',
         'effort'        => 'medium',       // low | medium | high | xhigh | max
@@ -277,9 +284,9 @@ function pps_assistant_tools() {
                 'required'   => array( 'zip' ),
             ),
             'handler' => function ( $input, &$session ) {
-                // Dispatch internally so the endpoint's own cache + rate limit still apply.
+                // Dispatch internally so the endpoint's own 30-day cache + per-IP Shippo
+                // rate limit still apply — the assistant can't burn the quota.
                 $req = new WP_REST_Request( 'POST', '/pps/v1/shipping/transit-estimate' );
-                $req->set_body_params( array() );
                 $req->set_body( wp_json_encode( array(
                     'zip'     => (string) $input['zip'],
                     'state'   => (string) ( $input['state'] ?? '' ),
@@ -652,14 +659,38 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
 // keep the two in sync the same way the CC/ST blocks are synced across calculators.
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Should the widget render on this request?
+ *
+ * Two independent gates, both deliberately conservative:
+ *
+ *  1. NEVER on cart or checkout. A JS error beside a live payment form is a revenue
+ *     incident, and nothing the assistant offers is worth that risk. This is not
+ *     configurable on purpose.
+ *  2. Logged-in admins only, until someone explicitly flips visible_to to 'everyone'.
+ *     That makes "deploy it" and "show it to customers" two separate decisions.
+ */
+function pps_assistant_should_render() {
+    if ( function_exists( 'is_cart' ) && ( is_cart() || is_checkout() ) ) return false;
+
+    $cfg = pps_assistant_config();
+    if ( ( $cfg['visible_to'] ?? 'admins' ) === 'everyone' ) return true;
+
+    return function_exists( 'current_user_can' ) && current_user_can( 'manage_options' );
+}
+
 add_action( 'wp_footer', function () {
     if ( ! pps_assistant_enabled() || is_admin() ) return;
+    if ( ! pps_assistant_should_render() ) return;
 
     $boot = wp_json_encode( array(
         'endpoint' => rest_url( 'pps/v1/assistant/chat' ),
         'nonce'    => wp_create_nonce( 'wp_rest' ),
         'greeting' => 'Hi — I can help with order status, file setup, and product questions. '
                     . 'For pricing I\'ll point you at the calculator.',
+        // Badge the launcher while it's admin-only, so nobody mistakes a test session
+        // for something customers can see.
+        'admin'    => current_user_can( 'manage_options' ) && ( pps_assistant_config()['visible_to'] ?? '' ) !== 'everyone',
     ) );
 
     // NOTE: never emit a literal closing script tag inside this JS. Same hazard as the
@@ -676,7 +707,8 @@ add_action( 'wp_footer', function () {
 
       var root = document.getElementById('pps-asst-root');
       root.innerHTML =
-        '<button id="pps-asst-launch" aria-label="Open chat">Chat</button>' +
+        '<button id="pps-asst-launch" aria-label="Open chat">Chat' +
+          (CFG.admin ? '<span class="pps-asst-flag">admin only</span>' : '') + '</button>' +
         '<div id="pps-asst-panel" hidden>' +
           '<header><span>Priority Print Service</span><button id="pps-asst-close" aria-label="Close">&times;</button></header>' +
           '<div id="pps-asst-log" role="log" aria-live="polite"></div>' +
@@ -739,6 +771,8 @@ add_action( 'wp_footer', function () {
       #pps-asst-launch{position:fixed;right:20px;bottom:20px;z-index:99998;background:#007eff;color:#fff;
         border:0;border-radius:24px;padding:12px 22px;font:600 15px/1 system-ui,sans-serif;cursor:pointer;
         box-shadow:0 4px 14px rgba(16,24,40,.18)}
+      .pps-asst-flag{display:inline-block;margin-left:8px;background:rgba(255,255,255,.22);border-radius:10px;
+        padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.02em;vertical-align:middle}
       #pps-asst-panel{position:fixed;right:20px;bottom:20px;z-index:99999;width:360px;max-width:calc(100vw - 32px);
         height:520px;max-height:calc(100vh - 40px);display:flex;flex-direction:column;background:#fff;
         border:1px solid #e3e8ef;border-radius:14px;box-shadow:0 12px 40px rgba(16,24,40,.18);overflow:hidden;
@@ -782,7 +816,8 @@ function pps_assistant_render_admin() {
       && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['pps_assistant_nonce'] ) ), 'pps_assistant_save' ) ) {
 
         $cfg = pps_assistant_config();
-        $cfg['enabled']   = ! empty( $_POST['enabled'] );
+        $cfg['enabled']    = ! empty( $_POST['enabled'] );
+        $cfg['visible_to'] = ( ( $_POST['visible_to'] ?? '' ) === 'everyone' ) ? 'everyone' : 'admins';
         $cfg['api_key']   = sanitize_text_field( wp_unslash( $_POST['api_key'] ?? '' ) );
         $cfg['model']     = sanitize_text_field( wp_unslash( $_POST['model'] ?? 'claude-opus-5' ) );
         $cfg['effort']    = sanitize_key( wp_unslash( $_POST['effort'] ?? 'medium' ) );
@@ -800,12 +835,23 @@ function pps_assistant_render_admin() {
     <div class="wrap">
         <h1>PPS Assistant</h1>
         <p><strong>API calls today:</strong> <?php echo (int) $today; ?> / <?php echo (int) $cfg['daily_cap']; ?></p>
+        <?php if ( $cfg['visible_to'] === 'everyone' && ! empty( $cfg['enabled'] ) ) : ?>
+            <div class="notice notice-warning inline"><p><strong>Live to customers.</strong>
+            Every visitor sees the chat widget (except on cart and checkout).</p></div>
+        <?php endif; ?>
         <form method="post">
             <?php wp_nonce_field( 'pps_assistant_save', 'pps_assistant_nonce' ); ?>
             <table class="form-table">
                 <tr><th>Enabled</th><td>
                     <label><input type="checkbox" name="enabled" <?php checked( $cfg['enabled'] ); ?>> Serve the widget</label>
                     <p class="description">Unchecking this is the kill switch — no API calls are made.</p>
+                </td></tr>
+                <tr><th>Visible to</th><td>
+                    <label><input type="radio" name="visible_to" value="admins" <?php checked( $cfg['visible_to'], 'admins' ); ?>>
+                        <strong>Logged-in admins only</strong> — safe for testing on a live site</label><br>
+                    <label><input type="radio" name="visible_to" value="everyone" <?php checked( $cfg['visible_to'], 'everyone' ); ?>>
+                        Everyone — customers will see it</label>
+                    <p class="description">Never renders on cart or checkout, under either setting.</p>
                 </td></tr>
                 <tr><th>API key</th><td>
                     <input type="password" name="api_key" value="<?php echo esc_attr( $cfg['api_key'] ); ?>" class="regular-text" autocomplete="off">
