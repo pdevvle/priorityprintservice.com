@@ -115,16 +115,6 @@
   body{font-family:var(--pps-sans)}
 
   /* ===== MODERN DRAFT — motion ===== */
-  /* Toggle knob: a coin-flip. The squash at the midpoint is what sells it — a plain
-     circle rotating on Y is otherwise invisible. Overshoot on the slide (the caller's
-     bezier) lands it with a little weight. */
-  @keyframes pps-knob-flip{
-    0%  {transform:rotateY(0deg)    scale(1)    translateY(0);    box-shadow:0 1px 2px rgba(16,24,40,.35)}
-    38% {transform:rotateY(90deg)   scale(.56)  translateY(-2.5px);box-shadow:0 5px 10px rgba(16,24,40,.5)}
-    68% {transform:rotateY(155deg)  scale(1.14) translateY(-1px);  box-shadow:0 3px 7px rgba(16,24,40,.42)}
-    86% {transform:rotateY(178deg)  scale(.95)  translateY(0)}
-    100%{transform:rotateY(180deg)  scale(1)    translateY(0);    box-shadow:0 1px 2px rgba(16,24,40,.35)}
-  }
   /* Select "pop" on choose. Two identical animations under different names so the
      same element can re-trigger without being remounted — remounting a <select>
      would drop focus and break keyboard use. */
@@ -132,7 +122,7 @@
   @keyframes pps-pop-1{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
   /* Anyone who has asked their OS to reduce motion gets none of it. */
   @media (prefers-reduced-motion: reduce){
-    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;transition-delay:0s !important;animation-delay:0s !important}
   }
 
   /* ===== MODERN DRAFT — interaction states & page field ===== */
@@ -5374,16 +5364,15 @@ function App(){
                       <span style={{display:"block",fontSize:11,color:CC.light,marginTop:1}}>{o.hint}</span>
                     </span>
                     <span style={{flex:"none",width:34,height:20,borderRadius:99,position:"relative",
-                      background:o.on?CK.cyan:CC.border,transition:"background .3s ease"}}>
-                      {/* Outer span carries the slide, inner one the flip: the flip is an
-                          animation that must restart on every change, and re-keying the
-                          element to restart it would also cancel a transition on itself. */}
-                      <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,
-                        transition:"left .36s cubic-bezier(.22,1.7,.5,1)"}}>
-                        <span key={o.on?"on":"off"} style={{display:"block",width:16,height:16,borderRadius:99,
-                          background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",
-                          animation:"pps-knob-flip .36s cubic-bezier(.4,0,.2,1)"}}/>
-                      </span>
+                      background:o.on?CK.cyan:CC.border,
+                      transition:"background .35s cubic-bezier(.4,0,.2,1) .25s"}}>
+                      {/* Straight slide: a quarter-second beat after the click, then the knob
+                          travels for .35s. Symmetric easing, no overshoot and no flip, so it
+                          reads as the control moving rather than performing. The track colour
+                          runs on the same delay and duration so the two move as one. */}
+                      <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,borderRadius:99,
+                        background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",
+                        transition:"left .35s cubic-bezier(.4,0,.2,1) .25s"}}/>
                     </span>
                   </button>
                 ))}
