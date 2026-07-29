@@ -1,0 +1,10 @@
+node_modules/
+out/
+
+# The repo root .gitignore excludes package.json / package-lock.json globally
+# (that rule exists for the calculators' throwaway sandbox installs). This is a
+# real project — un-ignore both. The lockfile especially: this is a back-burner
+# project and npm will have drifted by the time it's picked up again.
+!package.json
+!package-lock.json
+tsconfig.tsbuildinfo
