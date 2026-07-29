@@ -5365,14 +5365,14 @@ function App(){
                     </span>
                     <span style={{flex:"none",width:34,height:20,borderRadius:99,position:"relative",
                       background:o.on?CK.cyan:CC.border,
-                      transition:"background .35s cubic-bezier(.4,0,.2,1) .25s"}}>
+                      transition:"background .5s cubic-bezier(.4,0,.2,1) .25s"}}>
                       {/* Straight slide: a quarter-second beat after the click, then the knob
-                          travels for .35s. Symmetric easing, no overshoot and no flip, so it
+                          travels for .5s. Symmetric easing, no overshoot and no flip, so it
                           reads as the control moving rather than performing. The track colour
                           runs on the same delay and duration so the two move as one. */}
                       <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,borderRadius:99,
                         background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",
-                        transition:"left .35s cubic-bezier(.4,0,.2,1) .25s"}}/>
+                        transition:"left .5s cubic-bezier(.4,0,.2,1) .25s"}}/>
                     </span>
                   </button>
                 ))}
