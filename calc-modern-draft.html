@@ -171,7 +171,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-29 · TOGGLE-05</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-29 · HDR-JOBNAME</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -335,6 +335,10 @@ const TRANSIT_DAYS = _CFG.transit_days || {
   VI:9,MP:7,
 };
 const US_STATES = Object.keys(TRANSIT_DAYS).sort();
+// The state select is pre-set to the shop's own state so transit has a sane starting
+// value. That means "state is filled in" is never a signal that the customer told us
+// where the job is going — see hasDest in calculate().
+const DEFAULT_SHIP_STATE = "AZ";
 
 // UPS Ground zone map: 3-digit ZIP prefix → transit days (from admin or seed)
 const _PPS = window.PPS_CONFIG || {};
@@ -839,6 +843,12 @@ function calculate(c) {
   const _wCover=cvrSheets*(_cartonLb/(_cvrIsCard?(PCF.ship_card_sheets_per_carton||400):(PCF.ship_text_sheets_per_carton||900)));
   const estWeightLb=Math.round((_wInside*_osIn+_wCover*_osCvr)*_shFac*10)/10;
   const estCartons=Math.max(1,Math.ceil(estWeightLb/_cartonLb));
+  // Has the customer actually told us where this is going? The state select is
+  // pre-set to AZ, so its presence proves nothing; a ZIP (which drives the zone
+  // lookup) or a state other than the default does. Until then the quote panel
+  // shows production + 1 transit day rather than a doubly-guessed ground date.
+  const _hasDest = String(c.shipZip||"").replace(/[^0-9]/g,"").length >= 3
+    || (c.shipState && c.shipState !== DEFAULT_SHIP_STATE);
   const productionBizDays = days;
   // Free shipping = minimum turnaround × 2 + ground transit
   const bufferedProdDays = productionBizDays * 2;
@@ -997,7 +1007,7 @@ function calculate(c) {
   const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
   const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
   return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,vividOK:c.insidePaper.coatable,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
-    shipping:{estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
+    shipping:{hasDest:_hasDest,estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1074,16 +1084,39 @@ function TurnBadge({days}){
 function buildCHIP(){ return {fontSize:11,fontWeight:600,color:CC.mid,background:CC.track,border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99,whiteSpace:"nowrap",maxWidth:170,overflow:"hidden",textOverflow:"ellipsis",display:"inline-block",lineHeight:1.3}; }
 let CHIP = buildCHIP();
 
-function Sec({title,open,onToggle,children,badge,subtitle,step,summary}){
+function Sec({title,open,onToggle,children,badge,subtitle,step,summary,headerField}){
   const m=useIsMobile();
   // Summaries arrive as a list of characteristics. Cap how many render so a section
   // with several add-ons can not push the header taller or crowd out the title; the
   // remainder collapses into a "+N" chip.
   const _items=(Array.isArray(summary)?summary:summary?[summary]:[]).filter(Boolean);
   const _cap=m?1:3;
-  const _shown=_items.length>_cap?_items.slice(0,_cap-1):_items;
+  // Overflowing the cap costs one slot to the "+N" chip — but never the last one, or
+  // a capped-at-1 mobile header would show "+3" and nothing else.
+  const _shown=_items.length>_cap?_items.slice(0,Math.max(1,_cap-1)):_items;
   const _extra=_items.length-_shown.length;
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}><div style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}>{step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}<div style={{flex:1,minWidth:0}}><div style={{fontFamily:"var(--pps-display)",fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div></div><div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,minWidth:0,marginTop:subtitle?2:0}}>{!open&&_shown.length>0&&_shown.map((t,i)=><span key={i} style={CHIP}>{t}</span>)}{!open&&_extra>0&&<span style={{...CHIP,color:CC.light}}>+{_extra}</span>}{badge&&<span style={CHIP}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  const _chip=m?{...CHIP,maxWidth:118}:CHIP;
+  // A header field (e.g. Job Name) only makes sense while the section is open — when
+  // it is closed its value is already showing as a summary chip, and an input crammed
+  // between the title and the chips would crowd both. The header is therefore two
+  // toggle buttons flanking the field rather than one button wrapping it: an <input>
+  // nested inside a <button> is invalid and swallows its own clicks.
+  const _hf=headerField&&open;
+  const _pad=m?12:14, _padX=m?14:18;
+  return <div style={ST.card}>
+    <div style={{...ST.cardH,padding:0,cursor:"default",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}>
+      <button type="button" onClick={onToggle} aria-expanded={open} style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left",padding:`${_pad}px 0 ${_pad}px ${_padX}px`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
+        {step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}
+        <div style={{flex:1,minWidth:0}}><div style={{fontFamily:"var(--pps-display)",fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div>
+      </button>
+      {_hf&&<div style={{flex:"none",minWidth:0,padding:m?"0 8px":"0 12px",marginTop:subtitle?1:0}}>{headerField}</div>}
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-label={open?"Collapse section":"Expand section"} style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,minWidth:0,marginTop:subtitle?2:0,padding:`${_pad}px ${_padX}px ${_pad}px 0`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
+        {!open&&_shown.length>0&&_shown.map((t,i)=><span key={i} style={_chip}>{t}</span>)}{!open&&_extra>0&&<span style={{..._chip,color:CC.light}}>+{_extra}</span>}{badge&&!(m&&_hf)&&<span style={_chip}>{badge}</span>}
+        <span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span>
+      </button>
+    </div>
+    {open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}
+  </div>;
 }
 
 const DNAMES=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -1252,9 +1285,15 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
   const hasRush=sh&&sh.rushCost>0;
-  const availRange=sh?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):String(days);
-  // Availability now reads as a single date: the rush need-by date when rush is applied, else the free-delivery date.
-  const deliveryDate=sh?((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate):null;
+  // Before a destination is entered the free-ground date is a guess on a guess —
+  // 2× production buffer plus a placeholder transit — and it read a week later than
+  // the job actually needs. Until the address is known, quote production + 1 transit
+  // day (which is also what AZ ground is), then switch to the real committed date.
+  const _dest=!sh||sh.hasDest;
+  const availRange=sh?(_dest?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):`${sh.earliestBizDays}`):String(days);
+  // Availability reads as a single date: the rush need-by date when rush is applied,
+  // else the free-delivery date — or the production+1 placeholder pre-address.
+  const deliveryDate=sh?(!_dest?sh.earliestDate:((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate)):null;
   const ti=result.ti||{};
   const _factors=[];
   if(ti.coverPaper>0)_factors.push("paper lead time");
@@ -1272,26 +1311,41 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
     const [dC,cC]=moneyC.split(".");
     return(
       <div>
-        <div onClick={onToggleExpand} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:hasRush?CK.rush:CK.cyan,borderRadius:expanded?"6px 6px 0 0":6,padding:"8px 14px",color:hasRush?"#333":"#fff",cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
-          <div>
-            <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
-              {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
-              <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
-              <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
-            </div>
-            {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:12}}>
-            {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["As soon as",deliveryDate||availRange+" days"]].map(([l,v],i)=>(
-              <div key={i} style={{textAlign:"center"}}>
-                <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",opacity:.7}}>{l}</div>
-                <div style={{fontSize:13,fontWeight:700}}>{v}</div>
+        {/* Collapsed, this strip shares a 390px row with the Add to Order button —
+            three stat columns beside the price truncated the delivery date to
+            "Mon, Aug". Price and the disclosure sit on one line; the delivery date
+            gets the strip's full width on a second. $/ea and Qty move into the
+            expanded sheet, where the panel is full width and lays them out the way
+            desktop does. */}
+        <div onClick={onToggleExpand} style={{background:hasRush?CK.rush:CK.cyan,borderRadius:expanded?"6px 6px 0 0":6,padding:"8px 14px",color:hasRush?"#333":"#fff",cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+            <div style={{minWidth:0}}>
+              <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
+                {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
+                <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
+                <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
               </div>
-            ))}
-            <div style={{fontSize:10,opacity:.5,marginLeft:2,transition:"transform .2s",transform:expanded?"rotate(180deg)":"none"}}>▼</div>
+              {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+              <span style={{fontSize:9.5,fontWeight:700,letterSpacing:".5px",textTransform:"uppercase",opacity:.75}}>{expanded?"Hide":"Details"}</span>
+              <span style={{fontSize:10,opacity:.6,transition:"transform .2s",display:"inline-block",transform:expanded?"rotate(180deg)":"none"}}>▼</span>
+            </div>
+          </div>
+          <div style={{fontSize:10.5,fontWeight:600,opacity:.9,marginTop:3,letterSpacing:".2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            As soon as {deliveryDate||availRange+" days"}
           </div>
         </div>
-        {expanded&&<div style={{background:"#fff",borderRadius:"0 0 6px 6px",border:`1px solid ${CC.border}`,borderTop:"none",maxHeight:"40vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+        {expanded&&<div style={{background:CC.white,borderRadius:"0 0 6px 6px",border:`1px solid ${CC.border}`,borderTop:"none",maxHeight:"40vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+          {/* Same stat row desktop shows under its price card, at full width. */}
+          <div style={{display:"flex",borderBottom:`1px solid ${CC.border}`}}>
+            {[["$/ea","$"+Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],["As soon as",deliveryDate||availRange+" days"]].map(([l,v],i)=>(
+              <div key={i} style={{flex:1,padding:"9px 6px",textAlign:"center",borderLeft:i?`1px solid ${CC.border}`:"none",background:(i===2&&_hasExtra)?"#fffbeb":"transparent"}}>
+                <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:(i===2&&_hasExtra)?"#92400e":CC.light}}>{l}</div>
+                <div style={{fontSize:12.5,fontWeight:700,color:(i===2&&_hasExtra)?"#b45309":CC.dark,marginTop:1}}>{v}</div>
+              </div>
+            ))}
+          </div>
           {_hasExtra&&<div style={{padding:"5px 14px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
             <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>+{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
           </div>}
@@ -4823,7 +4877,7 @@ function App(){
   const[proofAddrSame,setProofAddrSame]=useState(true);
   const[proofAddr,setProofAddr]=useState({name:"",street:"",city:"",state:"",zip:""});
   // Shipping & Rush
-  const[shipState,setShipState]=useState(D.shipState||"AZ");
+  const[shipState,setShipState]=useState(D.shipState||DEFAULT_SHIP_STATE);
   const[shipAddr,setShipAddr]=useState({name:"",company:"",street1:"",street2:"",city:"",zip:""});
   const[needByDate,setNeedByDate]=useState("");
   const[coverArt,setCoverArt]=useState(null);
@@ -5052,6 +5106,7 @@ function App(){
     const lbl=(arr,v)=>{const o=arr.find(x=>x.val===v);return o?o.label:null;};
     const col=v=>v==="color"?"Full Color":"Greyscale";
     const q=sets.reduce((a,x)=>a+(x.qty||0),0)||sets[0]?.qty||0;
+    const jobName=(sets[0]?.name||"").trim();
     const pg=sets[0]?.pages||0;
     const fin=[
       coating>0&&lbl(COATINGS,coating),
@@ -5062,7 +5117,10 @@ function App(){
     const sh=result?.shipping;
     const proofLbl=proof>=3?"Hardcopy Proof":proof>0?"Manual Digital Proof":"Proof & Approve Online";
     return {
-      s1:[q.toLocaleString()+" qty",pg+"pp"],
+      // Job name leads the chips — it is what identifies the job at a glance, and on
+      // mobile only the first chip survives the cap. The unlock code is deliberately
+      // not echoed back as a chip; it is a code, not a name.
+      s1:[jobName&&jobName!=="%3414"?jobName:null,q.toLocaleString()+" qty",pg+"pp"],
       s2:[col(insideColor),insidePaper.label].concat(coverMode!=="same"?[coverPaper.label+" cover"]:[]),
       s3:fin.length?fin:["No finishing added"],
       s4:[lbl(ART_OPTS,artwork),proofLbl].filter(Boolean),
@@ -5182,7 +5240,7 @@ function App(){
     if (coating > 0) p.set("coating", coating);
     if (bundling > 0) p.set("bundling", bundling);
     if (roundCorner > 0) p.set("corner", roundCorner);
-    if (shipState !== "AZ") p.set("state", shipState);
+    if (shipState !== DEFAULT_SHIP_STATE) p.set("state", shipState);
     p.set("from", "saddle");
     const qs = p.toString();
     return qs ? targetUrl + (targetUrl.includes("?") ? "&" : "?") + qs : targetUrl;
@@ -5344,14 +5402,14 @@ function App(){
                     </span>
                     <span style={{flex:"none",width:34,height:20,borderRadius:99,position:"relative",
                       background:o.on?CK.cyan:CC.border,
-                      transition:"background .5s cubic-bezier(.4,0,.2,1) .25s"}}>
+                      transition:"background .8s cubic-bezier(.4,0,.2,1) .25s"}}>
                       {/* Straight slide: a quarter-second beat after the click, then the knob
-                          travels for .5s. Symmetric easing, no overshoot and no flip, so it
+                          travels for .8s. Symmetric easing, no overshoot and no flip, so it
                           reads as the control moving rather than performing. The track colour
                           runs on the same delay and duration so the two move as one. */}
                       <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,borderRadius:99,
                         background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",
-                        transition:"left .5s cubic-bezier(.4,0,.2,1) .25s"}}/>
+                        transition:"left .8s cubic-bezier(.4,0,.2,1) .25s"}}/>
                     </span>
                   </button>
                 ))}
@@ -5360,7 +5418,19 @@ function App(){
           </div>
 
           {/* SECTION 1: Size */}
-          <Sec step={1} summary={secSummary.s1} title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
+          <Sec step={1} summary={secSummary.s1} title="Booklet" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}
+            headerField={
+              /* Job Name lives in the header rather than the body: it names the whole
+                 job, not the trim size, and it is the one field an operator scans for.
+                 When the section collapses the value returns as a summary chip. */
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                {!mob&&<label htmlFor="pps-job-name" style={{fontSize:11,fontWeight:700,letterSpacing:".6px",textTransform:"uppercase",color:CC.light,whiteSpace:"nowrap"}}>Job Name</label>}
+                <input id="pps-job-name" type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})}
+                  placeholder={mob?"Job name":"Optional"} aria-label="Job name"
+                  style={{width:mob?150:180,padding:mob?"8px 10px":"8px 11px",fontSize:mob?16:13.5,fontFamily:"inherit",fontWeight:600,
+                    color:CC.dark,background:CC.white,border:`1px solid ${CC.border}`,borderRadius:6,outline:"none",minWidth:0}}/>
+              </div>
+            }>
             <div style={r2}>
               <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
@@ -5388,10 +5458,9 @@ function App(){
 
             {/* Set 1 — always in the size section */}
             <div style={ST.hr}/>
-            <div style={r3}>
+            <div style={r2}>
               <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>
               <Sel label={<Tip k="page_count">Pages</Tip>} value={sets[0].pages} onChange={v=>upSet(0,{pages:parseInt(v)})}>{PAGE_COUNTS.map(p=><option key={p} value={p}>{p} Pages</option>)}</Sel>
-              <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
             </div>
 
             {/* Staple Binding — hidden when two_staple add-on is disabled and not pre-filled */}
