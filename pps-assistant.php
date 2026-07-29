@@ -4,7 +4,7 @@
  * Description: Claude-powered on-site customer service chat. Grounded on real order
  *              data via tools; never prices, never promises dates. Template/scaffold —
  *              see docs/CUSTOMER_SERVICE_BOT.md for the design rationale.
- * Version: 0.1.0
+ * Version: 0.1.1
  * Author: Priority Print Service
  *
  * ── WHY NO COMPOSER ──
@@ -32,7 +32,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 if ( defined( 'PPS_ASSISTANT_VERSION' ) ) return;   // co-load guard
-define( 'PPS_ASSISTANT_VERSION', '0.1.0' );
+define( 'PPS_ASSISTANT_VERSION', '0.1.1' );
 define( 'PPS_ASSISTANT_API_URL', 'https://api.anthropic.com/v1/messages' );
 
 // ═══════════════════════════════════════════════════════════════
@@ -615,8 +615,16 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
         return rest_ensure_response( array( 'reply' => pps_assistant_fallback_text(), 'disabled' => true ) );
     }
 
+    // The widget sends this same value as the X-WP-Nonce header, which is what makes
+    // WordPress resolve the logged-in user for a REST request. Body-only would verify
+    // against user 0 and fail for any logged-in visitor.
+    //
+    // KNOWN ISSUE for visible_to = 'everyone': WP Rocket may serve a cached footer whose
+    // nonce has expired (nonces live ~12-24h), which would 403 every customer at once.
+    // Before going public, either exclude the widget markup from page caching or fetch
+    // the nonce from an uncached endpoint at open-chat time.
     if ( ! wp_verify_nonce( (string) $request['nonce'], 'wp_rest' ) ) {
-        return new WP_Error( 'bad_nonce', 'Invalid request', array( 'status' => 403 ) );
+        return new WP_Error( 'bad_nonce', 'Invalid or expired nonce', array( 'status' => 403 ) );
     }
 
     if ( pps_assistant_ip_throttled() ) {
@@ -627,7 +635,9 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
     if ( $message === '' ) {
         return new WP_Error( 'empty', 'Empty message', array( 'status' => 400 ) );
     }
-    $message = mb_substr( $message, 0, 2000 );
+    // mbstring is near-universal but not guaranteed; an undefined-function fatal here
+    // would surface to the customer as a bare 500.
+    $message = function_exists( 'mb_substr' ) ? mb_substr( $message, 0, 2000 ) : substr( $message, 0, 2000 );
 
     $sid     = sanitize_key( (string) $request['session'] );
     $session = pps_assistant_session_get( $sid );
@@ -755,14 +765,30 @@ add_action( 'wp_footer', function () {
 
         fetch(CFG.endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          // X-WP-Nonce is what authenticates the cookie session for the REST API. Without
+          // it WordPress runs the request as user 0, so a nonce minted for a logged-in
+          // admin fails verification and the endpoint 403s. Sending the nonce in the JSON
+          // body alone is NOT enough — that only feeds our own wp_verify_nonce call, which
+          // is itself evaluated against whatever user WordPress resolved.
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': CFG.nonce },
           body: JSON.stringify({ message: text, session: sid, nonce: CFG.nonce })
         })
-        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (r) {
+          return r.text().then(function (body) {
+            if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + body.slice(0, 300));
+            return JSON.parse(body);
+          });
+        })
         .then(function (d) { pending.className = 'pps-asst-msg pps-asst-bot';
                              pending.textContent = d.reply || ''; })
-        .catch(function () { pending.className = 'pps-asst-msg pps-asst-bot';
-                             pending.textContent = 'Sorry — something went wrong. Please email us and we’ll help.'; })
+        .catch(function (err) {
+          pending.className = 'pps-asst-msg pps-asst-bot';
+          // Admins testing get the real failure; customers get the friendly line.
+          pending.textContent = CFG.admin
+            ? 'DEBUG (admin only): ' + err.message
+            : 'Sorry — something went wrong. Please email us and we will help.';
+        })
         .finally(function () { busy = false; log.scrollTop = log.scrollHeight; });
       };
     })();
