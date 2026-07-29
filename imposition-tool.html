@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · IMPOSE-V1.3c</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · IMPOSE-V1.4</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1073,17 +1073,24 @@ function layoutOpts(spec) {
   };
 }
 
-async function imposePdf(artBytes, backBytes, spec) {
+async function imposePdf(artBytes, backBytes, spec, gangFiles) {
+  // Gang combo: ≥2 uploaded design files share one sheet (same trim), each
+  // taking a share of the cells. Ignores multiMode; qty = press sheets.
+  const gang = Array.isArray(gangFiles) && gangFiles.filter(g => g && g.bytes).length >= 2
+    ? gangFiles.filter(g => g && g.bytes) : null;
   const layout = computeLayout(spec.calc, spec.trimLong, spec.trimShort, layoutOpts(spec));
-  if (spec.calc === "saddle") return imposeSaddle(artBytes, spec, layout);
+  if (spec.calc === "saddle") {
+    if (gang) throw new Error("Gang combo is for flats/stickers — a saddle booklet is one document");
+    return imposeSaddle(artBytes, spec, layout);
+  }
   const warnings = [...layout.warnings];
 
-  const srcFront = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
+  const srcFront = await PL.PDFDocument.load(gang ? gang[0].bytes : artBytes, { ignoreEncryption: true });
   const nF = srcFront.getPageCount();
   if (nF < 1) throw new Error("Artwork PDF has no pages");
   const sides = spec.sides === 2 ? 2 : 1;
-  const mode = ["gang", "stack", "each"].includes(spec.multiMode) ? spec.multiMode : "repeat";
-  const backDoc = backBytes ? await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }) : null;
+  const mode = gang ? "combo" : ["gang", "stack", "each"].includes(spec.multiMode) ? spec.multiMode : "repeat";
+  const backDoc = !gang && backBytes ? await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }) : null;
 
   // add-bleed: per-page override map (1-based page keys, main file) falls
   // back to the job-level mode; back-file pages use the job-level mode.
@@ -1094,7 +1101,10 @@ async function imposePdf(artBytes, backBytes, spec) {
   };
   const inkDocs = {};
   async function inkDocFor(which) { // lazy pdf.js rasterizer per source file
-    if (!inkDocs[which]) inkDocs[which] = await pdfjsLib.getDocument({ data: (which === "F" ? artBytes : backBytes).slice(0) }).promise;
+    if (!inkDocs[which]) {
+      const src = which === "F" ? (gang ? gang[0].bytes : artBytes) : which === "B" ? backBytes : gang[+which.slice(1)].bytes;
+      inkDocs[which] = await pdfjsLib.getDocument({ data: src.slice(0) }).promise;
+    }
     return inkDocs[which];
   }
 
@@ -1104,7 +1114,29 @@ async function imposePdf(artBytes, backBytes, spec) {
   // without a separate back file reads pages front/back INTERLEAVED
   // (p1 = front of piece 1, p2 = its back, p3 = front of piece 2, …).
   const pieces = [];
-  if (mode === "repeat") {
+  let gangAlloc = null;
+  if (mode === "combo") {
+    const docs = [srcFront];
+    for (let i = 1; i < gang.length; i++) docs.push(await PL.PDFDocument.load(gang[i].bytes, { ignoreEncryption: true }));
+    const total = layout.cells.length;
+    const want = gang.map(g => (isFinite(+g.slots) && +g.slots > 0 ? Math.floor(+g.slots) : null));
+    const explicit = want.reduce((s, v) => s + (v || 0), 0);
+    if (explicit > total) throw new Error(`Gang slots add up to ${explicit} but the sheet only has ${total} cells (${layout.imp}-up)`);
+    const autoIdx = want.map((v, i) => (v == null ? i : -1)).filter(i => i >= 0);
+    const rem = total - explicit;
+    autoIdx.forEach((fi, k) => { want[fi] = Math.floor(rem / autoIdx.length) + (k < rem % autoIdx.length ? 1 : 0); });
+    gangAlloc = want;
+    for (let i = 0; i < gang.length; i++) {
+      const doc = docs[i], n = doc.getPageCount();
+      if (!want[i]) { warnings.push(`"${gang[i].name}" got 0 cells — raise its slots or free cells from other files`); continue; }
+      if (sides === 2 && n < 2) throw new Error(`"${gang[i].name}" is 1 page but the job is 2-sided — each gang design needs page 1 (front) + page 2 (back)`);
+      if (n > sides) warnings.push(`"${gang[i].name}" has ${n} pages — gang combo uses page 1${sides === 2 ? "+2" : ""} only`);
+      const back = sides === 2 ? { doc, pno: 1, gi: i } : null;
+      for (let k = 0; k < want[i]; k++) pieces.push({ front: { doc, pno: 0, gi: i }, back });
+    }
+    const blanks = total - pieces.length;
+    warnings.push(`GANG COMBO: ${gang.map((g, i) => `${g.name} ×${want[i]}`).join(" · ")}${blanks ? ` — ${blanks} cell(s) blank` : ""}. Qty = press sheets; each sheet yields those counts per design.`);
+  } else if (mode === "repeat") {
     let back = null;
     if (sides === 2) {
       if (backDoc) back = { doc: backDoc, pno: 0 };
@@ -1129,7 +1161,7 @@ async function imposePdf(artBytes, backBytes, spec) {
   const imp = layout.imp;
   // sheets per collated set: gang/stack pack pieces into cells; "each" gives
   // every piece its own full step-and-repeat sheet (own run quantity).
-  const D = mode === "repeat" ? 1 : mode === "each" ? pieces.length : Math.ceil(pieces.length / imp);
+  const D = mode === "repeat" || mode === "combo" ? 1 : mode === "each" ? pieces.length : Math.ceil(pieces.length / imp);
   if (mode === "each") {
     warnings.push(`${pieces.length} piece(s), one full ${imp}-up sheet each — print each sheet's own quantity.`);
   } else if (mode !== "repeat") {
@@ -1143,22 +1175,24 @@ async function imposePdf(artBytes, backBytes, spec) {
   // qty semantics: repeat → total pieces; gang/stack → copies per collated set
   const sheets = spec.qty
     ? (mode === "repeat" ? Math.ceil(spec.qty / imp)
+      : mode === "combo" ? spec.qty
       : mode === "each" ? pieces.length * Math.ceil(spec.qty / imp)
       : spec.qty * D)
-    : (mode === "repeat" ? null : D);
+    : (mode === "repeat" || mode === "combo" ? null : D);
   const dateStr = new Date().toISOString().slice(0, 10);
 
   // Resolve + embed each DISTINCT source page once (fix a/d), shared across cells.
   const artCache = new Map(), embedCache = new Map();
-  const keyOf = ref => (ref.doc === srcFront ? "F" : "B") + ref.pno;
+  const keyOf = ref => ref.gi != null ? `G${ref.gi}#${ref.pno}` : (ref.doc === srcFront ? "F" : "B") + ref.pno;
   let scaledPages = 0;
   async function prepared(ref) {
     const key = keyOf(ref);
     if (!artCache.has(key)) {
       const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed);
-      const abm = ref.doc === backDoc ? (spec.addBleed && spec.addBleed !== "off" ? spec.addBleed : null) : abMode(ref.pno);
+      const abm = ref.gi != null || ref.doc === backDoc
+        ? (spec.addBleed && spec.addBleed !== "off" ? spec.addBleed : null) : abMode(ref.pno);
       if (abm && !art.hasBleed) {
-        const which = ref.doc === backDoc ? "B" : "F";
+        const which = ref.gi != null ? "G" + ref.gi : ref.doc === backDoc ? "B" : "F";
         let gaps = null;
         if (spec.addBleedSmart !== false) {
           try { gaps = await detectInkGaps(await inkDocFor(which), ref.pno, art); }
@@ -1173,7 +1207,8 @@ async function imposePdf(artBytes, backBytes, spec) {
         }
         applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec));
       }
-      if (key === keyOf(pieces[0].front)) art.notes.forEach(n => warnings.push("front: " + n));
+      if (ref.gi != null) art.notes.forEach(n => warnings.push(`${gang[ref.gi].name}${ref.pno ? " (back)" : ""}: ${n}`));
+      else if (key === keyOf(pieces[0].front)) art.notes.forEach(n => warnings.push("front: " + n));
       else if (sides === 2 && pieces[0].back && key === keyOf(pieces[0].back)) art.notes.forEach(n => warnings.push("back: " + n));
       else if (art.scale !== 1) scaledPages++;
       const [embedded] = await out.embedPdf(ref.doc, [ref.pno]);
@@ -1192,6 +1227,7 @@ async function imposePdf(artBytes, backBytes, spec) {
   // cut piles, stacked in reading order, yield the collated sequence.
   const pieceAt = (s, slot) => {
     if (mode === "repeat") return pieces[0];
+    if (mode === "combo") return slot < pieces.length ? pieces[slot] : null; // contiguous blocks per file, reading order
     if (mode === "each") return pieces[s];
     const idx = mode === "gang" ? s * imp + slot : slot * D + s;
     return idx < pieces.length ? pieces[idx] : null;
@@ -1223,7 +1259,7 @@ async function imposePdf(artBytes, backBytes, spec) {
         }
         placeInCell(page, embedded, art, cell, extraRot + (frontCell.patRot || 0));
       }
-      const label = (sideIdx === 0 ? "FRONT" : "BACK") + (D > 1 ? ` ${s + 1}/${D}` : "") + (mode === "gang" ? " · GANG" : mode === "stack" ? " · CUT&STACK" : mode === "each" ? ` · PIECE ${s + 1}` : "");
+      const label = (sideIdx === 0 ? "FRONT" : "BACK") + (D > 1 ? ` ${s + 1}/${D}` : "") + (mode === "combo" ? " · GANG COMBO" : mode === "gang" ? " · GANG" : mode === "stack" ? " · CUT&STACK" : mode === "each" ? ` · PIECE ${s + 1}` : "");
       pageLabels.push(label);
       if (spec.marks !== false) {
         drawMarks(page, layout, cellsForMarks);
@@ -1248,7 +1284,8 @@ async function imposePdf(artBytes, backBytes, spec) {
     const b0 = artCache.get(keyOf(pieces[0].back));
     if (b0) sideReports.push({ side: "BACK", rot: b0.rot, cellRotate: b0.cellRotate, scale: b0.scale, hasBleed: b0.hasBleed, synth: b0.synth });
   }
-  if (mode !== "repeat") sideReports.push({ side: "COLLATED", pieces: pieces.length, sheetsPerSet: D, modeName: mode });
+  if (mode === "combo") sideReports.push({ side: "COMBO", pieces: pieces.length, sheetsPerSet: 1, modeName: "gang combo", alloc: gang.map((g, i) => `${g.name} ×${gangAlloc[i]}`).join(" · ") });
+  else if (mode !== "repeat") sideReports.push({ side: "COLLATED", pieces: pieces.length, sheetsPerSet: D, modeName: mode });
 
   out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "job"} — ${layout.imp}-up on ${layout.sheet.label}`);
   out.setProducer("PPS Auto-Imposition Tool");
@@ -1554,6 +1591,7 @@ function App() {
   const [addBleed, setAddBleed] = useState("off");         // synthesize bleed for no-bleed files: off | mirror | scale
   const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
   const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
+  const [gangFiles, setGangFiles] = useState([]);          // manual gang combo: [{bytes,name,pageCount,slots}]
   const [addBleedPages, setAddBleedPages] = useState({});  // per-page mode overrides {1-based page: mode}
   const [multiMode, setMultiMode] = useState("repeat");    // multipage flat files: repeat | gang | stack
   const isSaddle = calc === "saddle";
@@ -1612,10 +1650,12 @@ function App() {
 
   // Auto-regenerate the imposed PDF when spec or art changes
   useEffect(() => {
-    if (!art || !layoutInfo.layout) { setResult(null); return; }
+    const ganging = gangFiles.length >= 2;
+    if ((!art && !ganging) || !layoutInfo.layout) { setResult(null); return; }
     const seq = ++genSeq.current;
     setBusy(true); setError(""); setUploadState("");
-    imposePdf(art.bytes, debSpec.sides === 2 ? (backArt && backArt.bytes) : null, debSpec)
+    imposePdf(art ? art.bytes : null, debSpec.sides === 2 ? (backArt && backArt.bytes) : null, debSpec,
+              ganging ? gangFiles.map(g => ({ bytes: g.bytes, name: g.name, slots: g.slots === "" ? null : +g.slots })) : null)
       .then(res => {
         if (seq !== genSeq.current) return;
         res.filename = imposedFilename(debSpec, res.layout);
@@ -1623,7 +1663,20 @@ function App() {
       })
       .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); } })
       .finally(() => { if (seq === genSeq.current) setBusy(false); });
-  }, [art, backArt, debSpec, layoutInfo.layout ? 1 : 0]);
+  }, [art, backArt, gangFiles, debSpec, layoutInfo.layout ? 1 : 0]);
+
+  const addGangFiles = async files => {
+    const added = [];
+    for (const f of files) {
+      if (!/\.pdf$/i.test(f.name)) { setError(`"${f.name}" is not a PDF`); continue; }
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      let pageCount = 0;
+      try { pageCount = (await PL.PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount(); }
+      catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
+      added.push({ bytes, name: f.name, pageCount, slots: "" });
+    }
+    if (added.length) setGangFiles(prev => [...prev, ...added]);
+  };
 
   const onFiles = async (files, slot) => {
     setError("");
@@ -1845,6 +1898,38 @@ function App() {
                   accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
               </div>
             )}
+            {!isSaddle && (
+              <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 10 }}>
+                <span className="lbl">Gang combo — multiple designs on one sheet</span>
+                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginBottom: 6 }}>
+                  Add 2+ same-trim PDFs and each takes a share of the {lay ? `${lay.cells.length} cells` : "cells"} — blank slots = split evenly,
+                  or set counts per file. Each design uses its page 1{spec.sides === 2 ? " + page 2 (back)" : ""}.
+                  Qty = press sheets. Pieces fill contiguous blocks in reading order for clean cutting.
+                </div>
+                <input type="file" multiple accept=".pdf" onChange={e => { addGangFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
+                {gangFiles.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    {gangFiles.map((g, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 4 }}>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name} ({g.pageCount}p)</span>
+                        <input type="number" min="1" placeholder="auto" value={g.slots} style={{ width: 58 }}
+                               title="cells for this design (blank = even split)"
+                               onChange={e => setGangFiles(prev => prev.map((x, j) => j === i ? { ...x, slots: e.target.value } : x))} />
+                        <button type="button" className="imp-btn sec" style={{ padding: "2px 8px" }}
+                                onClick={() => setGangFiles(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                      </div>
+                    ))}
+                    {gangFiles.length === 1 && <div style={{ fontSize: 11, color: "#e91e63" }}>Add at least one more file to gang — with one file use the normal drop zone.</div>}
+                    {gangFiles.length >= 2 && (
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>
+                        Gang combo active — the main drop zone, multi-page mode, and separate back file are ignored.
+                        <button type="button" className="imp-btn sec" style={{ marginLeft: 8, padding: "2px 8px" }} onClick={() => setGangFiles([])}>clear gang</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="imp-card">
@@ -1894,7 +1979,7 @@ function App() {
                   ″ of art stretched into the bleed (smaller = purer edge color, larger = softer smear)
                 </div>
               )}
-              {art && art.pageCount > 1 && (addBleed !== "off" || Object.keys(addBleedPages).length > 0
+              {art && art.pageCount > 1 && gangFiles.length < 2 && (addBleed !== "off" || Object.keys(addBleedPages).length > 0
                 || (result && (result.warnings || []).some(w => /no bleed/i.test(w)))) && (
                 <div style={{ marginTop: 6 }}>
                   <div style={{ fontSize: 11, color: "#777", marginBottom: 3 }}>
@@ -1934,7 +2019,7 @@ function App() {
                   </select>
                 </Field>
               )}
-              <Field label={isSaddle ? "Quantity (books)" : multiMode === "each" ? "Quantity (per piece)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
+              <Field label={isSaddle ? "Quantity (books)" : gangFiles.length >= 2 ? "Quantity (press sheets)" : multiMode === "each" ? "Quantity (per piece)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
                 <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} />
               </Field>
             </div>
@@ -2115,6 +2200,8 @@ function App() {
                 <div style={{ marginBottom: 10, fontSize: 11.5, color: "rgba(255,255,255,.45)", lineHeight: 1.7 }}>
                   {result.sideReports.map((s, i) => s.side === "BOOKLET"
                     ? <div key={i}>Booklet: {s.pages} pages{s.padded !== s.pages ? ` (padded to ${s.padded})` : ""} · {s.signatures} signatures · {s.spreadsPerSide} spread{s.spreadsPerSide === 1 ? "" : "s"}/side · back {s.tumble ? "tumbled 180°" : "upright"}{s.srcRotPages ? ` · ${s.srcRotPages} source pages carried /Rotate (normalized)` : ""}</div>
+                    : s.side === "COMBO"
+                    ? <div key={i}>Gang combo: {s.alloc} — one sheet design, qty = press sheets</div>
                     : s.side === "COLLATED"
                     ? <div key={i}>Collated: {s.pieces} piece{s.pieces === 1 ? "" : "s"} · {s.modeName === "gang" ? "ganged in order" : s.modeName === "stack" ? "cut & stack" : "one full sheet per piece"} · {s.sheetsPerSet} sheet{s.sheetsPerSet === 1 ? "" : "s"}{s.modeName === "each" ? " total" : " per set"}</div>
                     : <div key={i}>{s.side}: {s.rot ? `source /Rotate ${s.rot}° normalized · ` : ""}cell rotation {s.cellRotate}° · scale ×{typeof s.scale === "number" ? s.scale.toFixed(3) : "?"} · {s.hasBleed ? "bleed present" : s.synth ? `bleed synthesized (${s.synth})` : "no bleed"}</div>)}

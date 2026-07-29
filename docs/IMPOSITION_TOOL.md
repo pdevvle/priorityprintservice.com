@@ -187,6 +187,19 @@ download the imposed PDF. Useful for testing and one-off jobs.
   ("synthesized on 5 of 8 pages…"). Verified by reference-run comparison:
   the per-page run's cells are pixel-identical to all-mirror/all-scale
   runs cell-by-cell per the chosen mode.
+- **Gang combo (multiple files on one sheet)**: add 2+ same-trim PDFs in
+  the "Gang combo" list and each design takes a share of the sheet's
+  cells — blank slot counts split the cells evenly, or set an explicit
+  count per file (total may not exceed the cell count; unassigned cells
+  stay blank). Pieces fill contiguous blocks in reading order so each
+  design cuts as a cluster. 2-sided reads each file's page 1 (front) +
+  page 2 (back), and every piece's back registers on its front's
+  mirrored cell — color-fixture verified per cell. Qty = press sheets
+  (each sheet yields the listed count per design). Job-level add-bleed
+  applies per file (per-page overrides are hidden while ganging).
+  Flats/stickers only — a saddle booklet is one document. The engine
+  accepts the list as `imposePdf(art, back, spec, gangFiles)` with
+  `[{bytes, name, slots}]`.
 - **Multipage collated flats**: when a flat/sticker file has more pages than
   a single design uses, a "Multi-page file" select offers three handlings —
   **repeat single design** (page 1 [+2], default), **gang in order** (pages
