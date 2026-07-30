@@ -122,6 +122,16 @@
   @keyframes pps-pop-1{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
   /* Condensed desktop total sliding up as the price card leaves the viewport. */
   @keyframes pps-mini-in{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
+  /* Editable job title in a section header: invisible at rest so the header reads as a
+     heading, a real field the moment it is hovered or focused. The placeholder has to
+     announce itself, since there is no label and no box to hint that it is editable. */
+  .pps-jobtitle{background:transparent;border:1px solid transparent;transition:background .15s ease, border-color .15s ease}
+  .pps-jobtitle::placeholder{color:#94a3b8;font-weight:500;opacity:1}
+  .pps-jobtitle:hover:not(:focus){background:rgba(148,163,184,.14);border-color:transparent !important}
+  .pps-jobtitle:focus{background:#fff}
+  :root[data-pps-theme="dark"] .pps-jobtitle::placeholder{color:#7183a0}
+  :root[data-pps-theme="dark"] .pps-jobtitle:hover:not(:focus){background:rgba(159,176,198,.16)}
+  :root[data-pps-theme="dark"] .pps-jobtitle:focus{background:#0f151d}
   /* Anyone who has asked their OS to reduce motion gets none of it. */
   @media (prefers-reduced-motion: reduce){
     *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;transition-delay:0s !important;animation-delay:0s !important}
@@ -173,7 +183,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-29 · HDR-JOBNAME</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-30 · JOBTITLE-FIT</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -1107,11 +1117,14 @@ function Sec({title,open,onToggle,children,badge,subtitle,step,summary,headerFie
   const _pad=m?12:14, _padX=m?14:18;
   return <div style={ST.card}>
     <div style={{...ST.cardH,padding:0,cursor:"default",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}>
-      <button type="button" onClick={onToggle} aria-expanded={open} style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left",padding:`${_pad}px 0 ${_pad}px ${_padX}px`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
+      {/* With a header field present the title shrinks to its own width so the field can
+          take the slack and sit right beside it, reading as a continuation of the
+          heading. Fixed-width fields overflowed narrow phones. */}
+      <button type="button" onClick={onToggle} aria-expanded={open} style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:_hf?"0 0 auto":1,minWidth:0,textAlign:"left",padding:`${_pad}px 0 ${_pad}px ${_padX}px`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
         {step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}
-        <div style={{flex:1,minWidth:0}}><div style={{fontFamily:"var(--pps-display)",fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div>
+        <div style={{flex:_hf?"0 0 auto":1,minWidth:0}}><div style={{fontFamily:"var(--pps-display)",fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div>
       </button>
-      {_hf&&<div style={{flex:"none",minWidth:0,padding:m?"0 8px":"0 12px",marginTop:subtitle?1:0}}>{headerField}</div>}
+      {_hf&&<div style={{flex:"1 1 auto",minWidth:40,padding:m?"0 4px 0 8px":"0 8px 0 10px",marginTop:subtitle?1:0}}>{headerField}</div>}
       <button type="button" onClick={onToggle} aria-expanded={open} aria-label={open?"Collapse section":"Expand section"} style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,minWidth:0,marginTop:subtitle?2:0,padding:`${_pad}px ${_padX}px ${_pad}px 0`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
         {!open&&_shown.length>0&&_shown.map((t,i)=><span key={i} style={_chip}>{t}</span>)}{!open&&_extra>0&&<span style={{..._chip,color:CC.light}}>+{_extra}</span>}{badge&&!(m&&_hf)&&<span style={_chip}>{badge}</span>}
         <span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span>
@@ -5445,14 +5458,19 @@ function App(){
             headerField={
               /* Job Name lives in the header rather than the body: it names the whole
                  job, not the trim size, and it is the one field an operator scans for.
+                 Styled as an editable title — heading typography, no chrome at rest —
+                 so it reads as part of the heading instead of a form box wedged into
+                 it. Width is fluid; a fixed width overflowed narrow phones. The 16px
+                 mobile size is deliberate: anything smaller and iOS zooms on focus.
                  When the section collapses the value returns as a summary chip. */
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                {!mob&&<label htmlFor="pps-job-name" style={{fontSize:11,fontWeight:700,letterSpacing:".6px",textTransform:"uppercase",color:CC.light,whiteSpace:"nowrap"}}>Job Name</label>}
-                <input id="pps-job-name" type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})}
-                  placeholder={mob?"Job name":"Optional"} aria-label="Job name"
-                  style={{width:mob?150:180,padding:mob?"8px 10px":"8px 11px",fontSize:mob?16:13.5,fontFamily:"inherit",fontWeight:600,
-                    color:CC.dark,background:CC.white,border:`1px solid ${CC.border}`,borderRadius:6,outline:"none",minWidth:0}}/>
-              </div>
+              <input id="pps-job-name" className="pps-jobtitle" type="text" value={sets[0].name}
+                onChange={e=>upSet(0,{name:e.target.value})}
+                placeholder="Name this job" aria-label="Job name"
+                style={{width:"100%",minWidth:0,padding:mob?"5px 8px":"5px 9px",fontSize:mob?16:15,
+                  fontFamily:"var(--pps-display)",fontWeight:650,letterSpacing:"-0.01em",
+                  color:CC.dark,textAlign:"right",outline:"none",borderRadius:7,textOverflow:"ellipsis"}}/>
+                  /* background + border live in .pps-jobtitle, not here: an inline
+                     background would outrank the :hover and :focus rules. */
             }>
             <div style={r2}>
               <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
