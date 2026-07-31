@@ -1096,7 +1096,7 @@ function TurnBadge({days}){
 function buildCHIP(){ return {fontSize:11,fontWeight:600,color:CC.mid,background:CC.track,border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99,whiteSpace:"nowrap",maxWidth:170,overflow:"hidden",textOverflow:"ellipsis",display:"inline-block",lineHeight:1.3}; }
 let CHIP = buildCHIP();
 
-function Sec({title,open,onToggle,children,badge,subtitle,step,summary,headerField}){
+function Sec({title,open,onToggle,children,badge,subtitle,step,summary,headerField,keepMounted}){
   const m=useIsMobile();
   // Summaries arrive as a list of characteristics. Cap how many render so a section
   // with several add-ons can not push the header taller or crowd out the title; the
@@ -1130,7 +1130,11 @@ function Sec({title,open,onToggle,children,badge,subtitle,step,summary,headerFie
         <span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span>
       </button>
     </div>
-    {open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}
+    {/* Collapsing normally unmounts the body, which is fine for sections whose values
+        all live in App state. A section that owns state internally — the artwork
+        uploader holds the extracted pages, the original File and the proof approval —
+        must be hidden instead, or closing it silently throws the upload away. */}
+    {(open||keepMounted)&&<div hidden={!open} style={{display:open?"block":"none",padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}
   </div>;
 }
 
@@ -3944,90 +3948,90 @@ update();
         <div className="bp-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) setActiveModal(null); }}>
           <div className="bp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
-              <div style={{ flex:1, minWidth:180, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                <div>
+              <div style={{ flex:1, minWidth:180, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+                <div style={{ flex:"1 1 auto", minWidth:130 }}>
                   <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>Artwork Proof</div>
                   <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
                     {dims.w}″ × {dims.h}″ · {displayPages.length} pages
                     {shouldRotate && <span style={{ color:"#60a5fa", marginLeft:6 }}>(auto-rotated)</span>}
                   </div>
                 </div>
+                  <div style={{ display:"flex", flexShrink:0, borderRadius:6, order: mob?3:0, flexBasis: mob?"100%":"auto",
+                  border: artApproved && proof===0 ? "2px solid #22c55e" : "2px solid #ef4444",
+                  boxShadow: artApproved && proof===0 ? "0 2px 10px rgba(34,197,94,.3)" : "0 2px 10px rgba(239,68,68,.2)" }}>
+                  <button type="button" disabled={generatingPdf} onClick={async () => {
+                  if (proof===0 && !artApproved) {
+                    setGeneratingPdf(true);
+                    setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
+                    try {
+                      const pkg = await generateApprovalPackage();
+                      if (!pkg || !pkg.manifestBlob) throw new Error("Package generation returned empty result");
+                      setApprovalPkg(pkg);
+                      setArtApproved(true);
+                      if (onArtwork) {
+                        const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
+                        const files = [];
+                        if (rawFileRef.current) files.push(rawFileRef.current);
+                        if (!pkg.skippedGeneration && pkg.printReadyBlob) {
+                          files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
+                        }
+                        pkg.previewBlobs.forEach((b, i) => {
+                          if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
+                        });
+                        // The _preview.html deliverable is intentionally NOT attached to the
+                        // order upload — it is a staff-only download (debug-gated, art modal only).
+                        // Attaching it broke the add-to-cart / order upload flow.
+                        files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
+                        onArtwork({ type: "files", list: files });
+                      }
+                    } catch (err) {
+                      console.error("Approval package generation failed:", err);
+                      alert("Failed to generate print-ready package: " + (err.message || err));
+                    } finally {
+                      setGeneratingPdf(false);
+                      setGenProgress(null);
+                    }
+                  } else if (proof!==0) { setProof(0); }
+                  }} className={proof===0 && !artApproved && !generatingPdf ? "bp-approve-cta" : ""} style={{
+                  padding: proof===0 && !artApproved ? "10px 24px" : "8px 18px",
+                  fontSize: proof===0 && !artApproved ? 13 : 12,
+                  fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em", textTransform:"uppercase",
+                  background: artApproved && proof===0
+                    ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
+                    : proof===0 ? undefined : "rgba(255,255,255,.04)",
+                  color: artApproved && proof===0 ? "#fff" : proof===0 ? undefined : "rgba(255,255,255,.3)",
+                  borderRight:"1px solid rgba(255,255,255,.08)",
+                  }}>{generatingPdf && genProgress ? (
+                  <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+                    <span>{genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… {genProgress.page}/{genProgress.totalPages}</span>
+                    <span style={{ display:"block", width:80, height:4, background:"rgba(255,255,255,.15)", borderRadius:2, overflow:"hidden" }}>
+                      <span style={{ display:"block", height:"100%", borderRadius:2, background: proof===0 ? "#ef4444" : "#3b82f6", transition:"width .15s", width: `${Math.round((genProgress.page / Math.max(1, genProgress.totalPages)) * 100)}%` }} />
+                    </span>
+                  </span>
+                  ) : artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
+                  <button type="button" onClick={() => setProof(0.01)} style={{
+                  padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
+                  background: proof===0.01 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 40%, #60a5fa 50%, #2563eb 60%, #1d4ed8 100%)" : "rgba(255,255,255,.04)",
+                  color: proof===0.01 ? "#fff" : "rgba(255,255,255,.4)", borderRight:"1px solid rgba(255,255,255,.08)",
+                  }}>Professional Proof</button>
+                  <button type="button" onClick={() => setProof(3.01)} style={{
+                  padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", borderRadius:"0 4px 4px 0", cursor:"pointer", fontFamily:"inherit",
+                  background: proof>=3 ? "linear-gradient(135deg, #f59e0b 0%, #d97706 40%, #fbbf24 50%, #d97706 60%, #b45309 100%)" : "rgba(255,255,255,.04)",
+                  color: proof>=3 ? "#000" : "rgba(255,255,255,.4)",
+                  }}>Hardcopy Proof</button>
+                </div>
                 <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.5)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
               </div>
               {/* Proof approval + fit controls row */}
               <div style={{ width:"100%", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
                 <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", justifyContent:"space-between" }}>
-                  <div style={{ display:"flex", borderRadius:6, border: artApproved && proof===0 ? "2px solid #22c55e" : "2px solid #ef4444", boxShadow: artApproved && proof===0 ? "0 2px 10px rgba(34,197,94,.3)" : "0 2px 10px rgba(239,68,68,.2)" }}>
-                    <button type="button" disabled={generatingPdf} onClick={async () => {
-                      if (proof===0 && !artApproved) {
-                        setGeneratingPdf(true);
-                        setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
-                        try {
-                          const pkg = await generateApprovalPackage();
-                          if (!pkg || !pkg.manifestBlob) throw new Error("Package generation returned empty result");
-                          setApprovalPkg(pkg);
-                          setArtApproved(true);
-                          if (onArtwork) {
-                            const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
-                            const files = [];
-                            if (rawFileRef.current) files.push(rawFileRef.current);
-                            if (!pkg.skippedGeneration && pkg.printReadyBlob) {
-                              files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
-                            }
-                            pkg.previewBlobs.forEach((b, i) => {
-                              if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
-                            });
-                            // The _preview.html deliverable is intentionally NOT attached to the
-                            // order upload — it is a staff-only download (debug-gated, art modal only).
-                            // Attaching it broke the add-to-cart / order upload flow.
-                            files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
-                            onArtwork({ type: "files", list: files });
-                          }
-                        } catch (err) {
-                          console.error("Approval package generation failed:", err);
-                          alert("Failed to generate print-ready package: " + (err.message || err));
-                        } finally {
-                          setGeneratingPdf(false);
-                          setGenProgress(null);
-                        }
-                      } else if (proof!==0) { setProof(0); }
-                    }} className={proof===0 && !artApproved && !generatingPdf ? "bp-approve-cta" : ""} style={{
-                      padding: proof===0 && !artApproved ? "10px 24px" : "8px 18px",
-                      fontSize: proof===0 && !artApproved ? 13 : 12,
-                      fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em", textTransform:"uppercase",
-                      background: artApproved && proof===0
-                        ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
-                        : proof===0 ? undefined : "rgba(255,255,255,.04)",
-                      color: artApproved && proof===0 ? "#fff" : proof===0 ? undefined : "rgba(255,255,255,.3)",
-                      borderRight:"1px solid rgba(255,255,255,.08)",
-                    }}>{generatingPdf && genProgress ? (
-                      <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
-                        <span>{genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… {genProgress.page}/{genProgress.totalPages}</span>
-                        <span style={{ display:"block", width:80, height:4, background:"rgba(255,255,255,.15)", borderRadius:2, overflow:"hidden" }}>
-                          <span style={{ display:"block", height:"100%", borderRadius:2, background: proof===0 ? "#ef4444" : "#3b82f6", transition:"width .15s", width: `${Math.round((genProgress.page / Math.max(1, genProgress.totalPages)) * 100)}%` }} />
-                        </span>
-                      </span>
-                    ) : artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
-                    <button type="button" onClick={() => setProof(0.01)} style={{
-                      padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
-                      background: proof===0.01 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 40%, #60a5fa 50%, #2563eb 60%, #1d4ed8 100%)" : "rgba(255,255,255,.04)",
-                      color: proof===0.01 ? "#fff" : "rgba(255,255,255,.4)", borderRight:"1px solid rgba(255,255,255,.08)",
-                    }}>Professional Proof</button>
-                    <button type="button" onClick={() => setProof(3.01)} style={{
-                      padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", borderRadius:"0 4px 4px 0", cursor:"pointer", fontFamily:"inherit",
-                      background: proof>=3 ? "linear-gradient(135deg, #f59e0b 0%, #d97706 40%, #fbbf24 50%, #d97706 60%, #b45309 100%)" : "rgba(255,255,255,.04)",
-                      color: proof>=3 ? "#000" : "rgba(255,255,255,.4)",
-                    }}>Hardcopy Proof</button>
-                  </div>
                   <FitToggle dark />
                 </div>
-                <label style={{ display:"flex", alignItems:"center", gap:8, marginTop:8, padding:"7px 10px", borderRadius:6, background:"rgba(255,255,255,.05)", border:"1px solid rgba(255,255,255,.1)", fontSize:11, color:"rgba(255,255,255,.7)", cursor:"pointer", userSelect:"none" }}
-                  title="Turn on if your PDF has two pages side-by-side per sheet (reader's spreads). Each spread is split down the middle into single pages.">
-                  <input type="checkbox" checked={readerSpreads}
-                    onChange={e => { const v = e.target.checked; setReaderSpreads(v); if (rawFileRef.current) processFiles([rawFileRef.current], { splitSpreads: v }); }}
-                    style={{ width:15, height:15, cursor:"pointer", accentColor: CK.cyan, flexShrink:0 }} />
-                  <span><strong style={{ color:"#fff" }}>Activate Reader's Spread Formatting</strong> — your file has two pages per sheet; split each spread into single pages.</span>
-                </label>
+                {/* The "Activate Reader's Spread Formatting" checkbox was removed from the
+                    proof modal per owner direction (2026-07-30) — tabled, not deleted. The
+                    machinery behind it is intentionally left intact: splitReaderSpreads(),
+                    the readerSpreads state and processFiles' splitSpreads option all still
+                    work, so restoring the control is a one-element change. */}
                 <div style={{ fontSize:10, color:"rgba(255,255,255,.45)", marginTop:6, lineHeight:1.4 }}>
                   {proof === 0 && !artApproved && "Review each page, then click Approve Now to confirm your artwork is print-ready. Your approval means we print exactly what you see."}
                   {proof === 0 && artApproved && "✓ Artwork approved — we'll print exactly what you see. You can change your proof option or close this modal."}
@@ -4898,19 +4902,20 @@ function App(){
   const[coverArt,setCoverArt]=useState(null);
   const[backCoverArt,setBackCoverArt]=useState(null);
   const openPreviewModalRef=useRef(null);
-  // The preview modal is owned by SetPreview, which only exists while the Artwork
-  // section is expanded (Sec unmounts its body when collapsed). With "one section at
-  // a time" on, that section can be closed — in which case there is nothing to open
-  // and the preview card would silently do nothing. Expand Artwork first, then fire
-  // the opener on the render after it mounts.
+  // The preview modal is owned by SetPreview, which lives inside the Artwork section's
+  // body. That body is kept mounted while collapsed (so uploads survive) but hidden
+  // with display:none — and a fixed-position modal inside a display:none subtree is
+  // just as invisible. So expand Artwork FIRST, unconditionally, then fire; both are
+  // state updates in the same batch, so the modal never paints inside a hidden parent.
+  // pendingPreview remains the fallback for the render before the opener registers.
   const[pendingPreview,setPendingPreview]=useState(false);
   const openPreview=()=>{
-    if(openPreviewModalRef.current){openPreviewModalRef.current();return;}
     setOp(p=>{
       if(p.s4)return p;
       if(soloSec){const n={};for(const k in p)n[k]=false;n.s4=true;return n;}
       return {...p,s4:true};
     });
+    if(openPreviewModalRef.current){openPreviewModalRef.current();return;}
     setPendingPreview(true);
   };
   useEffect(()=>{
@@ -5563,7 +5568,7 @@ function App(){
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
-          <Sec step={4} summary={secSummary.s4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          <Sec step={4} summary={secSummary.s4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")} keepMounted>
 
             {/* Art options dropdown */}
             <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
