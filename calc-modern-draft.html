@@ -238,7 +238,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-31 · PROOF-COPY</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-31 · QA-FIXES</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -765,6 +765,12 @@ function calculate(c) {
   const csOK=sets.every(s=>s.pages<=24);
 
   const cvrScoring=COVER_SCORING_VALS.includes(cvr.val);
+  // Cardstock stops being legal above 24pp. Degrading quietly to non-cardstock left the
+  // toggle, the paper dropdown and the price describing three different jobs, so this is
+  // now a hard stop the customer has to resolve. (_adErrs has already been flushed by
+  // this point, so this returns directly rather than pushing to it.)
+  if(c.insidePaperType==="cardstock"&&!csOK)
+    return {error:["Cardstock is only available up to 24 pages. Choose a text-weight paper, or lower the page count."],sz};
   const csInside=c.insidePaperType==="cardstock"&&csOK;
   const artWork=art.val>=2;
   const q100=sets.some(s=>s.qty>=100);
@@ -874,7 +880,11 @@ function calculate(c) {
   const humanProof = (c.proof > 0 && c.proof < 3) ? 1 : 0;
   const hT = Math.min(1, humanArt + humanProof);
   const artT=dT+(pE+dT)+eT+bT;
-  const days=Math.max(PCF.minimum_turnaround_days,Math.floor(sheetsToDays(tS)+pT+aT+artT))+hT;
+  // The itemised components frequently do NOT sum to the production figure, because a
+  // shop minimum floors it. Keep both numbers so the UI can say which one governed
+  // instead of printing a list that appears to be missing a day.
+  const _summedDays=Math.floor(sheetsToDays(tS)+pT+aT+artT);
+  const days=Math.max(PCF.minimum_turnaround_days,_summedDays)+hT;
 
   // Turnaround impact per option (for UI badges)
   const ti = {
@@ -1027,6 +1037,10 @@ function calculate(c) {
     twoStapleApplied:twoApplied,
     // Turnaround breakdown
     turnaround:{
+      summedDays:_summedDays,
+      minimumDays:PCF.minimum_turnaround_days,
+      minimumApplied:_summedDays<PCF.minimum_turnaround_days,
+      humanTouchDays:hT,
       baseDays,
       paperDays,
       paperValRaw:pT,
@@ -1126,8 +1140,33 @@ function Sel({label,value,onChange,children,disabled,note,badge,wrapStyle,name,a
 
 function TxtNum({label,value,onChange,min=1,max=99999}){
   const[raw,setRaw]=useState(String(value));
+  const[note,setNote]=useState(null);
+  // What we last handed the parent. The parent may normalise it — Quantity rounds, for
+  // instance — and when its normalised result happens to equal the value it already
+  // held, a [value]-keyed effect never fires and the box goes on showing "11.4" while
+  // the quote says 11. Reconciling on every render instead means the field always ends
+  // up displaying the number actually being priced. It does not fight mid-typing:
+  // "10." parses to 10, the parent stores 10, and pushed===value so nothing snaps.
+  const pushed=useRef(null);
   useEffect(()=>setRaw(String(value)),[value]);
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
+  useEffect(()=>{
+    if(pushed.current!==null && value!==pushed.current){ setRaw(String(value)); pushed.current=value; }
+  });
+  const commit=v=>{ pushed.current=v; onChange(v); };
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}
+    <input type="text" inputMode="decimal" value={raw}
+      onChange={e=>{setRaw(e.target.value);setNote(null);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)commit(v)}}
+      onBlur={()=>{
+        const typed=parseFloat(raw);
+        let v=typed; if(isNaN(v))v=min;
+        v=Math.min(max,Math.max(min,v));
+        // Rewriting someone's number without telling them is how a 18" height silently
+        // becomes 13.25". Say what happened and why.
+        setNote(!isNaN(typed)&&typed!==v ? `Adjusted to ${v} — allowed range is ${min}–${max}` : null);
+        commit(v); setRaw(String(v));
+      }} style={ST.inp}/>
+    {note&&<div style={{fontSize:11,color:"#b45309",marginTop:4,lineHeight:1.35}}>{note}</div>}
+  </div>;
 }
 
 function Pil({label,options,value,onChange,disabled,badge}){
@@ -5731,7 +5770,11 @@ function App(){
             <div style={r2}>
               <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
-                ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"20px 32px 20px 13px":"20px 34px 20px 14px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;return `${lo}×${sh}" — Opens to ${nonSpine*2}×${spine}"`})():"Enter dimensions below"}</option></select><span style={ST.selA}><Chev/></span></div></div>
+                ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"20px 32px 20px 13px":"20px 34px 20px 14px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;
+                    /* Width x Height, in the same order as the two fields directly below and
+                       the collapsed header pill. It used to print long-edge-first, so the
+                       same size was described two different ways on one screen. */
+                    return `${customLong}×${customShort}" — Opens to ${nonSpine*2}×${spine}"`})():"Enter dimensions below"}</option></select><span style={ST.selA}><Chev/></span></div></div>
                 : <Sel label={<Tip k="size">Select Size</Tip>} value={sizeLabel} onChange={handleSizeLabel}>
                     {SIZE_PRESETS.map(g=><optgroup key={g.group} label={g.group}>{g.items.map(s=><option key={s.label} value={s.label}>{s.label}</option>)}</optgroup>)}
                   </Sel>
@@ -5775,8 +5818,8 @@ function App(){
             </div>
             <div style={ST.hr}/>
             <div style={r2}>
-              <Pil label={<Tip k="inside_paper">Inside Paper</Tip>} value={insidePaperType} onChange={v=>{if(v==="cardstock"&&!csOK)return;setInsidePaperType(v);const pool=v==="cardstock"?PAPERS_CS:PAPERS_NC;setInsidePaper(pool[0])}} options={[{t:"Text Weight",v:"noncardstock"},{t:"Cardstock",v:"cardstock"}]}/>
-              <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{p.label} (Cardstock)</option>)}</optgroup>}</Sel>
+              <Pil label={<Tip k="inside_paper">Inside Paper</Tip>} value={insidePaperType} onChange={v=>{if(v==="cardstock"&&!csOK)return;setInsidePaperType(v);const pool=ALL_PAPERS.filter(p=>p.type===v);setInsidePaper(pool[0])}} options={[{t:"Text Weight",v:"noncardstock"},{t:"Cardstock",v:"cardstock"}]}/>
+              <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{p.label} (Cardstock)</option>)}</optgroup>}{!csOK&&isCardstockVal(insidePaper.val)&&<optgroup label="Not available at this page count"><option value={insidePaper.val}>{insidePaper.label}</option></optgroup>}</Sel>
             </div>
             {insidePaperType==="cardstock"&&!csOK&&<p style={ST.err}>Cardstock requires all sets ≤ 24 pages</p>}
             <div style={ST.hr}/>
@@ -6018,11 +6061,19 @@ function App(){
                     {l:"Artwork/Design", d:(r.ti.artDesign||0)+(r.ti.artEdits||0)},
                     {l:"Bleed work", d:r.ti.bleed},
                     {l:"Hardcopy proof", d:r.ti.proof},
+                    {l:"Manual proof/art handling", d:r.debug?.turnaround?.humanTouchDays},
                   ].filter(x => x.d >= 0.5);
-                  if (items.length <= 1) return null;
+                  const t = r.debug?.turnaround || {};
+                  // The components genuinely do not add up to the production figure when
+                  // the shop minimum floors it — which is most small jobs. Printing the
+                  // addends alone read as a missing day, so name the term that won.
+                  if (items.length === 0 && !t.minimumApplied) return null;
                   return (
                     <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #b3dff044",display:"flex",flexWrap:"wrap",gap:"2px 10px",fontSize:10,color:CC.light}}>
                       <span style={{fontWeight:600,color:CC.mid}}>Production {r.shipping?.productionBizDays}d:</span>
+                      {t.minimumApplied && (
+                        <span style={{color:CC.mid}}>{t.minimumDays}d shop minimum applies{items.length?` (components total ${t.summedDays}d)`:""}{items.length?" ·":""}</span>
+                      )}
                       {items.map((x,i) => <span key={i}>{x.l} {Math.round(x.d)}d{i < items.length-1 ? " ·" : ""}</span>)}
                     </div>
                   );
@@ -6081,7 +6132,15 @@ function App(){
             <SidebarBookPreview sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={openPreview}/>
             <div ref={priceRef}><Panel result={result} debugUnlocked={debugUnlocked}/></div>
           </div>
-          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",marginTop:16,padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:missingDest?CC.mid:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":missingDest?"Choose a destination":"Add to Order"}</button>
+          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",marginTop:16,padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
+          {/* Shipping is required to place the order, but the CTA keeps its own label —
+              a button that renames itself to describe a missing field reads as broken.
+              Pressing it jumps to the shipping section. */}
+          {missingDest && (
+            <div style={{marginTop:7,fontSize:12,fontWeight:600,color:CC.red,lineHeight:1.35}}>
+              Shipping info required prior to placing order
+            </div>
+          )}
           {/* Secondary action, directly under the CTA: visible without scrolling past
               the pricing table, which is where it used to sit. */}
           <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}}
@@ -6187,15 +6246,16 @@ function App(){
           display:"flex",alignItems:"center",gap:10,animation:"pps-mini-in .22s ease-out"}}>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:19,fontWeight:800,color:CC.dark,lineHeight:1.05}}>${_t}</div>
-            <div style={{fontSize:10.5,color:CC.light,fontWeight:600,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-              {(result.tQ||0).toLocaleString()} qty{_when?` · as soon as ${_when}`:""}
+            <div style={{fontSize:10.5,color:missingDest?CC.red:CC.light,fontWeight:600,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {missingDest ? "Shipping info required prior to placing order"
+                           : `${(result.tQ||0).toLocaleString()} qty${_when?` · as soon as ${_when}`:""}`}
             </div>
           </div>
           <button type="button" onClick={handleAddToOrder} disabled={submitting}
-            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.light:missingDest?CC.mid:CK.cyan,
+            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.light:CK.cyan,
               color:"#fff",fontSize:14,fontWeight:750,cursor:submitting?"default":"pointer",fontFamily:"inherit",
               opacity:submitting?.5:1,whiteSpace:"nowrap"}}>
-            {submitting?"Adding…":missingDest?"Choose a destination":"Add to Order"}
+            {submitting?"Adding…":"Add to Order"}
           </button>
         </div>;
       })()}
@@ -6209,11 +6269,16 @@ function App(){
 
       {/* Fixed bottom bar — mobile */}
       {mob&&<div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:9990,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
+        {missingDest && (
+          <div style={{fontSize:11,fontWeight:600,color:CC.red,marginBottom:6,lineHeight:1.3}}>
+            Shipping info required prior to placing order
+          </div>
+        )}
         <div style={{display:"flex",flexDirection:mobExpanded?"column":"row",alignItems:mobExpanded?"stretch":"center",gap:10}}>
           <div style={{flex:mobExpanded?undefined:1,minWidth:0}}>
             <Panel result={result} compact debugUnlocked={debugUnlocked} expanded={mobExpanded} onToggleExpand={()=>setMobExpanded(p=>!p)}/>
           </div>
-          <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:missingDest?CC.mid:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined,width:mobExpanded?"100%":undefined}}
+          <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined,width:mobExpanded?"100%":undefined}}
             disabled={!!result?.error?.length||submitting}>
             {submitting && uploadProgress ? (
               <div>
