@@ -65,17 +65,41 @@
   .bp-thumb{flex-shrink:0;text-align:center}
   .bp-thumb img{height:44px;border-radius:2px;box-shadow:0 1px 4px rgba(0,0,0,.15);border:1px solid #e0e0e0}
   .bp-thumb span{display:block;font-size:8px;color:#999;margin-top:2px}
-  /* Modal */
-  .bp-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
-  .bp-modal{background:#1a1d23;border:1px solid rgba(255,255,255,.1);border-radius:14px;width:90%;max-width:940px;max-height:90vh;display:flex;flex-direction:column;overflow:visible;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-  .bp-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;overflow:visible}
-  .bp-modal-body{padding:16px 20px;overflow-y:auto;flex:1;min-height:0;border-radius:0 0 14px 14px}
-  .bp-mode-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.6);padding:7px 18px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;transition:all .25s;font-family:inherit}
-  .bp-mode-btn:hover{background:rgba(0,126,255,.12);border-color:#007eff;color:#007eff}
-  .bp-mode-btn.on{background:#007eff;border-color:#007eff;color:#000;box-shadow:0 4px 16px rgba(0,126,255,.3)}
-  .bp-nav-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);width:36px;height:36px;min-width:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit;flex-shrink:0;box-sizing:border-box}
-  .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.15);border-color:#007eff;color:#007eff}
+  /* ── Modal chrome ──────────────────────────────────────────────────────────
+     The proof and 3D preview modals used to be their own dark-only surface with
+     white-on-black controls hardcoded inline. They now share the calculator's
+     surface, ink and hairline tokens through these variables, so both modals sit
+     in the modern skin and follow the light/dark toggle with everything else.
+     Set here rather than from CC so plain CSS rules can reach them too. */
+  :root{
+    --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
+    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#94a3b8;
+    --bp-btn:#f1f4f8; --bp-scrim:rgba(15,23,42,.55);
+  }
+  :root[data-pps-theme="dark"]{
+    --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
+    --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
+    --bp-btn:#0f151d; --bp-scrim:rgba(2,6,12,.66);
+  }
+  .bp-modal-bg{position:fixed;inset:0;background:var(--bp-scrim);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
+  .bp-modal{background:var(--bp-surface);border:1px solid var(--bp-line);border-radius:16px;width:90%;max-width:940px;max-height:90vh;display:flex;flex-direction:column;overflow:visible;box-shadow:0 4px 6px rgba(16,24,40,.06), 0 24px 64px rgba(16,24,40,.28)}
+  .bp-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--bp-line);flex-shrink:0;overflow:visible;border-radius:16px 16px 0 0;background:var(--bp-surface)}
+  .bp-modal-body{padding:16px 20px;overflow-y:auto;flex:1;min-height:0;border-radius:0 0 16px 16px;background:var(--bp-surface-2)}
+  .bp-modal-title{font-family:var(--pps-display);font-weight:650;letter-spacing:-0.01em;color:var(--bp-ink)}
+  .bp-mode-btn{background:var(--bp-btn);border:1px solid var(--bp-line);color:var(--bp-dim);padding:7px 18px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;transition:all .2s;font-family:inherit}
+  .bp-mode-btn:hover{background:rgba(0,126,255,.1);border-color:#007eff;color:#007eff}
+  .bp-mode-btn.on{background:#007eff;border-color:#007eff;color:#fff;box-shadow:0 2px 10px rgba(0,126,255,.3)}
+  .bp-nav-btn{background:var(--bp-btn);border:1px solid var(--bp-line);color:var(--bp-dim);width:36px;height:36px;min-width:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit;flex-shrink:0;box-sizing:border-box}
+  .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.12);border-color:#007eff;color:#007eff}
   .bp-nav-btn:disabled{opacity:.25;cursor:not-allowed}
+  /* View settings popover — guides, zoom and the loupe now live behind a gear so the
+     page-nav row has room for the page label instead of six competing controls. */
+  .bp-viewmenu{position:absolute;top:calc(100% + 6px);right:0;z-index:70;min-width:236px;padding:8px;
+    background:var(--bp-surface);border:1px solid var(--bp-line);border-radius:12px;
+    box-shadow:0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.18)}
+  .bp-viewmenu-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 8px;border-radius:8px}
+  .bp-viewmenu-row + .bp-viewmenu-row{border-top:1px solid var(--bp-line)}
+  .bp-viewmenu-label{font-size:12px;font-weight:600;color:var(--bp-ink)}
   /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
   .bp-checker{
     background-color:#3a3e46;
@@ -183,7 +207,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-30 · JOBTITLE-FIT</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-30 · PROOF-MODERN</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -2356,6 +2380,20 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [showGuides, setShowGuides] = useState(true); // toggle guide overlays in proof modal
   const [proofView, setProofView] = useState("single"); // "single" | "grid" within proof modal
   const [showMagnifier, setShowMagnifier] = useState(false); // magnifier loupe active
+  const [viewMenuOpen, setViewMenuOpen] = useState(false); // gear popover: guides / zoom / loupe
+  // Dismiss the view-settings popover on an outside click or Escape, the same way the
+  // form's settings gear does. This MUST sit below the useState above: Babel compiles
+  // the const to a hoisted var, so declaring the effect first does not throw — the deps
+  // array just captures undefined every render, the effect never re-runs, and the
+  // listener is never attached. It fails silently and looks like a dead click handler.
+  useEffect(() => {
+    if (!viewMenuOpen) return;
+    const away = e => { if (!e.target.closest || !e.target.closest("[data-bp-viewmenu]")) setViewMenuOpen(false); };
+    const esc = e => { if (e.key === "Escape") { e.stopPropagation(); setViewMenuOpen(false); } };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc, true);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc, true); };
+  }, [viewMenuOpen]);
   const [magPos, setMagPos] = useState(null); // {x, y, pctX, pctY} — cursor position on proof image
   // Proof viewport — pure view transform (zoom + pan). Does NOT modify the art.
   // Scale 1 = fit, max 5x. Pan in CSS pixels relative to container center.
@@ -2428,16 +2466,26 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // cover + odd reader pages = EVEN index, spine on the left) and verso (even reader
   // pages = ODD index, spine on the right) rotate in OPPOSITE directions. Assumes
   // head-up source art. spine → heads point into the binding; edge → toward fore-edge.
+  // Modes: "u1"/"u2"/"u3" set every page to an ABSOLUTE 90/180/270 (picking an angle
+  // from a menu should land on that angle, not add to whatever was there); "spine" and
+  // "edge" stay parity-aware. Legacy "uniform" kept as a relative +90 step.
   const rotateAll = (mode) => {
     const n = displayPages?.length || 0;
-    if (n <= 1) { setRotateSteps(s => (s + 1) % 4); return; }
+    const abs = { u1: 1, u2: 2, u3: 3 }[mode];
+    if (n <= 1) {
+      if (abs != null) setRotateSteps(abs);
+      else if (mode === "uniform") setRotateSteps(s => (s + 1) % 4);
+      else setRotateSteps(mode === "spine" ? 3 : 1);
+      return;
+    }
     setPageTransforms(p => {
       const next = { ...p };
       for (let i = 0; i < n; i++) {
         const cur = next[i] || DEFAULT_TX;
         const recto = i % 2 === 0;
         let steps = cur.rotateSteps;
-        if (mode === "uniform") steps = (cur.rotateSteps + 1) % 4;
+        if (abs != null) steps = abs;
+        else if (mode === "uniform") steps = (cur.rotateSteps + 1) % 4;
         else if (mode === "spine") steps = recto ? 3 : 1;
         else if (mode === "edge") steps = recto ? 1 : 3;
         next[i] = { ...cur, rotateSteps: steps };
@@ -3674,54 +3722,101 @@ update();
   }
 
   // Fit toggle (light theme for inline)
+  // ── Art manipulation, condensed ───────────────────────────────────────────
+  // Was seven controls in a row that overflowed the modal by 269px on a phone and put
+  // Rotate out of reach. Now: Crop, a Fit menu, Scale (which reveals its stepper), a
+  // Rotate menu, Undo. The two menus are action pickers — value stays "" so re-picking
+  // the same entry still fires — and their first option doubles as the state label.
+  const FIT_OPTS = [
+    { v: "contain", short: "Fit",     long: "Fit to size proportionately" },
+    { v: "cover",   short: "Fill",    long: "Fill size proportionately" },
+    { v: "stretch", short: "Stretch", long: "Stretch to fill size" },
+  ];
+  const fitActive = FIT_OPTS.find(o => o.v === fitMode);
+  const multiPage = (displayPages?.length || 0) > 1;
+  // Segment metrics tighten on a phone: the full-size row overran the modal head by
+  // 22px at 390px wide, and a control you cannot reach is worse than a cramped one.
+  const _fpad = mob ? "6px 9px" : "6px 12px";
+  const _fsel = mob ? "6px 4px" : "6px 8px";
   const FitToggle = ({ dark }) => (
-    <div style={{ display: "flex", alignItems:"center", gap: 6 }}>
-      <span style={{ fontSize:10, fontWeight:700, color:"rgba(255,255,255,.55)", letterSpacing:".08em", textTransform:"uppercase", marginRight:2 }}>Art:</span>
-      <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
-        {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Force Fill" }, { v: "scale", l: "Scale" }].map(o => (
-          <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} title={o.v === "stretch" ? "Stretch art to fill the entire bleed area — distorts aspect ratio" : undefined} style={{
-            padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-            background: fitMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
-            color: fitMode === o.v ? "#000" : "rgba(255,255,255,.5)",
-          }}>{o.l}</button>
-        ))}
-        <button type="button" onClick={() => setRotateSteps(s => (s + 1) % 4)} style={{
-          padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor:"pointer", fontFamily:"inherit",
-          background: rotateSteps > 0 ? CK.cyan : "rgba(255,255,255,.06)",
-          color: rotateSteps > 0 ? "#000" : "rgba(255,255,255,.5)",
-        }}>Rotate 90°{rotateSteps > 0 ? ` (${rotateSteps * 90}°)` : ""}</button>
-        {(displayPages?.length || 0) > 1 && (
-          <select value="" onChange={e => { const v = e.target.value; if (v) rotateAll(v); e.target.value = ""; }}
-            title="Rotate every page at once. Heads → Spine rotates facing pages in opposite directions so each head points into the binding."
-            style={{
-              padding:"6px 10px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)",
-              cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.6)",
-            }}>
-            <option value="" disabled>Rotate all…</option>
-            <option value="uniform">↻ Uniform 90°</option>
-            <option value="spine">Heads → Spine</option>
-            <option value="edge">Heads → Fore-edge</option>
-          </select>
-        )}
+    <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+      <span style={{ fontSize:10, fontWeight:700, color:"var(--bp-dim)", letterSpacing:".08em", textTransform:"uppercase", marginRight:2 }}>Art:</span>
+      <div style={{ display:"flex", flexWrap:"wrap", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)", maxWidth:"100%" }}>
+        <button type="button" onClick={() => setFitMode("crop")} title="Crop the art to the page, keeping its proportions" style={{
+          padding:_fpad, fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
+          background: fitMode === "crop" ? CK.cyan : "var(--bp-btn)",
+          color: fitMode === "crop" ? "#000" : "var(--bp-dim)",
+        }}>Crop</button>
+
+        <select value="" onChange={e => { if (e.target.value) setFitMode(e.target.value); e.target.value = ""; }}
+          title="How the art is sized to the page"
+          style={{
+            padding:_fsel, fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)",
+            cursor:"pointer", fontFamily:"inherit", maxWidth:mob?76:104,
+            background: fitActive ? CK.cyan : "var(--bp-btn)",
+            color: fitActive ? "#000" : "var(--bp-dim)",
+          }}>
+          <option value="" disabled>{fitActive ? fitActive.short : "Fit"}</option>
+          {FIT_OPTS.map(o => <option key={o.v} value={o.v}>{o.long}</option>)}
+        </select>
+
+        <button type="button" onClick={() => { setFitMode("scale"); if (fitMode !== "scale") setArtScale(100); }}
+          title="Size the art by percentage" style={{
+          padding:_fpad, fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)", cursor:"pointer", fontFamily:"inherit",
+          background: fitMode === "scale" ? CK.cyan : "var(--bp-btn)",
+          color: fitMode === "scale" ? "#000" : "var(--bp-dim)",
+        }}>Scale</button>
+
+        <select value="" onChange={e => {
+            const v = e.target.value; e.target.value = "";
+            if (!v) return;
+            if (v.startsWith("p")) setRotateSteps(Number(v.slice(1)));
+            else rotateAll(v);
+          }}
+          title="Rotate this page, or every page at once"
+          style={{
+            padding:_fsel, fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)",
+            cursor:"pointer", fontFamily:"inherit", maxWidth:mob?84:112,
+            background: rotateSteps > 0 ? CK.cyan : "var(--bp-btn)",
+            color: rotateSteps > 0 ? "#000" : "var(--bp-dim)",
+          }}>
+          <option value="" disabled>{rotateSteps > 0 ? `Rotate ${rotateSteps * 90}°` : "Rotate"}</option>
+          <optgroup label="Rotate page">
+            <option value="p1">Clockwise 90&deg;</option>
+            <option value="p2">Clockwise 180&deg;</option>
+            <option value="p3">Clockwise 270&deg;</option>
+            <option value="p0">Upright (0&deg;)</option>
+          </optgroup>
+          {multiPage && (
+            <optgroup label="Rotate all pages">
+              <option value="u1">Clockwise 90&deg;</option>
+              <option value="u2">Clockwise 180&deg;</option>
+              <option value="u3">Clockwise 270&deg;</option>
+              <option value="spine">Head to spine</option>
+              <option value="edge">Foot to spine</option>
+            </optgroup>
+          )}
+        </select>
+
         <button type="button" onClick={undoTx} disabled={txHistory.length === 0} title={txHistory.length ? `Undo last art change (${txHistory.length} step${txHistory.length === 1 ? "" : "s"} available)` : "No changes to undo"} style={{
-          padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor: txHistory.length ? "pointer" : "default", fontFamily:"inherit",
-          background:"rgba(255,255,255,.06)",
-          color: txHistory.length ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.2)",
-        }}>↶ Undo</button>
+          padding:"6px 10px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)", cursor: txHistory.length ? "pointer" : "default", fontFamily:"inherit",
+          background:"var(--bp-btn)",
+          color: txHistory.length ? "var(--bp-dim)" : "var(--bp-faint)",
+        }}>&#8630;</button>
       </div>
       {fitMode === "scale" && (
         <div style={{ display:"flex", alignItems:"center", gap:3 }}>
-          <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
-            <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 1))} style={{
+          <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
+            <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 1))} title="Decrease" style={{
               padding:"6px 10px", fontSize:12, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.5)",
-            }}>−</button>
-            <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 1))} style={{
-              padding:"6px 10px", fontSize:12, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.5)",
+              background:"var(--bp-btn)", color:"var(--bp-dim)",
+            }}>&minus;</button>
+            <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 1))} title="Increase" style={{
+              padding:"6px 10px", fontSize:12, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)", cursor:"pointer", fontFamily:"inherit",
+              background:"var(--bp-btn)", color:"var(--bp-dim)",
             }}>+</button>
           </div>
-          <span style={{ fontSize:10, fontWeight:600, color:"rgba(255,255,255,.4)", minWidth:32, textAlign:"center" }}>{artScale}%</span>
+          <span style={{ fontSize:10, fontWeight:600, color:"var(--bp-dim)", minWidth:32, textAlign:"center" }}>{artScale}%</span>
         </div>
       )}
     </div>
@@ -3950,8 +4045,8 @@ update();
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
               <div style={{ flex:1, minWidth:180, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
                 <div style={{ flex:"1 1 auto", minWidth:130 }}>
-                  <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>Artwork Proof</div>
-                  <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
+                  <div className="bp-modal-title" style={{ fontSize:15 }}>Artwork Proof</div>
+                  <div style={{ fontSize:11, color:"var(--bp-faint)" }}>
                     {dims.w}″ × {dims.h}″ · {displayPages.length} pages
                     {shouldRotate && <span style={{ color:"#60a5fa", marginLeft:6 }}>(auto-rotated)</span>}
                   </div>
@@ -3998,32 +4093,32 @@ update();
                   fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em", textTransform:"uppercase",
                   background: artApproved && proof===0
                     ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
-                    : proof===0 ? undefined : "rgba(255,255,255,.04)",
-                  color: artApproved && proof===0 ? "#fff" : proof===0 ? undefined : "rgba(255,255,255,.3)",
-                  borderRight:"1px solid rgba(255,255,255,.08)",
+                    : proof===0 ? undefined : "var(--bp-btn)",
+                  color: artApproved && proof===0 ? "#fff" : proof===0 ? undefined : "var(--bp-faint)",
+                  borderRight:"1px solid var(--bp-line)",
                   }}>{generatingPdf && genProgress ? (
                   <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
                     <span>{genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… {genProgress.page}/{genProgress.totalPages}</span>
-                    <span style={{ display:"block", width:80, height:4, background:"rgba(255,255,255,.15)", borderRadius:2, overflow:"hidden" }}>
+                    <span style={{ display:"block", width:80, height:4, background:"var(--bp-btn)", borderRadius:2, overflow:"hidden" }}>
                       <span style={{ display:"block", height:"100%", borderRadius:2, background: proof===0 ? "#ef4444" : "#3b82f6", transition:"width .15s", width: `${Math.round((genProgress.page / Math.max(1, genProgress.totalPages)) * 100)}%` }} />
                     </span>
                   </span>
                   ) : artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
                   <button type="button" onClick={() => setProof(0.01)} style={{
                   padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
-                  background: proof===0.01 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 40%, #60a5fa 50%, #2563eb 60%, #1d4ed8 100%)" : "rgba(255,255,255,.04)",
-                  color: proof===0.01 ? "#fff" : "rgba(255,255,255,.4)", borderRight:"1px solid rgba(255,255,255,.08)",
+                  background: proof===0.01 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 40%, #60a5fa 50%, #2563eb 60%, #1d4ed8 100%)" : "var(--bp-btn)",
+                  color: proof===0.01 ? "#fff" : "var(--bp-faint)", borderRight:"1px solid var(--bp-line)",
                   }}>Professional Proof</button>
                   <button type="button" onClick={() => setProof(3.01)} style={{
                   padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", borderRadius:"0 4px 4px 0", cursor:"pointer", fontFamily:"inherit",
-                  background: proof>=3 ? "linear-gradient(135deg, #f59e0b 0%, #d97706 40%, #fbbf24 50%, #d97706 60%, #b45309 100%)" : "rgba(255,255,255,.04)",
-                  color: proof>=3 ? "#000" : "rgba(255,255,255,.4)",
+                  background: proof>=3 ? "linear-gradient(135deg, #f59e0b 0%, #d97706 40%, #fbbf24 50%, #d97706 60%, #b45309 100%)" : "var(--bp-btn)",
+                  color: proof>=3 ? "#000" : "var(--bp-faint)",
                   }}>Hardcopy Proof</button>
                 </div>
-                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.5)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
+                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid var(--bp-line)", color:"var(--bp-dim)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
               </div>
               {/* Proof approval + fit controls row */}
-              <div style={{ width:"100%", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
+              <div style={{ width:"100%", borderTop:"1px solid var(--bp-line)", paddingTop:10 }}>
                 <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", justifyContent:"space-between" }}>
                   <FitToggle dark />
                 </div>
@@ -4032,7 +4127,7 @@ update();
                     machinery behind it is intentionally left intact: splitReaderSpreads(),
                     the readerSpreads state and processFiles' splitSpreads option all still
                     work, so restoring the control is a one-element change. */}
-                <div style={{ fontSize:10, color:"rgba(255,255,255,.45)", marginTop:6, lineHeight:1.4 }}>
+                <div style={{ fontSize:10, color:"var(--bp-faint)", marginTop:6, lineHeight:1.4 }}>
                   {proof === 0 && !artApproved && "Review each page, then click Approve Now to confirm your artwork is print-ready. Your approval means we print exactly what you see."}
                   {proof === 0 && artApproved && "✓ Artwork approved — we'll print exactly what you see. You can change your proof option or close this modal."}
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
@@ -4080,25 +4175,25 @@ update();
                         }}>⬇ Download All</button>
                         {rawFileRef.current && (
                           <button type="button" onClick={() => dlFile(rawFileRef.current, rawFileRef.current.name || baseName + "_raw")} style={{
-                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-dim)",
                           }}>Raw file</button>
                         )}
                         {!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob && (
                           <button type="button" onClick={() => dlFile(approvalPkg.printReadyBlob, baseName + "_print-ready.pdf")} style={{
-                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-dim)",
                           }}>Print-ready PDF</button>
                         )}
                         {approvalPkg.previewPdfBlob ? (
                           <button type="button" onClick={() => dlFile(approvalPkg.previewPdfBlob, baseName + "_proof.pdf")} style={{
-                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-dim)",
                           }}>Proof PDF ({previewCount} pp)</button>
                         ) : previewCount > 0 ? (
                           <button type="button" onClick={() => approvalPkg.previewBlobs.forEach((b, i) => { if (b) dlFile(b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`); })} style={{
-                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-dim)",
                           }}>Previews ({previewCount})</button>
                         ) : null}
                         {debug && approvalPkg.previewHtmlBlob && (
@@ -4108,12 +4203,12 @@ update();
                           }}>Preview HTML</button>
                         )}
                         <button type="button" onClick={() => dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt")} style={{
-                          padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-dim)",
                         }}>Manifest</button>
                       </div>
                       {approvalPkg.skippedGeneration && (
-                        <div style={{ fontSize:9, color:"rgba(255,255,255,.35)", marginTop:4 }}>No print-ready PDF generated — raw file is already print-ready (no transforms applied)</div>
+                        <div style={{ fontSize:9, color:"var(--bp-faint)", marginTop:4 }}>No print-ready PDF generated — raw file is already print-ready (no transforms applied)</div>
                       )}
                     </div>
                   );
@@ -4121,13 +4216,13 @@ update();
               </div>
             </div>
             {!artApproved && proof === 0 && (
-              <div style={{ padding:"4px 20px", borderBottom:"1px solid rgba(255,255,255,.06)", fontSize:10, color:"#f87171" }}>
+              <div style={{ padding:"4px 20px", borderBottom:"1px solid var(--bp-line)", fontSize:10, color:"#f87171" }}>
                 * Proof approval is required before your order can be placed.
               </div>
             )}
             {/* Preflight bar — warnings only */}
             {preflight && preflight.some(c => c.level !== "pass") && (
-              <div style={{ padding:"8px 20px", borderBottom:"1px solid rgba(255,255,255,.06)", display:"flex", gap:16, flexWrap:"wrap" }}>
+              <div style={{ padding:"8px 20px", borderBottom:"1px solid var(--bp-line)", display:"flex", gap:16, flexWrap:"wrap" }}>
                 {preflight.filter(c => c.level !== "pass").map((c, i) => (
                   <div key={i} style={{ display:"flex", alignItems:"center", gap:6 }}>
                     <span style={{ width:6, height:6, borderRadius:"50%", background:PF[c.level].dot }} />
@@ -4163,37 +4258,73 @@ update();
                 return (
                   <div style={{ padding:"16px 20px" }}>
                     {/* Page nav with view toggle */}
-                    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12 }}>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:10, flexWrap:"wrap", rowGap:8 }}>
                       <button type="button" disabled={proofIdx<=0} onClick={() => setProofIdx(i => i > 0 ? i-1 : i)} style={{
                         padding:"8px 16px", borderRadius:6, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit",
                         display:"flex", alignItems:"center", gap:4, transition:"all .2s",
-                        border:"1px solid rgba(255,255,255,.2)", background:"rgba(255,255,255,.08)", color:"rgba(255,255,255,.7)",
+                        border:"1px solid var(--bp-line)", background:"var(--bp-btn)", color:"var(--bp-dim)",
                         opacity: proofIdx<=0 ? 0.2 : 1,
                       }}>‹ Prev</button>
-                      <span style={{ fontSize:13, color:"rgba(255,255,255,.6)", minWidth:100, textAlign:"center", fontWeight:500 }}>{proofPage.label} ({proofIdx+1}/{displayPages.length})</span>
+                      <span style={{ fontSize:13, color:"var(--bp-dim)", minWidth:100, textAlign:"center", fontWeight:500 }}>{proofPage.label} ({proofIdx+1}/{displayPages.length})</span>
                       <button type="button" disabled={proofIdx>=displayPages.length-1} onClick={() => setProofIdx(i => i < displayPages.length-1 ? i+1 : i)} style={{
                         padding:"8px 16px", borderRadius:6, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit",
                         display:"flex", alignItems:"center", gap:4, transition:"all .2s",
-                        border:"1px solid rgba(255,255,255,.2)", background:"rgba(255,255,255,.08)", color:"rgba(255,255,255,.7)",
+                        border:"1px solid var(--bp-line)", background:"var(--bp-btn)", color:"var(--bp-dim)",
                         opacity: proofIdx>=displayPages.length-1 ? 0.2 : 1,
                       }}>Next ›</button>
-                      <button type="button" onClick={() => setShowGuides(g => !g)} style={{
-                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
-                        background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
-                        color: showGuides ? "#38a169" : "rgba(255,255,255,.4)",
-                      }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
-                      {/* Viewport zoom controls — pure view transform, mirrors PDF viewer UX */}
-                      <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.04)" }}>
-                        <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>−</button>
-                        <span style={{ fontSize:10.5, fontWeight:600, color:"rgba(255,255,255,.65)", minWidth:38, textAlign:"center", letterSpacing:".02em" }}>{Math.round(vpScale*100)}%</span>
-                        <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>+</button>
-                        <button type="button" onClick={vpReset} disabled={vpScale===VP_FIT && vpX===0 && vpY===0} title="Fit page" style={{padding:"4px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid rgba(255,255,255,.12)",marginLeft:2,borderRadius:0,cursor:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"rgba(255,255,255,.2)":"rgba(255,255,255,.55)",fontFamily:"inherit"}}>⛶</button>
+                      {/* Guides, zoom and the loupe live behind this gear. They were six
+                          controls competing with Prev/Next for the same row, which is what
+                          pushed the row past the modal edge on a phone. */}
+                      <div data-bp-viewmenu style={{ position:"relative" }}>
+                        <button type="button" onClick={() => setViewMenuOpen(o => !o)}
+                          aria-haspopup="true" aria-expanded={viewMenuOpen} aria-label="View settings" title="View settings — guides, zoom, loupe"
+                          style={{
+                            display:"flex", alignItems:"center", gap:5, padding:"6px 10px", fontSize:11, fontWeight:600,
+                            border:`1px solid ${viewMenuOpen ? CK.cyan : "var(--bp-line)"}`, borderRadius:6, cursor:"pointer", fontFamily:"inherit",
+                            background: viewMenuOpen ? "rgba(0,126,255,.10)" : "var(--bp-btn)",
+                            color: viewMenuOpen ? CK.cyan : "var(--bp-dim)",
+                          }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                          </svg>
+                          View
+                          {(showMagnifier || !showGuides || vpScale !== VP_FIT) &&
+                            <span title="View settings changed" style={{ width:6, height:6, borderRadius:99, background:CK.cyan, flexShrink:0 }}/>}
+                        </button>
+                        {viewMenuOpen && (
+                          <div className="bp-viewmenu" role="menu">
+                            <div className="bp-viewmenu-row">
+                              <span className="bp-viewmenu-label">Guides</span>
+                              <button type="button" role="menuitemcheckbox" aria-checked={showGuides} onClick={() => setShowGuides(g => !g)} style={{
+                                padding:"5px 12px", fontSize:11, fontWeight:700, borderRadius:6, cursor:"pointer", fontFamily:"inherit",
+                                border:`1px solid ${showGuides ? "rgba(22,163,74,.45)" : "var(--bp-dim)"}`,
+                                background: showGuides ? "rgba(22,163,74,.14)" : "var(--bp-btn)",
+                                color: showGuides ? "#16a34a" : "var(--bp-faint)",
+                              }}>{showGuides ? "Shown" : "Hidden"}</button>
+                            </div>
+                            <div className="bp-viewmenu-row">
+                              <span className="bp-viewmenu-label">Zoom</span>
+                              <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid var(--bp-line)", background:"var(--bp-btn)" }}>
+                                <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"3px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"var(--bp-faint)":"var(--bp-dim)",fontFamily:"inherit"}}>&minus;</button>
+                                <span style={{ fontSize:10.5, fontWeight:600, color:"var(--bp-dim)", minWidth:38, textAlign:"center", letterSpacing:".02em" }}>{Math.round(vpScale*100)}%</span>
+                                <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"3px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"var(--bp-faint)":"var(--bp-dim)",fontFamily:"inherit"}}>+</button>
+                                <button type="button" onClick={vpReset} disabled={vpScale===VP_FIT && vpX===0 && vpY===0} title="Fit page" style={{padding:"3px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid var(--bp-line)",marginLeft:2,borderRadius:0,cursor:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"var(--bp-faint)":"var(--bp-dim)",fontFamily:"inherit",letterSpacing:".03em"}}>Fit</button>
+                              </div>
+                            </div>
+                            <div className="bp-viewmenu-row">
+                              <span className="bp-viewmenu-label">Loupe</span>
+                              <button type="button" role="menuitemcheckbox" aria-checked={showMagnifier}
+                                onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
+                                padding:"5px 12px", fontSize:11, fontWeight:700, borderRadius:6, cursor:"pointer", fontFamily:"inherit",
+                                border:`1px solid ${showMagnifier ? "rgba(59,130,246,.45)" : "var(--bp-dim)"}`,
+                                background: showMagnifier ? "rgba(59,130,246,.14)" : "var(--bp-btn)",
+                                color: showMagnifier ? "#3b82f6" : "var(--bp-faint)",
+                              }}>{showMagnifier ? "On" : "Off"}</button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
-                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
-                        background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
-                        color: showMagnifier ? "#3b82f6" : "rgba(255,255,255,.4)",
-                      }}>🔍</button>
                       {debug && <button type="button" disabled={generatingPdf} title="Debug: regenerate the approval package without locking approval" onClick={async () => {
                         setGeneratingPdf(true);
                         setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
@@ -4211,12 +4342,12 @@ update();
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(251,191,36,.4)", borderRadius:6, cursor: generatingPdf ? "wait" : "pointer", fontFamily:"inherit",
                         background:"rgba(251,191,36,.12)", color:"#fbbf24",
                       }}>🔧 {generatingPdf ? "Generating…" : "Generate"}</button>}
-                      <div style={{ marginLeft:4, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
+                      <div style={{ marginLeft:4, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
                         {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (
                           <button type="button" key={o.v} onClick={() => setProofView(o.v)} title={o.v === "single" ? "Single page view" : "Grid view — all pages"} style={{
                             padding:"6px 10px", fontSize:13, border:"none", cursor:"pointer", fontFamily:"inherit",
-                            background: proofView === o.v ? CK.cyan : "rgba(255,255,255,.06)",
-                            color: proofView === o.v ? "#000" : "rgba(255,255,255,.5)",
+                            background: proofView === o.v ? CK.cyan : "var(--bp-btn)",
+                            color: proofView === o.v ? "#000" : "var(--bp-dim)",
                           }}>{o.l}</button>
                         ))}
                       </div>
@@ -4257,7 +4388,7 @@ update();
                           return (
                             <div className="bp-checker" style={{ position:"absolute", inset:0, overflow:"hidden" }}>
                               {proofPage.isBlank
-                                ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.3)", fontSize:14 }}>Blank page</div>
+                                ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:14 }}>Blank page</div>
                                 : <img src={hiResValid ? hiResProof.dataUrl : proofPage.dataUrl} style={{
                                     ...(fitMode === "crop" ? cropStyle(1)
                                       : fitMode === "scale" ? cropStyle(artScale / 100)
@@ -4269,10 +4400,10 @@ update();
                           );
                         })()}
                         {!proofPage.isBlank && !hiResValid && artDims?.source === "pdf" && (
-                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"rgba(255,255,255,.5)", background:"rgba(0,0,0,.5)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>Rendering 300 DPI…</div>
+                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"var(--bp-dim)", background:"rgba(0,0,0,.5)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>Rendering 300 DPI…</div>
                         )}
                         {!proofPage.isBlank && hiResValid && (
-                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"rgba(255,255,255,.4)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>300 DPI</div>
+                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"var(--bp-faint)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>300 DPI</div>
                         )}
                         {/* Guide overlays — togglable */}
                         {showGuides && !proofPage.isBlank && (
@@ -4287,7 +4418,7 @@ update();
                             <div style={{ position:"absolute", [proofIdx%2===0?"left":"right"]:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2 }}/>
                             {/* Staple marks — single centred stitch unless two staples apply */}
                             {(twoStaplesApplied ? [33, 67] : [50]).map(yp => (
-                              <div key={yp} style={{ position:"absolute", [proofIdx%2===0?"left":"right"]:`${bleedPctX}%`, top:`${yp}%`, transform:"translateY(-50%)", width:11, height:5, background:"#1e40af", borderRadius:1, border:"1px solid rgba(255,255,255,.85)", boxSizing:"border-box" }}/>
+                              <div key={yp} style={{ position:"absolute", [proofIdx%2===0?"left":"right"]:`${bleedPctX}%`, top:`${yp}%`, transform:"translateY(-50%)", width:11, height:5, background:"#1e40af", borderRadius:1, border:"1px solid var(--bp-line)", boxSizing:"border-box" }}/>
                             ))}
                             <div style={{ position:"absolute", [proofIdx%2===0?"left":"right"]:`${bleedPctX + 1.2}%`, top:"50%", transform:`translateY(-50%) rotate(${proofIdx%2===0?-90:90}deg)`, transformOrigin:"center center", fontSize:8, fontWeight:700, color:"#3b82f6", letterSpacing:".06em", whiteSpace:"nowrap", textTransform:"uppercase", opacity:0.7 }}>Spine</div>
                           </div>
@@ -4316,7 +4447,7 @@ update();
                               position:"absolute", pointerEvents:"none", zIndex:10,
                               left: magPos.x - magSize / 2, top: magPos.y - magSize / 2,
                               width: magSize, height: magSize, borderRadius:"50%",
-                              border:"3px solid rgba(255,255,255,.8)", boxShadow:"0 4px 20px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.3)",
+                              border:"3px solid var(--bp-line)", boxShadow:"0 4px 20px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.3)",
                               overflow: "hidden",
                             }}>
                               {/* Bleed-zoomed proof viewport — mirrors the main proof container at zoom× scale */}
@@ -4340,8 +4471,8 @@ update();
                                 </>}
                               </div>
                               {/* Crosshair — anchored to lens centre */}
-                              <div style={{ position:"absolute", left:"50%", top:0, bottom:0, width:1, background:"rgba(255,255,255,.3)", transform:"translateX(-50%)" }}/>
-                              <div style={{ position:"absolute", top:"50%", left:0, right:0, height:1, background:"rgba(255,255,255,.3)", transform:"translateY(-50%)" }}/>
+                              <div style={{ position:"absolute", left:"50%", top:0, bottom:0, width:1, background:"var(--bp-btn)", transform:"translateX(-50%)" }}/>
+                              <div style={{ position:"absolute", top:"50%", left:0, right:0, height:1, background:"var(--bp-btn)", transform:"translateY(-50%)" }}/>
                             </div>
                           );
                         })()}
@@ -4365,8 +4496,8 @@ update();
                     <div className="bp-thumbs" style={{ marginTop:12 }}>
                       {displayPages.map((p, i) => (
                         <div key={i} className="bp-thumb" style={{ cursor:"pointer", outline: i===proofIdx ? `2px solid ${CK.cyan}` : "none", borderRadius:3 }} onClick={() => setProofIdx(i)}>
-                          <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.5 : i===proofIdx ? 1 : 0.7, border: p.isBlank ? "1px dashed rgba(255,255,255,.3)" : undefined }} />
-                          <span style={{ color: i===proofIdx ? CK.cyan : p.isBlank ? CK.yellow : "rgba(255,255,255,.4)" }}>{p.label}</span>
+                          <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.5 : i===proofIdx ? 1 : 0.7, border: p.isBlank ? "1px dashed var(--bp-line)" : undefined }} />
+                          <span style={{ color: i===proofIdx ? CK.cyan : p.isBlank ? CK.yellow : "var(--bp-faint)" }}>{p.label}</span>
                         </div>
                       ))}
                     </div>
@@ -4378,13 +4509,13 @@ update();
               {proofView === "grid" && (
                 <div style={{ padding:"16px 20px" }}>
                   <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12 }}>
-                    <span style={{ fontSize:12, color:"rgba(255,255,255,.5)", fontWeight:500 }}>All Pages — click to inspect</span>
-                    <div style={{ marginLeft:8, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
+                    <span style={{ fontSize:12, color:"var(--bp-dim)", fontWeight:500 }}>All Pages — click to inspect</span>
+                    <div style={{ marginLeft:8, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
                       {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (
                         <button type="button" key={o.v} onClick={() => setProofView(o.v)} title={o.v === "single" ? "Single page view" : "Grid view — all pages"} style={{
                           padding:"6px 10px", fontSize:13, border:"none", cursor:"pointer", fontFamily:"inherit",
-                          background: proofView === o.v ? CK.cyan : "rgba(255,255,255,.06)",
-                          color: proofView === o.v ? "#000" : "rgba(255,255,255,.5)",
+                          background: proofView === o.v ? CK.cyan : "var(--bp-btn)",
+                          color: proofView === o.v ? "#000" : "var(--bp-dim)",
                         }}>{o.l}</button>
                       ))}
                     </div>
@@ -4392,13 +4523,13 @@ update();
                   <div style={{ display:"grid", gridTemplateColumns:`repeat(auto-fill, minmax(${mob ? 100 : 140}px, 1fr))`, gap:10 }}>
                     {displayPages.map((p, i) => (
                       <div key={i} style={{ cursor:"pointer", textAlign:"center" }} onClick={() => { setProofIdx(i); setProofView("single"); }}>
-                        <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
+                        <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid var(--bp-line)" }}>
                           {p.isBlank
-                            ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.2)", fontSize:10 }}>Blank</div>
+                            ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:10 }}>Blank</div>
                             : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
                           }
                         </div>
-                        <span style={{ fontSize:9, color: p.isBlank ? "rgba(255,255,255,.3)" : "rgba(255,255,255,.5)", marginTop:3, display:"block" }}>{p.label}</span>
+                        <span style={{ fontSize:9, color: p.isBlank ? "var(--bp-faint)" : "var(--bp-dim)", marginTop:3, display:"block" }}>{p.label}</span>
                       </div>
                     ))}
                   </div>
@@ -4418,22 +4549,22 @@ update();
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
               <div style={{ flex:1, minWidth:180, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <div>
-                  <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>Book Preview</div>
-                  <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
+                  <div className="bp-modal-title" style={{ fontSize:15 }}>Book Preview</div>
+                  <div style={{ fontSize:11, color:"var(--bp-faint)" }}>
                     {dims.w}″ × {dims.h}″ · {displayPages.length} pages · Saddle Stitch
                     {reconcileInfo?.type === "padded" && <InfoTip dark text={`Saddlestitch booklets require page counts in multiples of 4. Your file has ${reconcileInfo.raw} pages, so ${reconcileInfo.count} blank page${reconcileInfo.count > 1 ? "s are" : " is"} added to reach ${reconcileInfo.target}.`}><span style={{ color: CK.yellow, marginLeft: 6 }}>({reconcileInfo.count} blank{reconcileInfo.count > 1 ? "s" : ""} added)</span></InfoTip>}
                   </div>
                 </div>
-                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.5)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid var(--bp-line)", color:"var(--bp-dim)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
               </div>
               {/* Cover / Pages toggle */}
-              <div style={{ width:"100%", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
-                <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
+              <div style={{ width:"100%", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", borderTop:"1px solid var(--bp-line)", paddingTop:10 }}>
+                <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
                   {[{v:"closed",l:"Cover"},{v:"open",l:"Pages"}].map(o => (
                     <button type="button" key={o.v} onClick={() => { setPreviewMode(o.v); if(o.v==="closed") setRot({x:-15,y:-25}); if(o.v==="open"){setSpread(0);setRot({x:-5,y:0});} }} style={{
                       padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-                      background: previewMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
-                      color: previewMode === o.v ? "#000" : "rgba(255,255,255,.5)",
+                      background: previewMode === o.v ? CK.cyan : "var(--bp-btn)",
+                      color: previewMode === o.v ? "#000" : "var(--bp-dim)",
                     }}>{o.l}</button>
                   ))}
                 </div>
@@ -4453,13 +4584,13 @@ update();
                   ? <BookClosed3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spineW={spineW} rotateX={rot.x} rotateY={rot.y} scale={exScale} fitMode="stretch" />
                   : <BookOpen3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spread={spread} scale={exScale} rotateX={-5} rotateY={0} fitMode="stretch" />
                 }
-                {previewMode === "closed" && <div style={{ position:"absolute", bottom:10, left:"50%", transform:"translateX(-50%)", fontSize:10, color:"rgba(255,255,255,.3)", letterSpacing:".08em" }}>↔ Drag to rotate</div>}
+                {previewMode === "closed" && <div style={{ position:"absolute", bottom:10, left:"50%", transform:"translateX(-50%)", fontSize:10, color:"var(--bp-faint)", letterSpacing:".08em" }}>↔ Drag to rotate</div>}
               </div>
 
               {previewMode === "open" && (
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:16, marginTop:12 }}>
                   <button type="button" className="bp-nav-btn" disabled={spread <= 0} onClick={() => setSpread(s => s - 1)}>‹</button>
-                  <span style={{ fontSize:12, color:"rgba(255,255,255,.5)", minWidth:100, textAlign:"center" }}>
+                  <span style={{ fontSize:12, color:"var(--bp-dim)", minWidth:100, textAlign:"center" }}>
                     {(() => { const int = displayPages.slice(1, displayPages.length - 1); const li = spread * 2, ri = spread * 2 + 1; return int[ri] ? `Pages ${li + 2}–${ri + 2}` : `Page ${li + 2}`; })()}
                   </span>
                   <button type="button" className="bp-nav-btn" disabled={spread >= totalSpreads - 1} onClick={() => setSpread(s => s + 1)}>›</button>
@@ -4470,8 +4601,8 @@ update();
               <div className="bp-thumbs" style={{ marginTop:12 }}>
                 {displayPages.map((p, i) => (
                   <div key={i} className="bp-thumb">
-                    <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.5 : 1, border: p.isBlank ? "1px dashed rgba(255,255,255,.2)" : undefined }} />
-                    <span style={{ color: p.isBlank ? CK.yellow : "rgba(255,255,255,.4)" }}>{p.label}</span>
+                    <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.5 : 1, border: p.isBlank ? "1px dashed var(--bp-line)" : undefined }} />
+                    <span style={{ color: p.isBlank ? CK.yellow : "var(--bp-faint)" }}>{p.label}</span>
                   </div>
                 ))}
               </div>
