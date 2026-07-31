@@ -181,7 +181,18 @@ function turn_text( $text, $thinking = null ) {
 }
 
 function fresh_session() {
-    return array( 'messages' => array(), 'turns' => 0, 'verified_order' => 0, 'verified_email' => '' );
+    return array(
+        'messages' => array(), 'turns' => 0, 'verified_order' => 0, 'verified_email' => '',
+        'email' => '', 'phone' => '', 'phone_pref' => '', 'mode' => 'bot', 'escalated' => false,
+    );
+}
+
+/** Flip the manual availability toggle the operator controls. */
+function set_available( $on ) {
+    $cfg = pps_assistant_config();
+    $cfg['available_now']   = (bool) $on;
+    $cfg['available_since'] = $on ? 1 : 0;
+    update_option( 'pps_assistant_config', $cfg );
 }
 
 /** Concatenate every tool_result string in a finished session — what the model saw. */
@@ -433,6 +444,84 @@ ok( count( $GLOBALS['__mail'] ) === 1, 'escalation emails the shop' );
 ok( count( $GLOBALS['__notes'] ) === 1 && $GLOBALS['__notes'][0][0] === 4412,
     'escalation writes an order note on the verified order' );
 ok( ! empty( $s['escalated'] ), 'session is flagged as escalated' );
+
+// ═════════════════════════════════════════════════════════════════════════════════
+group( 'Escalation branches on human availability' );
+// ═════════════════════════════════════════════════════════════════════════════════
+
+// Toggle ON — the customer must be told someone is picking it up, and the bot must stop
+// troubleshooting rather than carrying on alongside a human.
+reset_world();
+set_available( true );
+$s = fresh_session();
+$s['email'] = 'buyer@example.com';
+script( array(
+    turn_tool( 'escalate_to_human', array( 'reason' => 'custom quote', 'summary' => 'Wants 5000 booklets' ) ),
+    turn_text( 'Someone is looking at this now.' ),
+) );
+pps_assistant_run( $s, 'I need a custom quote' );
+$seen = tool_results_in( $s );
+ok( strpos( $seen, 'HUMAN_AVAILABLE' ) !== false, 'toggle on → live-handoff branch' );
+ok( strpos( $seen, 'NO_HUMAN_AVAILABLE' ) === false, 'the two branches are mutually exclusive' );
+ok( strpos( $GLOBALS['__mail'][0]['subj'] ?? '', 'LIVE handoff' ) !== false,
+    'staff email is marked as a live handoff, not a queued one' );
+
+// Toggle OFF — the fallback path. This is the one that runs at 2am.
+reset_world();
+set_available( false );
+$s = fresh_session();
+$s['email'] = 'buyer@example.com';
+script( array(
+    turn_tool( 'escalate_to_human', array( 'reason' => 'damage claim', 'summary' => 'Booklets arrived scuffed' ) ),
+    turn_text( 'Submitted — we will email you.' ),
+) );
+pps_assistant_run( $s, 'my order arrived damaged' );
+$seen = tool_results_in( $s );
+ok( strpos( $seen, 'NO_HUMAN_AVAILABLE' ) !== false, 'toggle off → email-followup branch' );
+ok( strpos( $seen, 'text message or a phone call' ) !== false,
+    'the fallback instructs the bot to offer text or a call' );
+ok( strpos( $GLOBALS['__mail'][0]['body'] ?? '', 'buyer@example.com' ) !== false,
+    'the gated email address reaches the staff notification' );
+
+// Phone capture after the fallback.
+reset_world();
+set_available( false );
+$s = fresh_session();
+$s['email'] = 'buyer@example.com';
+$s['escalation_reason'] = 'damage claim';
+script( array(
+    turn_tool( 'record_contact', array( 'phone' => '(602) 555-0142', 'preference' => 'text' ) ),
+    turn_text( 'Got it.' ),
+) );
+pps_assistant_run( $s, 'you can text me at 602-555-0142' );
+ok( strpos( tool_results_in( $s ), 'RECORDED' ) !== false, 'a phone number is accepted after escalation' );
+ok( $s['phone'] === '(602) 555-0142' && $s['phone_pref'] === 'text',
+    'number and contact preference persist on the session' );
+ok( count( $GLOBALS['__mail'] ) === 1 && strpos( $GLOBALS['__mail'][0]['body'], '(602) 555-0142' ) !== false,
+    'the number is emailed to staff so it reaches the existing escalation' );
+
+// Garbage must not be recorded as a phone number.
+reset_world();
+$s = fresh_session();
+script( array( turn_tool( 'record_contact', array( 'phone' => 'no thanks' ) ), turn_text( 'ok' ) ) );
+pps_assistant_run( $s, 'no thanks' );
+ok( strpos( tool_results_in( $s ), 'INVALID' ) !== false, 'a non-number is rejected' );
+ok( empty( $s['phone'] ), 'a rejected number is not stored' );
+
+// A session predating this feature has no email/phone keys. It must not warn or fatal.
+reset_world();
+set_available( false );
+$legacy = array( 'messages' => array(), 'turns' => 0, 'verified_order' => 0, 'verified_email' => '' );
+script( array(
+    turn_tool( 'escalate_to_human', array( 'reason' => 'x', 'summary' => 'y' ) ),
+    turn_text( 'ok' ),
+) );
+$errors = array();
+set_error_handler( function ( $n, $str ) use ( &$errors ) { $errors[] = $str; return true; } );
+pps_assistant_run( $legacy, 'hello' );
+restore_error_handler();
+ok( ! $errors, 'a session stored before this change escalates without warnings',
+    implode( ' | ', $errors ) );
 
 // ── summary ──────────────────────────────────────────────────────────────────────
 echo "\n" . str_repeat( '─', 62 ) . "\n";

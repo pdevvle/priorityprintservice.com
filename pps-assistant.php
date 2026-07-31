@@ -44,6 +44,16 @@ function pps_assistant_config() {
         'enabled'       => false,          // ← ships OFF. This is the kill switch.
         'visible_to'    => 'admins',       // 'admins' | 'everyone' — who sees the widget
         'api_key'       => '',
+        // Human availability. Operator-chosen: a manual toggle, no schedule. Accurate when
+        // maintained, and silently wrong when someone forgets to flip it off — so the admin
+        // screen shows how long it has been on.
+        'available_now'   => false,
+        'available_since' => 0,
+        'require_email'   => true,         // gate the chat behind an email address
+        // Stage 2 — live handoff into Missive. Blank until the custom channel exists.
+        'missive_channel_id'     => '',
+        'missive_token'          => '',
+        'missive_webhook_secret' => '',
         'model'         => 'claude-opus-5',
         'effort'        => 'medium',       // low | medium | high | xhigh | max
         'max_tokens'    => 4096,           // thinking is ON by default on Opus 5 — leave headroom
@@ -65,6 +75,23 @@ function pps_assistant_config() {
 function pps_assistant_enabled() {
     $cfg = pps_assistant_config();
     return ! empty( $cfg['enabled'] ) && ! empty( $cfg['api_key'] );
+}
+
+/**
+ * Is a human available to take a live handoff right now?
+ *
+ * Manual toggle only, by operator choice — no schedule, no presence detection. The
+ * failure mode is a toggle left on overnight, so the admin screen reports how long it
+ * has been on rather than silently trusting it.
+ */
+function pps_assistant_human_available() {
+    $cfg = pps_assistant_config();
+    return ! empty( $cfg['available_now'] );
+}
+
+/** True once a live handoff has happened — Claude must stop answering this session. */
+function pps_assistant_session_is_human( array $session ) {
+    return ( $session['mode'] ?? 'bot' ) === 'human';
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -336,7 +363,11 @@ function pps_assistant_tools() {
         'escalate_to_human' => array(
             'description'  => 'Hand off to a team member. Call this for reprints, refunds, '
                 . 'cancellations, damage, color matching, custom quotes, anything involving money, '
-                . 'and anything you are unsure about. Reaching for this is always acceptable.',
+                . 'and anything you are unsure about — and call it once you have gone two or three '
+                . 'exchanges without making progress, rather than continuing to guess. Reaching '
+                . 'for this is always acceptable. The result tells you whether a colleague is '
+                . 'available right now or whether the customer should expect an email; say '
+                . 'whichever the result indicates, and nothing more definite than that.',
             'input_schema' => array(
                 'type'       => 'object',
                 'properties' => array(
@@ -347,16 +378,24 @@ function pps_assistant_tools() {
                 'required'   => array( 'reason', 'summary' ),
             ),
             'handler' => function ( $input, &$session ) {
-                $to = get_option( 'pps_question_recipient', get_option( 'admin_email' ) );
+                $available = pps_assistant_human_available();
+
+                $to      = get_option( 'pps_question_recipient', get_option( 'admin_email' ) );
+                $subject = ( $available ? 'PPS Assistant — LIVE handoff: ' : 'PPS Assistant — escalation: ' )
+                         . wp_trim_words( (string) $input['reason'], 8 );
                 $body = sprintf(
-                    "Assistant escalation\n\nReason: %s\n\nSummary: %s\n\nContact: %s\nVerified order: %s\n\n--- transcript ---\n%s",
+                    "Assistant escalation\n\nHuman was: %s\nReason: %s\n\nSummary: %s\n\n"
+                        . "Email: %s\nPhone: %s\nVerified order: %s\n\n--- transcript ---\n%s",
+                    $available ? 'AVAILABLE (customer told someone is picking this up now)'
+                               : 'unavailable (customer told we will follow up by email)',
                     $input['reason'],
                     $input['summary'],
-                    $input['contact'] ?? '(not given)',
-                    $session['verified_order'] ?? '(none)',
+                    ( $session['email'] ?? '' ) ?: ( $input['contact'] ?? '(not given)' ),
+                    ( $session['phone'] ?? '' ) ?: '(not given)',
+                    ( $session['verified_order'] ?? '' ) ?: '(none)',
                     pps_assistant_transcript( $session )
                 );
-                wp_mail( $to, 'PPS Assistant — escalation', $body );
+                wp_mail( $to, $subject, $body );
 
                 // Also drop a note on the order so it's visible in wp-admin.
                 if ( ! empty( $session['verified_order'] ) ) {
@@ -364,8 +403,71 @@ function pps_assistant_tools() {
                     if ( $order ) $order->add_order_note( 'Assistant escalation: ' . $input['reason'] );
                 }
 
-                $session['escalated'] = true;
-                return 'ESCALATED: tell the customer a team member will follow up, and stop.';
+                $session['escalated']         = true;
+                $session['escalation_reason'] = (string) $input['reason'];
+
+                if ( $available ) {
+                    // Stage 2 flips $session['mode'] to 'human' here, once the Missive custom
+                    // channel exists and an agent's reply can reach the widget.
+                    return 'HUMAN_AVAILABLE: a team member is picking this up now. Tell the '
+                         . 'customer someone is looking at it and will reply shortly. Stop '
+                         . 'troubleshooting — do not keep offering suggestions.';
+                }
+
+                return 'NO_HUMAN_AVAILABLE: nobody is at the desk right now. Tell the customer '
+                     . 'their details have been submitted and the team will follow up by email. '
+                     . 'Then offer a text message or a phone call as an alternative if they would '
+                     . 'rather, and call record_contact if they give you a number. Do not promise '
+                     . 'a specific response time.';
+            },
+        ),
+
+        'record_contact' => array(
+            'description'  => 'Attach a phone number to an escalation the customer has already '
+                . 'been told about, so the team can text or call instead of emailing. Call this '
+                . 'as soon as the customer gives you a number after an escalation. Do not ask '
+                . 'for a number before escalating.',
+            'input_schema' => array(
+                'type'       => 'object',
+                'properties' => array(
+                    'phone'      => array( 'type' => 'string', 'description' => 'Phone number as the customer gave it' ),
+                    'preference' => array(
+                        'type'        => 'string',
+                        'enum'        => array( 'text', 'call', 'either' ),
+                        'description' => 'How they would prefer to be reached',
+                    ),
+                ),
+                'required'   => array( 'phone' ),
+            ),
+            'handler' => function ( $input, &$session ) {
+                // Keep only digits and the usual separators — this is going into an email a
+                // human reads, not a dialer, so light-touch is right.
+                $phone = trim( preg_replace( '/[^0-9+()\-.\s ext]/i', '', (string) $input['phone'] ) );
+                if ( strlen( preg_replace( '/\D/', '', $phone ) ) < 7 ) {
+                    return 'INVALID: that does not look like a phone number. Ask them to repeat it, once.';
+                }
+
+                $session['phone']      = $phone;
+                $session['phone_pref'] = (string) ( $input['preference'] ?? 'either' );
+
+                $to = get_option( 'pps_question_recipient', get_option( 'admin_email' ) );
+                wp_mail(
+                    $to,
+                    'PPS Assistant — phone number added',
+                    sprintf(
+                        "The customer added a phone number to an earlier escalation.\n\n"
+                            . "Phone: %s\nPrefers: %s\nEmail: %s\nReason for escalation: %s\n\n"
+                            . "--- transcript ---\n%s",
+                        $phone,
+                        $session['phone_pref'],
+                        ( $session['email'] ?? '' ) ?: '(not given)',
+                        $session['escalation_reason'] ?? '(none recorded)',
+                        pps_assistant_transcript( $session )
+                    )
+                );
+
+                return 'RECORDED: confirm you have their number and that the team can reach them '
+                     . 'that way. Do not promise when.';
             },
         ),
     );
@@ -548,7 +650,17 @@ function pps_assistant_session_key( $sid ) {
 function pps_assistant_session_get( $sid ) {
     $s = get_transient( pps_assistant_session_key( $sid ) );
     if ( ! is_array( $s ) ) {
-        $s = array( 'messages' => array(), 'turns' => 0, 'verified_order' => 0, 'verified_email' => '' );
+        $s = array(
+            'messages'       => array(),
+            'turns'          => 0,
+            'verified_order' => 0,   // set only by verify_customer — NOT by the email gate
+            'verified_email' => '',
+            'email'          => '',  // self-reported at the gate; proves nothing
+            'phone'          => '',
+            'phone_pref'     => '',
+            'mode'           => 'bot',
+            'escalated'      => false,
+        );
     }
     return $s;
 }
@@ -605,6 +717,7 @@ add_action( 'rest_api_init', function () {
             'message' => array( 'required' => true, 'type' => 'string' ),
             'session' => array( 'required' => true, 'type' => 'string' ),
             'nonce'   => array( 'required' => true, 'type' => 'string' ),
+            'email'   => array( 'required' => false, 'type' => 'string' ),
         ),
         'callback'            => 'pps_assistant_handle_chat',
     ) );
@@ -643,6 +756,17 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
     $session = pps_assistant_session_get( $sid );
 
     $cfg = pps_assistant_config();
+
+    // Email gate. Captured once at the start so every conversation has a reply-to address —
+    // that is what makes the no-human-available path work. It is SELF-REPORTED and proves
+    // nothing: verify_customer still gates all order data.
+    $claimed = sanitize_email( (string) ( $request['email'] ?? '' ) );
+    if ( $claimed && empty( $session['email'] ) ) {
+        $session['email'] = $claimed;
+    }
+    if ( ! empty( $cfg['require_email'] ) && empty( $session['email'] ) ) {
+        return rest_ensure_response( array( 'reply' => '', 'need_email' => true ) );
+    }
     if ( (int) $session['turns'] >= (int) $cfg['max_turns'] ) {
         return rest_ensure_response( array(
             'reply' => "We've covered a lot here — let me get a team member to pick this up. "
@@ -722,7 +846,12 @@ add_action( 'wp_footer', function () {
         '<div id="pps-asst-panel" hidden>' +
           '<header><span>Priority Print Service</span><button id="pps-asst-close" aria-label="Close">&times;</button></header>' +
           '<div id="pps-asst-log" role="log" aria-live="polite"></div>' +
-          '<form id="pps-asst-form">' +
+          '<form id="pps-asst-gate">' +
+            '<label for="pps-asst-email">Your email, so we can follow up if we miss you</label>' +
+            '<input id="pps-asst-email" type="email" required autocomplete="email" placeholder="you@company.com">' +
+            '<button type="submit">Start chat</button>' +
+          '</form>' +
+          '<form id="pps-asst-form" hidden>' +
             '<input id="pps-asst-input" autocomplete="off" placeholder="Ask about an order, file setup, or a product…">' +
             '<button type="submit">Send</button>' +
           '</form>' +
@@ -740,11 +869,30 @@ add_action( 'wp_footer', function () {
         return el;
       }
 
-      document.getElementById('pps-asst-launch').onclick = function () {
-        var p = document.getElementById('pps-asst-panel');
-        p.hidden = false;
+      // Email gate. Held in sessionStorage so a page navigation doesn't re-ask; the server
+      // is the real gate, this is only UI state.
+      var email = sessionStorage.getItem('ppsAsstEmail') || '';
+
+      function showChat() {
+        document.getElementById('pps-asst-gate').hidden = true;
+        document.getElementById('pps-asst-form').hidden = false;
         if (!log.childElementCount) add('bot', CFG.greeting);
         document.getElementById('pps-asst-input').focus();
+      }
+
+      document.getElementById('pps-asst-launch').onclick = function () {
+        document.getElementById('pps-asst-panel').hidden = false;
+        if (email) showChat();
+        else document.getElementById('pps-asst-email').focus();
+      };
+
+      document.getElementById('pps-asst-gate').onsubmit = function (e) {
+        e.preventDefault();
+        var v = document.getElementById('pps-asst-email').value.trim();
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return;
+        email = v;
+        sessionStorage.setItem('ppsAsstEmail', email);
+        showChat();
       };
       document.getElementById('pps-asst-close').onclick = function () {
         document.getElementById('pps-asst-panel').hidden = true;
@@ -772,7 +920,7 @@ add_action( 'wp_footer', function () {
           // is itself evaluated against whatever user WordPress resolved.
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': CFG.nonce },
-          body: JSON.stringify({ message: text, session: sid, nonce: CFG.nonce })
+          body: JSON.stringify({ message: text, session: sid, nonce: CFG.nonce, email: email })
         })
         .then(function (r) {
           return r.text().then(function (body) {
@@ -811,6 +959,14 @@ add_action( 'wp_footer', function () {
       .pps-asst-bot{background:#fff;border:1px solid #e3e8ef;color:#0f172a;align-self:flex-start}
       .pps-asst-user{background:#007eff;color:#fff;align-self:flex-end}
       .pps-asst-pending{opacity:.55}
+      #pps-asst-gate{display:flex;flex-direction:column;gap:8px;padding:14px;border-top:1px solid #e3e8ef;background:#fff}
+      #pps-asst-gate[hidden]{display:none}
+      #pps-asst-gate label{font-size:12.5px;color:#475569;line-height:1.4}
+      #pps-asst-gate input{border:1px solid #e3e8ef;border-radius:9px;padding:10px 12px;font:inherit;font-size:14px}
+      #pps-asst-gate input:focus{outline:0;border-color:#007eff;box-shadow:0 0 0 3px rgba(0,126,255,.12)}
+      #pps-asst-gate button{background:#007eff;color:#fff;border:0;border-radius:9px;padding:10px 16px;
+        font:600 14px/1 system-ui,sans-serif;cursor:pointer}
+      #pps-asst-form[hidden]{display:none}
       #pps-asst-form{display:flex;gap:8px;padding:10px;border-top:1px solid #e3e8ef;background:#fff}
       #pps-asst-input{flex:1;border:1px solid #e3e8ef;border-radius:9px;padding:9px 11px;font:inherit;background:#fff}
       #pps-asst-input:focus{outline:0;border-color:#007eff;box-shadow:0 0 0 3px rgba(0,126,255,.12)}
@@ -844,6 +1000,14 @@ function pps_assistant_render_admin() {
         $cfg = pps_assistant_config();
         $cfg['enabled']    = ! empty( $_POST['enabled'] );
         $cfg['visible_to'] = ( ( $_POST['visible_to'] ?? '' ) === 'everyone' ) ? 'everyone' : 'admins';
+
+        // Stamp when availability was switched on, so the settings screen can show how long
+        // it has been on. A toggle left on overnight is the main failure mode of this design.
+        $was_available = ! empty( $cfg['available_now'] );
+        $now_available = ! empty( $_POST['available_now'] );
+        $cfg['available_now']   = $now_available;
+        $cfg['available_since'] = $now_available ? ( $was_available ? (int) $cfg['available_since'] : time() ) : 0;
+        $cfg['require_email']   = ! empty( $_POST['require_email'] );
         $cfg['api_key']   = sanitize_text_field( wp_unslash( $_POST['api_key'] ?? '' ) );
         $cfg['model']     = sanitize_text_field( wp_unslash( $_POST['model'] ?? 'claude-opus-5' ) );
         $cfg['effort']    = sanitize_key( wp_unslash( $_POST['effort'] ?? 'medium' ) );
@@ -871,6 +1035,27 @@ function pps_assistant_render_admin() {
                 <tr><th>Enabled</th><td>
                     <label><input type="checkbox" name="enabled" <?php checked( $cfg['enabled'] ); ?>> Serve the widget</label>
                     <p class="description">Unchecking this is the kill switch — no API calls are made.</p>
+                </td></tr>
+                <tr><th>Someone is available</th><td>
+                    <label><input type="checkbox" name="available_now" <?php checked( $cfg['available_now'] ); ?>>
+                        A human can take a live handoff right now</label>
+                    <?php if ( ! empty( $cfg['available_now'] ) && ! empty( $cfg['available_since'] ) ) :
+                        $mins = max( 0, (int) floor( ( time() - (int) $cfg['available_since'] ) / 60 ) );
+                        $warn = $mins > 600; // ~10h — almost certainly left on overnight ?>
+                        <p class="description" <?php echo $warn ? 'style="color:#dc2626;font-weight:600"' : ''; ?>>
+                            On for <?php echo esc_html( $mins < 60 ? $mins . ' min' : floor( $mins / 60 ) . 'h ' . ( $mins % 60 ) . 'm' ); ?>.
+                            <?php echo $warn ? 'That looks like it was left on — customers are being told a human is here.' : ''; ?>
+                        </p>
+                    <?php endif; ?>
+                    <p class="description">Off: escalations tell the customer the team will follow up by
+                    email, and the bot offers a text or call. On: the customer is told someone is picking
+                    it up now — so only leave it on when that is true.</p>
+                </td></tr>
+                <tr><th>Require email</th><td>
+                    <label><input type="checkbox" name="require_email" <?php checked( $cfg['require_email'] ); ?>>
+                        Ask for an email address before the chat starts</label>
+                    <p class="description">Self-reported, so it never unlocks order data — it exists so
+                    there is always somewhere to follow up.</p>
                 </td></tr>
                 <tr><th>Visible to</th><td>
                     <label><input type="radio" name="visible_to" value="admins" <?php checked( $cfg['visible_to'], 'admins' ); ?>>
