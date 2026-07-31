@@ -238,7 +238,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-31 · APPROVE-CTA</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-31 · PROOF-COPY</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -4144,9 +4144,22 @@ update();
                   </div>
                 <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid var(--bp-line)", color:"var(--bp-dim)", width:32, height:32, borderRadius:10, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
               </div>
-              {/* Proof approval + fit controls row */}
+              {/* What to do, then what it costs you if you don't — both above the art
+                  controls, so the instruction is read before the tools rather than
+                  discovered underneath them. */}
               <div style={{ width:"100%", borderTop:"1px solid var(--bp-line)", paddingTop:10 }}>
-                <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", justifyContent:"space-between" }}>
+                <div style={{ fontSize:10.5, color:"var(--bp-faint)", lineHeight:1.45 }}>
+                  {proof === 0 && !artApproved && "Review each page, then press Approve artwork to confirm it is print-ready. Your approval means we print exactly what you see."}
+                  {proof === 0 && artApproved && "\u2713 Artwork approved \u2014 we'll print exactly what you see. You can change your proof option or close this modal."}
+                  {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
+                  {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
+                </div>
+                {!artApproved && proof === 0 && (
+                  <div style={{ fontSize:10.5, color:"#dc2626", marginTop:4, fontWeight:600 }}>
+                    * Proof approval is required before your order can be placed.
+                  </div>
+                )}
+                <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", justifyContent:"space-between", marginTop:10 }}>
                   <FitToggle dark />
                 </div>
                 {/* The "Activate Reader's Spread Formatting" checkbox was removed from the
@@ -4154,12 +4167,6 @@ update();
                     machinery behind it is intentionally left intact: splitReaderSpreads(),
                     the readerSpreads state and processFiles' splitSpreads option all still
                     work, so restoring the control is a one-element change. */}
-                <div style={{ fontSize:10, color:"var(--bp-faint)", marginTop:6, lineHeight:1.4 }}>
-                  {proof === 0 && !artApproved && "Review each page, then press Approve artwork to confirm it is print-ready. Your approval means we print exactly what you see."}
-                  {proof === 0 && artApproved && "✓ Artwork approved — we'll print exactly what you see. You can change your proof option or close this modal."}
-                  {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
-                  {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
-                </div>
                 {approvalPkg && (artApproved || debug) && (() => {
                   const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                   const dlFile = (blob, name) => {
@@ -4242,11 +4249,6 @@ update();
                 })()}
               </div>
             </div>
-            {!artApproved && proof === 0 && (
-              <div style={{ padding:"4px 20px", borderBottom:"1px solid var(--bp-line)", fontSize:10, color:"#f87171" }}>
-                * Proof approval is required before your order can be placed.
-              </div>
-            )}
             {/* Preflight bar — warnings only */}
             {preflight && preflight.some(c => c.level !== "pass") && (
               <div style={{ padding:"8px 20px", borderBottom:"1px solid var(--bp-line)", display:"flex", gap:16, flexWrap:"wrap" }}>
@@ -4299,12 +4301,12 @@ update();
                         border:"1px solid var(--bp-line)", background:"var(--bp-btn)", color:"var(--bp-dim)",
                         opacity: proofIdx>=displayPages.length-1 ? 0.2 : 1,
                       }}>Next ›</button>
-                      {/* Guides, zoom and the loupe live behind this gear. They were six
+                      {/* Guides, zoom and the magnifying glass live behind this gear. They were six
                           controls competing with Prev/Next for the same row, which is what
                           pushed the row past the modal edge on a phone. */}
                       <div data-bp-viewmenu style={{ position:"relative" }}>
                         <button type="button" onClick={() => setViewMenuOpen(o => !o)}
-                          aria-haspopup="true" aria-expanded={viewMenuOpen} aria-label="View settings" title="View settings — guides, zoom, loupe"
+                          aria-haspopup="true" aria-expanded={viewMenuOpen} aria-label="View settings" title="View settings — guides, zoom, magnifying glass"
                           style={{
                             display:"flex", alignItems:"center", gap:5, padding:"6px 10px", fontSize:11, fontWeight:600,
                             border:`1px solid ${viewMenuOpen ? CK.cyan : "var(--bp-line)"}`, borderRadius:10, cursor:"pointer", fontFamily:"inherit",
@@ -4340,7 +4342,7 @@ update();
                               </div>
                             </div>
                             <div className="bp-viewmenu-row">
-                              <span className="bp-viewmenu-label">Loupe</span>
+                              <span className="bp-viewmenu-label">Magnifying glass</span>
                               <button type="button" role="menuitemcheckbox" aria-checked={showMagnifier}
                                 onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
                                 padding:"5px 12px", fontSize:11, fontWeight:700, borderRadius:10, cursor:"pointer", fontFamily:"inherit",
@@ -4387,12 +4389,14 @@ update();
                       onMouseLeave={vpOnMouseUp}
                     >
                     <div style={{ transform:`translate(${vpX}px, ${vpY}px) scale(${vpScale})`, transformOrigin:"center center", transition: vpDragging ? "none" : "transform .12s", willChange:"transform" }}>
-                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:10, overflow:"hidden", cursor: showMagnifier ? "none" : "inherit" }}
+                      <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${bleedW}/${bleedH}`, borderRadius:10, overflow:"hidden", cursor: (showMagnifier && magPos) ? "none" : "inherit" }}
                         onMouseMove={showMagnifier ? (e) => {
                           const r = e.currentTarget.getBoundingClientRect();
                           setMagPos({ x: e.clientX - r.left, y: e.clientY - r.top, pctX: (e.clientX - r.left) / r.width * 100, pctY: (e.clientY - r.top) / r.height * 100, cw: r.width, ch: r.height });
                         } : undefined}
                         onMouseLeave={showMagnifier ? () => setMagPos(null) : undefined}
+                        onPointerLeave={showMagnifier ? () => setMagPos(null) : undefined}
+                        onPointerCancel={showMagnifier ? () => setMagPos(null) : undefined}
                         onTouchMove={showMagnifier ? (e) => {
                           const t = e.touches[0]; const r = e.currentTarget.getBoundingClientRect();
                           setMagPos({ x: t.clientX - r.left, y: t.clientY - r.top, pctX: (t.clientX - r.left) / r.width * 100, pctY: (t.clientY - r.top) / r.height * 100, cw: r.width, ch: r.height });
