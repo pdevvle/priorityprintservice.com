@@ -2408,6 +2408,10 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [proofView, setProofView] = useState("single"); // "single" | "grid" within proof modal
   const [showMagnifier, setShowMagnifier] = useState(false); // magnifier loupe active
   const [viewMenuOpen, setViewMenuOpen] = useState(false); // gear popover: guides / zoom / loupe
+  // Where blanks go when the file is short of the ordered page count.
+  // null = the customer has not chosen yet (we still lay them out the historical way,
+  // at the end, so nothing changes underneath them until they decide).
+  const [blankPlacement, setBlankPlacement] = useState(null); // null | "covers" | "end"
   // Dismiss the view-settings popover on an outside click or Escape, the same way the
   // form's settings gear does. This MUST sit below the useState above: Babel compiles
   // the const to a hoisted var, so declaring the effect first does not throw — the deps
@@ -3298,8 +3302,27 @@ update();
       interior = rawInterior;
     } else if (rawInterior.length < neededInterior) {
       const n = neededInterior - rawInterior.length;
-      interior = [...rawInterior, ...Array.from({ length: n }, (_, i) => ({ dataUrl: blankPage, label: `Blank ${i + 1}`, isBlank: true }))];
-      info = { type: "padded", count: n, raw, target };
+      const mkBlank = (i) => ({ dataUrl: blankPage, label: `Blank ${i + 1}`, isBlank: true });
+      if (blankPlacement === "covers") {
+        // Inside front cover first, then inside back cover, then work backwards from the
+        // end of the interior. Printers reach for the inside covers first because a blank
+        // there reads as intentional; a blank in the middle of a signature reads as a
+        // mistake. Anything left over still lands at the end.
+        const slots = new Array(neededInterior).fill(null);
+        let left = n, made = 0;
+        for (const idx of [0, neededInterior - 1]) {
+          if (left > 0 && idx >= 0 && !slots[idx]) { slots[idx] = mkBlank(made++); left--; }
+        }
+        for (let i = neededInterior - 1; i >= 0 && left > 0; i--) {
+          if (!slots[i]) { slots[i] = mkBlank(made++); left--; }
+        }
+        let k = 0;
+        for (let i = 0; i < neededInterior; i++) if (!slots[i]) slots[i] = rawInterior[k++];
+        interior = slots;
+      } else {
+        interior = [...rawInterior, ...Array.from({ length: n }, (_, i) => mkBlank(i))];
+      }
+      info = { type: "padded", count: n, raw, target, placement: blankPlacement || "end" };
     } else {
       const n = rawInterior.length - neededInterior;
       interior = rawInterior.slice(0, neededInterior);
@@ -3312,7 +3335,7 @@ update();
       { ...backCover, label: pageLabel(target - 1, target) },
     ];
     return { displayPages: result, reconcileInfo: info };
-  }, [effectivePages, pageCount, blankPage]);
+  }, [effectivePages, pageCount, blankPage, blankPlacement]);
 
   // Trimmed pages for 3D book preview — each page rendered with its transforms applied,
   // then cropped to strip the 0.125" bleed off every edge. 3D preview shows finished
@@ -3940,25 +3963,91 @@ update();
             </div>
           </div>
 
-          {/* Inline preflight */}
-          {preflight && preflight.length > 0 && (
-            <div style={{ marginBottom: 6, padding: "8px 10px", borderRadius: 10, background: "#fafafa", border: `1px solid ${CC.border}` }}>
-              {preflight.map((c, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 7, padding: "2px 0", flexWrap:"wrap" }}>
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: PF[c.level].dot, flexShrink: 0, marginTop: 2 }} />
-                  <span style={{ fontSize: 10.5, fontWeight: 600, color: PF[c.level].text, minWidth: 72 }}>{c.label}</span>
-                  <span style={{ fontSize: 10, color: CC.mid, flex:1 }}>{c.detail}</span>
+          {/* ── Preflight: one box, warnings first ─────────────────────────────
+              Everything that needs a decision or a second look now lands in a single
+              tinted box instead of being spread between a grey list here and a bar in
+              the proof modal. A short file is the loudest case: it does not just warn,
+              it asks where the blanks should go, because "we added 7 blanks somewhere"
+              is not something a customer should have to discover in the thumbnails.
+              (Dragging pages / inserting blanks directly in the thumbnail strip is a
+              later piece of work — this is the decision, not the editor.) */}
+          {preflight && preflight.length > 0 && (() => {
+            const needsBlanks = reconcileInfo && reconcileInfo.type === "padded";
+            const issues = preflight.filter(c => c.level === "warn" || c.level === "fail");
+            const notes  = preflight.filter(c => c.level === "info");
+            const passes = preflight.filter(c => c.level === "pass");
+            const alert  = needsBlanks || issues.length > 0;
+            const pageChk = preflight.find(c => c.id === "pages");
+            const n = needsBlanks ? reconcileInfo.count : 0;
+            const chosen = blankPlacement;
+            // With fewer than three pages there is no interior to arrange — every slot
+            // between the covers is blank whichever option you pick — so offering the
+            // choice would be offering nothing. Say what will happen instead.
+            const canPlace = needsBlanks && reconcileInfo.raw >= 3;
+            const CHOICES = [
+              { v:"covers", t:`Make inside cover${n>1?"s":""} blank`, hint:"Blank the inside front cover first, then the inside back" },
+              { v:"end",    t:`Add blank page${n>1?"s":""} to the end of book`, hint:"Blanks follow your last page, before the back cover" },
+            ];
+            return (
+              <div style={{ marginBottom: 8, borderRadius: 10, overflow:"hidden",
+                background: alert ? "#fffbeb" : "#fafafa",
+                border: `1px solid ${alert ? "#fcd34d" : CC.border}` }}>
+                {alert && (
+                  <div style={{ padding:"7px 12px", borderBottom:`1px solid ${alert?"#fde68a":CC.border}`,
+                    fontSize:11.5, fontWeight:700, color:"#92400e", letterSpacing:".01em" }}>
+                    Needs your attention
+                  </div>
+                )}
+                <div style={{ padding:"8px 12px" }}>
+                  {needsBlanks && (
+                    <div style={{ marginBottom: issues.length||notes.length||passes.length ? 10 : 0,
+                      padding:"9px 11px", borderRadius:9, background:CC.white, border:`1px solid #fcd34d` }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:CC.dark, marginBottom:3 }}>
+                        <RichTip tipKey="page_count">Your file is {n} page{n>1?"s":""} short</RichTip>
+                      </div>
+                      <div style={{ fontSize:11, color:CC.mid, lineHeight:1.45, marginBottom:8 }}>
+                        {(pageChk ? pageChk.detail : `${reconcileInfo.raw} pages in file — ${n} blank${n>1?"s":""} will be added`).replace(/\.?$/, ".")}
+                        {canPlace
+                          ? ` Where should ${n>1?"they":"it"} go?`
+                          : ` Every page between the covers will be blank — upload the full booklet to change that.`}
+                      </div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                        {canPlace && CHOICES.map(o => (
+                          <button type="button" key={o.v} onClick={() => setBlankPlacement(o.v)} title={o.hint}
+                            style={{ padding:"7px 11px", fontSize:11.5, fontWeight:600, borderRadius:8, cursor:"pointer",
+                              fontFamily:"inherit", transition:"all .15s ease",
+                              border:`1px solid ${chosen===o.v ? CK.cyan : CC.border}`,
+                              background: chosen===o.v ? CC.tint : CC.white,
+                              color: chosen===o.v ? CK.cyan : CC.mid }}>
+                            {chosen===o.v ? "✓ " : ""}{o.t}
+                          </button>
+                        ))}
+                        <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                          title="Upload a corrected file with the full page count"
+                          style={{ padding:"7px 11px", fontSize:11.5, fontWeight:600, borderRadius:8, cursor:"pointer",
+                            fontFamily:"inherit", border:`1px solid ${CC.border}`, background:CC.white, color:CC.mid,
+                            transition:"all .15s ease" }}>
+                          Reupload revised file
+                        </button>
+                      </div>
+                      {canPlace && !chosen && (
+                        <div style={{ fontSize:10.5, color:"#b45309", marginTop:7 }}>
+                          Until you choose, blanks are placed at the end of the book.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {[...issues, ...notes, ...passes].filter(c => !(needsBlanks && c.id === "pages")).map((c, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 7, padding: "2px 0", flexWrap:"wrap" }}>
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: PF[c.level].dot, flexShrink: 0, marginTop: 2 }} />
+                      <span style={{ fontSize: 10.5, fontWeight: 600, color: PF[c.level].text, minWidth: 72 }}>{c.label}</span>
+                      <span style={{ fontSize: 10, color: CC.mid, flex:1 }}>{c.detail}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-              {reconcileInfo && reconcileInfo.type === "padded" && (
-                <div style={{ display:"flex", alignItems:"baseline", gap:7, padding:"2px 0" }}>
-                  <span style={{ width:7, height:7, borderRadius:"50%", background:"#b8860b", flexShrink:0, marginTop:2 }}/>
-                  <span style={{ fontSize:10.5, fontWeight:600, color:"#b8860b", minWidth:72 }}>Pages</span>
-                  <span style={{ fontSize:10, color:CC.mid }}>{reconcileInfo.count} blank{reconcileInfo.count>1?"s":""} added ({reconcileInfo.raw}→{reconcileInfo.target})</span>
-                </div>
-              )}
-            </div>
-          )}
+              </div>
+            );
+          })()}
 
           {/* ── Pill Selector: Proof | Preview ── (wrapped brochure-style) */}
           {(() => {
