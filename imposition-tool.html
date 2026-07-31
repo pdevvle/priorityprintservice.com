@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · IMPOSE-V1.4</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · IMPOSE-V1.5</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -474,6 +474,108 @@ function displayRect(rect, rot, W, H) {
   const map = ([u, v]) => rot === 90 ? [v, W - u] : rot === 180 ? [W - u, H - v] : rot === 270 ? [H - v, u] : [u, v];
   const [p1, p2] = pts.map(map);
   return { x: Math.min(p1[0], p2[0]), y: Math.min(p1[1], p2[1]), w: Math.abs(p2[0] - p1[0]), h: Math.abs(p2[1] - p1[1]) };
+}
+
+// ── PDF threat inspection & sanitization ────────────────────────
+// Malicious-PDF payloads live in the document catalog and annotations
+// (JavaScript, auto-run actions, launch actions, embedded files, forms) —
+// none of which survive the vector re-embed. inspectPdfThreats reports what
+// a source file carries; sanitizePdf produces a 1:1 CLEAN copy (same pages,
+// same size, content only) for files the shop must open even when
+// imposition isn't possible. NOTE: annotations/form fields (including their
+// visible appearance) do not carry into a sanitized copy.
+function inspectPdfThreats(doc) {
+  const flags = new Set();
+  const ctx = doc.context;
+  const look = (dict, name) => {
+    try { const v = dict && dict.get(PL.PDFName.of(name)); return v ? ctx.lookup(v) : null; }
+    catch (e) { return null; }
+  };
+  const cat = doc.catalog;
+  const oa = look(cat, "OpenAction");
+  if (oa && !(oa instanceof PL.PDFArray)) { // a plain array is a benign GoTo destination
+    const s = oa instanceof PL.PDFDict ? oa.get(PL.PDFName.of("S")) : null;
+    const sv = s ? s.toString().replace("/", "") : "unknown";
+    flags.add(/JavaScript|Launch|SubmitForm|ImportData/i.test(sv) ? `auto-run ${sv} on open` : "auto-run action on open");
+  }
+  if (look(cat, "AA")) flags.add("document auto-actions");
+  const names = look(cat, "Names");
+  if (names) {
+    if (look(names, "JavaScript")) flags.add("document JavaScript");
+    if (look(names, "EmbeddedFiles")) flags.add("embedded file attachment(s)");
+  }
+  const af = look(cat, "AcroForm");
+  if (af) flags.add(look(af, "XFA") ? "XFA form (scripted)" : "form fields");
+  for (let i = 0; i < doc.getPageCount(); i++) {
+    const node = doc.getPage(i).node;
+    if (look(node, "AA")) flags.add(`page ${i + 1}: auto-actions`);
+    const annots = look(node, "Annots");
+    if (annots instanceof PL.PDFArray) {
+      for (let j = 0; j < annots.size(); j++) {
+        const an = ctx.lookup(annots.get(j));
+        if (!(an instanceof PL.PDFDict)) continue;
+        const st = an.get(PL.PDFName.of("Subtype"));
+        if (st && /FileAttachment|RichMedia|Screen|Movie|Sound|3D/.test(st.toString())) flags.add(`page ${i + 1}: ${st.toString().slice(1)} annotation`);
+        const a = look(an, "A");
+        if (a instanceof PL.PDFDict) {
+          const s = a.get(PL.PDFName.of("S"));
+          if (s && /JavaScript|Launch|SubmitForm|ImportData/.test(s.toString())) flags.add(`page ${i + 1}: ${s.toString().replace("/", "")} link action`);
+        }
+        if (look(an, "AA")) flags.add(`page ${i + 1}: annotation auto-actions`);
+      }
+    }
+  }
+  return [...flags];
+}
+
+// Delete active-content keys from a loaded document IN PLACE. Done before any
+// embedPdf so pdf-lib's object copier never even pulls the payload objects in
+// (otherwise they linger as unreachable — inert, but visible to byte
+// scanners). Page content streams + resources are untouched → vectors intact.
+function stripActiveContent(doc) {
+  const del = (dict, name) => { try { dict && dict.delete(PL.PDFName.of(name)); } catch (e) {} };
+  const cat = doc.catalog;
+  ["OpenAction", "AA", "AcroForm"].forEach(k => del(cat, k));
+  try {
+    const names = cat.get(PL.PDFName.of("Names"));
+    const nd = names && doc.context.lookup(names);
+    if (nd) { ["JavaScript", "EmbeddedFiles"].forEach(k => del(nd, k)); }
+  } catch (e) {}
+  for (let i = 0; i < doc.getPageCount(); i++) {
+    const node = doc.getPage(i).node;
+    ["Annots", "AA"].forEach(k => del(node, k));
+  }
+}
+
+// 1:1 safety passthrough: every page re-embedded as a vector XObject into a
+// fresh document — page count, size, display rotation, and Trim/Bleed boxes
+// preserved; catalog/annotation payloads left behind.
+async function sanitizePdf(bytes) {
+  const src = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+  const n = src.getPageCount();
+  if (n < 1) throw new Error("PDF has no pages");
+  const threats = inspectPdfThreats(src);
+  stripActiveContent(src);
+  const out = await PL.PDFDocument.create();
+  const embeds = await out.embedPdf(src, Array.from({ length: n }, (_, i) => i));
+  for (let i = 0; i < n; i++) {
+    const sp = src.getPage(i);
+    const mb = sp.getMediaBox();
+    const rot = ((sp.getRotation().angle % 360) + 360) % 360;
+    const p = out.addPage([mb.width, mb.height]);
+    p.drawPage(embeds[i]);
+    if (rot) p.setRotation(PL.degrees(rot));
+    p.setMediaBox(0, 0, mb.width, mb.height);
+    p.setCropBox(0, 0, mb.width, mb.height);
+    const tb = getPageBox(sp, "TrimBox");
+    if (tb) p.setTrimBox(tb.x - mb.x, tb.y - mb.y, tb.w, tb.h);
+    const bb = getPageBox(sp, "BleedBox");
+    if (bb) p.setBleedBox(bb.x - mb.x, bb.y - mb.y, bb.w, bb.h);
+  }
+  out.setTitle("CLEAN sanitized copy");
+  out.setProducer("PPS Auto-Imposition Tool");
+  out.setCreator("PPS Auto-Imposition Tool");
+  return { bytes: await out.save({ useObjectStreams: false }), pages: n, threats };
 }
 
 const DIM_EPS = 0.02; // inches — dimension match tolerance (~1.4pt)
@@ -922,6 +1024,7 @@ async function imposeSaddle(artBytes, spec, layout) {
   const warnings = [...layout.warnings];
   const bk = layout.booklet;
   const src = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
+  stripActiveContent(src);
   const n = src.getPageCount();
   if (n < 3) throw new Error(`Booklet artwork must be a multi-page PDF in reading order — got ${n} page(s)`);
   const P = Math.ceil(n / 4) * 4;
@@ -1042,6 +1145,7 @@ async function imposeSaddle(artBytes, spec, layout) {
       issues.push(`sheet ${i + 1} MediaBox ${(m.width / PT).toFixed(2)}×${(m.height / PT).toFixed(2)}″ ≠ ${layout.sheet.long}×${layout.sheet.short}″`);
     if (!getPageBox(p, "TrimBox")) issues.push(`sheet ${i + 1} missing TrimBox`);
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
+    if (i === 0) { const th = inspectPdfThreats(check); if (th.length) issues.push(`output carries active content: ${th.join("; ")}`); }
   });
   if (!layout.mismatch && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
     issues.push(`placed ${layout.imp} pages/side ≠ priced ${layout.pricedImp}`);
@@ -1086,11 +1190,13 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   const warnings = [...layout.warnings];
 
   const srcFront = await PL.PDFDocument.load(gang ? gang[0].bytes : artBytes, { ignoreEncryption: true });
+  stripActiveContent(srcFront);
   const nF = srcFront.getPageCount();
   if (nF < 1) throw new Error("Artwork PDF has no pages");
   const sides = spec.sides === 2 ? 2 : 1;
   const mode = gang ? "combo" : ["gang", "stack", "each"].includes(spec.multiMode) ? spec.multiMode : "repeat";
   const backDoc = !gang && backBytes ? await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }) : null;
+  if (backDoc) stripActiveContent(backDoc);
 
   // add-bleed: per-page override map (1-based page keys, main file) falls
   // back to the job-level mode; back-file pages use the job-level mode.
@@ -1117,7 +1223,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   let gangAlloc = null;
   if (mode === "combo") {
     const docs = [srcFront];
-    for (let i = 1; i < gang.length; i++) docs.push(await PL.PDFDocument.load(gang[i].bytes, { ignoreEncryption: true }));
+    for (let i = 1; i < gang.length; i++) { const gd = await PL.PDFDocument.load(gang[i].bytes, { ignoreEncryption: true }); stripActiveContent(gd); docs.push(gd); }
     const total = layout.cells.length;
     const want = gang.map(g => (isFinite(+g.slots) && +g.slots > 0 ? Math.floor(+g.slots) : null));
     const explicit = want.reduce((s, v) => s + (v || 0), 0);
@@ -1302,6 +1408,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       issues.push(`sheet ${i + 1} MediaBox ${(m.width / PT).toFixed(2)}×${(m.height / PT).toFixed(2)}″ ≠ ${layout.sheet.long}×${layout.sheet.short}″`);
     if (!getPageBox(p, "TrimBox")) issues.push(`sheet ${i + 1} missing TrimBox`);
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
+    if (i === 0) { const th = inspectPdfThreats(check); if (th.length) issues.push(`output carries active content: ${th.join("; ")}`); }
   });
   if (!layout.mismatch && !layout.efficient && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
@@ -1366,7 +1473,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim };
+window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -1592,6 +1699,7 @@ function App() {
   const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
   const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
   const [gangFiles, setGangFiles] = useState([]);          // manual gang combo: [{bytes,name,pageCount,slots}]
+  const [cleanBusy, setCleanBusy] = useState(false);       // sanitize-only passthrough in flight
   const [addBleedPages, setAddBleedPages] = useState({});  // per-page mode overrides {1-based page: mode}
   const [multiMode, setMultiMode] = useState("repeat");    // multipage flat files: repeat | gang | stack
   const isSaddle = calc === "saddle";
@@ -1665,6 +1773,42 @@ function App() {
       .finally(() => { if (seq === genSeq.current) setBusy(false); });
   }, [art, backArt, gangFiles, debSpec, layoutInfo.layout ? 1 : 0]);
 
+  const makeCleanCopy = async () => {
+    if (!art) return;
+    setCleanBusy(true); setError("");
+    try {
+      const res = await sanitizePdf(art.bytes);
+      dlBytes(res.bytes, "CLEAN_" + art.name.replace(/\.pdf$/i, "") + ".pdf");
+      setNotice(res.threats.length
+        ? `CLEAN copy downloaded — stripped: ${res.threats.join("; ")}`
+        : "CLEAN copy downloaded — no active content found; sanitized anyway.");
+    } catch (e) { setError("Sanitize failed: " + e.message); }
+    setCleanBusy(false);
+  };
+
+  const sendCleanToDrive = async () => {
+    if (!art || !activeOrder || !CFG) return;
+    setCleanBusy(true); setError("");
+    try {
+      const res = await sanitizePdf(art.bytes);
+      const base = art.name.replace(/\.pdf$/i, "").replace(/[^\w.-]+/g, "_").slice(0, 80);
+      const fname = `CLEAN_Order-${activeOrder.order_id}${activeOrder.item_id ? "-i" + activeOrder.item_id : ""}_${base}.pdf`;
+      const fd = new FormData();
+      fd.append("action", "pps_impose_upload");
+      fd.append("nonce", CFG.nonce);
+      fd.append("order_id", activeOrder.order_id);
+      fd.append("filename", fname);
+      fd.append("file", new Blob([res.bytes], { type: "application/pdf" }), fname);
+      const r = await fetch(CFG.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin" });
+      if (!r.ok) throw await ajaxFail(r, "upload");
+      const j = await r.json();
+      if (!j.success) throw new Error((j.data && j.data.message) || "upload failed");
+      setNotice(`CLEAN copy filed to order #${activeOrder.order_id}'s Drive folder as ${fname}` +
+                (res.threats.length ? ` — stripped: ${res.threats.join("; ")}` : " — no active content found."));
+    } catch (e) { setError("CLEAN upload failed: " + e.message); }
+    setCleanBusy(false);
+  };
+
   const addGangFiles = async files => {
     const added = [];
     for (const f of files) {
@@ -1697,16 +1841,17 @@ function App() {
       }
       if (!/\.pdf$/i.test(f.name)) { setError(`"${f.name}" is not a PDF — the imposition input must be the print-ready or raw PDF.`); continue; }
       const bytes = new Uint8Array(await f.arrayBuffer());
-      let pageCount = 0, det = null;
+      let pageCount = 0, det = null, threats = [];
       try {
         const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
         pageCount = doc.getPageCount();
         try { det = detectTrim(doc, +bleedIn); } catch (e2) { /* detection is best-effort */ }
+        try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
       }
       catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
-      if (slot === "back") setBackArt({ bytes, name: f.name, pageCount });
+      if (slot === "back") setBackArt({ bytes, name: f.name, pageCount, threats });
       else {
-        setArt({ bytes, name: f.name, pageCount });
+        setArt({ bytes, name: f.name, pageCount, threats });
         setAddBleedPages({}); // per-page overrides belong to the previous file
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
         if (det) {
@@ -1748,7 +1893,9 @@ function App() {
       const bytes = new Uint8Array(await r.arrayBuffer());
       const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
       const pageCount = doc.getPageCount();
-      setArt({ bytes, name: row.art_file_name, pageCount });
+      let threats = [];
+      try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
+      setArt({ bytes, name: row.art_file_name, pageCount, threats });
       setAddBleedPages({});
       setBackArt(null);
       let note = `Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
@@ -1875,6 +2022,34 @@ function App() {
               sub={isSaddle ? "multi-page PDF, pages in reading order (cover = page 1) · padded to a multiple of 4 · drop the manifest .txt to autofill"
                             : "print-ready or raw PDF · page 1 = front, page 2 = back · drop the manifest .txt to autofill the spec"}
               accept=".pdf,.txt" onFiles={f => onFiles(f, "front")} fileName={art && `${art.name} (${art.pageCount}p)`} />
+            {art && art.threats && art.threats.length > 0 && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }}>
+                <b style={{ color: "#ff5f7a" }}>⚠ ACTIVE CONTENT in this file:</b> {art.threats.join(" · ")}
+                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+                  The imposed output strips all of it. Avoid opening the original in a PDF viewer — use the CLEAN copy.
+                </div>
+              </div>
+            )}
+            {backArt && backArt.threats && backArt.threats.length > 0 && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#ff5f7a" }}>⚠ Back file active content: {backArt.threats.join(" · ")}</div>
+            )}
+            {art && (
+              <div style={{ marginTop: 8 }}>
+                <button type="button" className="imp-btn sec" disabled={cleanBusy} onClick={makeCleanCopy}>
+                  {cleanBusy ? "Sanitizing…" : "⬇ CLEAN 1:1 copy (sanitized)"}
+                </button>
+                {CFG && activeOrder && (
+                  <button type="button" className="imp-btn sec" style={{ marginLeft: 8 }} disabled={cleanBusy} onClick={sendCleanToDrive}>
+                    🧼 File CLEAN copy to order's Drive folder
+                  </button>
+                )}
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                  Keeps every page's artwork 1:1 (any size, any product — works even when imposition refuses) but strips
+                  scripts, auto-run actions, attachments, and form fields. Note: form fields/annotations lose their visible
+                  appearance too.
+                </div>
+              </div>
+            )}
             {!isSaddle && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
               <div style={{ marginTop: 10 }}>
                 <Field label={`Multi-page file (${art.pageCount} pages)`}>

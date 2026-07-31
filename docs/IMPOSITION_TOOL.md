@@ -222,6 +222,49 @@ download the imposed PDF. Useful for testing and one-off jobs.
   the strip above the block) and omitted with a warning when there's no
   room. Fold guides follow the same rule.
 
+## Security — malicious-PDF defense
+
+Customer-uploaded PDFs are an untrusted input. The tool treats them as such:
+
+- **Threat inspection on load** — every dropped or Drive-pulled PDF is
+  walked for the payload classes that live in the document catalog and
+  annotations: document/annotation JavaScript, `/OpenAction` and `/AA`
+  auto-run actions, `/Launch` actions, `/EmbeddedFiles` attachments,
+  AcroForm/XFA form fields, and RichMedia/Screen/Movie/3D annotations. A
+  red **ACTIVE CONTENT** badge lists exactly what was found and warns the
+  operator not to open the original in a PDF viewer.
+- **Imposition is inherently sanitizing** — source pages are re-embedded as
+  vector XObjects into a brand-new document; the catalog/annotation
+  payloads never carry over. `stripActiveContent()` also deletes those keys
+  from the source *before* embedding, so no orphaned payload objects linger
+  in the output bytes either. The output preflight re-inspects the finished
+  PDF and refuses if any active content somehow survived. (Verified: a
+  fixture carrying JS + OpenAction + AA + Launch + embedded EXE + AcroForm
+  is fully detected, and both the imposed sheet and the CLEAN copy come back
+  with zero threats and zero payload strings in the raw bytes, content
+  pixel-identical.)
+- **CLEAN 1:1 copy** — a button on any loaded PDF produces
+  `CLEAN_<name>.pdf`: the same pages at the same size, vectors intact, with
+  all active content stripped — even for files imposition can't or won't
+  lay out (any product, any size). In wp-admin it can be filed straight to
+  the order's Drive folder (`CLEAN_Order-<id>-i<item>_…`). **Operational
+  rule: staff open the CLEAN copy, not the customer original.** Caveat:
+  annotations/form fields lose their visible appearance in a CLEAN copy
+  (they're part of the stripped layer).
+- **Upload hardening** (`pps-calculators.php`) — the customer artwork
+  endpoint validates magic bytes against the claimed extension (blocks
+  polyglots/renamed executables), drops an `.htaccess` + `index.html` guard
+  in the artwork tree (no execution, no directory listing), and — when
+  `wp_options['pps_vt_api_key']` is set — does a **privacy-safe VirusTotal
+  HASH lookup** (only the SHA-256 is sent, never the file); ≥2 engine
+  detections reject the upload, everything else fails open (second opinion,
+  not primary defense). The imposition upload endpoint accepts only
+  `IMPOSED_*`/`CLEAN_*` `.pdf` names with a `%PDF` magic check.
+
+Not covered: the press RIP rasterizes and never executes PDF actions, so it
+isn't a target here. The larger surface is the WordPress admin itself
+(2FA/login throttling) — out of scope for this tool.
+
 ## Known pricing/production mismatch (custom long-narrow flats)
 
 The calculators' `across` threshold (`r1 < 3 → 2-up`) prices 2-across for
