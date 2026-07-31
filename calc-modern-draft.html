@@ -121,17 +121,32 @@
     background-position:0 0,0 8px,8px -8px,-8px 0;
   }
   /* Approve Now CTA — strong call-to-action when art needs approval */
+  /* Approve artwork — the primary action in the proof modal.
+     It used to be a red five-stop gloss with a hard red pulse, welded to the two
+     proof-type buttons inside a red 2px frame. Three alarm signals stacked on the
+     one control we actually want pressed, and red reads as "something is wrong"
+     rather than "confirm". It is now the same flat brand CTA as Add to Order, with
+     one soft brand ring to keep the nudge, and it turns green once approved. */
   @keyframes bp-approve-pulse{
-    0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55),0 4px 14px rgba(239,68,68,.35)}
-    50%{box-shadow:0 0 0 6px rgba(239,68,68,0),0 4px 14px rgba(239,68,68,.35)}
+    0%,100%{box-shadow:0 0 0 0 rgba(0,126,255,.42),0 2px 10px rgba(0,126,255,.32)}
+    50%{box-shadow:0 0 0 7px rgba(0,126,255,0),0 2px 10px rgba(0,126,255,.32)}
   }
-  .bp-approve-cta{
-    background:linear-gradient(135deg,#ef4444 0%,#dc2626 40%,#f87171 50%,#dc2626 60%,#b91c1c 100%) !important;
-    color:#fff !important;
-    text-shadow:0 1px 2px rgba(0,0,0,.25);
-    animation:bp-approve-pulse 2s ease-in-out infinite;
-  }
-  .bp-approve-cta:hover{filter:brightness(1.08)}
+  .bp-approve{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    padding:9px 18px;border:none;border-radius:9px;cursor:pointer;font-family:inherit;
+    font-size:13px;font-weight:700;letter-spacing:.01em;color:#fff;background:#007eff;white-space:nowrap;
+    box-shadow:0 2px 10px rgba(0,126,255,.32);
+    transition:transform .15s ease,box-shadow .15s ease,filter .15s ease}
+  .bp-approve.nudge{animation:bp-approve-pulse 2.4s ease-in-out infinite}
+  .bp-approve:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.05);
+    box-shadow:0 6px 18px rgba(0,126,255,.45);animation:none}
+  .bp-approve:active:not(:disabled){transform:translateY(0);box-shadow:0 2px 8px rgba(0,126,255,.4)}
+  .bp-approve:disabled{cursor:wait;animation:none;filter:saturate(.7)}
+  /* Done state: a status, not a button — flat green, no lift, no pointer. */
+  .bp-approved{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:9px;
+    background:#16a34a;color:#fff;font-size:13px;font-weight:700;letter-spacing:.01em;white-space:nowrap;
+    box-shadow:0 2px 10px rgba(22,163,74,.28)}
+  .bp-prooflabel{font-size:10px;font-weight:700;color:var(--bp-dim);letter-spacing:.08em;
+    text-transform:uppercase;flex-shrink:0}
 
   /* Primary CTA — lifts on hover so it reads as the one thing to press. */
   [data-pps-cta]:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06);box-shadow:0 7px 20px rgba(0,126,255,.48) !important}
@@ -158,12 +173,15 @@
   /* Editable job title in a section header: invisible at rest so the header reads as a
      heading, a real field the moment it is hovered or focused. The placeholder has to
      announce itself, since there is no label and no box to hint that it is editable. */
-  .pps-jobtitle{background:transparent;border:1px solid transparent;transition:background .15s ease, border-color .15s ease}
-  .pps-jobtitle::placeholder{color:#94a3b8;font-weight:500;opacity:1}
-  .pps-jobtitle:hover:not(:focus){background:rgba(148,163,184,.14);border-color:transparent !important}
+  /* Job name reads as one of the header's summary pills — same chip shape, background
+     and hairline — so it belongs to the heading rather than looking like a form field
+     wedged into it. Hover/focus deepen it just enough to say it is editable. */
+  .pps-jobtitle{transition:background .15s ease, border-color .15s ease, box-shadow .15s ease}
+  .pps-jobtitle::placeholder{color:#94a3b8;font-weight:600;opacity:1}
+  .pps-jobtitle:hover:not(:focus){border-color:#cbd5e1 !important}
   .pps-jobtitle:focus{background:#fff}
   :root[data-pps-theme="dark"] .pps-jobtitle::placeholder{color:#7183a0}
-  :root[data-pps-theme="dark"] .pps-jobtitle:hover:not(:focus){background:rgba(159,176,198,.16)}
+  :root[data-pps-theme="dark"] .pps-jobtitle:hover:not(:focus){border-color:#3b4757 !important}
   :root[data-pps-theme="dark"] .pps-jobtitle:focus{background:#0f151d}
   /* Anyone who has asked their OS to reduce motion gets none of it. */
   @media (prefers-reduced-motion: reduce){
@@ -220,7 +238,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-31 · ART-MATCH</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-31 · APPROVE-CTA</div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -384,10 +402,6 @@ const TRANSIT_DAYS = _CFG.transit_days || {
   VI:9,MP:7,
 };
 const US_STATES = Object.keys(TRANSIT_DAYS).sort();
-// The state select is pre-set to the shop's own state so transit has a sane starting
-// value. That means "state is filled in" is never a signal that the customer told us
-// where the job is going — see hasDest in calculate().
-const DEFAULT_SHIP_STATE = "AZ";
 
 // UPS Ground zone map: 3-digit ZIP prefix → transit days (from admin or seed)
 const _PPS = window.PPS_CONFIG || {};
@@ -892,12 +906,12 @@ function calculate(c) {
   const _wCover=cvrSheets*(_cartonLb/(_cvrIsCard?(PCF.ship_card_sheets_per_carton||400):(PCF.ship_text_sheets_per_carton||900)));
   const estWeightLb=Math.round((_wInside*_osIn+_wCover*_osCvr)*_shFac*10)/10;
   const estCartons=Math.max(1,Math.ceil(estWeightLb/_cartonLb));
-  // Has the customer actually told us where this is going? The state select is
-  // pre-set to AZ, so its presence proves nothing; a ZIP (which drives the zone
-  // lookup) or a state other than the default does. Until then the quote panel
-  // shows production + 1 transit day rather than a doubly-guessed ground date.
-  const _hasDest = String(c.shipZip||"").replace(/[^0-9]/g,"").length >= 3
-    || (c.shipState && c.shipState !== DEFAULT_SHIP_STATE);
+  // Has the customer told us where this is going? The state select no longer carries a
+  // default, so any value is a real answer; a ZIP alone also counts, since it drives the
+  // zone lookup. Until then the quote panel shows production + 1 transit day rather than
+  // a ground date guessed from a placeholder destination.
+  const _hasDest = !!(c.shipState && String(c.shipState).trim())
+    || String(c.shipZip||"").replace(/[^0-9]/g,"").length >= 3;
   const productionBizDays = days;
   // Free shipping = minimum turnaround × 2 + ground transit
   const bufferedProdDays = productionBizDays * 2;
@@ -3789,7 +3803,7 @@ update();
           title="Rotate this page, or every page at once"
           style={{
             padding:_fsel, fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)",
-            cursor:"pointer", fontFamily:"inherit", maxWidth:mob?84:112,
+            cursor:"pointer", fontFamily:"inherit", maxWidth:mob?94:112,
             background: rotateSteps > 0 ? CK.cyan : "var(--bp-btn)",
             color: rotateSteps > 0 ? "#fff" : "var(--bp-dim)",
           }}>
@@ -4064,70 +4078,70 @@ update();
                     {shouldRotate && <span style={{ color:"#60a5fa", marginLeft:6 }}>(auto-rotated)</span>}
                   </div>
                 </div>
-                  <div style={{ display:"flex", flexShrink:0, borderRadius:10, order: mob?3:0, flexBasis: mob?"100%":"auto",
-                  border: artApproved && proof===0 ? "2px solid #22c55e" : "2px solid #ef4444",
-                  boxShadow: artApproved && proof===0 ? "0 2px 10px rgba(34,197,94,.3)" : "0 2px 10px rgba(239,68,68,.2)" }}>
-                  <button type="button" disabled={generatingPdf} onClick={async () => {
-                  if (proof===0 && !artApproved) {
-                    setGeneratingPdf(true);
-                    setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
-                    try {
-                      const pkg = await generateApprovalPackage();
-                      if (!pkg || !pkg.manifestBlob) throw new Error("Package generation returned empty result");
-                      setApprovalPkg(pkg);
-                      setArtApproved(true);
-                      if (onArtwork) {
-                        const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
-                        const files = [];
-                        if (rawFileRef.current) files.push(rawFileRef.current);
-                        if (!pkg.skippedGeneration && pkg.printReadyBlob) {
-                          files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
-                        }
-                        pkg.previewBlobs.forEach((b, i) => {
-                          if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
-                        });
-                        // The _preview.html deliverable is intentionally NOT attached to the
-                        // order upload — it is a staff-only download (debug-gated, art modal only).
-                        // Attaching it broke the add-to-cart / order upload flow.
-                        files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
-                        onArtwork({ type: "files", list: files });
-                      }
-                    } catch (err) {
-                      console.error("Approval package generation failed:", err);
-                      alert("Failed to generate print-ready package: " + (err.message || err));
-                    } finally {
-                      setGeneratingPdf(false);
-                      setGenProgress(null);
-                    }
-                  } else if (proof!==0) { setProof(0); }
-                  }} className={proof===0 && !artApproved && !generatingPdf ? "bp-approve-cta" : ""} style={{
-                  padding: proof===0 && !artApproved ? "10px 24px" : "8px 18px",
-                  fontSize: proof===0 && !artApproved ? 13 : 12,
-                  fontWeight:800, border:"none", borderRadius:"8px 0 0 8px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em", textTransform:"uppercase",
-                  background: artApproved && proof===0
-                    ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
-                    : proof===0 ? undefined : "var(--bp-btn)",
-                  color: artApproved && proof===0 ? "#fff" : proof===0 ? undefined : "var(--bp-faint)",
-                  borderRight:"1px solid var(--bp-line)",
-                  }}>{generatingPdf && genProgress ? (
-                  <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
-                    <span>{genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… {genProgress.page}/{genProgress.totalPages}</span>
-                    <span style={{ display:"block", width:80, height:4, background:"var(--bp-btn)", borderRadius:2, overflow:"hidden" }}>
-                      <span style={{ display:"block", height:"100%", borderRadius:2, background: proof===0 ? "#ef4444" : "#3b82f6", transition:"width .15s", width: `${Math.round((genProgress.page / Math.max(1, genProgress.totalPages)) * 100)}%` }} />
-                    </span>
-                  </span>
-                  ) : artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
-                  <button type="button" onClick={() => setProof(0.01)} style={{
-                  padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
-                  background: proof===0.01 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 40%, #60a5fa 50%, #2563eb 60%, #1d4ed8 100%)" : "var(--bp-btn)",
-                  color: proof===0.01 ? "#fff" : "var(--bp-faint)", borderRight:"1px solid var(--bp-line)",
-                  }}>Professional Proof</button>
-                  <button type="button" onClick={() => setProof(3.01)} style={{
-                  padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", borderRadius:"0 8px 8px 0", cursor:"pointer", fontFamily:"inherit",
-                  background: proof>=3 ? "linear-gradient(135deg, #f59e0b 0%, #d97706 40%, #fbbf24 50%, #d97706 60%, #b45309 100%)" : "var(--bp-btn)",
-                  color: proof>=3 ? "#000" : "var(--bp-faint)",
-                  }}>Hardcopy Proof</button>
-                </div>
+                  {/* Proof type is a CHOICE; approving is an ACTION. They used to be one
+                      welded control, which is why the approve button never looked right —
+                      a primary CTA butted against two radio buttons. Split into the form's
+                      segmented picker plus a real CTA, both still on this line. */}
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", rowGap:8,
+                    flexShrink:0, order: mob?3:0, flexBasis: mob?"100%":"auto" }}>
+                    <span className="bp-prooflabel">Proof:</span>
+                    <div className="bp-seg">
+                      {[{v:0,l:"Online"},{v:0.01,l:"Professional"},{v:3.01,l:"Hardcopy"}].map(o => {
+                        const on = o.v === 0 ? proof === 0 : o.v === 0.01 ? proof === 0.01 : proof >= 3;
+                        return <button type="button" key={o.v} className={`bp-seg-btn${on ? " on" : ""}`}
+                          style={{ padding: mob ? "6px 9px" : "6px 13px", fontSize: mob ? 11 : 11.5 }}
+                          onClick={() => setProof(o.v)}>{o.l}</button>;
+                      })}
+                    </div>
+                    {proof === 0 && (artApproved ? (
+                      <span className="bp-approved">&#10003; Approved</span>
+                    ) : (
+                      <button type="button" disabled={generatingPdf}
+                        className={`bp-approve${generatingPdf ? "" : " nudge"}`}
+                        style={mob ? { flex:"1 1 100%", padding:"12px 18px", fontSize:14 } : undefined}
+                        onClick={async () => {
+                          setGeneratingPdf(true);
+                          setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
+                          try {
+                            const pkg = await generateApprovalPackage();
+                            if (!pkg || !pkg.manifestBlob) throw new Error("Package generation returned empty result");
+                            setApprovalPkg(pkg);
+                            setArtApproved(true);
+                            if (onArtwork) {
+                              const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
+                              const files = [];
+                              if (rawFileRef.current) files.push(rawFileRef.current);
+                              if (!pkg.skippedGeneration && pkg.printReadyBlob) {
+                                files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
+                              }
+                              pkg.previewBlobs.forEach((b, i) => {
+                                if (b) files.push(new File([b], `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`, { type: "image/jpeg" }));
+                              });
+                              // The _preview.html deliverable is intentionally NOT attached to the
+                              // order upload — it is a staff-only download (debug-gated, art modal only).
+                              // Attaching it broke the add-to-cart / order upload flow.
+                              files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
+                              onArtwork({ type: "files", list: files });
+                            }
+                          } catch (err) {
+                            console.error("Approval package generation failed:", err);
+                            alert("Failed to generate print-ready package: " + (err.message || err));
+                          } finally {
+                            setGeneratingPdf(false);
+                            setGenProgress(null);
+                          }
+                        }}>
+                        {generatingPdf && genProgress ? (
+                          <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                            <span>{genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}&hellip; {genProgress.page}/{genProgress.totalPages}</span>
+                            <span style={{ display:"block", width:96, height:3, background:"rgba(255,255,255,.28)", borderRadius:99, overflow:"hidden" }}>
+                              <span style={{ display:"block", height:"100%", borderRadius:99, background:"#fff", transition:"width .15s", width: `${Math.round((genProgress.page / Math.max(1, genProgress.totalPages)) * 100)}%` }} />
+                            </span>
+                          </span>
+                        ) : "Approve artwork"}
+                      </button>
+                    ))}
+                  </div>
                 <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid var(--bp-line)", color:"var(--bp-dim)", width:32, height:32, borderRadius:10, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
               </div>
               {/* Proof approval + fit controls row */}
@@ -4141,7 +4155,7 @@ update();
                     the readerSpreads state and processFiles' splitSpreads option all still
                     work, so restoring the control is a one-element change. */}
                 <div style={{ fontSize:10, color:"var(--bp-faint)", marginTop:6, lineHeight:1.4 }}>
-                  {proof === 0 && !artApproved && "Review each page, then click Approve Now to confirm your artwork is print-ready. Your approval means we print exactly what you see."}
+                  {proof === 0 && !artApproved && "Review each page, then press Approve artwork to confirm it is print-ready. Your approval means we print exactly what you see."}
                   {proof === 0 && artApproved && "✓ Artwork approved — we'll print exactly what you see. You can change your proof option or close this modal."}
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
                   {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
@@ -5033,7 +5047,7 @@ function App(){
   const[proofAddrSame,setProofAddrSame]=useState(true);
   const[proofAddr,setProofAddr]=useState({name:"",street:"",city:"",state:"",zip:""});
   // Shipping & Rush
-  const[shipState,setShipState]=useState(D.shipState||DEFAULT_SHIP_STATE);
+  const[shipState,setShipState]=useState(D.shipState||"");
   const[shipAddr,setShipAddr]=useState({name:"",company:"",street1:"",street2:"",city:"",zip:""});
   const[needByDate,setNeedByDate]=useState("");
   const[coverArt,setCoverArt]=useState(null);
@@ -5418,7 +5432,7 @@ function App(){
     if (coating > 0) p.set("coating", coating);
     if (bundling > 0) p.set("bundling", bundling);
     if (roundCorner > 0) p.set("corner", roundCorner);
-    if (shipState !== DEFAULT_SHIP_STATE) p.set("state", shipState);
+    if (shipState) p.set("state", shipState);
     p.set("from", "saddle");
     const qs = p.toString();
     return qs ? targetUrl + (targetUrl.includes("?") ? "&" : "?") + qs : targetUrl;
@@ -5486,8 +5500,15 @@ function App(){
     setTimeout(() => { setQName(""); setQEmail(""); setQPhone(""); setQMessage(""); setQStatus("idle"); setQErrorMsg(""); }, 200);
   };
 
+  const missingDest = !shipState;
+  const openShipping = () => setOp(p=>{
+    if(p.s5)return p;
+    if(soloSec){const n={};for(const k in p)n[k]=false;n.s5=true;return n;}
+    return {...p,s5:true};
+  });
   const handleAddToOrder = async () => {
     if (!result || result.error?.length || submitting) return;
+    if (missingDest) { openShipping(); return; }
     // Artwork integrity guard: pageTransforms must be a real object before we
     // serialize order metadata. An empty {} is fine (customer didn't open the
     // proof transform UI); undefined/non-object means something is wrong with
@@ -5550,8 +5571,8 @@ function App(){
           {/* Settings — preferences live behind a gear so they read as settings
               rather than as more configuration choices competing with the form. */}
           <div data-pps-settings style={{position:"relative",display:"flex",justifyContent:"flex-end",padding:mob?"2px 2px 0":"0 2px 2px"}}>
-            <button type="button" onClick={()=>setSetOpen(o=>!o)} aria-haspopup="true" aria-expanded={setOpen} aria-label="Settings"
-              title="Settings"
+            <button type="button" onClick={()=>setSetOpen(o=>!o)} aria-haspopup="true" aria-expanded={setOpen} aria-label="Form settings"
+              title="Form settings"
               style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",
                 fontSize:12,fontWeight:600,color:setOpen?CC.dark:CC.light,background:setOpen?CC.track:"transparent",
                 border:`1px solid ${setOpen?CC.border:"transparent"}`,transition:"all .15s ease"}}>
@@ -5559,7 +5580,7 @@ function App(){
                 <circle cx="12" cy="12" r="3"/>
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
               </svg>
-              Settings
+              Form settings
             </button>
             {setOpen&&(
               <div role="menu" style={{position:"absolute",top:"100%",right:0,marginTop:6,zIndex:60,minWidth:250,
@@ -5607,10 +5628,10 @@ function App(){
                  When the section collapses the value returns as a summary chip. */
               <input id="pps-job-name" className="pps-jobtitle" type="text" value={sets[0].name}
                 onChange={e=>upSet(0,{name:e.target.value})}
-                placeholder="Name this job" aria-label="Job name"
-                style={{width:"100%",minWidth:0,padding:mob?"5px 8px":"5px 9px",fontSize:mob?16:15,
-                  fontFamily:"var(--pps-display)",fontWeight:650,letterSpacing:"-0.01em",
-                  color:CC.dark,textAlign:"right",outline:"none",borderRadius:7,textOverflow:"ellipsis"}}/>
+                placeholder="Job name/PO" aria-label="Job name or PO number"
+                style={{...CHIP,width:"100%",minWidth:0,maxWidth:"none",display:"block",
+                  padding:mob?"6px 12px":"6px 13px",fontSize:mob?16:12,
+                  textAlign:"center",outline:"none",textOverflow:"ellipsis"}}/>
                   /* background + border live in .pps-jobtitle, not here: an inline
                      background would outrank the :hover and :focus rules. */
             }>
@@ -5677,9 +5698,12 @@ function App(){
 
           {/* SECTION 3: Finishing & Addons */}
           <Sec step={3} summary={secSummary.s3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
-            {(_AD.vivid!==false || vividPrint===true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} disabled={!r.vividOK} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
-            {(_AD.vivid!==false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-8,marginBottom:4}}>Requires matte or gloss coated paper</div>}
-            {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
+            {/* Print Quality only exists on coated stock, so it is hidden rather than shown
+                disabled next to a line explaining why it cannot be used. The effect on
+                r.vividOK already clears vividPrint when the paper changes under it, so a
+                preset or share link cannot leave a hidden option switched on. */}
+            {r.vividOK && (_AD.vivid!==false || vividPrint===true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
+            {r.vividOK && (_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
               {(_AD.coating!==false || coating>0) && <Sel label={<RichTip tipKey="coating">Cover Coating</RichTip>} badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
               {(_AD.bundling!==false || bundling>0) && (r.q100!==false
@@ -5869,6 +5893,7 @@ function App(){
             <div style={{...addrGrid,marginTop:12}}>
               <div style={{...addrCell,gridColumn:mob?"1 / -1":"auto"}}><label htmlFor="pps-ship-city" style={ST.lbl}>City</label><input type="text" id="pps-ship-city" name="ship-city" autoComplete="shipping address-level2" value={shipAddr.city} onChange={e=>setShipAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={ST.inp}/></div>
               <Sel wrapStyle={addrCell} selectId="pps-ship-state" name="ship-address-level1" autoComplete="shipping address-level1" label={<Tip k="ship_state">State</Tip>} value={shipState} onChange={v=>{setShipState(v)}}>
+                <option value="">Select&hellip;</option>
                 {US_STATES.map(st=><option key={st} value={st}>{st}</option>)}
               </Sel>
               <div style={addrCell}><label htmlFor="pps-ship-zip" style={ST.lbl}>ZIP Code</label><input type="text" id="pps-ship-zip" name="ship-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>{
@@ -5963,7 +5988,7 @@ function App(){
             <SidebarBookPreview sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={openPreview}/>
             <div ref={priceRef}><Panel result={result} debugUnlocked={debugUnlocked}/></div>
           </div>
-          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
+          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",marginTop:16,padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:missingDest?CC.mid:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":missingDest?"Choose a destination":"Add to Order"}</button>
           {/* Secondary action, directly under the CTA: visible without scrolling past
               the pricing table, which is where it used to sit. */}
           <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}}
@@ -6026,10 +6051,10 @@ function App(){
               const n=projections.filter(p=>p.total!==null).length;
               if(n<=5) return null;
               return <button type="button" onClick={()=>setProjOpen(v=>!v)}
-                style={{width:"100%",padding:"8px 10px",border:"none",borderTop:`1px solid ${CC.border}`,
-                  background:CC.track,color:CK.cyan,fontSize:11,fontWeight:700,letterSpacing:".4px",
-                  textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit"}}>
-                {projOpen?"Show fewer ▴":`Show all ${n} quantities ▾`}
+                style={{width:"100%",padding:"9px 10px",border:"none",borderTop:`1px solid ${CC.border}`,
+                  background:CC.track,color:CK.cyan,fontSize:12,fontWeight:500,letterSpacing:".01em",
+                  cursor:"pointer",fontFamily:"inherit"}}>
+                {projOpen?"Show fewer ▴":"Show more ▾"}
               </button>;
             })()}
           </div>}
@@ -6074,10 +6099,10 @@ function App(){
             </div>
           </div>
           <button type="button" onClick={handleAddToOrder} disabled={submitting}
-            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.light:CK.cyan,
+            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.light:missingDest?CC.mid:CK.cyan,
               color:"#fff",fontSize:14,fontWeight:750,cursor:submitting?"default":"pointer",fontFamily:"inherit",
               opacity:submitting?.5:1,whiteSpace:"nowrap"}}>
-            {submitting?"Adding…":"Add to Order"}
+            {submitting?"Adding…":missingDest?"Choose a destination":"Add to Order"}
           </button>
         </div>;
       })()}
@@ -6095,7 +6120,7 @@ function App(){
           <div style={{flex:mobExpanded?undefined:1,minWidth:0}}>
             <Panel result={result} compact debugUnlocked={debugUnlocked} expanded={mobExpanded} onToggleExpand={()=>setMobExpanded(p=>!p)}/>
           </div>
-          <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined,width:mobExpanded?"100%":undefined}}
+          <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:missingDest?CC.mid:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined,width:mobExpanded?"100%":undefined}}
             disabled={!!result?.error?.length||submitting}>
             {submitting && uploadProgress ? (
               <div>
