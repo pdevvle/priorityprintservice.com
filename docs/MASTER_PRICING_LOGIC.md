@@ -364,7 +364,7 @@ Net effect: oversized custom jobs are now priced on their real (larger, more-eff
 
 ### Saddle stitch: in-stock text-weight covers exempt from non-inventory fee (2026-06-17)
 
-The `$35` `non_inventory_fee` is meant for genuinely non-stock papers. But the cover-inventory set was `COVER_INV = [COVER_SAME.val, ...INV_CS]` — it only recognized "Same as Inside" plus in-stock **cardstocks** as stocked covers. A text-weight sheet that is in-stock for *interiors* (e.g. 100lb Gloss Text, `val 0.003`, which is in `INV_NC`) was therefore tagged non-inventory the moment it was chosen as a *separate cover*, adding `$35` (further inflated by the 30% `booklet_surcharge`). Net effect: a pricier 80lb cardstock cover could come out cheaper than a 100lb Gloss Text cover.
+The `$35` `non_inventory_fee` is meant for genuinely non-stock papers. But the cover-inventory set was `COVER_INV = [COVER_SAME.val, ...INV_CS]` — it only recognized "Same as Inside" plus in-stock **cardstocks** as stocked covers. A text-weight sheet that is in-stock for *interiors* (e.g. 100lb Gloss Text, `val 0.003`, which is in `INV_NC`) was therefore tagged non-inventory the moment it was chosen as a *separate cover*, adding `$35` (further inflated by the `booklet_surcharge`, 0.40 since 2026-08-01). Net effect: a pricier 80lb cardstock cover could come out cheaper than a 100lb Gloss Text cover.
 
 Fix (calc-preview-test.html, `COVER_INV` definition): include the in-stock text weights too.
 
@@ -567,7 +567,7 @@ function calculate(c) {
   // 1. Validation errors → early return { error: [...] }
   // 2. Derive basic values: qty, pressSheets, sides, tP (total pages), etc.
   // 3. Markup: mk = max(backend_maximummarkup - discount, backend_minimummarkup)
-  //    (perfect bound and saddle now use 0.80*ln(tS); brochure uses 1.85*ln(tS)-0.5)
+  //    (saddle 0.295*ln(tS); perfect bound + coupon 0.275*ln(tS); flats 1.75*ln(pressSheets))
   // 4. Per-line-item costs (write to P object):
   //    P.paper, P.frontPrint, P.backPrint, P.cutting, P.folding, P.binding,
   //    P.coat, P.bundle, P.rc (round corner), P.perforation, P.outfold,
@@ -709,7 +709,7 @@ The shapes differ slightly — brochure's edit cost is flat `PCF.art_edit_rate`,
 2. **Cutting formula has a quirk.** `(labor_cutting_hr + mk)` rather than `labor_cutting_hr * mk`. Left as-is to match the brochure calculator's pattern. Not fixed.
 3. **Simulation vs reality gap.** The sim underestimates real calculator output. Real positioning is likely tighter than my estimates suggest.
 4. **Estimates, not real quotes.** Already documented above — everything is tuned to industry-knowledge estimates.
-5. **Perfect bound** has its own two-branch logarithmic discount curve (now superseded by the simple `0.80*ln(tS)` curve, but the old branched form is preserved as a `// ROLLBACK:` comment block in `calc-perfect-bound.html`). Worth understanding before touching its markup math.
+5. **Perfect bound** has its own two-branch logarithmic discount curve (now superseded by the simple `0.275*ln(tS)` curve, but the old branched form is preserved as a `// ROLLBACK:` comment block in `calc-perfect-bound.html`). Worth understanding before touching its markup math.
 6. **Saddle stitch** has a "sets" system (mothballed UI but code preserved) that multiplies several costs by N. The artwork upload-tier fee is deliberately NOT multiplied by N — review similar patterns before assuming a knob should scale by sets.
 7. **Roll fold / bifold / accordion-4** 3D previewer fixes are still iterative — the user reported the last few fixes weren't fully correct. The 3D preview is orthogonal to pricing and can be worked on separately.
 
