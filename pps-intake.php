@@ -193,7 +193,14 @@ add_shortcode( 'pps_intake', function ( $atts ) {
 
     $anchor = 'pps-intake-' . $key;
     $done   = isset( $_GET['pps_sent'] ) && sanitize_key( wp_unslash( $_GET['pps_sent'] ) ) === $key;
-    $error  = isset( $_GET['pps_err'] )  ? sanitize_text_field( wp_unslash( $_GET['pps_err'] ) ) : '';
+    // The URL carries an error CODE, never a sentence. Free text here let anyone craft a
+    // link that made the site display an attacker's words in its own trusted alert box —
+    // escaped against XSS, but a phishing primitive all the same.
+    $error  = pps_intake_error_text(
+        $form,
+        isset( $_GET['pps_err'] )   ? sanitize_key( wp_unslash( $_GET['pps_err'] ) )   : '',
+        isset( $_GET['pps_field'] ) ? sanitize_key( wp_unslash( $_GET['pps_field'] ) ) : ''
+    );
 
     ob_start();
     echo '<div class="pps-intake" id="' . esc_attr( $anchor ) . '">';
@@ -216,7 +223,6 @@ add_shortcode( 'pps_intake', function ( $atts ) {
     echo '<input type="hidden" name="action" value="pps_intake_submit">';
     echo '<input type="hidden" name="form" value="' . esc_attr( $key ) . '">';
     echo '<input type="hidden" name="ref" value="' . esc_attr( home_url( add_query_arg( array() ) ) ) . '">';
-    wp_nonce_field( 'pps_intake_' . $key, 'pps_intake_nonce' );
 
     // Honeypot. Named to look worth filling in to a bot and hidden from everyone else.
     echo '<div class="pps-intake-hp" aria-hidden="true">'
@@ -342,7 +348,11 @@ add_shortcode( 'pps_intake', function ( $atts ) {
 function pps_intake_allowed_ext() {
     return apply_filters( 'pps_intake_allowed_ext', array(
         'pdf', 'png', 'jpg', 'jpeg', 'gif', 'tif', 'tiff', 'webp',
-        'ai', 'psd', 'eps', 'indd', 'svg', 'zip',
+        // NO svg: an SVG is a script-bearing document served from OUR origin, and the
+        // person most likely to open one is a staff member clicking the Files link in the
+        // notification email — with their wp-admin cookies along for the ride. Vector
+        // artwork arrives fine as ai/eps/pdf, or zipped.
+        'ai', 'psd', 'eps', 'indd', 'zip',
         'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv',
     ) );
 }
@@ -403,6 +413,30 @@ function pps_intake_field_visible( array $f, array $values ) {
     return $want !== '' ? ( $ctrl === $want ) : ( $ctrl !== '' );
 }
 
+/**
+ * Resolve an error code from the URL to a message WE wrote.
+ *
+ * The field label is looked up from the form definition, never taken from the URL, so the
+ * strongest thing a crafted link can make the site say is one of these fixed sentences.
+ */
+function pps_intake_error_text( array $form, $code, $field ) {
+    if ( $code === '' ) return '';
+
+    $label = isset( $form['fields'][ $field ]['label'] ) ? $form['fields'][ $field ]['label'] : 'That field';
+
+    $map = array(
+        'req'     => $label . ' is required.',
+        'choice'  => 'Please answer: ' . $label,
+        'email'   => 'That email address does not look right.',
+        'rate'    => 'Too many submissions from your connection. Please try again in a few minutes.',
+        'upfail'  => 'One of those files did not upload cleanly. Please try again.',
+        'uptype'  => 'That file type is not accepted — try a PDF or an image.',
+        'upsize'  => 'One of those files is over the 20MB per-file limit.',
+        'uptotal' => 'Those files come to more than 40MB in total. Send the largest separately.',
+    );
+    return $map[ $code ] ?? 'Something went wrong — please try again.';
+}
+
 function pps_intake_rate_key() {
     $ip   = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : '';
     $salt = defined( 'AUTH_SALT' ) ? AUTH_SALT : 'pps';
@@ -417,7 +451,7 @@ function pps_intake_bounce( $key, $args ) {
     if ( ! $ref || strcasecmp( (string) $host, (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) !== 0 ) {
         $ref = home_url( '/' );
     }
-    $ref = remove_query_arg( array( 'pps_sent', 'pps_err' ), $ref );
+    $ref = remove_query_arg( array( 'pps_sent', 'pps_err', 'pps_field' ), $ref );
     wp_safe_redirect( add_query_arg( $args, $ref ) . '#pps-intake-' . $key );
     exit;
 }
@@ -431,10 +465,13 @@ function pps_intake_handle_submit() {
     if ( ! isset( $forms[ $key ] ) ) wp_die( 'Unknown form.' );
     $form = $forms[ $key ];
 
-    if ( ! isset( $_POST['pps_intake_nonce'] )
-      || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['pps_intake_nonce'] ) ), 'pps_intake_' . $key ) ) {
-        pps_intake_bounce( $key, array( 'pps_err' => 'That form expired — please try again.' ) );
-    }
+    // NO NONCE, deliberately. These pages are served from WP Rocket's cache, so a nonce
+    // baked into the HTML outlives its 12-24h window and then every visitor is refused —
+    // the quote form is on the cached HOME PAGE, so that is a sitewide outage on the main
+    // conversion path. And for logged-out visitors a nonce is not security anyway: the
+    // uid-0 nonce is shared and printed in the public page for anyone to read. WP core's
+    // own comment form makes the same call for guests, for the same reason. Abuse is
+    // bounded by the honeypot and the per-IP rate limit below.
 
     // Honeypot: answer as though it worked. Telling a bot it failed teaches it to retry.
     if ( ! empty( $_POST['website'] ) ) {
@@ -443,7 +480,7 @@ function pps_intake_handle_submit() {
 
     $rkey = pps_intake_rate_key();
     if ( (int) get_transient( $rkey ) >= 5 ) {
-        pps_intake_bounce( $key, array( 'pps_err' => 'Too many submissions from your connection. Please try again in a few minutes.' ) );
+        pps_intake_bounce( $key, array( 'pps_err' => 'rate' ) );
     }
     set_transient( $rkey, (int) get_transient( $rkey ) + 1, 15 * MINUTE_IN_SECONDS );
 
@@ -461,7 +498,7 @@ function pps_intake_handle_submit() {
             // label is a presentation concern the email formatter resolves.
             $values[ $fkey ] = isset( $f['options'][ $picked ] ) ? $picked : '';
             if ( ! empty( $f['required'] ) && $values[ $fkey ] === '' ) {
-                pps_intake_bounce( $key, array( 'pps_err' => 'Please answer: ' . $f['label'] ) );
+                pps_intake_bounce( $key, array( 'pps_err' => 'choice', 'pps_field' => $fkey ) );
             }
             continue;
         }
@@ -476,10 +513,10 @@ function pps_intake_handle_submit() {
         // Fields are validated in definition order, so the controlling answer is already
         // in $values by the time a dependent field is reached.
         if ( ! empty( $f['required'] ) && $val === '' && pps_intake_field_visible( $f, $values ) ) {
-            pps_intake_bounce( $key, array( 'pps_err' => $f['label'] . ' is required.' ) );
+            pps_intake_bounce( $key, array( 'pps_err' => 'req', 'pps_field' => $fkey ) );
         }
         if ( $f['type'] === 'email' && $val !== '' && ! is_email( $val ) ) {
-            pps_intake_bounce( $key, array( 'pps_err' => 'That email address does not look right.' ) );
+            pps_intake_bounce( $key, array( 'pps_err' => 'email', 'pps_field' => $fkey ) );
         }
         $max = (int) ( $f['maxlength'] ?? 200 );
         if ( strlen( $val ) > $max ) $val = substr( $val, 0, $max );
@@ -515,19 +552,21 @@ function pps_intake_take_uploads() {
     $valid   = array();
 
     foreach ( array_keys( $_FILES['files']['name'] ) as $i ) {
+        // A crafted files[][] request makes these entries arrays; treat that as a failed
+        // upload rather than letting string functions fatal on it.
+        if ( ! is_string( $_FILES['files']['name'][ $i ] ?? null ) ) { $out['error'] = 'upfail'; return $out; }
         if ( (int) $_FILES['files']['error'][ $i ] === UPLOAD_ERR_NO_FILE ) continue;
         if ( (int) $_FILES['files']['error'][ $i ] !== UPLOAD_ERR_OK ) {
-            $out['error'] = 'One of those files did not upload cleanly. Please try again.';
+            $out['error'] = 'upfail';
             return $out;
         }
-        $orig = sanitize_file_name( (string) $_FILES['files']['name'][ $i ] );
-        $ext  = strtolower( pathinfo( $orig, PATHINFO_EXTENSION ) );
+        $ext = strtolower( pathinfo( sanitize_file_name( $_FILES['files']['name'][ $i ] ), PATHINFO_EXTENSION ) );
         if ( ! in_array( $ext, $allowed, true ) ) {
-            $out['error'] = sprintf( 'We cannot accept .%s files. Try a PDF or an image.', $ext ?: '?' );
+            $out['error'] = 'uptype';
             return $out;
         }
         if ( (int) $_FILES['files']['size'][ $i ] > PPS_INTAKE_MAX_FILE ) {
-            $out['error'] = sprintf( '%s is over the 20MB per-file limit.', $orig );
+            $out['error'] = 'upsize';
             return $out;
         }
         $total += (int) $_FILES['files']['size'][ $i ];
@@ -536,7 +575,7 @@ function pps_intake_take_uploads() {
 
     if ( ! $valid ) return $out;
     if ( $total > PPS_INTAKE_MAX_TOTAL ) {
-        $out['error'] = 'Those files come to more than 40MB in total. Send the largest separately.';
+        $out['error'] = 'uptotal';
         return $out;
     }
 
@@ -544,14 +583,28 @@ function pps_intake_take_uploads() {
     $up    = wp_upload_dir();
     $dir   = $up['basedir'] . '/pps-intake/' . $token;
     wp_mkdir_p( $dir );
+    // Both files, because the two servers in front of this disagree: Apache reads the
+    // .htaccess, nginx (which serves static files on this host) ignores it and is kept
+    // from listing by the blank index.php instead.
     if ( ! file_exists( $dir . '/.htaccess' ) ) {
         file_put_contents( $dir . '/.htaccess', "Options -Indexes\n" );
     }
+    if ( ! file_exists( $dir . '/index.php' ) ) {
+        file_put_contents( $dir . '/index.php', "<?php // silence\n" );
+    }
 
     foreach ( $valid as $i ) {
-        $orig = sanitize_file_name( (string) $_FILES['files']['name'][ $i ] );
-        if ( move_uploaded_file( $_FILES['files']['tmp_name'][ $i ], $dir . '/' . $orig ) ) {
-            $out['urls'][] = $up['baseurl'] . '/pps-intake/' . $token . '/' . rawurlencode( $orig );
+        $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
+        // Flatten inner dots so "shell.php.jpg" is stored as "shell-php.jpg". The check
+        // above only reads the LAST extension; on AddHandler-style Apache configs an inner
+        // .php would still execute. This kills the whole class rather than blocklisting.
+        $ext  = strtolower( pathinfo( $orig, PATHINFO_EXTENSION ) );
+        $base = str_replace( '.', '-', pathinfo( $orig, PATHINFO_FILENAME ) );
+        if ( $base === '' ) $base = 'file';
+        $name = $base . '.' . $ext;
+
+        if ( move_uploaded_file( $_FILES['files']['tmp_name'][ $i ], $dir . '/' . $name ) ) {
+            $out['urls'][] = $up['baseurl'] . '/pps-intake/' . $token . '/' . rawurlencode( $name );
         }
     }
     return $out;
@@ -642,14 +695,11 @@ function pps_intake_notify( $key, array $form, array $values, array $file_urls, 
     if ( ! is_email( $mail ) ) return;
 
     $site = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
-    $c    = array( sprintf( 'Hi %s,', $name ), '', $form['confirm'], '' );
-    if ( ! empty( $values['message'] ) ) {
-        $c[] = 'What you sent us:';
-        $c[] = '';
-        $c[] = $values['message'];
-        $c[] = '';
-    }
-    $c[] = sprintf( '— The %s team', $site );
+    // The confirmation deliberately does NOT echo the message back. Doing so turns the
+    // form into a relay: enter a victim's email, write anything, and this mail server
+    // delivers the attacker's words to the victim under the shop's name. The submitter
+    // knows what they wrote; the confirmation only needs to say it arrived.
+    $c   = array( sprintf( 'Hi %s,', $name ), '', $form['confirm'], '', sprintf( '— The %s team', $site ) );
 
     wp_mail(
         $mail,
