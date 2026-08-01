@@ -1027,6 +1027,15 @@ $r = pps_assistant_missive_receive( array(
 ) );
 ok( $r === 'delivered', 'a matched reply is delivered' );
 
+// A working inbound leg must be VISIBLE. Logging only the failures means a successful
+// reply shows nothing on the admin screen, and "nothing happened" reads as "it broke".
+$mlog = get_option( 'pps_assistant_missive_log', array() );
+ok( ! empty( $mlog ) && $mlog[0]['event'] === 'inbound_delivered', 'and a success is logged, not just failures' );
+ok( ( $mlog[0]['matched'] ?? '' ) === 'reference', 'recording which route matched' );
+ok( ( $mlog[0]['chars'] ?? 0 ) === strlen( 'On it now' ), 'and the length, so extraction can be confirmed' );
+ok( strpos( wp_json_encode( $mlog[0] ), 'On it now' ) === false,
+    'without storing the reply text itself in an options row' );
+
 $s = pps_assistant_session_get( 'sess9' );
 ok( ( $s['mode'] ?? '' ) === 'human', 'delivery puts the session in human mode' );
 ok( count( $s['human_log'] ) === 1, 'and appends exactly one entry' );

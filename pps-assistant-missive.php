@@ -517,6 +517,23 @@ function pps_assistant_missive_receive( $payload ) {
         $session['mode'] = 'human';
         pps_assistant_session_save( $sid, $session );
     }
+
+    // Log the SUCCESS too, not only the failures.
+    //
+    // Without this a working inbound leg is invisible: the operator replies in Missive,
+    // everything works, the admin screen shows nothing, and the sensible conclusion is
+    // that it failed. Which route matched also matters — reference means our threading
+    // key came back, conversation means we fell through to the id.
+    //
+    // The reply text itself is deliberately not stored; its length is enough to confirm
+    // extraction found the right field, and this row lives in an options table.
+    pps_assistant_missive_log( 'inbound_delivered', array(
+        'sid'     => $sid,
+        'matched' => $f['reference'] !== '' ? 'reference' : 'conversation',
+        'author'  => $f['author'] ?: '(none found)',
+        'chars'   => strlen( $text ),
+    ) );
+
     return 'delivered';
 }
 
