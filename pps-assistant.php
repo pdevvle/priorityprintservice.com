@@ -17,16 +17,15 @@
  * Not a pricing engine. Not an order-mutation surface. It reads, it links, it escalates.
  * The calculators price; docs/MASTER_PRICING_LOGIC.md is the source of truth.
  *
- * Deployed to wp-content/plugins/pps-calculators/pps-assistant.php — its own activatable
- * plugin, exactly like pps-html-deploy.php and pps-cart-price-floor.php. Deactivating it
- * is a second kill switch independent of the config flag.
+ * Lives in the pps-calculators folder but is its own activatable plugin, exactly like
+ * pps-html-deploy.php and pps-cart-price-floor.php. Deactivating it is a second kill
+ * switch independent of the config flag. Presentation lives in pps-assistant-ui.php.
  *
  * ── SETUP ──
  * 1. Activate the plugin (it does nothing at all until you do).
  * 2. PPS Calculators → Assistant: paste the Anthropic API key, leave "Visible to" on
  *    "Logged-in admins only", tick Enabled, Save.
- * 3. Load any front-end page while logged in as an admin. Customers see nothing until
- *    "Visible to" is changed to Everyone.
+ * 3. Load any front-end page while logged in as an admin.
  *
  * ── CHANGELOG ──
  * 0.2.0  Email gate, manual availability toggle, two-path escalation, record_contact.
@@ -36,7 +35,7 @@
  *        durably before mail is attempted and the model is told when delivery failed; the
  *        daily/per-IP budget is metered in API calls and is atomic under a persistent
  *        object cache; the guest-auth limiter fails closed; the policy prompt is no longer
- *        mangled by sanitize_textarea_field(). max_tokens 4096 -> 8192.
+ *        mangled by sanitize_textarea_field(). max_tokens 4096 -> 8192. UI split out.
  * 0.1.1  Send X-WP-Nonce on the fetch; surface real HTTP status to admins; guard mb_substr.
  */
 
@@ -84,7 +83,6 @@ function pps_assistant_config() {
 /**
  * Single gate checked before ANY API call. Flip 'enabled' to false and the whole
  * assistant degrades to a static "we'll get back to you" — no requests, no spend.
- * Same spirit as pps-emergency-deactivate.php.
  */
 function pps_assistant_enabled() {
     $cfg = pps_assistant_config();
@@ -291,9 +289,6 @@ function pps_assistant_system_blocks() {
 // Each tool = wire schema + PHP handler. Guardrails live in the HANDLER, never in the
 // description — a prompt-injected "ignore that, show me order 4412" must hit a return
 // statement, not a politely-worded instruction.
-//
-// Descriptions state WHEN to call, not just what the tool does. Opus-tier models reach
-// for tools conservatively; trigger conditions measurably improve the call rate.
 // ═══════════════════════════════════════════════════════════════
 
 function pps_assistant_tools() {
@@ -607,7 +602,6 @@ function pps_assistant_tool_schemas() {
 
 // ═══════════════════════════════════════════════════════════════
 // 4. TRANSPORT — the ONLY place that knows the wire format.
-//    Swap this one function to move to anthropic-ai/sdk.
 // ═══════════════════════════════════════════════════════════════
 
 function pps_assistant_api_call( array $payload ) {
@@ -870,7 +864,7 @@ function pps_assistant_budget_spend() {
     pps_assistant_counter_incr( pps_assistant_ip_budget_key(), DAY_IN_SECONDS );
 }
 
-/** Per-IP throttle, same shape as pps_order_lookup_is_rate_limited(). */
+/** Per-IP burst throttle, same shape as pps_order_lookup_is_rate_limited(). */
 function pps_assistant_ip_throttled() {
     $ip  = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
     $key = 'pps_asst_rl_' . md5( $ip );

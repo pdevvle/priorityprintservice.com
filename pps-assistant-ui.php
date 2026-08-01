@@ -60,7 +60,6 @@ add_action( 'wp_footer', function () {
     <script>
     (function () {
       var CFG = <?php echo $boot; // phpcs:ignore ?>;
-      var C = { cyan:'#007eff', ink:'#0f172a', mid:'#475569', bg:'#f6f7f9', border:'#e3e8ef' };
       var sid = sessionStorage.getItem('ppsAsstSid');
       if (!sid) { sid = 'S' + Math.random().toString(36).slice(2) + Date.now().toString(36);
                   sessionStorage.setItem('ppsAsstSid', sid); }
@@ -203,7 +202,7 @@ add_action( 'wp_footer', function () {
 }, 99 );
 
 // ═══════════════════════════════════════════════════════════════
-// 9. ADMIN
+// ADMIN
 // ═══════════════════════════════════════════════════════════════
 
 add_action( 'admin_menu', function () {
