@@ -79,6 +79,11 @@ function pps_assistant_config() {
         'missive_webhook_secret' => '',
         'missive_alias'          => '',     // must match an alias defined on the channel
         'missive_alias_name'     => '',
+        // 'text' | 'email'. Missive rejects a subject line on a text channel outright
+        // ("'subject' is not allowed for 'text' messages"), and a text channel shows an
+        // HTML body as raw tags. Defaults to text because that is what a custom channel
+        // created for live chat is.
+        'missive_channel_type'   => 'text',
         // How long the widget waits for a first agent reply before it stops promising one.
         // Three minutes: long enough for someone to finish a sentence, short enough that
         // a visitor staring at "connecting you" does not conclude the site is broken.

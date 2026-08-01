@@ -1257,6 +1257,37 @@ foreach ( array( 'secret transcript contents', 'jane@example.com', 'Jane Doe' ) 
 ok( strpos( $flat, 'references' ) !== false && strpos( $flat, 'from_field' ) !== false,
     'but it keeps the field names, which is the whole diagnostic point' );
 
+// ── the channel type Missive actually validates ──────────────────────────────────
+// Real 400 from staging: {"error":{"message":"'subject' is not allowed for 'text'
+// messages"}}. A custom channel built for live chat is a text channel; a subject line
+// is not a stylistic choice there, it is a rejected message.
+reset_world();
+missive_configure( true );
+
+$p = pps_assistant_missive_payload( 'sid1', fresh_session(), 'hello' );
+ok( ! isset( $p['messages']['subject'] ), 'a text channel payload carries NO subject line' );
+ok( isset( $p['messages']['body'] ), 'but still carries a body' );
+
+// An explicit subject from the caller must not sneak past the channel-type rule either.
+$p = pps_assistant_missive_payload( 'sid1', fresh_session(), 'hello', array( 'subject' => 'Anything' ) );
+ok( ! isset( $p['messages']['subject'] ), 'and an explicitly passed subject is still dropped' );
+
+$cfg = pps_assistant_config();
+$cfg['missive_channel_type'] = 'email';
+update_option( 'pps_assistant_config', $cfg );
+$p = pps_assistant_missive_payload( 'sid1', fresh_session(), 'hello', array( 'subject' => 'Hi' ) );
+ok( ( $p['messages']['subject'] ?? '' ) === 'Hi', 'an email channel does carry one' );
+
+// A text channel shows markup as literal tags, so nothing we send it may contain any.
+$cfg['missive_channel_type'] = 'text';
+update_option( 'pps_assistant_config', $cfg );
+$s = fresh_session();
+$s['name'] = 'Jane'; $s['email'] = 'j@e.co';
+$body = pps_assistant_missive_body( $s, 'refund', 'wants money back' );
+ok( strpos( $body, '<' ) === false, 'the text-channel handoff body contains no markup at all' );
+ok( strpos( $body, 'Name: Jane' ) !== false, 'and still carries the details an agent needs' );
+ok( strpos( $body, 'Reason: refund' ) !== false, 'including why it was escalated' );
+
 // ── summary ──────────────────────────────────────────────────────────────────────
 echo "\n" . str_repeat( '─', 62 ) . "\n";
 if ( $T['fail'] === 0 ) {

@@ -378,6 +378,7 @@ function pps_assistant_render_admin() {
         // a readable field (same treatment as the API key).
         $cfg['missive_channel_id'] = sanitize_text_field( wp_unslash( $_POST['missive_channel_id'] ?? '' ) );
         $cfg['missive_token']      = sanitize_text_field( wp_unslash( $_POST['missive_token'] ?? '' ) );
+        $cfg['missive_channel_type'] = ( ( $_POST['missive_channel_type'] ?? '' ) === 'email' ) ? 'email' : 'text';
         $cfg['missive_alias']      = sanitize_text_field( wp_unslash( $_POST['missive_alias'] ?? '' ) );
         $cfg['missive_alias_name'] = sanitize_text_field( wp_unslash( $_POST['missive_alias_name'] ?? '' ) );
         $cfg['handoff_timeout']    = max( 30, (int) ( $_POST['handoff_timeout'] ?? 180 ) );
@@ -505,6 +506,16 @@ function pps_assistant_render_admin() {
                 <tr><th>API token</th><td>
                     <input type="password" name="missive_token" value="<?php echo esc_attr( $cfg['missive_token'] ); ?>" class="regular-text" autocomplete="off">
                     <p class="description">Missive → Settings → API.</p>
+                </td></tr>
+                <tr><th>Channel type</th><td>
+                    <label><input type="radio" name="missive_channel_type" value="text" <?php checked( $cfg['missive_channel_type'], 'text' ); ?>>
+                        <strong>Text</strong> — a chat-style custom channel</label><br>
+                    <label><input type="radio" name="missive_channel_type" value="email" <?php checked( $cfg['missive_channel_type'], 'email' ); ?>>
+                        Email — the channel carries subject lines</label>
+                    <p class="description">Missive validates this. A subject line on a text channel is
+                    rejected outright (<code>'subject' is not allowed for 'text' messages</code>), and an
+                    HTML body reaches the agent as raw tags. Leave this on Text unless a send fails saying
+                    otherwise.</p>
                 </td></tr>
                 <tr><th>Alias username</th><td>
                     <input type="text" name="missive_alias" value="<?php echo esc_attr( $cfg['missive_alias'] ); ?>" class="regular-text" placeholder="website-chat">

@@ -63,6 +63,19 @@ function pps_assistant_missive_ready() {
 }
 
 /**
+ * Is this a text channel rather than an email one?
+ *
+ * Not cosmetic. Missive validates on it: posting a subject to a text channel returns
+ * HTTP 400 "'subject' is not allowed for 'text' messages", and an HTML body on a text
+ * channel reaches the agent as literal <p> tags. A custom channel built for live chat is
+ * a text channel, so that is the default.
+ */
+function pps_assistant_missive_is_text_channel() {
+    $cfg = pps_assistant_config();
+    return ( $cfg['missive_channel_type'] ?? 'text' ) !== 'email';
+}
+
+/**
  * The threading key for a session.
  *
  * Ours, not Missive's — which is the whole point. A webhook delivery that echoes this
@@ -173,11 +186,16 @@ function pps_assistant_missive_payload( $sid, array $session, $body, array $opts
             'name'     => (string) ( $cfg['missive_alias_name'] ?: 'Website chat' ),
             'username' => (string) ( $cfg['missive_alias'] ?: 'website-chat' ),
         ) ),
-        'subject'    => (string) ( $opts['subject'] ?? ( 'Website chat — ' . $name ) ),
         'body'       => (string) $body,
         // Ours. Survives whatever Missive does with its own ids.
         'references' => array( pps_assistant_missive_reference( $sid ) ),
     );
+
+    // Only an email channel takes one. Sending it to a text channel is a hard 400, not a
+    // warning — Missive refuses the whole message.
+    if ( ! pps_assistant_missive_is_text_channel() ) {
+        $message['subject'] = (string) ( $opts['subject'] ?? ( 'Website chat — ' . $name ) );
+    }
 
     // Thread into the conversation we already opened, when we know it.
     if ( ! empty( $session['missive_conversation'] ) ) {
@@ -318,6 +336,19 @@ function pps_assistant_missive_body( array $session, $reason, $summary ) {
         'Reason'  => (string) $reason,
     );
 
+    // A text channel shows markup as literal tags, so it gets a plain-text build. This is
+    // the shape an agent actually reads on a chat channel anyway.
+    if ( pps_assistant_missive_is_text_channel() ) {
+        $out = "Live handoff from the website chat — reply here and it appears in the "
+             . "visitor's chat window.\n\n";
+        foreach ( $rows as $k => $v ) {
+            $out .= $k . ': ' . (string) $v . "\n";
+        }
+        if ( $summary ) $out .= "\nSummary: " . (string) $summary . "\n";
+        $out .= "\n--- conversation so far ---\n" . pps_assistant_transcript( $session );
+        return $out;
+    }
+
     $html = '<p><strong>Live handoff from the website chat.</strong> '
           . 'Reply here and it appears in the visitor\'s chat window.</p><ul>';
     foreach ( $rows as $k => $v ) {
@@ -335,7 +366,11 @@ function pps_assistant_missive_body( array $session, $reason, $summary ) {
 
 /** Relay a visitor's later message into the open Missive conversation. */
 function pps_assistant_missive_relay( $sid, array $session, $text ) {
-    $res = pps_assistant_missive_send( $sid, $session, '<p>' . esc_html( (string) $text ) . '</p>' );
+    $body = pps_assistant_missive_is_text_channel()
+        ? (string) $text
+        : '<p>' . esc_html( (string) $text ) . '</p>';
+
+    $res = pps_assistant_missive_send( $sid, $session, $body );
     return ! is_wp_error( $res );
 }
 
@@ -505,11 +540,13 @@ add_action( 'admin_post_pps_assistant_missive_test', function () {
         'messages'=> array(),
     );
 
+    $text = 'Test message from the PPS Assistant bridge. If you can see this in Missive, '
+          . 'the outbound half works. Reply to it and the inbound half gets recorded too.';
+
     $res = pps_assistant_missive_send(
         $sid,
         $session,
-        '<p>Test message from the PPS Assistant bridge. If you can see this in Missive, '
-        . 'the outbound half works. Reply to it and the inbound half gets recorded too.</p>',
+        pps_assistant_missive_is_text_channel() ? $text : '<p>' . $text . '</p>',
         array( 'subject' => 'PPS Assistant — connection test', 'add_to_inbox' => true )
     );
 
