@@ -1594,7 +1594,36 @@ function pps_ajax_add_to_cart() {
             WC()->cart->remove_cart_item( $edit_key );
             WC()->session->set( 'pps_edit_key_' . $product_id, null );
         }
-        wp_send_json_success( array( 'cart_item_key' => $cart_item_key ) );
+        // Discount code, if the customer entered one. Applied through WooCommerce so
+        // Woo remains the single authority on coupon maths and renders the discount
+        // line natively in cart, checkout, order emails and the admin order screen.
+        // Deliberately NOT folded into pps_price: that price is what the materials
+        // floor and the pps_lock checksum are computed against, and a coupon baked
+        // into it would trip both.
+        $coupon_applied = '';
+        $coupon_code    = wc_format_coupon_code( sanitize_text_field( (string) ( $_POST['pps_coupon'] ?? '' ) ) );
+        if ( $coupon_code !== '' && strlen( $coupon_code ) <= 60 ) {
+            // Woo re-validates here; a code the preview endpoint accepted can still be
+            // refused (used up in the meantime, cart no longer meets the minimum...).
+            if ( ! WC()->cart->has_discount( $coupon_code ) ) {
+                if ( WC()->cart->apply_coupon( $coupon_code ) ) {
+                    $coupon_applied = $coupon_code;
+                }
+                // Woo pushes its own notice on failure; swallow it so a bad code cannot
+                // block a legitimate add-to-cart. The response tells the client instead.
+                if ( $coupon_applied === '' && function_exists( 'wc_clear_notices' ) ) {
+                    wc_clear_notices();
+                }
+            } else {
+                $coupon_applied = $coupon_code;
+            }
+        }
+
+        wp_send_json_success( array(
+            'cart_item_key'  => $cart_item_key,
+            'coupon_applied' => $coupon_applied,
+            'coupon_failed'  => ( $coupon_code !== '' && $coupon_applied === '' ) ? $coupon_code : '',
+        ) );
     } else {
         wp_send_json_error( 'Could not add to cart.' );
     }
@@ -2201,6 +2230,122 @@ add_action( 'rest_api_init', function() {
                 return new WP_Error( 'shippo_error', $resp->get_error_message(), array( 'status' => 502 ) );
             }
             return rest_ensure_response( json_decode( wp_remote_retrieve_body( $resp ), true ) );
+        },
+    ) );
+
+    // POST /wp-json/pps/v1/coupon/preview — what would this code do to this quote?
+    //
+    // The calculator needs to SHOW the effect of a discount code while the customer is
+    // still configuring, but coupons live in WooCommerce and the browser must never be
+    // told what they are worth in advance. So the client asks, and this answers for one
+    // code against one subtotal.
+    //
+    // This is a PREVIEW and nothing more. The coupon is never folded into pps_price —
+    // doing so would trip pps_materials_price_floor() (which compares the line price to
+    // materials cost) and desync the pps_lock checksum. The real discount is applied by
+    // WooCommerce at cart level in pps_ajax_add_to_cart(), which also means cart,
+    // checkout, order emails and the admin screen render it natively for free.
+    // A tampered client can therefore only lie to itself: Woo re-validates at checkout.
+    register_rest_route( 'pps/v1', '/coupon/preview', array(
+        'methods'             => 'POST',
+        // Public: guests are most customers, and they need to see the effect too.
+        'permission_callback' => '__return_true',
+        'callback'            => function( $request ) {
+            if ( ! function_exists( 'wc_get_coupon_id_by_code' ) ) {
+                return new WP_Error( 'no_wc', 'WooCommerce unavailable', array( 'status' => 501 ) );
+            }
+            $data     = $request->get_json_params();
+            $code     = wc_format_coupon_code( sanitize_text_field( (string) ( $data['code'] ?? '' ) ) );
+            $subtotal = round( floatval( $data['subtotal'] ?? 0 ), 2 );
+            $prod_id  = intval( $data['product_id'] ?? 0 );
+
+            if ( $code === '' || strlen( $code ) > 60 ) {
+                return new WP_Error( 'bad_code', 'Enter a discount code.', array( 'status' => 400 ) );
+            }
+            if ( $subtotal <= 0 ) {
+                return new WP_Error( 'bad_subtotal', 'Configure your order first.', array( 'status' => 400 ) );
+            }
+
+            // Rate limit per IP. Without this the endpoint is a coupon-code oracle —
+            // someone could grind through guesses until one validates.
+            $ip     = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
+            $rl_key = 'pps_coupon_rl_' . md5( $ip );
+            $hits   = (int) get_transient( $rl_key );
+            if ( $hits >= 12 ) {
+                return new WP_Error( 'rate_limited', 'Too many attempts — please wait a minute.', array( 'status' => 429 ) );
+            }
+            set_transient( $rl_key, $hits + 1, MINUTE_IN_SECONDS );
+
+            // Deliberately uniform failure text: never distinguish "no such code" from
+            // "expired" or "used up", or the endpoint confirms which codes exist.
+            $reject = new WP_Error( 'invalid', 'That code is not valid for this order.', array( 'status' => 200 ) );
+
+            $coupon_id = wc_get_coupon_id_by_code( $code );
+            if ( ! $coupon_id ) return $reject;
+            $coupon = new WC_Coupon( $coupon_id );
+            if ( ! $coupon->get_id() ) return $reject;
+
+            // Validity checks done explicitly rather than via WC_Discounts, which needs a
+            // real cart. Each one mirrors what Woo will enforce at checkout.
+            $exp = $coupon->get_date_expires();
+            if ( $exp && $exp->getTimestamp() < current_time( 'timestamp', true ) ) return $reject;
+
+            $limit = $coupon->get_usage_limit();
+            if ( $limit > 0 && $coupon->get_usage_count() >= $limit ) return $reject;
+
+            $min = (float) $coupon->get_minimum_amount();
+            if ( $min > 0 && $subtotal < $min ) {
+                return rest_ensure_response( array(
+                    'valid'   => false,
+                    'message' => sprintf( 'This code needs a minimum of %s.', wp_strip_all_tags( wc_price( $min ) ) ),
+                ) );
+            }
+            $max = (float) $coupon->get_maximum_amount();
+            if ( $max > 0 && $subtotal > $max ) {
+                return rest_ensure_response( array(
+                    'valid'   => false,
+                    'message' => sprintf( 'This code applies to orders up to %s.', wp_strip_all_tags( wc_price( $max ) ) ),
+                ) );
+            }
+
+            // Product / category restrictions, when the calculator told us the product.
+            if ( $prod_id ) {
+                $inc = $coupon->get_product_ids();
+                $exc = $coupon->get_excluded_product_ids();
+                if ( ! empty( $inc ) && ! in_array( $prod_id, $inc, true ) ) return $reject;
+                if ( ! empty( $exc ) && in_array( $prod_id, $exc, true ) ) return $reject;
+                $cat_inc = $coupon->get_product_categories();
+                $cat_exc = $coupon->get_excluded_product_categories();
+                if ( ! empty( $cat_inc ) || ! empty( $cat_exc ) ) {
+                    $terms = wc_get_product_cat_ids( $prod_id );
+                    if ( ! empty( $cat_inc ) && ! array_intersect( $terms, $cat_inc ) ) return $reject;
+                    if ( ! empty( $cat_exc ) && array_intersect( $terms, $cat_exc ) ) return $reject;
+                }
+            }
+
+            $type   = $coupon->get_discount_type();
+            $amount = (float) $coupon->get_amount();
+            if ( 'percent' === $type ) {
+                $discount = $subtotal * ( $amount / 100 );
+            } else {
+                // fixed_cart and fixed_product both resolve to a flat amount here: the
+                // calculator quotes a single line item, so there is no basket to spread across.
+                $discount = $amount;
+            }
+            $discount = min( round( $discount, 2 ), $subtotal );
+            if ( $discount <= 0 ) return $reject;
+
+            return rest_ensure_response( array(
+                'valid'    => true,
+                'code'     => $code,
+                'type'     => $type,
+                'amount'   => $amount,
+                'discount' => $discount,
+                'label'    => 'percent' === $type
+                    ? rtrim( rtrim( number_format( $amount, 2, '.', '' ), '0' ), '.' ) . '% off'
+                    : wp_strip_all_tags( wc_price( $amount ) ) . ' off',
+                'free_shipping' => (bool) $coupon->get_free_shipping(),
+            ) );
         },
     ) );
 
