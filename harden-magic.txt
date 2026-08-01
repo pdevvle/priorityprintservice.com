@@ -1,0 +1,39 @@
+    // Magic-byte validation: the file's leading bytes must match its claimed
+    // extension — blocks executables/polyglots renamed to an allowed type.
+    $fh   = fopen( $file['tmp_name'], 'rb' );
+    $head = $fh ? (string) fread( $fh, 16 ) : '';
+    if ( $fh ) {
+        fclose( $fh );
+    }
+    $magic_ok = false;
+    switch ( $ext ) {
+        case 'pdf':
+            $magic_ok = strncmp( $head, '%PDF', 4 ) === 0;
+            break;
+        case 'jpg':
+        case 'jpeg':
+            $magic_ok = strncmp( $head, "\xFF\xD8\xFF", 3 ) === 0;
+            break;
+        case 'png':
+            $magic_ok = strncmp( $head, "\x89PNG\r\n\x1a\n", 8 ) === 0;
+            break;
+        case 'tif':
+        case 'tiff':
+            $magic_ok = strncmp( $head, "II*\x00", 4 ) === 0 || strncmp( $head, "MM\x00*", 4 ) === 0;
+            break;
+        case 'eps':
+            $magic_ok = strncmp( $head, '%!PS', 4 ) === 0 || strncmp( $head, "\xC5\xD0\xD3\xC6", 4 ) === 0;
+            break;
+        case 'ai': // modern AI = PDF-compatible; legacy AI = PostScript
+            $magic_ok = strncmp( $head, '%PDF', 4 ) === 0 || strncmp( $head, '%!PS', 4 ) === 0;
+            break;
+        case 'txt': // generated manifests: small, and no executable headers
+            $magic_ok = $file['size'] <= 1024 * 1024
+                && strncmp( $head, 'MZ', 2 ) !== 0
+                && strncmp( $head, "\x7FELF", 4 ) !== 0
+                && strncmp( $head, "\xCA\xFE\xBA\xBE", 4 ) !== 0;
+            break;
+    }
+    if ( ! $magic_ok ) {
+        wp_send_json_error( 'File content does not match its .' . $ext . ' extension — re-export the file and try again.' );
+    }
