@@ -238,7 +238,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-01 · DISCOUNTS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-01 · PAGECLAMP</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -3630,8 +3630,17 @@ update();
       if (onCoverArt && extracted.pages.length >= 1) onCoverArt(extracted.pages[0].dataUrl);
       if (onBackCoverArt && extracted.pages.length >= 2) onBackCoverArt(extracted.pages[extracted.pages.length - 1].dataUrl);
       if (onPagesDetected && extracted.pages.length >= 2) {
+        // Round up to the next signature (4pp), floor at the smallest book we sell,
+        // and CLAMP to the largest. Without the clamp a 68pp upload set pages=68,
+        // which has no matching <option> — the select fell back to displaying "8
+        // Pages" while the engine priced 68. The control and the price described
+        // different jobs, silently, and a 120pp saddle stitch could be ordered even
+        // though the product tops out at 64. The overflow is surfaced instead, via
+        // reconcileInfo.type === "trimmed".
+        const _max = PAGE_COUNTS[PAGE_COUNTS.length - 1] || 64;
         let pg = Math.ceil(extracted.pages.length / 4) * 4;
         if (pg < 8) pg = 8;
+        if (pg > _max) pg = _max;
         onPagesDetected(pg);
       }
       // Pass raw file up for order submission
@@ -4041,10 +4050,17 @@ update();
               later piece of work — this is the decision, not the editor.) */}
           {preflight && preflight.length > 0 && (() => {
             const needsBlanks = reconcileInfo && reconcileInfo.type === "padded";
+            // More pages in the file than the book has room for. Either the customer
+            // ordered fewer than they uploaded, or the file exceeds the largest book
+            // this product comes in — in which case the page count was clamped and
+            // saying nothing would let them order 64pp thinking they bought 120.
+            const overflow  = reconcileInfo && reconcileInfo.type === "trimmed" ? reconcileInfo : null;
+            const _maxPages = PAGE_COUNTS[PAGE_COUNTS.length - 1] || 64;
+            const atCeiling = !!overflow && reconcileInfo.target >= _maxPages;
             const issues = preflight.filter(c => c.level === "warn" || c.level === "fail");
             const notes  = preflight.filter(c => c.level === "info");
             const passes = preflight.filter(c => c.level === "pass");
-            const alert  = needsBlanks || issues.length > 0;
+            const alert  = needsBlanks || !!overflow || issues.length > 0;
             const pageChk = preflight.find(c => c.id === "pages");
             const n = needsBlanks ? reconcileInfo.count : 0;
             const chosen = blankPlacement;
@@ -4067,6 +4083,31 @@ update();
                   </div>
                 )}
                 <div style={{ padding:"8px 12px" }}>
+                  {overflow && (
+                    <div style={{ marginBottom: (issues.length||notes.length||passes.length||needsBlanks) ? 10 : 0,
+                      padding:"9px 11px", borderRadius:9, background:CC.white, border:`1px solid #fcd34d` }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:CC.dark, marginBottom:3 }}>
+                        <RichTip tipKey="page_count">
+                          {atCeiling
+                            ? `Your file has ${overflow.raw} pages — more than this booklet holds`
+                            : `Your file has ${overflow.raw} pages — you ordered ${overflow.target}`}
+                        </RichTip>
+                      </div>
+                      <div style={{ fontSize:11, color:CC.mid, lineHeight:1.45, marginBottom:8 }}>
+                        {atCeiling
+                          ? `Saddle stitch tops out at ${_maxPages} pages. We will print the first ${overflow.target}; the remaining ${overflow.count} will not be included. For a longer book, ask us about perfect binding.`
+                          : `The last ${overflow.count} page${overflow.count>1?"s":""} will not be printed. Raise the page count to include ${overflow.raw>_maxPages?_maxPages:overflow.raw}, or reupload a file that matches.`}
+                      </div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                        <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                          style={{ padding:"7px 11px", fontSize:11.5, fontWeight:600, borderRadius:8, cursor:"pointer",
+                            fontFamily:"inherit", border:`1px solid ${CC.border}`, background:CC.white, color:CC.mid,
+                            transition:"all .15s ease" }}>
+                          Reupload revised file
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {needsBlanks && (
                     <div style={{ marginBottom: issues.length||notes.length||passes.length ? 10 : 0,
                       padding:"9px 11px", borderRadius:9, background:CC.white, border:`1px solid #fcd34d` }}>
@@ -4105,7 +4146,7 @@ update();
                       )}
                     </div>
                   )}
-                  {[...issues, ...notes, ...passes].filter(c => !(needsBlanks && c.id === "pages")).map((c, i) => (
+                  {[...issues, ...notes, ...passes].filter(c => !((needsBlanks || overflow) && c.id === "pages")).map((c, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 7, padding: "2px 0", flexWrap:"wrap" }}>
                       <span style={{ width: 7, height: 7, borderRadius: "50%", background: PF[c.level].dot, flexShrink: 0, marginTop: 2 }} />
                       <span style={{ fontSize: 10.5, fontWeight: 600, color: PF[c.level].text, minWidth: 72 }}>{c.label}</span>
