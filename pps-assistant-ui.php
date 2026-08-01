@@ -590,6 +590,29 @@ function pps_assistant_render_admin() {
             </form>
 
             <?php
+            // Turned-away deliveries. Shown above the main log because a 401 is the one
+            // failure the operator cannot diagnose from Missive's side — it just says
+            // "401 Unauthorized" and stops.
+            $rej = get_option( 'pps_assistant_webhook_rejects', array() );
+            if ( is_string( $rej ) ) $rej = json_decode( $rej, true );
+            if ( is_array( $rej ) && $rej ) : ?>
+                <h3 style="color:#b32d2e">Rejected webhook deliveries
+                    <span style="font-weight:400;color:#666">(last 5)</span></h3>
+                <p class="description" style="max-width:46em"><strong>Read
+                <code>k_present</code> first.</strong> False means the key never arrived —
+                the sender dropped the query string, so use the <code>X-PPS-Key</code> header
+                instead if Missive allows custom headers. True means it arrived but did not
+                match, so the URL in Missive is from before a key regeneration — re-copy it.</p>
+                <div style="max-height:280px;overflow:auto;border:1px solid #ccd0d4;background:#fff;padding:10px">
+                <?php foreach ( $rej as $r ) : ?>
+                    <pre style="margin:0 0 8px;white-space:pre-wrap;word-break:break-all;font-size:11px;color:#555"><?php
+                        echo esc_html( wp_json_encode( $r, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
+                    ?></pre>
+                    <hr style="margin:6px 0">
+                <?php endforeach; ?>
+                </div>
+            <?php endif;
+
             $mlog = get_option( 'pps_assistant_missive_log', array() );
             if ( is_string( $mlog ) ) $mlog = json_decode( $mlog, true );
             if ( is_array( $mlog ) && $mlog ) : ?>
