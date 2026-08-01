@@ -141,7 +141,12 @@ PPS React calculators and the legacy WCPA plugin run side-by-side on the same Wo
   - https://pdevvle.github.io/priorityprintservice.com/calc-brochure.html (brochure)
   - https://pdevvle.github.io/priorityprintservice.com/calc-coupon-book.html (coupon book)
 - Each calculator has a build-stamp chip in the bottom-right corner. After a push, wait ~60 seconds for Pages to rebuild, then hard-refresh (Cmd/Ctrl+Shift+R) or use an Incognito window. If the chip still doesn't update, verify `.nojekyll` exists on `pps-pricing-config` root — that's the #1 cause of "my push didn't show up."
-- Go private protocol: replace files with dummies, flip repo to private. Restore: `git checkout pps-real-backup -- <files>`
+- **Publish surface:** the `pages-public` branch is what Pages should serve — an orphan branch carrying only the nine calculators, `pps-theme/preview.html` and `.nojekyll`. Pages serves the *entire tree* of whatever branch it publishes from, so publishing `pps-pricing-config` also served every `.php` file as plain text (Pages doesn't execute PHP), plus `docs/MASTER_PRICING_LOGIC.md` and `CLAUDE.md`. Calculator changes get cherry-picked to `pages-public`; nothing else goes on it.
+- **Go private (deferred by owner 2026-08-01 until the build is finished).** When ready:
+  1. Confirm the GitHub plan allows Pages from a private repo, or the preview URLs go dark.
+  2. Flip repo visibility. This is the action that matters — while the repo is public, everything is readable on github.com regardless of what Pages serves, **including full history**, so deleting a file from HEAD does not unpublish it.
+  3. Only then is the older dummy-swap dance unnecessary. Legacy restore path, if used: `git checkout pps-real-backup -- <files>`
+  - Until then, treat every branch as public: don't commit pricing figures, strategy, or credentials anywhere in the repo.
 
 ## Retired branches
 
