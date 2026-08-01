@@ -1225,7 +1225,7 @@ add_action( 'wp_footer', function () {
 
 add_action( 'admin_menu', function () {
     add_submenu_page(
-        'pps-calculators',                 // parent slug — adjust if the menu slug differs
+        'pps-calculators',                 // verified against pps-calculators.php add_menu_page()
         'Assistant',
         'Assistant',
         'manage_options',
@@ -1270,7 +1270,10 @@ function pps_assistant_render_admin() {
     }
 
     $cfg   = pps_assistant_config();
-    $today = (int) get_transient( 'pps_assistant_calls_' . gmdate( 'Y-m-d' ) );
+    // Must read through the same accessor the counter writes through — under Object Cache
+    // Pro the value lives in the object cache, not a transient, so a direct get_transient()
+    // here would display 0 forever.
+    $today = pps_assistant_counter_get( pps_assistant_budget_key() );
     ?>
     <div class="wrap">
         <h1>PPS Assistant</h1>
