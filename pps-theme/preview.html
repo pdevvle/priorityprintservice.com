@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#f6f4ef" />
+<title>Homepage preview — Priority Print Service</title>
+<link rel="stylesheet" href="assets/css/main.css" />
+<style>
+  /* Preview-only page styles (would not exist in theme) */
+  .screen-reader-text {
+    position: absolute !important; clip: rect(1px,1px,1px,1px); width: 1px; height: 1px; overflow: hidden;
+  }
+
+  /* ── Hero ─────────────────────────────────────────────── */
+  .pps-hero {
+    max-width: var(--pps-max-w);
+    margin: 0 auto;
+    padding: var(--pps-space-9) var(--pps-gutter) var(--pps-space-7);
+    text-align: center;
+  }
+  .pps-hero h1 {
+    margin: 0 0 var(--pps-space-4);
+    font-size: clamp(36px, 6vw, 72px);
+    line-height: 1;
+    letter-spacing: -0.035em;
+    font-weight: 700;
+  }
+  .pps-hero p {
+    max-width: 52ch;
+    margin: 0 auto var(--pps-space-6);
+    font-size: clamp(16px, 1.5vw, 19px);
+    line-height: 1.55;
+    color: var(--pps-slate);
+  }
+
+  /* ── Product Wizard ───────────────────────────────────── */
+  .pps-wizard {
+    max-width: var(--pps-max-w);
+    margin: 0 auto;
+    padding: 0 var(--pps-gutter) var(--pps-space-9);
+  }
+  .pps-wizard__header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--pps-space-4);
+    margin-bottom: var(--pps-space-6);
+    padding-bottom: var(--pps-space-4);
+    border-bottom: 1px solid var(--pps-hairline);
+  }
+  .pps-wizard__step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--pps-ink);
+    color: var(--pps-paper);
+    font-family: var(--pps-font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .pps-wizard__title {
+    font-size: clamp(18px, 2.5vw, 24px);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 0;
+    color: var(--pps-ink);
+  }
+
+  .pps-wizard__grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--pps-space-5);
+  }
+  @media (max-width: 720px) {
+    .pps-wizard__grid { grid-template-columns: 1fr; }
+  }
+
+  /* ── Product Card ─────────────────────────────────────── */
+  .pps-product {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: var(--pps-white);
+    border: 1px solid var(--pps-border);
+    border-radius: var(--pps-radius-md);
+    overflow: hidden;
+    transition: transform var(--pps-dur-med) var(--pps-ease),
+                box-shadow var(--pps-dur-med) var(--pps-ease),
+                border-color var(--pps-dur-med) var(--pps-ease);
+    cursor: pointer;
+  }
+  .pps-product:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 16px 48px -12px rgba(10, 10, 10, 0.15);
+    border-color: var(--pps-fog);
+  }
+  .pps-product:focus-within {
+    outline: 2px solid var(--pps-ink);
+    outline-offset: 2px;
+  }
+
+  .pps-product__img {
+    position: relative;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+    background: var(--pps-mist);
+  }
+  .pps-product__img img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transition: transform var(--pps-dur-slow) var(--pps-ease);
+  }
+  .pps-product:hover .pps-product__img img {
+    transform: scale(1.04);
+  }
+  .pps-product__num {
+    position: absolute;
+    top: var(--pps-space-3);
+    left: var(--pps-space-3);
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--pps-white);
+    color: var(--pps-ink);
+    font-family: var(--pps-font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-grid;
+    place-items: center;
+    box-shadow: 0 2px 8px rgba(10, 10, 10, 0.12);
+  }
+
+  .pps-product__body {
+    padding: var(--pps-space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--pps-space-2);
+    flex: 1;
+  }
+  .pps-product__name {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+  }
+  .pps-product__name a {
+    text-decoration: none;
+    color: inherit;
+  }
+  .pps-product__name a::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+  .pps-product__desc {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--pps-text-muted);
+  }
+  .pps-product__specs {
+    margin: var(--pps-space-2) 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pps-space-2);
+  }
+  .pps-product__tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--pps-paper);
+    border: 1px solid var(--pps-border);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--pps-charcoal);
+    letter-spacing: 0.01em;
+  }
+  .pps-product__cta {
+    margin-top: auto;
+    padding-top: var(--pps-space-4);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--pps-ink);
+    letter-spacing: -0.005em;
+  }
+  .pps-product__cta svg {
+    width: 14px; height: 14px;
+    transition: transform var(--pps-dur-fast) var(--pps-ease);
+  }
+  .pps-product:hover .pps-product__cta svg {
+    transform: translateX(4px);
+  }
+
+  /* ── Extras row ───────────────────────────────────────── */
+  .pps-extras {
+    max-width: var(--pps-max-w);
+    margin: 0 auto;
+    padding: 0 var(--pps-gutter) var(--pps-space-9);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--pps-space-4);
+  }
+  .pps-extra {
+    padding: var(--pps-space-5);
+    background: var(--pps-white);
+    border: 1px solid var(--pps-border);
+    border-radius: var(--pps-radius-md);
+  }
+  .pps-extra__icon {
+    width: 36px; height: 36px;
+    margin-bottom: var(--pps-space-3);
+    color: var(--pps-charcoal);
+  }
+  .pps-extra h3 {
+    margin: 0 0 var(--pps-space-1);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .pps-extra p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--pps-text-muted);
+    line-height: 1.45;
+  }
+
+  /* ── Footer note ──────────────────────────────────────── */
+  .demo-note {
+    max-width: var(--pps-max-w);
+    margin: 0 auto;
+    padding: var(--pps-space-5) var(--pps-gutter) var(--pps-space-7);
+    color: var(--pps-text-muted);
+    font-size: 13px;
+    border-top: 1px solid var(--pps-hairline);
+  }
+</style>
+</head>
+<body>
+
+<a class="pps-skip" href="#pps-main">Skip to content</a>
+
+<header class="pps-header" role="banner">
+  <div class="pps-header__inner">
+    <a class="pps-brand" href="#" aria-label="Priority Print Service — home">
+      <span class="pps-brand__mark" aria-hidden="true">P</span>
+      <span class="pps-brand__text">Priority Print <em>Service</em></span>
+    </a>
+
+    <div class="pps-header__mid" aria-hidden="true"></div>
+
+    <div class="pps-header__actions">
+      <a class="pps-header__phone" href="tel:+16025551234">
+        <span class="label">Call&nbsp;</span>(602) 555-1234
+      </a>
+      <button
+        class="pps-menu-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="pps-overlay"
+        aria-label="Open menu"
+        data-pps-menu-toggle
+      >
+        <span class="pps-menu-toggle__bars" aria-hidden="true"></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<div
+  id="pps-overlay"
+  class="pps-overlay"
+  data-pps-overlay
+  data-open="false"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="pps-overlay-title"
+>
+  <div class="pps-overlay__inner">
+    <button
+      class="pps-overlay__close"
+      type="button"
+      aria-label="Close menu"
+      data-pps-menu-close
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    </button>
+
+    <h2 id="pps-overlay-title" class="screen-reader-text">Menu</h2>
+
+    <div class="pps-overlay__grid">
+      <nav aria-label="Services">
+        <span class="pps-nav__eyebrow">Print services</span>
+        <ul class="pps-nav__list">
+          <li class="pps-nav__item">
+            <a class="pps-nav__link" href="#">
+              <span class="pps-nav__num" aria-hidden="true">01</span>
+              <span class="pps-nav__label">Saddle stitch booklets</span>
+              <span class="pps-nav__meta">8–200pg · stapled</span>
+            </a>
+          </li>
+          <li class="pps-nav__item">
+            <a class="pps-nav__link" href="#">
+              <span class="pps-nav__num" aria-hidden="true">02</span>
+              <span class="pps-nav__label">Perfect bound booklets</span>
+              <span class="pps-nav__meta">40–500pg · glued spine</span>
+            </a>
+          </li>
+          <li class="pps-nav__item">
+            <a class="pps-nav__link" href="#">
+              <span class="pps-nav__num" aria-hidden="true">03</span>
+              <span class="pps-nav__label">Brochures &amp; flyers</span>
+              <span class="pps-nav__meta">9 fold types · flats</span>
+            </a>
+          </li>
+          <li class="pps-nav__item">
+            <a class="pps-nav__link" href="#">
+              <span class="pps-nav__num" aria-hidden="true">04</span>
+              <span class="pps-nav__label">Coupon books</span>
+              <span class="pps-nav__meta">perforated · numbered</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+
+      <nav aria-label="About and support" class="pps-nav--secondary">
+        <span class="pps-nav__eyebrow">The shop</span>
+        <ul class="pps-nav__list">
+          <li class="pps-nav__item"><a class="pps-nav__link" href="#"><span class="pps-nav__label">About</span></a></li>
+          <li class="pps-nav__item"><a class="pps-nav__link" href="#"><span class="pps-nav__label">Pricing guide</span></a></li>
+          <li class="pps-nav__item"><a class="pps-nav__link" href="#"><span class="pps-nav__label">FAQ</span></a></li>
+          <li class="pps-nav__item"><a class="pps-nav__link" href="#"><span class="pps-nav__label">Contact</span></a></li>
+        </ul>
+      </nav>
+    </div>
+
+    <div class="pps-overlay__foot">
+      <div class="pps-contact__row">
+        <div class="pps-contact__group">
+          <span class="pps-contact__label">Call</span>
+          <a class="pps-contact__value" href="tel:+16025551234">(602) 555-1234</a>
+        </div>
+        <div class="pps-contact__group">
+          <span class="pps-contact__label">Email</span>
+          <a class="pps-contact__value" href="mailto:hello@priorityprintservice.com">hello@priorityprintservice.com</a>
+        </div>
+        <div class="pps-contact__group">
+          <span class="pps-contact__label">Hours</span>
+          <span class="pps-contact__value">Mon–Fri 8a–5p</span>
+        </div>
+      </div>
+      <a class="pps-cta" href="#">
+        Start an order
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M5 12h14M13 5l7 7-7 7" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</div>
+
+<main id="pps-main" tabindex="-1">
+
+  <!-- Hero -->
+  <section class="pps-hero">
+    <h1>Custom printing,<br />instant pricing.</h1>
+    <p>Configure your print job, see the price in real time, and order online. Booklets, brochures, coupon books — produced in Phoenix and shipped nationwide.</p>
+  </section>
+
+  <!-- Product Wizard -->
+  <section class="pps-wizard" aria-label="Choose your product">
+    <div class="pps-wizard__header">
+      <span class="pps-wizard__step" aria-hidden="true">1</span>
+      <h2 class="pps-wizard__title">What are you printing?</h2>
+    </div>
+
+    <div class="pps-wizard__grid">
+
+      <!-- Saddle Stitch -->
+      <article class="pps-product">
+        <div class="pps-product__img">
+          <img src="https://woocommerce-70867-4915293.cloudwaysapps.com/wp-content/uploads/2018/06/open-saddlestitch-booklet-mockup.png"
+               alt="An open saddle stitch booklet showing stapled binding along the spine"
+               loading="lazy" />
+          <span class="pps-product__num" aria-hidden="true">01</span>
+        </div>
+        <div class="pps-product__body">
+          <h3 class="pps-product__name"><a href="#">Saddle Stitch Booklets</a></h3>
+          <p class="pps-product__desc">Stapled on the spine. The go-to for programs, catalogs, zines, and manuals up to 200 pages.</p>
+          <div class="pps-product__specs">
+            <span class="pps-product__tag">8–200 pages</span>
+            <span class="pps-product__tag">Staple bound</span>
+            <span class="pps-product__tag">Multiple sizes</span>
+          </div>
+          <span class="pps-product__cta">
+            Get instant quote
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </div>
+      </article>
+
+      <!-- Perfect Bound -->
+      <article class="pps-product">
+        <div class="pps-product__img">
+          <img src="https://woocommerce-70867-4915293.cloudwaysapps.com/wp-content/uploads/2023/02/Priority-Print-Service-Online-Printing-Services-2.jpg"
+               alt="Professional print production services"
+               loading="lazy" />
+          <span class="pps-product__num" aria-hidden="true">02</span>
+        </div>
+        <div class="pps-product__body">
+          <h3 class="pps-product__name"><a href="#">Perfect Bound Booklets</a></h3>
+          <p class="pps-product__desc">Glued spine with a flat, professional edge. Ideal for thick catalogs, reports, journals, and books.</p>
+          <div class="pps-product__specs">
+            <span class="pps-product__tag">40–500 pages</span>
+            <span class="pps-product__tag">Glued spine</span>
+            <span class="pps-product__tag">Square back</span>
+          </div>
+          <span class="pps-product__cta">
+            Get instant quote
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </div>
+      </article>
+
+      <!-- Brochures -->
+      <article class="pps-product">
+        <div class="pps-product__img">
+          <img src="https://woocommerce-70867-4915293.cloudwaysapps.com/wp-content/uploads/2023/02/Priority-Print-Service-Online-Printing-Services-3.jpg"
+               alt="Printed brochures and flat print materials"
+               loading="lazy" />
+          <span class="pps-product__num" aria-hidden="true">03</span>
+        </div>
+        <div class="pps-product__body">
+          <h3 class="pps-product__name"><a href="#">Brochures &amp; Flyers</a></h3>
+          <p class="pps-product__desc">Single-sheet printing with 9 fold options. From flat flyers to gate folds — any size up to 27 inches.</p>
+          <div class="pps-product__specs">
+            <span class="pps-product__tag">9 fold types</span>
+            <span class="pps-product__tag">Flat available</span>
+            <span class="pps-product__tag">Custom sizes</span>
+          </div>
+          <span class="pps-product__cta">
+            Get instant quote
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </div>
+      </article>
+
+      <!-- Coupon Books -->
+      <article class="pps-product">
+        <div class="pps-product__img">
+          <img src="https://woocommerce-70867-4915293.cloudwaysapps.com/wp-content/uploads/2023/08/custom-coupon-book-min.png"
+               alt="Custom printed coupon book with perforated pages"
+               loading="lazy" />
+          <span class="pps-product__num" aria-hidden="true">04</span>
+        </div>
+        <div class="pps-product__body">
+          <h3 class="pps-product__name"><a href="#">Coupon Books</a></h3>
+          <p class="pps-product__desc">Perforated tear-out pages with optional numbering. Pad-bound or wraparound cover styles.</p>
+          <div class="pps-product__specs">
+            <span class="pps-product__tag">Perforated</span>
+            <span class="pps-product__tag">Numbered</span>
+            <span class="pps-product__tag">Pad or book</span>
+          </div>
+          <span class="pps-product__cta">
+            Get instant quote
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- Extras row -->
+  <section class="pps-extras" aria-label="What's included">
+    <div class="pps-extra">
+      <svg class="pps-extra__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+      </svg>
+      <h3>Instant pricing</h3>
+      <p>Live calculators show your exact cost as you configure. No waiting for quotes.</p>
+    </div>
+    <div class="pps-extra">
+      <svg class="pps-extra__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+      </svg>
+      <h3>Online proofing</h3>
+      <p>Upload artwork, preview with bleed guides, and approve before we print.</p>
+    </div>
+    <div class="pps-extra">
+      <svg class="pps-extra__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+        <rect x="1" y="3" width="15" height="13" rx="2"/><polyline points="16 8 20 8 23 11 23 16 20 16"/><circle cx="18" cy="17" r="2"/><circle cx="7" cy="17" r="2"/>
+      </svg>
+      <h3>Rush shipping</h3>
+      <p>Same-week turnarounds with overnight delivery. Pick your need-by date.</p>
+    </div>
+    <div class="pps-extra">
+      <svg class="pps-extra__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <h3>Finishing options</h3>
+      <p>UV coating, round cornering, perforation, numbering, and more.</p>
+    </div>
+  </section>
+
+  <p class="demo-note">This is a preview page — open it directly in a browser to see the header, fold-out menu, and product wizard. The WordPress version will render via <code>pps-theme/</code> template files.</p>
+</main>
+
+<script src="assets/js/main.js" defer></script>
+</body>
+</html>
