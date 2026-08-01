@@ -238,7 +238,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-31 · QA-FIXES</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-01 · DISCOUNTS</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -1391,7 +1391,7 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
   );
 }
 
-function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
+function Panel({result,compact,debugUnlocked,expanded,onToggleExpand,coupon,totalRef}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
@@ -1405,6 +1405,12 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
   // Availability reads as a single date: the rush need-by date when rush is applied,
   // else the free-delivery date — or the production+1 placeholder pre-address.
   const deliveryDate=sh?(!_dest?sh.earliestDate:((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate)):null;
+  // A discount code reduces what the customer pays but never the quoted line price —
+  // WooCommerce applies it at cart level. So show it as a deduction FROM the total
+  // rather than by rewriting the total, which is also how the order will read.
+  const _cpn=coupon&&coupon.discount>0?coupon:null;
+  const _cpnAmt=_cpn?Math.min(_cpn.discount,total):0;
+  const _afterCpn=Math.max(0,Math.round((total-_cpnAmt)*100)/100);
   const ti=result.ti||{};
   const _factors=[];
   if(ti.coverPaper>0)_factors.push("paper lead time");
@@ -1446,6 +1452,9 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
           <div style={{fontSize:10.5,fontWeight:600,opacity:.9,marginTop:3,letterSpacing:".2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
             As soon as {deliveryDate||availRange+" days"}
           </div>
+          {_cpn&&<div style={{fontSize:10.5,fontWeight:700,marginTop:2,letterSpacing:".2px",whiteSpace:"nowrap"}}>
+            {_cpn.code} −${_cpnAmt.toFixed(2)} · you pay ${_afterCpn.toFixed(2)}
+          </div>}
         </div>
         {expanded&&<div style={{background:CC.white,borderRadius:"0 0 6px 6px",border:`1px solid ${CC.border}`,borderTop:"none",maxHeight:"40vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
           {/* Same stat row desktop shows under its price card, at full width. */}
@@ -1478,6 +1487,11 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
   const brkDen=Math.max(0.01,grouped.reduce((s,r)=>s+Math.max(0,r.val),0)+(hasRush?sh.rushCost:0));
   return(
     <div style={{...ST.pnl, pointerEvents: "none"}}>
+      {/* Sentinel for the condensed-total bar. Watching the whole panel was wrong — on
+          a tall rail the total scrolls away while the panel's lower half is still on
+          screen, so the bar stayed hidden exactly when it was needed. Anchored at the
+          TOP of the card so it leaves the viewport when the total does. */}
+      <div ref={totalRef} style={{height:1,marginBottom:-1}} aria-hidden="true"/>
       {/* Ink price card, not brand cyan: cyan is reserved for the CTA and active
           states so the Add to Order button stays the loudest thing in the rail.
           Rush keeps its own colour — that's a state signal, not decoration. */}
@@ -1489,6 +1503,19 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
           <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
           {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
         </div>
+        {_cpn&&(
+          <div style={{marginTop:10,paddingTop:9,borderTop:`1px solid ${hasRush?"rgba(0,0,0,.15)":"rgba(255,255,255,.18)"}`}}>
+            <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,fontSize:12.5,fontWeight:700}}>
+              <span style={{textTransform:"uppercase",letterSpacing:".5px",opacity:.85}}>{_cpn.code} · {_cpn.label}</span>
+              <span>−${_cpnAmt.toFixed(2)}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,marginTop:6}}>
+              <span style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",opacity:.8}}>You pay</span>
+              <span style={{fontSize:24,fontWeight:800,letterSpacing:"-.7px"}}>${_afterCpn.toFixed(2)}</span>
+            </div>
+            <div style={{fontSize:10,opacity:.62,marginTop:3,lineHeight:1.35}}>Applied at checkout{_cpn.free_shipping?" · includes free shipping":""}</div>
+          </div>
+        )}
         {hasRush&&<div style={{fontSize:13.5,fontWeight:800,marginTop:6,letterSpacing:".2px"}}>Delivery by {sh.needByFmt}</div>}
         {hasRush&&debugUnlocked&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
       </div>
@@ -4899,7 +4926,7 @@ function uploadWithProgress(url, formData, onProgress) {
   });
 }
 
-async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress) {
+async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress, couponCode) {
   const PPS = window.PPS_CONFIG || {};
 
   // ── Standalone mode: download artwork + order summary as a zip-like package ──
@@ -5002,6 +5029,7 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     // Payload integrity — both are revalidated server-side in pps_ajax_add_to_cart
     // and neither participates in pricing.
     fd.append("pps_tier", "retail");
+    if (couponCode) fd.append("pps_coupon", couponCode);
     fd.append("pps_lock", (function(s){var h=0;for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))>>>0;}return h.toString(36);})(_pstr + "|" + PPS.productId));
     fd.append("pps_rush", rushCost.toFixed(2));
     fd.append("pps_summary", summary);
@@ -5451,6 +5479,81 @@ function App(){
   const[submitting,setSubmitting]=useState(false);
   const[uploadProgress,setUploadProgress]=useState(null); // null | {phase, pct, fileName, fileIdx, fileCount}
   const[shareCopied,setShareCopied]=useState(false);
+  // ── Discount code ─────────────────────────────────────────────────────────
+  // The code is previewed here and applied for real by WooCommerce at add-to-cart.
+  // Nothing about it touches the quoted line price: pps_price stays the true product
+  // price so the materials floor and the pps_lock checksum still hold. What the panel
+  // shows is an estimate of the effect; Woo re-validates and does the real maths.
+  const[couponInput,setCouponInput]=useState("");
+  const[coupon,setCoupon]=useState(null);      // {code,label,discount,type,free_shipping}
+  const[couponMsg,setCouponMsg]=useState("");
+  const[couponBusy,setCouponBusy]=useState(false);
+  const applyCoupon=async()=>{
+    const code=(couponInput||"").trim();
+    if(!code||couponBusy)return;
+    const subtotal=Number(result&&result.total)||0;
+    if(subtotal<=0){setCouponMsg("Configure your order first.");return;}
+    setCouponBusy(true); setCouponMsg("");
+    try{
+      const root=((window.PPS_CONFIG||{}).ajaxUrl||"").replace(/wp-admin\/admin-ajax\.php.*$/,"");
+      const r=await fetch((root||"/")+"wp-json/pps/v1/coupon/preview",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({code,subtotal,product_id:(window.PPS_CONFIG||{}).productId||0}),
+      });
+      if(!r.ok&&r.status!==200){ setCoupon(null); setCouponMsg(r.status===429?"Too many attempts — please wait a minute.":"Could not check that code."); return; }
+      const j=await r.json();
+      if(j&&j.valid){ setCoupon(j); setCouponMsg(""); }
+      else { setCoupon(null); setCouponMsg((j&&j.message)||"That code is not valid for this order."); }
+    }catch(e){ setCoupon(null); setCouponMsg("Could not reach the server — the code will still be checked at checkout."); }
+    finally{ setCouponBusy(false); }
+  };
+  const clearCoupon=()=>{ setCoupon(null); setCouponInput(""); setCouponMsg(""); };
+  // Rendered in the desktop rail and again in the mobile form. Defined once so the two
+  // cannot drift — the first version lived only in the rail, which meant a customer on
+  // a phone had no way to enter a discount code at all.
+  const DiscountField=()=>(
+    <div>
+      {coupon ? (
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"9px 11px",borderRadius:9,
+          background:CC.tint,border:`1px solid ${CK.cyan}55`}}>
+          <span style={{fontSize:12.5,fontWeight:700,color:CK.cyan,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            &#10003; {coupon.code} — {coupon.label}
+          </span>
+          <button type="button" onClick={clearCoupon} title="Remove this code"
+            style={{border:"none",background:"none",cursor:"pointer",fontFamily:"inherit",
+              fontSize:11.5,fontWeight:600,color:CC.light,padding:"2px 4px"}}>Remove</button>
+        </div>
+      ) : (
+        <div style={{display:"flex",gap:6}}>
+          <input type="text" value={couponInput} aria-label="Discount code"
+            onChange={e=>{setCouponInput(e.target.value.toUpperCase());setCouponMsg("");}}
+            onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();applyCoupon();}}}
+            placeholder="Discount code"
+            style={{...ST.inp,flex:1,minWidth:0,padding:"10px 12px",fontSize:mob?16:13,letterSpacing:".04em",textTransform:"uppercase"}}/>
+          <button type="button" onClick={applyCoupon} disabled={couponBusy||!couponInput.trim()}
+            style={{flexShrink:0,padding:"10px 15px",borderRadius:9,border:`1px solid ${CC.border}`,
+              background:CC.white,color:couponInput.trim()?CC.dark:CC.light,fontSize:12.5,fontWeight:650,
+              cursor:(couponBusy||!couponInput.trim())?"default":"pointer",fontFamily:"inherit",transition:"all .15s ease"}}>
+            {couponBusy?"Checking…":"Apply"}
+          </button>
+        </div>
+      )}
+      {couponMsg&&<div style={{fontSize:11.5,color:CC.red,marginTop:5,lineHeight:1.35}}>{couponMsg}</div>}
+    </div>
+  );
+  // A percentage code has to be re-priced whenever the quote changes, or the panel
+  // would keep showing a discount computed against a stale subtotal.
+  useEffect(()=>{
+    if(!coupon)return;
+    const subtotal=Number(result&&result.total)||0;
+    if(subtotal<=0)return;
+    if(coupon.type==="percent"){
+      const d=Math.min(Math.round(subtotal*(coupon.amount/100)*100)/100,subtotal);
+      if(Math.abs(d-coupon.discount)>0.005) setCoupon(c=>c?{...c,discount:d}:c);
+    } else if(coupon.discount>subtotal){
+      setCoupon(c=>c?{...c,discount:Math.round(subtotal*100)/100}:c);
+    }
+  },[result&&result.total,coupon&&coupon.type,coupon&&coupon.amount]);
   const[projCopied,setProjCopied]=useState(false);
   // The quantity table is the tallest thing in the rail. Left whole it pushes the rail
   // past the viewport, and a rail taller than the page's left column cannot stick — so
@@ -5460,11 +5563,16 @@ function App(){
   // Belt and braces for the same problem: when the price card does leave the viewport
   // (very short window, or a rail taller than everything else), a condensed bar takes
   // its place, tracked to the rail's own column so it reads as the rail folding up.
-  const railRef=useRef(null), priceRef=useRef(null);
+  const railRef=useRef(null);
+  // Callback ref, not useRef: the sentinel lives inside Panel, which early-returns
+  // before rendering it while the quote is still resolving. A plain ref plus a
+  // run-once effect therefore observed nothing and the bar never appeared. A state
+  // setter as the ref re-runs the effect the moment the node actually attaches.
+  const[totalEl,setTotalEl]=useState(null);
   const[miniBar,setMiniBar]=useState(null); // null | {left,width}
   useEffect(()=>{
     if(mob) { setMiniBar(null); return; }
-    const el=priceRef.current; if(!el||typeof IntersectionObserver==="undefined") return;
+    const el=totalEl; if(!el||typeof IntersectionObserver==="undefined") return;
     const place=()=>{ const r=railRef.current&&railRef.current.getBoundingClientRect();
       setMiniBar(r?{left:Math.round(r.left),width:Math.round(r.width)}:null); };
     const io=new IntersectionObserver(([e])=>{ if(e.isIntersecting) setMiniBar(null); else place(); },{threshold:0});
@@ -5472,7 +5580,7 @@ function App(){
     const onResize=()=>{ setMiniBar(v=>v?(railRef.current?{left:Math.round(railRef.current.getBoundingClientRect().left),width:Math.round(railRef.current.getBoundingClientRect().width)}:v):v); };
     window.addEventListener("resize",onResize);
     return ()=>{ io.disconnect(); window.removeEventListener("resize",onResize); };
-  },[mob]);
+  },[mob,totalEl]);
   const copyProjections = () => {
     if (!projections) return;
     const rows = projections.filter(p => p.total !== null);
@@ -5665,7 +5773,7 @@ function App(){
     const summary = buildSummary(config, result);
     const metadata = buildMetadata(config, result);
     const rushCost = result.shipping?.rushCost || 0;
-    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress);
+    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress, coupon ? coupon.code : "");
     // If still here (standalone mode), re-enable
     setUploadProgress(null);
     setSubmitting(false);
@@ -6125,6 +6233,7 @@ function App(){
             </>}
           </Sec>
 
+          {mob&&<div style={{...ST.card,padding:"12px 14px"}}><DiscountField/></div>}
 
         </div>
         {/* Sticky quote rail — the price and CTA stay in view while the job is built,
@@ -6132,7 +6241,7 @@ function App(){
         {!mob&&<div ref={railRef} style={{width:320,flexShrink:0,position:"sticky",top:16,alignSelf:"flex-start"}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
             <SidebarBookPreview sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={openPreview}/>
-            <div ref={priceRef}><Panel result={result} debugUnlocked={debugUnlocked}/></div>
+            <div><Panel result={result} debugUnlocked={debugUnlocked} coupon={coupon} totalRef={setTotalEl}/></div>
           </div>
           <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",marginTop:16,padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
           {/* Shipping is required to place the order, but the CTA keeps its own label —
@@ -6143,6 +6252,8 @@ function App(){
               Shipping info required prior to placing order
             </div>
           )}
+          {/* Discount code — one definition, mounted here and in the mobile flow. */}
+          <div style={{marginTop:10}}><DiscountField/></div>
           {/* Secondary action, directly under the CTA: visible without scrolling past
               the pricing table, which is where it used to sit. */}
           <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}}
@@ -6278,7 +6389,7 @@ function App(){
         )}
         <div style={{display:"flex",flexDirection:mobExpanded?"column":"row",alignItems:mobExpanded?"stretch":"center",gap:10}}>
           <div style={{flex:mobExpanded?undefined:1,minWidth:0}}>
-            <Panel result={result} compact debugUnlocked={debugUnlocked} expanded={mobExpanded} onToggleExpand={()=>setMobExpanded(p=>!p)}/>
+            <Panel result={result} compact debugUnlocked={debugUnlocked} coupon={coupon} expanded={mobExpanded} onToggleExpand={()=>setMobExpanded(p=>!p)}/>
           </div>
           <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined,width:mobExpanded?"100%":undefined}}
             disabled={!!result?.error?.length||submitting}>
