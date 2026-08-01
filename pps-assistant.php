@@ -79,6 +79,8 @@ function pps_assistant_config() {
         'missive_webhook_secret' => '',
         'missive_alias'          => '',     // must match an alias defined on the channel
         'missive_alias_name'     => '',
+        // OFF: customers see the alias (the shop). ON: they see whoever replied.
+        'missive_show_agent_name' => false,
         // 'text' | 'email'. Missive rejects a subject line on a text channel outright
         // ("'subject' is not allowed for 'text' messages"), and a text channel shows an
         // HTML body as raw tags. Defaults to text because that is what a custom channel

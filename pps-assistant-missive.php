@@ -76,6 +76,32 @@ function pps_assistant_missive_is_text_channel() {
 }
 
 /**
+ * What name the CUSTOMER sees on an agent's reply.
+ *
+ * Defaults to the channel alias, not the person who typed. A shared alias like
+ * "Priority Print Service Staff" exists precisely so a customer is talking to the shop
+ * rather than to whoever happened to be at the desk — showing individual staff names
+ * would undo the reason the alias was configured, and it puts real people's names in
+ * front of strangers by default.
+ *
+ * The real author is still recorded in the bridge log, so internally you can always tell
+ * who replied. That split is deliberate: attribution for you, one identity for them.
+ */
+function pps_assistant_missive_agent_display( $author ) {
+    $cfg = pps_assistant_config();
+
+    if ( ! empty( $cfg['missive_show_agent_name'] ) && is_string( $author ) && $author !== '' ) {
+        return $author;
+    }
+
+    $name = (string) ( $cfg['missive_alias_name'] ?? '' );
+    if ( $name === '' ) $name = (string) ( $cfg['missive_alias'] ?? '' );
+    if ( $name === '' && function_exists( 'get_bloginfo' ) ) $name = (string) get_bloginfo( 'name' );
+
+    return $name !== '' ? $name : 'Our team';
+}
+
+/**
  * The threading key for a session.
  *
  * Ours, not Missive's — which is the whole point. A webhook delivery that echoes this
@@ -505,7 +531,7 @@ function pps_assistant_missive_receive( $payload ) {
     // Append through the re-reading helper: the chat endpoint writes this same array from
     // the other direction, across a relay that can sit on the wire for seconds.
     $session = pps_assistant_append_human_log( $sid, array(
-        'from' => ( $f['author'] ?: 'Priority Print Service' ),
+        'from' => pps_assistant_missive_agent_display( $f['author'] ),
         'text' => function_exists( 'mb_substr' ) ? mb_substr( $text, 0, 4000 ) : substr( $text, 0, 4000 ),
         'at'   => time(),
         'kind' => 'agent',

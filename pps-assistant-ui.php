@@ -381,6 +381,7 @@ function pps_assistant_render_admin() {
         $cfg['missive_channel_type'] = ( ( $_POST['missive_channel_type'] ?? '' ) === 'email' ) ? 'email' : 'text';
         $cfg['missive_alias']      = sanitize_text_field( wp_unslash( $_POST['missive_alias'] ?? '' ) );
         $cfg['missive_alias_name'] = sanitize_text_field( wp_unslash( $_POST['missive_alias_name'] ?? '' ) );
+        $cfg['missive_show_agent_name'] = ! empty( $_POST['missive_show_agent_name'] );
         $cfg['handoff_timeout']    = max( 30, (int) ( $_POST['handoff_timeout'] ?? 180 ) );
 
         // The webhook secret is ours to mint, not the operator's to invent — a weak one here
@@ -523,6 +524,15 @@ function pps_assistant_render_admin() {
                     <p class="description">Username first, then the display name — both must match an
                     alias you defined on the custom channel in Missive. This is the address the visitor's
                     message is addressed <em>to</em>, and the identity your team replies <em>as</em>.</p>
+                </td></tr>
+                <tr><th>Name on replies</th><td>
+                    <label><input type="checkbox" name="missive_show_agent_name" <?php checked( $cfg['missive_show_agent_name'] ); ?>>
+                        Show the name of whoever replied</label>
+                    <p class="description">Off (default) the customer sees your alias —
+                    <strong><?php echo esc_html( $cfg['missive_alias_name'] ?: ( $cfg['missive_alias'] ?: 'your alias' ) ); ?></strong>
+                    — which is the point of having a shared one. On, they see the individual
+                    team member's name as Missive reports it. Either way the bridge log records
+                    who actually replied, so you never lose attribution internally.</p>
                 </td></tr>
                 <tr><th>Wait before giving up</th><td>
                     <input type="number" name="handoff_timeout" value="<?php echo (int) $cfg['handoff_timeout']; ?>" min="30" step="10"> seconds

@@ -1050,7 +1050,10 @@ $s = pps_assistant_session_get( 'sess9' );
 ok( ( $s['mode'] ?? '' ) === 'human', 'delivery puts the session in human mode' );
 ok( count( $s['human_log'] ) === 1, 'and appends exactly one entry' );
 ok( $s['human_log'][0]['text'] === 'On it now', 'with the HTML stripped' );
-ok( $s['human_log'][0]['from'] === 'Preston', 'and the agent named' );
+// The customer sees the SHOP, not the individual. A shared alias exists so a visitor is
+// talking to the business; leaking staff names to strangers by default would undo that.
+ok( $s['human_log'][0]['from'] !== 'Preston', 'the customer does not see the individual by default' );
+ok( ( $mlog[0]['author'] ?? '' ) === 'Preston', 'but the log still records who really replied' );
 ok( $s['human_log'][0]['kind'] === 'agent', 'and marked as coming from a person' );
 // The Messages API history has strict invariants; a foreign turn spliced in bricks it.
 ok( empty( $s['messages'] ), 'the agent reply is kept OUT of the Claude message history' );
@@ -1347,6 +1350,30 @@ $body = pps_assistant_missive_body( $s, 'refund', 'wants money back' );
 ok( strpos( $body, '<' ) === false, 'the text-channel handoff body contains no markup at all' );
 ok( strpos( $body, 'Name: Jane' ) !== false, 'and still carries the details an agent needs' );
 ok( strpos( $body, 'Reason: refund' ) !== false, 'including why it was escalated' );
+
+// ── which name reaches the customer ──────────────────────────────────────────────
+reset_world();
+missive_configure( true );
+$cfg = pps_assistant_config();
+$cfg['missive_alias']      = 'priority-print-service-staff';
+$cfg['missive_alias_name'] = 'Priority Print Service Staff';
+update_option( 'pps_assistant_config', $cfg );
+
+ok( pps_assistant_missive_agent_display( 'Preston Cicala' ) === 'Priority Print Service Staff',
+    'by default the customer sees the alias, not the person who typed' );
+
+$cfg['missive_show_agent_name'] = true;
+update_option( 'pps_assistant_config', $cfg );
+ok( pps_assistant_missive_agent_display( 'Preston Cicala' ) === 'Preston Cicala',
+    'the toggle shows the individual when the operator chooses that' );
+ok( pps_assistant_missive_agent_display( '' ) === 'Priority Print Service Staff',
+    'and falls back to the alias when Missive reports no name' );
+
+$cfg['missive_show_agent_name'] = false;
+$cfg['missive_alias_name']      = '';
+update_option( 'pps_assistant_config', $cfg );
+ok( pps_assistant_missive_agent_display( 'Preston Cicala' ) === 'priority-print-service-staff',
+    'with no display name it uses the alias username rather than leaking a person' );
 
 // ── summary ──────────────────────────────────────────────────────────────────────
 echo "\n" . str_repeat( '─', 62 ) . "\n";
