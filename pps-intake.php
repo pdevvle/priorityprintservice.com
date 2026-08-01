@@ -165,8 +165,12 @@ function pps_intake_forms() {
                 'callback'   => array( 'type' => 'checkbox', 'required' => false,
                                        'label' => 'Are you requesting a callback?',
                                        'box'   => 'Yes, I think I need a phone call.' ),
+                // Required, but only once they have said this IS based on a previous order.
+                // Forminator asked for it unconditionally, so anyone answering "new product"
+                // was blocked until they described an order that does not exist.
                 'prev_order' => array( 'type' => 'textarea', 'label' => 'Your previous order', 'required' => true,
                                        'rows' => 4, 'maxlength' => 500,
+                                       'show_if' => 'basis', 'show_if_value' => 'previous',
                                        'help' => 'Order number, billing name or email — anything that helps us '
                                                . 'find the past project.' ),
                 'message'    => array( 'type' => 'textarea', 'label' => 'Comments', 'required' => true,
@@ -225,7 +229,16 @@ add_shortcode( 'pps_intake', function ( $atts ) {
         // A conditional field renders VISIBLE and is hidden by the script below. Without
         // JavaScript it simply stays on screen, which is a slightly longer form rather than
         // a field nobody can reach.
-        $cond = ! empty( $f['show_if'] ) ? ' data-show-if="' . esc_attr( $f['show_if'] ) . '"' : '';
+        $cond = '';
+        if ( ! empty( $f['show_if'] ) ) {
+            $cond = ' data-show-if="' . esc_attr( $f['show_if'] ) . '"';
+            // Absent, any answer to the controlling field reveals this one — which is what a
+            // checkbox wants. Present, only that specific answer does, which is what a radio
+            // wants.
+            if ( ! empty( $f['show_if_value'] ) ) {
+                $cond .= ' data-show-if-value="' . esc_attr( $f['show_if_value'] ) . '"';
+            }
+        }
 
         if ( $f['type'] === 'radio' ) {
             echo '<fieldset class="pps-intake-field pps-intake-choice"' . $cond . '>';
@@ -295,13 +308,30 @@ add_shortcode( 'pps_intake', function ( $atts ) {
 
     // Conditional reveal. Progressive: the fields are already rendered and usable, this
     // only tidies them away until they are relevant.
-    echo '<script>(function(){var r=document.getElementById(' . wp_json_encode( $anchor ) . ');'
-       . 'if(!r)return;var c=r.querySelectorAll("[data-show-if]");if(!c.length)return;'
-       . 'function sync(){Array.prototype.forEach.call(c,function(el){'
-       . 'var src=r.querySelector(\'[name="\'+el.dataset.showIf+\'"]\');'
-       . 'el.hidden=!(src&&src.checked)})}'
-       . 'Array.prototype.forEach.call(r.querySelectorAll(\'input[type=checkbox]\'),function(b){'
-       . 'b.addEventListener("change",sync)});sync()})();<\/script>';
+    //
+    // NOTE the literal closing tag below. Escaping it as <\/script> is right when a closing
+    // tag sits inside a JavaScript STRING, and wrong here — this is the element's own
+    // terminator, and the HTML parser would not recognise the escaped form, swallowing the
+    // rest of the page as script content.
+    printf(
+        '<script>(function(){var r=document.getElementById(%s);if(!r)return;'
+      . 'var c=r.querySelectorAll("[data-show-if]");if(!c.length)return;'
+      . 'function sync(){Array.prototype.forEach.call(c,function(el){'
+        . 'var want=el.getAttribute("data-show-if-value"),on=false;'
+        // A checkbox is one input; a radio group is several sharing a name. Walk them all
+        // and let the checked one decide.
+        . 'Array.prototype.forEach.call(r.querySelectorAll(\'[name="\'+el.getAttribute("data-show-if")+\'"]\'),'
+          . 'function(i){if(i.checked)on=want?(i.value===want):true});'
+        . 'el.hidden=!on;'
+        // A hidden field still marked required blocks submission with a validation error
+        // pointing at something the customer cannot see or focus.
+        . 'Array.prototype.forEach.call(el.querySelectorAll("input,textarea,select"),function(i){'
+          . 'if(on){if(i.getAttribute("data-was-req"))i.required=true}'
+          . 'else{if(i.required)i.setAttribute("data-was-req","1");i.required=false}})})}'
+      . 'Array.prototype.forEach.call(r.querySelectorAll("input[type=checkbox],input[type=radio]"),'
+        . 'function(b){b.addEventListener("change",sync)});sync()})();</script>',
+        wp_json_encode( $anchor )
+    );
 
     echo '</div>';
 
@@ -357,6 +387,22 @@ add_action( 'wp_enqueue_scripts', function () {
 // SUBMIT
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Is a conditional field showing, given the answers so far?
+ *
+ * No show_if: always. show_if with no value: any answer to the controlling field reveals
+ * it, which is what a checkbox wants. show_if plus show_if_value: only that answer, which
+ * is what a radio wants.
+ */
+function pps_intake_field_visible( array $f, array $values ) {
+    if ( empty( $f['show_if'] ) ) return true;
+
+    $ctrl = (string) ( $values[ $f['show_if'] ] ?? '' );
+    $want = (string) ( $f['show_if_value'] ?? '' );
+
+    return $want !== '' ? ( $ctrl === $want ) : ( $ctrl !== '' );
+}
+
 function pps_intake_rate_key() {
     $ip   = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : '';
     $salt = defined( 'AUTH_SALT' ) ? AUTH_SALT : 'pps';
@@ -411,7 +457,9 @@ function pps_intake_handle_submit() {
         if ( $f['type'] === 'radio' ) {
             // Only ever store one of the options we rendered — a posted value is untrusted.
             $picked = sanitize_key( wp_unslash( $_POST[ $fkey ] ?? '' ) );
-            $values[ $fkey ] = isset( $f['options'][ $picked ] ) ? (string) $f['options'][ $picked ] : '';
+            // Store the option KEY, not its label: conditions compare against it, and the
+            // label is a presentation concern the email formatter resolves.
+            $values[ $fkey ] = isset( $f['options'][ $picked ] ) ? $picked : '';
             if ( ! empty( $f['required'] ) && $values[ $fkey ] === '' ) {
                 pps_intake_bounce( $key, array( 'pps_err' => 'Please answer: ' . $f['label'] ) );
             }
@@ -422,7 +470,12 @@ function pps_intake_handle_submit() {
              : ( $f['type'] === 'email'  ? sanitize_email( $raw ) : sanitize_text_field( $raw ) );
         $val = trim( (string) $val );
 
-        if ( ! empty( $f['required'] ) && $val === '' ) {
+        // A field hidden by its condition cannot be required — the browser drops the
+        // attribute when it hides the field, and the server has to agree or the form
+        // becomes unsubmittable for exactly the people the condition was meant to spare.
+        // Fields are validated in definition order, so the controlling answer is already
+        // in $values by the time a dependent field is reached.
+        if ( ! empty( $f['required'] ) && $val === '' && pps_intake_field_visible( $f, $values ) ) {
             pps_intake_bounce( $key, array( 'pps_err' => $f['label'] . ' is required.' ) );
         }
         if ( $f['type'] === 'email' && $val !== '' && ! is_email( $val ) ) {
@@ -555,7 +608,9 @@ function pps_intake_notify( $key, array $form, array $values, array $file_urls, 
     foreach ( $form['fields'] as $fkey => $f ) {
         $v = trim( (string) ( $values[ $fkey ] ?? '' ) );
         if ( $v === '' ) continue;                       // unticked boxes say nothing
+        if ( ! pps_intake_field_visible( $f, $values ) ) continue;   // they never saw it
         if ( $f['type'] === 'checkbox' ) { $lines[] = $f['label'] . ' Yes'; continue; }
+        if ( $f['type'] === 'radio' )    { $lines[] = $f['label'] . ' ' . ( $f['options'][ $v ] ?? $v ); continue; }
         $lines[] = $f['label'] . ': ' . ( $f['type'] === 'textarea' ? "\n" . $v : $v );
     }
     if ( $file_urls ) {
