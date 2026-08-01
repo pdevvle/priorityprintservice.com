@@ -72,8 +72,12 @@ add_action( 'wp_footer', function () {
           '<header><span>Priority Print Service</span><button id="pps-asst-close" aria-label="Close">&times;</button></header>' +
           '<div id="pps-asst-log" role="log" aria-live="polite"></div>' +
           '<form id="pps-asst-gate">' +
-            '<label for="pps-asst-email">Your email, so we can follow up if we miss you</label>' +
-            '<input id="pps-asst-email" type="email" required autocomplete="email" placeholder="you@company.com">' +
+            '<p class="pps-asst-gate-intro">A few details so we can follow up if we miss you.</p>' +
+            '<input id="pps-asst-name" type="text" required autocomplete="name" placeholder="Full name">' +
+            '<input id="pps-asst-company" type="text" autocomplete="organization" placeholder="Company (optional)">' +
+            '<input id="pps-asst-email" type="email" required autocomplete="email" placeholder="Email">' +
+            '<input id="pps-asst-phone" type="tel" required autocomplete="tel" placeholder="Phone">' +
+            '<p class="pps-asst-gate-err" hidden></p>' +
             '<button type="submit">Start chat</button>' +
           '</form>' +
           '<form id="pps-asst-form" hidden>' +
@@ -94,9 +98,11 @@ add_action( 'wp_footer', function () {
         return el;
       }
 
-      // Email gate. Held in sessionStorage so a page navigation doesn't re-ask; the server
-      // is the real gate, this is only UI state.
-      var email = sessionStorage.getItem('ppsAsstEmail') || '';
+      // Intake gate. Held in sessionStorage so a page navigation doesn't re-ask; the
+      // server re-validates every field, this is only UI state.
+      var intake = {};
+      try { intake = JSON.parse(sessionStorage.getItem('ppsAsstIntake') || '{}'); } catch (e) { intake = {}; }
+      var haveIntake = !!(intake.name && intake.email && intake.phone);
 
       function showChat() {
         document.getElementById('pps-asst-gate').hidden = true;
@@ -107,16 +113,33 @@ add_action( 'wp_footer', function () {
 
       document.getElementById('pps-asst-launch').onclick = function () {
         document.getElementById('pps-asst-panel').hidden = false;
-        if (email) showChat();
-        else document.getElementById('pps-asst-email').focus();
+        if (haveIntake) showChat();
+        else document.getElementById('pps-asst-name').focus();
       };
 
       document.getElementById('pps-asst-gate').onsubmit = function (e) {
         e.preventDefault();
-        var v = document.getElementById('pps-asst-email').value.trim();
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return;
-        email = v;
-        sessionStorage.setItem('ppsAsstEmail', email);
+        var err = document.getElementById('pps-asst-gate').querySelector('.pps-asst-gate-err');
+        var v = {
+          name:    document.getElementById('pps-asst-name').value.trim(),
+          company: document.getElementById('pps-asst-company').value.trim(),
+          email:   document.getElementById('pps-asst-email').value.trim(),
+          phone:   document.getElementById('pps-asst-phone').value.trim()
+        };
+
+        // Say which field is wrong rather than just refusing. A gate that silently does
+        // nothing is the fastest way to lose someone who wanted to talk to you.
+        var problem = '';
+        if (!v.name) problem = 'Please add your name.';
+        else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email)) problem = 'That email does not look right.';
+        else if (v.phone.replace(/\D/g, '').length < 7) problem = 'That phone number looks too short.';
+
+        if (problem) { err.textContent = problem; err.hidden = false; return; }
+        err.hidden = true;
+
+        intake = v;
+        haveIntake = true;
+        sessionStorage.setItem('ppsAsstIntake', JSON.stringify(intake));
         showChat();
       };
       document.getElementById('pps-asst-close').onclick = function () {
@@ -145,7 +168,11 @@ add_action( 'wp_footer', function () {
           // is itself evaluated against whatever user WordPress resolved.
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': CFG.nonce },
-          body: JSON.stringify({ message: text, session: sid, nonce: CFG.nonce, email: email })
+          body: JSON.stringify({
+            message: text, session: sid, nonce: CFG.nonce,
+            name: intake.name || '', company: intake.company || '',
+            email: intake.email || '', phone: intake.phone || ''
+          })
         })
         .then(function (r) {
           return r.text().then(function (body) {
@@ -184,9 +211,12 @@ add_action( 'wp_footer', function () {
       .pps-asst-bot{background:#fff;border:1px solid #e3e8ef;color:#0f172a;align-self:flex-start}
       .pps-asst-user{background:#007eff;color:#fff;align-self:flex-end}
       .pps-asst-pending{opacity:.55}
-      #pps-asst-gate{display:flex;flex-direction:column;gap:8px;padding:14px;border-top:1px solid #e3e8ef;background:#fff}
+      #pps-asst-gate{display:flex;flex-direction:column;gap:7px;padding:14px;border-top:1px solid #e3e8ef;background:#fff;
+        max-height:100%;overflow-y:auto}
       #pps-asst-gate[hidden]{display:none}
-      #pps-asst-gate label{font-size:12.5px;color:#475569;line-height:1.4}
+      .pps-asst-gate-intro{margin:0;font-size:12.5px;color:#475569;line-height:1.4}
+      .pps-asst-gate-err{margin:0;font-size:12.5px;color:#dc2626;line-height:1.4}
+      .pps-asst-gate-err[hidden]{display:none}
       #pps-asst-gate input{border:1px solid #e3e8ef;border-radius:9px;padding:10px 12px;font:inherit;font-size:14px}
       #pps-asst-gate input:focus{outline:0;border-color:#007eff;box-shadow:0 0 0 3px rgba(0,126,255,.12)}
       #pps-asst-gate button{background:#007eff;color:#fff;border:0;border-radius:9px;padding:10px 16px;

@@ -81,6 +81,7 @@ function wp_json_encode( $d, $f = 0 )      { return json_encode( $d, $f ); }
 function wp_using_ext_object_cache()       { return false; }
 function is_email( $e )                    { return filter_var( (string) $e, FILTER_VALIDATE_EMAIL ) ? $e : false; }
 function wp_check_invalid_utf8( $s, $x = false ) { return $s; }
+function rest_ensure_response( $d )        { return $d; }
 function wp_parse_url( $u, $c = -1 )       { return parse_url( $u, $c ); }
 function current_user_can( $c )            { return ! empty( $GLOBALS['__is_admin'] ); }
 function wp_strip_all_tags( $s, $b = false ) { return strip_tags( (string) $s ); }
@@ -201,9 +202,21 @@ function turn_text( $text, $thinking = null ) {
 function fresh_session() {
     return array(
         'messages' => array(), 'turns' => 0, 'verified_order' => 0, 'verified_email' => '',
-        'email' => '', 'phone' => '', 'phone_pref' => '', 'mode' => 'bot', 'escalated' => false,
+        'email' => '', 'name' => '', 'company' => '', 'phone' => '', 'phone_pref' => '',
+        'mode' => 'bot', 'escalated' => false,
     );
 }
+
+/** Minimal stand-in for WP_REST_Request: array access is all the intake helper uses. */
+class Fake_Request implements ArrayAccess {
+    private $d;
+    public function __construct( array $d ) { $this->d = $d; }
+    #[\ReturnTypeWillChange] public function offsetExists( $o )  { return isset( $this->d[ $o ] ); }
+    #[\ReturnTypeWillChange] public function offsetGet( $o )     { return $this->d[ $o ] ?? null; }
+    #[\ReturnTypeWillChange] public function offsetSet( $o, $v ) { $this->d[ $o ] = $v; }
+    #[\ReturnTypeWillChange] public function offsetUnset( $o )   { unset( $this->d[ $o ] ); }
+}
+if ( ! class_exists( 'WP_REST_Request' ) ) { class_alias( 'Fake_Request', 'WP_REST_Request' ); }
 
 /** Flip the manual availability toggle the operator controls. */
 function set_available( $on ) {
@@ -696,6 +709,89 @@ group( 'Handoff terminality' );
 ok( pps_assistant_session_is_human( array( 'mode' => 'human' ) ), 'a handed-off session reports as human' );
 ok( ! pps_assistant_session_is_human( array( 'mode' => 'bot' ) ), 'a bot session does not' );
 ok( ! pps_assistant_session_is_human( array() ), 'a session with no mode defaults to bot' );
+
+// ═════════════════════════════════════════════════════════════════════════════════
+group( 'Intake gate' );
+// ═════════════════════════════════════════════════════════════════════════════════
+
+// The gate is the only thing between an anonymous caller and the API budget, so the
+// server has to enforce it — the browser check is convenience, and the endpoint is
+// reachable without the widget.
+
+$s = fresh_session();
+$missing = pps_assistant_capture_intake( $s, new Fake_Request( array() ) );
+ok( $missing === array( 'name', 'email', 'phone' ), 'an empty submission reports all three required fields',
+    implode( ',', $missing ) );
+
+$s = fresh_session();
+$missing = pps_assistant_capture_intake( $s, new Fake_Request( array(
+    'name' => 'Alice Smith', 'email' => 'alice@example.com', 'phone' => '(602) 555-0142',
+) ) );
+ok( $missing === array(), 'a complete submission passes without a company' );
+ok( $s['name'] === 'Alice Smith' && $s['email'] === 'alice@example.com', 'name and email persist' );
+ok( $s['phone_pref'] === 'either', 'a gate-supplied number defaults its contact preference' );
+
+// Junk must not satisfy the gate.
+foreach ( array(
+    'not-an-email'  => array( 'name' => 'A', 'email' => 'nope',              'phone' => '6025550142' ),
+    'short phone'   => array( 'name' => 'A', 'email' => 'a@b.co',            'phone' => '123' ),
+    'n/a phone'     => array( 'name' => 'A', 'email' => 'a@b.co',            'phone' => 'n/a' ),
+    'blank name'    => array( 'name' => '  ', 'email' => 'a@b.co',           'phone' => '6025550142' ),
+) as $label => $payload ) {
+    $s = fresh_session();
+    $missing = pps_assistant_capture_intake( $s, new Fake_Request( $payload ) );
+    ok( $missing !== array(), "rejected: $label", 'missing=' . implode( ',', $missing ) );
+}
+
+// Company is genuinely optional.
+$s = fresh_session();
+pps_assistant_capture_intake( $s, new Fake_Request( array(
+    'name' => 'Alice', 'email' => 'a@b.co', 'phone' => '6025550142', 'company' => 'Acme Print Buyers',
+) ) );
+ok( $s['company'] === 'Acme Print Buyers', 'company is captured when given' );
+
+// Frozen after first write — a later request must not be able to rewrite the identity
+// a conversation was started under.
+$s = fresh_session();
+pps_assistant_capture_intake( $s, new Fake_Request( array(
+    'name' => 'Alice', 'email' => 'alice@example.com', 'phone' => '6025550142',
+) ) );
+pps_assistant_capture_intake( $s, new Fake_Request( array(
+    'name' => 'Mallory', 'email' => 'mallory@evil.com', 'phone' => '6025559999',
+) ) );
+ok( $s['name'] === 'Alice' && $s['email'] === 'alice@example.com' && $s['phone'] === '6025550142',
+    'intake is frozen after the first write — a later request cannot overwrite it' );
+
+// Tags must not survive into an email a human reads.
+$s = fresh_session();
+pps_assistant_capture_intake( $s, new Fake_Request( array(
+    'name' => '<script>x</script>Bob', 'email' => 'b@c.co', 'phone' => '6025550142',
+) ) );
+ok( strpos( $s['name'], '<' ) === false, 'markup is stripped from the name' );
+
+// The gate NEVER grants order access, however complete it looks.
+reset_world();
+$s = fresh_session();
+pps_assistant_capture_intake( $s, new Fake_Request( array(
+    'name' => 'Alice', 'email' => 'alice@example.com', 'phone' => '6025550142',
+) ) );
+script( array( turn_tool( 'get_order_status', array( 'order_id' => 4412 ) ), turn_text( 'ok' ) ) );
+pps_assistant_run( $s, 'where is my order' );
+ok( strpos( tool_results_in( $s ), 'NOT_VERIFIED' ) !== false,
+    'a matching gate email still does not unlock that customer\'s order' );
+
+// With a number already on file, the bot must not ask for one again.
+reset_world();
+set_available( false );
+$s = fresh_session();
+$s['email'] = 'a@b.co'; $s['phone'] = '6025550142';
+script( array( turn_tool( 'escalate_to_human', array( 'reason' => 'x', 'summary' => 'y' ) ), turn_text( 'ok' ) ) );
+pps_assistant_run( $s, 'help' );
+$seen = tool_results_in( $s );
+ok( strpos( $seen, 'Do NOT ask for their number again' ) !== false,
+    'escalation does not re-ask for a number the gate already captured' );
+ok( strpos( $GLOBALS['__mail'][0]['body'], '6025550142' ) !== false,
+    'the gate number reaches the staff notification' );
 
 // ── summary ──────────────────────────────────────────────────────────────────────
 echo "\n" . str_repeat( '─', 62 ) . "\n";

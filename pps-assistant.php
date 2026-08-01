@@ -464,11 +464,14 @@ function pps_assistant_tools() {
                          . wp_trim_words( (string) $input['reason'], 8 );
                 $body = sprintf(
                     "Assistant escalation\n\nHuman was: %s\nReason: %s\n\nSummary: %s\n\n"
-                        . "Email: %s\nPhone: %s\nVerified order: %s\n\n--- transcript ---\n%s",
+                        . "Name: %s\nCompany: %s\nEmail: %s\nPhone: %s\nVerified order: %s\n\n"
+                        . "--- transcript ---\n%s",
                     $available ? 'AVAILABLE (customer told someone is picking this up now)'
                                : 'unavailable (customer told we will follow up by email)',
                     $input['reason'],
                     $input['summary'],
+                    ( $session['name'] ?? '' ) ?: '(not given)',
+                    ( $session['company'] ?? '' ) ?: '(not given)',
                     ( $session['email'] ?? '' ) ?: ( $input['contact'] ?? '(not given)' ),
                     ( $session['phone'] ?? '' ) ?: '(not given)',
                     ( $session['verified_order'] ?? '' ) ?: '(none)',
@@ -486,6 +489,8 @@ function pps_assistant_tools() {
                     'post_content' => $body,
                 ), true );
                 if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+                    update_post_meta( $post_id, '_pps_q_name',    (string) ( $session['name'] ?? '' ) );
+                    update_post_meta( $post_id, '_pps_q_company', (string) ( $session['company'] ?? '' ) );
                     update_post_meta( $post_id, '_pps_q_email',    (string) ( $session['email'] ?? '' ) );
                     update_post_meta( $post_id, '_pps_q_phone',    (string) ( $session['phone'] ?? '' ) );
                     update_post_meta( $post_id, '_pps_asst_order', (int) ( $session['verified_order'] ?? 0 ) );
@@ -519,6 +524,16 @@ function pps_assistant_tools() {
                     return 'HUMAN_AVAILABLE: a team member is picking this up now. Tell the '
                          . 'customer someone is looking at it and will reply shortly. Stop '
                          . 'troubleshooting — do not keep offering suggestions.';
+                }
+
+                // The intake form now collects a phone number up front, so asking for one
+                // again reads as though we lost it. Only chase a number we do not have.
+                if ( ! empty( $session['phone'] ) ) {
+                    return 'NO_HUMAN_AVAILABLE: nobody is at the desk right now. Tell the customer '
+                         . 'their details have been submitted and the team will follow up by email, '
+                         . 'or by phone or text on the number they gave, whichever suits them. Do '
+                         . 'NOT ask for their number again — we already have it. Do not promise a '
+                         . 'specific response time.';
                 }
 
                 return 'NO_HUMAN_AVAILABLE: nobody is at the desk right now. Tell the customer '
@@ -798,6 +813,8 @@ function pps_assistant_session_get( $sid ) {
             'verified_order' => 0,   // set only by verify_customer — NOT by the email gate
             'verified_email' => '',
             'email'          => '',  // self-reported at the gate; proves nothing
+            'name'           => '',
+            'company'        => '',
             'phone'          => '',
             'phone_pref'     => '',
             'mode'           => 'bot',
@@ -887,6 +904,43 @@ function pps_assistant_log_usage( array $usage ) {
     ) );
 }
 
+/**
+ * Pull the intake fields off a request into the session, once.
+ *
+ * Returns the list of required fields still missing, so the widget can say which. The
+ * browser validates too, but that is convenience — this is the check that counts, because
+ * the endpoint is reachable without the widget.
+ */
+function pps_assistant_capture_intake( array &$session, WP_REST_Request $request ) {
+    if ( empty( $session['name'] ) ) {
+        $name = trim( wp_strip_all_tags( (string) ( $request['name'] ?? '' ) ) );
+        if ( $name !== '' ) $session['name'] = mb_substr( $name, 0, 120 );
+    }
+    if ( empty( $session['company'] ) ) {
+        $company = trim( wp_strip_all_tags( (string) ( $request['company'] ?? '' ) ) );
+        if ( $company !== '' ) $session['company'] = mb_substr( $company, 0, 160 );
+    }
+    if ( empty( $session['email'] ) ) {
+        $email = sanitize_email( (string) ( $request['email'] ?? '' ) );
+        if ( $email && is_email( $email ) ) $session['email'] = $email;
+    }
+    if ( empty( $session['phone'] ) ) {
+        $phone = trim( preg_replace( '/[^0-9+()\-.\s]/', '', (string) ( $request['phone'] ?? '' ) ) );
+        // Seven digits is the shortest real subscriber number; anything less is a typo or
+        // someone typing "n/a" to get past the form.
+        if ( strlen( preg_replace( '/\D/', '', $phone ) ) >= 7 ) {
+            $session['phone']      = mb_substr( $phone, 0, 40 );
+            $session['phone_pref'] = $session['phone_pref'] ?: 'either';
+        }
+    }
+
+    $missing = array();
+    foreach ( array( 'name', 'email', 'phone' ) as $f ) {   // company is optional
+        if ( empty( $session[ $f ] ) ) $missing[] = $f;
+    }
+    return $missing;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // 7. REST ENDPOINT
 // ═══════════════════════════════════════════════════════════════
@@ -918,6 +972,9 @@ add_action( 'rest_api_init', function () {
             'session' => array( 'required' => true, 'type' => 'string' ),
             'nonce'   => array( 'required' => true, 'type' => 'string' ),
             'email'   => array( 'required' => false, 'type' => 'string' ),
+            'name'    => array( 'required' => false, 'type' => 'string' ),
+            'company' => array( 'required' => false, 'type' => 'string' ),
+            'phone'   => array( 'required' => false, 'type' => 'string' ),
         ),
         'callback'            => 'pps_assistant_handle_chat',
     ) );
@@ -968,15 +1025,21 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
 
     $cfg = pps_assistant_config();
 
-    // Email gate. Captured once at the start so every conversation has a reply-to address —
-    // that is what makes the no-human-available path work. It is SELF-REPORTED and proves
-    // nothing: verify_customer still gates all order data.
-    $claimed = sanitize_email( (string) ( $request['email'] ?? '' ) );
-    if ( $claimed && empty( $session['email'] ) ) {
-        $session['email'] = $claimed;
-    }
-    if ( ! empty( $cfg['require_email'] ) && empty( $session['email'] ) ) {
-        return rest_ensure_response( array( 'reply' => '', 'need_email' => true ) );
+    // Intake gate. Captured once at the start so every conversation has somewhere to follow
+    // up — that is what makes the no-human-available path work. All of it is SELF-REPORTED
+    // and proves nothing: verify_customer still gates every piece of order data. Someone
+    // typing "alice@example.com" here does not become Alice.
+    //
+    // Written once and then frozen: a later request cannot overwrite a name or email
+    // captured earlier in the same session.
+    $intake = pps_assistant_capture_intake( $session, $request );
+
+    if ( ! empty( $cfg['require_email'] ) && $intake ) {
+        return rest_ensure_response( array(
+            'reply'      => '',
+            'need_email' => true,      // kept for older cached widgets
+            'need_intake' => $intake,  // which fields are still missing
+        ) );
     }
     if ( (int) $session['turns'] >= (int) $cfg['max_turns'] ) {
         return rest_ensure_response( array(
