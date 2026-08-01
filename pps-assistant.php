@@ -607,6 +607,11 @@ function pps_assistant_tools() {
                     'post_content' => $body,
                 ), true );
                 if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+                    // Tags the row in the Calc Questions list, alongside the forms and the
+                    // calculator question. Without it an escalation is indistinguishable
+                    // from a form submission at a glance.
+                    update_post_meta( $post_id, '_pps_q_source',  'assistant' );
+                    update_post_meta( $post_id, '_pps_q_calc_label', 'Assistant chat' );
                     update_post_meta( $post_id, '_pps_q_name',    (string) ( $session['name'] ?? '' ) );
                     update_post_meta( $post_id, '_pps_q_company', (string) ( $session['company'] ?? '' ) );
                     update_post_meta( $post_id, '_pps_q_email',    (string) ( $session['email'] ?? '' ) );
