@@ -263,7 +263,7 @@ function pps_assistant_missive_send( $sid, array $session, $body, array $opts = 
     pps_assistant_missive_log( $code >= 200 && $code < 300 ? 'send_ok' : 'send_failed', array(
         'sid'      => $sid,
         'status'   => $code,
-        'request'  => pps_assistant_missive_safe( wp_json_encode( $payload ) ),
+        'request'  => pps_assistant_missive_safe( wp_json_encode( pps_assistant_missive_loggable( $payload ) ) ),
         'response' => pps_assistant_missive_safe( $raw ),
     ) );
 

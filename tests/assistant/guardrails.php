@@ -94,9 +94,18 @@ function wp_insert_post( $a, $err = false ) {
     return 1000 + count( $GLOBALS['__posts'] );
 }
 function update_post_meta( $id, $k, $v )   { $GLOBALS['__postmeta'][ $id ][ $k ] = $v; return true; }
-function wp_remote_post( ...$a )           { throw new RuntimeException( 'REAL HTTP CALL ESCAPED THE SEAM' ); }
-function wp_remote_retrieve_response_code( $r ) { return 0; }
-function wp_remote_retrieve_body( $r )     { return ''; }
+/**
+ * Claude's transport has its own filter seam and must NEVER reach here — an escaped call
+ * has to fail loudly. The Missive transport is deliberately exercised THROUGH this shim,
+ * by setting __http_response, so that its real status handling and its real logging run
+ * instead of being short-circuited before them.
+ */
+function wp_remote_post( ...$a ) {
+    if ( isset( $GLOBALS['__http_response'] ) ) return $GLOBALS['__http_response'];
+    throw new RuntimeException( 'REAL HTTP CALL ESCAPED THE SEAM' );
+}
+function wp_remote_retrieve_response_code( $r ) { return is_array( $r ) ? (int) ( $r['code'] ?? 0 ) : 0; }
+function wp_remote_retrieve_body( $r )     { return is_array( $r ) ? (string) ( $r['body'] ?? '' ) : ''; }
 function is_wp_error( $t )                 { return $t instanceof WP_Error; }
 function wp_mail( $to, $subj, $body )      {
     $GLOBALS['__mail'][] = compact( 'to', 'subj', 'body' );
@@ -249,6 +258,7 @@ function reset_world() {
     $GLOBALS['__postmeta'] = array();
     $GLOBALS['__filters']['pps_assistant_limiter_ready'] = array();
     $GLOBALS['__mail_ok'] = true;
+    unset( $GLOBALS['__http_response'] );   // back to "any real HTTP call is a bug"
     update_option( 'pps_assistant_config', array( 'enabled' => true, 'api_key' => 'sk-test', 'daily_cap' => 300 ) );
     update_option( 'pps_question_recipient', 'shop@example.com' );
 }
@@ -1254,17 +1264,58 @@ ok( strpos( $GLOBALS['__mail'][0]['body'] ?? '', 'handed into Missive' ) !== fal
     'and tells staff where to reply' );
 
 // ── the bridge log must not become a customer-data store ─────────────────────────
+//
+// Asserted against what LANDS IN THE LOG after a real send, not against the redaction
+// helper in isolation. The first version of this test called the helper directly, so it
+// stayed green while the helper was wired into only one of the two logging call sites —
+// and the one that actually runs shipped unredacted. Test the seam, not the function.
 reset_world();
 missive_configure( true );
-$logged = pps_assistant_missive_loggable( pps_assistant_missive_payload( 'sid1', array(
-    'name' => 'Jane Doe', 'email' => 'jane@example.com', 'phone' => '6025550142',
-), '<p>secret transcript contents</p>', array( 'subject' => 'Website chat — Jane Doe' ) ) );
-$flat = wp_json_encode( $logged );
-foreach ( array( 'secret transcript contents', 'jane@example.com', 'Jane Doe' ) as $pii ) {
-    ok( strpos( $flat, $pii ) === false, "the bridge log does not retain: $pii" );
+
+// Both outcomes log a request, and BOTH must be redacted — the failure path is the one
+// an operator is most likely to paste into a chat window for help.
+foreach ( array(
+    'send_ok'     => array( 'code' => 201, 'body' => '{"messages":{"conversation":"c1"}}' ),
+    'send_failed' => array( 'code' => 400, 'body' => '{"error":{"message":"nope"}}' ),
+) as $label => $http ) {
+
+    reset_world();
+    missive_configure( true );
+    $GLOBALS['__filters']['pps_assistant_missive_pre_send'] = array();   // no short-circuit
+    $GLOBALS['__http_response'] = $http;                                 // run the real transport
+
+    $s = fresh_session();
+    $s['name'] = 'Jane Doe'; $s['email'] = 'jane@example.com'; $s['phone'] = '6025550142';
+
+    $res  = pps_assistant_missive_send( 'sid1', $s, 'secret transcript contents' );
+    $log  = get_option( 'pps_assistant_missive_log', array() );
+    $flat = wp_json_encode( $log );
+
+    ok( ( $log[0]['event'] ?? '' ) === $label, "$label: logged under the right event" );
+    foreach ( array( 'secret transcript contents', 'jane@example.com', 'Jane Doe' ) as $pii ) {
+        ok( strpos( $flat, $pii ) === false, "$label: the bridge log does not retain: $pii" );
+    }
+    ok( strpos( $flat, 'references' ) !== false && strpos( $flat, 'from_field' ) !== false,
+        "$label: but it keeps the field names, which is the whole diagnostic point" );
 }
-ok( strpos( $flat, 'references' ) !== false && strpos( $flat, 'from_field' ) !== false,
-    'but it keeps the field names, which is the whole diagnostic point' );
+
+// Missive answers a successful create with 201, not 200 — confirmed on staging. A
+// success check written as `=== 200` would have failed every real send.
+reset_world();
+missive_configure( true );
+$GLOBALS['__filters']['pps_assistant_missive_pre_send'] = array();
+$GLOBALS['__http_response'] = array( 'code' => 201, 'body' => '{"messages":{"conversation":"b1d79717"}}' );
+$res = pps_assistant_missive_send( 'sid1', fresh_session(), 'hi' );
+ok( ! is_wp_error( $res ), 'HTTP 201 counts as success, not just 200' );
+ok( pps_assistant_missive_conversation_id( $res ) === 'b1d79717',
+    'and the conversation id is read from the real response shape' );
+
+reset_world();
+missive_configure( true );
+$GLOBALS['__filters']['pps_assistant_missive_pre_send'] = array();
+$GLOBALS['__http_response'] = array( 'code' => 400, 'body' => '{"error":{"message":"x"}}' );
+ok( is_wp_error( pps_assistant_missive_send( 'sid1', fresh_session(), 'hi' ) ),
+    'a 400 is still a failure' );
 
 // ── the channel type Missive actually validates ──────────────────────────────────
 // Real 400 from staging: {"error":{"message":"'subject' is not allowed for 'text'
