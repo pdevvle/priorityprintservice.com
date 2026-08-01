@@ -1,0 +1,330 @@
+<?php
+/**
+ * PPS Assistant — presentation layer (front-end widget + admin screen).
+ *
+ * Required by pps-assistant.php. Not a plugin in its own right: no plugin header, and it
+ * does nothing unless the engine has already defined PPS_ASSISTANT_VERSION.
+ *
+ * Split out because deploys to this site are whole-file writes over MCP — keeping the UI
+ * separate means a CSS tweak does not re-transmit the tool handlers and the agent loop.
+ *
+ * The visual source of truth is assistant-widget-preview.html on the Pages branch; keep
+ * the two in sync the same way the CC/ST blocks are synced across the calculators.
+ */
+
+if ( ! defined( 'ABSPATH' ) ) exit;
+if ( ! defined( 'PPS_ASSISTANT_VERSION' ) ) return;   // engine not loaded — nothing to render
+
+// ═══════════════════════════════════════════════════════════════
+// WIDGET (front-end) — vanilla JS, no React; this loads on every page.
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Should the widget render on this request?
+ *
+ * Two independent gates, both deliberately conservative:
+ *
+ *  1. NEVER on cart or checkout. A JS error beside a live payment form is a revenue
+ *     incident, and nothing the assistant offers is worth that risk. This is not
+ *     configurable on purpose.
+ *  2. Logged-in admins only, until someone explicitly flips visible_to to 'everyone'.
+ *     That makes "deploy it" and "show it to customers" two separate decisions.
+ */
+function pps_assistant_should_render() {
+    if ( function_exists( 'is_cart' ) && ( is_cart() || is_checkout() ) ) return false;
+
+    $cfg = pps_assistant_config();
+    if ( ( $cfg['visible_to'] ?? 'admins' ) === 'everyone' ) return true;
+
+    return function_exists( 'current_user_can' ) && current_user_can( 'manage_options' );
+}
+
+add_action( 'wp_footer', function () {
+    if ( ! pps_assistant_enabled() || is_admin() ) return;
+    if ( ! pps_assistant_should_render() ) return;
+
+    $boot = wp_json_encode( array(
+        'endpoint' => rest_url( 'pps/v1/assistant/chat' ),
+        'nonce'    => wp_create_nonce( 'wp_rest' ),
+        'greeting' => 'Hi — I can help with order status, file setup, and product questions. '
+                    . 'For pricing I\'ll point you at the calculator.',
+        // Badge the launcher while it's admin-only, so nobody mistakes a test session
+        // for something customers can see.
+        'admin'    => current_user_can( 'manage_options' ) && ( pps_assistant_config()['visible_to'] ?? '' ) !== 'everyone',
+    ) );
+
+    // NOTE: never emit a literal closing script tag inside this JS. Same hazard as the
+    // calculators' babel blocks — the HTML parser closes at the first match.
+    ?>
+    <div id="pps-asst-root"></div>
+    <script>
+    (function () {
+      var CFG = <?php echo $boot; // phpcs:ignore ?>;
+      var C = { cyan:'#007eff', ink:'#0f172a', mid:'#475569', bg:'#f6f7f9', border:'#e3e8ef' };
+      var sid = sessionStorage.getItem('ppsAsstSid');
+      if (!sid) { sid = 'S' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+                  sessionStorage.setItem('ppsAsstSid', sid); }
+
+      var root = document.getElementById('pps-asst-root');
+      root.innerHTML =
+        '<button id="pps-asst-launch" aria-label="Open chat">Chat' +
+          (CFG.admin ? '<span class="pps-asst-flag">admin only</span>' : '') + '</button>' +
+        '<div id="pps-asst-panel" hidden>' +
+          '<header><span>Priority Print Service</span><button id="pps-asst-close" aria-label="Close">&times;</button></header>' +
+          '<div id="pps-asst-log" role="log" aria-live="polite"></div>' +
+          '<form id="pps-asst-gate">' +
+            '<label for="pps-asst-email">Your email, so we can follow up if we miss you</label>' +
+            '<input id="pps-asst-email" type="email" required autocomplete="email" placeholder="you@company.com">' +
+            '<button type="submit">Start chat</button>' +
+          '</form>' +
+          '<form id="pps-asst-form" hidden>' +
+            '<input id="pps-asst-input" autocomplete="off" placeholder="Ask about an order, file setup, or a product…">' +
+            '<button type="submit">Send</button>' +
+          '</form>' +
+        '</div>';
+
+      var log = document.getElementById('pps-asst-log');
+      var busy = false;
+
+      function add(role, text) {
+        var el = document.createElement('div');
+        el.className = 'pps-asst-msg pps-asst-' + role;
+        el.textContent = text;
+        log.appendChild(el);
+        log.scrollTop = log.scrollHeight;
+        return el;
+      }
+
+      // Email gate. Held in sessionStorage so a page navigation doesn't re-ask; the server
+      // is the real gate, this is only UI state.
+      var email = sessionStorage.getItem('ppsAsstEmail') || '';
+
+      function showChat() {
+        document.getElementById('pps-asst-gate').hidden = true;
+        document.getElementById('pps-asst-form').hidden = false;
+        if (!log.childElementCount) add('bot', CFG.greeting);
+        document.getElementById('pps-asst-input').focus();
+      }
+
+      document.getElementById('pps-asst-launch').onclick = function () {
+        document.getElementById('pps-asst-panel').hidden = false;
+        if (email) showChat();
+        else document.getElementById('pps-asst-email').focus();
+      };
+
+      document.getElementById('pps-asst-gate').onsubmit = function (e) {
+        e.preventDefault();
+        var v = document.getElementById('pps-asst-email').value.trim();
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return;
+        email = v;
+        sessionStorage.setItem('ppsAsstEmail', email);
+        showChat();
+      };
+      document.getElementById('pps-asst-close').onclick = function () {
+        document.getElementById('pps-asst-panel').hidden = true;
+      };
+
+      document.getElementById('pps-asst-form').onsubmit = function (e) {
+        e.preventDefault();
+        if (busy) return;
+        var input = document.getElementById('pps-asst-input');
+        var text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        add('user', text);
+
+        busy = true;
+        var pending = add('bot', '…');
+        pending.className += ' pps-asst-pending';
+
+        fetch(CFG.endpoint, {
+          method: 'POST',
+          // X-WP-Nonce is what authenticates the cookie session for the REST API. Without
+          // it WordPress runs the request as user 0, so a nonce minted for a logged-in
+          // admin fails verification and the endpoint 403s. Sending the nonce in the JSON
+          // body alone is NOT enough — that only feeds our own wp_verify_nonce call, which
+          // is itself evaluated against whatever user WordPress resolved.
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': CFG.nonce },
+          body: JSON.stringify({ message: text, session: sid, nonce: CFG.nonce, email: email })
+        })
+        .then(function (r) {
+          return r.text().then(function (body) {
+            if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + body.slice(0, 300));
+            return JSON.parse(body);
+          });
+        })
+        .then(function (d) { pending.className = 'pps-asst-msg pps-asst-bot';
+                             pending.textContent = d.reply || ''; })
+        .catch(function (err) {
+          pending.className = 'pps-asst-msg pps-asst-bot';
+          // Admins testing get the real failure; customers get the friendly line.
+          pending.textContent = CFG.admin
+            ? 'DEBUG (admin only): ' + err.message
+            : 'Sorry — something went wrong. Please email us and we will help.';
+        })
+        .finally(function () { busy = false; log.scrollTop = log.scrollHeight; });
+      };
+    })();
+    </script>
+    <style>
+      #pps-asst-launch{position:fixed;right:20px;bottom:20px;z-index:99998;background:#007eff;color:#fff;
+        border:0;border-radius:24px;padding:12px 22px;font:600 15px/1 system-ui,sans-serif;cursor:pointer;
+        box-shadow:0 4px 14px rgba(16,24,40,.18)}
+      .pps-asst-flag{display:inline-block;margin-left:8px;background:rgba(255,255,255,.22);border-radius:10px;
+        padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.02em;vertical-align:middle}
+      #pps-asst-panel{position:fixed;right:20px;bottom:20px;z-index:99999;width:360px;max-width:calc(100vw - 32px);
+        height:520px;max-height:calc(100vh - 40px);display:flex;flex-direction:column;background:#fff;
+        border:1px solid #e3e8ef;border-radius:14px;box-shadow:0 12px 40px rgba(16,24,40,.18);overflow:hidden;
+        font:400 14px/1.5 system-ui,sans-serif}
+      #pps-asst-panel header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;
+        border-bottom:1px solid #e3e8ef;font-weight:600;color:#0f172a}
+      #pps-asst-panel header button{background:0;border:0;font-size:22px;line-height:1;cursor:pointer;color:#475569}
+      #pps-asst-log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:#f6f7f9}
+      .pps-asst-msg{max-width:85%;padding:9px 12px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}
+      .pps-asst-bot{background:#fff;border:1px solid #e3e8ef;color:#0f172a;align-self:flex-start}
+      .pps-asst-user{background:#007eff;color:#fff;align-self:flex-end}
+      .pps-asst-pending{opacity:.55}
+      #pps-asst-gate{display:flex;flex-direction:column;gap:8px;padding:14px;border-top:1px solid #e3e8ef;background:#fff}
+      #pps-asst-gate[hidden]{display:none}
+      #pps-asst-gate label{font-size:12.5px;color:#475569;line-height:1.4}
+      #pps-asst-gate input{border:1px solid #e3e8ef;border-radius:9px;padding:10px 12px;font:inherit;font-size:14px}
+      #pps-asst-gate input:focus{outline:0;border-color:#007eff;box-shadow:0 0 0 3px rgba(0,126,255,.12)}
+      #pps-asst-gate button{background:#007eff;color:#fff;border:0;border-radius:9px;padding:10px 16px;
+        font:600 14px/1 system-ui,sans-serif;cursor:pointer}
+      #pps-asst-form[hidden]{display:none}
+      #pps-asst-form{display:flex;gap:8px;padding:10px;border-top:1px solid #e3e8ef;background:#fff}
+      #pps-asst-input{flex:1;border:1px solid #e3e8ef;border-radius:9px;padding:9px 11px;font:inherit;background:#fff}
+      #pps-asst-input:focus{outline:0;border-color:#007eff;box-shadow:0 0 0 3px rgba(0,126,255,.12)}
+      #pps-asst-form button{background:#007eff;color:#fff;border:0;border-radius:9px;padding:9px 16px;
+        font:600 14px/1 system-ui,sans-serif;cursor:pointer}
+    </style>
+    <?php
+}, 99 );
+
+// ═══════════════════════════════════════════════════════════════
+// 9. ADMIN
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'admin_menu', function () {
+    add_submenu_page(
+        'pps-calculators',                 // verified against pps-calculators.php add_menu_page()
+        'Assistant',
+        'Assistant',
+        'manage_options',
+        'pps-assistant',
+        'pps_assistant_render_admin'
+    );
+}, 20 );
+
+function pps_assistant_render_admin() {
+    if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Nope.' );
+
+    if ( isset( $_POST['pps_assistant_nonce'] )
+      && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['pps_assistant_nonce'] ) ), 'pps_assistant_save' ) ) {
+
+        $cfg = pps_assistant_config();
+        $cfg['enabled']    = ! empty( $_POST['enabled'] );
+        $cfg['visible_to'] = ( ( $_POST['visible_to'] ?? '' ) === 'everyone' ) ? 'everyone' : 'admins';
+
+        // Stamp when availability was switched on, so the settings screen can show how long
+        // it has been on. A toggle left on overnight is the main failure mode of this design.
+        $was_available = ! empty( $cfg['available_now'] );
+        $now_available = ! empty( $_POST['available_now'] );
+        $cfg['available_now']   = $now_available;
+        $cfg['available_since'] = $now_available ? ( $was_available ? (int) $cfg['available_since'] : time() ) : 0;
+        $cfg['require_email']   = ! empty( $_POST['require_email'] );
+        $cfg['api_key']   = sanitize_text_field( wp_unslash( $_POST['api_key'] ?? '' ) );
+        $cfg['model']     = sanitize_text_field( wp_unslash( $_POST['model'] ?? 'claude-opus-5' ) );
+        $cfg['effort']    = sanitize_key( wp_unslash( $_POST['effort'] ?? 'medium' ) );
+        $cfg['daily_cap'] = max( 0, (int) ( $_POST['daily_cap'] ?? 300 ) );
+        // NOT sanitize_textarea_field(): it strips angle-bracket tags, which is exactly how a
+        // structured Claude system prompt is written, and an unmatched '<' ("runs < 500") makes
+        // it esc_html() the entire remainder of the field. This value goes into a JSON API
+        // body; it is escaped at render time by esc_textarea() below.
+        $policy           = wp_unslash( $_POST['policy'] ?? '' );
+        $policy           = wp_check_invalid_utf8( $policy, true );
+        $policy           = str_replace( array( "\r\n", "\r" ), "\n", $policy );
+        $cfg['policy']    = function_exists( 'mb_substr' ) ? mb_substr( $policy, 0, 20000 ) : substr( $policy, 0, 20000 );
+
+        update_option( 'pps_assistant_config', $cfg );
+        delete_transient( 'pps_assistant_catalog' );
+        echo '<div class="notice notice-success"><p>Saved.</p></div>';
+    }
+
+    $cfg   = pps_assistant_config();
+    // Must read through the same accessor the counter writes through — under Object Cache
+    // Pro the value lives in the object cache, not a transient, so a direct get_transient()
+    // here would display 0 forever.
+    $today = pps_assistant_counter_get( pps_assistant_budget_key() );
+    ?>
+    <div class="wrap">
+        <h1>PPS Assistant</h1>
+        <p><strong>API calls today:</strong> <?php echo (int) $today; ?> / <?php echo (int) $cfg['daily_cap']; ?></p>
+        <?php if ( $cfg['visible_to'] === 'everyone' && ! empty( $cfg['enabled'] ) ) : ?>
+            <div class="notice notice-warning inline"><p><strong>Live to customers.</strong>
+            Every visitor sees the chat widget (except on cart and checkout).</p></div>
+        <?php endif; ?>
+        <form method="post">
+            <?php wp_nonce_field( 'pps_assistant_save', 'pps_assistant_nonce' ); ?>
+            <table class="form-table">
+                <tr><th>Enabled</th><td>
+                    <label><input type="checkbox" name="enabled" <?php checked( $cfg['enabled'] ); ?>> Serve the widget</label>
+                    <p class="description">Unchecking this is the kill switch — no API calls are made.</p>
+                </td></tr>
+                <tr><th>Someone is available</th><td>
+                    <label><input type="checkbox" name="available_now" <?php checked( $cfg['available_now'] ); ?>>
+                        A human can take a live handoff right now</label>
+                    <?php if ( ! empty( $cfg['available_now'] ) && ! empty( $cfg['available_since'] ) ) :
+                        $mins = max( 0, (int) floor( ( time() - (int) $cfg['available_since'] ) / 60 ) );
+                        $warn = $mins > 600; // ~10h — almost certainly left on overnight ?>
+                        <p class="description" <?php echo $warn ? 'style="color:#dc2626;font-weight:600"' : ''; ?>>
+                            On for <?php echo esc_html( $mins < 60 ? $mins . ' min' : floor( $mins / 60 ) . 'h ' . ( $mins % 60 ) . 'm' ); ?>.
+                            <?php echo $warn ? 'That looks like it was left on — customers are being told a human is here.' : ''; ?>
+                        </p>
+                    <?php endif; ?>
+                    <p class="description">Off: escalations tell the customer the team will follow up by
+                    email, and the bot offers a text or call. On: the customer is told someone is picking
+                    it up now — so only leave it on when that is true.</p>
+                </td></tr>
+                <tr><th>Require email</th><td>
+                    <label><input type="checkbox" name="require_email" <?php checked( $cfg['require_email'] ); ?>>
+                        Ask for an email address before the chat starts</label>
+                    <p class="description">Self-reported, so it never unlocks order data — it exists so
+                    there is always somewhere to follow up.</p>
+                </td></tr>
+                <tr><th>Visible to</th><td>
+                    <label><input type="radio" name="visible_to" value="admins" <?php checked( $cfg['visible_to'], 'admins' ); ?>>
+                        <strong>Logged-in admins only</strong> — widget and chat endpoint both closed to customers</label><br>
+                    <label><input type="radio" name="visible_to" value="everyone" <?php checked( $cfg['visible_to'], 'everyone' ); ?>>
+                        Everyone — customers will see it</label>
+                    <p class="description">Never renders on cart or checkout, under either setting.</p>
+                </td></tr>
+                <tr><th>API key</th><td>
+                    <input type="password" name="api_key" value="<?php echo esc_attr( $cfg['api_key'] ); ?>" class="regular-text" autocomplete="off">
+                </td></tr>
+                <tr><th>Model</th><td>
+                    <input type="text" name="model" value="<?php echo esc_attr( $cfg['model'] ); ?>" class="regular-text">
+                    <p class="description">claude-opus-5 (default) · claude-sonnet-5 · claude-haiku-4-5</p>
+                </td></tr>
+                <tr><th>Effort</th><td>
+                    <select name="effort">
+                        <?php foreach ( array( 'low', 'medium', 'high', 'xhigh', 'max' ) as $e ) : ?>
+                            <option value="<?php echo esc_attr( $e ); ?>" <?php selected( $cfg['effort'], $e ); ?>><?php echo esc_html( $e ); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <p class="description">Start at medium and sweep down — low and medium are strong on Opus 5, and lower effort means faster replies.</p>
+                </td></tr>
+                <tr><th>Daily cap</th><td>
+                    <input type="number" name="daily_cap" value="<?php echo (int) $cfg['daily_cap']; ?>" min="0">
+                </td></tr>
+                <tr><th>Policy prompt</th><td>
+                    <textarea name="policy" rows="16" class="large-text code" placeholder="Leave blank to use the built-in default"><?php echo esc_textarea( $cfg['policy'] ); ?></textarea>
+                    <p class="description">Editing this changes the cached prefix — the next request pays a fresh cache write.</p>
+                </td></tr>
+            </table>
+            <?php submit_button(); ?>
+        </form>
+    </div>
+    <?php
+}
