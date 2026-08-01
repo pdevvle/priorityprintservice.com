@@ -330,11 +330,13 @@ function pps_assistant_render_admin() {
                     email, and the bot offers a text or call. On: the customer is told someone is picking
                     it up now — so only leave it on when that is true.</p>
                 </td></tr>
-                <tr><th>Require email</th><td>
+                <tr><th>Require intake</th><td>
                     <label><input type="checkbox" name="require_email" <?php checked( $cfg['require_email'] ); ?>>
-                        Ask for an email address before the chat starts</label>
-                    <p class="description">Self-reported, so it never unlocks order data — it exists so
-                    there is always somewhere to follow up.</p>
+                        Collect name, email and phone before the chat starts</label>
+                    <p class="description">Company is always optional. All of it is self-reported, so it
+                    never unlocks order data — it exists so there is always somewhere to follow up.
+                    Requiring a phone number is the highest-friction field on the form; untick this if
+                    drop-off is worse than the missed contact details.</p>
                 </td></tr>
                 <tr><th>Visible to</th><td>
                     <label><input type="radio" name="visible_to" value="admins" <?php checked( $cfg['visible_to'], 'admins' ); ?>>
@@ -382,9 +384,9 @@ function pps_assistant_render_admin() {
                             (invalidates the URL already in Missive)
                         </label>
                     </p>
-                    <p class="description" style="color:#b45309"><strong>Not live yet.</strong>
-                    The endpoint ships with stage 2 — until then this URL returns 404, so do not
-                    paste it into Missive if Missive validates the URL when you save.</p>
+                    <p class="description">Requires the <strong>PPS Assistant — Missive Webhook</strong>
+                    plugin to be active. It currently authenticates and records deliveries so we can see
+                    the real payload shape; it does not yet deliver replies into the chat.</p>
                 </td></tr>
                 <tr><th colspan="2"><hr></th></tr>
                 <tr><th>Policy prompt</th><td>
