@@ -157,6 +157,17 @@ A single markup curve can't compress both into a tight band above Vistaprint. Be
 
 ---
 
+## Captured price matrix
+
+`docs/PRICING_MATRIX.md` (readable) and `docs/pricing-matrix.json` (1,816 points) record
+what every calculator actually quotes across size, paper and — where exposed as a select
+— page count, read out of the rendered quantity table rather than computed from the
+constants below. Regenerate with `tools-pricing-matrix.mjs` after any pricing change.
+
+Keep both: the values in this file describe the *model*, the matrix describes the
+*output*. When they disagree, the matrix is right and this file has drifted — which has
+happened before (see the correction table at the end of the next section).
+
 ## Currently applied values (per calculator)
 
 **Extracted from the calculator sources 2026-08-01**, with comments stripped so that
