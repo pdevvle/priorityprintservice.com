@@ -99,22 +99,43 @@ function pps_intake_forms() {
             ),
         ),
 
+        // Mirrors the Forminator quote form field for field, including the conditional
+        // reorder question. It is embedded on the home page as well as /contact/, so it is
+        // the highest-traffic form on the site — a replacement that quietly drops a field
+        // loses real enquiries.
         'quote' => array(
             'title'   => 'Request a quote',
             'source'  => 'quote-form',
             'subject' => 'Quote request',
-            'submit'  => 'Request quote',
+            'submit'  => 'Submit request',
             'uploads' => true,
-            'confirm' => 'Thanks — we have your request and will come back with a quote by email.',
+            'confirm' => 'Thanks — we have your request and will be in touch shortly.',
             'fields'  => array(
-                'name'    => $name,
-                'email'   => $email,
-                'phone'   => $phone,
-                'company' => array( 'type' => 'text', 'label' => 'Company', 'required' => false,
-                                    'autocomplete' => 'organization' ),
-                'message' => array( 'type' => 'textarea', 'label' => 'What do you need?', 'required' => true,
-                                    'rows' => 7, 'maxlength' => 4000,
-                                    'help' => 'Size, paper, colour, quantity, finishing, and the date you need it.' ),
+                'is_reorder' => array( 'type' => 'checkbox', 'required' => false,
+                                       'label' => 'Is this a reorder or based on a previous order?',
+                                       'box'   => 'Yes, I am an existing customer.',
+                                       'help'  => 'Tick this if you are a returning customer and want us to '
+                                                . 'reference an earlier order.' ),
+                'name'       => $name,
+                'email'      => array( 'type' => 'email', 'label' => 'Email address', 'required' => true,
+                                       'autocomplete' => 'email',
+                                       'help' => 'We work through email before and during projects — please '
+                                               . 'give an address you monitor.' ),
+                // Required here, unlike the trouble ticket. A quote needs a conversation.
+                'phone'      => array( 'type' => 'tel', 'label' => 'Phone number', 'required' => true,
+                                       'autocomplete' => 'tel',
+                                       'help' => 'Used if we need to talk something through.' ),
+                'callback'   => array( 'type' => 'checkbox', 'required' => false,
+                                       'label' => 'Are you requesting a callback?',
+                                       'box'   => 'Yes, I think I need a phone call.',
+                                       'help'  => 'We will agree a good time before calling.' ),
+                'prev_order' => array( 'type' => 'textarea', 'label' => 'Your previous order', 'required' => false,
+                                       'rows' => 4, 'maxlength' => 500, 'show_if' => 'is_reorder',
+                                       'help' => 'Order number, billing name or email — anything that helps us find it.' ),
+                'message'    => array( 'type' => 'textarea', 'label' => 'Current project details', 'required' => true,
+                                       'rows' => 6, 'maxlength' => 500,
+                                       'help' => 'Size, page count, paper type, quantity, deadline, and anything '
+                                               . 'else you can think of.' ),
             ),
         ),
 
@@ -122,19 +143,35 @@ function pps_intake_forms() {
             'title'   => 'Reorder request',
             'source'  => 'reorder-request',
             'subject' => 'Reorder research request',
-            'submit'  => 'Send reorder request',
+            'submit'  => 'Submit request',
             'uploads' => true,
-            'confirm' => 'Thanks — we will look up your past order and follow up by email.',
+            'confirm' => 'Thanks — we will research your past project and be in touch shortly.',
             'fields'  => array(
-                'name'      => $name,
-                'email'     => $email,
-                'phone'     => $phone,
-                'order_ref' => array( 'type' => 'text', 'label' => 'Order reference', 'required' => false,
-                                      'placeholder' => 'Invoice # / PO # / Order #',
-                                      'help' => 'If you have one. If not, describe the job below.' ),
-                'message'   => array( 'type' => 'textarea', 'label' => 'What did we print for you?', 'required' => true,
-                                      'rows' => 6, 'maxlength' => 4000,
-                                      'help' => 'Roughly what it was and roughly when, and we will find it.' ),
+                'basis'      => array( 'type' => 'radio', 'required' => false,
+                                       'label'   => 'Is this based on a previous order?',
+                                       'options' => array(
+                                           'previous' => 'This is based on a previous order.',
+                                           'new'      => 'This is not based on a previous order, but is a new '
+                                                       . 'product you have not produced yet.',
+                                       ) ),
+                'name'       => $name,
+                'email'      => array( 'type' => 'email', 'label' => 'Email address', 'required' => true,
+                                       'autocomplete' => 'email',
+                                       'help' => 'We work through email before and during projects — please '
+                                               . 'give an address you monitor.' ),
+                'phone'      => array( 'type' => 'tel', 'label' => 'Phone number', 'required' => true,
+                                       'autocomplete' => 'tel',
+                                       'help' => 'Used if we need to talk something through.' ),
+                'callback'   => array( 'type' => 'checkbox', 'required' => false,
+                                       'label' => 'Are you requesting a callback?',
+                                       'box'   => 'Yes, I think I need a phone call.' ),
+                'prev_order' => array( 'type' => 'textarea', 'label' => 'Your previous order', 'required' => true,
+                                       'rows' => 4, 'maxlength' => 500,
+                                       'help' => 'Order number, billing name or email — anything that helps us '
+                                               . 'find the past project.' ),
+                'message'    => array( 'type' => 'textarea', 'label' => 'Comments', 'required' => true,
+                                       'rows' => 5, 'maxlength' => 500,
+                                       'help' => 'Anything that has changed since last time.' ),
             ),
         ),
     );
@@ -185,7 +222,40 @@ add_shortcode( 'pps_intake', function ( $atts ) {
         $id  = $anchor . '-' . $fkey;
         $req = ! empty( $f['required'] );
 
-        echo '<p class="pps-intake-field">';
+        // A conditional field renders VISIBLE and is hidden by the script below. Without
+        // JavaScript it simply stays on screen, which is a slightly longer form rather than
+        // a field nobody can reach.
+        $cond = ! empty( $f['show_if'] ) ? ' data-show-if="' . esc_attr( $f['show_if'] ) . '"' : '';
+
+        if ( $f['type'] === 'radio' ) {
+            echo '<fieldset class="pps-intake-field pps-intake-choice"' . $cond . '>';
+            echo '<legend>' . esc_html( $f['label'] );
+            if ( $req ) echo ' <span class="pps-intake-req" aria-hidden="true">*</span>';
+            echo '</legend>';
+            foreach ( (array) $f['options'] as $ov => $ol ) {
+                printf(
+                    '<label><input type="radio" name="%s" value="%s"%s> %s</label>',
+                    esc_attr( $fkey ), esc_attr( $ov ), $req ? ' required' : '', esc_html( $ol )
+                );
+            }
+            if ( ! empty( $f['help'] ) ) echo '<span class="pps-intake-help">' . esc_html( $f['help'] ) . '</span>';
+            echo '</fieldset>';
+            continue;
+        }
+
+        if ( $f['type'] === 'checkbox' ) {
+            printf(
+                '<p class="pps-intake-field pps-intake-check"%s><label for="%s">'
+                    . '<input id="%s" name="%s" type="checkbox" value="1"> %s</label>',
+                $cond, esc_attr( $id ), esc_attr( $id ), esc_attr( $fkey ),
+                esc_html( $f['box'] ?? $f['label'] )
+            );
+            if ( ! empty( $f['help'] ) ) echo '<span class="pps-intake-help">' . esc_html( $f['help'] ) . '</span>';
+            echo '</p>';
+            continue;
+        }
+
+        echo '<p class="pps-intake-field"' . $cond . '>';
         echo '<label for="' . esc_attr( $id ) . '">' . esc_html( $f['label'] );
         if ( $req ) echo ' <span class="pps-intake-req" aria-hidden="true">*</span>';
         echo '</label>';
@@ -221,7 +291,19 @@ add_shortcode( 'pps_intake', function ( $atts ) {
     }
 
     echo '<p><button type="submit" class="pps-intake-submit">' . esc_html( $form['submit'] ) . '</button></p>';
-    echo '</form></div>';
+    echo '</form>';
+
+    // Conditional reveal. Progressive: the fields are already rendered and usable, this
+    // only tidies them away until they are relevant.
+    echo '<script>(function(){var r=document.getElementById(' . wp_json_encode( $anchor ) . ');'
+       . 'if(!r)return;var c=r.querySelectorAll("[data-show-if]");if(!c.length)return;'
+       . 'function sync(){Array.prototype.forEach.call(c,function(el){'
+       . 'var src=r.querySelector(\'[name="\'+el.dataset.showIf+\'"]\');'
+       . 'el.hidden=!(src&&src.checked)})}'
+       . 'Array.prototype.forEach.call(r.querySelectorAll(\'input[type=checkbox]\'),function(b){'
+       . 'b.addEventListener("change",sync)});sync()})();<\/script>';
+
+    echo '</div>';
 
     return ob_get_clean();
 } );
@@ -256,6 +338,14 @@ add_action( 'wp_enqueue_scripts', function () {
 .pps-intake-field input:focus,.pps-intake-field textarea:focus{outline:0;border-color:#007eff;
   box-shadow:0 0 0 3px rgba(0,126,255,.12)}
 .pps-intake-help{font-size:13px;color:#64748b;line-height:1.4}
+.pps-intake-check label{display:flex;align-items:flex-start;gap:9px;font-weight:500;font-size:14.5px}
+.pps-intake-check input{width:auto;margin-top:2px}
+.pps-intake-choice{border:0;padding:0;margin:0 0 18px}
+.pps-intake-choice legend{font-weight:600;font-size:14.5px;padding:0;margin-bottom:7px}
+.pps-intake-choice label{display:flex;align-items:flex-start;gap:9px;font-size:14.5px;margin-bottom:6px}
+.pps-intake-choice input{width:auto;margin-top:3px}
+/* An ID or class rule that sets display would beat [hidden]; this one restates it. */
+.pps-intake-field[hidden]{display:none}
 .pps-intake-submit{background:#007eff;color:#fff;border:0;border-radius:9px;padding:12px 24px;
   font:600 15px/1 system-ui,sans-serif;cursor:pointer}
 .pps-intake-ok{padding:14px 16px;border-radius:9px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}
@@ -314,6 +404,19 @@ function pps_intake_handle_submit() {
     // ── collect + validate ──
     $values = array();
     foreach ( $form['fields'] as $fkey => $f ) {
+        if ( $f['type'] === 'checkbox' ) {
+            $values[ $fkey ] = empty( $_POST[ $fkey ] ) ? '' : '1';
+            continue;
+        }
+        if ( $f['type'] === 'radio' ) {
+            // Only ever store one of the options we rendered — a posted value is untrusted.
+            $picked = sanitize_key( wp_unslash( $_POST[ $fkey ] ?? '' ) );
+            $values[ $fkey ] = isset( $f['options'][ $picked ] ) ? (string) $f['options'][ $picked ] : '';
+            if ( ! empty( $f['required'] ) && $values[ $fkey ] === '' ) {
+                pps_intake_bounce( $key, array( 'pps_err' => 'Please answer: ' . $f['label'] ) );
+            }
+            continue;
+        }
         $raw = wp_unslash( $_POST[ $fkey ] ?? '' );
         $val = $f['type'] === 'textarea' ? sanitize_textarea_field( $raw )
              : ( $f['type'] === 'email'  ? sanitize_email( $raw ) : sanitize_text_field( $raw ) );
@@ -429,6 +532,9 @@ function pps_intake_record( $key, array $form, array $values, array $file_urls )
     // Reuses the label column so these rows are not blank in the admin list.
     update_post_meta( $post_id, '_pps_q_calc_label', $form['title'] );
     update_post_meta( $post_id, '_pps_q_user_ip',    isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( (string) $_SERVER['REMOTE_ADDR'] ) : '' );
+    // Reuses the key the Calc Questions meta box already renders as a 'Callback' row,
+    // so a callback request from a form looks identical to one from the wizard.
+    if ( ! empty( $values['callback'] ) )  update_post_meta( $post_id, '_pps_q_callback', 1 );
     if ( ! empty( $values['order_ref'] ) ) update_post_meta( $post_id, '_pps_q_order_ref', $values['order_ref'] );
     if ( $file_urls )                      update_post_meta( $post_id, '_pps_q_files', $file_urls );
 
@@ -442,9 +548,14 @@ function pps_intake_notify( $key, array $form, array $values, array $file_urls, 
     $mail = (string) ( $values['email'] ?? '' );
 
     $lines = array( $form['title'], '' );
+    if ( ! empty( $values['callback'] ) ) {
+        $lines[] = '*** CALLBACK REQUESTED ***';
+        $lines[] = '';
+    }
     foreach ( $form['fields'] as $fkey => $f ) {
         $v = trim( (string) ( $values[ $fkey ] ?? '' ) );
-        if ( $v === '' ) continue;
+        if ( $v === '' ) continue;                       // unticked boxes say nothing
+        if ( $f['type'] === 'checkbox' ) { $lines[] = $f['label'] . ' Yes'; continue; }
         $lines[] = $f['label'] . ': ' . ( $f['type'] === 'textarea' ? "\n" . $v : $v );
     }
     if ( $file_urls ) {
