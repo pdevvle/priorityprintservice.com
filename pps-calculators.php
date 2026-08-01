@@ -232,7 +232,7 @@ function pps_admin_page() {
 
     // ── Handle form actions ──
     if ( isset( $_POST['pps_action'] ) && check_admin_referer( 'pps_admin_action' ) ) {
-        $action = sanitize_text_field( $_POST['pps_action'] );
+        $action = sanitize_text_field( wp_unslash( $_POST['pps_action'] ) );
 
         // Upload
         if ( $action === 'upload' && ! empty( $_FILES['pps_file'] ) && $_FILES['pps_file']['error'] === UPLOAD_ERR_OK ) {
@@ -266,7 +266,7 @@ function pps_admin_page() {
 
         // Save product assignment
         if ( $action === 'save_products' ) {
-            $fn = sanitize_file_name( $_POST['pps_filename'] ?? '' );
+            $fn = sanitize_file_name( wp_unslash( $_POST['pps_filename'] ?? '' ) );
             if ( isset( $reg[ $fn ] ) ) {
                 $raw_ids = isset( $_POST['pps_products'] ) ? (array) $_POST['pps_products'] : array();
                 $ids = array_unique( array_filter( array_map( 'intval', $raw_ids ) ) );
@@ -278,8 +278,8 @@ function pps_admin_page() {
 
         // Rename
         if ( $action === 'rename' ) {
-            $fn       = sanitize_file_name( $_POST['pps_filename'] ?? '' );
-            $new_name = sanitize_text_field( $_POST['pps_new_name'] ?? '' );
+            $fn       = sanitize_file_name( wp_unslash( $_POST['pps_filename'] ?? '' ) );
+            $new_name = sanitize_text_field( wp_unslash( $_POST['pps_new_name'] ?? '' ) );
             if ( isset( $reg[ $fn ] ) && $new_name ) {
                 $reg[ $fn ]['name'] = $new_name;
                 pps_save_registry( $reg );
@@ -289,7 +289,7 @@ function pps_admin_page() {
 
         // Delete
         if ( $action === 'delete' ) {
-            $fn = sanitize_file_name( $_POST['pps_filename'] ?? '' );
+            $fn = sanitize_file_name( wp_unslash( $_POST['pps_filename'] ?? '' ) );
             if ( isset( $reg[ $fn ] ) ) {
                 $filepath = trailingslashit( $dir ) . $fn;
                 if ( file_exists( $filepath ) ) unlink( $filepath );
@@ -1524,7 +1524,11 @@ function pps_ajax_add_to_cart() {
     $product_id = intval( $_POST['product_id'] ?? 0 );
     $price      = floatval( $_POST['pps_price'] ?? 0 );
     $rush       = floatval( $_POST['pps_rush'] ?? 0 );
-    $summary    = sanitize_textarea_field( $_POST['pps_summary'] ?? '' );
+    // WordPress slashes $_POST on every request (magic-quotes emulation) and
+    // sanitize_*() does not undo it, so without wp_unslash an apostrophe survives as
+    // a literal backslash all the way into the cart and checkout summary — e.g.
+    // "I don\'t have bleeds". Every other $_POST read in this file already unslashes.
+    $summary    = sanitize_textarea_field( wp_unslash( $_POST['pps_summary'] ?? '' ) );
     $metadata   = wp_unslash( $_POST['pps_metadata'] ?? '{}' );
     $biz_days   = intval( $_POST['pps_biz_days'] ?? 5 );
 
@@ -1627,7 +1631,7 @@ function pps_ajax_add_to_cart() {
     );
 
     // Artwork: direct relative path from upload endpoint
-    $artwork_path = sanitize_text_field( $_POST['pps_artwork_path'] ?? '' );
+    $artwork_path = sanitize_text_field( wp_unslash( $_POST['pps_artwork_path'] ?? '' ) );
     if ( $artwork_path ) {
         // Security: prevent path traversal — must start with pps-artwork/ and contain no ..
         if ( strpos( $artwork_path, '..' ) !== false || strpos( $artwork_path, 'pps-artwork/' ) !== 0 ) {
