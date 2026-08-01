@@ -258,10 +258,12 @@ function pps_assistant_render_admin() {
 
         // Stamp when availability was switched on, so the settings screen can show how long
         // it has been on. A toggle left on overnight is the main failure mode of this design.
-        $was_available = ! empty( $cfg['available_now'] );
+        // Same helper the bookmarkable URL uses — one rule, two front doors.
         $now_available = ! empty( $_POST['available_now'] );
+        $cfg['available_since'] = pps_assistant_availability_stamp(
+            ! empty( $cfg['available_now'] ), $cfg['available_since'], $now_available
+        );
         $cfg['available_now']   = $now_available;
-        $cfg['available_since'] = $now_available ? ( $was_available ? (int) $cfg['available_since'] : time() ) : 0;
         $cfg['require_email']   = ! empty( $_POST['require_email'] );
         $cfg['api_key']   = sanitize_text_field( wp_unslash( $_POST['api_key'] ?? '' ) );
         $cfg['model']     = sanitize_text_field( wp_unslash( $_POST['model'] ?? 'claude-opus-5' ) );
@@ -280,6 +282,9 @@ function pps_assistant_render_admin() {
         }
         if ( ! empty( $_POST['pps_regen_secret'] ) ) {
             $cfg['missive_webhook_secret'] = wp_generate_password( 48, false, false );
+        }
+        if ( ! empty( $_POST['pps_regen_avail'] ) ) {
+            $cfg['avail_secret'] = wp_generate_password( 32, false, false );
         }
         // NOT sanitize_textarea_field(): it strips angle-bracket tags, which is exactly how a
         // structured Claude system prompt is written, and an unmatched '<' ("runs < 500") makes
@@ -329,6 +334,28 @@ function pps_assistant_render_admin() {
                     <p class="description">Off: escalations tell the customer the team will follow up by
                     email, and the bot offers a text or call. On: the customer is told someone is picking
                     it up now — so only leave it on when that is true.</p>
+                    <p class="description"><strong>Both settings send the same email</strong> to the shop
+                    today; only the subject line and what the bot says differ. A real live handoff — the
+                    conversation moving into Missive and an agent's reply reaching the widget — lands with
+                    stage 2, below.</p>
+                </td></tr>
+                <tr><th>Toggle from your phone</th><td>
+                    <?php $avail_base = rest_url( 'pps/v1/assistant/availability' ) . '?k=' . rawurlencode( pps_assistant_avail_secret() ); ?>
+                    <p style="margin:0 0 6px"><strong>Bookmark this one</strong> — it shows the current
+                    state and has both buttons on it:</p>
+                    <input type="text" readonly class="large-text code" onclick="this.select()"
+                        value="<?php echo esc_attr( $avail_base ); ?>">
+                    <p class="description" style="margin-top:8px">For two separate one-tap bookmarks, append
+                    <code>&amp;set=on</code> or <code>&amp;set=off</code> to that URL.</p>
+                    <p class="description">The key in the query string is the whole of the authentication,
+                    so treat the URL as a credential — anyone holding it can flip this switch. Nothing else
+                    is reachable through it and no customer data is exposed. It also works while logged into
+                    wp-admin without the key.
+                        <label style="display:block;margin-top:6px">
+                            <input type="checkbox" name="pps_regen_avail" value="1"> Generate a new key on save
+                            (invalidates any bookmark you already made)
+                        </label>
+                    </p>
                 </td></tr>
                 <tr><th>Require intake</th><td>
                     <label><input type="checkbox" name="require_email" <?php checked( $cfg['require_email'] ); ?>>
@@ -363,7 +390,7 @@ function pps_assistant_render_admin() {
                 <tr><th>Daily cap</th><td>
                     <input type="number" name="daily_cap" value="<?php echo (int) $cfg['daily_cap']; ?>" min="0">
                 </td></tr>
-                <tr><th colspan="2"><hr><h2 style="margin:0">Missive live handoff <span style="font-weight:400;color:#666">(stage 2)</span></h2></th></tr>
+                <tr><th colspan="2"><hr><h2 style="margin:0">Missive live handoff <span style="font-weight:400;color:#666">(stage 2 — not built yet)</span></h2></th></tr>
                 <tr><th>Channel ID</th><td>
                     <input type="text" name="missive_channel_id" value="<?php echo esc_attr( $cfg['missive_channel_id'] ); ?>" class="regular-text">
                     <p class="description">Missive → Settings → Accounts → Add account → Custom.</p>

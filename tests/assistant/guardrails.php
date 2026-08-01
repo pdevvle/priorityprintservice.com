@@ -793,6 +793,77 @@ ok( strpos( $seen, 'Do NOT ask for their number again' ) !== false,
 ok( strpos( $GLOBALS['__mail'][0]['body'], '6025550142' ) !== false,
     'the gate number reaches the staff notification' );
 
+// ═════════════════════════════════════════════════════════════════════════════════
+// AVAILABILITY TOGGLE
+//
+// The bookmarkable URL is authenticated by a query-string secret and nothing else, so
+// the compare is the whole security boundary. These assert it refuses by default rather
+// than trusting that a secret was configured.
+// ═════════════════════════════════════════════════════════════════════════════════
+group( 'Availability toggle' );
+
+reset_world();
+$GLOBALS['__is_admin'] = false;
+
+// Fails CLOSED before a secret exists — an unconfigured site must not be wide open.
+ok( pps_assistant_availability_authorized( '' ) === false, 'no secret configured: empty key refused' );
+ok( pps_assistant_availability_authorized( 'anything' ) === false, 'no secret configured: any key refused' );
+
+$cfg = pps_assistant_config();
+$cfg['avail_secret'] = 'sekrit-abc-123';
+update_option( 'pps_assistant_config', $cfg );
+
+ok( pps_assistant_availability_authorized( 'sekrit-abc-123' ) === true, 'the right key is accepted' );
+ok( pps_assistant_availability_authorized( 'sekrit-abc-124' ) === false, 'a near-miss key is refused' );
+ok( pps_assistant_availability_authorized( 'sekrit-abc-123 ' ) === false, 'a trailing space is refused' );
+ok( pps_assistant_availability_authorized( '' ) === false, 'an empty key is refused even once a secret exists' );
+// hash_equals() throws a TypeError on non-strings; the route passes whatever arrives.
+ok( pps_assistant_availability_authorized( null ) === false, 'a missing key parameter is refused, not fatal' );
+ok( pps_assistant_availability_authorized( array( 'x' ) ) === false, 'an array key is refused, not fatal' );
+
+// A logged-in admin gets through without the key, so the link survives a rotation.
+$GLOBALS['__is_admin'] = true;
+ok( pps_assistant_availability_authorized( '' ) === true, 'a logged-in admin needs no key' );
+$GLOBALS['__is_admin'] = false;
+
+// The stamp rule: shared by the admin checkbox and the URL, so it is tested once here.
+ok( pps_assistant_availability_stamp( false, 0, false ) === 0, 'off stays off, unstamped' );
+ok( pps_assistant_availability_stamp( true, 12345, false ) === 0, 'turning off clears the stamp' );
+ok( pps_assistant_availability_stamp( false, 0, true ) > 0, 'turning on stamps the time' );
+ok( pps_assistant_availability_stamp( true, 12345, true ) === 12345,
+    're-asserting ON keeps the original stamp — a double tap must not reset the overnight warning' );
+
+// End to end through the setter.
+set_available( false );
+pps_assistant_set_available( true );
+ok( pps_assistant_human_available() === true, 'set_available(true) makes a human available' );
+$stamp = (int) pps_assistant_config()['available_since'];
+ok( $stamp > 0, 'and stamps when it happened' );
+
+pps_assistant_set_available( true );
+ok( (int) pps_assistant_config()['available_since'] === $stamp, 'a second ON does not re-stamp' );
+
+pps_assistant_set_available( false );
+ok( pps_assistant_human_available() === false, 'set_available(false) takes it back down' );
+ok( (int) pps_assistant_config()['available_since'] === 0, 'and clears the stamp' );
+
+// The state this flips is the state escalation reads — assert the wiring, not just the flag.
+reset_world();
+pps_assistant_set_available( false );
+$s = fresh_session();
+script( array( turn_tool( 'escalate_to_human', array( 'reason' => 'r', 'summary' => 's' ) ), turn_text( 'ok' ) ) );
+pps_assistant_run( $s, 'help' );
+ok( strpos( tool_results_in( $s ), 'NO_HUMAN_AVAILABLE' ) !== false,
+    'toggled off: escalation takes the email path' );
+
+reset_world();
+pps_assistant_set_available( true );
+$s = fresh_session();
+script( array( turn_tool( 'escalate_to_human', array( 'reason' => 'r', 'summary' => 's' ) ), turn_text( 'ok' ) ) );
+pps_assistant_run( $s, 'help' );
+ok( strpos( tool_results_in( $s ), 'HUMAN_AVAILABLE' ) !== false,
+    'toggled on: escalation takes the live-handoff path' );
+
 // ── summary ──────────────────────────────────────────────────────────────────────
 echo "\n" . str_repeat( '─', 62 ) . "\n";
 if ( $T['fail'] === 0 ) {

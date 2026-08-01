@@ -4,7 +4,7 @@
  * Description: Claude-powered on-site customer service chat. Grounded on real order
  *              data via tools; never prices, never promises dates. Template/scaffold —
  *              see docs/CUSTOMER_SERVICE_BOT.md for the design rationale.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Author: Priority Print Service
  *
  * ── WHY NO COMPOSER ──
@@ -28,6 +28,9 @@
  * 3. Load any front-end page while logged in as an admin.
  *
  * ── CHANGELOG ──
+ * 0.2.1  Full intake gate (name, company, email, phone). Bookmarkable availability URL —
+ *        a secret-authenticated REST route so the toggle can be flipped from a phone
+ *        without a wp-admin round trip.
  * 0.2.0  Email gate, manual availability toggle, two-path escalation, record_contact.
  *        Plus the hardening pass from the adversarial review (13 confirmed findings):
  *        a bailed turn no longer poisons the session history; 'visible_to' is now a real
@@ -59,6 +62,7 @@ function pps_assistant_config() {
         // screen shows how long it has been on.
         'available_now'   => false,
         'available_since' => 0,
+        'avail_secret'    => '',           // minted lazily; authenticates the bookmark URL
         'require_email'   => true,         // gate the chat behind an email address
         // Stage 2 — live handoff into Missive. Blank until the custom channel exists.
         'missive_channel_id'     => '',
@@ -99,6 +103,75 @@ function pps_assistant_enabled() {
 function pps_assistant_human_available() {
     $cfg = pps_assistant_config();
     return ! empty( $cfg['available_now'] );
+}
+
+/**
+ * When did availability last go ON? Pure, because two callers need the identical rule and
+ * a duplicated rule drifts: the admin checkbox and the bookmarkable URL below.
+ *
+ * Re-asserting an already-on state keeps the ORIGINAL timestamp. That matters — tapping
+ * the "on" bookmark a second time must not reset the "on for 9h" warning, which is the
+ * only thing that catches a toggle left on overnight.
+ */
+function pps_assistant_availability_stamp( $was_on, $was_since, $now_on ) {
+    if ( ! $now_on ) return 0;
+    return $was_on ? (int) $was_since : time();
+}
+
+/** Flip availability and stamp it. Returns the new state. */
+function pps_assistant_set_available( $on ) {
+    $cfg = pps_assistant_config();
+    $on  = (bool) $on;
+
+    $cfg['available_since'] = pps_assistant_availability_stamp(
+        ! empty( $cfg['available_now'] ), $cfg['available_since'] ?? 0, $on
+    );
+    $cfg['available_now'] = $on;
+
+    update_option( 'pps_assistant_config', $cfg );
+    return $on;
+}
+
+/**
+ * Secret for the bookmarkable availability URL. Minted on first read rather than on save,
+ * so the admin screen can show a working link the moment this deploys.
+ *
+ * Deliberately NOT the Missive webhook secret: different blast radius, and rotating one
+ * should never silently break the other.
+ */
+function pps_assistant_avail_secret() {
+    $cfg = pps_assistant_config();
+    if ( ! empty( $cfg['avail_secret'] ) ) return (string) $cfg['avail_secret'];
+
+    $cfg['avail_secret'] = wp_generate_password( 32, false, false );
+    update_option( 'pps_assistant_config', $cfg );
+    return $cfg['avail_secret'];
+}
+
+/**
+ * Authorize an availability flip.
+ *
+ * The secret in the query string IS the authentication — there is no cookie on a phone
+ * that has never logged into wp-admin, which is the entire point of the bookmark. Compared
+ * with hash_equals() so the route is not an oracle for guessing the secret a byte at a
+ * time. An admin with a live session is let through without it, so the link keeps working
+ * from a desktop after a rotation.
+ *
+ * Worst case if the URL leaks: someone can flip a boolean that changes which of two
+ * honest sentences the bot says. No customer data is reachable from here.
+ */
+function pps_assistant_availability_authorized( $given ) {
+    if ( function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) ) return true;
+
+    // `?k[]=x` arrives as an array. Casting it would emit a warning and compare "Array",
+    // so reject anything that is not already a string rather than coercing it.
+    if ( ! is_string( $given ) ) return false;
+
+    $cfg      = pps_assistant_config();
+    $expected = (string) ( $cfg['avail_secret'] ?? '' );
+
+    if ( $expected === '' || $given === '' ) return false;
+    return hash_equals( $expected, $given );
 }
 
 /** True once a live handoff has happened — Claude must stop answering this session. */
@@ -1083,6 +1156,97 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
         'reply'     => $result['reply'],
         'escalated' => ! empty( $session['escalated'] ),
     ) );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 7b. AVAILABILITY TOGGLE — bookmarkable, no wp-admin round trip
+//
+// Registered as a REST route rather than a query string on a normal page for one specific
+// reason: WP Rocket page-caches the front end, and a cached "you are now available" page
+// would flip nothing while looking like it worked. REST is never page-cached.
+//
+// GET with no `set` shows the current state; ?set=on / ?set=off act. Two deterministic
+// links beat one toggle — a toggle you tap when you cannot remember the current state is
+// a coin flip, and getting it wrong means the bot tells customers a human is here when
+// nobody is.
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'rest_api_init', function () {
+    register_rest_route( 'pps/v1', '/assistant/availability', array(
+        'methods'             => 'GET',
+        'permission_callback' => function ( $request ) {
+            return pps_assistant_availability_authorized( $request['k'] ?? '' );
+        },
+        'args'                => array(
+            'k'   => array( 'required' => false, 'type' => 'string' ),
+            'set' => array( 'required' => false, 'type' => 'string' ),
+        ),
+        'callback'            => 'pps_assistant_handle_availability',
+    ) );
+} );
+
+function pps_assistant_handle_availability( WP_REST_Request $request ) {
+    $set = strtolower( trim( (string) ( $request['set'] ?? '' ) ) );
+    if ( $set === 'on' || $set === 'off' ) {
+        pps_assistant_set_available( $set === 'on' );
+    }
+
+    $cfg   = pps_assistant_config();
+    $on    = ! empty( $cfg['available_now'] );
+    $since = (int) ( $cfg['available_since'] ?? 0 );
+    $base  = rest_url( 'pps/v1/assistant/availability' ) . '?k=' . rawurlencode( pps_assistant_avail_secret() );
+
+    $for = '';
+    if ( $on && $since ) {
+        $mins = max( 0, (int) floor( ( time() - $since ) / 60 ) );
+        $for  = $mins < 60 ? $mins . ' min' : floor( $mins / 60 ) . 'h ' . ( $mins % 60 ) . 'm';
+    }
+
+    // The REST server already sent `Content-Type: application/json`; header() replaces it.
+    // This renders in a browser, so JSON would be the wrong answer for the one surface
+    // this endpoint exists to serve.
+    header( 'Content-Type: text/html; charset=utf-8' );
+    header( 'Cache-Control: no-store, no-cache, must-revalidate' );
+    header( 'X-Robots-Tag: noindex, nofollow' );
+    // The secret is in this page's own URL. Do not hand it to anything we link out to.
+    header( 'Referrer-Policy: no-referrer' );
+
+    $state_label = $on ? 'A human is available' : 'No human available';
+    $state_note  = $on
+        ? 'Escalations tell the customer someone is picking it up right now.'
+        : 'Escalations tell the customer the team will follow up by email, and offer a call or text.';
+
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+       . '<meta name="viewport" content="width=device-width,initial-scale=1">'
+       . '<meta name="robots" content="noindex,nofollow">'
+       . '<title>' . esc_html( $state_label ) . ' — PPS Assistant</title><style>'
+       . 'body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;'
+       . 'background:#0f172a;color:#e2e8f0;font:400 16px/1.5 system-ui,-apple-system,sans-serif;padding:24px}'
+       . '.card{width:100%;max-width:420px;text-align:center}'
+       . '.dot{display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:9px;vertical-align:-1px}'
+       . 'h1{font-size:23px;margin:0 0 10px;font-weight:600}'
+       . 'p{margin:0 0 22px;color:#94a3b8;font-size:14.5px}'
+       . '.warn{color:#fca5a5;font-weight:600}'
+       . 'a.btn{display:block;padding:19px;margin:11px 0;border-radius:13px;text-decoration:none;'
+       . 'font-weight:600;font-size:17px;border:1px solid transparent}'
+       . '.on{background:#16a34a;color:#fff}.off{background:#1e293b;color:#e2e8f0;border-color:#334155}'
+       . '.cur{opacity:.4;pointer-events:none}'
+       . '</style></head><body><div class="card">'
+       . '<h1><span class="dot" style="background:' . ( $on ? '#22c55e' : '#64748b' ) . '"></span>'
+       . esc_html( $state_label ) . '</h1>'
+       . '<p>' . esc_html( $state_note )
+       . ( $for !== '' ? '<br><span class="' . ( $since && ( time() - $since ) > 36000 ? 'warn' : '' ) . '">On for '
+                       . esc_html( $for ) . '.</span>' : '' )
+       . ( pps_assistant_enabled() ? '' : '<br><span class="warn">The assistant itself is switched off, '
+                       . 'so nothing is using this yet.</span>' )
+       . '</p>'
+       . '<a class="btn on' . ( $on ? ' cur' : '' ) . '" href="' . esc_url( $base . '&set=on' ) . '">'
+       . ( $on ? 'Available ✓' : "I'm available" ) . '</a>'
+       . '<a class="btn off' . ( $on ? '' : ' cur' ) . '" href="' . esc_url( $base . '&set=off' ) . '">'
+       . ( $on ? 'Go unavailable' : 'Unavailable ✓' ) . '</a>'
+       . '</div></body></html>';
+
+    exit;   // the REST server would otherwise JSON-encode a return value after our markup
 }
 
 // ═══════════════════════════════════════════════════════════════
