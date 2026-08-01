@@ -202,6 +202,57 @@ print markup:          uniform                // was asymmetric (mk only on BW i
 
 Mirrors the saddle-stitch architecture: dedicated `perfectbound_*` PCF keys so it can be tuned independently of brochure (previously shared `backend_*`). Old two-branch curve and asymmetric print markup are preserved inline as commented-out `// ROLLBACK:` blocks for quick revert without a git operation.
 
+### Pricing surcharge (booklet family) — raised 0.30 → 0.40, 2026-08-01
+
+```
+booklet_surcharge:      0.40   (calc-preview-test.html, calc-modern-draft.html)
+perfectbound_surcharge: 0.40   (calc-perfect-bound.html)
+couponbook_surcharge:   0.40   (calc-coupon-book.html)
+```
+
+Applied as `P.surcharge = subBeforeSurcharge * rate`, where `subBeforeSurcharge` is the
+running sum of **every** line item at that point — materials, print, all labor, add-ons,
+fees, and every discount already taken (`discBW`, `discEasy`, `discCommon`, `discSize`).
+It lands after all discounts and before the site-wide sale discount, and shows in the
+debug breakdown as the `fee`-group line item "Pricing Surcharge".
+
+Two consequences worth remembering before tuning it:
+
+- **It scales the discounts too.** Because it multiplies the post-discount subtotal,
+  raising it makes every discount you grant proportionally smaller in absolute terms.
+  The same applies to fees — the `$35` `non_inventory_fee` is inflated by this rate.
+- **Measured effect of 0.30 → 0.40 is a uniform +7.69%** (= 1.40/1.30 − 1) across the
+  entire quantity curve on all three calculators, verified end-to-end through the
+  rendered quantity-pricing table:
+
+  | qty | saddle 0.30 → 0.40 | perfect bound | coupon book |
+  |---|---|---|---|
+  | 100 | $164.03 → $176.65 | $219.86 → $236.77 | $254.09 → $273.64 |
+  | 1000 | $575.32 → $619.58 | $763.71 → $822.46 | $988.77 → $1064.83 |
+  | 5000 | $2539.76 → $2735.12 | $2820.10 → $3037.04 | $4006.77 → $4314.99 |
+
+**ROLLBACK 2026-08-01:** previous value was `0.30` on all three keys. Revert in the four
+HTML files and the three `pps-config-admin.php` defaults, *and* in the saved option — see
+the deployment note below.
+
+**DEPLOYMENT — the code change alone does not move live pricing.** `pps_get_config()`
+resolves as `array_merge($defaults['pcf'], $saved['pcf'])`, so a value stored in
+`wp_options['pps_calc_config']` wins over the default in `pps-config-admin.php`. Staging
+had all three stored at `0.3` when this change was made. To take effect on a live site,
+the three fields must also be changed in **PPS Calculators → Config → Production**.
+Changing them there is preferred over rewriting the option programmatically: the stored
+array has already lost type fidelity once (`sale_label` and `question_recipient_email` are
+persisted as `0` rather than strings — harmless today only because the calculators read
+them as `PCF.sale_label || "Sale"`), which is what a full round-trip through the API does
+to it.
+
+### The five flat calculators have no surcharge
+
+Brochure, greeting card, letterhead, postcard and sticker carry no surcharge term at all —
+their entire margin comes from the `backend_*` markup curve. This is a real asymmetry in
+the catalogue, not an oversight to fix blindly: adding a 40% term to a flat product is a
+40% price rise, so model it before changing anything.
+
 ### WordPress admin (`pps-config-admin.php`)
 
 Defaults updated to match all calculators:
