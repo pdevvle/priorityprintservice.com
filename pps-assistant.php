@@ -4,7 +4,7 @@
  * Description: Claude-powered on-site customer service chat. Grounded on real order
  *              data via tools; never prices, never promises dates. Template/scaffold —
  *              see docs/CUSTOMER_SERVICE_BOT.md for the design rationale.
- * Version: 0.2.1
+ * Version: 0.3.0
  * Author: Priority Print Service
  *
  * ── WHY NO COMPOSER ──
@@ -28,6 +28,11 @@
  * 3. Load any front-end page while logged in as an admin.
  *
  * ── CHANGELOG ──
+ * 0.3.0  Stage 2: live handoff into a Missive custom channel. escalate_to_human posts the
+ *        conversation to Missive and only then flips the session to 'human'; the visitor's
+ *        later messages are relayed rather than answered; agent replies arrive by webhook
+ *        and are collected by /assistant/poll. An unanswered handoff times out back to the
+ *        bot. A post that fails NEVER claims a live pickup — see pps-assistant-missive.php.
  * 0.2.1  Full intake gate (name, company, email, phone). Bookmarkable availability URL —
  *        a secret-authenticated REST route so the toggle can be flipped from a phone
  *        without a wp-admin round trip.
@@ -45,7 +50,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 if ( defined( 'PPS_ASSISTANT_VERSION' ) ) return;   // co-load guard
-define( 'PPS_ASSISTANT_VERSION', '0.2.0' );
+define( 'PPS_ASSISTANT_VERSION', '0.3.0' );
 define( 'PPS_ASSISTANT_API_URL', 'https://api.anthropic.com/v1/messages' );
 
 // ═══════════════════════════════════════════════════════════════
@@ -68,6 +73,12 @@ function pps_assistant_config() {
         'missive_channel_id'     => '',
         'missive_token'          => '',
         'missive_webhook_secret' => '',
+        'missive_alias'          => '',     // must match an alias defined on the channel
+        'missive_alias_name'     => '',
+        // How long the widget waits for a first agent reply before it stops promising one.
+        // Three minutes: long enough for someone to finish a sentence, short enough that
+        // a visitor staring at "connecting you" does not conclude the site is broken.
+        'handoff_timeout'        => 180,
         'model'         => 'claude-opus-5',
         'effort'        => 'medium',       // low | medium | high | xhigh | max
         // Thinking is ON by default on Opus 5 and max_tokens caps thinking PLUS reply. 4096
@@ -592,11 +603,33 @@ function pps_assistant_tools() {
                 }
 
                 if ( $available ) {
-                    // Stage 2 flips $session['mode'] to 'human' here, once the Missive custom
-                    // channel exists and an agent's reply can reach the widget.
-                    return 'HUMAN_AVAILABLE: a team member is picking this up now. Tell the '
-                         . 'customer someone is looking at it and will reply shortly. Stop '
-                         . 'troubleshooting — do not keep offering suggestions.';
+                    // Try to move the conversation into Missive. The promise made on screen
+                    // is keyed off whether that actually worked — "someone is picking this
+                    // up now" is only true if an agent can see it and reply.
+                    $handed = false;
+                    if ( function_exists( 'pps_assistant_missive_open' ) && pps_assistant_missive_ready() ) {
+                        $handed = pps_assistant_missive_open(
+                            $session['sid'] ?? '', $session, (string) $input['reason'], (string) $input['summary']
+                        );
+                    }
+
+                    if ( $handed ) {
+                        $session['mode']       = 'human';
+                        $session['handoff_at'] = time();
+                        return 'HANDED_OFF: the conversation is now with a team member and your '
+                             . 'part is done. Tell the customer you are connecting them to someone '
+                             . 'now and that they can keep typing in this window. Say nothing else '
+                             . '— do not troubleshoot, summarise, or add suggestions.';
+                    }
+
+                    // Available, but the bridge is not configured or the post failed. The
+                    // email is already sent, so the honest line is the email line — claiming
+                    // a live pickup we cannot deliver is the one failure that costs trust.
+                    error_log( '[pps-assistant] human available but Missive handoff unavailable — falling back to email' );
+                    return 'NO_LIVE_CHANNEL: a team member is around, and the request has been '
+                         . 'emailed to them. Tell the customer their details are with the team and '
+                         . 'someone will follow up shortly by email, or by phone or text if they '
+                         . 'prefer. Do NOT say anyone is reading this chat right now.';
                 }
 
                 // The intake form now collects a phone number up front, so asking for one
@@ -892,6 +925,13 @@ function pps_assistant_session_get( $sid ) {
             'phone_pref'     => '',
             'mode'           => 'bot',
             'escalated'      => false,
+            // Stage 2. human_log is the agent side of the conversation, kept OUT of
+            // 'messages' on purpose: that array has to stay a valid Messages API history
+            // (strict role alternation, tool_use answered), and splicing foreign turns
+            // into it is exactly the class of bug that bricked sessions before.
+            'human_log'            => array(),
+            'missive_conversation' => '',
+            'handoff_at'           => 0,
         );
     }
     return $s;
@@ -1095,6 +1135,9 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
 
     $sid     = sanitize_key( (string) $request['session'] );
     $session = pps_assistant_session_get( $sid );
+    // Tool handlers receive only the session, but the Missive bridge needs the id to
+    // thread on. Carrying it in the array beats widening every handler's signature.
+    $session['sid'] = $sid;
 
     $cfg = pps_assistant_config();
 
@@ -1123,14 +1166,40 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
     }
 
     // Once a human has taken the conversation, Claude must never speak again in it —
-    // a bot answering alongside a live agent is worse than no bot. Stage 2 flips this
-    // when the Missive bridge lands; the short-circuit is here now so the bridge cannot
-    // be wired up without it.
+    // a bot answering alongside a live agent is worse than no bot. The visitor's message
+    // is relayed into Missive instead; the agent's replies come back via the webhook and
+    // are collected by the poll endpoint below.
     if ( pps_assistant_session_is_human( $session ) ) {
+        $relayed = false;
+        if ( function_exists( 'pps_assistant_missive_relay' ) ) {
+            $relayed = pps_assistant_missive_relay( $sid, $session, $message );
+        }
+
+        // Echo the visitor's own line into the log so the widget can render the whole
+        // human-side conversation from one ordered source after a reload.
+        $session['human_log']   = (array) ( $session['human_log'] ?? array() );
+        $session['human_log'][] = array(
+            'from' => 'you', 'text' => $message, 'at' => time(), 'kind' => 'visitor',
+        );
+
+        // A relay that failed means the agent never saw it. Saying nothing would leave
+        // the visitor typing into a void believing they are being read.
+        if ( ! $relayed ) {
+            error_log( '[pps-assistant] relay to Missive failed for session ' . $sid );
+            $session['human_log'][] = array(
+                'from' => 'system',
+                'text' => "That didn't reach us — please email " . pps_assistant_staff_email()
+                        . ' and we will pick it up there.',
+                'at'   => time(),
+                'kind' => 'system',
+            );
+        }
+
         pps_assistant_session_save( $sid, $session );
         return rest_ensure_response( array(
             'reply'      => '',
             'with_human' => true,
+            'relayed'    => $relayed,
         ) );
     }
 
@@ -1155,6 +1224,80 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
     return rest_ensure_response( array(
         'reply'     => $result['reply'],
         'escalated' => ! empty( $session['escalated'] ),
+    ) );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 7a. POLL — how an agent's reply reaches the widget
+//
+// Deliberately the cheapest endpoint in the plugin: one transient read, no API call, no
+// option write on the common path. The widget hits it every few seconds during a live
+// handoff, so anything expensive here is multiplied by every waiting visitor.
+//
+// The cursor is an index into human_log rather than a "clear on read" queue. A dropped
+// response then costs a retry instead of a lost message from a human being.
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'rest_api_init', function () {
+    register_rest_route( 'pps/v1', '/assistant/poll', array(
+        'methods'             => 'GET',
+        'permission_callback' => 'pps_assistant_chat_permission',
+        'args'                => array(
+            'session' => array( 'required' => true,  'type' => 'string' ),
+            'cursor'  => array( 'required' => false, 'type' => 'integer' ),
+        ),
+        'callback'            => 'pps_assistant_handle_poll',
+    ) );
+} );
+
+function pps_assistant_handle_poll( WP_REST_Request $request ) {
+    $sid = sanitize_key( (string) $request['session'] );
+    if ( $sid === '' ) return new WP_Error( 'bad_session', 'Missing session', array( 'status' => 400 ) );
+
+    // Same burst throttle as chat. A poll is cheap, but "cheap" times an open loop in a
+    // forgotten browser tab is still a load source worth bounding.
+    if ( pps_assistant_ip_throttled() ) {
+        return rest_ensure_response( array( 'messages' => array(), 'throttled' => true ) );
+    }
+
+    $session = pps_assistant_session_get( $sid );
+    $log     = (array) ( $session['human_log'] ?? array() );
+    $cursor  = max( 0, (int) $request['cursor'] );
+
+    // Nobody has replied yet and the window has passed. Say so once, in the log, so the
+    // message survives a reload and cannot be delivered twice.
+    $cfg     = pps_assistant_config();
+    $timeout = max( 30, (int) $cfg['handoff_timeout'] );
+    $waiting = pps_assistant_session_is_human( $session )
+            && ! empty( $session['handoff_at'] )
+            && ( time() - (int) $session['handoff_at'] ) > $timeout;
+
+    $agent_replied = false;
+    foreach ( $log as $entry ) {
+        if ( ( $entry['kind'] ?? '' ) === 'agent' ) { $agent_replied = true; break; }
+    }
+
+    if ( $waiting && ! $agent_replied ) {
+        // Hand the conversation back to the bot. The escalation email went out when the
+        // handoff was raised, so the follow-up promise this makes is already backed.
+        $session['mode']        = 'bot';
+        $session['handoff_at']  = 0;
+        $log[]                  = array(
+            'from' => 'system',
+            'kind' => 'system',
+            'at'   => time(),
+            'text' => "Nobody's free to jump in right now, sorry. Your details are with the team "
+                    . 'and they will follow up by email — or by phone or text if you would rather. '
+                    . 'You can keep asking me things in the meantime.',
+        );
+        $session['human_log'] = $log;
+        pps_assistant_session_save( $sid, $session );
+    }
+
+    return rest_ensure_response( array(
+        'mode'     => $session['mode'] ?? 'bot',
+        'messages' => array_slice( $log, $cursor ),
+        'cursor'   => count( $log ),
     ) );
 }
 
@@ -1257,6 +1400,15 @@ function pps_assistant_handle_availability( WP_REST_Request $request ) {
 // most often and shares no state with the engine above, so it lives separately: touching
 // the widget no longer risks the tool handlers.
 // ═══════════════════════════════════════════════════════════════
+
+// The Missive bridge loads BEFORE the UI: the admin screen renders a test-send button
+// that only exists once the bridge is present, and escalate_to_human function_exists()
+// checks it. Absent, the assistant degrades to the stage-1 email path with no fatals.
+$_pps_assistant_missive = __DIR__ . '/pps-assistant-missive.php';
+if ( file_exists( $_pps_assistant_missive ) ) {
+    require_once $_pps_assistant_missive;
+}
+unset( $_pps_assistant_missive );
 
 $_pps_assistant_ui = __DIR__ . '/pps-assistant-ui.php';
 if ( file_exists( $_pps_assistant_ui ) ) {

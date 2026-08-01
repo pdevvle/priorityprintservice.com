@@ -9,7 +9,7 @@ php tests/assistant/guardrails.php     # exit 0 = pass, 1 = fail
 
 | File | What it proves | Deps |
 |------|----------------|------|
-| `guardrails.php` | The assistant's safety properties are **structural**, not prompt-dependent: order data can't be reached without verification (even when the model is scripted to comply with a prompt injection), order numbers can't be enumerated, the guest-auth rate limit is inherited, a looping model is bounded, and a refusal doesn't fatal. 26 assertions. | `php` only |
+| `guardrails.php` | The assistant's safety properties are **structural**, not prompt-dependent: order data can't be reached without verification (even when the model is scripted to comply with a prompt injection), order numbers can't be enumerated, the guest-auth rate limit is inherited, a looping model is bounded, a refusal doesn't fatal, and a live handoff is never promised unless it actually posted to Missive. 146 assertions. | `php` only |
 
 ## How it works
 

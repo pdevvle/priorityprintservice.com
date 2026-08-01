@@ -45,6 +45,7 @@ add_action( 'wp_footer', function () {
 
     $boot = wp_json_encode( array(
         'endpoint' => rest_url( 'pps/v1/assistant/chat' ),
+        'poll'     => rest_url( 'pps/v1/assistant/poll' ),
         'nonce'    => wp_create_nonce( 'wp_rest' ),
         'greeting' => 'Hi — I can help with order status, file setup, and product questions. '
                     . 'For pricing I\'ll point you at the calculator.',
@@ -70,6 +71,7 @@ add_action( 'wp_footer', function () {
           (CFG.admin ? '<span class="pps-asst-flag">admin only</span>' : '') + '</button>' +
         '<div id="pps-asst-panel" hidden>' +
           '<header><span>Priority Print Service</span><button id="pps-asst-close" aria-label="Close">&times;</button></header>' +
+          '<div id="pps-asst-banner" role="status" hidden></div>' +
           '<div id="pps-asst-log" role="log" aria-live="polite"></div>' +
           '<form id="pps-asst-gate">' +
             '<p class="pps-asst-gate-intro">A few details so we can follow up if we miss you.</p>' +
@@ -98,6 +100,84 @@ add_action( 'wp_footer', function () {
         return el;
       }
 
+      // ── live handoff ────────────────────────────────────────────────────────────
+      // While a human owns the conversation the bot is silent server-side, so the only
+      // way an agent's words reach this window is by asking for them.
+      var cursor = 0, pollTimer = null, withHuman = false, firstPoll = true, graceLeft = 0;
+
+      function setBanner(text) {
+        var b = document.getElementById('pps-asst-banner');
+        if (!text) { b.hidden = true; return; }
+        b.textContent = text;
+        b.hidden = false;
+      }
+
+      function renderHuman(m, showOwn) {
+        // The visitor's own relayed lines are already on screen from when they were typed,
+        // so re-rendering them mid-session would duplicate. On the FIRST poll after a page
+        // load the window is empty, and skipping them would show the agent's answers with
+        // none of the questions — so there, render them.
+        if (m.kind === 'visitor' && !showOwn) return;
+        var el = add(m.kind === 'visitor' ? 'user' : (m.kind === 'system' ? 'bot' : 'human'), m.text);
+        if (m.kind === 'agent' && m.from) {
+          var tag = document.createElement('span');
+          tag.className = 'pps-asst-who';
+          tag.textContent = m.from;
+          el.prepend(tag);
+        }
+      }
+
+      function pollOnce() {
+        return fetch(CFG.poll + '?session=' + encodeURIComponent(sid) + '&cursor=' + cursor, {
+          credentials: 'same-origin',
+          headers: { 'X-WP-Nonce': CFG.nonce }
+        })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d) return;
+          if (typeof d.cursor === 'number') cursor = d.cursor;
+          var own = firstPoll;
+          firstPoll = false;
+          (d.messages || []).forEach(function (m) { renderHuman(m, own); });
+
+          var nowHuman = d.mode === 'human';
+          if (nowHuman && !withHuman) setBanner('Connecting you to the team…');
+          // Falling back out of human mode means nobody picked up; the server has already
+          // said so in the log, so the banner just needs to stop claiming otherwise.
+          if (!nowHuman && withHuman) setBanner('');
+          withHuman = nowHuman;
+          // An agent has actually spoken — stop saying "connecting".
+          if (nowHuman && (d.messages || []).some(function (m) { return m.kind === 'agent'; })) {
+            setBanner('You are chatting with our team.');
+          }
+
+          // Do NOT stop dead when the server hands the chat back to the bot. Someone who
+          // was busy may still reply a minute later, and a stopped poller would drop that
+          // message on the floor. Back off and keep listening for a bounded while.
+          if (nowHuman) { graceLeft = 40; retime(4000); }
+          else if (graceLeft > 0) { graceLeft--; retime(15000); }
+          else stopPolling();
+        })
+        .catch(function () { /* a dropped poll is recoverable; the cursor did not move */ });
+      }
+
+      var pollEvery = 0;
+      function retime(ms) {
+        if (pollTimer && pollEvery === ms) return;   // already at this cadence
+        if (pollTimer) clearInterval(pollTimer);
+        pollEvery = ms;
+        pollTimer = setInterval(pollOnce, ms);
+      }
+      function startPolling() {
+        graceLeft = 40;
+        if (!pollTimer) retime(4000);
+        pollOnce();
+      }
+      function stopPolling() {
+        if (!pollTimer) return;
+        clearInterval(pollTimer); pollTimer = null; pollEvery = 0;
+      }
+
       // Intake gate. Held in sessionStorage so a page navigation doesn't re-ask; the
       // server re-validates every field, this is only UI state.
       var intake = {};
@@ -109,6 +189,9 @@ add_action( 'wp_footer', function () {
         document.getElementById('pps-asst-form').hidden = false;
         if (!log.childElementCount) add('bot', CFG.greeting);
         document.getElementById('pps-asst-input').focus();
+        // A reload mid-handoff lands here with an empty window and a live agent waiting
+        // on the other side. One poll rebuilds the human side from the server's log.
+        pollOnce().then(function () { if (withHuman) startPolling(); });
       }
 
       document.getElementById('pps-asst-launch').onclick = function () {
@@ -180,8 +263,16 @@ add_action( 'wp_footer', function () {
             return JSON.parse(body);
           });
         })
-        .then(function (d) { pending.className = 'pps-asst-msg pps-asst-bot';
-                             pending.textContent = d.reply || ''; })
+        .then(function (d) {
+          // A handed-off turn has no bot reply — the agent's words arrive via polling.
+          // Remove the placeholder rather than rendering an empty bubble.
+          if (d.with_human || !d.reply) { pending.remove(); }
+          else { pending.className = 'pps-asst-msg pps-asst-bot'; pending.textContent = d.reply; }
+          if (d.with_human) startPolling();
+          // The bot asks for a handoff by flipping mode server-side; the next poll
+          // reports it. Poll once immediately so "connecting you" appears without delay.
+          else if (d.escalated) pollOnce();
+        })
         .catch(function (err) {
           pending.className = 'pps-asst-msg pps-asst-bot';
           // Admins testing get the real failure; customers get the friendly line.
@@ -211,6 +302,13 @@ add_action( 'wp_footer', function () {
       .pps-asst-bot{background:#fff;border:1px solid #e3e8ef;color:#0f172a;align-self:flex-start}
       .pps-asst-user{background:#007eff;color:#fff;align-self:flex-end}
       .pps-asst-pending{opacity:.55}
+      /* A live agent must not look like the bot — same bubble side, different identity. */
+      .pps-asst-human{background:#ecfdf5;border:1px solid #a7f3d0;color:#064e3b;align-self:flex-start}
+      .pps-asst-who{display:block;font-size:11.5px;font-weight:700;color:#047857;margin-bottom:3px;
+        letter-spacing:.02em}
+      #pps-asst-banner{padding:8px 14px;background:#ecfdf5;border-bottom:1px solid #a7f3d0;
+        color:#065f46;font-size:12.5px;font-weight:600}
+      #pps-asst-banner[hidden]{display:none}
       #pps-asst-gate{display:flex;flex-direction:column;gap:7px;padding:14px;border-top:1px solid #e3e8ef;background:#fff;
         max-height:100%;overflow-y:auto}
       #pps-asst-gate[hidden]{display:none}
@@ -274,6 +372,9 @@ function pps_assistant_render_admin() {
         // a readable field (same treatment as the API key).
         $cfg['missive_channel_id'] = sanitize_text_field( wp_unslash( $_POST['missive_channel_id'] ?? '' ) );
         $cfg['missive_token']      = sanitize_text_field( wp_unslash( $_POST['missive_token'] ?? '' ) );
+        $cfg['missive_alias']      = sanitize_text_field( wp_unslash( $_POST['missive_alias'] ?? '' ) );
+        $cfg['missive_alias_name'] = sanitize_text_field( wp_unslash( $_POST['missive_alias_name'] ?? '' ) );
+        $cfg['handoff_timeout']    = max( 30, (int) ( $_POST['handoff_timeout'] ?? 180 ) );
 
         // The webhook secret is ours to mint, not the operator's to invent — a weak one here
         // means anyone who finds the route can inject messages into a customer's chat.
@@ -334,10 +435,10 @@ function pps_assistant_render_admin() {
                     <p class="description">Off: escalations tell the customer the team will follow up by
                     email, and the bot offers a text or call. On: the customer is told someone is picking
                     it up now — so only leave it on when that is true.</p>
-                    <p class="description"><strong>Both settings send the same email</strong> to the shop
-                    today; only the subject line and what the bot says differ. A real live handoff — the
-                    conversation moving into Missive and an agent's reply reaching the widget — lands with
-                    stage 2, below.</p>
+                    <p class="description">The escalation email is sent either way. What this changes is
+                    whether the chat is also handed into Missive for a live reply — and it only claims that
+                    if the handoff genuinely posted. With the bridge below unconfigured, ticking this just
+                    gets a politer version of the email answer.</p>
                 </td></tr>
                 <tr><th>Toggle from your phone</th><td>
                     <?php $avail_base = rest_url( 'pps/v1/assistant/availability' ) . '?k=' . rawurlencode( pps_assistant_avail_secret() ); ?>
@@ -390,7 +491,7 @@ function pps_assistant_render_admin() {
                 <tr><th>Daily cap</th><td>
                     <input type="number" name="daily_cap" value="<?php echo (int) $cfg['daily_cap']; ?>" min="0">
                 </td></tr>
-                <tr><th colspan="2"><hr><h2 style="margin:0">Missive live handoff <span style="font-weight:400;color:#666">(stage 2 — not built yet)</span></h2></th></tr>
+                <tr><th colspan="2"><hr><h2 style="margin:0">Missive live handoff <span style="font-weight:400;color:#666">(check the connection below after saving)</span></h2></th></tr>
                 <tr><th>Channel ID</th><td>
                     <input type="text" name="missive_channel_id" value="<?php echo esc_attr( $cfg['missive_channel_id'] ); ?>" class="regular-text">
                     <p class="description">Missive → Settings → Accounts → Add account → Custom.</p>
@@ -398,6 +499,20 @@ function pps_assistant_render_admin() {
                 <tr><th>API token</th><td>
                     <input type="password" name="missive_token" value="<?php echo esc_attr( $cfg['missive_token'] ); ?>" class="regular-text" autocomplete="off">
                     <p class="description">Missive → Settings → API.</p>
+                </td></tr>
+                <tr><th>Alias username</th><td>
+                    <input type="text" name="missive_alias" value="<?php echo esc_attr( $cfg['missive_alias'] ); ?>" class="regular-text" placeholder="website-chat">
+                    <input type="text" name="missive_alias_name" value="<?php echo esc_attr( $cfg['missive_alias_name'] ); ?>" class="regular-text" placeholder="Website chat" style="margin-top:4px">
+                    <p class="description">Username first, then the display name — both must match an
+                    alias you defined on the custom channel in Missive. This is the address the visitor's
+                    message is addressed <em>to</em>, and the identity your team replies <em>as</em>.</p>
+                </td></tr>
+                <tr><th>Wait before giving up</th><td>
+                    <input type="number" name="handoff_timeout" value="<?php echo (int) $cfg['handoff_timeout']; ?>" min="30" step="10"> seconds
+                    <p class="description">How long the visitor sees “Connecting you to the team…” before
+                    the bot takes the conversation back and points them at the email follow-up. The
+                    escalation email is already sent by then, so nothing is lost — this only controls how
+                    long an unanswered chat keeps promising a live reply.</p>
                 </td></tr>
                 <tr><th>Webhook URL</th><td>
                     <input type="text" readonly class="large-text code" onclick="this.select()"
@@ -412,8 +527,8 @@ function pps_assistant_render_admin() {
                         </label>
                     </p>
                     <p class="description">Requires the <strong>PPS Assistant — Missive Webhook</strong>
-                    plugin to be active. It currently authenticates and records deliveries so we can see
-                    the real payload shape; it does not yet deliver replies into the chat.</p>
+                    plugin to be active. Deliveries are routed into the visitor's chat and recorded
+                    below either way.</p>
                 </td></tr>
                 <tr><th colspan="2"><hr></th></tr>
                 <tr><th>Policy prompt</th><td>
@@ -421,8 +536,65 @@ function pps_assistant_render_admin() {
                     <p class="description">Editing this changes the cached prefix — the next request pays a fresh cache write.</p>
                 </td></tr>
             </table>
-            <?php submit_button(); ?>
+
+            <?php submit_button( 'Save settings' ); ?>
         </form>
+
+        <?php
+        // Outside the settings form on purpose: this posts to admin-post.php, and nesting
+        // it would make the Save button submit a test send instead.
+        if ( function_exists( 'pps_assistant_missive_ready' ) ) :
+            $ready = pps_assistant_missive_ready();
+            $test  = isset( $_GET['pps_test'] ) ? sanitize_key( wp_unslash( $_GET['pps_test'] ) ) : '';
+            ?>
+            <h2>Check the connection</h2>
+            <?php if ( $test === 'ok' ) : ?>
+                <div class="notice notice-success inline"><p>Message accepted by Missive. Look for
+                <em>PPS Assistant — connection test</em> in your inbox, then reply to it — the reply
+                should appear in the log below within a few seconds.</p></div>
+            <?php elseif ( $test === 'fail' ) : ?>
+                <div class="notice notice-error inline"><p>Missive rejected it. The exact request and
+                response are in the log below — that response names what needs fixing.</p></div>
+            <?php endif; ?>
+
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <input type="hidden" name="action" value="pps_assistant_missive_test">
+                <?php wp_nonce_field( 'pps_assistant_missive_test' ); ?>
+                <p><button type="submit" class="button" <?php disabled( ! $ready ); ?>>Send a test message</button>
+                <?php if ( ! $ready ) : ?>
+                    <span class="description">Needs a channel ID and an API token first.</span>
+                <?php endif; ?>
+                </p>
+                <p class="description" style="max-width:46em">Missive blocks automated reads of its own
+                API documentation, so the exact field names in both directions are reconstructed rather
+                than copied from a spec. This button settles that in one round trip instead of finding
+                out during a real customer's handoff — and every attempt, sent and received, is recorded
+                verbatim below.</p>
+            </form>
+
+            <?php
+            $mlog = get_option( 'pps_assistant_missive_log', array() );
+            if ( is_string( $mlog ) ) $mlog = json_decode( $mlog, true );
+            if ( is_array( $mlog ) && $mlog ) : ?>
+                <h3>Bridge log <span style="font-weight:400;color:#666">(newest first, last 15)</span></h3>
+                <div style="max-height:340px;overflow:auto;border:1px solid #ccd0d4;background:#fff;padding:10px">
+                <?php foreach ( $mlog as $row ) : ?>
+                    <p style="margin:0 0 4px"><strong><?php echo esc_html( $row['event'] ?? '?' ); ?></strong>
+                    <code><?php echo esc_html( $row['at'] ?? '' ); ?></code>
+                    <?php if ( isset( $row['status'] ) ) : ?>
+                        — HTTP <?php echo (int) $row['status']; ?>
+                    <?php endif; ?></p>
+                    <?php foreach ( array( 'request', 'response', 'raw', 'error' ) as $k ) :
+                        if ( empty( $row[ $k ] ) ) continue; ?>
+                        <pre style="margin:0 0 8px;white-space:pre-wrap;word-break:break-all;font-size:11px;color:#555"><?php
+                            echo esc_html( $k . ': ' . ( is_string( $row[ $k ] ) ? $row[ $k ] : wp_json_encode( $row[ $k ] ) ) );
+                        ?></pre>
+                    <?php endforeach; ?>
+                    <hr style="margin:6px 0">
+                <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        <?php endif; ?>
     </div>
     <?php
 }

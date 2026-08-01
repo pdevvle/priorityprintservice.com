@@ -151,6 +151,57 @@ assertions or the suite silently stops covering the thing it exists to cover.
 
 ---
 
+## The live handoff (Missive)
+
+When **Someone is available** is on and the Missive bridge is configured, an escalation
+stops being an email and becomes a real conversation: the chat is posted into your custom
+channel, the bot goes silent, and whatever you type in Missive appears in the visitor's
+window. They keep typing in the same box; their replies relay back to you.
+
+### Turning it on
+
+1. **PPS Calculators → Assistant → Missive live handoff.** Channel ID, API token, and the
+   alias username + display name — the alias must match one you defined on the channel.
+2. Copy the **Webhook URL** into Missive's *Outgoing webhook · URL* field.
+3. Save, then hit **Send a test message**. It should land in your inbox within seconds.
+4. **Reply to that test.** If the reply shows up in the bridge log as `delivered`, both
+   directions work.
+
+Step 4 is the one people skip, and it's the one that matters — outbound working tells you
+nothing about whether an agent's reply can find its way back.
+
+### If the test fails
+
+The bridge log under the button has the exact request and the exact response, token
+redacted. A 422 naming a field is a one-line fix — paste that response into a session.
+
+This is worth knowing: **Missive blocks automated reads of its own API docs**, so the
+field names in both directions were reconstructed rather than copied from a spec. The
+logging exists precisely because of that. If a reply lands as `unmatched`, the raw payload
+beside it names the field the extractor is missing.
+
+### What can't go wrong
+
+| Situation | What the customer is told |
+|---|---|
+| Bridge unconfigured, toggle on | "Team will follow up by email" — never that someone is reading |
+| Missive rejects the post | Same. The handoff does not happen |
+| Nobody replies within the timeout | Bot comes back, says the team will email, keeps helping |
+| A relayed message fails to send | Told plainly it didn't reach us, with the email address |
+
+The rule the code enforces: the session only flips to human **after** a successful post.
+The escalation email goes out either way, so no request is ever lost to a failed handoff.
+
+### The timeout
+
+"Wait before giving up" (default 180s) is how long the visitor sees *Connecting you to the
+team…* before the bot takes over again. Too long and they conclude the site is broken; too
+short and you lose handoffs you'd have answered. If an agent replies after it expires, the
+message still arrives — the widget keeps listening at a slower cadence for about ten
+minutes.
+
+---
+
 ## Lever 4 — evals
 
 Prompt edits routinely fix one case and break two you weren't watching. The only defense

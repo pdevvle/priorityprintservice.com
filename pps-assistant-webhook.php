@@ -1,29 +1,30 @@
 <?php
 /**
  * Plugin Name: PPS Assistant — Missive Webhook
- * Description: Receives agent replies from a Missive custom channel. Currently a verified
- *              stub: it authenticates the caller, records the payload, and returns 200 so
- *              Missive's setup form accepts the URL. Delivery into the chat widget lands
- *              with stage 2.
- * Version: 0.1.0
+ * Description: Receives agent replies from a Missive custom channel and delivers them into
+ *              the visitor's chat session. Authenticates the caller, routes the payload,
+ *              and records every delivery for diagnosis.
+ * Version: 0.2.0
  * Author: Priority Print Service
  *
  * WHY THIS EXISTS SEPARATELY
  * Missive's "Connect your account" form wants an outgoing webhook URL before it will
- * create the channel, and a URL that 404s is not obviously acceptable to it. Shipping the
- * route as its own small file unblocks channel creation without redeploying the 52KB
- * engine, and it folds into pps-assistant.php at stage 2.
+ * create the channel, and a URL that 404s is not obviously acceptable to it. Keeping the
+ * route in its own small file means the URL can be created, authenticated and debugged
+ * without redeploying the 70KB engine — and it stays deactivatable on its own, which is a
+ * useful kill switch for inbound traffic alone.
  *
  * WHAT IT DOES NOW
- * Authenticates, logs, acknowledges. It does NOT deliver anything to a customer — nothing
- * is wired to the widget yet, so an agent reply typed in Missive goes nowhere. That is
- * deliberate: better a channel that visibly does nothing than one that half-works.
+ * Authenticates, hands the payload to pps_assistant_missive_receive() for routing into the
+ * visitor's session, logs the raw bytes, and acknowledges.
  *
- * WHY THE LOGGING IS THE POINT
- * Missive's docs 403 automated fetchers, so the exact payload shape is unknown. Every
- * authenticated delivery is recorded to wp_options['pps_assistant_webhook_log'] (last 10,
- * newest first). One real agent reply on staging tells us the field names stage 2 needs —
- * which beats guessing at them.
+ * WHY THE LOGGING IS STILL THE POINT
+ * Missive's docs 403 automated fetchers, so the inbound payload shape is RECONSTRUCTED,
+ * not read off a spec. The extractor walks a list of plausible field paths; when none
+ * match, `routed` comes back "unmatched" and the raw body is in
+ * wp_options['pps_assistant_webhook_log'] (last 10, newest first) plus
+ * ['pps_assistant_missive_log']. That turns the first miss into a one-line fix in
+ * pps_assistant_missive_extract() rather than an investigation.
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
@@ -66,9 +67,21 @@ function pps_assistant_handle_missive_webhook( WP_REST_Request $request ) {
     // is computed over exact bytes, and re-serialising a parsed array changes them.
     $raw = $request->get_body();
 
+    // Stage 2: try to deliver into the visitor's chat. The raw-body log below still runs
+    // either way — a delivery that failed to route is exactly the one worth having bytes
+    // for, and the payload shape is still reconstructed rather than documented.
+    $routed = 'no_bridge';
+    if ( function_exists( 'pps_assistant_missive_receive' ) ) {
+        $parsed = json_decode( (string) $raw, true );
+        $routed = is_array( $parsed ) ? pps_assistant_missive_receive( $parsed ) : 'unparseable';
+    }
+
     $entry = array(
         'at'      => gmdate( 'c' ),
         'method'  => $request->get_method(),
+        // What happened to it. "unmatched" beside a raw body is the pair that tells you
+        // which field path pps_assistant_missive_extract() is missing.
+        'routed'  => $routed,
         // Header names that might carry a signature or delivery id. Recorded so we can see
         // what Missive actually sends rather than guessing from documentation we can't read.
         'headers' => array_intersect_key(
@@ -87,8 +100,11 @@ function pps_assistant_handle_missive_webhook( WP_REST_Request $request ) {
     $log = array_slice( $log, 0, 10 );          // keep it bounded; this is a diagnostic, not storage
     update_option( PPS_ASSISTANT_WEBHOOK_LOG, $log, false );   // autoload off — it can get chunky
 
-    error_log( '[pps-assistant] missive webhook received ' . strlen( (string) $raw ) . ' bytes' );
+    error_log( '[pps-assistant] missive webhook received ' . strlen( (string) $raw )
+        . ' bytes, routed=' . $routed );
 
-    // Acknowledge. Missive retries on non-2xx, and a retry storm against a stub helps nobody.
-    return rest_ensure_response( array( 'ok' => true, 'stage' => 'stub' ) );
+    // Always acknowledge, even when we could not route it. Missive retries on non-2xx, and
+    // a retry storm changes nothing about a payload we failed to understand — the log is
+    // what fixes that, not a redelivery.
+    return rest_ensure_response( array( 'ok' => true, 'routed' => $routed ) );
 }
