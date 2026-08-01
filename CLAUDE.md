@@ -114,6 +114,48 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 - Reorder type coercion (Number() on all numeric, strict boolean)
 - Edit mode atomicity (add before remove)
 
+## Server-side patches must come home the same session
+
+**A fix that exists only on a server is not a fix. It is a countdown to the next
+deploy.** This cost us the artwork-upload hardening on 2026-08-01: magic-byte
+validation and an `.htaccess` execution guard were applied surgically to staging via
+published insertion blocks, the blocks were deleted once applied, and the repo copy of
+`pps-calculators.php` never had them. Deploying that file for an unrelated reason
+silently reverted both. Nothing failed, nothing logged, and the site kept working with
+its upload defences gone.
+
+The rule, in order of preference:
+
+1. **Change the repo first, then deploy.** This is the normal path. Surgical
+   server-side edits are for emergencies only.
+2. **If you must patch a server directly, merge it into the repo in the same
+   session** — before you close the task, not "next time". A patch that survives only
+   as a `.txt` artifact in a deleted commit is already lost.
+3. **Never delete the deploy artifact until the repo carries the change**, not merely
+   until the server does. "Patch complete" means merged, not applied.
+
+### Before overwriting any file on a server
+
+Whole-file deploys are the mechanism that destroys surgical patches, so check first:
+
+- Compare the server file's size against the repo version, and against repo history:
+  `for c in $(git log --format=%H -25 -- <file>); do ... git cat-file -s ...; done`
+  A size that matches **no** commit means the server copy has been edited in place —
+  stop and find out what is in it before overwriting.
+- **Treat a `.bak`, `.orig` or `.prehardening` file beside a live file as a red flag.**
+  It is the fingerprint of someone patching surgically. That file is the *pre*-patch
+  state, so it cannot restore the patch — it only proves one happened.
+- Prefer pull-based deploys (`pps_plugin_download_url` against a raw commit URL) so the
+  deployed bytes are pinned to a reviewable commit, and rollback is the same call with
+  a different SHA.
+
+### Applies equally to
+
+Anything edited outside version control and relied upon: `wp_options` values that
+carry behaviour (`pps_calc_config`, the registry, the tooltips table), one-shot
+`_pps_*` helper files, and files added to `active_plugins` by hand. If it changes what
+production does and it is not in the repo, it is one deploy from being undone.
+
 ## Pricing changes
 
 Before suggesting any formula change, PCF default change, or new pricing knob, read `docs/MASTER_PRICING_LOGIC.md`. It is the single source of truth for the pricing engine — strategy, applied values, rollback reference, and the patterns for adding new knobs. Pricing math lives only in the calculator HTML files; `pps-calculators.php` contains no pricing logic, only config injection.
