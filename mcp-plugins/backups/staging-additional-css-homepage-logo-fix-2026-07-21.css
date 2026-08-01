@@ -1,0 +1,165 @@
+/* Homepage client-logo band fix — staging. Version-controlled record + revert
+ * reference. Nothing here is auto-loaded. Progression: v1 (never-crop) → v2
+ * (fixed-height wall, 2026-07-21) → v3 (Printivity-style blue tile wall,
+ * 2026-07-22, CURRENT). Each version's CSS was appended to the Astra Customizer
+ * Additional CSS (custom_css post 19873); later + higher-specificity wins.
+ *
+ * ROOT CAUSE (found via GD analysis, pps-home-probe.php):
+ *   The 8 "Preferred by businesses…" logos were each a short wordmark baked onto a
+ *   tall white canvas — content filled ~96% width but as little as 25% HEIGHT, i.e.
+ *   large baked whitespace top + bottom inside the image file. An overflow-clip hid
+ *   that padding (wide logos cropped); object-fit:contain revealed all the baked
+ *   whitespace ("gigantic margin"). WordPress/WooCommerce also served a hard-cropped
+ *   square 150x150 thumbnail (Spectra block urlMobile) which center-crops a wide
+ *   logo = residual clipping.
+ *
+ * ── v2 (2026-07-21, SUPERSEDED but still present beneath v3) ────────────────
+ *   1. IMAGE TRIM (GD, pps-home-probe.php apply mode): each of the 8 source logos
+ *      (attach IDs 39221-39228) trimmed to its content bbox + 8% margin, file
+ *      overwritten. Originals backed up at <file>.pre-trim-bak. Aspect-changing
+ *      generated sizes (square thumbnail etc.) dropped from metadata so they can't
+ *      feed srcset. — This trim is STILL IN EFFECT and v3 relies on it.
+ *   2. SRCSET REPOINT: -N-150x150.jpg refs on homepage post 86861 repointed to full
+ *      -N.jpg. — Later fully superseded by v3's repoint to -N-white.png.
+ *   3. CSS: fixed-height flex wall (block below, marked v2). Still present; v3
+ *      overrides every overlapping property via higher specificity + later cascade.
+ *
+ * ── v3 (2026-07-22, CURRENT — Printivity-style blue tile wall) ──────────────
+ *   White monochrome logos on rounded blue tiles, matching the reference the owner
+ *   approved. Three parts, all on staging:
+ *   1. WHITE KNOCKOUTS (GD, pps-home-probe.php knockout mode): for each of the 8
+ *      trimmed logos, a white-on-transparent PNG generated next to the original as
+ *      <name>-white.png (ink darkness → white alpha; near-white → transparent).
+ *      Source = the v2-trimmed file, so the knockout inherits the tight crop.
+ *   2. CONTENT REPOINT (homepage post 86861, via wp_alter_post): every
+ *      Priority-Print-Service-Online-Printing-Services-N.jpg reference (src + srcset
+ *      + Spectra urlMobile) repointed to -N-white.png (56 replacements). The band
+ *      now serves only the white knockout PNGs.
+ *   3. CSS: the v3 block below, appended after the v2 END marker in post 19873.
+ *      Scoped to the logo band ONLY via .pps-benefits.has-ast-global-color-5-
+ *      background-color (that class combo uniquely identifies this band — NOT the
+ *      "No Logins / No Minimums" benefits group, which is .pps-benefits without the
+ *      global-color-5 background). Blue band #0f4c81, blue tiles #2169a8, white
+ *      logos height 42px object-fit:contain; 4-up desktop / 3-up ≤900px / 2-up
+ *      ≤560px grid; the two uag-hide-mob tiles collapse on mobile via :has().
+ *
+ *   NOTE: the v3 CSS write was applied with wp_alter_post (plain-text mode) on
+ *   post 19873, because the pps_set_custom_css MCP tool was permission-blocked in
+ *   that session. Same destination (Astra Additional CSS), same result.
+ *
+ * VERIFY (staging): pps-home-probe.php probe mode (set option
+ *   pps_home_probe_trigger, read pps_home_probe_result) — purges WP Rocket, refetches
+ *   the homepage, and reports band_html (should show -N-white.png) + css_hits (should
+ *   show the v3 rules). Confirmed live 2026-07-22.
+ *
+ * PRODUCTION TODO: none of this is on production yet. When the homepage ships to
+ *   prod, repeat on prod: (a) the image trim + white-knockout GD passes (or copy the
+ *   *-white.png files across), (b) the post-content repoint to -N-white.png, (c)
+ *   append the v3 CSS block to prod's Additional CSS.
+ *
+ * REVERT:
+ *   - Full revert to original logos: restore each <file>.pre-trim-bak over <file>,
+ *     regenerate thumbnails; repoint homepage post 86861 -N-white.png refs back to
+ *     -N.jpg (or -N-150x150.jpg); delete BOTH the v2 and v3 CSS blocks from post 19873.
+ *   - Fall back v3 → v2 only: delete the v3 block below from post 19873 and repoint
+ *     homepage -N-white.png → -N.jpg. (Leaves the v2 fixed-height wall in effect.)
+ *   - The -N-white.png files can be left in place if unused; they are additive.
+ */
+
+/* ===== HOMEPAGE CLIENT-LOGO STRIP v2 — fixed-height logo wall (2026-07-21) — SUPERSEDED by v3 below ===== */
+.pps-benefits .wp-block-columns.is-not-stacked-on-mobile {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 26px 44px !important;
+}
+.pps-benefits .wp-block-columns.is-not-stacked-on-mobile > .wp-block-column {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+.pps-benefits .wp-block-uagb-image,
+.pps-benefits .wp-block-uagb-image__figure {
+  width: auto !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  overflow: visible !important;
+}
+.pps-benefits .wp-block-uagb-image__figure img {
+  height: 48px !important;
+  width: auto !important;
+  max-width: 160px !important;
+  aspect-ratio: auto !important;
+  object-fit: contain !important;
+}
+@media (max-width: 600px) {
+  .pps-benefits .wp-block-columns.is-not-stacked-on-mobile { gap: 20px 30px !important; }
+  .pps-benefits .wp-block-uagb-image__figure img { height: 38px !important; max-width: 128px !important; }
+}
+/* ===== END HOMEPAGE CLIENT-LOGO STRIP ===== */
+
+/* ===== HOMEPAGE CLIENT-LOGO STRIP v3 — Printivity-style blue tile wall (2026-07-22) =====
+   Supersedes the v2 fixed-height wall above (higher specificity + later cascade).
+   White-knockout logos (…-N-white.png) on rounded blue tiles. Scoped to the logo
+   band only via .has-ast-global-color-5-background-color (NOT the benefits group). */
+.pps-benefits.has-ast-global-color-5-background-color {
+  background-color:#0f4c81 !important;
+  padding-top:48px !important;
+  padding-bottom:52px !important;
+}
+.pps-benefits.has-ast-global-color-5-background-color > p {
+  color:#dfeaf6 !important;
+  font-size:16px !important;
+  margin-bottom:26px !important;
+}
+.pps-benefits.has-ast-global-color-5-background-color .wp-block-columns.is-not-stacked-on-mobile {
+  display:grid !important;
+  grid-template-columns:repeat(4,1fr) !important;
+  align-items:stretch !important;
+  gap:16px !important;
+  max-width:1060px !important;
+  margin-left:auto !important;
+  margin-right:auto !important;
+  flex-wrap:initial !important;
+}
+.pps-benefits.has-ast-global-color-5-background-color .wp-block-columns.is-not-stacked-on-mobile > .wp-block-column {
+  flex:initial !important;
+  width:auto !important;
+  max-width:none !important;
+  min-width:0 !important;
+  margin:0 !important;
+  background:#2169a8 !important;
+  border-radius:10px !important;
+  padding:20px 18px !important;
+  min-height:96px !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+}
+.pps-benefits.has-ast-global-color-5-background-color .wp-block-uagb-image,
+.pps-benefits.has-ast-global-color-5-background-color .wp-block-uagb-image__figure {
+  width:auto !important;
+  max-width:100% !important;
+  margin:0 !important;
+  overflow:visible !important;
+}
+.pps-benefits.has-ast-global-color-5-background-color .wp-block-uagb-image__figure img {
+  height:42px !important;
+  width:auto !important;
+  max-width:100% !important;
+  aspect-ratio:auto !important;
+  object-fit:contain !important;
+}
+@media (max-width:900px){
+  .pps-benefits.has-ast-global-color-5-background-color .wp-block-columns.is-not-stacked-on-mobile { grid-template-columns:repeat(3,1fr) !important; }
+}
+@media (max-width:560px){
+  .pps-benefits.has-ast-global-color-5-background-color .wp-block-columns.is-not-stacked-on-mobile { grid-template-columns:repeat(2,1fr) !important; gap:12px !important; }
+  .pps-benefits.has-ast-global-color-5-background-color .wp-block-columns.is-not-stacked-on-mobile > .wp-block-column { min-height:76px !important; padding:14px !important; }
+  .pps-benefits.has-ast-global-color-5-background-color .wp-block-column:has(.uag-hide-mob) { display:none !important; }
+  .pps-benefits.has-ast-global-color-5-background-color .wp-block-uagb-image__figure img { height:34px !important; }
+}
+/* ===== END HOMEPAGE CLIENT-LOGO STRIP v3 ===== */

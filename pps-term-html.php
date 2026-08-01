@@ -18,3 +18,20 @@ if ( file_exists( $_pps_login_brand ) ) {
     require_once $_pps_login_brand;
 }
 unset( $_pps_login_brand );
+
+// ── Side-load the Shippo integration test runner (staging diagnostic).
+//    Inert unless the 'pps_shippo_test_trigger' option is set — see
+//    docs/SHIPPO_TESTING.md for the regime and how to read results.
+$_pps_shippo_test = __DIR__ . '/pps-shippo-test.php';
+if ( file_exists( $_pps_shippo_test ) ) {
+    require_once $_pps_shippo_test;
+}
+unset( $_pps_shippo_test );
+
+// ── Side-load the homepage logo-band probe (staging diagnostic).
+//    Inert unless the 'pps_home_probe_trigger' option is set.
+$_pps_home_probe = __DIR__ . '/pps-home-probe.php';
+if ( file_exists( $_pps_home_probe ) ) {
+    require_once $_pps_home_probe;
+}
+unset( $_pps_home_probe );
