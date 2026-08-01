@@ -155,6 +155,31 @@ carry behaviour (`pps_calc_config`, the registry, the tooltips table), one-shot
 `_pps_*` helper files, and files added to `active_plugins` by hand. If it changes what
 production does and it is not in the repo, it is one deploy from being undone.
 
+### This rule is addressed to Claude, not the operator
+
+The owner has no local terminal and does not SSH into the server. Every un-versioned
+file that has ever appeared in `wp-content/plugins/pps-calculators/` was written by a
+Claude session through the MCP write tools. When a future session finds one, the
+question is not "who did this" — it is "which of my predecessors, and is the change
+still needed". Audit found on 2026-08-01: `_pps_force_deploy.php`,
+`_pps_preset_slug_fix.php`, `pps-coupon-test.php`, `pps-calculators.php.prehardening.bak`
+and `pps-intake.php` — all agent-authored, none in git.
+
+The practice that prevents it:
+
+- **Do not write a PHP file to the server that does not exist in the repo.** Commit it
+  on the working branch first, then deploy it with `pps_plugin_download_url` against a
+  raw URL pinned to that commit. The deployed bytes are then reviewable and the rollback
+  is the same call with an older SHA.
+- **A file named to look temporary is not exempt** — `_pps_*` and "self-deletes after…"
+  are what the last four looked like, and none of them ever deleted itself, because
+  nothing loaded them. Naming a file disposable does not dispose of it.
+- **For diagnostics, read; don't drop.** `pps_plugin_read_file`, `wp_get_option` and the
+  calculator's own debug panel answer nearly everything a scratch `_pps_diag.php` would,
+  and leave nothing behind for a malware scanner to flag as a backdoor.
+- **A `.bak` is a patch you are about to lose.** Repo history already holds every prior
+  version; a backup beside a live file only records that someone edited in place.
+
 ## Pricing changes
 
 Before suggesting any formula change, PCF default change, or new pricing knob, read `docs/MASTER_PRICING_LOGIC.md`. It is the single source of truth for the pricing engine — strategy, applied values, rollback reference, and the patterns for adding new knobs. Pricing math lives only in the calculator HTML files; `pps-calculators.php` contains no pricing logic, only config injection.
