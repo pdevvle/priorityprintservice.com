@@ -55,6 +55,8 @@
 <div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-24 · PC-ADJTBL</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
+/* pps-sealed */ (function(){ "use strict";
+
 // PRIORITY PRINT SERVICE — Postcard Calculator v1
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 function useIsMobile(bp=700){const[m,s]=useState(window.innerWidth<=bp);useEffect(()=>{const h=()=>s(window.innerWidth<=bp);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h)},[bp]);return m}
@@ -4710,6 +4712,8 @@ const ST = {
 };
 
 ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<App />);
+
+})();
 </script>
 </body>
 </html>

@@ -240,6 +240,8 @@
 <div id="pps-calculator-root"></div>
 <div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-07-31 · QA-FIXES</div>
 <script type="text/babel">
+/* pps-sealed */ (function(){ "use strict";
+
 const { useState, useMemo, useEffect, useRef } = React;
 
 // ── Defensive DOM guard ──────────────────────────────────────────────
@@ -6399,6 +6401,8 @@ function pps_applyTheme( name ) {
 // Mount
 ReactDOM.createRoot(document.getElementById('pps-calculator-root'))
   .render(React.createElement(ErrorBoundary, null, React.createElement(App)));
+
+})();
 </script>
 </body>
 </html>
