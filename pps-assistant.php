@@ -4,7 +4,7 @@
  * Description: Claude-powered on-site customer service chat. Grounded on real order
  *              data via tools; never prices, never promises dates. Template/scaffold —
  *              see docs/CUSTOMER_SERVICE_BOT.md for the design rationale.
- * Version: 0.1.1
+ * Version: 0.2.0
  * Author: Priority Print Service
  *
  * ── WHY NO COMPOSER ──
@@ -27,12 +27,23 @@
  *    "Logged-in admins only", tick Enabled, Save.
  * 3. Load any front-end page while logged in as an admin. Customers see nothing until
  *    "Visible to" is changed to Everyone.
+ *
+ * ── CHANGELOG ──
+ * 0.2.0  Email gate, manual availability toggle, two-path escalation, record_contact.
+ *        Plus the hardening pass from the adversarial review (13 confirmed findings):
+ *        a bailed turn no longer poisons the session history; 'visible_to' is now a real
+ *        permission callback rather than a rendering-only gate; escalations are recorded
+ *        durably before mail is attempted and the model is told when delivery failed; the
+ *        daily/per-IP budget is metered in API calls and is atomic under a persistent
+ *        object cache; the guest-auth limiter fails closed; the policy prompt is no longer
+ *        mangled by sanitize_textarea_field(). max_tokens 4096 -> 8192.
+ * 0.1.1  Send X-WP-Nonce on the fetch; surface real HTTP status to admins; guard mb_substr.
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 if ( defined( 'PPS_ASSISTANT_VERSION' ) ) return;   // co-load guard
-define( 'PPS_ASSISTANT_VERSION', '0.1.1' );
+define( 'PPS_ASSISTANT_VERSION', '0.2.0' );
 define( 'PPS_ASSISTANT_API_URL', 'https://api.anthropic.com/v1/messages' );
 
 // ═══════════════════════════════════════════════════════════════
@@ -56,7 +67,10 @@ function pps_assistant_config() {
         'missive_webhook_secret' => '',
         'model'         => 'claude-opus-5',
         'effort'        => 'medium',       // low | medium | high | xhigh | max
-        'max_tokens'    => 4096,           // thinking is ON by default on Opus 5 — leave headroom
+        // Thinking is ON by default on Opus 5 and max_tokens caps thinking PLUS reply. 4096
+        // truncated tool-using turns routinely. Kept under ~16k because this is a
+        // non-streaming wp_remote_post on a 120s timeout.
+        'max_tokens'    => 8192,
         'max_turns'     => 12,             // per session
         'max_tool_hops' => 6,              // per turn — bounds a runaway tool loop
         'daily_cap'     => 300,            // API calls per day, site-wide
@@ -92,6 +106,70 @@ function pps_assistant_human_available() {
 /** True once a live handoff has happened — Claude must stop answering this session. */
 function pps_assistant_session_is_human( array $session ) {
     return ( $session['mode'] ?? 'bot' ) === 'human';
+}
+
+/**
+ * Who gets escalation mail.
+ *
+ * get_option()'s default only applies when the row is ABSENT. pps-calculators.php:1124
+ * reads this same option with an is_email() guard, which implies it can exist as an empty
+ * string — in which case a naive read hands wp_mail() an empty recipient and every
+ * escalation fails silently.
+ */
+function pps_assistant_staff_email() {
+    $cand = get_option( 'pps_question_recipient', '' );
+    return is_email( $cand ) ? $cand : get_option( 'admin_email' );
+}
+
+/**
+ * Is the guest-auth brute-force limiter available?
+ *
+ * pps_order_lookup_*() live in pps-reorder.php, which is loaded by pps-calculators.php.
+ * This plugin is independently activatable on purpose, so the calculators plugin can be
+ * deactivated while the chat stays live — and then the limiter silently vanishes. Fail
+ * CLOSED. Behind a filter so the test harness can exercise the unavailable case, which it
+ * otherwise cannot: PHP has no way to undefine a function.
+ */
+function pps_assistant_limiter_ready() {
+    $ready = function_exists( 'pps_order_lookup_is_rate_limited' )
+          && function_exists( 'pps_order_lookup_record_attempt' );
+    return (bool) apply_filters( 'pps_assistant_limiter_ready', $ready );
+}
+
+/**
+ * Per-session mutex. A turn can run for minutes; the session is read at the start and
+ * written whole at the end, so a second concurrent request on the same id clobbers it.
+ * wp_cache_add() is atomic under a persistent object cache (Object Cache Pro is active).
+ */
+function pps_assistant_lock( $sid ) {
+    $key = 'pps_asst_lock_' . md5( (string) $sid );
+    if ( wp_using_ext_object_cache() ) {
+        return (bool) wp_cache_add( $key, 1, 'pps_assistant', 120 );
+    }
+    if ( get_transient( $key ) ) return false;
+    set_transient( $key, 1, 120 );
+    return true;
+}
+
+function pps_assistant_unlock( $sid ) {
+    $key = 'pps_asst_lock_' . md5( (string) $sid );
+    if ( wp_using_ext_object_cache() ) { wp_cache_delete( $key, 'pps_assistant' ); return; }
+    delete_transient( $key );
+}
+
+/**
+ * Is this request coming from our own pages?
+ *
+ * Cheap and trivially forged by a scripted client, so it is hygiene rather than
+ * authorization — the real bound on abuse is the per-IP daily ceiling below.
+ */
+function pps_assistant_origin_ok() {
+    $origin = '';
+    if ( ! empty( $_SERVER['HTTP_ORIGIN'] ) )       $origin = (string) $_SERVER['HTTP_ORIGIN'];
+    elseif ( ! empty( $_SERVER['HTTP_REFERER'] ) )  $origin = (string) $_SERVER['HTTP_REFERER'];
+    if ( $origin === '' ) return true;   // some privacy tooling strips both; don't punish it
+    $host = wp_parse_url( $origin, PHP_URL_HOST );
+    return $host && strtolower( $host ) === strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -236,12 +314,18 @@ function pps_assistant_tools() {
             'handler' => function ( $input, &$session ) {
                 // Reuse the existing guest-auth rate limit from pps-reorder.php so the
                 // chat surface can't be used to brute-force what the lookup form blocks.
-                if ( function_exists( 'pps_order_lookup_is_rate_limited' ) && pps_order_lookup_is_rate_limited() ) {
+                // FAIL CLOSED. The limiter lives in pps-reorder.php, loaded by the
+                // calculators plugin. This plugin is independently activatable, so that
+                // limiter can vanish while the chat stays live — and an open verification
+                // endpoint is an order-number oracle.
+                if ( ! pps_assistant_limiter_ready() ) {
+                    error_log( '[pps-assistant] guest-auth limiter unavailable — refusing verification' );
+                    return 'RATE_LIMITED: verification is temporarily unavailable. Offer escalate_to_human.';
+                }
+                if ( pps_order_lookup_is_rate_limited() ) {
                     return 'RATE_LIMITED: too many attempts. Tell the customer to try again later or offer escalate_to_human.';
                 }
-                if ( function_exists( 'pps_order_lookup_record_attempt' ) ) {
-                    pps_order_lookup_record_attempt();
-                }
+                pps_order_lookup_record_attempt();
 
                 $order = wc_get_order( (int) $input['order_id'] );
                 $email = sanitize_email( (string) $input['billing_email'] );
@@ -380,7 +464,7 @@ function pps_assistant_tools() {
             'handler' => function ( $input, &$session ) {
                 $available = pps_assistant_human_available();
 
-                $to      = get_option( 'pps_question_recipient', get_option( 'admin_email' ) );
+                $to      = pps_assistant_staff_email();
                 $subject = ( $available ? 'PPS Assistant — LIVE handoff: ' : 'PPS Assistant — escalation: ' )
                          . wp_trim_words( (string) $input['reason'], 8 );
                 $body = sprintf(
@@ -395,7 +479,27 @@ function pps_assistant_tools() {
                     ( $session['verified_order'] ?? '' ) ?: '(none)',
                     pps_assistant_transcript( $session )
                 );
-                wp_mail( $to, $subject, $body );
+                // Record BEFORE sending, mirroring pps_handle_question_submit() in
+                // pps-calculators.php — mail is a delivery channel, not the record. An
+                // escalation that exists only in a 2h transient is lost when mail fails,
+                // and this tool's traffic (quotes, reprints, damage) is exactly the traffic
+                // with no order to attach a note to.
+                $post_id = wp_insert_post( array(
+                    'post_type'    => 'pps_question',
+                    'post_status'  => 'publish',
+                    'post_title'   => wp_strip_all_tags( 'Assistant escalation — ' . wp_trim_words( (string) $input['reason'], 8 ) ),
+                    'post_content' => $body,
+                ), true );
+                if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+                    update_post_meta( $post_id, '_pps_q_email',    (string) ( $session['email'] ?? '' ) );
+                    update_post_meta( $post_id, '_pps_q_phone',    (string) ( $session['phone'] ?? '' ) );
+                    update_post_meta( $post_id, '_pps_asst_order', (int) ( $session['verified_order'] ?? 0 ) );
+                }
+
+                $sent = wp_mail( $to, $subject, $body );
+                if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+                    update_post_meta( $post_id, '_pps_q_email_sent', $sent ? 1 : 0 );
+                }
 
                 // Also drop a note on the order so it's visible in wp-admin.
                 if ( ! empty( $session['verified_order'] ) ) {
@@ -405,6 +509,14 @@ function pps_assistant_tools() {
 
                 $session['escalated']         = true;
                 $session['escalation_reason'] = (string) $input['reason'];
+
+                if ( ! $sent ) {
+                    error_log( '[pps-assistant] escalation mail FAILED to ' . $to );
+                    return 'ESCALATION_RECORDED_BUT_UNSENT: the request is logged but our '
+                         . 'notification did not send. Give the customer the shop email address '
+                         . 'directly and ask them to follow up there. Do NOT tell them someone '
+                         . 'is picking it up.';
+                }
 
                 if ( $available ) {
                     // Stage 2 flips $session['mode'] to 'human' here, once the Missive custom
@@ -450,8 +562,8 @@ function pps_assistant_tools() {
                 $session['phone']      = $phone;
                 $session['phone_pref'] = (string) ( $input['preference'] ?? 'either' );
 
-                $to = get_option( 'pps_question_recipient', get_option( 'admin_email' ) );
-                wp_mail(
+                $to   = pps_assistant_staff_email();
+                $sent = wp_mail(
                     $to,
                     'PPS Assistant — phone number added',
                     sprintf(
@@ -465,6 +577,13 @@ function pps_assistant_tools() {
                         pps_assistant_transcript( $session )
                     )
                 );
+
+                if ( ! $sent ) {
+                    error_log( '[pps-assistant] record_contact mail FAILED to ' . $to );
+                    return 'RECORDED_BUT_UNSENT: we stored the number but could not notify the '
+                         . 'team. Give the customer the shop email address and ask them to send '
+                         . 'their number there too.';
+                }
 
                 return 'RECORDED: confirm you have their number and that the team can reach them '
                      . 'that way. Do not promise when.';
@@ -536,14 +655,24 @@ function pps_assistant_run( array &$session, $user_message ) {
     $cfg = pps_assistant_config();
     $tools = pps_assistant_tools();
 
-    $session['messages'][] = array(
+    // Work on a COPY of the history, and commit it only when a turn actually completes.
+    //
+    // Mutating $session['messages'] up front means every bail-out — API error, refusal,
+    // hop limit, or a max_tokens truncation that clipped mid-tool_use — leaves a trailing
+    // user turn or an unanswered tool_use in the STORED history. The Messages API then
+    // rejects every later request in that session ("roles must alternate", or an
+    // unanswered tool_use id), so the customer gets the fallback text forever. The 2h TTL
+    // refreshes on each retry and the sid lives in sessionStorage, so a reload does not
+    // rescue them. This is the single most damaging failure mode in the file.
+    $messages   = (array) ( $session['messages'] ?? array() );
+    $messages[] = array(
         'role'    => 'user',
         'content' => array( array( 'type' => 'text', 'text' => $user_message ) ),
     );
 
     for ( $hop = 0; $hop < (int) $cfg['max_tool_hops']; $hop++ ) {
 
-        if ( ! pps_assistant_budget_ok() ) {
+        if ( ! pps_assistant_budget_ok() || pps_assistant_ip_budget_exceeded() ) {
             return array( 'reply' => pps_assistant_fallback_text(), 'capped' => true );
         }
         pps_assistant_budget_spend();
@@ -552,7 +681,7 @@ function pps_assistant_run( array &$session, $user_message ) {
             'model'         => $cfg['model'],
             'max_tokens'    => (int) $cfg['max_tokens'],
             'system'        => pps_assistant_system_blocks(),
-            'messages'      => $session['messages'],
+            'messages'      => $messages,
             'tools'         => pps_assistant_tool_schemas(),
             'output_config' => array( 'effort' => $cfg['effort'] ),
         ) );
@@ -569,15 +698,34 @@ function pps_assistant_run( array &$session, $user_message ) {
 
         // Append the assistant turn VERBATIM. This preserves thinking blocks, which must
         // be echoed back unchanged on the next request.
-        $session['messages'][] = array( 'role' => 'assistant', 'content' => $data['content'] );
+        $messages[] = array( 'role' => 'assistant', 'content' => $data['content'] );
 
         if ( ( $data['stop_reason'] ?? '' ) !== 'tool_use' ) {
+
+            // A turn truncated mid-tool_use carries a tool_use block that can never be
+            // answered. Persisting it is what bricks the session, so drop the whole turn.
+            foreach ( (array) $data['content'] as $block ) {
+                if ( ( $block['type'] ?? '' ) === 'tool_use' ) {
+                    error_log( '[pps-assistant] dropped turn: stop_reason='
+                        . ( $data['stop_reason'] ?? '?' ) . ' with unanswered tool_use' );
+                    return array( 'reply' => pps_assistant_fallback_text(), 'truncated' => true );
+                }
+            }
+
             $text = '';
             foreach ( (array) $data['content'] as $block ) {
                 if ( ( $block['type'] ?? '' ) === 'text' ) $text .= $block['text'];
             }
+            $text = trim( $text );
+            if ( $text === '' ) {
+                // Truncated during thinking: HTTP 200, zero text blocks. The widget would
+                // render an empty bubble, which reads worse than the fallback.
+                return array( 'reply' => pps_assistant_fallback_text(), 'empty' => true );
+            }
+
+            $session['messages'] = $messages;   // ← the only commit point
             pps_assistant_log_usage( $data['usage'] ?? array() );
-            return array( 'reply' => trim( $text ) );
+            return array( 'reply' => $text );
         }
 
         // Execute every tool call in this turn, return ALL results in ONE user message.
@@ -615,7 +763,7 @@ function pps_assistant_run( array &$session, $user_message ) {
             }
         }
 
-        $session['messages'][] = array( 'role' => 'user', 'content' => $results );
+        $messages[] = array( 'role' => 'user', 'content' => $results );
     }
 
     // Ran out of hops — the model is looping.
@@ -624,7 +772,7 @@ function pps_assistant_run( array &$session, $user_message ) {
 
 function pps_assistant_fallback_text() {
     return "I'm not able to help with that right now — let me get a team member to follow up. "
-         . "You can reach us at " . esc_html( get_option( 'pps_question_recipient', get_option( 'admin_email' ) ) ) . ".";
+         . "You can reach us at " . esc_html( pps_assistant_staff_email() ) . ".";
 }
 
 function pps_assistant_transcript( array $session ) {
@@ -670,16 +818,56 @@ function pps_assistant_session_save( $sid, array $session ) {
 }
 
 /** Site-wide daily cap. An uncapped public chat endpoint is an uncapped bill. */
-function pps_assistant_budget_ok() {
-    $cfg = pps_assistant_config();
-    $key = 'pps_assistant_calls_' . gmdate( 'Y-m-d' );
-    return (int) get_transient( $key ) < (int) $cfg['daily_cap'];
+function pps_assistant_budget_key() { return 'pps_assistant_calls_' . gmdate( 'Y-m-d' ); }
+
+function pps_assistant_counter_get( $key ) {
+    if ( wp_using_ext_object_cache() ) {
+        $v = wp_cache_get( $key, 'pps_assistant' );
+        return $v === false ? 0 : (int) $v;
+    }
+    return (int) get_transient( $key );
 }
 
-function pps_assistant_budget_spend() {
-    $key  = 'pps_assistant_calls_' . gmdate( 'Y-m-d' );
+/**
+ * Atomic where it matters. get-then-set lets concurrent requests sail past the cap; the
+ * daily counter is the only bound an attacker cannot sidestep by rotating IPs, so it is
+ * the one worth making a real CAS. wp_cache_incr() is atomic under Object Cache Pro.
+ */
+function pps_assistant_counter_incr( $key, $ttl ) {
+    if ( wp_using_ext_object_cache() ) {
+        wp_cache_add( $key, 0, 'pps_assistant', $ttl );
+        return (int) wp_cache_incr( $key, 1, 'pps_assistant' );
+    }
     $hits = (int) get_transient( $key );
-    set_transient( $key, $hits + 1, DAY_IN_SECONDS );
+    set_transient( $key, $hits + 1, $ttl );
+    return $hits + 1;
+}
+
+function pps_assistant_budget_ok() {
+    $cfg = pps_assistant_config();
+    return pps_assistant_counter_get( pps_assistant_budget_key() ) < (int) $cfg['daily_cap'];
+}
+
+/** Per-IP daily ceiling, metered in API CALLS. No single caller takes more than a fifth. */
+function pps_assistant_ip_budget_key() {
+    $ip = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
+    return 'pps_asst_ipday_' . md5( $ip . gmdate( 'Y-m-d' ) );
+}
+
+function pps_assistant_ip_budget_exceeded() {
+    $cfg = pps_assistant_config();
+    $cap = max( 10, (int) ceil( (int) $cfg['daily_cap'] * 0.2 ) );
+    return pps_assistant_counter_get( pps_assistant_ip_budget_key() ) >= $cap;
+}
+
+/**
+ * Charge one API call. Both counters move together, so the per-IP limit is denominated in
+ * the same unit as the site cap — the old per-request throttle let one IP spend 6x its
+ * apparent allowance, because a single request runs up to max_tool_hops calls.
+ */
+function pps_assistant_budget_spend() {
+    pps_assistant_counter_incr( pps_assistant_budget_key(), DAY_IN_SECONDS );
+    pps_assistant_counter_incr( pps_assistant_ip_budget_key(), DAY_IN_SECONDS );
 }
 
 /** Per-IP throttle, same shape as pps_order_lookup_is_rate_limited(). */
@@ -709,10 +897,28 @@ function pps_assistant_log_usage( array $usage ) {
 // 7. REST ENDPOINT
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Authorization for the chat endpoint.
+ *
+ * 'visible_to' used to gate ONLY whether wp_footer emitted markup — the REST route was
+ * open to anyone the moment 'Enabled' was ticked, while the admin screen promised
+ * "Logged-in admins only — safe for testing on a live site". That was false: during the
+ * believed-private window, anonymous callers could spend Anthropic budget and send mail to
+ * the shop. The nonce is CSRF hygiene, not authorization — for logged-out visitors
+ * wp_create_nonce('wp_rest') is computed against uid 0, so every anonymous caller shares
+ * the same valid value for ~12-24h.
+ */
+function pps_assistant_chat_permission() {
+    if ( ! pps_assistant_enabled() ) return false;
+    $cfg = pps_assistant_config();
+    if ( ( $cfg['visible_to'] ?? 'admins' ) === 'everyone' ) return true;
+    return current_user_can( 'manage_options' );
+}
+
 add_action( 'rest_api_init', function () {
     register_rest_route( 'pps/v1', '/assistant/chat', array(
         'methods'             => 'POST',
-        'permission_callback' => '__return_true', // public widget; guarded by nonce + throttle below
+        'permission_callback' => 'pps_assistant_chat_permission',
         'args'                => array(
             'message' => array( 'required' => true, 'type' => 'string' ),
             'session' => array( 'required' => true, 'type' => 'string' ),
@@ -732,15 +938,26 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
     // WordPress resolve the logged-in user for a REST request. Body-only would verify
     // against user 0 and fail for any logged-in visitor.
     //
-    // KNOWN ISSUE for visible_to = 'everyone': WP Rocket may serve a cached footer whose
-    // nonce has expired (nonces live ~12-24h), which would 403 every customer at once.
-    // Before going public, either exclude the widget markup from page caching or fetch
-    // the nonce from an uncached endpoint at open-chat time.
+    // This is CSRF hygiene, NOT authorization. For a logged-out visitor
+    // wp_create_nonce('wp_rest') is computed against uid 0 with an empty session token, so
+    // every anonymous caller shares the same valid value for ~12-24h — and once
+    // visible_to is 'everyone' that value is published in the page HTML and served from WP
+    // Rocket's cache. Authorization is pps_assistant_chat_permission(); spend is bounded by
+    // the per-IP daily ceiling. Do not mistake this check for either.
+    //
+    // KNOWN ISSUE for visible_to = 'everyone': a cached footer can carry a nonce past its
+    // 12-24h life, which would 403 every customer at once. Before going public, either
+    // exclude the widget markup from page caching or mint the nonce from an uncached REST
+    // GET at chat-open time. That fixes availability and adds no security.
     if ( ! wp_verify_nonce( (string) $request['nonce'], 'wp_rest' ) ) {
         return new WP_Error( 'bad_nonce', 'Invalid or expired nonce', array( 'status' => 403 ) );
     }
 
-    if ( pps_assistant_ip_throttled() ) {
+    if ( ! pps_assistant_origin_ok() ) {
+        return new WP_Error( 'bad_origin', 'Invalid request', array( 'status' => 403 ) );
+    }
+
+    if ( pps_assistant_ip_throttled() || pps_assistant_ip_budget_exceeded() ) {
         return rest_ensure_response( array( 'reply' => 'One moment — too many messages at once. Try again shortly.' ) );
     }
 
@@ -770,14 +987,40 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
     if ( (int) $session['turns'] >= (int) $cfg['max_turns'] ) {
         return rest_ensure_response( array(
             'reply' => "We've covered a lot here — let me get a team member to pick this up. "
-                     . "Email us at " . get_option( 'pps_question_recipient', get_option( 'admin_email' ) ) . ".",
+                     . "Email us at " . pps_assistant_staff_email() . ".",
             'ended' => true,
         ) );
     }
 
-    $session['turns']++;
-    $result = pps_assistant_run( $session, $message );
-    pps_assistant_session_save( $sid, $session );
+    // Once a human has taken the conversation, Claude must never speak again in it —
+    // a bot answering alongside a live agent is worse than no bot. Stage 2 flips this
+    // when the Missive bridge lands; the short-circuit is here now so the bridge cannot
+    // be wired up without it.
+    if ( pps_assistant_session_is_human( $session ) ) {
+        pps_assistant_session_save( $sid, $session );
+        return rest_ensure_response( array(
+            'reply'      => '',
+            'with_human' => true,
+        ) );
+    }
+
+    // Serialize per session. A turn can run for minutes and the session is written whole
+    // at the end, so a duplicated tab would otherwise clobber it — including dropping a
+    // verify_customer result.
+    if ( ! pps_assistant_lock( $sid ) ) {
+        return rest_ensure_response( array( 'reply' => 'Still working on your last message — one moment.' ) );
+    }
+
+    try {
+        $result = pps_assistant_run( $session, $message );
+        // Only a turn that produced a real reply costs the customer one of their turns.
+        if ( ! empty( $result['reply'] ) && empty( $result['error'] ) && empty( $result['capped'] ) ) {
+            $session['turns']++;
+        }
+        pps_assistant_session_save( $sid, $session );
+    } finally {
+        pps_assistant_unlock( $sid );
+    }
 
     return rest_ensure_response( array(
         'reply'     => $result['reply'],
@@ -1012,7 +1255,14 @@ function pps_assistant_render_admin() {
         $cfg['model']     = sanitize_text_field( wp_unslash( $_POST['model'] ?? 'claude-opus-5' ) );
         $cfg['effort']    = sanitize_key( wp_unslash( $_POST['effort'] ?? 'medium' ) );
         $cfg['daily_cap'] = max( 0, (int) ( $_POST['daily_cap'] ?? 300 ) );
-        $cfg['policy']    = sanitize_textarea_field( wp_unslash( $_POST['policy'] ?? '' ) );
+        // NOT sanitize_textarea_field(): it strips angle-bracket tags, which is exactly how a
+        // structured Claude system prompt is written, and an unmatched '<' ("runs < 500") makes
+        // it esc_html() the entire remainder of the field. This value goes into a JSON API
+        // body; it is escaped at render time by esc_textarea() below.
+        $policy           = wp_unslash( $_POST['policy'] ?? '' );
+        $policy           = wp_check_invalid_utf8( $policy, true );
+        $policy           = str_replace( array( "\r\n", "\r" ), "\n", $policy );
+        $cfg['policy']    = function_exists( 'mb_substr' ) ? mb_substr( $policy, 0, 20000 ) : substr( $policy, 0, 20000 );
 
         update_option( 'pps_assistant_config', $cfg );
         delete_transient( 'pps_assistant_catalog' );
@@ -1059,7 +1309,7 @@ function pps_assistant_render_admin() {
                 </td></tr>
                 <tr><th>Visible to</th><td>
                     <label><input type="radio" name="visible_to" value="admins" <?php checked( $cfg['visible_to'], 'admins' ); ?>>
-                        <strong>Logged-in admins only</strong> — safe for testing on a live site</label><br>
+                        <strong>Logged-in admins only</strong> — widget and chat endpoint both closed to customers</label><br>
                     <label><input type="radio" name="visible_to" value="everyone" <?php checked( $cfg['visible_to'], 'everyone' ); ?>>
                         Everyone — customers will see it</label>
                     <p class="description">Never renders on cart or checkout, under either setting.</p>

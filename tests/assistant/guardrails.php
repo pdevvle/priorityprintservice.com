@@ -53,6 +53,9 @@ $GLOBALS['__trans'] = array();
 $GLOBALS['__filters'] = array();
 $GLOBALS['__mail'] = array();
 $GLOBALS['__notes'] = array();
+$GLOBALS['__posts'] = array();
+$GLOBALS['__postmeta'] = array();
+$GLOBALS['__is_admin'] = false;
 
 function add_action( $h, $cb, $p = 10, $a = 1 ) {}
 function add_filter( $h, $cb, $p = 10, $a = 1 ) { $GLOBALS['__filters'][ $h ][] = $cb; }
@@ -73,13 +76,28 @@ function set_transient( $k, $v, $t = 0 )   { $GLOBALS['__trans'][ $k ] = $v; ret
 function delete_transient( $k )            { unset( $GLOBALS['__trans'][ $k ] ); return true; }
 
 function wp_json_encode( $d, $f = 0 )      { return json_encode( $d, $f ); }
+// No persistent object cache in the harness, so the counters take their transient path —
+// which is the path a site without Object Cache Pro takes too.
+function wp_using_ext_object_cache()       { return false; }
+function is_email( $e )                    { return filter_var( (string) $e, FILTER_VALIDATE_EMAIL ) ? $e : false; }
+function wp_check_invalid_utf8( $s, $x = false ) { return $s; }
+function wp_parse_url( $u, $c = -1 )       { return parse_url( $u, $c ); }
+function current_user_can( $c )            { return ! empty( $GLOBALS['__is_admin'] ); }
+function wp_strip_all_tags( $s, $b = false ) { return strip_tags( (string) $s ); }
+function wp_insert_post( $a, $err = false ) {
+    $GLOBALS['__posts'][] = $a;
+    return 1000 + count( $GLOBALS['__posts'] );
+}
+function update_post_meta( $id, $k, $v )   { $GLOBALS['__postmeta'][ $id ][ $k ] = $v; return true; }
 function wp_remote_post( ...$a )           { throw new RuntimeException( 'REAL HTTP CALL ESCAPED THE SEAM' ); }
 function wp_remote_retrieve_response_code( $r ) { return 0; }
 function wp_remote_retrieve_body( $r )     { return ''; }
 function is_wp_error( $t )                 { return $t instanceof WP_Error; }
-function wp_mail( $to, $subj, $body )      { $GLOBALS['__mail'][] = compact( 'to', 'subj', 'body' ); return true; }
+function wp_mail( $to, $subj, $body )      {
+    $GLOBALS['__mail'][] = compact( 'to', 'subj', 'body' );
+    return ! isset( $GLOBALS['__mail_ok'] ) || $GLOBALS['__mail_ok'];
+}
 function wp_trim_words( $s, $n = 55 )      { return implode( ' ', array_slice( preg_split( '/\s+/', (string) $s ), 0, $n ) ); }
-function wp_strip_all_tags( $s )           { return strip_tags( (string) $s ); }
 function esc_html( $s )                    { return htmlspecialchars( (string) $s ); }
 function home_url( $p = '' )               { return 'https://priorityprintservice.com' . $p; }
 function sanitize_email( $s )              { return filter_var( trim( (string) $s ), FILTER_SANITIZE_EMAIL ); }
@@ -210,6 +228,10 @@ function reset_world() {
     $GLOBALS['__trans'] = array();
     $GLOBALS['__mail']  = array();
     $GLOBALS['__notes'] = array();
+    $GLOBALS['__posts'] = array();
+    $GLOBALS['__postmeta'] = array();
+    $GLOBALS['__filters']['pps_assistant_limiter_ready'] = array();
+    $GLOBALS['__mail_ok'] = true;
     update_option( 'pps_assistant_config', array( 'enabled' => true, 'api_key' => 'sk-test', 'daily_cap' => 300 ) );
     update_option( 'pps_question_recipient', 'shop@example.com' );
 }
@@ -522,6 +544,158 @@ pps_assistant_run( $legacy, 'hello' );
 restore_error_handler();
 ok( ! $errors, 'a session stored before this change escalates without warnings',
     implode( ' | ', $errors ) );
+
+// ═════════════════════════════════════════════════════════════════════════════════
+group( 'A bailed turn must not poison the session' );
+// ═════════════════════════════════════════════════════════════════════════════════
+
+// This is the highest-consequence bug the review found. If a failed turn leaves a
+// trailing user message or an unanswered tool_use in the STORED history, the Messages API
+// rejects every later request in that session and the customer gets the fallback forever.
+// The sid lives in sessionStorage, so a reload does not rescue them.
+
+$bails = array(
+    'api error'    => array( new WP_Error( 'api', 'boom' ) ),
+    'refusal'      => array( array( 'stop_reason' => 'refusal', 'content' => array() ) ),
+    'truncated'    => array( array(
+        'stop_reason' => 'max_tokens',
+        'content'     => array( array( 'type' => 'tool_use', 'id' => 't1', 'name' => 'build_calculator_link', 'input' => array() ) ),
+    ) ),
+    'empty text'   => array( array( 'stop_reason' => 'end_turn', 'content' => array() ) ),
+);
+
+foreach ( $bails as $label => $queue ) {
+    reset_world();
+    $s = fresh_session();
+    // Seed a completed exchange so we can prove the prior history survives intact.
+    $s['messages'] = array(
+        array( 'role' => 'user',      'content' => array( array( 'type' => 'text', 'text' => 'hi' ) ) ),
+        array( 'role' => 'assistant', 'content' => array( array( 'type' => 'text', 'text' => 'hello' ) ) ),
+    );
+    $before = $s['messages'];
+    script( $queue );
+    $r = pps_assistant_run( $s, 'second message' );
+    ok( $s['messages'] === $before, "$label: stored history is left untouched",
+        'ended with ' . count( $s['messages'] ) . ' messages, expected ' . count( $before ) );
+    ok( ! empty( $r['reply'] ), "$label: customer still gets a reply" );
+}
+
+// The API error case is the one that must not be retried into a poisoned state — run twice
+// and confirm the history still alternates.
+reset_world();
+$s = fresh_session();
+script( array( new WP_Error( 'api', 'boom' ), new WP_Error( 'api', 'boom' ) ) );
+pps_assistant_run( $s, 'one' );
+pps_assistant_run( $s, 'two' );
+$roles = array_map( function ( $m ) { return $m['role']; }, $s['messages'] );
+ok( $s['messages'] === array(), 'two consecutive failures leave an empty, valid history',
+    implode( ',', $roles ) );
+
+// A successful turn still commits.
+reset_world();
+$s = fresh_session();
+script( array( turn_text( 'Here you go.' ) ) );
+pps_assistant_run( $s, 'hello' );
+ok( count( $s['messages'] ) === 2 && $s['messages'][0]['role'] === 'user'
+    && $s['messages'][1]['role'] === 'assistant',
+    'a successful turn commits exactly one user + one assistant message' );
+
+// A tool-using turn commits the full chain in order.
+reset_world();
+$s = fresh_session();
+script( array(
+    turn_tool( 'build_calculator_link', array( 'calc' => 'saddle' ) ),
+    turn_text( 'Here is the link.' ),
+) );
+pps_assistant_run( $s, 'how much' );
+$roles = array_map( function ( $m ) { return $m['role']; }, $s['messages'] );
+ok( $roles === array( 'user', 'assistant', 'user', 'assistant' ),
+    'a tool-using turn commits a correctly alternating chain', implode( ',', $roles ) );
+
+// ═════════════════════════════════════════════════════════════════════════════════
+group( 'Fail-closed and delivery guarantees' );
+// ═════════════════════════════════════════════════════════════════════════════════
+
+// The guest-auth limiter lives in another plugin that can be deactivated independently.
+reset_world();
+add_filter( 'pps_assistant_limiter_ready', function () { return false; } );
+$s = fresh_session();
+script( array(
+    turn_tool( 'verify_customer', array( 'order_id' => 4412, 'billing_email' => 'alice@example.com' ) ),
+    turn_text( 'ok' ),
+) );
+pps_assistant_run( $s, 'verify me' );
+$seen = tool_results_in( $s );
+ok( strpos( $seen, 'VERIFIED' ) === false, 'verification fails CLOSED when the limiter is unavailable' );
+ok( empty( $s['verified_order'] ), 'no session is verified while the limiter is missing' );
+
+// An empty-string recipient option must not silently swallow every escalation.
+reset_world();
+update_option( 'pps_question_recipient', '' );
+update_option( 'admin_email', 'fallback@example.com' );
+ok( pps_assistant_staff_email() === 'fallback@example.com',
+    'an empty recipient option falls back to admin_email rather than mailing nobody' );
+update_option( 'pps_question_recipient', 'shop@example.com' );
+ok( pps_assistant_staff_email() === 'shop@example.com', 'a valid recipient option is used' );
+
+// Escalations must be durable even when mail fails.
+reset_world();
+set_available( true );
+$GLOBALS['__mail_ok'] = false;
+$s = fresh_session();
+$s['email'] = 'buyer@example.com';
+script( array(
+    turn_tool( 'escalate_to_human', array( 'reason' => 'reprint', 'summary' => 'wants a reprint' ) ),
+    turn_text( 'ok' ),
+) );
+pps_assistant_run( $s, 'I need a reprint' );
+$seen = tool_results_in( $s );
+ok( count( $GLOBALS['__posts'] ) === 1 && $GLOBALS['__posts'][0]['post_type'] === 'pps_question',
+    'the escalation is recorded before the mail attempt' );
+ok( strpos( $seen, 'ESCALATION_RECORDED_BUT_UNSENT' ) !== false,
+    'a failed send tells the model NOT to promise a callback' );
+ok( strpos( $seen, 'HUMAN_AVAILABLE' ) === false,
+    'a failed send does not claim a human is picking it up, even with the toggle on' );
+
+// And the happy path still records.
+reset_world();
+$s = fresh_session();
+script( array( turn_tool( 'escalate_to_human', array( 'reason' => 'x', 'summary' => 'y' ) ), turn_text( 'ok' ) ) );
+pps_assistant_run( $s, 'help' );
+ok( count( $GLOBALS['__posts'] ) === 1, 'a delivered escalation is still recorded durably' );
+
+// ═════════════════════════════════════════════════════════════════════════════════
+group( 'Spend is metered in API calls, not requests' );
+// ═════════════════════════════════════════════════════════════════════════════════
+
+reset_world();
+update_option( 'pps_assistant_config', array(
+    'enabled' => true, 'api_key' => 'sk-test', 'daily_cap' => 100, 'max_tool_hops' => 6,
+) );
+$s = fresh_session();
+$loop = array();
+for ( $i = 0; $i < 10; $i++ ) $loop[] = turn_tool( 'build_calculator_link', array( 'calc' => 'saddle' ), 'toolu_' . $i );
+script( $loop );
+pps_assistant_run( $s, 'loop' );
+$day = pps_assistant_counter_get( pps_assistant_budget_key() );
+$ip  = pps_assistant_counter_get( pps_assistant_ip_budget_key() );
+ok( $day === 6, 'one request charged all six hops to the daily counter', "day=$day" );
+ok( $ip === 6, 'the per-IP counter is charged in the SAME unit as the site cap', "ip=$ip" );
+
+// The per-IP ceiling is a fraction of the site cap, so one caller cannot drain the day.
+reset_world();
+update_option( 'pps_assistant_config', array( 'enabled' => true, 'api_key' => 'sk-test', 'daily_cap' => 100 ) );
+for ( $i = 0; $i < 20; $i++ ) pps_assistant_counter_incr( pps_assistant_ip_budget_key(), 86400 );
+ok( pps_assistant_ip_budget_exceeded(), 'one IP is cut off at a fifth of the daily cap' );
+ok( pps_assistant_budget_ok(), 'the site as a whole is still open to everyone else' );
+
+// ═════════════════════════════════════════════════════════════════════════════════
+group( 'Handoff terminality' );
+// ═════════════════════════════════════════════════════════════════════════════════
+
+ok( pps_assistant_session_is_human( array( 'mode' => 'human' ) ), 'a handed-off session reports as human' );
+ok( ! pps_assistant_session_is_human( array( 'mode' => 'bot' ) ), 'a bot session does not' );
+ok( ! pps_assistant_session_is_human( array() ), 'a session with no mode defaults to bot' );
 
 // ── summary ──────────────────────────────────────────────────────────────────────
 echo "\n" . str_repeat( '─', 62 ) . "\n";
