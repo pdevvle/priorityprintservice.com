@@ -238,6 +238,20 @@ function pps_assistant_render_admin() {
         $cfg['model']     = sanitize_text_field( wp_unslash( $_POST['model'] ?? 'claude-opus-5' ) );
         $cfg['effort']    = sanitize_key( wp_unslash( $_POST['effort'] ?? 'medium' ) );
         $cfg['daily_cap'] = max( 0, (int) ( $_POST['daily_cap'] ?? 300 ) );
+
+        // Stage 2 — Missive custom channel. Credentials are stored, never echoed back into
+        // a readable field (same treatment as the API key).
+        $cfg['missive_channel_id'] = sanitize_text_field( wp_unslash( $_POST['missive_channel_id'] ?? '' ) );
+        $cfg['missive_token']      = sanitize_text_field( wp_unslash( $_POST['missive_token'] ?? '' ) );
+
+        // The webhook secret is ours to mint, not the operator's to invent — a weak one here
+        // means anyone who finds the route can inject messages into a customer's chat.
+        if ( empty( $cfg['missive_webhook_secret'] ) ) {
+            $cfg['missive_webhook_secret'] = wp_generate_password( 48, false, false );
+        }
+        if ( ! empty( $_POST['pps_regen_secret'] ) ) {
+            $cfg['missive_webhook_secret'] = wp_generate_password( 48, false, false );
+        }
         // NOT sanitize_textarea_field(): it strips angle-bracket tags, which is exactly how a
         // structured Claude system prompt is written, and an unmatched '<' ("runs < 500") makes
         // it esc_html() the entire remainder of the field. This value goes into a JSON API
@@ -318,6 +332,32 @@ function pps_assistant_render_admin() {
                 <tr><th>Daily cap</th><td>
                     <input type="number" name="daily_cap" value="<?php echo (int) $cfg['daily_cap']; ?>" min="0">
                 </td></tr>
+                <tr><th colspan="2"><hr><h2 style="margin:0">Missive live handoff <span style="font-weight:400;color:#666">(stage 2)</span></h2></th></tr>
+                <tr><th>Channel ID</th><td>
+                    <input type="text" name="missive_channel_id" value="<?php echo esc_attr( $cfg['missive_channel_id'] ); ?>" class="regular-text">
+                    <p class="description">Missive → Settings → Accounts → Add account → Custom.</p>
+                </td></tr>
+                <tr><th>API token</th><td>
+                    <input type="password" name="missive_token" value="<?php echo esc_attr( $cfg['missive_token'] ); ?>" class="regular-text" autocomplete="off">
+                    <p class="description">Missive → Settings → API.</p>
+                </td></tr>
+                <tr><th>Webhook URL</th><td>
+                    <input type="text" readonly class="large-text code" onclick="this.select()"
+                        value="<?php echo esc_attr( rest_url( 'pps/v1/assistant/missive-webhook' ) . '?k=' . $cfg['missive_webhook_secret'] ); ?>">
+                    <p class="description">
+                        Paste into Missive's <em>Outgoing webhook · URL</em> field. The secret in the
+                        query string is how the endpoint tells a real Missive delivery from a forged
+                        one, so treat this whole URL as a credential.
+                        <label style="display:block;margin-top:6px">
+                            <input type="checkbox" name="pps_regen_secret" value="1"> Generate a new secret on save
+                            (invalidates the URL already in Missive)
+                        </label>
+                    </p>
+                    <p class="description" style="color:#b45309"><strong>Not live yet.</strong>
+                    The endpoint ships with stage 2 — until then this URL returns 404, so do not
+                    paste it into Missive if Missive validates the URL when you save.</p>
+                </td></tr>
+                <tr><th colspan="2"><hr></th></tr>
                 <tr><th>Policy prompt</th><td>
                     <textarea name="policy" rows="16" class="large-text code" placeholder="Leave blank to use the built-in default"><?php echo esc_textarea( $cfg['policy'] ); ?></textarea>
                     <p class="description">Editing this changes the cached prefix — the next request pays a fresh cache write.</p>
