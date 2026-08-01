@@ -448,7 +448,7 @@ function pps_assistant_render_admin() {
                     gets a politer version of the email answer.</p>
                 </td></tr>
                 <tr><th>Toggle from your phone</th><td>
-                    <?php $avail_base = rest_url( 'pps/v1/assistant/availability' ) . '?k=' . rawurlencode( pps_assistant_avail_secret() ); ?>
+                    <?php $avail_base = add_query_arg( 'k', rawurlencode( pps_assistant_avail_secret() ), rest_url( 'pps/v1/assistant/availability' ) ); ?>
                     <p style="margin:0 0 6px"><strong>Bookmark this one</strong> — it shows the current
                     state and has both buttons on it:</p>
                     <input type="text" readonly class="large-text code" onclick="this.select()"
@@ -533,7 +533,7 @@ function pps_assistant_render_admin() {
                 </td></tr>
                 <tr><th>Webhook URL</th><td>
                     <input type="text" readonly class="large-text code" onclick="this.select()"
-                        value="<?php echo esc_attr( rest_url( 'pps/v1/assistant/missive-webhook' ) . '?k=' . $cfg['missive_webhook_secret'] ); ?>">
+                        value="<?php echo esc_attr( add_query_arg( 'k', rawurlencode( $cfg['missive_webhook_secret'] ), rest_url( 'pps/v1/assistant/missive-webhook' ) ) ); ?>">
                     <p class="description">
                         Paste into Missive's <em>Outgoing webhook · URL</em> field. The secret in the
                         query string is how the endpoint tells a real Missive delivery from a forged

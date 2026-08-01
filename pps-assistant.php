@@ -1422,7 +1422,7 @@ function pps_assistant_handle_availability( WP_REST_Request $request ) {
     $cfg   = pps_assistant_config();
     $on    = ! empty( $cfg['available_now'] );
     $since = (int) ( $cfg['available_since'] ?? 0 );
-    $base  = rest_url( 'pps/v1/assistant/availability' ) . '?k=' . rawurlencode( pps_assistant_avail_secret() );
+    $base  = add_query_arg( 'k', rawurlencode( pps_assistant_avail_secret() ), rest_url( 'pps/v1/assistant/availability' ) );
 
     $for = '';
     if ( $on && $since ) {
@@ -1468,9 +1468,9 @@ function pps_assistant_handle_availability( WP_REST_Request $request ) {
        . ( pps_assistant_enabled() ? '' : '<br><span class="warn">The assistant itself is switched off, '
                        . 'so nothing is using this yet.</span>' )
        . '</p>'
-       . '<a class="btn on' . ( $on ? ' cur' : '' ) . '" href="' . esc_url( $base . '&set=on' ) . '">'
+       . '<a class="btn on' . ( $on ? ' cur' : '' ) . '" href="' . esc_url( add_query_arg( 'set', 'on', $base ) ) . '">'
        . ( $on ? 'Available ✓' : "I'm available" ) . '</a>'
-       . '<a class="btn off' . ( $on ? '' : ' cur' ) . '" href="' . esc_url( $base . '&set=off' ) . '">'
+       . '<a class="btn off' . ( $on ? '' : ' cur' ) . '" href="' . esc_url( add_query_arg( 'set', 'off', $base ) ) . '">'
        . ( $on ? 'Go unavailable' : 'Unavailable ✓' ) . '</a>'
        . '</div></body></html>';
 

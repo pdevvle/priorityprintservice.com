@@ -30,26 +30,76 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'PPS_ASSISTANT_WEBHOOK_LOG', 'pps_assistant_webhook_log' );
+define( 'PPS_ASSISTANT_WEBHOOK_REJECTS', 'pps_assistant_webhook_rejects' );
 
 /**
  * Authenticate a delivery.
  *
- * Missive has no nonce and no WordPress session, so the shared secret in the query string
- * is the whole of the authentication. Compared with hash_equals() because a timing-safe
- * compare costs nothing here and a leaky one is how a secret gets guessed a byte at a time.
+ * Missive has no nonce and no WordPress session, so the shared secret is the whole of the
+ * authentication. Compared with hash_equals() because a timing-safe compare costs nothing
+ * here and a leaky one is how a secret gets guessed a byte at a time.
  *
- * If Missive turns out to sign deliveries (an HMAC header), that becomes the primary check
- * and this drops to a fallback — the log below will show us whether such a header arrives.
+ * Accepted from the query string OR an X-PPS-Key header, because not every webhook sender
+ * preserves a query string — some store only the path, and a stripped `k` is
+ * indistinguishable from a wrong one without the diagnostics below.
  */
 function pps_assistant_webhook_authorized( WP_REST_Request $request ) {
     if ( ! function_exists( 'pps_assistant_config' ) ) return false;   // engine not loaded
 
     $cfg      = pps_assistant_config();
     $expected = (string) ( $cfg['missive_webhook_secret'] ?? '' );
-    $given    = (string) $request->get_param( 'k' );
+    if ( $expected === '' ) return false;
 
-    if ( $expected === '' || $given === '' ) return false;
-    return hash_equals( $expected, $given );
+    foreach ( array( $request->get_param( 'k' ), $request->get_header( 'x_pps_key' ) ) as $given ) {
+        if ( is_string( $given ) && $given !== '' && hash_equals( $expected, $given ) ) return true;
+    }
+    return false;
+}
+
+/**
+ * Record WHY a delivery was turned away.
+ *
+ * This is the fix for a genuine blind spot: a permission_callback runs before the handler,
+ * so a rejected request logged nothing at all. Missive reported "401 Unauthorized" and
+ * there was no way to tell a stripped query string from a mismatched secret — two problems
+ * with completely different fixes.
+ *
+ * Kept in its OWN option so a flood of junk requests cannot evict real deliveries from the
+ * main log. Values are never stored, only whether they were present: the point is to see
+ * what arrived, not to build a second copy of the secret.
+ */
+function pps_assistant_webhook_log_reject( WP_REST_Request $request ) {
+    $uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : '';
+    // Whether ?k= survived is the single most useful fact here — but never write the value.
+    $uri = preg_replace( '/([?&]k=)[^&]*/i', '$1[value-present]', $uri );
+
+    $cfg      = function_exists( 'pps_assistant_config' ) ? pps_assistant_config() : array();
+    $expected = (string) ( $cfg['missive_webhook_secret'] ?? '' );
+    $given    = $request->get_param( 'k' );
+
+    $entry = array(
+        'at'          => gmdate( 'c' ),
+        'method'      => $request->get_method(),
+        'uri'         => mb_substr( $uri, 0, 500 ),
+        'k_present'   => is_string( $given ) && $given !== '',
+        'k_length'    => is_string( $given ) ? strlen( $given ) : 0,
+        'k_expected_length' => strlen( $expected ),
+        'header_key_present' => (string) $request->get_header( 'x_pps_key' ) !== '',
+        'secret_configured'  => $expected !== '',
+        // Names only. A rejected request is untrusted input; its values are not worth storing.
+        'query_keys'  => array_keys( (array) $request->get_query_params() ),
+        'header_names'=> array_keys( (array) $request->get_headers() ),
+    );
+
+    $log = get_option( PPS_ASSISTANT_WEBHOOK_REJECTS, array() );
+    if ( is_string( $log ) ) $log = json_decode( $log, true );
+    if ( ! is_array( $log ) ) $log = array();
+
+    array_unshift( $log, $entry );
+    update_option( PPS_ASSISTANT_WEBHOOK_REJECTS, array_slice( $log, 0, 5 ), false );
+
+    error_log( '[pps-assistant] webhook REJECTED: k_present=' . ( $entry['k_present'] ? '1' : '0' )
+        . ' uri=' . $entry['uri'] );
 }
 
 add_action( 'rest_api_init', function () {
@@ -57,12 +107,23 @@ add_action( 'rest_api_init', function () {
         // Missive sends JSON; accept GET too so their setup form can probe the URL
         // without us rejecting it as a bad method.
         'methods'             => array( 'GET', 'POST' ),
-        'permission_callback' => 'pps_assistant_webhook_authorized',
+        // Deliberately open, with the real check inside the handler. A permission_callback
+        // rejects before anything can be recorded, which is how we ended up with a 401 and
+        // no idea why. The route still refuses unauthenticated callers — it just says so
+        // from somewhere it can leave a note.
+        'permission_callback' => '__return_true',
         'callback'            => 'pps_assistant_handle_missive_webhook',
     ) );
 } );
 
 function pps_assistant_handle_missive_webhook( WP_REST_Request $request ) {
+    // The authentication that permission_callback used to do — moved here so a refusal
+    // can explain itself. Same answer to the caller, 401 and nothing else.
+    if ( ! pps_assistant_webhook_authorized( $request ) ) {
+        pps_assistant_webhook_log_reject( $request );
+        return new WP_Error( 'unauthorized', 'Invalid or missing key', array( 'status' => 401 ) );
+    }
+
     // Record the RAW body, not the parsed array — if Missive ever signs deliveries the MAC
     // is computed over exact bytes, and re-serialising a parsed array changes them.
     $raw = $request->get_body();
