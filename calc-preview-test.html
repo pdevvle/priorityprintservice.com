@@ -3273,8 +3273,17 @@ update();
       if (onCoverArt && extracted.pages.length >= 1) onCoverArt(extracted.pages[0].dataUrl);
       if (onBackCoverArt && extracted.pages.length >= 2) onBackCoverArt(extracted.pages[extracted.pages.length - 1].dataUrl);
       if (onPagesDetected && extracted.pages.length >= 2) {
+        // Round up to the next signature (4pp), floor at the smallest book we sell,
+        // and CLAMP to the largest. Without the clamp a 68pp upload set pages=68,
+        // which has no matching <option> — the select fell back to displaying "8
+        // Pages" while the engine priced 68. The control and the price described
+        // different jobs, silently, and a 120pp saddle stitch could be ordered even
+        // though the product tops out at 64. The overflow is surfaced instead, via
+        // reconcileInfo.type === "trimmed".
+        const _max = PAGE_COUNTS[PAGE_COUNTS.length - 1] || 64;
         let pg = Math.ceil(extracted.pages.length / 4) * 4;
         if (pg < 8) pg = 8;
+        if (pg > _max) pg = _max;
         onPagesDetected(pg);
       }
       // Pass raw file up for order submission
