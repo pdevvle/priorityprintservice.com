@@ -90,6 +90,9 @@ function pps_assistant_config() {
         // Three minutes: long enough for someone to finish a sentence, short enough that
         // a visitor staring at "connecting you" does not conclude the site is broken.
         'handoff_timeout'        => 180,
+        // Email the customer a copy of their own chat when it escalates. Off by
+        // default: a receipt for a two-line conversation is noise.
+        'customer_transcript'    => false,
         'model'         => 'claude-opus-5',
         'effort'        => 'medium',       // low | medium | high | xhigh | max
         // Thinking is ON by default on Opus 5 and max_tokens caps thinking PLUS reply. 4096
@@ -625,6 +628,10 @@ function pps_assistant_tools() {
                 $session['escalated']         = true;
                 $session['escalation_reason'] = (string) $input['reason'];
 
+                // Their copy. Sent after the record exists so a mail failure cannot cost
+                // us the escalation, and built only from what they already saw.
+                pps_assistant_send_customer_transcript( $session );
+
                 if ( ! $sent ) error_log( '[pps-assistant] escalation mail FAILED to ' . $to );
 
                 // Checked before the mail result on purpose: once the chat is live in
@@ -935,6 +942,83 @@ function pps_assistant_transcript( array $session ) {
         }
     }
     return $out;
+}
+
+/**
+ * The conversation as the CUSTOMER would read it.
+ *
+ * pps_assistant_transcript() labels turns USER / ASSISTANT, which is the internal shape.
+ * Anything a customer might see gets this instead: their own name, and a plain label for
+ * the assistant. Same content, no machine framing.
+ */
+function pps_assistant_customer_transcript( array $session ) {
+    $them = trim( (string) ( $session['name'] ?? '' ) );
+    if ( $them === '' ) $them = 'You';
+    $us = 'Assistant';
+
+    $out     = '';
+    $history = ! empty( $session['_live_messages'] ) ? $session['_live_messages'] : ( $session['messages'] ?? array() );
+    foreach ( (array) $history as $m ) {
+        foreach ( (array) $m['content'] as $b ) {
+            if ( ( $b['type'] ?? '' ) !== 'text' ) continue;
+            $out .= ( ( $m['role'] ?? '' ) === 'user' ? $them : $us ) . ': ' . $b['text'] . "\n\n";
+        }
+    }
+
+    // Anything a live agent said belongs in the customer's copy too — from their side it
+    // was all one conversation, and a transcript missing the human half is a confusing
+    // record of what they were promised.
+    foreach ( (array) ( $session['human_log'] ?? array() ) as $e ) {
+        if ( ( $e['kind'] ?? '' ) === 'visitor' ) { $out .= $them . ': ' . $e['text'] . "\n\n"; continue; }
+        if ( ( $e['kind'] ?? '' ) === 'agent' )   { $out .= ( $e['from'] ?: 'Our team' ) . ': ' . $e['text'] . "\n\n"; }
+    }
+
+    return $out;
+}
+
+/**
+ * Email the customer their own conversation.
+ *
+ * Off by default — it is a courtesy, not a requirement, and an unwanted receipt for a
+ * two-line chat is noise. Contains ONLY what they already saw: no reason, no summary, no
+ * routing state, nothing about how the request was handled internally.
+ */
+function pps_assistant_send_customer_transcript( array $session ) {
+    $cfg = pps_assistant_config();
+    if ( empty( $cfg['customer_transcript'] ) ) return false;
+
+    $to = (string) ( $session['email'] ?? '' );
+    if ( ! is_email( $to ) ) return false;
+
+    $site = function_exists( 'get_bloginfo' ) ? wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES ) : 'Priority Print Service';
+    $them = trim( (string) ( $session['name'] ?? '' ) );
+
+    $lines   = array();
+    $lines[] = $them !== '' ? sprintf( 'Hi %s,', $them ) : 'Hi,';
+    $lines[] = '';
+    $lines[] = 'Here is a copy of your chat with us, for your records.';
+    $lines[] = '';
+    $lines[] = 'Someone from the team will follow up by email. If you would rather we called '
+             . 'or texted, just reply and say so.';
+    $lines[] = '';
+    $lines[] = '--- your conversation ---';
+    $lines[] = '';
+    $lines[] = trim( pps_assistant_customer_transcript( $session ) );
+    $lines[] = '';
+    $lines[] = sprintf( '— The %s team', $site );
+
+    $sent = wp_mail(
+        $to,
+        sprintf( 'Your chat with %s', $site ),
+        implode( "\n", $lines ),
+        array(
+            'Content-Type: text/plain; charset=UTF-8',
+            'Reply-To: ' . pps_assistant_staff_email(),
+        )
+    );
+
+    if ( ! $sent ) error_log( '[pps-assistant] customer transcript FAILED to ' . $to );
+    return $sent;
 }
 
 // ═══════════════════════════════════════════════════════════════

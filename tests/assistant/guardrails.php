@@ -1349,7 +1349,9 @@ $s['name'] = 'Jane'; $s['email'] = 'j@e.co';
 $body = pps_assistant_missive_body( $s, 'refund', 'wants money back' );
 ok( strpos( $body, '<' ) === false, 'the text-channel handoff body contains no markup at all' );
 ok( strpos( $body, 'Name: Jane' ) !== false, 'and still carries the details an agent needs' );
-ok( strpos( $body, 'Reason: refund' ) !== false, 'including why it was escalated' );
+// The reason is the model's triage note about the customer. It goes to the team, not
+// into a thread addressed to the customer — see the customer-facing group below.
+ok( strpos( $body, 'Reason: refund' ) === false, 'but NOT the internal reason' );
 
 // ── which name reaches the customer ──────────────────────────────────────────────
 reset_world();
@@ -1374,6 +1376,97 @@ $cfg['missive_alias_name']      = '';
 update_option( 'pps_assistant_config', $cfg );
 ok( pps_assistant_missive_agent_display( 'Preston Cicala' ) === 'priority-print-service-staff',
     'with no display name it uses the alias username rather than leaking a person' );
+
+// ═════════════════════════════════════════════════════════════════════════════════
+// NOTHING INTERNAL REACHES THE CUSTOMER
+//
+// The Missive conversation is addressed to the visitor, and the transcript email goes
+// straight to them. Both are written to be harmless if the person they are about reads
+// them: no routing state, and none of the model's characterisation of them.
+// ═════════════════════════════════════════════════════════════════════════════════
+group( 'Customer-facing output carries nothing internal' );
+
+reset_world();
+missive_configure( true );
+
+$s = fresh_session();
+$s['name'] = 'Preston'; $s['email'] = 'p@example.com'; $s['phone'] = '6025550142';
+$s['messages'] = array(
+    array( 'role' => 'user',      'content' => array( array( 'type' => 'text', 'text' => 'I need a custom quote' ) ) ),
+    array( 'role' => 'assistant', 'content' => array( array( 'type' => 'text', 'text' => 'What size and quantity?' ) ) ),
+);
+
+$REASON  = 'Customer requesting a custom/bespoke quote not covered by standard products';
+$SUMMARY = 'Customer wants a custom quote but has not specified product details';
+
+$body = pps_assistant_missive_body( $s, $REASON, $SUMMARY );
+
+// The exact strings from the leak report.
+foreach ( array( 'Assistant escalation', 'Human was:', 'chat handed into Missive',
+                 'the customer sees it live', $REASON, $SUMMARY ) as $internal ) {
+    ok( strpos( $body, $internal ) === false,
+        'the handoff message does not carry: ' . substr( $internal, 0, 38 ) );
+}
+ok( strpos( $body, 'I need a custom quote' ) !== false, 'but it does carry what the customer typed' );
+ok( strpos( $body, 'Preston' ) !== false && strpos( $body, '6025550142' ) !== false,
+    'and how to reach them' );
+// Filler like "(not given)" turns a handoff into a dossier.
+ok( strpos( $body, '(not given)' ) === false, 'and omits empty fields rather than padding them' );
+
+// The triage still has to reach the team — just not through the delivered thread.
+reset_world();
+missive_configure( true );
+add_filter( 'pps_assistant_missive_pre_note', function ( $pre, $payload ) {
+    $GLOBALS['__note'] = $payload;
+    return true;
+}, 10, 2 );
+pps_assistant_missive_note( 'conv1', $REASON, $SUMMARY );
+$note = wp_json_encode( $GLOBALS['__note'] ?? array(), JSON_UNESCAPED_SLASHES );
+ok( strpos( $note, $REASON ) !== false, 'the internal note DOES carry the reason' );
+ok( strpos( $note, $SUMMARY ) !== false, 'and the summary' );
+ok( strpos( $note, 'conv1' ) !== false, 'attached to the right conversation' );
+
+// ── the customer transcript ──────────────────────────────────────────────────────
+reset_world();
+$s['human_log'] = array(
+    array( 'from' => 'you', 'text' => 'still there?', 'kind' => 'visitor', 'at' => 1 ),
+    array( 'from' => 'Priority Print Service Staff', 'text' => 'Yes — one moment', 'kind' => 'agent', 'at' => 2 ),
+    array( 'from' => 'system', 'text' => 'Nobody is free right now', 'kind' => 'system', 'at' => 3 ),
+);
+$t = pps_assistant_customer_transcript( $s );
+ok( strpos( $t, 'Preston: I need a custom quote' ) !== false, 'the transcript uses their name, not USER' );
+ok( strpos( $t, 'Assistant: What size' ) !== false, 'and a plain label for the bot' );
+ok( strpos( $t, 'Priority Print Service Staff: Yes — one moment' ) !== false,
+    'and includes what the live agent said — from their side it was one conversation' );
+ok( strpos( $t, 'USER:' ) === false && strpos( $t, 'ASSISTANT:' ) === false,
+    'and never the internal role labels' );
+
+// Off by default; on, it sends only their own material.
+reset_world();
+ok( pps_assistant_send_customer_transcript( $s ) === false, 'no transcript unless it is switched on' );
+
+$cfg = pps_assistant_config();
+$cfg['customer_transcript'] = true;
+update_option( 'pps_assistant_config', $cfg );
+$s['email'] = 'p@example.com';
+$s['escalation_reason'] = $REASON;
+ok( pps_assistant_send_customer_transcript( $s ) !== false, 'switched on, it sends' );
+
+$mail = $GLOBALS['__mail'][0] ?? array();
+ok( ( $mail['to'] ?? '' ) === 'p@example.com', 'to the customer, not the shop' );
+foreach ( array( $REASON, $SUMMARY, 'Assistant escalation', 'Human was:' ) as $internal ) {
+    ok( strpos( $mail['body'] ?? '', $internal ) === false,
+        'their transcript does not carry: ' . substr( $internal, 0, 32 ) );
+}
+ok( strpos( $mail['body'] ?? '', 'I need a custom quote' ) !== false, 'but does carry their own words' );
+
+// A customer with no email address must not blow up an escalation.
+reset_world();
+$cfg = pps_assistant_config();
+$cfg['customer_transcript'] = true;
+update_option( 'pps_assistant_config', $cfg );
+$blank = fresh_session();
+ok( pps_assistant_send_customer_transcript( $blank ) === false, 'no email address, no send, no fatal' );
 
 // ── summary ──────────────────────────────────────────────────────────────────────
 echo "\n" . str_repeat( '─', 62 ) . "\n";

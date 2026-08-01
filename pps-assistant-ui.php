@@ -383,6 +383,7 @@ function pps_assistant_render_admin() {
         $cfg['missive_alias_name'] = sanitize_text_field( wp_unslash( $_POST['missive_alias_name'] ?? '' ) );
         $cfg['missive_show_agent_name'] = ! empty( $_POST['missive_show_agent_name'] );
         $cfg['handoff_timeout']    = max( 30, (int) ( $_POST['handoff_timeout'] ?? 180 ) );
+        $cfg['customer_transcript'] = ! empty( $_POST['customer_transcript'] );
 
         // The webhook secret is ours to mint, not the operator's to invent — a weak one here
         // means anyone who finds the route can inject messages into a customer's chat.
@@ -473,6 +474,13 @@ function pps_assistant_render_admin() {
                     never unlocks order data — it exists so there is always somewhere to follow up.
                     Requiring a phone number is the highest-friction field on the form; untick this if
                     drop-off is worse than the missed contact details.</p>
+                </td></tr>
+                <tr><th>Send customers a transcript</th><td>
+                    <label><input type="checkbox" name="customer_transcript" <?php checked( $cfg['customer_transcript'] ); ?>>
+                        Email the customer a copy of their chat when it escalates</label>
+                    <p class="description">Their side only — what they typed and what they were told.
+                    None of the internal triage (reason, summary, routing) goes anywhere near it.
+                    Off by default, because a receipt for a two-line conversation is noise.</p>
                 </td></tr>
                 <tr><th>Visible to</th><td>
                     <label><input type="radio" name="visible_to" value="admins" <?php checked( $cfg['visible_to'], 'admins' ); ?>>

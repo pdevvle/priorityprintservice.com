@@ -343,6 +343,16 @@ function pps_assistant_missive_open( $sid, array &$session, $reason, $summary ) 
     if ( $conv ) {
         $session['missive_conversation'] = $conv;
         pps_assistant_missive_index( $conv, $sid );
+        // Triage goes in as a team-only comment, never into the delivered thread.
+        //
+        // Guarded because it is a nicety and the handoff is not. A timeout or a rejected
+        // shape on /posts must never turn a working live handoff into a failed one — the
+        // staff email carries the same briefing either way.
+        try {
+            pps_assistant_missive_note( $conv, $reason, $summary );
+        } catch ( Throwable $e ) {
+            error_log( '[pps-assistant] internal note threw: ' . $e->getMessage() );
+        }
     }
     // Index by our own reference too — this is the route that does not depend on any
     // Missive id format being what we assumed.
@@ -351,43 +361,96 @@ function pps_assistant_missive_open( $sid, array &$session, $reason, $summary ) 
     return true;
 }
 
-/** The opening message an agent sees: who this is, and everything said so far. */
+/**
+ * The opening message on the handoff conversation.
+ *
+ * WRITTEN TO BE HARMLESS IF THE CUSTOMER READS IT. The Missive conversation is addressed
+ * to the visitor — their identity is in to_fields — so anything in this body sits in a
+ * thread about them, one forward or one channel change away from reaching them.
+ *
+ * So it carries facts they already know: who they are, how to reach them, and what they
+ * typed. It carries NO internal triage — no routing state ("chat handed into Missive"),
+ * and none of the model's own characterisation of them. "Customer wants a custom quote
+ * but has not specified product details" is a reasonable note for a colleague and an
+ * insulting thing for a customer to read about themselves.
+ *
+ * That material is not lost: it goes to the staff email, the Calc Questions record, and
+ * pps_assistant_missive_note() below, all of which are internal-only.
+ */
 function pps_assistant_missive_body( array $session, $reason, $summary ) {
-    $rows = array(
-        'Name'    => ( $session['name'] ?? '' ) ?: '(not given)',
-        'Company' => ( $session['company'] ?? '' ) ?: '(not given)',
-        'Email'   => ( $session['email'] ?? '' ) ?: '(not given)',
-        'Phone'   => ( $session['phone'] ?? '' ) ?: '(not given)',
-        'Order'   => ( $session['verified_order'] ?? '' ) ?: '(none verified)',
-        'Reason'  => (string) $reason,
-    );
+    // Only lines that have a value. "(not given)" is filler that reads as a dossier.
+    $rows = array_filter( array(
+        'Name'    => (string) ( $session['name'] ?? '' ),
+        'Company' => (string) ( $session['company'] ?? '' ),
+        'Email'   => (string) ( $session['email'] ?? '' ),
+        'Phone'   => (string) ( $session['phone'] ?? '' ),
+        'Order'   => ( $session['verified_order'] ?? 0 ) ? '#' . (int) $session['verified_order'] : '',
+    ), 'strlen' );
 
-    // A text channel shows markup as literal tags, so it gets a plain-text build. This is
-    // the shape an agent actually reads on a chat channel anyway.
     if ( pps_assistant_missive_is_text_channel() ) {
-        $out = "Live handoff from the website chat — reply here and it appears in the "
-             . "visitor's chat window.\n\n";
-        foreach ( $rows as $k => $v ) {
-            $out .= $k . ': ' . (string) $v . "\n";
-        }
-        if ( $summary ) $out .= "\nSummary: " . (string) $summary . "\n";
-        $out .= "\n--- conversation so far ---\n" . pps_assistant_transcript( $session );
+        $out = "Website chat\n\n";
+        foreach ( $rows as $k => $v ) $out .= $k . ': ' . $v . "\n";
+        $out .= "\n--- conversation ---\n" . pps_assistant_customer_transcript( $session );
         return $out;
     }
 
-    $html = '<p><strong>Live handoff from the website chat.</strong> '
-          . 'Reply here and it appears in the visitor\'s chat window.</p><ul>';
+    $html = '<p><strong>Website chat</strong></p><ul>';
     foreach ( $rows as $k => $v ) {
-        $html .= '<li><strong>' . esc_html( $k ) . ':</strong> ' . esc_html( (string) $v ) . '</li>';
+        $html .= '<li><strong>' . esc_html( $k ) . ':</strong> ' . esc_html( $v ) . '</li>';
     }
-    $html .= '</ul>';
-
-    if ( $summary ) $html .= '<p><strong>Summary:</strong> ' . esc_html( (string) $summary ) . '</p>';
-
-    $html .= '<hr><p><strong>Conversation so far</strong></p><pre style="white-space:pre-wrap">'
-           . esc_html( pps_assistant_transcript( $session ) ) . '</pre>';
+    $html .= '</ul><hr><pre style="white-space:pre-wrap">'
+           . esc_html( pps_assistant_customer_transcript( $session ) ) . '</pre>';
 
     return $html;
+}
+
+/**
+ * Post the internal briefing as a Missive COMMENT rather than a message.
+ *
+ * A comment is visible only to the team — it is never part of what a channel delivers —
+ * which is the right home for the model's reason and summary. Best-effort: the shape of
+ * /v1/posts for a comment is reconstructed like everything else here, so a failure is
+ * logged and swallowed. The staff email always carries the same briefing, so nothing is
+ * lost when this does not land.
+ */
+function pps_assistant_missive_note( $conversation_id, $reason, $summary ) {
+    if ( ! pps_assistant_missive_ready() || ! $conversation_id ) return false;
+
+    $cfg  = pps_assistant_config();
+    $text = "Assistant triage\n\nReason: " . (string) $reason;
+    if ( $summary ) $text .= "\nSummary: " . (string) $summary;
+    $text .= "\n\n(Internal note — not delivered to the customer.)";
+
+    $payload = apply_filters( 'pps_assistant_missive_note_payload', array( 'posts' => array(
+        'conversation' => (string) $conversation_id,
+        'notification' => array( 'title' => 'Assistant triage', 'body' => wp_trim_words( (string) $reason, 12 ) ),
+        'text'         => $text,
+    ) ), $conversation_id );
+
+    $pre = apply_filters( 'pps_assistant_missive_pre_note', null, $payload );
+    if ( $pre !== null ) return (bool) $pre;
+
+    $res = wp_remote_post( PPS_ASSISTANT_MISSIVE_API . '/posts', array(
+        'timeout' => 8,
+        'headers' => array(
+            'Authorization' => 'Bearer ' . $cfg['missive_token'],
+            'Content-Type'  => 'application/json',
+        ),
+        'body'    => wp_json_encode( $payload ),
+    ) );
+
+    if ( is_wp_error( $res ) ) {
+        pps_assistant_missive_log( 'note_failed', array( 'error' => $res->get_error_message() ) );
+        return false;
+    }
+
+    $code = (int) wp_remote_retrieve_response_code( $res );
+    $ok   = $code >= 200 && $code < 300;
+    pps_assistant_missive_log( $ok ? 'note_ok' : 'note_failed', array(
+        'status'   => $code,
+        'response' => pps_assistant_missive_safe( (string) wp_remote_retrieve_body( $res ), 1500 ),
+    ) );
+    return $ok;
 }
 
 /** Relay a visitor's later message into the open Missive conversation. */
