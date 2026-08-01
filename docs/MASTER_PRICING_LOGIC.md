@@ -159,48 +159,111 @@ A single markup curve can't compress both into a tight band above Vistaprint. Be
 
 ## Currently applied values (per calculator)
 
-### Brochure (`calc-brochure.html`)
+**Extracted from the calculator sources 2026-08-01**, with comments stripped so that
+commented-out `ROLLBACK:` values are not mistaken for live ones. Every figure below is a
+*file default* — `pps_get_config()` resolves as `array_merge($defaults['pcf'], $saved['pcf'])`,
+so anything stored in `wp_options['pps_calc_config']` wins over these. Where the two
+diverge today, it is called out.
+
+### Flat products — brochure, greeting card, letterhead, postcard, sticker
+
+All five share one curve and one set of knobs:
 
 ```
-backend_maximummarkup: 15.2
-backend_minimummarkup: 3.5
-easydiscount_max:      0
-markup curve:          dL = 1.85 * ln(tS) - 0.5
-print markup:          uniform (applied to all print costs)
-baseCost:              removed ($35 was always added)
+backend_maximummarkup:  13
+backend_minimummarkup:  1.5
+backend_markup_coef_tS: 1.75
+backend_base_rate:      10
+easydiscount_max:       0
+markup curve:           dL = 1.75 * ln(pressSheets)
+surcharge:              none — these carry no surcharge term at all
 ```
 
-Expected positioning: +1% to +12% above Vistaprint.
+Note the curve runs on `pressSheets`, not `tS` as the booklet family does.
 
-### Saddle stitch booklet (`calc-preview-test.html`)
-
-```
-booklet_maximummarkup: 8
-booklet_minimummarkup: 1.5
-booklet_size_discount: 0.15  (15% off for imp<4 sizes)
-easydiscount_max:      0
-common_discount_max:   0
-markup curve:          dL = 0.80 * ln(tS)
-print markup:          uniform
-```
-
-Expected positioning:
-- 5.5×8.5: +3-53% (tighter for thicker books, hot for 8pp at high qty)
-- 8.5×11: +1-49% with size discount
-
-### Perfect bound (`calc-perfect-bound.html`) — tuned 2026-04-14
+### Saddle stitch booklet — `calc-preview-test.html`, `calc-modern-draft.html`
 
 ```
-perfectbound_maximummarkup: 8
-perfectbound_minimummarkup: 1.5
-perfectbound_size_discount: 0.15  (15% off for imp<4 sizes)
-easydiscount_max:      0
-common_discount_max:   0
-markup curve:          dL = 0.80 * ln(tS)     // was two-branch: quadratic<1000, linear≥1000
-print markup:          uniform                // was asymmetric (mk only on BW inside)
+booklet_maximummarkup:       3.6
+booklet_minimummarkup:       1.45
+booklet_markup_coef_tS:      0.295
+booklet_cover_maximummarkup: 6.0
+booklet_cover_minimummarkup: 1.8
+booklet_cover_markup_coef:   0.38
+booklet_size_discount:       0
+booklet_8up_markup_bonus:    0.15
+booklet_surcharge:           0.40
+bw_discount_rate:            0.3
+easy_discount_rate:          0.05
+easydiscount_max:            0
+common_discount_max:         1500      (any value > 0 enables the discount; legacy name, not a $ cap)
+markup curve:                dL = 0.295 * ln(tS)
 ```
 
-Mirrors the saddle-stitch architecture: dedicated `perfectbound_*` PCF keys so it can be tuned independently of brochure (previously shared `backend_*`). Old two-branch curve and asymmetric print markup are preserved inline as commented-out `// ROLLBACK:` blocks for quick revert without a git operation.
+These two files also declare `backend_maximummarkup: 15.2` / `backend_minimummarkup: 3.5`,
+which the saved option overrides to `13` / `1.5`. The booklet engine prices off the
+`booklet_*` keys, so the `backend_*` pair is vestigial here — do not tune it expecting an
+effect on booklets.
+
+### Perfect bound — `calc-perfect-bound.html`
+
+```
+perfectbound_maximummarkup:       3.6
+perfectbound_minimummarkup:       1.45
+perfectbound_markup_coef_tS:      0.275
+perfectbound_cover_maximummarkup: 6.0
+perfectbound_cover_minimummarkup: 1.8
+perfectbound_cover_markup_coef:   0.38
+perfectbound_size_discount:       0
+perfectbound_surcharge:           0.40
+bw_discount_rate:                 0.3
+easy_discount_rate_1:             0.07
+easy_discount_rate_2:             0.05
+easydiscount_max:                 0
+common_discount_max:              0        (disabled)
+backend_maximummarkup:            9        (vestigial, as above)
+markup curve:                     dL = 0.275 * ln(tS)
+```
+
+### Coupon book — `calc-coupon-book.html`
+
+```
+couponbook_maximummarkup:  3.6
+couponbook_minimummarkup:  1.45
+couponbook_markup_coef_tS: 0.275
+couponbook_size_discount:  0
+couponbook_surcharge:      0.40
+bw_discount_rate:          0.3
+easy_discount_rate_1:      0.07
+easy_discount_rate_2:      0.05
+easydiscount_max:          0
+common_discount_max:       0        (disabled)
+backend_maximummarkup:     9        (vestigial, as above)
+markup curve:              dL = 0.275 * ln(tS)
+```
+
+### What changed in this correction (2026-08-01)
+
+The previous version of this section had drifted badly from the code and should not be
+trusted in any older copy of this file:
+
+| Claimed | Actual |
+|---|---|
+| Brochure `backend_max/min: 15.2 / 3.5` | `13 / 1.5` — the 15.2/3.5 pair lives in the *booklet* files, and is vestigial there |
+| Brochure `dL = 1.85*ln(tS) - 0.5` | `dL = 1.75 * ln(pressSheets)` |
+| Brochure "baseCost removed" | `backend_base_rate: 10` is present and applied |
+| Saddle `booklet_max/min: 8 / 1.5` | `3.6 / 1.45` |
+| Saddle `booklet_size_discount: 0.15` | `0` |
+| Saddle `common_discount_max: 0` | `1500` (enabled) |
+| Saddle/PB `dL = 0.80*ln(tS)` | `0.295` and `0.275` respectively |
+| Perfect bound `max/min: 8 / 1.5` | `3.6 / 1.45` |
+| Coupon book | absent entirely |
+| The four flat calculators | absent entirely |
+| The surcharge | absent entirely, despite being one of the largest single levers |
+
+The lesson worth keeping: this section is hand-maintained and drifted through at least
+two retunes without being updated. Re-extract from source before trusting it, and treat
+any pricing decision made against a stale copy as suspect.
 
 ### Pricing surcharge (booklet family) — raised 0.30 → 0.40, 2026-08-01
 
