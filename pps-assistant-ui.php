@@ -185,6 +185,7 @@ add_action( 'wp_footer', function () {
       var haveIntake = !!(intake.name && intake.email && intake.phone);
 
       function showChat() {
+        panel.classList.add('is-chatting');
         document.getElementById('pps-asst-gate').hidden = true;
         document.getElementById('pps-asst-form').hidden = false;
         if (!log.childElementCount) add('bot', CFG.greeting);
@@ -194,11 +195,32 @@ add_action( 'wp_footer', function () {
         pollOnce().then(function () { if (withHuman) startPolling(); });
       }
 
-      document.getElementById('pps-asst-launch').onclick = function () {
-        document.getElementById('pps-asst-panel').hidden = false;
+      var panel    = document.getElementById('pps-asst-panel');
+      var launcher = document.getElementById('pps-asst-launch');
+
+      function openPanel() {
+        panel.hidden = false;
+        // The launcher is pinned to the same corner as the panel and simply sat behind it.
+        // Hiding it is the difference between a chat window and a chat window with a button
+        // poking out from under one edge.
+        launcher.hidden = true;
         if (haveIntake) showChat();
         else document.getElementById('pps-asst-name').focus();
-      };
+      }
+
+      function closePanel() {
+        panel.hidden = true;
+        launcher.hidden = false;
+        launcher.focus();
+      }
+
+      launcher.onclick = openPanel;
+
+      // Escape closes. Its absence is the kind of thing that reads as "not quite finished"
+      // without anyone being able to say why.
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !panel.hidden) closePanel();
+      });
 
       document.getElementById('pps-asst-gate').onsubmit = function (e) {
         e.preventDefault();
@@ -225,9 +247,7 @@ add_action( 'wp_footer', function () {
         sessionStorage.setItem('ppsAsstIntake', JSON.stringify(intake));
         showChat();
       };
-      document.getElementById('pps-asst-close').onclick = function () {
-        document.getElementById('pps-asst-panel').hidden = true;
-      };
+      document.getElementById('pps-asst-close').onclick = closePanel;
 
       document.getElementById('pps-asst-form').onsubmit = function (e) {
         e.preventDefault();
@@ -297,13 +317,30 @@ add_action( 'wp_footer', function () {
       .pps-asst-flag{display:inline-block;margin-left:8px;background:rgba(255,255,255,.22);border-radius:10px;
         padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.02em;vertical-align:middle}
       #pps-asst-panel{position:fixed;right:20px;bottom:20px;z-index:99999;width:360px;max-width:calc(100vw - 32px);
-        height:520px;max-height:calc(100vh - 40px);display:flex;flex-direction:column;background:#fff;
+        /* Sized by its content while the intake gate is up — a fixed 520px box around
+           four fields is mostly empty space. It becomes a proper window once there is
+           a conversation to hold. */
+        height:auto;max-height:calc(100vh - 40px);display:flex;flex-direction:column;background:#fff;
         border:1px solid #e3e8ef;border-radius:14px;box-shadow:0 12px 40px rgba(16,24,40,.18);overflow:hidden;
         font:400 14px/1.5 system-ui,sans-serif}
       #pps-asst-panel header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;
         border-bottom:1px solid #e3e8ef;font-weight:600;color:#0f172a}
-      #pps-asst-panel header button{background:0;border:0;font-size:22px;line-height:1;cursor:pointer;color:#475569}
+      #pps-asst-panel header button{background:0;border:0;font-size:22px;line-height:1;cursor:pointer;
+        color:#475569;padding:4px 8px;margin:-4px -8px;border-radius:7px}
+      #pps-asst-panel header button:hover{background:#f1f5f9;color:#0f172a}
+      /* An ID selector beats the browser's [hidden]{display:none}, so every element that
+         sets `display` here MUST restate it or the hidden attribute silently does nothing.
+         Missing this on the panel is what left the chat window stuck open and made the
+         close button look broken. */
+      #pps-asst-panel[hidden]{display:none}
+      #pps-asst-launch[hidden]{display:none}
       #pps-asst-log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:#f6f7f9}
+      /* While the intake gate is up the log holds nothing, and an empty flex:1 box would
+         push the four fields into a cramped strip at the bottom of the panel. */
+      #pps-asst-log:empty{display:none}
+      #pps-asst-panel.is-chatting{height:520px}
+      /* Header already draws a bottom border; the gate's top border doubled it. */
+      #pps-asst-log:empty + #pps-asst-gate{border-top:0}
       .pps-asst-msg{max-width:85%;padding:9px 12px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}
       .pps-asst-bot{background:#fff;border:1px solid #e3e8ef;color:#0f172a;align-self:flex-start}
       .pps-asst-user{background:#007eff;color:#fff;align-self:flex-end}
