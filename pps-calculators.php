@@ -886,6 +886,46 @@ function pps_ajax_upload_artwork() {
         wp_send_json_error( 'File too large (max 200MB).' );
     }
 
+    // Magic-byte validation: the file's leading bytes must match its claimed
+    // extension — blocks executables/polyglots renamed to an allowed type.
+    $fh   = fopen( $file['tmp_name'], 'rb' );
+    $head = $fh ? (string) fread( $fh, 16 ) : '';
+    if ( $fh ) {
+        fclose( $fh );
+    }
+    $magic_ok = false;
+    switch ( $ext ) {
+        case 'pdf':
+            $magic_ok = strncmp( $head, '%PDF', 4 ) === 0;
+            break;
+        case 'jpg':
+        case 'jpeg':
+            $magic_ok = strncmp( $head, "\xFF\xD8\xFF", 3 ) === 0;
+            break;
+        case 'png':
+            $magic_ok = strncmp( $head, "\x89PNG\r\n\x1a\n", 8 ) === 0;
+            break;
+        case 'tif':
+        case 'tiff':
+            $magic_ok = strncmp( $head, "II*\x00", 4 ) === 0 || strncmp( $head, "MM\x00*", 4 ) === 0;
+            break;
+        case 'eps':
+            $magic_ok = strncmp( $head, '%!PS', 4 ) === 0 || strncmp( $head, "\xC5\xD0\xD3\xC6", 4 ) === 0;
+            break;
+        case 'ai': // modern AI = PDF-compatible; legacy AI = PostScript
+            $magic_ok = strncmp( $head, '%PDF', 4 ) === 0 || strncmp( $head, '%!PS', 4 ) === 0;
+            break;
+        case 'txt': // generated manifests: small, and no executable headers
+            $magic_ok = $file['size'] <= 1024 * 1024
+                && strncmp( $head, 'MZ', 2 ) !== 0
+                && strncmp( $head, "\x7FELF", 4 ) !== 0
+                && strncmp( $head, "\xCA\xFE\xBA\xBE", 4 ) !== 0;
+            break;
+    }
+    if ( ! $magic_ok ) {
+        wp_send_json_error( 'File content does not match its .' . $ext . ' extension — re-export the file and try again.' );
+    }
+
     // Unique filename: timestamp-hash.ext
     $token       = date( 'Ymd-His' ) . '-' . substr( md5( uniqid( '', true ) ), 0, 8 );
     $stored_name = $token . '.' . $ext;
@@ -896,6 +936,44 @@ function pps_ajax_upload_artwork() {
     $full_dir = trailingslashit( $dir ) . $subdir;
     if ( ! file_exists( $full_dir ) ) {
         wp_mkdir_p( $full_dir );
+    }
+
+    // Defense in depth: nothing in the artwork tree may ever execute, and
+    // the directory must not be listable. (nginx ignores .htaccess — there
+    // the stored token.ext naming already prevents script extensions.)
+    $guard = trailingslashit( $dir ) . '.htaccess';
+    if ( ! file_exists( $guard ) ) {
+        @file_put_contents( $guard,
+            "<FilesMatch \"\\.(?:php|phtml|phar|php\\d|phps|cgi|pl|py|sh|asp|aspx|jsp)$\">\n" .
+            "<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n" .
+            "<IfModule !mod_authz_core.c>\nOrder allow,deny\nDeny from all\n</IfModule>\n" .
+            "</FilesMatch>\nOptions -Indexes -ExecCGI\n" );
+    }
+    if ( ! file_exists( trailingslashit( $dir ) . 'index.html' ) ) {
+        @file_put_contents( trailingslashit( $dir ) . 'index.html', '' );
+    }
+
+    // Optional VirusTotal HASH lookup (privacy-safe: only the SHA-256 leaves
+    // the server — never the file). Opt-in via wp_options['pps_vt_api_key'].
+    // A known-malicious verdict rejects the upload; unknown/clean/errors pass
+    // (fail-open — this is a second opinion, not the primary defense).
+    $vt_key = get_option( 'pps_vt_api_key', '' );
+    if ( $vt_key ) {
+        $sha = @hash_file( 'sha256', $file['tmp_name'] );
+        if ( $sha ) {
+            $vt = wp_remote_get( 'https://www.virustotal.com/api/v3/files/' . $sha, array(
+                'timeout' => 8,
+                'headers' => array( 'x-apikey' => $vt_key ),
+            ) );
+            if ( ! is_wp_error( $vt ) && wp_remote_retrieve_response_code( $vt ) === 200 ) {
+                $body  = json_decode( wp_remote_retrieve_body( $vt ), true );
+                $stats = $body['data']['attributes']['last_analysis_stats'] ?? array();
+                $bad   = intval( $stats['malicious'] ?? 0 ) + intval( $stats['suspicious'] ?? 0 );
+                if ( $bad >= 2 ) { // ≥2 engines flag it — refuse
+                    wp_send_json_error( 'This file was flagged as unsafe by malware scanning and cannot be uploaded. Please re-export from your source application.' );
+                }
+            }
+        }
     }
 
     $dest = trailingslashit( $full_dir ) . $stored_name;
