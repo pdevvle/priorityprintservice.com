@@ -82,6 +82,10 @@ function wp_using_ext_object_cache()       { return false; }
 function is_email( $e )                    { return filter_var( (string) $e, FILTER_VALIDATE_EMAIL ) ? $e : false; }
 function wp_check_invalid_utf8( $s, $x = false ) { return $s; }
 function rest_ensure_response( $d )        { return $d; }
+// The nonce is CSRF hygiene, not authorization — the tests that exercise the REST handler
+// are about routing and session state, so it passes here. Its real failure mode (a cached
+// page carrying a stale nonce) is a deployment concern, not one this harness can model.
+function wp_verify_nonce( $n, $a = -1 )    { return ! empty( $GLOBALS['__nonce_ok'] ) || ! isset( $GLOBALS['__nonce_ok'] ); }
 function wp_parse_url( $u, $c = -1 )       { return parse_url( $u, $c ); }
 function current_user_can( $c )            { return ! empty( $GLOBALS['__is_admin'] ); }
 function wp_strip_all_tags( $s, $b = false ) { return strip_tags( (string) $s ); }
@@ -502,8 +506,13 @@ $seen = tool_results_in( $s );
 ok( strpos( $seen, 'NO_HUMAN_AVAILABLE' ) === false, 'toggle on → not the nobody-is-here branch' );
 ok( strpos( $seen, 'NO_LIVE_CHANNEL' ) !== false, 'toggle on with no bridge → honest email fallback' );
 ok( strpos( $seen, 'NO_HUMAN_AVAILABLE' ) === false, 'the two branches are mutually exclusive' );
-ok( strpos( $GLOBALS['__mail'][0]['subj'] ?? '', 'LIVE handoff' ) !== false,
-    'staff email is marked as a live handoff, not a queued one' );
+// The staff email must describe what HAPPENED, not what was hoped for. With the toggle on
+// but no bridge configured, nobody received this chat — calling it a live handoff would
+// tell staff a colleague had it while the customer sat waiting on an email nobody sent.
+ok( strpos( $GLOBALS['__mail'][0]['subj'] ?? '', 'LIVE handoff' ) === false,
+    'toggle on but no handoff: the staff email is NOT labelled a live handoff' );
+ok( strpos( $GLOBALS['__mail'][0]['body'] ?? '', 'did NOT go through' ) !== false,
+    'and the body says plainly that it needs answering here' );
 
 // Toggle OFF — the fallback path. This is the one that runs at 2am.
 reset_world();
@@ -1100,6 +1109,153 @@ pps_assistant_session_save( 'sessa', $s );
 
 $out = pps_assistant_handle_poll( new Fake_Request( array( 'session' => 'sessa', 'cursor' => 0 ) ) );
 ok( $out['mode'] === 'human', 'a long conversation with a real agent is never timed out' );
+
+// ═════════════════════════════════════════════════════════════════════════════════
+// SELF-REVIEW REGRESSIONS
+//
+// Every assertion below corresponds to a defect found by reviewing the stage 2 code
+// after it was written and deployed. They exist so the same mistakes cannot return
+// quietly — each one failed before its fix.
+// ═════════════════════════════════════════════════════════════════════════════════
+group( 'Regressions found in self-review' );
+
+// ── the poll loop must not spend the chat allowance ──────────────────────────────
+// The widget polls every 4s (75 per 5 min) and the chat throttle allows 20 per 5 min
+// from a SHARED counter. Live handoffs died ~80s in, and took the send box with them.
+reset_world();
+for ( $i = 0; $i < 60; $i++ ) pps_assistant_poll_throttled();
+ok( pps_assistant_ip_throttled() === false,
+    'sixty polls do not exhaust the chat throttle — a visitor can still send' );
+
+reset_world();
+for ( $i = 0; $i < 75; $i++ ) pps_assistant_poll_throttled();
+ok( pps_assistant_poll_throttled() === false,
+    'and five minutes of polling at the widget cadence is itself under the poll ceiling' );
+
+reset_world();
+for ( $i = 0; $i < 200; $i++ ) pps_assistant_poll_throttled();
+ok( pps_assistant_poll_throttled() === true, 'polling is still bounded, just far higher' );
+
+// A throttled poll must still report the mode. Without it the widget reads "not with a
+// human" and tears down a live conversation's UI.
+reset_world();
+$s = fresh_session();
+$s['mode'] = 'human';
+$s['handoff_at'] = time();
+pps_assistant_session_save( 'sessthr', $s );
+for ( $i = 0; $i < 205; $i++ ) pps_assistant_poll_throttled();
+$out = pps_assistant_handle_poll( new Fake_Request( array( 'session' => 'sessthr', 'cursor' => 0 ) ) );
+ok( ! empty( $out['throttled'] ), 'a throttled poll says so' );
+ok( ( $out['mode'] ?? '' ) === 'human', 'and STILL reports human mode, so the widget does not tear down' );
+
+// ── the turn cap must not sever a live conversation ──────────────────────────────
+reset_world();
+missive_configure( true );
+$cfg = pps_assistant_config();
+$cfg['max_turns'] = 2;
+update_option( 'pps_assistant_config', $cfg );
+
+$s = fresh_session();
+$s['mode']  = 'human';                 // already with a colleague
+$s['turns'] = 99;                      // and long past the bot's cap
+$s['name'] = 'A'; $s['email'] = 'a@b.co'; $s['phone'] = '6025550142';
+pps_assistant_session_save( 'sesscap', $s );
+
+missive_script( array( 'messages' => array( 'conversation' => 'c1' ) ) );
+$out = pps_assistant_handle_chat( new Fake_Request( array(
+    'message' => 'still there?', 'session' => 'sesscap', 'nonce' => 'n',
+    'name' => 'A', 'email' => 'a@b.co', 'phone' => '6025550142',
+) ) );
+ok( ! empty( $out['with_human'] ), 'a handed-off session past the turn cap is still relayed, not cut off' );
+ok( empty( $out['ended'] ), 'and is never told "we have covered a lot here" mid-conversation with a person' );
+
+// ── an agent reply must not be lost to the relay's network window ────────────────
+// The chat path reads the session, spends seconds relaying, then writes. Appending
+// through the re-reading helper is what stops that write clobbering a reply that
+// landed in between.
+reset_world();
+missive_configure( true );
+$s = fresh_session();
+$s['mode'] = 'human';
+$s['name'] = 'A'; $s['email'] = 'a@b.co'; $s['phone'] = '6025550142';
+pps_assistant_session_save( 'sessrace', $s );
+pps_assistant_missive_index( 'pps-session-sessrace', 'sessrace' );
+
+// The relay "takes time", and an agent reply arrives while it is on the wire.
+$GLOBALS['__filters']['pps_assistant_missive_pre_send'] = array();
+add_filter( 'pps_assistant_missive_pre_send', function ( $pre, $payload, $sid ) {
+    pps_assistant_missive_receive( array( 'message' => array(
+        'references' => array( 'pps-session-sessrace' ), 'body' => 'I am right here',
+        'author' => array( 'name' => 'Preston' ),
+    ) ) );
+    return array( 'messages' => array( 'conversation' => 'c1' ) );
+}, 10, 3 );
+
+pps_assistant_handle_chat( new Fake_Request( array(
+    'message' => 'hello?', 'session' => 'sessrace', 'nonce' => 'n',
+    'name' => 'A', 'email' => 'a@b.co', 'phone' => '6025550142',
+) ) );
+
+$log  = pps_assistant_session_get( 'sessrace' )['human_log'];
+$text = wp_json_encode( $log );
+ok( strpos( $text, 'I am right here' ) !== false,
+    "the agent's reply survives a message sent while the relay was on the wire" );
+ok( strpos( $text, 'hello?' ) !== false, 'and the visitor line is kept too' );
+
+// ── the escalation transcript must contain the message that caused it ────────────
+reset_world();
+pps_assistant_set_available( false );
+$s = fresh_session();
+$s['email'] = 'a@b.co';
+script( array( turn_tool( 'escalate_to_human', array( 'reason' => 'refund', 'summary' => 's' ) ), turn_text( 'ok' ) ) );
+pps_assistant_run( $s, 'I want a refund on order 4412' );
+ok( strpos( $GLOBALS['__mail'][0]['body'] ?? '', 'I want a refund on order 4412' ) !== false,
+    'the escalated transcript includes the line that triggered the escalation' );
+ok( ! isset( pps_assistant_session_get( 'nope' )['_live_messages'] ),
+    'and the in-flight scratch copy is never part of a stored session' );
+
+// ── a successful handoff outranks a failed notification email ────────────────────
+reset_world();
+missive_configure( true );
+pps_assistant_set_available( true );
+$GLOBALS['__mail_ok'] = false;                  // our own notification bounces
+missive_script( array( 'messages' => array( 'conversation' => 'c9' ) ) );
+$s = fresh_session();
+$s['sid'] = 'sessmail';
+script( array( turn_tool( 'escalate_to_human', array( 'reason' => 'r', 'summary' => 's' ) ), turn_text( 'ok' ) ) );
+pps_assistant_run( $s, 'help' );
+$seen = tool_results_in( $s );
+ok( strpos( $seen, 'HANDED_OFF' ) !== false,
+    'a live chat in Missive is not downgraded because our own email bounced' );
+ok( strpos( $seen, 'ESCALATION_RECORDED_BUT_UNSENT' ) === false,
+    'and the customer is not told to email us instead while an agent is reading' );
+
+// And the inverse: a real handoff labels the staff email honestly.
+reset_world();
+missive_configure( true );
+pps_assistant_set_available( true );
+missive_script( array( 'messages' => array( 'conversation' => 'c9' ) ) );
+$s = fresh_session();
+$s['sid'] = 'sessmail2';
+script( array( turn_tool( 'escalate_to_human', array( 'reason' => 'r', 'summary' => 's' ) ), turn_text( 'ok' ) ) );
+pps_assistant_run( $s, 'help' );
+ok( strpos( $GLOBALS['__mail'][0]['subj'] ?? '', 'LIVE handoff' ) !== false,
+    'a real handoff IS labelled a live handoff' );
+ok( strpos( $GLOBALS['__mail'][0]['body'] ?? '', 'handed into Missive' ) !== false,
+    'and tells staff where to reply' );
+
+// ── the bridge log must not become a customer-data store ─────────────────────────
+reset_world();
+missive_configure( true );
+$logged = pps_assistant_missive_loggable( pps_assistant_missive_payload( 'sid1', array(
+    'name' => 'Jane Doe', 'email' => 'jane@example.com', 'phone' => '6025550142',
+), '<p>secret transcript contents</p>', array( 'subject' => 'Website chat — Jane Doe' ) ) );
+$flat = wp_json_encode( $logged );
+foreach ( array( 'secret transcript contents', 'jane@example.com', 'Jane Doe' ) as $pii ) {
+    ok( strpos( $flat, $pii ) === false, "the bridge log does not retain: $pii" );
+}
+ok( strpos( $flat, 'references' ) !== false && strpos( $flat, 'from_field' ) !== false,
+    'but it keeps the field names, which is the whole diagnostic point' );
 
 // ── summary ──────────────────────────────────────────────────────────────────────
 echo "\n" . str_repeat( '─', 62 ) . "\n";

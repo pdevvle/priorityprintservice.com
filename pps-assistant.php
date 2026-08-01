@@ -33,6 +33,10 @@
  *        later messages are relayed rather than answered; agent replies arrive by webhook
  *        and are collected by /assistant/poll. An unanswered handoff times out back to the
  *        bot. A post that fails NEVER claims a live pickup — see pps-assistant-missive.php.
+ *        Self-review pass on the above: polling has its own rate limit (it was sharing the
+ *        chat allowance and killing handoffs ~80s in); the turn cap no longer severs a live
+ *        conversation; human_log appends re-read first so a relay cannot clobber an agent's
+ *        reply; escalation transcripts now include the message that triggered them.
  * 0.2.1  Full intake gate (name, company, email, phone). Bookmarkable availability URL —
  *        a secret-authenticated REST route so the toggle can be flipped from a phone
  *        without a wp-admin round trip.
@@ -543,15 +547,35 @@ function pps_assistant_tools() {
             'handler' => function ( $input, &$session ) {
                 $available = pps_assistant_human_available();
 
+                // Attempt the live handoff FIRST, before the notification is composed.
+                // Composed the other way round, the email says "AVAILABLE — someone is
+                // picking this up now" whenever the toggle is on, including when the post
+                // to Missive just failed. Staff would read that a colleague had the chat
+                // while the customer was told to wait for email, and nobody would act.
+                $handed = false;
+                if ( $available && function_exists( 'pps_assistant_missive_open' ) && pps_assistant_missive_ready() ) {
+                    $handed = pps_assistant_missive_open(
+                        $session['sid'] ?? '', $session, (string) $input['reason'], (string) $input['summary']
+                    );
+                }
+                if ( $handed ) {
+                    $session['mode']       = 'human';
+                    $session['handoff_at'] = time();
+                }
+
                 $to      = pps_assistant_staff_email();
-                $subject = ( $available ? 'PPS Assistant — LIVE handoff: ' : 'PPS Assistant — escalation: ' )
+                $subject = ( $handed ? 'PPS Assistant — LIVE handoff: ' : 'PPS Assistant — escalation: ' )
                          . wp_trim_words( (string) $input['reason'], 8 );
                 $body = sprintf(
                     "Assistant escalation\n\nHuman was: %s\nReason: %s\n\nSummary: %s\n\n"
                         . "Name: %s\nCompany: %s\nEmail: %s\nPhone: %s\nVerified order: %s\n\n"
                         . "--- transcript ---\n%s",
-                    $available ? 'AVAILABLE (customer told someone is picking this up now)'
-                               : 'unavailable (customer told we will follow up by email)',
+                    $handed
+                        ? 'AVAILABLE — chat handed into Missive. Reply there and the customer sees it live.'
+                        : ( $available
+                            ? 'marked available, but the live handoff did NOT go through — the customer '
+                                . 'was told to expect email, so this needs a reply here'
+                            : 'unavailable (customer told we will follow up by email)' ),
                     $input['reason'],
                     $input['summary'],
                     ( $session['name'] ?? '' ) ?: '(not given)',
@@ -594,8 +618,19 @@ function pps_assistant_tools() {
                 $session['escalated']         = true;
                 $session['escalation_reason'] = (string) $input['reason'];
 
+                if ( ! $sent ) error_log( '[pps-assistant] escalation mail FAILED to ' . $to );
+
+                // Checked before the mail result on purpose: once the chat is live in
+                // Missive, whether our notification email also went out is irrelevant to
+                // the customer — someone genuinely is reading.
+                if ( $handed ) {
+                    return 'HANDED_OFF: the conversation is now with a team member and your '
+                         . 'part is done. Tell the customer you are connecting them to someone '
+                         . 'now and that they can keep typing in this window. Say nothing else '
+                         . '— do not troubleshoot, summarise, or add suggestions.';
+                }
+
                 if ( ! $sent ) {
-                    error_log( '[pps-assistant] escalation mail FAILED to ' . $to );
                     return 'ESCALATION_RECORDED_BUT_UNSENT: the request is logged but our '
                          . 'notification did not send. Give the customer the shop email address '
                          . 'directly and ask them to follow up there. Do NOT tell them someone '
@@ -603,28 +638,9 @@ function pps_assistant_tools() {
                 }
 
                 if ( $available ) {
-                    // Try to move the conversation into Missive. The promise made on screen
-                    // is keyed off whether that actually worked — "someone is picking this
-                    // up now" is only true if an agent can see it and reply.
-                    $handed = false;
-                    if ( function_exists( 'pps_assistant_missive_open' ) && pps_assistant_missive_ready() ) {
-                        $handed = pps_assistant_missive_open(
-                            $session['sid'] ?? '', $session, (string) $input['reason'], (string) $input['summary']
-                        );
-                    }
-
-                    if ( $handed ) {
-                        $session['mode']       = 'human';
-                        $session['handoff_at'] = time();
-                        return 'HANDED_OFF: the conversation is now with a team member and your '
-                             . 'part is done. Tell the customer you are connecting them to someone '
-                             . 'now and that they can keep typing in this window. Say nothing else '
-                             . '— do not troubleshoot, summarise, or add suggestions.';
-                    }
-
                     // Available, but the bridge is not configured or the post failed. The
-                    // email is already sent, so the honest line is the email line — claiming
-                    // a live pickup we cannot deliver is the one failure that costs trust.
+                    // email is sent, so the honest line is the email line — claiming a live
+                    // pickup we cannot deliver is the one failure that costs trust.
                     error_log( '[pps-assistant] human available but Missive handoff unavailable — falling back to email' );
                     return 'NO_LIVE_CHANNEL: a team member is around, and the request has been '
                          . 'emailed to them. Tell the customer their details are with the team and '
@@ -843,6 +859,16 @@ function pps_assistant_run( array &$session, $user_message ) {
             return array( 'reply' => $text );
         }
 
+        // Expose the IN-FLIGHT history to the handlers.
+        //
+        // $session['messages'] is only written at the commit point below, so during a tool
+        // handler it still holds the state from the PREVIOUS turn — it does not contain the
+        // message the customer just sent. Every escalation therefore emailed a transcript
+        // missing the one line that caused it ("I want a refund" absent from the refund
+        // escalation), and the Missive handoff would hand an agent the same gap.
+        // Unset again in pps_assistant_handle_chat() so it is never persisted.
+        $session['_live_messages'] = $messages;
+
         // Execute every tool call in this turn, return ALL results in ONE user message.
         // Splitting them across messages trains the model out of parallel tool use.
         $results = array();
@@ -892,7 +918,9 @@ function pps_assistant_fallback_text() {
 
 function pps_assistant_transcript( array $session ) {
     $out = '';
-    foreach ( (array) ( $session['messages'] ?? array() ) as $m ) {
+    // Prefer the in-flight copy when a tool handler is running — see pps_assistant_run().
+    $history = ! empty( $session['_live_messages'] ) ? $session['_live_messages'] : ( $session['messages'] ?? array() );
+    foreach ( (array) $history as $m ) {
         foreach ( (array) $m['content'] as $b ) {
             if ( ( $b['type'] ?? '' ) === 'text' ) {
                 $out .= strtoupper( $m['role'] ) . ': ' . $b['text'] . "\n\n";
@@ -939,6 +967,27 @@ function pps_assistant_session_get( $sid ) {
 
 function pps_assistant_session_save( $sid, array $session ) {
     set_transient( pps_assistant_session_key( $sid ), $session, 2 * HOUR_IN_SECONDS );
+}
+
+/**
+ * Append to human_log by RE-READING the session first.
+ *
+ * Two writers touch this array from different directions: the chat endpoint (the visitor
+ * typed) and the Missive webhook (an agent replied). The chat path holds a relay across
+ * a network call that can take seconds — read the session before it, write after it, and
+ * any agent reply that arrived in between is overwritten by the stale copy. A person's
+ * message disappearing mid-conversation is the worst bug this file could have, so the
+ * read is redone immediately before the write and the window shrinks to microseconds.
+ *
+ * Not a lock: locking would serialise the relay against the webhook, and a dropped
+ * message is much worse than a rare interleaved one.
+ */
+function pps_assistant_append_human_log( $sid, array $entry ) {
+    $session              = pps_assistant_session_get( $sid );
+    $session['human_log'] = (array) ( $session['human_log'] ?? array() );
+    $session['human_log'][] = $entry;
+    pps_assistant_session_save( $sid, $session );
+    return $session;
 }
 
 /** Site-wide daily cap. An uncapped public chat endpoint is an uncapped bill. */
@@ -994,7 +1043,28 @@ function pps_assistant_budget_spend() {
     pps_assistant_counter_incr( pps_assistant_ip_budget_key(), DAY_IN_SECONDS );
 }
 
-/** Per-IP burst throttle, same shape as pps_order_lookup_is_rate_limited(). */
+/**
+ * Per-IP burst throttle for POLLING. Separate counter, far higher ceiling.
+ *
+ * The chat throttle below allows 20 requests per 5 minutes, which is generous for
+ * messages a person types and catastrophic for a 4-second poll loop: a live handoff
+ * burns the whole allowance in about 80 seconds, and because the counter is shared, the
+ * visitor is then locked out of SENDING as well — mid-conversation with a human. Polls
+ * are a transient read with no API call behind them, so they get their own budget.
+ *
+ * 200 per 5 minutes is one every 1.5s sustained: comfortable headroom over the widget's
+ * 4s cadence even with a couple of tabs open, and still a bound.
+ */
+function pps_assistant_poll_throttled() {
+    $ip  = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
+    $key = 'pps_asst_pollrl_' . md5( $ip );
+    $n   = (int) get_transient( $key );
+    if ( $n >= 200 ) return true;
+    set_transient( $key, $n + 1, MINUTE_IN_SECONDS * 5 );
+    return false;
+}
+
+/** Per-IP burst throttle for CHAT, same shape as pps_order_lookup_is_rate_limited(). */
 function pps_assistant_ip_throttled() {
     $ip  = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
     $key = 'pps_asst_rl_' . md5( $ip );
@@ -1157,14 +1227,6 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
             'need_intake' => $intake,  // which fields are still missing
         ) );
     }
-    if ( (int) $session['turns'] >= (int) $cfg['max_turns'] ) {
-        return rest_ensure_response( array(
-            'reply' => "We've covered a lot here — let me get a team member to pick this up. "
-                     . "Email us at " . pps_assistant_staff_email() . ".",
-            'ended' => true,
-        ) );
-    }
-
     // Once a human has taken the conversation, Claude must never speak again in it —
     // a bot answering alongside a live agent is worse than no bot. The visitor's message
     // is relayed into Missive instead; the agent's replies come back via the webhook and
@@ -1176,30 +1238,42 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
         }
 
         // Echo the visitor's own line into the log so the widget can render the whole
-        // human-side conversation from one ordered source after a reload.
-        $session['human_log']   = (array) ( $session['human_log'] ?? array() );
-        $session['human_log'][] = array(
+        // human-side conversation from one ordered source after a reload. Appended via
+        // the re-reading helper because the relay above just spent seconds on the wire,
+        // and an agent reply may have landed while it did.
+        pps_assistant_append_human_log( $sid, array(
             'from' => 'you', 'text' => $message, 'at' => time(), 'kind' => 'visitor',
-        );
+        ) );
 
         // A relay that failed means the agent never saw it. Saying nothing would leave
         // the visitor typing into a void believing they are being read.
         if ( ! $relayed ) {
             error_log( '[pps-assistant] relay to Missive failed for session ' . $sid );
-            $session['human_log'][] = array(
+            pps_assistant_append_human_log( $sid, array(
                 'from' => 'system',
                 'text' => "That didn't reach us — please email " . pps_assistant_staff_email()
                         . ' and we will pick it up there.',
                 'at'   => time(),
                 'kind' => 'system',
-            );
+            ) );
         }
 
-        pps_assistant_session_save( $sid, $session );
         return rest_ensure_response( array(
             'reply'      => '',
             'with_human' => true,
             'relayed'    => $relayed,
+        ) );
+    }
+
+    // The turn cap is a bound on Claude's spend, so it is checked AFTER the human branch
+    // above. Checked before it, a visitor who used their turns and was then handed off
+    // would be told "we've covered a lot here" while a colleague was mid-sentence with
+    // them — the cap would silently sever a live conversation it has no business in.
+    if ( (int) $session['turns'] >= (int) $cfg['max_turns'] ) {
+        return rest_ensure_response( array(
+            'reply' => "We've covered a lot here — let me get a team member to pick this up. "
+                     . "Email us at " . pps_assistant_staff_email() . ".",
+            'ended' => true,
         ) );
     }
 
@@ -1216,6 +1290,8 @@ function pps_assistant_handle_chat( WP_REST_Request $request ) {
         if ( ! empty( $result['reply'] ) && empty( $result['error'] ) && empty( $result['capped'] ) ) {
             $session['turns']++;
         }
+        // Scratch state for tool handlers only — never store a second copy of the history.
+        unset( $session['_live_messages'] );
         pps_assistant_session_save( $sid, $session );
     } finally {
         pps_assistant_unlock( $sid );
@@ -1254,13 +1330,17 @@ function pps_assistant_handle_poll( WP_REST_Request $request ) {
     $sid = sanitize_key( (string) $request['session'] );
     if ( $sid === '' ) return new WP_Error( 'bad_session', 'Missing session', array( 'status' => 400 ) );
 
-    // Same burst throttle as chat. A poll is cheap, but "cheap" times an open loop in a
-    // forgotten browser tab is still a load source worth bounding.
-    if ( pps_assistant_ip_throttled() ) {
-        return rest_ensure_response( array( 'messages' => array(), 'throttled' => true ) );
-    }
-
+    // Poll-specific throttle — NOT the chat one. See pps_assistant_poll_throttled().
+    // Always report the mode even when throttled: a response without it reads to the
+    // widget as "no longer with a human", which tears down a live conversation's UI.
     $session = pps_assistant_session_get( $sid );
+    if ( pps_assistant_poll_throttled() ) {
+        return rest_ensure_response( array(
+            'mode'      => $session['mode'] ?? 'bot',
+            'messages'  => array(),
+            'throttled' => true,
+        ) );
+    }
     $log     = (array) ( $session['human_log'] ?? array() );
     $cursor  = max( 0, (int) $request['cursor'] );
 

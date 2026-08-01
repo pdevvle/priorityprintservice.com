@@ -90,6 +90,39 @@ function pps_assistant_missive_log( $event, array $data ) {
 }
 
 /**
+ * Strip a payload down to its SHAPE before logging it.
+ *
+ * The reason for logging the request is to see which field names Missive rejected. The
+ * customer's name, email, phone and entire chat transcript are not part of that, and a
+ * diagnostic buffer rendered on an admin screen and kept for 15 entries is the wrong
+ * place for them. Field names are preserved exactly; their contents are not.
+ */
+function pps_assistant_missive_loggable( array $payload ) {
+    $p = $payload;
+    foreach ( array( 'messages', 'message' ) as $k ) {
+        if ( empty( $p[ $k ] ) || ! is_array( $p[ $k ] ) ) continue;
+
+        if ( isset( $p[ $k ]['body'] ) ) {
+            $p[ $k ]['body'] = '[' . strlen( (string) $p[ $k ]['body'] ) . ' bytes omitted]';
+        }
+        if ( isset( $p[ $k ]['subject'] ) ) $p[ $k ]['subject'] = '[omitted]';
+
+        foreach ( array( 'from_field', 'to_fields' ) as $addr ) {
+            if ( empty( $p[ $k ][ $addr ] ) || ! is_array( $p[ $k ][ $addr ] ) ) continue;
+            // to_fields is a list, from_field a single object — normalise the walk.
+            $rows = isset( $p[ $k ][ $addr ][0] ) ? $p[ $k ][ $addr ] : array( $p[ $k ][ $addr ] );
+            foreach ( $rows as $i => $row ) {
+                foreach ( array( 'name', 'username', 'id' ) as $field ) {
+                    if ( isset( $row[ $field ] ) ) $rows[ $i ][ $field ] = '[omitted]';
+                }
+            }
+            $p[ $k ][ $addr ] = isset( $p[ $k ][ $addr ][0] ) ? $rows : $rows[0];
+        }
+    }
+    return $p;
+}
+
+/**
  * Redact before logging. The bearer token never appears in the log — a diagnostic buffer
  * readable from an admin screen is not where a credential should live.
  */
@@ -196,7 +229,7 @@ function pps_assistant_missive_send( $sid, array $session, $body, array $opts = 
     if ( is_wp_error( $res ) ) {
         pps_assistant_missive_log( 'send_transport_error', array(
             'sid'     => $sid,
-            'request' => pps_assistant_missive_safe( wp_json_encode( $payload ) ),
+            'request' => pps_assistant_missive_safe( wp_json_encode( pps_assistant_missive_loggable( $payload ) ) ),
             'error'   => $res->get_error_message(),
         ) );
         return new WP_Error( 'transport', $res->get_error_message() );
@@ -385,8 +418,13 @@ function pps_assistant_missive_extract( $payload ) {
         }
 
         // ── who sent it
+        //
+        // Order matters. On a message going OUT of Missive, from_field is our own channel
+        // alias ("Website chat"), not the colleague who typed it — so the person-shaped
+        // keys are tried first and from_field is the fallback. Worst case the customer
+        // sees the shop name, which is honest; best case they see who they are talking to.
         if ( $out['author'] === '' ) {
-            foreach ( array( 'from_field', 'author', 'user', 'sender' ) as $ak ) {
+            foreach ( array( 'author', 'user', 'sender', 'from_field' ) as $ak ) {
                 if ( empty( $n[ $ak ] ) || ! is_array( $n[ $ak ] ) ) continue;
                 $a = $n[ $ak ];
                 $out['author'] = (string) ( $a['name'] ?? $a['display_name'] ?? $a['username'] ?? '' );
@@ -429,20 +467,21 @@ function pps_assistant_missive_receive( $payload ) {
         return 'empty';
     }
 
-    $session = pps_assistant_session_get( $sid );
-
-    // An agent replying is what makes the handoff real. Setting it here too means a
-    // conversation still lands even if the mode flip was lost to a race.
-    $session['mode']        = 'human';
-    $session['human_log']   = (array) ( $session['human_log'] ?? array() );
-    $session['human_log'][] = array(
+    // Append through the re-reading helper: the chat endpoint writes this same array from
+    // the other direction, across a relay that can sit on the wire for seconds.
+    $session = pps_assistant_append_human_log( $sid, array(
         'from' => ( $f['author'] ?: 'Priority Print Service' ),
         'text' => function_exists( 'mb_substr' ) ? mb_substr( $text, 0, 4000 ) : substr( $text, 0, 4000 ),
         'at'   => time(),
         'kind' => 'agent',
-    );
+    ) );
 
-    pps_assistant_session_save( $sid, $session );
+    // An agent replying is what makes the handoff real. Set here too so a conversation
+    // still lands even if the mode flip was lost to a race.
+    if ( ( $session['mode'] ?? '' ) !== 'human' ) {
+        $session['mode'] = 'human';
+        pps_assistant_session_save( $sid, $session );
+    }
     return 'delivered';
 }
 

@@ -264,9 +264,15 @@ add_action( 'wp_footer', function () {
           });
         })
         .then(function (d) {
-          // A handed-off turn has no bot reply — the agent's words arrive via polling.
-          // Remove the placeholder rather than rendering an empty bubble.
-          if (d.with_human || !d.reply) { pending.remove(); }
+          // A handed-off turn has no bot reply — the agent's words arrive via polling, so
+          // drop the placeholder rather than rendering an empty bubble.
+          if (d.with_human) { pending.remove(); }
+          // Any OTHER empty reply is unexpected. Silently removing the bubble makes it
+          // look like the message was never sent, which is the one impression to avoid.
+          else if (!d.reply) {
+            pending.className = 'pps-asst-msg pps-asst-bot';
+            pending.textContent = 'Sorry — nothing came back that time. Try sending that again?';
+          }
           else { pending.className = 'pps-asst-msg pps-asst-bot'; pending.textContent = d.reply; }
           if (d.with_human) startPolling();
           // The bot asks for a handoff by flipping mode server-side; the next poll
