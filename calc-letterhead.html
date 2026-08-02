@@ -17,7 +17,10 @@
   .lh-viewport{perspective:1800px;perspective-origin:50% 50%;display:flex;justify-content:center;align-items:center;position:relative;overflow:hidden;border-radius:8px;background:linear-gradient(135deg,#1a1d23,#2a2e36);border:1px solid rgba(255,255,255,.08);min-height:280px;width:100%}
           button:focus-visible,[role="button"]:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid #1d6fe0 !important;outline-offset:2px;border-radius:3px;}
 @media(max-width:700px){
-    select,input[type="text"],input[type="number"]{font-size:16px!important;padding:10px!important;min-height:44px!important}
+    /* 56px to meet the pill toggle beside them, which sits at 56 because it carries
+       no .pps-pill class and escapes this clamp. Fields at 44 against a 56 toggle
+       read as two different form systems in one column. */
+    select,input[type="text"],input[type="number"],input[type="tel"],input[type="email"]{font-size:16px!important;padding:10px 12px!important;min-height:56px!important}
   }
   /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
   .bp-checker{

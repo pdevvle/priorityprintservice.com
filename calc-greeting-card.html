@@ -24,7 +24,10 @@
   .fold-face.fb{transform:rotateY(180deg);z-index:1}
           button:focus-visible,[role="button"]:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid #1d6fe0 !important;outline-offset:2px;border-radius:3px;}
 @media(max-width:700px){
-    select,input[type="text"],input[type="number"]{font-size:16px!important;padding:10px!important;min-height:44px!important}
+    /* 56px to meet the pill toggle beside them, which sits at 56 because it carries
+       no .pps-pill class and escapes this clamp. Fields at 44 against a 56 toggle
+       read as two different form systems in one column. */
+    select,input[type="text"],input[type="number"],input[type="tel"],input[type="email"]{font-size:16px!important;padding:10px 12px!important;min-height:56px!important}
   }
   /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
   .bp-checker{
