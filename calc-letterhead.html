@@ -2067,7 +2067,7 @@ function Sel({label,value,onChange,children,disabled,note,badge,autoComplete,nam
 function TxtNum({label,value,onChange,min=1,max=99999}){
   const[raw,setRaw]=useState(String(value));
   useEffect(()=>setRaw(String(value)),[value]);
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);/* Commit ANY parsed number, in range or not. Committing only in-range values left the state holding the previous number while the field showed the new one, so a short edge typed as 0 kept feeding 4 to the preview and the chip. Out of range now reaches calculate(), which rejects it and disables the order — a visible error beats a silent disagreement. onBlur still clamps. */if(!isNaN(v))onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
 }
 
 function Pil({label,options,value,onChange,disabled,badge}){
@@ -2895,7 +2895,7 @@ function App() {
         </div>
       </section>
 
-      {mob && <MobilePreviewBar longEdge={longEdge} shortEdge={shortEdge} quantity={qty} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar longEdge={r.longE ?? longEdge} shortEdge={r.shortE ?? shortEdge} quantity={qty} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
 
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "0 10px 140px" : "0 24px 80px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
@@ -2997,7 +2997,7 @@ function App() {
             {artwork===0.01 && (
               <div style={{marginTop:8}}>
                 <SheetPreview
-                  longEdge={longEdge} shortEdge={shortEdge}
+                  longEdge={r.longE ?? longEdge} shortEdge={r.shortE ?? shortEdge}
                   perfCount={perfCount} perfDir={perfDir}
                   perfPositions={perfPositions} onPerfPositions={setPerfPositions}
                   frontColor={frontColor} backColor={backColor} sides={sides}
@@ -3159,7 +3159,13 @@ function App() {
             below) still receive clicks. Mirrors the saddle calculator's split. */}
         {!mob && <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
-            <SidebarLetterheadPreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+            {/* The engine's resolved dimensions, not the custom-size state. calculate() reads
+                long/short out of SIZE_PRESETS in preset mode, while longEdge/shortEdge are only
+                ever written by the custom inputs, a reorder restore or a URL param — so choosing
+                a preset repriced correctly while the preview kept whatever the custom fields last
+                held, which is the 11x8.5 default on a fresh load. Custom mode looked fine for the
+                same reason it was broken: there, those fields ARE the source. */}
+            <SidebarLetterheadPreview longEdge={r.longE ?? longEdge} shortEdge={r.shortE ?? shortEdge} quantity={qty} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} />
           </div>
           {missingDest && <div style={{marginTop:10,fontSize:12,fontWeight:600,color:"#dc2626",lineHeight:1.35}}>{missingDestMsg}</div>}
