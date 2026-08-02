@@ -262,7 +262,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · CTRLSIZE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · DESTDATE</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -417,16 +417,21 @@ const PCF = Object.assign({
 }, _CFG.pcf || {});
 
 // Ground transit days from facility (Phoenix AZ) — state-level fallback
-const TRANSIT_DAYS = _CFG.transit_days || {
+// Merged over the defaults, NOT replaced. US_STATES is derived from these keys, so a
+// saved config missing a state DELETED that state from the shipping dropdown — which is
+// how Georgia customers ended up unable to pick their own state. A saved map can now
+// override a transit value but can never remove a destination.
+const _TRANSIT_DEFAULTS = {
   AZ:1,
   CA:2,CO:2,NM:2,NV:2,UT:2,
   ID:3,OR:3,TX:3,WA:3,
-  AL:4,AR:4,FL:4,IA:4,IL:4,IN:4,KS:4,KY:4,LA:4,MI:4,MN:4,MO:4,MS:4,MT:4,ND:4,NE:4,OK:4,PA:4,SD:4,TN:4,WI:4,WV:4,WY:4,
+  AL:4,AR:4,FL:4,GA:4,IA:4,IL:4,IN:4,KS:4,KY:4,LA:4,MI:4,MN:4,MO:4,MS:4,MT:4,ND:4,NE:4,OK:4,PA:4,SD:4,TN:4,WI:4,WV:4,WY:4,
   MA:5,NC:5,NJ:5,NY:5,OH:5,SC:5,VA:5,
   CT:6,DC:6,DE:6,MD:6,ME:6,NH:6,VT:6,
   AK:7,HI:7,PR:7,RI:7,
   VI:9,MP:7,
 };
+const TRANSIT_DAYS = Object.assign({}, _TRANSIT_DEFAULTS, _CFG.transit_days || {});
 const US_STATES = Object.keys(TRANSIT_DAYS).sort();
 
 // UPS Ground zone map: 3-digit ZIP prefix → transit days (from admin or seed)
@@ -946,8 +951,12 @@ function calculate(c) {
   // default, so any value is a real answer; a ZIP alone also counts, since it drives the
   // zone lookup. Until then the quote panel shows production + 1 transit day rather than
   // a ground date guessed from a placeholder destination.
+  // Do we know where this is going? A ZIP is what the zone map and the live UPS lookup
+  // both key on, so a dated promise needs one; state alone is a coarse guess dressed up
+  // as a delivery date. Clearing the ZIP used to leave the previous date on screen
+  // unchanged, because the state fallback quietly produced the same number.
   const _hasDest = !!(c.shipState && String(c.shipState).trim())
-    || String(c.shipZip||"").replace(/[^0-9]/g,"").length >= 3;
+    && String(c.shipZip || "").replace(/[^0-9]/g, "").length >= 3;
   const productionBizDays = days;
   // Free shipping = minimum turnaround × 2 + ground transit
   const bufferedProdDays = productionBizDays * 2;
