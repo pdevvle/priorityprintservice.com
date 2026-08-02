@@ -131,16 +131,40 @@
     0%,100%{box-shadow:0 0 0 0 rgba(0,126,255,.42),0 2px 10px rgba(0,126,255,.32)}
     50%{box-shadow:0 0 0 7px rgba(0,126,255,0),0 2px 10px rgba(0,126,255,.32)}
   }
+  /* A light sweep travels across the button on a loop. It is the one control in the
+     modal we want pressed, and flat blue read as just another button beside the proof
+     picker. The gradient is oversized and its position animated, so nothing paints
+     outside the button and there is no overlay element to sit above the label. */
+  @keyframes bp-approve-shimmer{
+    from{background-position:150% 0}
+    to{background-position:-50% 0}
+  }
   .bp-approve{display:inline-flex;align-items:center;justify-content:center;gap:8px;
-    padding:9px 18px;border:none;border-radius:9px;cursor:pointer;font-family:inherit;
-    font-size:13px;font-weight:700;letter-spacing:.01em;color:#fff;background:#007eff;white-space:nowrap;
-    box-shadow:0 2px 10px rgba(0,126,255,.32);
-    transition:transform .15s ease,box-shadow .15s ease,filter .15s ease}
-  .bp-approve.nudge{animation:bp-approve-pulse 2.4s ease-in-out infinite}
-  .bp-approve:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.05);
-    box-shadow:0 6px 18px rgba(0,126,255,.45);animation:none}
+    padding:14px 23px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
+    font-size:15px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+    color:#fff;white-space:nowrap;
+    background:linear-gradient(105deg,#0062cc 0%,#007eff 34%,#8ccbff 50%,#007eff 66%,#0062cc 100%);
+    background-size:300% 100%;
+    animation:bp-approve-shimmer 2.9s linear infinite;
+    box-shadow:0 3px 14px rgba(0,126,255,.4);
+    transition:transform .15s ease,box-shadow .15s ease}
+  /* Nudge adds the expanding ring on top of the sweep; both run together. */
+  .bp-approve.nudge{animation:bp-approve-shimmer 2.9s linear infinite,
+    bp-approve-pulse 2.4s ease-in-out infinite}
+  /* Hover drops the ring but keeps the sweep — killing all animation on hover made the
+     button look dead exactly when someone was about to press it. */
+  .bp-approve:hover:not(:disabled){transform:translateY(-1px);
+    box-shadow:0 8px 22px rgba(0,126,255,.5);
+    animation:bp-approve-shimmer 1.5s linear infinite}
   .bp-approve:active:not(:disabled){transform:translateY(0);box-shadow:0 2px 8px rgba(0,126,255,.4)}
-  .bp-approve:disabled{cursor:wait;animation:none;filter:saturate(.7)}
+  /* Generating: a frozen gradient would strand a pale band mid-button, so go flat. */
+  .bp-approve:disabled{cursor:wait;animation:none;background:#0062cc;filter:saturate(.7)}
+  /* The global reduced-motion rule only shortens durations, which would freeze the
+     sweep at whatever position it stopped on. Give it a flat brand fill instead. */
+  @media (prefers-reduced-motion: reduce){
+    .bp-approve,.bp-approve.nudge,.bp-approve:hover:not(:disabled){
+      background:#007eff;background-size:auto;animation:none}
+  }
   /* Done state: a status, not a button — flat green, no lift, no pointer. */
   .bp-approved{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:9px;
     background:#16a34a;color:#fff;font-size:13px;font-weight:700;letter-spacing:.01em;white-space:nowrap;
@@ -238,7 +262,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · CPNFIELD</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · PROOFPASS</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -2464,7 +2488,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug, pageTransforms, setPageTransforms, artDims, setArtDims, twoStaplesApplied }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, coverColor, staffUnlocked, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug, pageTransforms, setPageTransforms, artDims, setArtDims, twoStaplesApplied }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2627,7 +2651,15 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const dims = useMemo(() => trimDims(sizeLabel, customLong, customShort, bindDir),
     [sizeLabel, customLong, customShort, bindDir]);
 
-  const gsFilter = insideColor === "bw" ? "grayscale(1)" : "none";
+  // Cover and inside can be printed differently, so one filter for the whole book was
+  // wrong in both directions at once: a greyscale inside greyed out a full-colour cover,
+  // and a greyscale cover still proofed in colour. Saddle stitch wraps a single cover
+  // sheet around the block, so the outer leaves — the first two pages and the last two —
+  // are cover and everything between them is inside. pageCount rather than
+  // displayPages.length because this is declared before that memo runs, and the
+  // reconcile pads or trims displayPages to exactly pageCount anyway.
+  const isCoverPage = (i) => i === 0 || i === 1 || i === pageCount - 2 || i === pageCount - 1;
+  const gsFor = (i) => ((isCoverPage(i) ? coverColor : insideColor) === "bw") ? "grayscale(1)" : "none";
 
   // ── Orientation mismatch detection ──
   const needsRotation = useMemo(() => {
@@ -4258,7 +4290,7 @@ update();
                   position: "relative", transition: "border-color .2s",
                 }}>
                 {isUserPage ? (
-                  <img src={p.dataUrl} alt={p.label} style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", background:"#e8e8e8", filter:gsFilter }} />
+                  <img src={p.dataUrl} alt={p.label} style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", background:"#e8e8e8", filter:gsFor(i) }} />
                 ) : (
                   <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, padding:4 }}>
                     <span style={{ fontSize:16, opacity:.3 }}>+</span>
@@ -4289,34 +4321,19 @@ update();
           <div className="bp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
               <div style={{ flex:1, minWidth:180, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-                <div style={{ flex:"1 1 auto", minWidth:130 }}>
+                <div style={{ flex:"0 1 auto", minWidth:130 }}>
                   <div className="bp-modal-title" style={{ fontSize:15 }}>Artwork Proof</div>
                   <div style={{ fontSize:11, color:"var(--bp-faint)" }}>
                     {dims.w}″ × {dims.h}″ · {displayPages.length} pages
                     {shouldRotate && <span style={{ color:"#60a5fa", marginLeft:6 }}>(auto-rotated)</span>}
                   </div>
                 </div>
-                  {/* Proof type is a CHOICE; approving is an ACTION. They used to be one
-                      welded control, which is why the approve button never looked right —
-                      a primary CTA butted against two radio buttons. Split into the form's
-                      segmented picker plus a real CTA, both still on this line. */}
-                  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", rowGap:8,
-                    flexShrink:0, order: mob?3:0, flexBasis: mob?"100%":"auto" }}>
-                    <span className="bp-prooflabel">Proof:</span>
-                    <div className="bp-seg">
-                      {[{v:0,l:"Online"},{v:0.01,l:"Professional"},{v:3.01,l:"Hardcopy"}].map(o => {
-                        const on = o.v === 0 ? proof === 0 : o.v === 0.01 ? proof === 0.01 : proof >= 3;
-                        return <button type="button" key={o.v} className={`bp-seg-btn${on ? " on" : ""}`}
-                          style={{ padding: mob ? "6px 9px" : "6px 13px", fontSize: mob ? 11 : 11.5 }}
-                          onClick={() => setProof(o.v)}>{o.l}</button>;
-                      })}
-                    </div>
                     {proof === 0 && (artApproved ? (
                       <span className="bp-approved">&#10003; Approved</span>
                     ) : (
                       <button type="button" disabled={generatingPdf}
                         className={`bp-approve${generatingPdf ? "" : " nudge"}`}
-                        style={mob ? { flex:"1 1 100%", padding:"12px 18px", fontSize:14 } : undefined}
+                        style={mob ? { flex:"1 1 100%", padding:"17px 23px", fontSize:16 } : undefined}
                         onClick={async () => {
                           setGeneratingPdf(true);
                           setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
@@ -4359,6 +4376,21 @@ update();
                         ) : "Approve artwork"}
                       </button>
                     ))}
+                  {/* Proof type is a CHOICE; approving is an ACTION. They used to be one
+                      welded control, which is why the approve button never looked right —
+                      a primary CTA butted against two radio buttons. Split into the form's
+                      segmented picker plus a real CTA, both still on this line. */}
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", rowGap:8,
+                    flexShrink:0, order: mob?3:0, flexBasis: mob?"100%":"auto" }}>
+                    <span className="bp-prooflabel">Proof:</span>
+                    <div className="bp-seg">
+                      {[{v:0,l:"Online"},{v:0.01,l:"Professional"},{v:3.01,l:"Hardcopy"}].map(o => {
+                        const on = o.v === 0 ? proof === 0 : o.v === 0.01 ? proof === 0.01 : proof >= 3;
+                        return <button type="button" key={o.v} className={`bp-seg-btn${on ? " on" : ""}`}
+                          style={{ padding: mob ? "6px 9px" : "6px 13px", fontSize: mob ? 11 : 11.5 }}
+                          onClick={() => setProof(o.v)}>{o.l}</button>;
+                      })}
+                    </div>
                   </div>
                 <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid var(--bp-line)", color:"var(--bp-dim)", width:32, height:32, borderRadius:10, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
               </div>
@@ -4385,7 +4417,11 @@ update();
                     machinery behind it is intentionally left intact: splitReaderSpreads(),
                     the readerSpreads state and processFiles' splitSpreads option all still
                     work, so restoring the control is a one-element change. */}
-                {approvalPkg && (artApproved || debug) && (() => {
+                {/* Staff-only. This was visible to any customer the moment they approved, and its
+                    other half was gated on `debug`, which is a ?debug=1 URL parameter rather than
+                    the %3414 job-name unlock — a guessable flag on a customer-facing modal. Both
+                    now answer to the same unlock. */}
+                {approvalPkg && staffUnlocked && (() => {
                   const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                   const dlFile = (blob, name) => {
                     if (!blob) return;
@@ -4630,7 +4666,7 @@ update();
                           const cropStyle = (mult) => ({
                             width: `${nativeW * mult * 100}%`, height: "auto",
                             position: "absolute", top: "50%", left: "50%",
-                            transform: "translate(-50%, -50%)", display: "block", filter: gsFilter,
+                            transform: "translate(-50%, -50%)", display: "block", filter: gsFor(proofIdx),
                           });
                           return (
                             <div className="bp-checker" style={{ position:"absolute", inset:0, overflow:"hidden" }}>
@@ -4639,7 +4675,7 @@ update();
                                 : <img src={hiResValid ? hiResProof.dataUrl : proofPage.dataUrl} style={{
                                     ...(fitMode === "crop" ? cropStyle(1)
                                       : fitMode === "scale" ? cropStyle(artScale / 100)
-                                      : { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit: fitMode==="contain" ? "contain" : fitMode==="stretch" ? "fill" : "cover" }
+                                      : { display:"block", filter:gsFor(proofIdx), width:"100%", height:"100%", objectFit: fitMode==="contain" ? "contain" : fitMode==="stretch" ? "fill" : "cover" }
                                     )
                                   }} />
                               }
@@ -4686,7 +4722,7 @@ update();
                           const cropStyle = (mult) => ({
                             width: `${nativeW * mult * 100}%`, height: "auto",
                             position: "absolute", top: "50%", left: "50%",
-                            transform: "translate(-50%, -50%)", display: "block", filter: gsFilter,
+                            transform: "translate(-50%, -50%)", display: "block", filter: gsFor(proofIdx),
                           });
                           const spineLeft = proofIdx % 2 === 0;
                           return (
@@ -4702,8 +4738,8 @@ update();
                                 <img src={imgSrc} style={{
                                   ...(proofTx.fitMode === "crop" ? cropStyle(1)
                                     : proofTx.fitMode === "scale" ? cropStyle(proofTx.artScale / 100)
-                                    : proofTx.fitMode === "stretch" ? { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit:"fill", position:"absolute", inset:0 }
-                                    : { display:"block", filter:gsFilter, width:"100%", height:"100%", objectFit: proofTx.fitMode === "contain" ? "contain" : "cover" }
+                                    : proofTx.fitMode === "stretch" ? { display:"block", filter:gsFor(proofIdx), width:"100%", height:"100%", objectFit:"fill", position:"absolute", inset:0 }
+                                    : { display:"block", filter:gsFor(proofIdx), width:"100%", height:"100%", objectFit: proofTx.fitMode === "contain" ? "contain" : "cover" }
                                   )
                                 }} />
                                 {showGuides && <>
@@ -4771,7 +4807,7 @@ update();
                         <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:8, overflow:"hidden", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid var(--bp-line)" }}>
                           {p.isBlank
                             ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:10 }}>Blank</div>
-                            : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
+                            : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", filter:gsFor(i) }} />
                           }
                         </div>
                         <span style={{ fontSize:9, color: p.isBlank ? "var(--bp-faint)" : "var(--bp-dim)", marginTop:3, display:"block" }}>{p.label}</span>
@@ -4821,7 +4857,8 @@ update();
             </div>
 
             <div className="bp-modal-body">
-              <div className="bp-viewport expanded" onMouseDown={previewMode === "closed" ? onPointerDown : undefined} style={{ cursor: previewMode === "closed" ? "grab" : "default", filter:gsFilter }}>
+              <div className="bp-viewport expanded" onMouseDown={previewMode === "closed" ? onPointerDown : undefined} style={{ cursor: previewMode === "closed" ? "grab" : "default", // The closed book shows the cover; opened, the spread is inside pages.
+                filter: previewMode === "closed" ? gsFor(0) : gsFor(2) }}>
                 {previewMode === "closed"
                   ? <BookClosed3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spineW={spineW} rotateX={rot.x} rotateY={rot.y} scale={exScale} fitMode="stretch" />
                   : <BookOpen3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spread={spread} scale={exScale} rotateX={-5} rotateY={0} fitMode="stretch" />
@@ -6144,6 +6181,7 @@ function App(){
               <SetPreview
                 sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir}
                 pageCount={sets[0]?.pages||8} roundCorner={roundCorner} insideColor={insideColor}
+                coverColor={coverColor} staffUnlocked={debugUnlocked}
                 twoStaplesApplied={!!(r.twoAuto || twoStaple)}
                 proof={proof} setProof={setProof}
                 pageTransforms={pageTransforms} setPageTransforms={setPageTransforms}
@@ -6275,6 +6313,11 @@ function App(){
                 <div style={{fontSize:mob?10.5:11,color:CC.mid,marginTop:2}}>
                   {r.shipping?.freeDeliveryBizDays} business days
                 </div>
+                {/* How the shop gets to those dates: component day counts, the shop
+                    minimum, when production starts and when it must ship. Internal
+                    scheduling — the customer is being sold two dates, not the reasoning
+                    behind them. Behind %3414 for anyone quoting a job by hand. */}
+                {debugUnlocked && <>
                 {/* Turnaround breakdown */}
                 {r.ti && (() => {
                   const items = [
@@ -6313,16 +6356,24 @@ function App(){
                     ({r.shipping?.effectiveTransit}d {r.shipping?.effectiveTransit < r.shipping?.transitDays ? "overnight" : "ground"} transit)
                   </span>
                 </div>
+                </>}
                 {!mob&&<div style={{fontSize:10,color:CC.light,marginTop:6,paddingTop:6,borderTop:"1px solid #b3dff044"}}>
                   Earliest possible: <strong style={{color:CC.mid}}>{r.shipping?.earliestDate}</strong> ({r.shipping?.earliestBizDays} business days)
                 </div>}
-                <div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,...(mob?{paddingTop:4,borderTop:"1px solid #b3dff044"}:{})}}>
-                  {mob?<>{r.shipping?.earliestDate} earliest · {r.shipping?.pastCutoff} shop time</>:<>Shop time: {r.shipping?.pastCutoff} ({PCF.shop_timezone.replace("America/","")}) · Cutoff: {PCF.shop_cutoff_hour>12?PCF.shop_cutoff_hour-12:PCF.shop_cutoff_hour}:00 {PCF.shop_cutoff_hour>=12?"PM":"AM"} · Starts: {r.shipping?.shopToday}</>}
-                </div>
+                {/* Mobile has no room for the desktop "Earliest possible" line above, so this
+                    is where the earliest date appears there — and it stays, because it is one
+                    of the two dates the customer is promised. */}
+                {mob&&<div style={{fontSize:9,color:CC.light,marginTop:4,paddingTop:4,borderTop:"1px solid #b3dff044"}}>
+                  {r.shipping?.earliestDate} earliest
+                </div>}
+                {/* Shop clock, cutoff and the day production would start: purely internal. */}
+                {debugUnlocked&&!mob&&<div style={{fontSize:10,color:CC.light,marginTop:4}}>
+                  Shop time: {r.shipping?.pastCutoff} ({PCF.shop_timezone.replace("America/","")}) · Cutoff: {PCF.shop_cutoff_hour>12?PCF.shop_cutoff_hour-12:PCF.shop_cutoff_hour}:00 {PCF.shop_cutoff_hour>=12?"PM":"AM"} · Starts: {r.shipping?.shopToday}
+                </div>}
               </div>
 
               <div style={ST.f}>
-                <label style={ST.lbl}>Need It Sooner? Pick a Date</label>
+                <label style={ST.lbl}>Select a specific date</label>
                 <DatePicker value={needByDate} onChange={setNeedByDate}
                   earliestDate={r.shipping?.earliestYMD} freeDate={r.shipping?.freeDeliveryYMD}/>
                 {needByDate&&!r.shipping?.needByValid&&<p style={ST.err}>Date must be in the future</p>}
@@ -6380,12 +6431,12 @@ function App(){
             Ask a question about this quote →
           </button>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
-            <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing
+            <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light,minWidth:0,flex:"1 1 auto",lineHeight:1.5}}>Quantity Pricing
                 {(parseFloat(tableAdjPct)||0)!==0&&<span style={{marginLeft:6,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
-                {couponActive&&<span style={{marginLeft:6,color:CK.cyan,letterSpacing:".3px"}}>{coupon.code} applied</span>}
+                {couponActive&&<span style={{marginLeft:6,color:CK.cyan,letterSpacing:".3px",whiteSpace:"nowrap"}}>{coupon.code} applied</span>}
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:"auto"}}>
                 {debugUnlocked&&(
                   <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3}}>
                     <span style={{fontSize:9,fontWeight:700,color:CC.light,textTransform:"uppercase",letterSpacing:".4px"}}>Adjust Table</span>
