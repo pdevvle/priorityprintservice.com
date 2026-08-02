@@ -262,7 +262,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · TIPFIX</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · PICKDATE</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -1438,7 +1438,21 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand,coupon,tota
   const availRange=sh?(_dest?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):`${sh.earliestBizDays}`):String(days);
   // Availability reads as a single date: the rush need-by date when rush is applied,
   // else the free-delivery date — or the production+1 placeholder pre-address.
-  const deliveryDate=sh?(!_dest?sh.earliestDate:((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate)):null;
+  // A date the customer picked is an instruction, not an estimate, so it wins the
+  // availability display. This used to be conditional and got it wrong two ways: the
+  // modern draft fell back to the earliest-possible placeholder whenever no address
+  // had been entered yet, and the rest honoured a picked date only when it triggered
+  // a rush charge. Either way somebody who chose Aug 14 was told "as soon as Aug 7".
+  // sh.needByFmt is non-null exactly when a picked date is valid and not too soon, so
+  // it is the whole condition.
+  // Compared against the free date, not merely checked for existence: four of these
+  // calculators pre-fill the date field with the free delivery date as a convenience,
+  // so "a date is set" is the default state and would make every quote read as a
+  // promise. A date that DIFFERS from the free one is the customer actually asking
+  // for something.
+  const requestedDate = sh && sh.needByFmt && sh.needByFmt !== sh.freeDeliveryDate
+    ? sh.needByFmt : null;
+  const deliveryDate = sh?(requestedDate || (!_dest?sh.earliestDate:((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate))) : null;
   // A discount code reduces what the customer pays but never the quoted line price —
   // WooCommerce applies it at cart level. So show it as a deduction FROM the total
   // rather than by rewriting the total, which is also how the order will read.
@@ -1488,7 +1502,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand,coupon,tota
             </div>
           </div>
           <div style={{fontSize:10.5,fontWeight:600,opacity:.9,marginTop:3,letterSpacing:".2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-            As soon as {deliveryDate||availRange+" days"}
+            {requestedDate ? "Delivery by" : "As soon as"} {deliveryDate||availRange+" days"}
           </div>
           {_cpn&&<div style={{fontSize:10.5,fontWeight:700,marginTop:2,letterSpacing:".2px",whiteSpace:"nowrap"}}>
             {_cpn.code} −${_cpnAmt.toFixed(2)} · you pay ${_afterCpn.toFixed(2)}
@@ -1497,7 +1511,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand,coupon,tota
         {expanded&&<div style={{background:CC.white,borderRadius:"0 0 6px 6px",border:`1px solid ${CC.border}`,borderTop:"none",maxHeight:"40vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
           {/* Same stat row desktop shows under its price card, at full width. */}
           <div style={{display:"flex",borderBottom:`1px solid ${CC.border}`}}>
-            {[["$/ea","$"+Math.max(0,perUnit).toFixed(2),_cpnUnit!=null?"$"+_cpnUnit.toFixed(2):null],["Qty",tQ.toLocaleString(),null],["As soon as",deliveryDate||availRange+" days",null]].map(([l,v,net],i)=>(
+            {[["$/ea","$"+Math.max(0,perUnit).toFixed(2),_cpnUnit!=null?"$"+_cpnUnit.toFixed(2):null],["Qty",tQ.toLocaleString(),null],[requestedDate ? "Delivery by" : "As soon as",deliveryDate||availRange+" days",null]].map(([l,v,net],i)=>(
               <div key={i} style={{flex:1,padding:"9px 6px",textAlign:"center",borderLeft:i?`1px solid ${CC.border}`:"none",background:(i===2&&_hasExtra)?"#fffbeb":"transparent"}}>
                 <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:(i===2&&_hasExtra)?"#92400e":CC.light}}>{l}</div>
                 {net
@@ -1571,7 +1585,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand,coupon,tota
           </div>
         ))}
         <div style={{flex:1,padding:"11px 8px",textAlign:"center",background:_hasExtra?"#fffbeb":"transparent",transition:"background .3s"}}>
-          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>As soon as</div>
+          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>{requestedDate ? "Delivery by" : "As soon as"}</div>
           <div style={{fontSize:13.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{deliveryDate||availRange+" days"}</div>
 
         </div>
@@ -5553,7 +5567,15 @@ function App(){
   useEffect(()=>{if(r.coatOK===false)setCoating(0)},[r.coatOK]);
   useEffect(()=>{if(r.vividOK===false)setVividPrint(false)},[r.vividOK]);
   useEffect(()=>{if(r.q100===false)setBundling(0)},[r.q100]);
-  useEffect(()=>{if(r.shipping?.freeDeliveryYMD)setNeedByDate(r.shipping.freeDeliveryYMD)},[r.shipping?.freeDeliveryYMD]);
+  // The date field is pre-filled with the free delivery date so it never sits empty.
+  // That has to stop the moment the customer picks their own, or every recalculation
+  // that moves the free date — a quantity change, a different paper — silently threw
+  // their choice away and put the default back.
+  const needByTouched = useRef(false);
+  useEffect(()=>{
+    if(needByTouched.current) return;
+    if(r.shipping?.freeDeliveryYMD) setNeedByDate(r.shipping.freeDeliveryYMD);
+  },[r.shipping?.freeDeliveryYMD]);
   // NOTE: hardcopy proof is NOT auto-removed — always available as option
   const upSet=(i,p)=>setSets(s=>s.map((x,j)=>j===i?{...x,...p}:x));
 
@@ -6395,7 +6417,7 @@ function App(){
 
               <div style={ST.f}>
                 <label style={ST.lbl}>Select a specific date</label>
-                <DatePicker value={needByDate} onChange={setNeedByDate}
+                <DatePicker value={needByDate} onChange={v=>{needByTouched.current=true;setNeedByDate(v);}}
                   earliestDate={r.shipping?.earliestYMD} freeDate={r.shipping?.freeDeliveryYMD}/>
                 {needByDate&&!r.shipping?.needByValid&&<p style={ST.err}>Date must be in the future</p>}
               </div>
@@ -6560,7 +6582,7 @@ function App(){
       {!mob&&miniBar&&result&&!result.error?.length&&(()=>{
         const _t=Math.max(0,result.total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
         const _sh=result.shipping;
-        const _when=_sh?((_sh.hasDest)?(((_sh.rushCost>0)&&_sh.needByFmt)?_sh.needByFmt:_sh.freeDeliveryDate):_sh.earliestDate):null;
+        const _when=_sh?(_sh.needByFmt||((_sh.hasDest)?(((_sh.rushCost>0)&&_sh.needByFmt)?_sh.needByFmt:_sh.freeDeliveryDate):_sh.earliestDate)):null;
         const _net=couponActive?netOf(result.total):null;
         return <Float><div style={{position:"fixed",bottom:16,left:miniBar.left,width:miniBar.width,zIndex:9990,
           background:CC.white,border:`1px solid ${CC.border}`,borderRadius:12,
@@ -6570,7 +6592,7 @@ function App(){
             <div style={{fontSize:19,fontWeight:800,color:CC.dark,lineHeight:1.05}}>${_t}</div>
             <div style={{fontSize:10.5,color:missingDest?CC.red:CC.light,fontWeight:600,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
               {missingDest ? missingDestMsg
-                           : `${(result.tQ||0).toLocaleString()} qty${_when?` · as soon as ${_when}`:""}`}
+                           : `${(result.tQ||0).toLocaleString()} qty${_when?` · ${_sh&&_sh.needByFmt?"delivery by":"as soon as"} ${_when}`:""}`}
             </div>
             {/* The condensed bar is the only price on screen once the card scrolls off,
                 so it cannot be the one place a live code goes unmentioned. */}
