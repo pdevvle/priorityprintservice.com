@@ -2300,6 +2300,12 @@ function buildMetadata(config, result) {
     shipAddr: config.shipAddr || {},
     needByDate: config.needByDate,
     // Shipping — durations, not absolute dates
+    // Physical shipment estimate. WooCommerce has nowhere to carry this on a virtual
+    // line item, so it travels in the metadata blob and the plugin lifts it onto the
+    // order — a fulfilment tool that imports the order needs a weight and a parcel
+    // count, not just an address.
+    estWeightLb: sh.estWeightLb,
+    estCartons: sh.estCartons,
     transitDays: sh.transitDays,
     productionBizDays: sh.productionBizDays,
     requestedBizDays: sh.bizDaysToDate || sh.freeDeliveryBizDays,
