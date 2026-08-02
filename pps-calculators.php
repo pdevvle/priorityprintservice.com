@@ -90,6 +90,19 @@ if ( file_exists( PPS_CALC_DIR . 'pps-imposition.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-imposition.php';
 }
 
+// Shippo integration test runner. Loaded only while its trigger option is set, which
+// costs one autoloaded option read per request and keeps a diagnostic that makes live
+// API calls out of the normal request path.
+//
+// It has always been in the repo but nothing ever required it, so every previous run
+// needed a hand-edit to this file on the server — which the next deploy then reverted,
+// leaving a versioned tool that only worked by breaking the deploy rule. This is the
+// in-tree version of that hook. See docs/SHIPPO_TESTING.md for the run procedure.
+if ( file_exists( PPS_CALC_DIR . 'pps-shippo-test.php' )
+     && '' !== (string) get_option( 'pps_shippo_test_trigger', '' ) ) {
+    require_once PPS_CALC_DIR . 'pps-shippo-test.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
@@ -1946,6 +1959,21 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         ) );
         $item->add_meta_data( 'PPS-Spec', $spec, true );
 
+        // Shipment estimate, on the line item where the spec already travels.
+        //
+        // WooCommerce has no weight field on an order or an order item — weight is
+        // always derived from the product, and calculator products are virtual and
+        // weightless by design. So this is the only place the figure can ride, and it
+        // is a labelled line rather than a hidden key because the point is for a person
+        // buying a label to be able to read it.
+        $wt   = (float) ( $full['estWeightLb'] ?? 0 );
+        $ctns = (int) ( $full['estCartons'] ?? 0 );
+        if ( $wt > 0 ) {
+            $item->add_meta_data( 'PPS-Ship-Est', sprintf(
+                '%.2f lb | %d carton%s', $wt, max( 1, $ctns ), max( 1, $ctns ) === 1 ? '' : 's'
+            ), true );
+        }
+
         // Production start date — distinct label for Missive rule parsing
         $prodStart = $full['productionStartDate'] ?? '';
         if ( $prodStart ) {
@@ -2034,6 +2062,13 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
 
     if ( $weight > 0 )  $order->update_meta_data( '_pps_est_weight_lb', round( $weight, 2 ) );
     if ( $cartons > 0 ) $order->update_meta_data( '_pps_est_cartons', $cartons );
+
+    // The same two figures under unprefixed keys. WooCommerce treats a leading
+    // underscore as protected and REST clients routinely skip those, so these are the
+    // copies a fulfilment integration can actually map to a parcel. Order-level meta is
+    // not rendered to the customer, so this costs nothing on the receipt.
+    if ( $weight > 0 )  $order->update_meta_data( 'pps_ship_weight_lb', round( $weight, 2 ) );
+    if ( $cartons > 0 ) $order->update_meta_data( 'pps_ship_cartons', $cartons );
 
     if ( $addr === null ) {
         if ( $weight > 0 || $cartons > 0 ) $order->save();
