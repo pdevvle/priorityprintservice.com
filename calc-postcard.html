@@ -2567,8 +2567,8 @@ generate();
           </div>
           {panels > 1 && sizeMode === "custom" && (
             <Pil label={<Tip k="fold_direction">Fold Direction</Tip>} value={foldDir} onChange={onFoldDirChange} options={[
-              { t: `Fold Long Side (${longEdge}")`, v: "long" },
-              { t: `Fold Short Side (${shortEdge}")`, v: "short" },
+              { t: `Fold Long Side (${Math.max(longEdge, shortEdge)}")`, v: "long" },
+              { t: `Fold Short Side (${Math.min(longEdge, shortEdge)}")`, v: "short" },
             ]} />
           )}
           {panels > 1 && (() => {
@@ -3267,7 +3267,7 @@ function Sel({label,value,onChange,children,disabled,note,badge,autoComplete,nam
 function TxtNum({label,value,onChange,min=1,max=99999}){
   const[raw,setRaw]=useState(String(value));
   useEffect(()=>setRaw(String(value)),[value]);
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);/* Commit ANY parsed number, in range or not. Committing only in-range values left the state holding the previous number while the field showed the new one, so a short edge typed as 0 kept feeding 4 to the preview and the chip. Out of range now reaches calculate(), which rejects it and disables the order — a visible error beats a silent disagreement. onBlur still clamps. */if(!isNaN(v))onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
 }
 
 function Pil({label,options,value,onChange,disabled,badge}){
@@ -3989,8 +3989,14 @@ function App() {
   const r2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
   const r3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
   const preset = SIZE_PRESETS.find(s => s.label === sizeLabel);
-  const dimLong = sizeMode === "preset" ? (preset?.long || 6) : longEdge;
-  const dimShort = sizeMode === "preset" ? (preset?.short || 4) : shortEdge;
+  // calculate() normalises with Math.max/min, so anything that DESCRIBES the sheet
+  // has to as well. Without it, entering Long=4 / Short=12 left the fold buttons
+  // reading "Fold Long Side (4\")" and "Fold Short Side (12\")" — the UI
+  // contradicting itself while the engine quietly folded the 12" edge.
+  const _rawLong = sizeMode === "preset" ? (preset?.long || 6) : longEdge;
+  const _rawShort = sizeMode === "preset" ? (preset?.short || 4) : shortEdge;
+  const dimLong = Math.max(_rawLong, _rawShort);
+  const dimShort = Math.min(_rawLong, _rawShort);
 
   // Guard: the compound right-angle fold is brochure-only (11×25.5 non-cardstock).
   // Postcard papers are always cardstock, so it's never valid here — if it's ever
@@ -4175,7 +4181,7 @@ function App() {
         </div>
       </section>
 
-      {mob && <MobilePreviewBar longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar longEdge={r.longE ?? longEdge} shortEdge={r.shortE ?? shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
 
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "0 10px 140px" : "0 24px 80px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
@@ -4510,7 +4516,13 @@ function App() {
             below) still receive clicks. Mirrors the saddle calculator's split. */}
         {!mob && <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
-            <SidebarPostcardPreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+            {/* The engine's resolved dimensions, not the custom-size state. calculate() reads
+                long/short out of SIZE_PRESETS in preset mode, while longEdge/shortEdge are only
+                ever written by the custom inputs, a reorder restore or a URL param — so choosing
+                a preset repriced correctly while the preview kept whatever the custom fields last
+                held, which is the 11x8.5 default on a fresh load. Custom mode looked fine for the
+                same reason it was broken: there, those fields ARE the source. */}
+            <SidebarPostcardPreview longEdge={r.longE ?? longEdge} shortEdge={r.shortE ?? shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} />
           </div>
           {missingDest && <div style={{marginTop:10,fontSize:12,fontWeight:600,color:"#dc2626",lineHeight:1.35}}>{missingDestMsg}</div>}
