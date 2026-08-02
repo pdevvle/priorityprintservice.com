@@ -3908,6 +3908,38 @@ function App() {
   }, []);
 
   const shipZip = shipAddr.zip || "";
+  // ── Destination completeness ────────────────────────────────────────────────
+  // Everything the job cannot ship without. Until 2026-08-02 this gate was the state
+  // alone in the modern draft and did not exist at all in the other eight, so an order
+  // could be placed with a ZIP and no street: enough to price transit, not enough to
+  // deliver. The order then reached fulfilment with an empty WooCommerce shipping
+  // address, and anything reading it fell back to the cardholder's billing address.
+  const _destMissing = [];
+  if (!String(shipAddr.street1 || "").trim()) _destMissing.push("street address");
+  if (!String(shipAddr.city || "").trim())    _destMissing.push("city");
+  if (!String(shipState || "").trim())        _destMissing.push("state");
+  if (!String(shipAddr.zip || "").trim())     _destMissing.push("ZIP code");
+  const missingDest = _destMissing.length > 0;
+  // Name what is missing rather than repeat one generic warning: someone who has filled
+  // three of the four fields needs to know which one is still empty.
+  const missingDestMsg = !missingDest ? ""
+    : _destMissing.length >= 4 ? "Shipping info required prior to placing order"
+    : "Shipping address incomplete \u2014 add " + (_destMissing.length === 1 ? _destMissing[0]
+        : _destMissing.slice(0, -1).join(", ") + " and " + _destMissing[_destMissing.length - 1]);
+  // Send them to the field rather than leaving them to hunt for it. Opens the section
+  // first when it is collapsed, because the input is not in the DOM until then.
+  const focusShipping = () => {
+    if (!document.querySelector('[autocomplete="shipping address-line1"]')) {
+      const hdr = Array.prototype.find.call(document.querySelectorAll("button"),
+        b => /Shipping\s*&\s*Delivery/i.test(b.textContent || ""));
+      if (hdr) hdr.click();
+    }
+    setTimeout(() => {
+      const t = document.querySelector('[autocomplete="shipping address-line1"]');
+      if (t) { t.scrollIntoView({ behavior: "smooth", block: "center" }); t.focus(); }
+    }, 120);
+  };
+
   const fold = FOLD_TYPES.find(f => f.val === foldType) || FOLD_TYPES[0];
 
   // Shippo live transit: re-run the pricing memo when a live lookup lands.
@@ -4042,6 +4074,7 @@ function App() {
 
   const handleAddToOrder = async () => {
     if (!result || result.error || submitting) return;
+    if (missingDest) { focusShipping(); return; }
     setSubmitting(true);
     setUploadProgress(null);
     const config = {
@@ -4497,6 +4530,7 @@ function App() {
             <SidebarBrochurePreview longEdge={longEdge} shortEdge={shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} />
           </div>
+          {missingDest && <div style={{marginTop:10,fontSize:12,fontWeight:600,color:"#dc2626",lineHeight:1.35}}>{missingDestMsg}</div>}
           <button type="button" onClick={handleAddToOrder} disabled={!!result?.error || submitting} style={{ width: "100%", marginTop: 10, padding: submitting && uploadProgress ? "10px 12px 6px" : "12px", borderRadius: 6, border: "none", background: (result?.error || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error || submitting) ? .5 : 1, transition: "all .2s", overflow: "hidden" }}>
             {submitting && uploadProgress ? (
               <div>

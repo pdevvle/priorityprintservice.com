@@ -4947,6 +4947,38 @@ function App(){
   }, [perfCount, trimW]);
 
   const shipZip=shipAddr.zip||"";
+  // ── Destination completeness ────────────────────────────────────────────────
+  // Everything the job cannot ship without. Until 2026-08-02 this gate was the state
+  // alone in the modern draft and did not exist at all in the other eight, so an order
+  // could be placed with a ZIP and no street: enough to price transit, not enough to
+  // deliver. The order then reached fulfilment with an empty WooCommerce shipping
+  // address, and anything reading it fell back to the cardholder's billing address.
+  const _destMissing = [];
+  if (!String(shipAddr.street1 || "").trim()) _destMissing.push("street address");
+  if (!String(shipAddr.city || "").trim())    _destMissing.push("city");
+  if (!String(shipState || "").trim())        _destMissing.push("state");
+  if (!String(shipAddr.zip || "").trim())     _destMissing.push("ZIP code");
+  const missingDest = _destMissing.length > 0;
+  // Name what is missing rather than repeat one generic warning: someone who has filled
+  // three of the four fields needs to know which one is still empty.
+  const missingDestMsg = !missingDest ? ""
+    : _destMissing.length >= 4 ? "Shipping info required prior to placing order"
+    : "Shipping address incomplete \u2014 add " + (_destMissing.length === 1 ? _destMissing[0]
+        : _destMissing.slice(0, -1).join(", ") + " and " + _destMissing[_destMissing.length - 1]);
+  // Send them to the field rather than leaving them to hunt for it. Opens the section
+  // first when it is collapsed, because the input is not in the DOM until then.
+  const focusShipping = () => {
+    if (!document.querySelector('[autocomplete="shipping address-line1"]')) {
+      const hdr = Array.prototype.find.call(document.querySelectorAll("button"),
+        b => /Shipping\s*&\s*Delivery/i.test(b.textContent || ""));
+      if (hdr) hdr.click();
+    }
+    setTimeout(() => {
+      const t = document.querySelector('[autocomplete="shipping address-line1"]');
+      if (t) { t.scrollIntoView({ behavior: "smooth", block: "center" }); t.focus(); }
+    }, 120);
+  };
+
   // Shippo live transit: re-run the pricing memo when a live lookup lands.
   const [ltTick, setLtTick] = useState(0);
   useEffect(() => {
@@ -5193,6 +5225,7 @@ function App(){
 
   const handleAddToOrder = async () => {
     if (!result || result.error?.length || submitting) return;
+    if (missingDest) { focusShipping(); return; }
     // Artwork integrity guard: pageTransforms must be a real object before we
     // serialize order metadata. An empty {} is fine (customer didn't open the
     // proof transform UI); undefined/non-object means something is wrong with
@@ -5701,6 +5734,7 @@ function App(){
             <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} debugUnlocked={debugUnlocked}/>
           </div>
+          {missingDest && <div style={{marginTop:10,fontSize:12,fontWeight:600,color:"#dc2626",lineHeight:1.35}}>{missingDestMsg}</div>}
           <button type="button" onClick={handleAddToOrder} style={{width:"100%",padding:"14px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:15,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",transition:"opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
             <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>

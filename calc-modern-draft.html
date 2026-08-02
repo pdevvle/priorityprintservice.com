@@ -238,7 +238,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · SHIPADDR</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · ADDRGATE</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -5834,7 +5834,24 @@ function App(){
     setTimeout(() => { setQName(""); setQEmail(""); setQPhone(""); setQMessage(""); setQStatus("idle"); setQErrorMsg(""); }, 200);
   };
 
-  const missingDest = !shipState;
+  // ── Destination completeness ────────────────────────────────────────────────
+  // Everything the job cannot ship without. Until 2026-08-02 this gate was the state
+  // alone in the modern draft and did not exist at all in the other eight, so an order
+  // could be placed with a ZIP and no street: enough to price transit, not enough to
+  // deliver. The order then reached fulfilment with an empty WooCommerce shipping
+  // address, and anything reading it fell back to the cardholder's billing address.
+  const _destMissing = [];
+  if (!String(shipAddr.street1 || "").trim()) _destMissing.push("street address");
+  if (!String(shipAddr.city || "").trim())    _destMissing.push("city");
+  if (!String(shipState || "").trim())        _destMissing.push("state");
+  if (!String(shipAddr.zip || "").trim())     _destMissing.push("ZIP code");
+  const missingDest = _destMissing.length > 0;
+  // Name what is missing rather than repeat one generic warning: someone who has filled
+  // three of the four fields needs to know which one is still empty.
+  const missingDestMsg = !missingDest ? ""
+    : _destMissing.length >= 4 ? "Shipping info required prior to placing order"
+    : "Shipping address incomplete \u2014 add " + (_destMissing.length === 1 ? _destMissing[0]
+        : _destMissing.slice(0, -1).join(", ") + " and " + _destMissing[_destMissing.length - 1]);
   const openShipping = () => setOp(p=>{
     if(p.s5)return p;
     if(soloSec){const n={};for(const k in p)n[k]=false;n.s5=true;return n;}
@@ -6341,7 +6358,7 @@ function App(){
               Pressing it jumps to the shipping section. */}
           {missingDest && (
             <div style={{marginTop:7,fontSize:12,fontWeight:600,color:CC.red,lineHeight:1.35}}>
-              Shipping info required prior to placing order
+              {missingDestMsg}
             </div>
           )}
           {/* Discount code — one definition, mounted here and in the mobile flow. */}
@@ -6472,7 +6489,7 @@ function App(){
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:19,fontWeight:800,color:CC.dark,lineHeight:1.05}}>${_t}</div>
             <div style={{fontSize:10.5,color:missingDest?CC.red:CC.light,fontWeight:600,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-              {missingDest ? "Shipping info required prior to placing order"
+              {missingDest ? missingDestMsg
                            : `${(result.tQ||0).toLocaleString()} qty${_when?` · as soon as ${_when}`:""}`}
             </div>
             {/* The condensed bar is the only price on screen once the card scrolls off,
@@ -6501,7 +6518,7 @@ function App(){
       {mob&&<Float><div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:9990,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
         {missingDest && (
           <div style={{fontSize:11,fontWeight:600,color:CC.red,marginBottom:6,lineHeight:1.3}}>
-            Shipping info required prior to placing order
+            {missingDestMsg}
           </div>
         )}
         <div style={{display:"flex",flexDirection:mobExpanded?"column":"row",alignItems:mobExpanded?"stretch":"center",gap:10}}>
