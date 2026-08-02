@@ -2270,8 +2270,23 @@ add_action( 'woocommerce_email_after_order_table', function() {
 add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatted, $item ) {
     if ( ! is_array( $formatted ) ) return $formatted;
 
-    $staff = is_admin() || ! empty( $GLOBALS['pps_email_sent_to_admin'] );
-    if ( $staff ) return $formatted;
+    // Positive identification only, and it FAILS OPEN deliberately. The obvious
+    // alternative — strip unless we can prove this is staff — depends on
+    // woocommerce_email_before_order_table firing, and a theme or plugin that overrides
+    // email-order-details.php can silently drop it. Astra ships WooCommerce template
+    // overrides, so that is not hypothetical here. The failure mode would be the admin
+    // notification losing PPS-Spec, Missive parsing nothing, and nobody noticing for
+    // days. A customer seeing one line of job shorthand is the cheaper way to be wrong.
+    $customer_email = isset( $GLOBALS['pps_email_sent_to_admin'] ) && ! $GLOBALS['pps_email_sent_to_admin'];
+
+    $customer_page = false;
+    if ( ! is_admin() && function_exists( 'is_wc_endpoint_url' ) ) {
+        $customer_page = is_wc_endpoint_url( 'order-received' )
+                      || is_wc_endpoint_url( 'view-order' )
+                      || is_wc_endpoint_url( 'order-pay' );
+    }
+
+    if ( ! $customer_email && ! $customer_page ) return $formatted;
 
     $internal = pps_internal_item_meta_keys();
     foreach ( $formatted as $id => $meta ) {
