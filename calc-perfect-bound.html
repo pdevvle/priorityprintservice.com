@@ -5280,7 +5280,10 @@ function App(){
       <style>{`
                 button:focus-visible,[role="button"]:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid #1d6fe0 !important;outline-offset:2px;border-radius:3px;}
 @media(max-width:700px){
-          select,input[type="text"],input[type="number"]{font-size:16px!important;padding:10px!important;min-height:44px!important}
+          select,input[type="text"],input[type="number"],input[type="tel"],input[type="email"]{font-size:16px!important;padding:10px 12px!important;min-height:46px!important}
+          /* Here the toggle is the short one — 40px, under the 44px tap-target minimum —
+             so raise it to the fields rather than shrink the fields down to it. */
+          button[aria-pressed]{min-height:44px!important}
           .pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}
           .pps-sec-body{padding:12px 14px!important}
           .pps-pill{padding:10px 6px!important;font-size:12px!important;min-height:44px!important}
