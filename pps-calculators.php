@@ -1759,14 +1759,42 @@ add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
 add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
     if ( ! isset( $cart_item['pps_summary'] ) ) return $data;
 
-    $lines = array_filter( explode( "\n", $cart_item['pps_summary'] ) );
-    foreach ( $lines as $line ) {
+    // buildSummary() emits one line per chosen option, and rendering them verbatim turned
+    // a cart row into a dozen table rows — six of them labelled "Configuration", because
+    // a line with no colon had nothing to split on and fell back to that word. Group them
+    // instead: the headline spec, the two paper facts, and one row carrying every
+    // finishing choice. Same information, a third of the height, no repeated labels.
+    $headline = '';
+    $labelled = array();
+    $options  = array();
+
+    foreach ( array_filter( array_map( 'trim', explode( "\n", $cart_item['pps_summary'] ) ) ) as $line ) {
         $parts = explode( ':', $line, 2 );
         if ( count( $parts ) === 2 ) {
-            $data[] = array( 'key' => trim( $parts[0] ), 'value' => trim( $parts[1] ) );
-        } elseif ( trim( $line ) ) {
-            $data[] = array( 'key' => 'Configuration', 'value' => trim( $line ) );
+            $labelled[ trim( $parts[0] ) ] = trim( $parts[1] );
+        } elseif ( $headline === '' ) {
+            $headline = $line;   // size · quantity · pages · job name — always first
+        } else {
+            $options[] = $line;  // stapling, coating, bundling, corners, artwork, proof…
         }
+    }
+
+    if ( $headline !== '' ) {
+        $data[] = array( 'key' => 'Specification', 'value' => $headline );
+    }
+    // Paper first, because it is what a customer double-checks on a print order.
+    foreach ( array( 'Inside', 'Cover' ) as $paper_key ) {
+        if ( isset( $labelled[ $paper_key ] ) ) {
+            $data[] = array( 'key' => $paper_key, 'value' => $labelled[ $paper_key ] );
+            unset( $labelled[ $paper_key ] );
+        }
+    }
+    if ( $options ) {
+        $data[] = array( 'key' => 'Finishing', 'value' => implode( ' · ', $options ) );
+    }
+    // Whatever else carried its own label — Rush, Ship to, Standard delivery.
+    foreach ( $labelled as $label => $value ) {
+        $data[] = array( 'key' => $label, 'value' => $value );
     }
 
     if ( isset( $cart_item['pps_biz_days'] ) ) {
@@ -1788,6 +1816,216 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
 
     return $data;
 }, 10, 2 );
+
+// ═══════════════════════════════════════════════════════════════
+// CART & CHECKOUT: SKIN
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Mark calculator lines so the stylesheet can treat them differently from ordinary
+ * products. A calculator line is always quantity 1 — the real quantity is part of the
+ * spec — so its unit price and quantity box only repeat the subtotal. An ordinary
+ * WooCommerce product may have an editable quantity, and hiding that would leave a
+ * customer no way to change it.
+ */
+add_filter( 'woocommerce_cart_item_class', function( $class, $cart_item ) {
+    if ( isset( $cart_item['pps_metadata'] ) ) $class .= ' pps-line';
+    return $class;
+}, 10, 2 );
+
+add_filter( 'body_class', function( $classes ) {
+    if ( function_exists( 'is_cart' ) && ( is_cart() || is_checkout() ) ) {
+        $classes[] = 'pps-cart';
+    }
+    return $classes;
+} );
+
+/**
+ * Cart/checkout styling.
+ *
+ * Inline rather than a stylesheet file: it is small, it only loads on two pages, and a
+ * separate file would be one more artifact to keep in step with the repo on every
+ * deploy. Scoped under .pps-cart and written only against WooCommerce's own markup, so
+ * it survives a theme change.
+ */
+add_action( 'wp_enqueue_scripts', function () {
+    if ( ! function_exists( 'is_cart' ) || ! ( is_cart() || is_checkout() ) ) return;
+    wp_register_style( 'pps-cart', false, array(), PPS_CALC_VERSION );
+    wp_enqueue_style( 'pps-cart' );
+    wp_add_inline_style( 'pps-cart', <<<'CSS'
+/* PPS cart & checkout skin.
+   Loaded only on cart/checkout, and only styles what WooCommerce's own markup gives us,
+   so nothing here depends on a theme template staying put.
+
+   The default table put the product name in a narrow column beside three mostly-empty
+   money columns, then stacked a dozen spec rows under it — so a single line item ran a
+   full screen tall and the price you were being asked to pay sat somewhere in the middle
+   of it. This turns each line into a card: art, name and specs on the left, money on the
+   right, specs as quiet supporting text rather than a table of their own. */
+
+.pps-cart .woocommerce-cart-form { float: none; width: 100%; }
+.pps-cart .cart-collaterals { float: none; width: 100%; }
+
+@media (min-width: 981px) {
+  .pps-cart .woocommerce > .woocommerce-cart-form,
+  .pps-cart form.woocommerce-cart-form { float: left; width: calc(100% - 380px); }
+  .pps-cart .cart-collaterals { float: right; width: 348px; }
+}
+
+/* ── The line-item table, rebuilt as cards ───────────────────────────────── */
+.pps-cart table.cart,
+.pps-cart table.shop_table.cart {
+  border: 0; background: none; border-collapse: separate; border-spacing: 0 12px;
+}
+.pps-cart table.cart thead { display: none; }   /* column headers mean nothing once rows are cards */
+
+.pps-cart table.cart tr.cart_item {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto 1fr;
+  /* Rows on the right so remove, unit price, quantity and subtotal stack in the corner.
+     WooCommerce gives us no wrapper to put them in, so the grid does the stacking.
+     Empty rows collapse, so a line that hides price and quantity loses the gap too. */
+  grid-template-areas:
+    "thumb name remove"
+    "thumb name price"
+    "thumb name qty"
+    "thumb name money";
+  align-items: start;
+  gap: 0 18px;
+  background: #fff;
+  border: 1px solid #e6e9ee;
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+.pps-cart table.cart tr.cart_item > td {
+  border: 0; padding: 0; background: none; vertical-align: top;
+}
+
+.pps-cart tr.cart_item td.product-thumbnail { grid-area: thumb; }
+.pps-cart tr.cart_item td.product-thumbnail img {
+  width: 76px; height: auto; border-radius: 8px; display: block;
+  border: 1px solid #eef1f5;
+}
+.pps-cart tr.cart_item td.product-name { grid-area: name; min-width: 0; }
+
+.pps-cart tr.cart_item td.product-name > a:first-child {
+  display: block; font-size: 17px; font-weight: 700; line-height: 1.25;
+  color: #111827; text-decoration: none; margin-bottom: 2px;
+}
+.pps-cart tr.cart_item td.product-name > a:first-child:hover { color: #007eff; }
+
+/* Money reads as one right-aligned stack instead of three columns to scan across. */
+.pps-cart tr.cart_item td.product-price { grid-area: price; justify-self: end;
+  font-size: 12.5px; color: #6b7280; }
+.pps-cart tr.cart_item td.product-quantity { grid-area: qty; justify-self: end;
+  font-size: 12.5px; color: #6b7280; margin-top: 2px; }
+
+/* A calculator line always has quantity 1 — the real quantity lives inside the spec —
+   so unit price and quantity just repeat the subtotal. Hidden for those lines ONLY:
+   an ordinary WooCommerce product may have an editable quantity box, and hiding that
+   would leave no way to change it. */
+.pps-cart tr.cart_item.pps-line td.product-price,
+.pps-cart tr.cart_item.pps-line td.product-quantity { display: none; }
+.pps-cart tr.cart_item td.product-subtotal {
+  grid-area: money; justify-self: end; align-self: start;
+  font-size: 19px; font-weight: 800; color: #111827; white-space: nowrap; padding-left: 12px;
+}
+
+/* Remove sits as a quiet ✕ in the corner rather than its own table column. */
+.pps-cart tr.cart_item td.product-remove {
+  grid-area: remove; justify-self: end; align-self: start; margin-bottom: 8px;
+}
+.pps-cart tr.cart_item td.product-remove a.remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  color: #9aa4b2 !important; background: #f3f5f8 !important;
+  font-size: 15px; line-height: 1; text-decoration: none;
+}
+.pps-cart tr.cart_item td.product-remove a.remove:hover {
+  color: #fff !important; background: #ef4444 !important;
+}
+
+/* ── Specs: supporting detail, not a second table ────────────────────────── */
+.pps-cart tr.cart_item dl.variation {
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px; margin: 8px 0 0; font-size: 12.5px; line-height: 1.5;
+}
+.pps-cart tr.cart_item dl.variation dt {
+  margin: 0; font-weight: 600; color: #8a94a3; white-space: nowrap;
+}
+.pps-cart tr.cart_item dl.variation dd { margin: 0; color: #4b5563; min-width: 0; }
+.pps-cart tr.cart_item dl.variation dd p { margin: 0; }
+
+.pps-cart .pps-edit-specs {
+  display: inline-block; margin: 6px 0 2px; padding: 3px 10px;
+  font-size: 11.5px; font-weight: 600; line-height: 1.6;
+  color: #007eff; background: #eff6ff; border: 1px solid #cfe4ff;
+  border-radius: 999px; text-decoration: none;
+}
+.pps-cart .pps-edit-specs:hover { background: #dbeafe; }
+
+/* Update cart row */
+.pps-cart table.cart td.actions {
+  display: block; border: 0; background: none; padding: 4px 0 0; text-align: right;
+}
+
+/* ── Totals card ─────────────────────────────────────────────────────────── */
+.pps-cart .cart_totals {
+  background: #fff; border: 1px solid #e6e9ee; border-radius: 14px;
+  padding: 20px; box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+.pps-cart .cart_totals > h2 {
+  font-size: 15px; font-weight: 700; letter-spacing: .02em;
+  margin: 0 0 14px; padding: 0; border: 0; color: #111827;
+}
+.pps-cart .cart_totals table { border: 0; margin: 0; width: 100%; }
+.pps-cart .cart_totals table th,
+.pps-cart .cart_totals table td {
+  border: 0; border-bottom: 1px solid #f0f2f5; padding: 9px 0;
+  font-size: 13.5px; background: none;
+}
+.pps-cart .cart_totals table th { font-weight: 600; color: #6b7280; text-align: left; }
+.pps-cart .cart_totals table td { text-align: right; color: #111827; }
+.pps-cart .cart_totals tr.cart-discount th,
+.pps-cart .cart_totals tr.cart-discount td { color: #16a34a; }
+.pps-cart .cart_totals tr.order-total th,
+.pps-cart .cart_totals tr.order-total td {
+  border-bottom: 0; padding-top: 13px; font-size: 17px; font-weight: 800; color: #111827;
+}
+.pps-cart .cart_totals .woocommerce-remove-coupon { font-size: 11.5px; }
+
+.pps-cart .wc-proceed-to-checkout { padding: 14px 0 0; }
+.pps-cart .wc-proceed-to-checkout a.checkout-button,
+.pps-cart .wc-proceed-to-checkout .button {
+  display: block; width: 100%; box-sizing: border-box; text-align: center;
+  padding: 14px 16px; border-radius: 10px;
+  font-size: 15px; font-weight: 700; letter-spacing: .01em;
+}
+
+/* ── Phones: the card becomes two rows, money under the name ─────────────── */
+@media (max-width: 640px) {
+  .pps-cart table.cart tr.cart_item {
+    grid-template-columns: 60px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "thumb name remove"
+      "price qty  qty"
+      "money money money";
+    padding: 14px 15px; gap: 0 14px;
+  }
+  .pps-cart tr.cart_item td.product-thumbnail img { width: 60px; }
+  .pps-cart tr.cart_item td.product-subtotal {
+    text-align: left; margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid #f0f2f5;
+  }
+  .pps-cart tr.cart_item td.product-subtotal { justify-self: start; }
+  .pps-cart tr.cart_item dl.variation { grid-template-columns: 1fr; gap: 0; }
+  .pps-cart tr.cart_item dl.variation dt { margin-top: 6px; }
+}
+CSS
+    );
+}, 20 );
 
 // ═══════════════════════════════════════════════════════════════
 // CART: EDIT SPECS LINK
@@ -1946,17 +2184,49 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         $days     = intval( $full['days'] ?? $biz_days );
         $sets_ct  = count( $sets );
 
-        $spec = implode( ' | ', array(
-            $size,
-            $totalQty . 'qty',
-            $totalPg . 'pg',
-            $sets_ct . ( $sets_ct === 1 ? 'set' : 'sets' ),
-            $iPaper,
-            $iColor,
-            $proof,
-            $rush,
-            $days . 'days',
-        ) );
+        // Cover stock and colour are priced and printed separately from the inside, so a
+        // spec that names only the inside paper is a spec production cannot work from.
+        $cPaper = is_array( $full['coverPaper'] ?? null ) ? ( $full['coverPaper']['label'] ?? '' ) : '';
+        $cColor = ( $full['coverColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
+        $cover  = ( ( $full['coverMode'] ?? '' ) === 'same' || $cPaper === '' )
+            ? 'SELF-COVER'
+            : 'COVER: ' . $cPaper . '/' . $cColor;
+
+        // Finishing choices live in the metadata as numeric config values, not labels —
+        // coating 750 means nothing on a job ticket. buildSummary() has already resolved
+        // every one of them to the words the customer chose, so take them from there:
+        // the labelled lines are facts we already have, the rest are the add-ons.
+        $addons = array();
+        $seen_headline = false;
+        foreach ( array_filter( array_map( 'trim', explode( "\n", (string) ( $values['pps_summary'] ?? '' ) ) ) ) as $line ) {
+            if ( strpos( $line, ':' ) !== false ) continue;   // Inside:/Cover:/Rush:/Ship to:
+            if ( ! $seen_headline ) { $seen_headline = true; continue; }  // size · qty · pages
+            $addons[] = $line;
+        }
+
+        $ship = trim( (string) ( $full['shipState'] ?? '' ) . ' ' . (string) ( $full['shipZip'] ?? '' ) );
+        $job  = isset( $sets[0]['name'] ) ? trim( (string) $sets[0]['name'] ) : '';
+
+        $spec_parts = array_merge(
+            array(
+                $size,
+                $totalQty . 'qty',
+                $totalPg . 'pg',
+                $sets_ct . ( $sets_ct === 1 ? 'set' : 'sets' ),
+                'INSIDE: ' . $iPaper . '/' . $iColor,
+                $cover,
+            ),
+            $addons,
+            array(
+                $proof,
+                $rush,
+                $days . 'days',
+            )
+        );
+        if ( $ship !== '' ) $spec_parts[] = 'SHIP: ' . $ship;
+        if ( $job !== '' )  $spec_parts[] = 'JOB: ' . $job;
+
+        $spec = implode( ' | ', array_filter( $spec_parts, static function( $p ) { return trim( (string) $p ) !== ''; } ) );
         $item->add_meta_data( 'PPS-Spec', $spec, true );
 
         // Production start date — distinct label for Missive rule parsing
@@ -1966,6 +2236,51 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         }
     }
 }, 10, 4 );
+
+// ═══════════════════════════════════════════════════════════════
+// ORDER: KEEP THE PRODUCTION FIELDS OFF THE CUSTOMER'S COPY
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * PPS-Spec and PPS-Production-Start have to be visible item meta — Missive parses them
+ * out of the staff notification, and an underscore-prefixed key never renders. The cost
+ * of that was a customer receipt ending in two lines of job-ticket shorthand and an
+ * internal start date, which reads as a system leaking its guts.
+ *
+ * So: keep them wherever staff look, strip them wherever the customer does. Admin
+ * screens and the admin notification keep everything; the front end — emailed receipt,
+ * order-received page, My Account — sees only what it should.
+ *
+ * `Preset` goes too. It is an analytics slug, meaningless to a customer.
+ */
+function pps_internal_item_meta_keys() {
+    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset' );
+}
+
+// WooCommerce renders both notifications through the same meta accessor, so the filter
+// cannot tell them apart on its own. These two bracket the order table and record which
+// audience is being written for.
+add_action( 'woocommerce_email_before_order_table', function( $order, $sent_to_admin ) {
+    $GLOBALS['pps_email_sent_to_admin'] = (bool) $sent_to_admin;
+}, 1, 2 );
+add_action( 'woocommerce_email_after_order_table', function() {
+    unset( $GLOBALS['pps_email_sent_to_admin'] );
+}, 99 );
+
+add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatted, $item ) {
+    if ( ! is_array( $formatted ) ) return $formatted;
+
+    $staff = is_admin() || ! empty( $GLOBALS['pps_email_sent_to_admin'] );
+    if ( $staff ) return $formatted;
+
+    $internal = pps_internal_item_meta_keys();
+    foreach ( $formatted as $id => $meta ) {
+        if ( isset( $meta->key ) && in_array( $meta->key, $internal, true ) ) {
+            unset( $formatted[ $id ] );
+        }
+    }
+    return $formatted;
+}, 10, 2 );
 
 // ═══════════════════════════════════════════════════════════════
 // ORDER: LIFT THE CALCULATOR'S SHIP-TO ONTO THE ORDER ITSELF

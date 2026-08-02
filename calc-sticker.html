@@ -2039,7 +2039,7 @@ function buildSummary(config, result) {
 
   // Delivery
   if (config.needByDate && sh.rushCost > 0) {
-    lines.push(`Rush: ${sh.bizDaysToDate} business days · ${sh.rushMultiplier.toFixed(2)}×`);
+    lines.push(`Rush: ${sh.bizDaysToDate} business days`);
   } else {
     lines.push(`Standard delivery: ${sh.freeDeliveryBizDays} business days`);
   }
