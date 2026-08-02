@@ -957,7 +957,7 @@ function Sel({label,value,onChange,children,disabled,note,badge}){
 function TxtNum({label,value,onChange,min=1,max=99999}){
   const[raw,setRaw]=useState(String(value));
   useEffect(()=>setRaw(String(value)),[value]);
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);/* Commit ANY parsed number, in range or not. Committing only in-range values left the state holding the previous number while the field showed the new one, so a short edge typed as 0 kept feeding 4 to the preview and the chip. Out of range now reaches calculate(), which rejects it and disables the order — a visible error beats a silent disagreement. onBlur still clamps. */if(!isNaN(v))onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
 }
 
 function Pil({label,options,value,onChange,disabled,badge}){
