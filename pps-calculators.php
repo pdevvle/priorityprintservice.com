@@ -2641,6 +2641,13 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
  * Billing is left alone — that is the cardholder's address and frequently not the
  * delivery one, which is the whole reason these are separate fields.
  *
+ * Side effect worth knowing: for a logged-in customer, WC_Customer::save() writes
+ * through to their saved account shipping address. That is what WooCommerce itself does
+ * with an address typed at checkout, and it is what makes the block checkout (a separate
+ * request reading WC()->customer) agree with the classic one. If it should instead be
+ * scoped to this cart only, drop the save() and prefill via woocommerce_checkout_get_value
+ * — that covers classic checkout but not blocks.
+ *
  * @param string $metadata_json The line item's pps_metadata, as posted.
  * @return bool True when the session was updated.
  */
