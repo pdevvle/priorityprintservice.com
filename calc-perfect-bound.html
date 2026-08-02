@@ -1275,8 +1275,21 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
   const hasRush=sh&&sh.rushCost>0;
   const availRange=sh?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):String(days);
-  const deliveryDate=sh?((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate):null;
-
+  // A date the customer picked is an instruction, not an estimate, so it wins the
+  // availability display. This used to be conditional and got it wrong two ways: the
+  // modern draft fell back to the earliest-possible placeholder whenever no address
+  // had been entered yet, and the rest honoured a picked date only when it triggered
+  // a rush charge. Either way somebody who chose Aug 14 was told "as soon as Aug 7".
+  // sh.needByFmt is non-null exactly when a picked date is valid and not too soon, so
+  // it is the whole condition.
+  // Compared against the free date, not merely checked for existence: four of these
+  // calculators pre-fill the date field with the free delivery date as a convenience,
+  // so "a date is set" is the default state and would make every quote read as a
+  // promise. A date that DIFFERS from the free one is the customer actually asking
+  // for something.
+  const requestedDate = sh && sh.needByFmt && sh.needByFmt !== sh.freeDeliveryDate
+    ? sh.needByFmt : null;
+  const deliveryDate = sh?(requestedDate || ((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate)) : null;
   const ti=result.ti||{};
   const _factors=[];
   if(ti.coverPaper>0)_factors.push("paper lead time");
@@ -1306,7 +1319,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
             {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
-            {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],[hasRush?"Delivery":"Avail.",deliveryDate||availRange+" days"]].map(([l,v],i)=>(
+            {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],[(requestedDate||hasRush)?"Delivery":"Avail.",deliveryDate||availRange+" days"]].map(([l,v],i)=>(
               <div key={i} style={{textAlign:"center"}}>
                 <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",opacity:.7}}>{l}</div>
                 <div style={{fontSize:13,fontWeight:700}}>{v}</div>
@@ -1357,7 +1370,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
           </div>
         ))}
         <div style={{flex:1,padding:"11px 8px",textAlign:"center",background:_hasExtra?"#fffbeb":"transparent",transition:"background .3s"}}>
-          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>{hasRush?"Delivery":"Availability"}</div>
+          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>{(requestedDate||hasRush)?"Delivery by":"Availability"}</div>
           <div style={{fontSize:13.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{deliveryDate||availRange+" days"}</div>
         </div>
       </div>
@@ -5088,7 +5101,15 @@ function App(){
   useEffect(()=>{if(r.coatOK===false)setCoating(0)},[r.coatOK]);
   useEffect(()=>{if(r.vividOK===false)setVividPrint(false)},[r.vividOK]);
   useEffect(()=>{if(r.q100===false)setBundling(0)},[r.q100]);
-  useEffect(()=>{if(r.shipping?.freeDeliveryYMD)setNeedByDate(r.shipping.freeDeliveryYMD)},[r.shipping?.freeDeliveryYMD]);
+  // The date field is pre-filled with the free delivery date so it never sits empty.
+  // That has to stop the moment the customer picks their own, or every recalculation
+  // that moves the free date — a quantity change, a different paper — silently threw
+  // their choice away and put the default back.
+  const needByTouched = useRef(false);
+  useEffect(()=>{
+    if(needByTouched.current) return;
+    if(r.shipping?.freeDeliveryYMD) setNeedByDate(r.shipping.freeDeliveryYMD);
+  },[r.shipping?.freeDeliveryYMD]);
   // NOTE: hardcopy proof is NOT auto-removed — always available as option
   const upSet=(i,p)=>setSets(s=>s.map((x,j)=>{
     if(j!==i) return x;
@@ -5665,7 +5686,7 @@ function App(){
 
               <div style={ST.f}>
                 <label style={ST.lbl}>Need It Sooner? Pick a Date</label>
-                <DatePicker value={needByDate} onChange={setNeedByDate}
+                <DatePicker value={needByDate} onChange={v=>{needByTouched.current=true;setNeedByDate(v);}}
                   earliestDate={r.shipping?.earliestYMD} freeDate={r.shipping?.freeDeliveryYMD}/>
                 {needByDate&&r.shipping?.needByPast&&<p style={ST.err}>This date has passed — please select a future date</p>}
                 {needByDate&&!r.shipping?.needByValid&&!r.shipping?.needByPast&&<p style={ST.err}>Date must be in the future</p>}
