@@ -1959,21 +1959,6 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         ) );
         $item->add_meta_data( 'PPS-Spec', $spec, true );
 
-        // Shipment estimate, on the line item where the spec already travels.
-        //
-        // WooCommerce has no weight field on an order or an order item — weight is
-        // always derived from the product, and calculator products are virtual and
-        // weightless by design. So this is the only place the figure can ride, and it
-        // is a labelled line rather than a hidden key because the point is for a person
-        // buying a label to be able to read it.
-        $wt   = (float) ( $full['estWeightLb'] ?? 0 );
-        $ctns = (int) ( $full['estCartons'] ?? 0 );
-        if ( $wt > 0 ) {
-            $item->add_meta_data( 'PPS-Ship-Est', sprintf(
-                '%.2f lb | %d carton%s', $wt, max( 1, $ctns ), max( 1, $ctns ) === 1 ? '' : 's'
-            ), true );
-        }
-
         // Production start date — distinct label for Missive rule parsing
         $prodStart = $full['productionStartDate'] ?? '';
         if ( $prodStart ) {
@@ -2060,15 +2045,15 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
         );
     }
 
+    // Internal only, and deliberately underscore-prefixed: this is an operator's
+    // off-the-cuff reference, not a figure to publish. It stays out of the customer's
+    // receipt and off the order screen's line-item rows; the PPS Calculator Data meta
+    // box renders it where someone packing the job will actually look.
+    //
+    // Summed across every calculator line, because two booklet lines ship as one
+    // consignment rather than two.
     if ( $weight > 0 )  $order->update_meta_data( '_pps_est_weight_lb', round( $weight, 2 ) );
     if ( $cartons > 0 ) $order->update_meta_data( '_pps_est_cartons', $cartons );
-
-    // The same two figures under unprefixed keys. WooCommerce treats a leading
-    // underscore as protected and REST clients routinely skip those, so these are the
-    // copies a fulfilment integration can actually map to a parcel. Order-level meta is
-    // not rendered to the customer, so this costs nothing on the receipt.
-    if ( $weight > 0 )  $order->update_meta_data( 'pps_ship_weight_lb', round( $weight, 2 ) );
-    if ( $cartons > 0 ) $order->update_meta_data( 'pps_ship_cartons', $cartons );
 
     if ( $addr === null ) {
         if ( $weight > 0 || $cartons > 0 ) $order->save();
@@ -2166,6 +2151,20 @@ function pps_order_meta_box( $post_or_order ) {
         }
         if ( $rush && floatval( $rush ) > 0 ) {
             echo '<p style="margin:0 0 6px"><strong>Rush:</strong> $' . number_format( floatval( $rush ), 2 ) . '</p>';
+        }
+
+        // Shipment estimate — an operator's reference figure, nothing more. The
+        // calculator's own weight model produced it at quote time; it has never been on
+        // a scale. Labelled "est." and never surfaced to the customer, so nobody buys
+        // postage against it without weighing the job first.
+        $ship_meta = json_decode( (string) $metadata_json, true );
+        if ( is_array( $ship_meta ) && (float) ( $ship_meta['estWeightLb'] ?? 0 ) > 0 ) {
+            $w = (float) $ship_meta['estWeightLb'];
+            $c = max( 1, (int) ( $ship_meta['estCartons'] ?? 1 ) );
+            echo '<p style="margin:0 0 6px"><strong>Shipment (est.):</strong> '
+               . esc_html( number_format( $w, 2 ) ) . ' lb · '
+               . esc_html( $c ) . ' carton' . ( $c === 1 ? '' : 's' )
+               . ' <span style="color:#666;font-weight:400">— calculated, not weighed</span></p>';
         }
 
         // Artwork: Drive-aware renderer if available, else local fallback
