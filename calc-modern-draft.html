@@ -238,7 +238,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · ADDRGATE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · CPNFIELD</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -5595,7 +5595,15 @@ function App(){
   // Rendered in the desktop rail and again in the mobile form. Defined once so the two
   // cannot drift — the first version lived only in the rail, which meant a customer on
   // a phone had no way to enter a discount code at all.
-  const DiscountField=()=>(
+  //
+  // A FUNCTION THAT RETURNS JSX, NOT A COMPONENT, and it must stay that way. Declared
+  // inside this component, every render makes a new function identity; used as
+  // <DiscountField/> that is a new element *type* each time, so React unmounts the old
+  // subtree and mounts a fresh one. The <input> DOM node is destroyed on every
+  // keystroke, taking focus with it — the field accepted exactly one character and then
+  // dropped focus to <body>. Called as {discountField()} the JSX becomes part of this
+  // component's own tree and reconciles against the previous render normally.
+  const discountField=()=>(
     <div>
       {coupon ? (
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"9px 11px",borderRadius:9,
@@ -6342,7 +6350,7 @@ function App(){
             </>}
           </Sec>
 
-          {mob&&<div style={{...ST.card,padding:"12px 14px"}}><DiscountField/></div>}
+          {mob&&<div style={{...ST.card,padding:"12px 14px"}}>{discountField()}</div>}
 
         </div>
         {/* Sticky quote rail — the price and CTA stay in view while the job is built,
@@ -6362,7 +6370,7 @@ function App(){
             </div>
           )}
           {/* Discount code — one definition, mounted here and in the mobile flow. */}
-          <div style={{marginTop:10}}><DiscountField/></div>
+          <div style={{marginTop:10}}>{discountField()}</div>
           {/* Secondary action, directly under the CTA: visible without scrolling past
               the pricing table, which is where it used to sit. */}
           <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}}
