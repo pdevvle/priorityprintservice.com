@@ -1955,6 +1955,148 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
 }, 10, 4 );
 
 // ═══════════════════════════════════════════════════════════════
+// ORDER: LIFT THE CALCULATOR'S SHIP-TO ONTO THE ORDER ITSELF
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Copy the calculator's delivery address and shipment estimate onto the WC order.
+ *
+ * Every calculator product is a WooCommerce *virtual* product (owner rule 2026-07-19),
+ * which is what keeps Woo's own shipping machinery — and every coexisting shipping
+ * plugin — out of the cart. The side effect is that Woo decides the cart needs no
+ * shipping, so checkout never renders the shipping address fields and the order ends up
+ * carrying a billing address only.
+ *
+ * That matters well beyond WooCommerce's own screens. Anything reading the order over
+ * the REST API — Shippo's store connection, packing slips, anything added later — sees
+ * an empty shipping address and falls back to billing, which for a card payment is the
+ * cardholder's address and frequently not where the job goes.
+ *
+ * The address the customer actually typed is already on the order: the calculator sends
+ * it in `shipAddr` and it is stored in the line item's `_pps_metadata`. This lifts it
+ * into the fields those tools read, along with the predicted weight and carton count,
+ * which a virtual line item has nowhere else to put.
+ *
+ * Reads from the ORDER, not the cart, so classic checkout, block checkout and an order
+ * built in wp-admin all go through one path.
+ *
+ * @param WC_Order|int $order_or_id
+ */
+function pps_apply_calculator_shipping_address( $order_or_id ) {
+    $order = is_a( $order_or_id, 'WC_Order' ) ? $order_or_id : wc_get_order( $order_or_id );
+    if ( ! $order ) return false;
+
+    // A mixed cart containing a genuinely shippable product has a real WooCommerce
+    // shipping address, entered at checkout. That one is authoritative — never
+    // overwrite it with a calculator's copy.
+    if ( trim( (string) $order->get_shipping_address_1() ) !== '' ) return false;
+
+    $addr = null;
+    $weight = 0.0;
+    $cartons = 0;
+
+    foreach ( $order->get_items() as $item ) {
+        $raw = $item->get_meta( '_pps_metadata' );
+        if ( ! $raw ) continue;
+        $meta = json_decode( (string) $raw, true );
+        if ( ! is_array( $meta ) ) continue;
+
+        // Weight and cartons accumulate across every calculator line on the order —
+        // two booklet lines ship as one consignment, not two.
+        $weight  += (float) ( $meta['estWeightLb'] ?? 0 );
+        $cartons += (int) ( $meta['estCartons'] ?? 0 );
+
+        if ( $addr !== null ) continue;   // first usable address wins
+
+        $a = isset( $meta['shipAddr'] ) && is_array( $meta['shipAddr'] ) ? $meta['shipAddr'] : array();
+        // State lives alongside shipAddr rather than inside it — the calculator collects
+        // it separately because it drives the transit map. ZIP is mirrored in both.
+        $state  = trim( (string) ( $a['state'] ?? $meta['shipState'] ?? '' ) );
+        $zip    = trim( (string) ( $a['zip'] ?? $meta['shipZip'] ?? '' ) );
+        $street = trim( (string) ( $a['street1'] ?? '' ) );
+        $city   = trim( (string) ( $a['city'] ?? '' ) );
+
+        // Partial is worse than absent: half an address in the shipping fields looks
+        // authoritative to a fulfilment tool and silently ships to the wrong place,
+        // whereas empty fields fall back to billing, which is at least a whole address.
+        if ( $street === '' || $city === '' || $state === '' || $zip === '' ) continue;
+
+        $addr = array(
+            'street1' => $street,
+            'street2' => trim( (string) ( $a['street2'] ?? '' ) ),
+            'city'    => $city,
+            'state'   => $state,
+            'zip'     => $zip,
+            'company' => trim( (string) ( $a['company'] ?? '' ) ),
+            'name'    => trim( (string) ( $a['name'] ?? '' ) ),
+        );
+    }
+
+    if ( $weight > 0 )  $order->update_meta_data( '_pps_est_weight_lb', round( $weight, 2 ) );
+    if ( $cartons > 0 ) $order->update_meta_data( '_pps_est_cartons', $cartons );
+
+    if ( $addr === null ) {
+        if ( $weight > 0 || $cartons > 0 ) $order->save();
+        return false;
+    }
+
+    // The form asks for one "Full Name" because that is how people write an address.
+    // Split on the last space so "Mary Anne Van Der Berg" keeps its surname intact;
+    // fall back to the billing name when the field was left empty.
+    $name = $addr['name'];
+    if ( $name === '' ) {
+        $first = $order->get_billing_first_name();
+        $last  = $order->get_billing_last_name();
+    } elseif ( strpos( $name, ' ' ) === false ) {
+        $first = $name;
+        $last  = '';
+    } else {
+        $first = trim( substr( $name, 0, strrpos( $name, ' ' ) ) );
+        $last  = trim( substr( $name, strrpos( $name, ' ' ) + 1 ) );
+    }
+
+    $order->set_shipping_first_name( $first );
+    $order->set_shipping_last_name( $last );
+    $order->set_shipping_company( $addr['company'] );
+    $order->set_shipping_address_1( $addr['street1'] );
+    $order->set_shipping_address_2( $addr['street2'] );
+    $order->set_shipping_city( $addr['city'] );
+    $order->set_shipping_state( $addr['state'] );
+    $order->set_shipping_postcode( $addr['zip'] );
+    // The calculator has no country field — it prices US ground transit only. Stated
+    // here rather than left blank, because a blank country makes an address unrateable.
+    $order->set_shipping_country( 'US' );
+
+    // WC 8.0+ carries a shipping phone; older versions ignore the setter's absence.
+    if ( method_exists( $order, 'set_shipping_phone' ) ) {
+        $existing = $order->get_shipping_phone();
+        if ( trim( (string) $existing ) === '' ) $order->set_shipping_phone( $order->get_billing_phone() );
+    }
+
+    // Auditable: whoever picks this order up in Shippo can see where the address came
+    // from, rather than wondering why it differs from billing.
+    $order->add_order_note( sprintf(
+        'Delivery address taken from the calculator: %s, %s %s %s.%s',
+        $addr['street1'], $addr['city'], $addr['state'], $addr['zip'],
+        $weight > 0 ? sprintf( ' Estimated %.2f lb in %d carton(s).', $weight, max( 1, $cartons ) ) : ''
+    ) );
+
+    $order->save();
+    return true;
+}
+
+// Classic checkout, block checkout, and the admin "create order" screen. Each fires
+// once the line items exist, which is what this reads from.
+add_action( 'woocommerce_checkout_order_processed', 'pps_apply_calculator_shipping_address', 20, 1 );
+add_action( 'woocommerce_store_api_checkout_order_processed', 'pps_apply_calculator_shipping_address', 20, 1 );
+
+// Safety net. If an order reaches processing without a shipping address — a gateway
+// that builds the order down another path, a manual order, a checkout plugin we have
+// not met — fill it in before anything downstream imports it.
+add_action( 'woocommerce_order_status_processing', 'pps_apply_calculator_shipping_address', 5, 1 );
+add_action( 'woocommerce_order_status_on-hold',    'pps_apply_calculator_shipping_address', 5, 1 );
+
+// ═══════════════════════════════════════════════════════════════
 // ADMIN ORDER: META BOX
 // ═══════════════════════════════════════════════════════════════
 
