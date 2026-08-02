@@ -1730,9 +1730,19 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'var opts=w.querySelectorAll(\'[data-step="\'+step+\'"] .pps-wiz-opt\');'
           .   'opts.forEach(function(o){o.classList.toggle("is-selected",o.dataset.val===val)});'
           .   'var si=steps.indexOf(step);'
+          // A step whose data-step is not in the steps array means the markup and this
+          // script disagree. Without this guard si is -1, which hides every step from
+          // index 1 and then re-shows step 0 -- the wizard highlights your choice and
+          // then refuses to advance, forever. Bail instead of dismantling the page.
+          .   'if(si<0){updatePrev();updateActions();return}'
           .   'for(var i=si+2;i<steps.length;i++){hide(steps[i]);delete state[steps[i]]}'
-          .   'if(step==="papertype")filterPapers(val);'
-          .   'if(step==="sizetype")filterSizes(val);'
+          // The step immediately after keeps its DOM so it can be re-shown, and the loop
+          // above deliberately skips it -- but the filters below strip its highlight. Its
+          // state has to go with the highlight, or the summary bar and the quote URL
+          // carry a size nothing on screen shows as chosen. Named rather than
+          // steps[si+1], so this stays correct if the step order ever changes.
+          .   'if(step==="papertype"){delete state.paper;filterPapers(val)}'
+          .   'if(step==="sizetype"){delete state.size;filterSizes(val)}'
           .   'if(si<steps.length-1)setTimeout(function(){show(steps[si+1])},150);'
           .   'updatePrev();updateActions();'
           . '}'
