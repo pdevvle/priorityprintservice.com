@@ -213,6 +213,12 @@ function pps_assistant_session_is_human( array $session ) {
  * escalation fails silently.
  */
 function pps_assistant_staff_email() {
+    // Defer to the shared resolver when it is loaded — pps-calculators.php requires
+    // pps-intake.php, so on this site it always is. It checks Central Config FIRST, which
+    // this function used to skip: with question_recipient_email set there, escalations
+    // went somewhere different from every other form on the site.
+    if ( function_exists( 'pps_intake_recipient' ) ) return pps_intake_recipient();
+
     $cand = get_option( 'pps_question_recipient', '' );
     return is_email( $cand ) ? $cand : get_option( 'admin_email' );
 }

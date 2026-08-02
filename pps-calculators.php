@@ -90,6 +90,14 @@ if ( file_exists( PPS_CALC_DIR . 'pps-imposition.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-imposition.php';
 }
 
+// Loaded here as well as being separately activatable. The category wizard in
+// pps-term-shortcodes.php submits through the shared intake pipeline, so a deactivated
+// PPS Intake would stop recording quote requests from every category page. Its own
+// co-load guard makes the double-load harmless.
+if ( file_exists( PPS_CALC_DIR . 'pps-intake.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-intake.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════

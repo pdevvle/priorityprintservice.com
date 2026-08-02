@@ -40,7 +40,14 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'PPS_INTAKE_VERSION', '0.1.0' );
+// Co-load guard, same pattern as pps-assistant.php. This file is BOTH an activatable
+// plugin and a module required by pps-calculators.php, because the category wizard in
+// pps-term-shortcodes.php now submits through it — and a wizard that stops recording
+// quote requests because someone deactivated a plugin would be a silent lead leak.
+// Loading it from the calculators plugin also means the shortcodes work without anyone
+// having to remember to activate anything.
+if ( defined( 'PPS_INTAKE_VERSION' ) ) return;
+define( 'PPS_INTAKE_VERSION', '0.2.0' );
 define( 'PPS_INTAKE_MAX_FILE', 20 * 1024 * 1024 );   // per file
 define( 'PPS_INTAKE_MAX_TOTAL', 40 * 1024 * 1024 );  // per submission
 
@@ -139,6 +146,51 @@ function pps_intake_forms() {
             ),
         ),
 
+        // Submitted by the category wizard in pps-term-shortcodes.php, which renders its own
+        // stepped UI. Defined here so the record, the notification and the customer
+        // confirmation are byte-identical to the standalone forms. 'internal' keeps the
+        // shortcode from trying to render something that has no standalone markup.
+        'wizard' => array(
+            'title'    => 'Category wizard',
+            'source'   => 'wizard',
+            'subject'  => 'Quote request',
+            'internal' => true,
+            'uploads'  => true,
+            'confirm'  => 'Thanks — we have your request and will be in touch shortly.',
+            'fields'   => array(
+                'name'     => $name,
+                'email'    => $email,
+                'phone'    => array( 'type' => 'tel', 'label' => 'Phone number', 'required' => true ),
+                'callback' => array( 'type' => 'checkbox', 'required' => false,
+                                     'label' => 'Are you requesting a callback?',
+                                     'box'   => 'Yes, I think I need a phone call.' ),
+                'message'  => array( 'type' => 'textarea', 'label' => 'Additional details',
+                                     'required' => false, 'maxlength' => 4000 ),
+            ),
+        ),
+
+        // Same shape, different label. A lead wizard runs where no calculator exists at all
+        // (signs, business cards), so the request is the whole transaction rather than a
+        // question about a price the customer could have got themselves.
+        'lead' => array(
+            'title'    => 'Lead wizard',
+            'source'   => 'lead',
+            'subject'  => 'Quote request',
+            'internal' => true,
+            'uploads'  => true,
+            'confirm'  => 'Thanks — we have your request and will be in touch shortly.',
+            'fields'   => array(
+                'name'     => $name,
+                'email'    => $email,
+                'phone'    => array( 'type' => 'tel', 'label' => 'Phone number', 'required' => true ),
+                'callback' => array( 'type' => 'checkbox', 'required' => false,
+                                     'label' => 'Are you requesting a callback?',
+                                     'box'   => 'Yes, I think I need a phone call.' ),
+                'message'  => array( 'type' => 'textarea', 'label' => 'Additional details',
+                                     'required' => false, 'maxlength' => 4000 ),
+            ),
+        ),
+
         'reorder' => array(
             'title'   => 'Reorder request',
             'source'  => 'reorder-request',
@@ -188,7 +240,8 @@ function pps_intake_forms() {
 add_shortcode( 'pps_intake', function ( $atts ) {
     $atts  = shortcode_atts( array( 'form' => 'support' ), $atts, 'pps_intake' );
     $forms = pps_intake_forms();
-    $key   = isset( $forms[ $atts['form'] ] ) ? $atts['form'] : 'support';
+    $key   = isset( $forms[ $atts['form'] ] ) && empty( $forms[ $atts['form'] ]['internal'] )
+           ? $atts['form'] : 'support';
     $form  = $forms[ $key ];
 
     $anchor = 'pps-intake-' . $key;
@@ -462,7 +515,8 @@ add_action( 'admin_post_pps_intake_submit',        'pps_intake_handle_submit' );
 function pps_intake_handle_submit() {
     $forms = pps_intake_forms();
     $key   = sanitize_key( wp_unslash( $_POST['form'] ?? '' ) );
-    if ( ! isset( $forms[ $key ] ) ) wp_die( 'Unknown form.' );
+    // Internal definitions have no rendered form, so a POST naming one is forged.
+    if ( ! isset( $forms[ $key ] ) || ! empty( $forms[ $key ]['internal'] ) ) wp_die( 'Unknown form.' );
     $form = $forms[ $key ];
 
     // NO NONCE, deliberately. These pages are served from WP Rocket's cache, so a nonce
@@ -618,7 +672,7 @@ function pps_intake_take_uploads() {
  * now the only way to tell submissions apart was a "Lead: " / "Wizard: " string prefix on
  * the calculator label, which is not something to build filtering on.
  */
-function pps_intake_record( $key, array $form, array $values, array $file_urls ) {
+function pps_intake_record( $key, array $form, array $values, array $file_urls, array $extra_meta = array() ) {
     $title = sprintf( '%s — %s', $values['name'] ?? 'Website visitor', $form['title'] );
 
     $post_id = wp_insert_post( array(
@@ -644,11 +698,17 @@ function pps_intake_record( $key, array $form, array $values, array $file_urls )
     if ( ! empty( $values['order_ref'] ) ) update_post_meta( $post_id, '_pps_q_order_ref', $values['order_ref'] );
     if ( $file_urls )                      update_post_meta( $post_id, '_pps_q_files', $file_urls );
 
+    // Caller-owned meta: the category wizard carries a spec summary and a calculator link
+    // that no form field maps to. Written last so a caller can override a default above.
+    foreach ( $extra_meta as $mk => $mv ) {
+        if ( $mv !== '' && $mv !== null ) update_post_meta( $post_id, $mk, $mv );
+    }
+
     return (int) $post_id;
 }
 
 /** Staff notification + customer confirmation. */
-function pps_intake_notify( $key, array $form, array $values, array $file_urls, $post_id ) {
+function pps_intake_notify( $key, array $form, array $values, array $file_urls, $post_id, array $extra_lines = array() ) {
     $to   = pps_intake_recipient();
     $name = (string) ( $values['name'] ?? 'Website visitor' );
     $mail = (string) ( $values['email'] ?? '' );
@@ -665,6 +725,10 @@ function pps_intake_notify( $key, array $form, array $values, array $file_urls, 
         if ( $f['type'] === 'checkbox' ) { $lines[] = $f['label'] . ' Yes'; continue; }
         if ( $f['type'] === 'radio' )    { $lines[] = $f['label'] . ' ' . ( $f['options'][ $v ] ?? $v ); continue; }
         $lines[] = $f['label'] . ': ' . ( $f['type'] === 'textarea' ? "\n" . $v : $v );
+    }
+    if ( $extra_lines ) {
+        $lines[] = '';
+        foreach ( $extra_lines as $l ) $lines[] = $l;
     }
     if ( $file_urls ) {
         $lines[] = '';
