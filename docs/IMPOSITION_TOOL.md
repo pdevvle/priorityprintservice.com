@@ -104,10 +104,17 @@ download the imposed PDF. Useful for testing and one-off jobs.
   custom (from-right / from-bottom) overrides available. The block is always
   clamped so the trim stays inside the printable area; if bleed would fall
   outside it, the tool warns.
-- **Efficient mode** (flats imaging ≥2-up on 13×19): lays the same piece out
-  on **13×27.5**, the multiple expanding to fill the 27″ usable axis (e.g.
-  11×8.5 goes from 2-up to 3-up per pass). Pricing basis stays the 13×19
-  imp — badge and slug show both numbers.
+- **Efficient mode** (flats imaging ≥2-up on 13×19, **and saddle booklets**):
+  lays the same piece out on **13×27.5**, the multiple expanding to fill the
+  27″ usable axis (e.g. 11×8.5 goes from 2-up to 3-up per pass). Pricing basis
+  stays the 13×19 imp — badge and slug show both numbers. For **saddle
+  stitch**, the "piece" is a printer's spread: efficient mode step-and-repeats
+  more identical **signature copies per sheet** on the oversize sheet (e.g. a
+  5.5×8.5 booklet goes 2→3 copies/side), cutting press passes for the same
+  book count. It only fires when 13×27.5 actually holds more copies than the
+  priced 13×19 layout (otherwise it says so and stays on 13×19); duplex
+  registration on the wide sheet is verified by the physical simulator on
+  both flip edges.
 - **Piece patterns** (flats & stickers): Straight / **Head-to-head** (row
   pairs, heads meeting at the shared cut) / **Foot-to-foot** (phase-shifted
   complement) / **Reversal** (alternate columns 180°) / **Reversal

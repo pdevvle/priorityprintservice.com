@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · IMPOSE-V1.5</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-01 · IMPOSE-V1.6</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -394,7 +394,8 @@ function computeSaddleLayout(pw, ph, opts) {
   const { imp, source } = resolveSaddleImp(pw, ph);
   if (imp < 1) throw new Error(`${pw}×${ph}″ pages do not image on any press sheet (imp=${imp})`);
   const spreadW = 2 * pw, spreadH = ph; // spine vertical in spread space
-  let sheet, target;
+  const spL = Math.max(spreadW, spreadH), spS = Math.min(spreadW, spreadH);
+  let sheet, target, efficient = false;
   if (imp >= 2) {
     sheet = SHEETS["13x19"];
     target = Math.floor(imp / 2);
@@ -412,12 +413,29 @@ function computeSaddleLayout(pw, ph, opts) {
   // bleed never manufactures a gutter the operator didn't ask for. The
   // Gutter override still spaces spreads out explicitly when wanted.
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : [0];
-  let grid = bestGridForCount(target, Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet, gutters);
+  let grid = null;
+  // Efficient mode: lay the signature out on the 13×27.5 oversize sheet and
+  // step-and-repeat as many identical signature copies as physically fit —
+  // fewer press passes for the same books. Each cell is a full copy of the
+  // signature (like the flats version, but the "piece" is a printer spread).
+  // Pricing basis stays the priced pages/side; only fires when 27.5 actually
+  // holds MORE copies than the priced 13×19 layout.
+  if (opts && opts.efficient) {
+    const effGrid = bestPhysicalGrid(spL, spS, SHEETS["13x27.5"], gutters);
+    if (effGrid && effGrid.a * effGrid.d > target) {
+      sheet = SHEETS["13x27.5"]; grid = effGrid; efficient = true;
+      const c = effGrid.a * effGrid.d;
+      warnings.push(`Efficient mode: ${c} signature cop${c === 1 ? "y" : "ies"}/side on 13×27.5 (priced ${target} per 13×19-side).`);
+    } else {
+      warnings.push("Efficient 13×27.5 mode fits no additional signature copies for this booklet size — ignored.");
+    }
+  }
+  if (!grid) grid = bestGridForCount(target, spL, spS, sheet, gutters);
   if (!grid) {
     if (!(opts && opts.allowBestFit)) {
       throw new Error(`${target} spread(s) of ${spreadW}×${spreadH}″ (pages ${pw}×${ph}″, priced ${imp}/side${source === "custom" ? ", custom size" : ""}) do not physically fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}. Pricing/production mismatch — enable "allow best physical fit" to place fewer (flagged).`);
     }
-    grid = bestPhysicalGrid(Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet, gutters);
+    grid = bestPhysicalGrid(spL, spS, sheet, gutters);
     if (!grid) throw new Error(`A ${spreadW}×${spreadH}″ spread does not fit on ${sheet.label} at all.`);
     mismatch = true;
     warnings.push(`MISMATCH: placing ${grid.a * grid.d} spread(s)/side but pricing assumed ${target}. Review before printing.`);
@@ -431,7 +449,7 @@ function computeSaddleLayout(pw, ph, opts) {
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
     imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
     pricedImp: imp,                 // pages per side the calculator priced
-    mismatch, warnings,
+    mismatch, efficient, warnings,
     cellW: grid.rotated ? pieceShort : pieceLong,
     cellH: grid.rotated ? pieceLong : pieceShort,
     booklet: {
@@ -1147,7 +1165,7 @@ async function imposeSaddle(artBytes, spec, layout) {
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
     if (i === 0) { const th = inspectPdfThreats(check); if (th.length) issues.push(`output carries active content: ${th.join("; ")}`); }
   });
-  if (!layout.mismatch && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
+  if (!layout.mismatch && !layout.efficient && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
     issues.push(`placed ${layout.imp} pages/side ≠ priced ${layout.pricedImp}`);
   // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that down
   if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && layout.sheet.key === "13x27.5"))
@@ -2298,10 +2316,10 @@ function App() {
                 })}
               </div>
             )}
-            {FLAT_CALCS.includes(calc) && (
+            {(FLAT_CALCS.includes(calc) || isSaddle) && (
               <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 8 }}>
                 <input type="checkbox" checked={efficient} onChange={e => setEfficient(e.target.checked)} style={{ width: "auto" }} />
-                <span>Lay out on 13×27.5 (efficient mode) <span style={{ color: "rgba(255,255,255,.4)" }}>— multiple expands to fill the 27″ axis</span></span>
+                <span>Lay out on 13×27.5 (efficient mode) <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "more signature copies per sheet" : "multiple expands to fill the 27″ axis"}</span></span>
               </label>
             )}
             <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
