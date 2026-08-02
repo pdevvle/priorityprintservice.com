@@ -1863,14 +1863,11 @@ add_action( 'wp_enqueue_scripts', function () {
    of it. This turns each line into a card: art, name and specs on the left, money on the
    right, specs as quiet supporting text rather than a table of their own. */
 
-.pps-cart .woocommerce-cart-form { float: none; width: 100%; }
-.pps-cart .cart-collaterals { float: none; width: 100%; }
-
-@media (min-width: 981px) {
-  .pps-cart .woocommerce > .woocommerce-cart-form,
-  .pps-cart form.woocommerce-cart-form { float: left; width: calc(100% - 380px); }
-  .pps-cart .cart-collaterals { float: right; width: 348px; }
-}
+/* Page layout is left to the theme. An earlier version set float/width on the cart form
+   and the totals column; Astra's own rules won on the real site, so all that achieved
+   was making the mock disagree with production. The card below now sizes itself from
+   whatever width it is given. */
+.pps-cart form.woocommerce-cart-form { container-type: inline-size; }
 
 /* ── The line-item table, rebuilt as cards ───────────────────────────────── */
 .pps-cart table.cart,
@@ -1881,7 +1878,10 @@ add_action( 'wp_enqueue_scripts', function () {
 
 .pps-cart table.cart tr.cart_item {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) auto;
+  /* The name gets a floor. Left as minmax(0,1fr) the auto money track — sized by
+     the quantity input's ~185px default — starved it to 58px in a narrow column,
+     which renders a product name one letter per line. */
+  grid-template-columns: 76px minmax(140px, 1fr) auto;
   grid-template-rows: auto auto auto 1fr;
   /* Rows on the right so remove, unit price, quantity and subtotal stack in the corner.
      WooCommerce gives us no wrapper to put them in, so the grid does the stacking.
@@ -1921,6 +1921,10 @@ add_action( 'wp_enqueue_scripts', function () {
   font-size: 12.5px; color: #6b7280; }
 .pps-cart tr.cart_item td.product-quantity { grid-area: qty; justify-self: end;
   font-size: 12.5px; color: #6b7280; margin-top: 2px; }
+/* A number input defaults to roughly 185px. In an auto-sized grid track that is the
+   whole row's width budget, so it is capped to what a quantity actually needs. */
+.pps-cart tr.cart_item td.product-quantity .qty,
+.pps-cart tr.cart_item td.product-quantity input { width: 64px; max-width: 100%; box-sizing: border-box; }
 
 /* A calculator line always has quantity 1 — the real quantity lives inside the spec —
    so unit price and quantity just repeat the subtotal. Hidden for those lines ONLY:
@@ -1996,6 +2000,23 @@ add_action( 'wp_enqueue_scripts', function () {
 }
 .pps-cart .cart_totals .woocommerce-remove-coupon { font-size: 11.5px; }
 
+/* Shipping methods are a list of choices, not a figure. The blanket right-align on
+   totals cells turned them into a ragged one-word-per-line column. */
+.pps-cart .cart_totals tr.woocommerce-shipping-totals td,
+.pps-cart .cart_totals tr.shipping td { text-align: left; }
+.pps-cart .cart_totals ul#shipping_method {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 8px;
+}
+.pps-cart .cart_totals ul#shipping_method li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px;
+  align-items: start; margin: 0; line-height: 1.4;
+}
+.pps-cart .cart_totals ul#shipping_method li label { margin: 0; font-size: 13px; color: #374151; }
+.pps-cart .cart_totals ul#shipping_method li input { margin: 3px 0 0; }
+.pps-cart .cart_totals .woocommerce-shipping-destination {
+  margin: 10px 0 0; font-size: 12px; color: #6b7280; text-align: left;
+}
+
 .pps-cart .wc-proceed-to-checkout { padding: 14px 0 0; }
 .pps-cart .wc-proceed-to-checkout a.checkout-button,
 .pps-cart .wc-proceed-to-checkout .button {
@@ -2004,7 +2025,31 @@ add_action( 'wp_enqueue_scripts', function () {
   font-size: 15px; font-weight: 700; letter-spacing: .01em;
 }
 
-/* ── Phones: the card becomes two rows, money under the name ─────────────── */
+/* ── Narrow container: the card becomes two rows, money under the name ──────
+   A container query, not a viewport one: the failure that prompted this was a cart
+   form occupying a third of a 1400px page. The viewport was wide; the card was not. */
+@container (max-width: 520px) {
+  .pps-cart table.cart tr.cart_item {
+    grid-template-columns: 60px minmax(0, 1fr) auto;
+    /* Quantity and unit price share one line beneath the name; the line total gets its
+       own full-width row so it is the last thing read, as on the wide card. */
+    grid-template-areas:
+      "thumb name  remove"
+      "thumb qty   price"
+      "money money money";
+    padding: 14px 15px; gap: 0 14px;
+  }
+  .pps-cart tr.cart_item td.product-thumbnail img { width: 60px; }
+  .pps-cart tr.cart_item td.product-quantity { justify-self: start; margin-top: 8px; }
+  .pps-cart tr.cart_item td.product-price { justify-self: end; margin-top: 8px; }
+  .pps-cart tr.cart_item td.product-subtotal {
+    justify-self: start; text-align: left; margin-top: 12px; padding-top: 12px;
+    padding-left: 0; border-top: 1px solid #f0f2f5;
+  }
+  .pps-cart tr.cart_item dl.variation { grid-template-columns: 1fr; gap: 0; }
+  .pps-cart tr.cart_item dl.variation dt { margin-top: 6px; }
+}
+
 @media (max-width: 640px) {
   .pps-cart table.cart tr.cart_item {
     grid-template-columns: 60px minmax(0, 1fr) auto;
