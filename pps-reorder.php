@@ -704,7 +704,13 @@ function pps_handle_single_item_reorder() {
         'item_id'  => $item_id,
     );
 
+    // A reorder carries its own price authority in pps_legacy_unit_price, so it is a
+    // legitimate add even for a product the calculator owns. Without this flag the
+    // spec-less-line guard in pps-calculators.php would refuse it as if it were someone
+    // pressing WooCommerce's Add to cart button on a placeholder-priced product.
+    $GLOBALS['pps_internal_add_to_cart'] = true;
     $cart_key = WC()->cart->add_to_cart( $product_id, $quantity, $variation_id, $variations, $cart_item_data );
+    unset( $GLOBALS['pps_internal_add_to_cart'] );
 
     if ( ! $cart_key ) {
         wc_add_notice( 'Could not add that item to your cart.', 'error' );

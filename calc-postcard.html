@@ -55,7 +55,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-24 · PC-ADJTBL</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-02 · PC-DESTDATE</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
@@ -215,7 +215,12 @@ const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01},{label:"
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
 
 // Transit days
-const TRANSIT_DAYS = _CFG.transit_days || {AZ:1,CA:2,CO:2,ID:3,MT:3,NM:2,NV:2,OR:3,TX:3,UT:2,WA:3,WY:3,AL:4,AR:4,CT:5,DC:5,DE:5,FL:4,GA:4,HI:7,IA:4,IL:4,IN:4,KS:3,KY:4,LA:4,MA:5,MD:5,ME:6,MI:4,MN:4,MO:4,MS:4,NC:5,ND:4,NE:3,NH:6,NJ:5,NY:5,OH:4,OK:3,PA:5,RI:5,SC:5,SD:4,TN:4,VA:5,VT:6,WI:4,WV:5};
+// Merged over the defaults, NOT replaced. US_STATES is derived from these keys, so a
+// saved config missing a state DELETED that state from the shipping dropdown — which
+// is how Georgia customers ended up unable to select their own state. A saved map can
+// now override a transit value but can never remove a destination.
+const _TRANSIT_DEFAULTS = {AZ:1,CA:2,CO:2,ID:3,MT:3,NM:2,NV:2,OR:3,TX:3,UT:2,WA:3,WY:3,AL:4,AR:4,CT:5,DC:5,DE:5,FL:4,GA:4,HI:7,IA:4,IL:4,IN:4,KS:3,KY:4,LA:4,MA:5,MD:5,ME:6,MI:4,MN:4,MO:4,MS:4,NC:5,ND:4,NE:3,NH:6,NJ:5,NY:5,OH:4,OK:3,PA:5,RI:5,SC:5,SD:4,TN:4,VA:5,VT:6,WI:4,WV:5,AK:7,MP:7,PR:7,VI:9};
+const TRANSIT_DAYS = Object.assign({}, _TRANSIT_DEFAULTS, _CFG.transit_days || {});
 const US_STATES = Object.keys(TRANSIT_DAYS).sort();
 const _PPS = window.PPS_CONFIG || {};
 const _ZONE_SEED = {"000":7,"001":7,"002":7,"003":7,"004":7,"005":7,"006":7,"007":7,"008":7,"009":7,"010":5,"011":5,"012":5,"013":5,"014":5,"015":5,"016":5,"017":5,"018":5,"019":5,"020":5,"021":5,"022":5,"023":5,"024":5,"025":5,"026":5,"027":5,"028":7,"029":7,"030":6,"031":6,"032":6,"033":6,"034":6,"035":6,"036":6,"037":6,"038":6,"039":6,"040":6,"041":6,"042":6,"043":6,"044":6,"045":6,"046":6,"047":6,"048":6,"049":6,"050":6,"051":6,"052":6,"053":6,"054":6,"055":6,"056":6,"057":6,"058":6,"059":6,"060":6,"061":6,"062":6,"063":6,"064":6,"065":6,"066":6,"067":6,"068":6,"069":6,"070":5,"071":5,"072":5,"073":5,"074":5,"075":5,"076":5,"077":5,"078":5,"079":5,"080":5,"081":5,"082":5,"083":5,"084":5,"085":5,"086":5,"087":5,"088":5,"089":5,"090":7,"091":7,"092":7,"093":7,"094":7,"095":7,"096":7,"097":7,"098":7,"099":7,"100":5,"101":5,"102":5,"103":5,"104":5,"105":5,"106":5,"107":5,"108":5,"109":5,"110":5,"111":5,"112":5,"113":5,"114":5,"115":5,"116":5,"117":5,"118":5,"119":5,"120":5,"121":5,"122":5,"123":5,"124":5,"125":5,"126":5,"127":5,"128":5,"129":5,"130":5,"131":5,"132":5,"133":5,"134":5,"135":5,"136":5,"137":5,"138":5,"139":5,"140":5,"141":5,"142":5,"143":5,"144":5,"145":5,"146":5,"147":5,"148":5,"149":5,"150":4,"151":4,"152":4,"153":4,"154":4,"155":4,"156":4,"157":4,"158":4,"159":4,"160":4,"161":4,"162":4,"163":4,"164":4,"165":4,"166":4,"167":4,"168":4,"169":4,"170":4,"171":4,"172":4,"173":4,"174":4,"175":4,"176":4,"177":4,"178":4,"179":4,"180":4,"181":4,"182":4,"183":4,"184":4,"185":4,"186":4,"187":4,"188":4,"189":4,"190":4,"191":4,"192":4,"193":4,"194":4,"195":4,"196":4,"197":6,"198":6,"199":6,"200":6,"201":6,"202":6,"203":6,"204":6,"205":6,"206":6,"207":6,"208":6,"209":6,"210":6,"211":6,"212":6,"213":6,"214":6,"215":6,"216":6,"217":6,"218":6,"219":6,"220":5,"221":5,"222":5,"223":5,"224":5,"225":5,"226":5,"227":5,"228":5,"229":5,"230":5,"231":5,"232":5,"233":5,"234":5,"235":5,"236":5,"237":5,"238":5,"239":5,"240":5,"241":5,"242":5,"243":5,"244":5,"245":5,"246":5,"247":4,"248":4,"249":4,"250":4,"251":4,"252":4,"253":4,"254":4,"255":4,"256":4,"257":4,"258":4,"259":4,"260":4,"261":4,"262":4,"263":4,"264":4,"265":4,"266":4,"267":4,"268":4,"269":7,"270":5,"271":5,"272":5,"273":5,"274":5,"275":5,"276":5,"277":5,"278":5,"279":5,"280":5,"281":5,"282":5,"283":5,"284":5,"285":5,"286":5,"287":5,"288":5,"289":5,"290":5,"291":5,"292":5,"293":5,"294":5,"295":5,"296":5,"297":5,"298":5,"299":5,"300":4,"301":4,"302":4,"303":4,"304":4,"305":4,"306":4,"307":4,"308":4,"309":4,"310":4,"311":4,"312":4,"313":4,"314":4,"315":4,"316":4,"317":4,"318":4,"319":4,"320":4,"321":4,"322":4,"323":4,"324":4,"325":4,"326":4,"327":4,"328":4,"329":4,"330":4,"331":4,"332":4,"333":4,"334":4,"335":4,"336":4,"337":4,"338":4,"339":4,"340":4,"341":4,"342":4,"343":4,"344":4,"345":4,"346":4,"347":4,"348":4,"349":4,"350":4,"351":4,"352":4,"353":4,"354":4,"355":4,"356":4,"357":4,"358":4,"359":4,"360":4,"361":4,"362":4,"363":4,"364":4,"365":4,"366":4,"367":4,"368":4,"369":4,"370":4,"371":4,"372":4,"373":4,"374":4,"375":4,"376":4,"377":4,"378":4,"379":4,"380":4,"381":4,"382":4,"383":4,"384":4,"385":4,"386":4,"387":4,"388":4,"389":4,"390":4,"391":4,"392":4,"393":4,"394":4,"395":4,"396":4,"397":4,"398":7,"399":7,"400":4,"401":4,"402":4,"403":4,"404":4,"405":4,"406":4,"407":4,"408":4,"409":4,"410":4,"411":4,"412":4,"413":4,"414":4,"415":4,"416":4,"417":4,"418":4,"419":4,"420":4,"421":4,"422":4,"423":4,"424":4,"425":4,"426":4,"427":4,"428":7,"429":7,"430":5,"431":5,"432":5,"433":5,"434":5,"435":5,"436":5,"437":5,"438":5,"439":5,"440":5,"441":5,"442":5,"443":5,"444":5,"445":5,"446":5,"447":5,"448":5,"449":5,"450":5,"451":5,"452":5,"453":5,"454":5,"455":5,"456":5,"457":5,"458":5,"459":7,"460":4,"461":4,"462":4,"463":4,"464":4,"465":4,"466":4,"467":4,"468":4,"469":4,"470":4,"471":4,"472":4,"473":4,"474":4,"475":4,"476":4,"477":4,"478":4,"479":4,"480":4,"481":4,"482":4,"483":4,"484":4,"485":4,"486":4,"487":4,"488":4,"489":4,"490":4,"491":4,"492":4,"493":4,"494":4,"495":4,"496":4,"497":4,"498":4,"499":4,"500":4,"501":4,"502":4,"503":4,"504":4,"505":4,"506":4,"507":4,"508":4,"509":4,"510":4,"511":4,"512":4,"513":4,"514":4,"515":4,"516":4,"517":4,"518":4,"519":4,"520":4,"521":4,"522":4,"523":4,"524":4,"525":4,"526":4,"527":4,"528":4,"529":7,"530":4,"531":4,"532":4,"533":4,"534":4,"535":4,"536":4,"537":4,"538":4,"539":4,"540":4,"541":4,"542":4,"543":4,"544":4,"545":4,"546":4,"547":4,"548":4,"549":4,"550":4,"551":4,"552":4,"553":4,"554":4,"555":4,"556":4,"557":4,"558":4,"559":4,"560":4,"561":4,"562":4,"563":4,"564":4,"565":4,"566":4,"567":4,"568":7,"569":7,"570":4,"571":4,"572":4,"573":4,"574":4,"575":4,"576":4,"577":4,"578":7,"579":7,"580":4,"581":4,"582":4,"583":4,"584":4,"585":4,"586":4,"587":4,"588":4,"589":7,"590":4,"591":4,"592":4,"593":4,"594":4,"595":4,"596":4,"597":4,"598":4,"599":4,"600":4,"601":4,"602":4,"603":4,"604":4,"605":4,"606":4,"607":4,"608":4,"609":4,"610":4,"611":4,"612":4,"613":4,"614":4,"615":4,"616":4,"617":4,"618":4,"619":4,"620":4,"621":4,"622":4,"623":4,"624":4,"625":4,"626":4,"627":4,"628":4,"629":4,"630":4,"631":4,"632":4,"633":4,"634":4,"635":4,"636":4,"637":4,"638":4,"639":4,"640":4,"641":4,"642":4,"643":4,"644":4,"645":4,"646":4,"647":4,"648":4,"649":4,"650":4,"651":4,"652":4,"653":4,"654":4,"655":4,"656":4,"657":4,"658":4,"659":7,"660":4,"661":4,"662":4,"663":4,"664":4,"665":4,"666":4,"667":4,"668":4,"669":4,"670":4,"671":4,"672":4,"673":4,"674":4,"675":4,"676":4,"677":4,"678":4,"679":4,"680":4,"681":4,"682":4,"683":4,"684":4,"685":4,"686":4,"687":4,"688":4,"689":4,"690":4,"691":4,"692":4,"693":4,"694":7,"695":7,"696":7,"697":7,"698":7,"699":7,"700":4,"701":4,"702":4,"703":4,"704":4,"705":4,"706":4,"707":4,"708":4,"709":4,"710":4,"711":4,"712":4,"713":4,"714":4,"715":7,"716":4,"717":4,"718":4,"719":4,"720":4,"721":4,"722":4,"723":4,"724":4,"725":4,"726":4,"727":4,"728":4,"729":4,"730":4,"731":4,"732":4,"733":4,"734":4,"735":4,"736":4,"737":4,"738":4,"739":4,"740":4,"741":4,"742":4,"743":4,"744":4,"745":4,"746":4,"747":4,"748":4,"749":4,"750":3,"751":3,"752":3,"753":3,"754":3,"755":3,"756":3,"757":3,"758":3,"759":3,"760":3,"761":3,"762":3,"763":3,"764":3,"765":3,"766":3,"767":3,"768":3,"769":3,"770":3,"771":3,"772":3,"773":3,"774":3,"775":3,"776":3,"777":3,"778":3,"779":3,"780":3,"781":3,"782":3,"783":3,"784":3,"785":3,"786":3,"787":3,"788":3,"789":3,"790":3,"791":3,"792":3,"793":3,"794":3,"795":3,"796":3,"797":3,"798":3,"799":3,"800":2,"801":2,"802":2,"803":2,"804":2,"805":2,"806":2,"807":2,"808":2,"809":2,"810":2,"811":2,"812":2,"813":2,"814":2,"815":2,"816":2,"817":7,"818":7,"819":7,"820":4,"821":4,"822":4,"823":4,"824":4,"825":4,"826":4,"827":4,"828":4,"829":4,"830":4,"831":4,"832":3,"833":3,"834":3,"835":3,"836":3,"837":3,"838":3,"839":7,"840":2,"841":2,"842":2,"843":2,"844":2,"845":2,"846":2,"847":2,"848":7,"849":7,"850":1,"851":1,"852":1,"853":1,"854":1,"855":1,"856":1,"857":1,"858":1,"859":1,"860":1,"861":1,"862":1,"863":1,"864":1,"865":1,"866":7,"867":7,"868":7,"869":7,"870":2,"871":2,"872":2,"873":2,"874":2,"875":2,"876":2,"877":2,"878":2,"879":2,"880":2,"881":2,"882":2,"883":2,"884":2,"885":7,"886":7,"887":7,"888":7,"889":2,"890":2,"891":2,"892":2,"893":2,"894":2,"895":2,"896":2,"897":2,"898":2,"899":7,"900":2,"901":2,"902":2,"903":2,"904":2,"905":2,"906":2,"907":2,"908":2,"909":2,"910":2,"911":2,"912":2,"913":2,"914":2,"915":2,"916":2,"917":2,"918":2,"919":2,"920":2,"921":2,"922":2,"923":2,"924":2,"925":2,"926":2,"927":2,"928":2,"929":2,"930":2,"931":2,"932":2,"933":2,"934":2,"935":2,"936":2,"937":2,"938":2,"939":2,"940":2,"941":2,"942":2,"943":2,"944":2,"945":2,"946":2,"947":2,"948":2,"949":2,"950":2,"951":2,"952":2,"953":2,"954":2,"955":2,"956":2,"957":2,"958":2,"959":2,"960":2,"961":2,"962":2,"963":2,"964":2,"965":2,"966":2,"967":7,"968":7,"969":7,"970":3,"971":3,"972":3,"973":3,"974":3,"975":3,"976":3,"977":3,"978":3,"979":3,"980":3,"981":3,"982":3,"983":3,"984":3,"985":3,"986":3,"987":3,"988":3,"989":3,"990":3,"991":3,"992":3,"993":3,"994":3,"995":7,"996":7,"997":7,"998":7,"999":7};
@@ -627,6 +632,12 @@ function calculate(c) {
 
   // Shipping & Rush
   const transitDays = getTransitDays(c.shipState, c.shipZip);
+  // Do we know where this is going? A ZIP is what the zone map and the live UPS lookup
+  // both key on, so a dated promise needs one; state alone is a coarse guess dressed up
+  // as a delivery date. Clearing the ZIP used to leave the previous date on screen
+  // unchanged, because the state fallback quietly produced the same number.
+  const _hasDest = !!(c.shipState && String(c.shipState).trim())
+    && String(c.shipZip || "").replace(/[^0-9]/g, "").length >= 3;
   // Internal shipping-weight estimate (owner rule 2026-07-19): a 45 lb carton
   // holds 900 text-weight or 400 cardstock 13x19 press sheets. Debug/ops only.
   const _cartonLb=PCF.ship_carton_lb||45;
@@ -694,6 +705,7 @@ function calculate(c) {
     coatOK: paper.coatable, vividOK: paper.coatable, q100: qty >= 100, ti,
     saleActive, saleAmount, saleLabel: (PCF.sale_label || "Sale"), totalWithoutSale,
     shipping: {
+      hasDest: _hasDest,
       estWeightLb, estCartons,
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
       earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday),
@@ -3179,7 +3191,7 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
   // for something.
   const requestedDate = sh && sh.needByFmt && sh.needByFmt !== sh.freeDeliveryDate
     ? sh.needByFmt : null;
-  const deliveryDate = sh ? (requestedDate || ((hasRush && sh.needByFmt) ? sh.needByFmt : sh.freeDeliveryDate)) : null;
+  const deliveryDate = sh ? (requestedDate || (sh.hasDest ? ((hasRush && sh.needByFmt) ? sh.needByFmt : sh.freeDeliveryDate) : null)) : null;
   const moneyStr = Math.max(0, r.total).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [dPart, cPart] = moneyStr.split(".");
   const saleActive = !!r.saleActive;
@@ -3955,6 +3967,21 @@ function App() {
 
   const r = result || {};
 
+  // Dimensions the preview is allowed to draw.
+  //
+  // calculate() rejects a sheet under 2 inches, and a cleared size field reads as 0, so
+  // mid-edit `r` carries an error and no geometry at all. The call sites used to fall
+  // back to the raw input, which the preview component then turned into its own 11x8.5
+  // default -- a sheet nobody had asked for, drawn confidently next to a "Minimum
+  // dimension is 2 inches" error, and the reason a 4x12 entry appeared to be accepted.
+  // Holding the last geometry the engine actually accepted keeps the picture honest
+  // while someone is part-way through typing. A ref, not state: it is a cache of
+  // something already rendered, so writing it must not schedule another render.
+  const lastGoodDims = useRef(null);
+  if (r.longE > 0 && r.shortE > 0) lastGoodDims.current = { long: r.longE, short: r.shortE };
+  const previewLong  = r.longE ?? lastGoodDims.current?.long  ?? (Number(longEdge)  || 11);
+  const previewShort = r.shortE ?? lastGoodDims.current?.short ?? (Number(shortEdge) || 8.5);
+
   // Quantity projection table
   const projectionsRaw = useMemo(() => {
     if (!result || result.error) return null;
@@ -4181,7 +4208,7 @@ function App() {
         </div>
       </section>
 
-      {mob && <MobilePreviewBar longEdge={r.longE ?? longEdge} shortEdge={r.shortE ?? shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar longEdge={previewLong} shortEdge={previewShort} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
 
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "0 10px 140px" : "0 24px 80px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
         <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
@@ -4482,7 +4509,7 @@ function App() {
               </div>
 
               <div style={ST.f}>
-                <label style={ST.lbl}>Need It Sooner? Pick a Date</label>
+                <label style={ST.lbl}>Select a specific date</label>
                 <DatePicker value={needByDate} onChange={setNeedByDate}
                   earliestDate={r.shipping.earliestYMD} freeDate={r.shipping.freeDeliveryYMD}/>
                 {needByDate&&r.shipping.needByPast&&<p style={ST.err}>This date has passed — please select a future date</p>}
@@ -4522,7 +4549,7 @@ function App() {
                 a preset repriced correctly while the preview kept whatever the custom fields last
                 held, which is the 11x8.5 default on a fresh load. Custom mode looked fine for the
                 same reason it was broken: there, those fields ARE the source. */}
-            <SidebarPostcardPreview longEdge={r.longE ?? longEdge} shortEdge={r.shortE ?? shortEdge} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
+            <SidebarPostcardPreview longEdge={previewLong} shortEdge={previewShort} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
             <Panel result={result} />
           </div>
           {missingDest && <div style={{marginTop:10,fontSize:12,fontWeight:600,color:"#dc2626",lineHeight:1.35}}>{missingDestMsg}</div>}

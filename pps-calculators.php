@@ -159,6 +159,50 @@ function pps_save_registry( $reg ) {
 }
 
 /**
+ * The delivery date the customer was actually shown, formatted for display.
+ *
+ * The cart and the order item both used to recompute this as "now + N business days",
+ * which disagreed with the calculator for three separate reasons: it counted from the
+ * moment the page was viewed rather than when the quote was made (so the date drifted
+ * every day the cart sat there), it ignored the 2pm production cutoff that the engine
+ * applies, and it ignored a date the customer had explicitly asked for. That is where
+ * the three different delivery dates on one checkout screen came from.
+ *
+ * The calculator already resolved all of that and put the answer in the metadata as
+ * `estimatedDeliveryDate` (Y-m-d). Reading it back is not merely more accurate — it is
+ * the only version the customer ever agreed to.
+ *
+ * The recompute survives as a fallback for cart items and orders created before the
+ * field existed.
+ *
+ * @param string $metadata_json The line item's pps_metadata.
+ * @param int    $biz_days      Business-day count, for the legacy fallback.
+ * @return string|null Formatted date, or null if neither source yields one.
+ */
+function pps_quoted_delivery_date( $metadata_json, $biz_days ) {
+    $tz  = 'America/Phoenix';
+    if ( function_exists( 'pps_get_config' ) ) {
+        $cfg = pps_get_config();
+        $tz  = $cfg['pcf']['shop_timezone'] ?? $tz;
+    }
+    $zone = new DateTimeZone( $tz );
+
+    $meta = json_decode( (string) $metadata_json, true );
+    $ymd  = is_array( $meta ) ? trim( (string) ( $meta['estimatedDeliveryDate'] ?? '' ) ) : '';
+    if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) ) {
+        $d = DateTime::createFromFormat( 'Y-m-d|', $ymd, $zone );
+        // createFromFormat accepts out-of-range parts by rolling them over, so a
+        // malformed date can parse into a real but wrong one. Round-tripping it is
+        // what catches that.
+        if ( $d && $d->format( 'Y-m-d' ) === $ymd ) return $d->format( 'l, M j, Y' );
+    }
+
+    $biz_days = (int) $biz_days;
+    if ( $biz_days <= 0 ) return null;
+    return pps_add_business_days( new DateTime( 'now', $zone ), $biz_days )->format( 'l, M j, Y' );
+}
+
+/**
  * Find calculator filename assigned to a product ID.
  */
 function pps_get_calculator_for_product( $product_id ) {
@@ -1681,9 +1725,17 @@ function pps_ajax_add_to_cart() {
         wp_send_json_error( 'Cart not available.' );
     }
 
+    // Tells the spec-less-line guard below that this add is the calculator's own.
+    $GLOBALS['pps_internal_add_to_cart'] = true;
     $cart_item_key = WC()->cart->add_to_cart( $product_id, 1, 0, array(), $cart_item_data );
+    unset( $GLOBALS['pps_internal_add_to_cart'] );
 
     if ( $cart_item_key ) {
+        // Carry the delivery address the customer just typed into the checkout session,
+        // so the address block on /checkout/ agrees with the "Ship to:" on the line item
+        // instead of showing a second, older address from their account.
+        pps_prefill_customer_shipping( $metadata );
+
         // Edit mode: now safe to remove old item since new one succeeded
         if ( $edit_key ) {
             WC()->cart->remove_cart_item( $edit_key );
@@ -1723,6 +1775,77 @@ function pps_ajax_add_to_cart() {
         wp_send_json_error( 'Could not add to cart.' );
     }
 }
+
+/**
+ * A calculator product may only enter the cart through the calculator.
+ *
+ * Every product in the registry carries a placeholder catalogue price — a penny, in the
+ * case of Letterhead — because its real price is whatever the calculator works out from
+ * the spec. WooCommerce's own Add to cart button does not know that. Pressed from a shop
+ * archive, a related-products strip, a stale `?add-to-cart=` link or a search result, it
+ * puts a spec-less line on the cart at the placeholder price, and that line is
+ * checkout-able.
+ *
+ * It has already happened on staging: a stray $0.01 "Letterhead" line sat in the cart,
+ * pushed the subtotal a penny past the calculator's quote (which read as a rounding bug
+ * in the pricing engine and is not one), and — being a non-virtual product — switched
+ * WooCommerce's shipping machinery back on for a cart that is otherwise entirely
+ * virtual, which is where the third, contradictory delivery date at checkout came from.
+ *
+ * The order-side price floor above cannot catch this: the placeholder price IS the
+ * product's regular price, so a penny clears a floor defined as a fraction of it.
+ *
+ * Products not in the registry are WCPA's or plain WooCommerce's and are untouched.
+ */
+add_filter( 'woocommerce_add_to_cart_validation', function( $passed, $product_id, $quantity = 1, $variation_id = 0 ) {
+    if ( ! $passed ) return $passed;
+    if ( ! empty( $GLOBALS['pps_internal_add_to_cart'] ) ) return $passed;   // the calculator's own add
+
+    $calc = pps_get_calculator_for_product( $product_id );
+    if ( ! $calc ) return $passed;                                          // WCPA or plain Woo product
+
+    $product = wc_get_product( $product_id );
+    $link    = $product ? get_permalink( $product_id ) : '';
+    wc_add_notice( sprintf(
+        /* translators: %s: link to the product's calculator page */
+        'This product is priced from its specification. %s to choose your options and get a price.',
+        $link ? '<a href="' . esc_url( $link ) . '">Open the calculator</a>' : 'Open its product page'
+    ), 'error' );
+    return false;
+}, 10, 4 );
+
+/**
+ * Sweep out spec-less calculator lines that predate the guard above.
+ *
+ * The guard stops new ones. It does nothing about the line already sitting in a session
+ * cart from before it existed — which is a live problem rather than a hypothetical, that
+ * being exactly how the stray $0.01 Letterhead survived across a staging session.
+ *
+ * Removal is the only sound outcome: the line carries no specification, so there is
+ * nothing to produce and no price that means anything. Silently dropping it would be
+ * worse than leaving it, so it says so.
+ */
+add_action( 'woocommerce_cart_loaded_from_session', function( $cart ) {
+    if ( is_admin() && ! wp_doing_ajax() ) return;
+    $dropped = array();
+
+    foreach ( $cart->get_cart() as $key => $item ) {
+        if ( isset( $item['pps_metadata'] ) || isset( $item['pps_legacy_unit_price'] ) ) continue;
+        $pid = (int) ( $item['product_id'] ?? 0 );
+        if ( ! $pid || ! pps_get_calculator_for_product( $pid ) ) continue;
+
+        $product   = $item['data'] ?? null;
+        $dropped[] = $product && is_a( $product, 'WC_Product' ) ? $product->get_name() : 'an item';
+        $cart->remove_cart_item( $key );
+    }
+
+    if ( $dropped && function_exists( 'wc_add_notice' ) ) {
+        wc_add_notice( sprintf(
+            '%s was removed from your cart: it had no specification, so it could not be priced or produced. Please configure it on its product page.',
+            esc_html( implode( ', ', array_unique( $dropped ) ) )
+        ), 'notice' );
+    }
+}, 20 );
 
 // ═══════════════════════════════════════════════════════════════
 // CART: SESSION PERSISTENCE
@@ -1797,20 +1920,15 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
         $data[] = array( 'key' => $label, 'value' => $value );
     }
 
-    if ( isset( $cart_item['pps_biz_days'] ) ) {
-        $tz = 'America/Phoenix';
-        if ( function_exists( 'pps_get_config' ) ) {
-            $cfg = pps_get_config();
-            $tz  = $cfg['pcf']['shop_timezone'] ?? $tz;
-        }
-        $delivery = pps_add_business_days(
-            new DateTime( 'now', new DateTimeZone( $tz ) ),
-            intval( $cart_item['pps_biz_days'] )
-        );
+    $delivery = pps_quoted_delivery_date(
+        $cart_item['pps_metadata'] ?? '',
+        intval( $cart_item['pps_biz_days'] ?? 0 )
+    );
+    if ( $delivery !== null ) {
         $data[] = array(
             'key'     => 'Estimated Delivery',
-            'value'   => $delivery->format( 'l, M j, Y' ),
-            'display' => '<strong style="color:#46882c">' . $delivery->format( 'l, M j, Y' ) . '</strong>',
+            'value'   => $delivery,
+            'display' => '<strong style="color:#46882c">' . esc_html( $delivery ) . '</strong>',
         );
     }
 
@@ -1863,18 +1981,34 @@ add_action( 'wp_enqueue_scripts', function () {
    of it. This turns each line into a card: art, name and specs on the left, money on the
    right, specs as quiet supporting text rather than a table of their own. */
 
-/* Page layout is left to the theme. An earlier version set float/width on the cart form
-   and the totals column; Astra's own rules won on the real site, so all that achieved
-   was making the mock disagree with production. The card below now sizes itself from
-   whatever width it is given. */
-.pps-cart form.woocommerce-cart-form { container-type: inline-size; }
+/* ── Give the form a width before anything else ──────────────────────────────
+   Astra lays the cart out as a flex row. Its first item carries no width of its own, so
+   it is free to shrink to min-content — and it did: on staging the form and table
+   measured 239px inside a 619px column inside a 910px row, which squeezed the name cell
+   to nothing and rendered "Low Cost Brochure Printing" one character per line.
 
-/* ── The line-item table, rebuilt as cards ───────────────────────────────── */
+   flex-grow on the column makes it claim the row's free space; width:100% on the form
+   makes it fill the column. Both are inert if the theme ever stops using flex here, so
+   this is safe to state unconditionally. min-width:0 is the companion rule — without it
+   a flex item refuses to shrink below its content, which is how long spec strings push
+   the table wider than the page. */
+.pps-cart .ast-cart-non-sticky { flex: 1 1 auto; min-width: 0; }
+.pps-cart form.woocommerce-cart-form {
+  display: block; width: 100%; max-width: 100%; min-width: 0; flex: 1 1 auto;
+}
+
+/* ── The line-item table, rebuilt as cards ─────────────────────────────────
+   Table layout is dropped entirely. Every row below is a grid, so the table algorithm
+   was contributing nothing but a min-content floor that fought the column it sat in —
+   which is the other half of the collapse above. As blocks they simply fill their
+   parent, and a long spec string can no longer widen the page. */
 .pps-cart table.cart,
 .pps-cart table.shop_table.cart {
-  border: 0; background: none; border-collapse: separate; border-spacing: 0 12px;
+  display: block; width: 100%; max-width: 100%; border: 0; background: none;
 }
-.pps-cart table.cart thead { display: none; }   /* column headers mean nothing once rows are cards */
+.pps-cart table.cart > tbody { display: block; width: 100%; }
+.pps-cart table.cart > thead { display: none; }  /* column headers mean nothing once rows are cards */
+.pps-cart table.cart > tbody > tr { display: block; width: 100%; }
 
 .pps-cart table.cart tr.cart_item {
   display: grid;
@@ -1893,14 +2027,17 @@ add_action( 'wp_enqueue_scripts', function () {
     "thumb name money";
   align-items: start;
   gap: 0 18px;
+  margin: 0 0 12px;          /* replaces border-spacing, which a block table ignores */
   background: #fff;
   border: 1px solid #e6e9ee;
   border-radius: 14px;
   padding: 18px 20px;
+  box-sizing: border-box;
   box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
 }
 .pps-cart table.cart tr.cart_item > td {
-  border: 0; padding: 0; background: none; vertical-align: top;
+  display: block; border: 0; padding: 0; background: none; vertical-align: top;
+  min-width: 0;              /* a grid item defaults to min-content; long specs overflowed */
 }
 
 .pps-cart tr.cart_item td.product-thumbnail { grid-area: thumb; }
@@ -2025,10 +2162,12 @@ add_action( 'wp_enqueue_scripts', function () {
   font-size: 15px; font-weight: 700; letter-spacing: .01em;
 }
 
-/* ── Narrow container: the card becomes two rows, money under the name ──────
-   A container query, not a viewport one: the failure that prompted this was a cart
-   form occupying a third of a 1400px page. The viewport was wide; the card was not. */
-@container (max-width: 520px) {
+/* ── Narrow viewport: the card becomes two rows, money under the name ────────
+   This was a container query against the cart form. `container-type: inline-size` also
+   means "size this element as if it had no contents", which is precisely the property
+   that lets a flex parent squeeze it to nothing — the same failure this file now exists
+   to fix, re-introduced by the fix's own tooling. A viewport query cannot do that. */
+@media (max-width: 860px) {
   .pps-cart table.cart tr.cart_item {
     grid-template-columns: 60px minmax(0, 1fr) auto;
     /* Quantity and unit price share one line beneath the name; the line total gets its
@@ -2052,21 +2191,12 @@ add_action( 'wp_enqueue_scripts', function () {
 
 @media (max-width: 640px) {
   .pps-cart table.cart tr.cart_item {
-    grid-template-columns: 60px minmax(0, 1fr) auto;
     grid-template-areas:
       "thumb name remove"
       "price qty  qty"
       "money money money";
-    padding: 14px 15px; gap: 0 14px;
   }
-  .pps-cart tr.cart_item td.product-thumbnail img { width: 60px; }
-  .pps-cart tr.cart_item td.product-subtotal {
-    text-align: left; margin-top: 12px; padding-top: 12px;
-    border-top: 1px solid #f0f2f5;
-  }
-  .pps-cart tr.cart_item td.product-subtotal { justify-self: start; }
-  .pps-cart tr.cart_item dl.variation { grid-template-columns: 1fr; gap: 0; }
-  .pps-cart tr.cart_item dl.variation dt { margin-top: 6px; }
+  .pps-cart tr.cart_item td.product-price { justify-self: start; }
 }
 CSS
     );
@@ -2168,14 +2298,19 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
     $item->add_meta_data( '_pps_summary', $values['pps_summary'] ?? '', true );
     $item->add_meta_data( '_pps_rush', $values['pps_rush'] ?? 0, true );
 
-    // Snapshot delivery date at checkout moment
+    // The date the customer was quoted, not a fresh count from checkout time. Both are
+    // usually the same day; they diverge exactly when it matters — a cart left overnight,
+    // an order placed after the 2pm cutoff, or a delivery date the customer chose.
     $tz = 'America/Phoenix';
     if ( function_exists( 'pps_get_config' ) ) {
         $cfg = pps_get_config();
         $tz  = $cfg['pcf']['shop_timezone'] ?? $tz;
     }
-    $biz_days = intval( $values['pps_biz_days'] ?? 5 );
-    $delivery = pps_add_business_days( new DateTime( 'now', new DateTimeZone( $tz ) ), $biz_days );
+    $biz_days  = intval( $values['pps_biz_days'] ?? 5 );
+    $quoted    = pps_quoted_delivery_date( $values['pps_metadata'] ?? '', $biz_days );
+    $delivery  = $quoted !== null
+        ? new DateTime( $quoted, new DateTimeZone( $tz ) )
+        : pps_add_business_days( new DateTime( 'now', new DateTimeZone( $tz ) ), $biz_days );
 
     $item->add_meta_data( '_pps_delivery_date', $delivery->format( 'Y-m-d' ), true );
 
@@ -2377,7 +2512,13 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     // A mixed cart containing a genuinely shippable product has a real WooCommerce
     // shipping address, entered at checkout. That one is authoritative — never
     // overwrite it with a calculator's copy.
-    if ( trim( (string) $order->get_shipping_address_1() ) !== '' ) return false;
+    //
+    // Note this is a flag rather than an early return. It used to return here, which
+    // also skipped the weight and carton meta below — and once the session prefill
+    // started putting the calculator's address on the order before this runs, that
+    // "already has an address" branch became the common case, silently taking the
+    // packing figures with it.
+    $keep_existing_address = trim( (string) $order->get_shipping_address_1() ) !== '';
 
     $addr = null;
     $weight = 0.0;
@@ -2430,7 +2571,7 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     if ( $weight > 0 )  $order->update_meta_data( '_pps_est_weight_lb', round( $weight, 2 ) );
     if ( $cartons > 0 ) $order->update_meta_data( '_pps_est_cartons', $cartons );
 
-    if ( $addr === null ) {
+    if ( $addr === null || $keep_existing_address ) {
         if ( $weight > 0 || $cartons > 0 ) $order->save();
         return false;
     }
@@ -2477,6 +2618,70 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     ) );
 
     $order->save();
+    return true;
+}
+
+/**
+ * Prefill the checkout address from the calculator, at add-to-cart.
+ *
+ * pps_apply_calculator_shipping_address() above repairs the ORDER, after checkout. This
+ * is the other half of the same problem: what the customer READS on the checkout page,
+ * before any order exists.
+ *
+ * Without it they see the delivery address they typed into the calculator on the line
+ * item ("Ship to: TX 78701") and, a few inches away, whatever WooCommerce remembered
+ * from their account ("Scottsdale, AZ 85262") — two ship-tos on one screen with nothing
+ * saying which one the job follows. It follows the calculator's: that is the address the
+ * quote was priced and the transit time calculated against.
+ *
+ * So the calculator's address wins outright rather than filling only blanks. A saved
+ * profile address is older than something the customer typed a minute ago, and leaving
+ * the stale one in place is the bug being fixed. It is still theirs to edit at checkout.
+ *
+ * Billing is left alone — that is the cardholder's address and frequently not the
+ * delivery one, which is the whole reason these are separate fields.
+ *
+ * @param string $metadata_json The line item's pps_metadata, as posted.
+ * @return bool True when the session was updated.
+ */
+function pps_prefill_customer_shipping( $metadata_json ) {
+    if ( ! function_exists( 'WC' ) || ! WC()->customer ) return false;
+
+    $meta = json_decode( (string) $metadata_json, true );
+    if ( ! is_array( $meta ) ) return false;
+
+    $a = isset( $meta['shipAddr'] ) && is_array( $meta['shipAddr'] ) ? $meta['shipAddr'] : array();
+    // State sits alongside shipAddr rather than inside it — the calculator collects it
+    // separately because it drives the transit map. ZIP is mirrored in both.
+    $street = trim( (string) ( $a['street1'] ?? '' ) );
+    $city   = trim( (string) ( $a['city'] ?? '' ) );
+    $state  = trim( (string) ( $a['state'] ?? $meta['shipState'] ?? '' ) );
+    $zip    = trim( (string) ( $a['zip'] ?? $meta['shipZip'] ?? '' ) );
+
+    // Same rule as the order-side writer: a half address looks authoritative and ships
+    // to the wrong place, where an empty one at least prompts the customer to type it.
+    if ( $street === '' || $city === '' || $state === '' || $zip === '' ) return false;
+
+    $name  = trim( (string) ( $a['name'] ?? '' ) );
+    if ( $name !== '' ) {
+        // Split on the last space so "Mary Anne Van Der Berg" keeps its surname intact.
+        $cut   = strrpos( $name, ' ' );
+        $first = $cut === false ? $name : trim( substr( $name, 0, $cut ) );
+        $last  = $cut === false ? ''    : trim( substr( $name, $cut + 1 ) );
+        WC()->customer->set_shipping_first_name( $first );
+        WC()->customer->set_shipping_last_name( $last );
+    }
+    WC()->customer->set_shipping_company( trim( (string) ( $a['company'] ?? '' ) ) );
+    WC()->customer->set_shipping_address_1( $street );
+    WC()->customer->set_shipping_address_2( trim( (string) ( $a['street2'] ?? '' ) ) );
+    WC()->customer->set_shipping_city( $city );
+    WC()->customer->set_shipping_state( $state );
+    WC()->customer->set_shipping_postcode( $zip );
+    // The calculator prices US ground transit only and has no country field. Stated
+    // rather than left blank, because a blank country makes an address unrateable.
+    WC()->customer->set_shipping_country( 'US' );
+    WC()->customer->save();
+
     return true;
 }
 
