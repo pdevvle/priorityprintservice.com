@@ -599,14 +599,26 @@ function pps_mcp_handle( WP_REST_Request $req ) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function pps_mcp_oauth_register( WP_REST_Request $req ) {
-    $b = json_decode( $req->get_body(), true );
+    $raw = (string) $req->get_body();
+    $b   = json_decode( $raw, true );
     if ( ! is_array( $b ) ) $b = array();
+
+    // Log the request verbatim. A registration failure otherwise reports only that it
+    // could not register, and the client's request is the one thing that would say why
+    // -- it is not visible from either end without this.
+    pps_mcp_log( 'oauth/register', array( 'body' => substr( $raw, 0, 900 ) ), true, 'attempt' );
     $redirects = array_values( array_filter( (array) ( $b['redirect_uris'] ?? array() ), function ( $u ) {
         // https only, with one carve-out for the loopback addresses a desktop client uses.
         return is_string( $u ) && ( strpos( $u, 'https://' ) === 0
             || preg_match( '#^http://(127\.0\.0\.1|localhost)(:\d+)?(/|$)#', $u ) );
     } ) );
-    if ( ! $redirects ) return new WP_REST_Response( array( 'error' => 'invalid_redirect_uri' ), 400 );
+    if ( ! $redirects ) {
+        pps_mcp_log( 'oauth/register', array( 'redirect_uris' => $b['redirect_uris'] ?? null ), false, 'no acceptable redirect_uri' );
+        return new WP_REST_Response( array(
+            'error' => 'invalid_redirect_uri',
+            'error_description' => 'redirect_uris must be https, or http on 127.0.0.1/localhost.',
+        ), 400 );
+    }
 
     $clients = get_option( 'pps_mcp_clients', array() );
     if ( ! is_array( $clients ) ) $clients = array();
@@ -620,14 +632,28 @@ function pps_mcp_oauth_register( WP_REST_Request $req ) {
     );
     update_option( 'pps_mcp_clients', $clients, false );
 
+    pps_mcp_log( 'oauth/register', array( 'client_id' => $id ), true, 'issued' );
+
+    // RFC 7591 section 3.2.1 asks for all registered metadata, including fields the
+    // server provisions. client_id_issued_at and client_secret_expires_at are commonly
+    // required by clients even for public registrations, and their absence is the sort
+    // of thing that produces a bare "could not register".
+    //
+    // grant_types deliberately omits refresh_token: this server does not issue refresh
+    // tokens, and the authorization-server metadata does not advertise them. Claiming a
+    // grant here that the metadata denies is exactly the inconsistency a strict client
+    // rejects.
     return new WP_REST_Response( array(
         'client_id'                  => $id,
+        'client_id_issued_at'        => time(),
+        'client_secret_expires_at'   => 0,
         'client_name'                => $clients[ $id ]['name'],
         'redirect_uris'              => $redirects,
         'token_endpoint_auth_method' => 'none',       // public client; PKCE is the protection
-        'grant_types'                => array( 'authorization_code', 'refresh_token' ),
+        'grant_types'                => array( 'authorization_code' ),
         'response_types'             => array( 'code' ),
-    ), 201 );
+        'scope'                      => 'mcp',
+    ), 201, array( 'Cache-Control' => 'no-store' ) );
 }
 
 /**
@@ -900,6 +926,23 @@ function pps_mcp_admin() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Denied.' );
     $fresh = '';
 
+    if ( isset( $_POST['pps_mcp_manualclient'] ) && check_admin_referer( 'pps_mcp_admin' ) ) {
+        // For when a client cannot self-register and offers to accept a client ID
+        // instead -- which is precisely what claude.ai suggests when registration fails.
+        $id      = 'ppsmcp_' . bin2hex( random_bytes( 16 ) );
+        $clients = (array) get_option( 'pps_mcp_clients', array() );
+        $clients[ $id ] = array(
+            'redirect_uris' => array(
+                'https://claude.ai/api/mcp/auth_callback',
+                'https://claude.com/api/mcp/auth_callback',
+            ),
+            'name'    => 'Manually created',
+            'created' => gmdate( 'c' ),
+        );
+        update_option( 'pps_mcp_clients', $clients, false );
+        echo '<div class="notice notice-success"><p><strong>Client ID created.</strong> Paste it into the connector\'s OAuth Client ID field. Leave the secret empty — this is a public client using PKCE.</p>'
+           . '<p><code style="font-size:14px;user-select:all">' . esc_html( $id ) . '</code></p></div>';
+    }
     if ( isset( $_POST['pps_mcp_newurl'] ) && check_admin_referer( 'pps_mcp_admin' ) ) {
         // Short and random rather than v2, v3, v4: a sequence is guessable, and if the
         // reason for reissuing was ever that a URL leaked, the next one should not be.
@@ -943,6 +986,7 @@ function pps_mcp_admin() {
     echo '<form method="post" style="margin:18px 0">';
     wp_nonce_field( 'pps_mcp_admin' );
     echo '<button class="button button-primary" name="pps_mcp_gen" value="1">Generate a static token</button> ';
+    echo '<button class="button" name="pps_mcp_manualclient" value="1">Create a client ID manually</button> ';
     echo '<button class="button" name="pps_mcp_newurl" value="1" onclick="return confirm(\'Issue a new endpoint URL? Any connector pointing at the current one will stop working and must be re-added.\')">Issue a new endpoint URL</button> ';
     echo '<button class="button" name="pps_mcp_mode" value="' . ( pps_mcp_mode() === 'full' ? 'read' : 'full' ) . '">'
        . ( pps_mcp_mode() === 'full' ? 'Switch to read-only' : 'Allow writes (staging only)' ) . '</button> ';
