@@ -686,7 +686,10 @@ function pps_mcp_oauth_authorize() {
         set_transient( 'pps_mcp_tok_' . pps_mcp_hash( $code ), array(
             'kind' => 'code', 'user_id' => get_current_user_id(), 'client_id' => $client_id,
             'redirect_uri' => $redirect, 'challenge' => $challenge,
-        ), 60 );   // one minute: a code only has to survive a redirect
+        ), 600 );   // ten minutes. One was enough in principle -- a code only has to survive a
+                    // redirect -- but a browser hop plus a persistent object cache that has not
+                    // yet flushed can outlast it, and an expired code and a wrong one fail
+                    // identically from the client's side.
         wp_redirect( add_query_arg( array( 'code' => $code, 'state' => $state ), $redirect ) );
         exit;
     }
@@ -707,28 +710,52 @@ function pps_mcp_oauth_authorize() {
 }
 
 function pps_mcp_oauth_token( WP_REST_Request $req ) {
+    // Every rejection below is logged with the reason. A client reports only
+    // "token exchange failed"; which of five checks refused it is invisible from both
+    // ends otherwise, and guessing at that is how an evening disappears.
     $p    = $req->get_params();
     $code = (string) ( $p['code'] ?? '' );
     $ver  = (string) ( $p['code_verifier'] ?? '' );
 
+    $seen = array(
+        'grant_type'    => (string) ( $p['grant_type'] ?? '(absent)' ),
+        'client_id'     => (string) ( $p['client_id'] ?? '(absent)' ),
+        'redirect_uri'  => (string) ( $p['redirect_uri'] ?? '(absent)' ),
+        'code'          => $code !== '' ? substr( $code, 0, 8 ) . '…' : '(absent)',
+        'code_verifier' => $ver !== '' ? 'present(' . strlen( $ver ) . ')' : '(absent)',
+        'content_type'  => (string) $req->get_header( 'content-type' ),
+        'param_keys'    => implode( ',', array_keys( $p ) ),
+    );
+    $fail = function ( $why, $desc ) use ( $seen ) {
+        pps_mcp_log( 'oauth/token', $seen, false, $why );
+        return new WP_REST_Response( array( 'error' => 'invalid_grant', 'error_description' => $desc ), 400,
+            array( 'Cache-Control' => 'no-store' ) );
+    };
+
     if ( ( $p['grant_type'] ?? '' ) !== 'authorization_code' ) {
+        pps_mcp_log( 'oauth/token', $seen, false, 'unsupported grant_type' );
         return new WP_REST_Response( array( 'error' => 'unsupported_grant_type' ), 400 );
     }
     $key = 'pps_mcp_tok_' . pps_mcp_hash( $code );
     $rec = get_transient( $key );
     if ( ! is_array( $rec ) || ( $rec['kind'] ?? '' ) !== 'code' ) {
-        return new WP_REST_Response( array( 'error' => 'invalid_grant' ), 400 );
+        // Either the code never existed, or it expired. 60 seconds was tight: a redirect
+        // through a browser plus an object cache that may not have flushed can outlast it.
+        return $fail( 'code not found or expired', 'Authorization code is unknown or has expired.' );
     }
     delete_transient( $key );   // single use, deleted before validation so a failed attempt cannot be replayed
 
-    if ( ! hash_equals( (string) $rec['client_id'], (string) ( $p['client_id'] ?? '' ) )
-      || ! hash_equals( (string) $rec['redirect_uri'], (string) ( $p['redirect_uri'] ?? '' ) ) ) {
-        return new WP_REST_Response( array( 'error' => 'invalid_grant' ), 400 );
+    if ( ! hash_equals( (string) $rec['client_id'], (string) ( $p['client_id'] ?? '' ) ) ) {
+        return $fail( 'client_id mismatch: stored=' . $rec['client_id'], 'client_id does not match the authorization request.' );
+    }
+    if ( ! hash_equals( (string) $rec['redirect_uri'], (string) ( $p['redirect_uri'] ?? '' ) ) ) {
+        return $fail( 'redirect_uri mismatch: stored=' . $rec['redirect_uri'], 'redirect_uri does not match the authorization request.' );
     }
     // PKCE: the verifier must hash to the challenge presented at /authorize.
     $calc = rtrim( strtr( base64_encode( hash( 'sha256', $ver, true ) ), '+/', '-_' ), '=' );
     if ( ! hash_equals( (string) $rec['challenge'], $calc ) ) {
-        return new WP_REST_Response( array( 'error' => 'invalid_grant' ), 400 );
+        return $fail( 'PKCE mismatch: stored=' . substr( (string) $rec['challenge'], 0, 12 ) . '… computed=' . substr( $calc, 0, 12 ) . '…',
+            'code_verifier does not match the code_challenge.' );
     }
 
     $access = bin2hex( random_bytes( 32 ) );
@@ -737,9 +764,16 @@ function pps_mcp_oauth_token( WP_REST_Request $req ) {
         'kind' => 'access', 'user_id' => (int) $rec['user_id'], 'client_id' => $rec['client_id'],
     ), $ttl );
 
+    pps_mcp_log( 'oauth/token', $seen, true, 'access token issued' );
+
+    // scope is echoed because it was advertised in the metadata and returned at
+    // registration; a client that tracks it can treat its absence as a refusal.
     return new WP_REST_Response( array(
-        'access_token' => $access, 'token_type' => 'Bearer', 'expires_in' => $ttl,
-    ), 200, array( 'Cache-Control' => 'no-store' ) );
+        'access_token' => $access,
+        'token_type'   => 'Bearer',
+        'expires_in'   => $ttl,
+        'scope'        => 'mcp',
+    ), 200, array( 'Cache-Control' => 'no-store', 'Pragma' => 'no-cache' ) );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
