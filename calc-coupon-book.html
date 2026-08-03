@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-02 · CB-DESTDATE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-03 · CB-PAGEAPPLY</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -1022,16 +1022,32 @@ function Sel({label,value,onChange,children,disabled,note,badge,autoComplete,nam
 // so there's no guessing whether a half-typed "12" was meant to be "120" — the
 // value applies on Enter, on blur, or via the ✓ Apply button that appears while
 // the entry differs from what's applied. Default = commit on every keystroke.
-function TxtNum({label,value,onChange,min=1,max=99999,confirm=false}){
+function TxtNum({label,value,onChange,min=1,max=99999,confirm=false,unit="",adjustHint=""}){
   const[raw,setRaw]=useState(String(value));
-  useEffect(()=>setRaw(String(value)),[value]);
-  const flush=()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))};
+  // What was typed at the last commit. The caller normalises page counts (even, at
+  // least 4), so the field can come back holding a number nobody entered -- which
+  // reads as the input having been ignored unless it says otherwise.
+  const typedRef=useRef(null);
+  const[adjusted,setAdjusted]=useState(null);
+  useEffect(()=>{
+    setRaw(String(value));
+    if(typedRef.current!==null&&typedRef.current!==value)setAdjusted({from:typedRef.current,to:value});
+    typedRef.current=null;
+  },[value]);
+  const flush=()=>{
+    const typed=parseFloat(raw);
+    const v=isNaN(typed)?min:Math.min(max,Math.max(min,typed));
+    typedRef.current=isNaN(typed)?null:typed;
+    // The clamp this component owns; the effect above catches the caller's own.
+    setAdjusted(!isNaN(typed)&&typed!==v?{from:typed,to:v}:null);
+    onChange(v);setRaw(String(v));
+  };
   // A pending edit: what's typed isn't what's actually applied to the quote yet.
   const unapplied=confirm&&raw.trim()!==""&&raw.trim()!==String(value);
   return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}
     <div style={{position:"relative"}}>
       <input type="text" inputMode="decimal" value={raw}
-        onChange={e=>{setRaw(e.target.value);if(confirm)return;const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)onChange(v)}}
+        onChange={e=>{setRaw(e.target.value);setAdjusted(null);if(confirm)return;const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)onChange(v)}}
         onBlur={flush}
         onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();flush()}}}
         style={{...ST.inp,...(unapplied?{paddingRight:80,borderColor:CK.cyan}:{})}}/>
@@ -1042,7 +1058,17 @@ function TxtNum({label,value,onChange,min=1,max=99999,confirm=false}){
           title="Apply this page count to the quote"
           style={{position:"absolute",right:5,top:"50%",transform:"translateY(-50%)",padding:"5px 10px",fontSize:12,fontWeight:700,border:"none",borderRadius:4,cursor:"pointer",fontFamily:"inherit",background:CK.cyan,color:"#fff",lineHeight:1.2,whiteSpace:"nowrap"}}>✓ Apply</button>
       )}
-    </div></div>;
+    </div>
+    {/* The cyan border and the Apply button were the only sign the quote was stale.
+        Somebody typed 48, watched the price sit at the 4pp figure, and concluded page
+        count was free -- so say it in words. */}
+    {unapplied&&<div style={{marginTop:4,fontSize:11,fontWeight:600,color:CK.cyan,lineHeight:1.3}}>
+      Quote still shows {value}{unit?" "+unit:""} &mdash; press Apply or Enter to update it.
+    </div>}
+    {!unapplied&&adjusted&&<div style={{marginTop:4,fontSize:11,color:CC.light,lineHeight:1.3}}>
+      Adjusted {adjusted.from} &rarr; {adjusted.to}{adjustHint?" \u2014 "+adjustHint:""}
+    </div>}
+  </div>;
 }
 
 function Pil({label,options,value,onChange,disabled,badge}){
@@ -4743,10 +4769,18 @@ function App(){
     return qs ? base + "?" + qs : base;
   };
 
+  // The fallbacks below swap one calculator FILENAME for another, which is right on the
+  // standalone Pages preview and a no-op on a WordPress product page -- there the path is
+  // /product/<slug>/, the regex matches nothing, and .replace() hands back the same URL.
+  // The "Try as Saddle Stitch" link then reloaded the perfect-bound page it was on.
+  // PPS_CONFIG.switchTargets (injected by PHP, pointing at real product URLs) is the
+  // intended source; until it is present, a target that resolves to the current page is
+  // not a target, so it is dropped rather than rendered as a dead end.
+  const _hereUrl = (location.origin + location.pathname).replace(/\/+$/, "");
   const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [
     {type:"saddle",label:"Saddle Stitch",url:(location.origin+location.pathname).replace(/calc-coupon-book\.html/,"calc-preview-test.html")},
     {type:"perfect-bound",label:"Perfect Bound",url:(location.origin+location.pathname).replace(/calc-coupon-book\.html/,"calc-perfect-bound.html")},
-  ];
+  ].filter(t => t && t.url && t.url.replace(/\/+$/, "") !== _hereUrl);
   const buildSwitchUrl = (targetUrl) => {
     const p = new URLSearchParams();
     p.set("qty", sets[0].qty);
@@ -4888,7 +4922,7 @@ function App(){
               </div>
             ) : (
               <div style={{marginTop:6}}>
-                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350} confirm/>
+                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350} confirm unit="pages" adjustHint="page count must be even, minimum 4"/>
               </div>
             )}
 
