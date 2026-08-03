@@ -1078,9 +1078,14 @@ function pps_mcp_preflight() {
             $rivals[] = ( $meta['Name'] ?? $file ) . ' ' . ( $meta['Version'] ?? '' );
         }
     }
-    $add( 'No other MCP or OAuth plugin active', empty( $rivals ),
+    // Informational, not a verdict. This matches on a plugin's NAME, and a plugin can
+    // carry "MCP" in its title while only registering tools into another plugin's
+    // registry -- which is true of the two on this site. Whether anything actually
+    // competes is decided by the rest_authentication_errors row below, and reporting a
+    // name match as a failure is the same false signal this report exists to avoid.
+    $add( 'Other MCP or OAuth plugins', true,
         $rivals ? implode( ' | ', $rivals ) : 'none',
-        $rivals ? 'Another MCP or OAuth plugin competes for the same REST authentication chain and can answer a request before this one sees it.' : '' );
+        $rivals ? 'Named only. See the rest_authentication_errors row for whether any of them actually intercept requests.' : '' );
 
     // ── 1. The endpoint answers every method with 401, never 404 ─────────────
     // A 404 tells a client there is nothing here, so it stops without ever learning it
