@@ -922,6 +922,63 @@ function pps_mcp_admin() {
     echo '<span style="color:#6b7280">Calls the endpoint from this server and shows the result. No token needed.</span>';
     echo '</form>';
 
+    // ── Discovery check ──────────────────────────────────────────────────────
+    // A connector's first two requests are these documents, and if either is wrong it
+    // gives up before anything else runs — reporting only that it could not connect.
+    // Checking them meant reading raw JSON at a hand-typed URL, which is a poor way to
+    // ask anyone to verify a protocol detail. This states the verdict instead.
+    echo '<h2>Discovery</h2>';
+    echo '<p>What a connector fetches before it can authenticate. Both must be right or it fails with no useful message.</p>';
+    echo '<table class="widefat striped"><tbody>';
+
+    $checks = array(
+        'Authorization server metadata' => array(
+            'url'    => home_url( '/.well-known/oauth-authorization-server' ),
+            'expect' => rtrim( home_url( '/' ), '/' ),
+            'field'  => 'issuer',
+        ),
+        'Protected resource metadata' => array(
+            'url'    => home_url( '/.well-known/oauth-protected-resource' . wp_parse_url( rest_url( PPS_MCP_NS . '/http' ), PHP_URL_PATH ) ),
+            'expect' => rest_url( PPS_MCP_NS . '/http' ),
+            'field'  => 'resource',
+        ),
+    );
+
+    $all_ok = true;
+    foreach ( $checks as $label => $c ) {
+        $res  = wp_remote_get( $c['url'], array( 'timeout' => 15, 'sslverify' => false ) );
+        $ok   = false;
+        $note = '';
+        if ( is_wp_error( $res ) ) {
+            $note = 'Could not fetch: ' . $res->get_error_message();
+        } else {
+            $code = wp_remote_retrieve_response_code( $res );
+            $doc  = json_decode( (string) wp_remote_retrieve_body( $res ), true );
+            if ( $code !== 200 ) {
+                $note = "HTTP $code — WordPress is 404ing this path. The plugin file may be outdated, or a cache is serving the old response.";
+            } elseif ( ! is_array( $doc ) ) {
+                $note = 'Returned something that is not JSON — most likely an HTML page, so something upstream is intercepting /.well-known/.';
+            } else {
+                $got  = (string) ( $doc[ $c['field'] ] ?? '' );
+                $ok   = ( $got === $c['expect'] );
+                $note = $ok ? esc_html( $c['field'] ) . ' = ' . esc_html( $got )
+                            : esc_html( $c['field'] ) . ' = <code>' . esc_html( $got ?: '(missing)' ) . '</code>, expected <code>' . esc_html( $c['expect'] ) . '</code>';
+            }
+        }
+        $all_ok = $all_ok && $ok;
+        echo '<tr><td style="width:230px"><strong>' . esc_html( $label ) . '</strong><br><span style="color:#6b7280;font-size:11px">' . esc_html( $c['url'] ) . '</span></td>'
+           . '<td style="width:70px;font-size:18px">' . ( $ok ? '<span style="color:#16a34a">&#10003;</span>' : '<span style="color:#dc2626">&#10007;</span>' ) . '</td>'
+           . '<td>' . $note . '</td></tr>';
+    }
+    echo '</tbody></table>';
+
+    echo '<p style="padding:10px 14px;border-radius:6px;display:inline-block;'
+       . ( $all_ok ? 'background:#dcfce7;border:1px solid #86efac' : 'background:#fee2e2;border:1px solid #fca5a5' ) . '">'
+       . ( $all_ok
+           ? 'Discovery is correct. A connector added now should reach the approval step.'
+           : 'Discovery is wrong — a connector will fail here, before it can report anything useful. Fix this before adding one.' )
+       . '</p>';
+
     $clients = (array) get_option( 'pps_mcp_clients', array() );
     echo '<h2>Registered OAuth clients (' . count( $clients ) . ')</h2><ul>';
     foreach ( $clients as $cid => $c ) {
