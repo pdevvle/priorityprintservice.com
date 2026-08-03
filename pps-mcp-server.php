@@ -1051,6 +1051,37 @@ function pps_mcp_preflight() {
         $mode === 'full' ? 'Writes permitted — correct for staging, wrong for a live store.'
                          : 'Read-only. Deploys will be refused until this is full.' );
 
+    // ── 0b. Things a separate diagnostic plugin used to answer ───────────────
+    // Folded in so there is one place to look. Each earned its spot during this
+    // build: the Authorization header because a stripped one makes every credential
+    // look invalid, and the plugin inventory because AI Engine's OAuth handler turned
+    // out to be competing for the same REST handshake.
+    $auth_ok = isset( $_SERVER['HTTP_AUTHORIZATION'] ) || isset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] );
+    $add( 'Authorization header reaches PHP', $auth_ok,
+        $auth_ok ? 'present on this request' : 'not present on THIS request (a browser sends none, so this is only meaningful for an API call)',
+        $auth_ok ? '' : 'If an API client also gets no header through, add to .htaccess: RewriteCond %{HTTP:Authorization} . / RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]' );
+
+    $ht     = ABSPATH . '.htaccess';
+    $has_ht = file_exists( $ht ) && is_readable( $ht );
+    $fwd    = $has_ht && preg_match( '/HTTP_AUTHORIZATION/i', (string) file_get_contents( $ht ) );
+    $add( '.htaccess forwards Authorization', true,
+        ! $has_ht ? 'no readable .htaccess (Nginx-only stack — check the app-level config instead)'
+                  : ( $fwd ? 'rule present' : 'no rule — fine unless the check above fails for API clients' ), '' );
+
+    if ( ! function_exists( 'get_plugins' ) ) require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    $active = (array) get_option( 'active_plugins', array() );
+    $rivals = array();
+    foreach ( get_plugins() as $file => $meta ) {
+        if ( ! in_array( $file, $active, true ) ) continue;
+        if ( strpos( $file, 'pps-mcp-server' ) === 0 ) continue;
+        if ( preg_match( '/mcp|oauth|ai[- ]?engine|meow/i', $file . ' ' . ( $meta['Name'] ?? '' ) ) ) {
+            $rivals[] = ( $meta['Name'] ?? $file ) . ' ' . ( $meta['Version'] ?? '' );
+        }
+    }
+    $add( 'No other MCP or OAuth plugin active', empty( $rivals ),
+        $rivals ? implode( ' | ', $rivals ) : 'none',
+        $rivals ? 'Another MCP or OAuth plugin competes for the same REST authentication chain and can answer a request before this one sees it.' : '' );
+
     // ── 1. The endpoint answers every method with 401, never 404 ─────────────
     // A 404 tells a client there is nothing here, so it stops without ever learning it
     // should authenticate. This is the check that would have caught the last bug.

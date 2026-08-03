@@ -21,7 +21,7 @@ cd "$(dirname "$0")"
 
 # Standalone single-file plugins. pps-calculators.php and its siblings are deliberately
 # absent: they are one multi-file plugin deployed by pinned URL, not by upload.
-DEFAULT=(pps-mcp-server.php pps-mcp-diagnostics.php)
+DEFAULT=(pps-mcp-server.php)
 FILES=("${@:-}")
 [ -z "${FILES[0]:-}" ] && FILES=("${DEFAULT[@]}")
 
