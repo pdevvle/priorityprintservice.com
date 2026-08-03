@@ -946,62 +946,8 @@ function pps_mcp_admin() {
     echo '<span style="color:#6b7280">Calls the endpoint from this server and shows the result. No token needed.</span>';
     echo '</form>';
 
-    // ── Discovery check ──────────────────────────────────────────────────────
-    // A connector's first two requests are these documents, and if either is wrong it
-    // gives up before anything else runs — reporting only that it could not connect.
-    // Checking them meant reading raw JSON at a hand-typed URL, which is a poor way to
-    // ask anyone to verify a protocol detail. This states the verdict instead.
-    echo '<h2>Discovery</h2>';
-    echo '<p>What a connector fetches before it can authenticate. Both must be right or it fails with no useful message.</p>';
-    echo '<table class="widefat striped"><tbody>';
-
-    $checks = array(
-        'Authorization server metadata' => array(
-            'url'    => home_url( '/.well-known/oauth-authorization-server' ),
-            'expect' => rtrim( home_url( '/' ), '/' ),
-            'field'  => 'issuer',
-        ),
-        'Protected resource metadata' => array(
-            'url'    => home_url( '/.well-known/oauth-protected-resource' . wp_parse_url( rest_url( PPS_MCP_NS . '/http' ), PHP_URL_PATH ) ),
-            'expect' => rest_url( PPS_MCP_NS . '/http' ),
-            'field'  => 'resource',
-        ),
-    );
-
-    $all_ok = true;
-    foreach ( $checks as $label => $c ) {
-        $res  = wp_remote_get( $c['url'], array( 'timeout' => 15, 'sslverify' => false ) );
-        $ok   = false;
-        $note = '';
-        if ( is_wp_error( $res ) ) {
-            $note = 'Could not fetch: ' . $res->get_error_message();
-        } else {
-            $code = wp_remote_retrieve_response_code( $res );
-            $doc  = json_decode( (string) wp_remote_retrieve_body( $res ), true );
-            if ( $code !== 200 ) {
-                $note = "HTTP $code — WordPress is 404ing this path. The plugin file may be outdated, or a cache is serving the old response.";
-            } elseif ( ! is_array( $doc ) ) {
-                $note = 'Returned something that is not JSON — most likely an HTML page, so something upstream is intercepting /.well-known/.';
-            } else {
-                $got  = (string) ( $doc[ $c['field'] ] ?? '' );
-                $ok   = ( $got === $c['expect'] );
-                $note = $ok ? esc_html( $c['field'] ) . ' = ' . esc_html( $got )
-                            : esc_html( $c['field'] ) . ' = <code>' . esc_html( $got ?: '(missing)' ) . '</code>, expected <code>' . esc_html( $c['expect'] ) . '</code>';
-            }
-        }
-        $all_ok = $all_ok && $ok;
-        echo '<tr><td style="width:230px"><strong>' . esc_html( $label ) . '</strong><br><span style="color:#6b7280;font-size:11px">' . esc_html( $c['url'] ) . '</span></td>'
-           . '<td style="width:70px;font-size:18px">' . ( $ok ? '<span style="color:#16a34a">&#10003;</span>' : '<span style="color:#dc2626">&#10007;</span>' ) . '</td>'
-           . '<td>' . $note . '</td></tr>';
-    }
-    echo '</tbody></table>';
-
-    echo '<p style="padding:10px 14px;border-radius:6px;display:inline-block;'
-       . ( $all_ok ? 'background:#dcfce7;border:1px solid #86efac' : 'background:#fee2e2;border:1px solid #fca5a5' ) . '">'
-       . ( $all_ok
-           ? 'Discovery is correct. A connector added now should reach the approval step.'
-           : 'Discovery is wrong — a connector will fail here, before it can report anything useful. Fix this before adding one.' )
-       . '</p>';
+    // Everything a connector does, walked from here, with a copyable report.
+    pps_mcp_render_preflight();
 
     $clients = (array) get_option( 'pps_mcp_clients', array() );
     echo '<h2>Registered OAuth clients (' . count( $clients ) . ')</h2><ul>';
@@ -1027,4 +973,252 @@ function pps_mcp_uninstall() {
     global $wpdb;
     foreach ( array( 'pps_mcp_token_hash', 'pps_mcp_token_user', 'pps_mcp_clients', 'pps_mcp_log' ) as $o ) delete_option( $o );
     $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_pps_mcp_tok_%' OR option_name LIKE '_transient_timeout_pps_mcp_tok_%'" );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PREFLIGHT
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Walk the entire connector handshake from inside the server and report where it
+ * breaks.
+ *
+ * A connector that fails says only "could not connect". Everything that matters
+ * happens in the four requests it makes before it can report anything: probing the
+ * endpoint, fetching two discovery documents, and registering itself. Four separate
+ * bugs in this plugin lived in exactly that window, and each one cost a round trip to
+ * find because the only way to see it was to try and fail.
+ *
+ * This performs those same requests over real HTTP against this site and checks each
+ * response against what the specs require, so the failure is named before anyone adds
+ * a connector. The output is one block of text, meant to be copied whole.
+ *
+ * Loopback is legitimate for every check here: each answer is generated by PHP, so
+ * the request path does not change it. It cannot prove the site is reachable from the
+ * public internet — only adding a connector proves that — and it says so.
+ */
+function pps_mcp_preflight() {
+    $r    = array();
+    $add  = function ( $step, $ok, $detail, $fix = '' ) use ( &$r ) {
+        $r[] = compact( 'step', 'ok', 'detail', 'fix' );
+    };
+    $get  = function ( $url, $args = array() ) {
+        return wp_remote_request( $url, array_merge( array( 'timeout' => 15, 'sslverify' => false, 'redirection' => 0 ), $args ) );
+    };
+    $endpoint = rest_url( PPS_MCP_NS . '/http' );
+
+    // ── 0. Environment ───────────────────────────────────────────────────────
+    $add( 'Site uses HTTPS', is_ssl() || strpos( home_url(), 'https://' ) === 0,
+        home_url(), 'OAuth requires https. A plain-http site cannot be used as a remote connector.' );
+
+    $add( 'Pretty permalinks enabled', (bool) get_option( 'permalink_structure' ),
+        get_option( 'permalink_structure' ) ?: '(plain)',
+        'Settings > Permalinks > anything other than Plain. REST routes and /.well-known/ both need it.' );
+
+    $mode = pps_mcp_mode();
+    $env  = function_exists( 'wp_get_environment_type' ) ? wp_get_environment_type() : 'unknown';
+    $add( 'Write mode', true, "mode=$mode, WP_ENVIRONMENT_TYPE=$env",
+        $mode === 'full' ? 'Writes permitted — correct for staging, wrong for a live store.'
+                         : 'Read-only. Deploys will be refused until this is full.' );
+
+    // ── 1. The endpoint answers every method with 401, never 404 ─────────────
+    // A 404 tells a client there is nothing here, so it stops without ever learning it
+    // should authenticate. This is the check that would have caught the last bug.
+    foreach ( array( 'GET', 'POST', 'DELETE' ) as $method ) {
+        $res  = $get( $endpoint, array( 'method' => $method ) );
+        $code = is_wp_error( $res ) ? 0 : (int) wp_remote_retrieve_response_code( $res );
+        $ok   = $code === 401;
+        $add( "Unauthenticated $method returns 401", $ok,
+            is_wp_error( $res ) ? $res->get_error_message() : "HTTP $code",
+            $code === 404 ? 'A 404 means the route is not registered for this method. A client probing with it concludes the endpoint does not exist.'
+              : ( $code === 200 ? 'The endpoint answered without a credential. That is an open door.' : '' ) );
+    }
+
+    // ── 2. The 401 carries WWW-Authenticate pointing at real metadata ────────
+    $res  = $get( $endpoint, array( 'method' => 'POST' ) );
+    $hdrs = is_wp_error( $res ) ? array() : (array) wp_remote_retrieve_headers( $res );
+    $hdrs = array_change_key_case( is_object( $hdrs ) ? (array) $hdrs : $hdrs, CASE_LOWER );
+    $wa   = (string) ( $hdrs['www-authenticate'] ?? '' );
+    $add( '401 carries WWW-Authenticate', $wa !== '', $wa ?: '(absent)',
+        'Without it a client has no way to find the authorization server. RFC 9728.' );
+
+    $pointed = '';
+    if ( preg_match( '/resource_metadata="([^"]+)"/', $wa, $m ) ) $pointed = $m[1];
+    $add( 'WWW-Authenticate names resource_metadata', $pointed !== '', $pointed ?: '(absent)',
+        'The header must include resource_metadata="<url>".' );
+
+    // ── 3. Protected resource metadata ───────────────────────────────────────
+    $pr_url = home_url( '/.well-known/oauth-protected-resource' . wp_parse_url( $endpoint, PHP_URL_PATH ) );
+    $res    = $get( $pr_url );
+    $code   = is_wp_error( $res ) ? 0 : (int) wp_remote_retrieve_response_code( $res );
+    $body   = is_wp_error( $res ) ? '' : (string) wp_remote_retrieve_body( $res );
+    $pr     = json_decode( $body, true );
+    $add( 'Protected resource metadata reachable', $code === 200 && is_array( $pr ),
+        "HTTP $code at $pr_url",
+        $code === 404 ? 'WordPress 404s this path. The plugin may be outdated, or a cache/webserver rule is intercepting /.well-known/.'
+          : ( is_array( $pr ) ? '' : 'Returned something that is not JSON — likely an HTML page, so something upstream is answering first.' ) );
+
+    if ( is_array( $pr ) ) {
+        $add( 'resource matches the endpoint exactly', ( $pr['resource'] ?? '' ) === $endpoint,
+            'resource=' . ( $pr['resource'] ?? '(missing)' ) . ' expected=' . $endpoint,
+            'RFC 9728 requires an exact match, including scheme and trailing path.' );
+        $as_list = (array) ( $pr['authorization_servers'] ?? array() );
+        $add( 'authorization_servers present', ! empty( $as_list ),
+            $as_list ? implode( ', ', $as_list ) : '(empty)', 'A client has nowhere to go without it.' );
+    } else {
+        $as_list = array();
+    }
+
+    // ── 4. Authorization server metadata, per RFC 8414 URL construction ──────
+    // The well-known segment goes after the HOST and the issuer path is appended, and
+    // the issuer returned must equal the identifier used to build the URL. Getting
+    // either wrong makes a strict client reject the document silently.
+    $as_meta = null;
+    foreach ( $as_list as $as ) {
+        $parts   = wp_parse_url( $as );
+        $as_path = rtrim( (string) ( $parts['path'] ?? '' ), '/' );
+        $as_url  = $parts['scheme'] . '://' . $parts['host'] . ( isset( $parts['port'] ) ? ':' . $parts['port'] : '' )
+                 . '/.well-known/oauth-authorization-server' . $as_path;
+
+        $res  = $get( $as_url );
+        $code = is_wp_error( $res ) ? 0 : (int) wp_remote_retrieve_response_code( $res );
+        $doc  = json_decode( is_wp_error( $res ) ? '' : (string) wp_remote_retrieve_body( $res ), true );
+        $add( 'Authorization server metadata reachable', $code === 200 && is_array( $doc ),
+            "HTTP $code at $as_url", $code === 404 ? 'The document is not served at the RFC 8414 location.' : '' );
+
+        if ( is_array( $doc ) ) {
+            $as_meta = $doc;
+            $add( 'issuer matches the identifier it was fetched under',
+                ( $doc['issuer'] ?? '' ) === rtrim( $as, '/' ),
+                'issuer=' . ( $doc['issuer'] ?? '(missing)' ) . ' expected=' . rtrim( $as, '/' ),
+                'RFC 8414 section 3.3. A mismatch is rejected without explanation.' );
+
+            foreach ( array( 'registration_endpoint', 'authorization_endpoint', 'token_endpoint' ) as $f ) {
+                $add( "$f advertised", ! empty( $doc[ $f ] ), (string) ( $doc[ $f ] ?? '(missing)' ),
+                    $f === 'registration_endpoint' ? 'claude.ai registers itself; without this it cannot enrol.' : '' );
+            }
+            $add( 'S256 PKCE advertised', in_array( 'S256', (array) ( $doc['code_challenge_methods_supported'] ?? array() ), true ),
+                implode( ',', (array) ( $doc['code_challenge_methods_supported'] ?? array() ) ) ?: '(none)',
+                'OAuth 2.1 public clients require it.' );
+        }
+        break;
+    }
+
+    // ── 5. Dynamic client registration, for real, then cleaned up ────────────
+    if ( ! empty( $as_meta['registration_endpoint'] ) ) {
+        $res  = $get( $as_meta['registration_endpoint'], array(
+            'method' => 'POST', 'headers' => array( 'Content-Type' => 'application/json' ),
+            'body'   => wp_json_encode( array(
+                'client_name'   => 'PPS preflight (temporary)',
+                'redirect_uris' => array( 'https://claude.ai/api/mcp/auth_callback' ),
+            ) ),
+        ) );
+        $code = is_wp_error( $res ) ? 0 : (int) wp_remote_retrieve_response_code( $res );
+        $doc  = json_decode( is_wp_error( $res ) ? '' : (string) wp_remote_retrieve_body( $res ), true );
+        $cid  = (string) ( $doc['client_id'] ?? '' );
+        $add( 'Dynamic client registration works', $code === 201 && $cid !== '',
+            "HTTP $code" . ( $cid ? ", client_id issued" : '' ),
+            $code === 401 ? 'Registration must be open — a client has no credential yet. Something is requiring auth on it.' : '' );
+
+        if ( $cid ) {   // leave nothing behind
+            $clients = (array) get_option( 'pps_mcp_clients', array() );
+            unset( $clients[ $cid ] );
+            update_option( 'pps_mcp_clients', $clients, false );
+        }
+    }
+
+    // ── 6. Authorize and token endpoints exist and behave ────────────────────
+    if ( ! empty( $as_meta['authorization_endpoint'] ) ) {
+        $res  = $get( $as_meta['authorization_endpoint'] );
+        $code = is_wp_error( $res ) ? 0 : (int) wp_remote_retrieve_response_code( $res );
+        // Anything but 404/500 is fine: unauthenticated it should complain about a
+        // missing client_id or redirect to login, both of which are correct.
+        $add( 'Authorization endpoint responds', $code && $code !== 404 && $code < 500, "HTTP $code",
+            $code === 404 ? 'The authorize URL does not resolve. The browser step of OAuth cannot happen.' : '' );
+    }
+    if ( ! empty( $as_meta['token_endpoint'] ) ) {
+        $res  = $get( $as_meta['token_endpoint'], array(
+            'method' => 'POST',
+            'body'   => array( 'grant_type' => 'authorization_code', 'code' => 'preflight-not-a-real-code' ),
+        ) );
+        $code = is_wp_error( $res ) ? 0 : (int) wp_remote_retrieve_response_code( $res );
+        $add( 'Token endpoint rejects a bad code cleanly', $code === 400, "HTTP $code",
+            $code === 404 ? 'The token URL does not resolve.' : ( $code >= 500 ? 'It errored rather than refusing — a bug in the handler.' : '' ) );
+    }
+
+    // ── 7. A real authenticated round trip ───────────────────────────────────
+    $probe = bin2hex( random_bytes( 32 ) );
+    set_transient( 'pps_mcp_tok_' . pps_mcp_hash( $probe ), array(
+        'kind' => 'access', 'user_id' => get_current_user_id(), 'client_id' => 'preflight',
+    ), 60 );
+    $res  = $get( $endpoint, array(
+        'method'  => 'POST',
+        'headers' => array( 'Authorization' => 'Bearer ' . $probe, 'Content-Type' => 'application/json' ),
+        'body'    => wp_json_encode( array( 'jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list' ) ),
+    ) );
+    delete_transient( 'pps_mcp_tok_' . pps_mcp_hash( $probe ) );
+    $body  = is_wp_error( $res ) ? '' : (string) wp_remote_retrieve_body( $res );
+    $doc   = json_decode( $body, true );
+    $tools = (array) ( $doc['result']['tools'] ?? array() );
+    $add( 'Authenticated tools/list works', ! empty( $tools ),
+        count( $tools ) . ' tool(s): ' . implode( ', ', wp_list_pluck( $tools, 'name' ) ),
+        empty( $tools ) ? 'The transport or auth is broken downstream of discovery.' : '' );
+
+    // ── 8. Anything filtering REST before our route ──────────────────────────
+    global $wp_filter;
+    $names = array();
+    if ( isset( $wp_filter['rest_authentication_errors'] ) ) {
+        foreach ( $wp_filter['rest_authentication_errors']->callbacks as $prio => $cbs ) {
+            foreach ( $cbs as $cb ) {
+                $f = $cb['function'];
+                if ( is_string( $f ) ) $names[] = $f;
+                elseif ( is_array( $f ) && count( $f ) === 2 ) $names[] = ( is_object( $f[0] ) ? get_class( $f[0] ) : (string) $f[0] ) . '::' . $f[1];
+                else $names[] = '(closure)';
+            }
+        }
+    }
+    $add( 'Nothing unexpected on rest_authentication_errors', count( $names ) <= 1,
+        $names ? implode( ', ', $names ) : '(none)',
+        count( $names ) > 1 ? 'A security plugin here can 401 every REST request regardless of this plugin.' : '' );
+
+    return $r;
+}
+
+function pps_mcp_render_preflight() {
+    echo '<h2>Preflight</h2>';
+    echo '<p>Performs every request a connector makes, against this site, and checks each response against what the specs require. Run it before adding a connector.</p>';
+    echo '<form method="post" style="margin:12px 0">';
+    wp_nonce_field( 'pps_mcp_admin' );
+    echo '<button class="button button-primary" name="pps_mcp_preflight" value="1">Run preflight</button>';
+    echo '</form>';
+
+    if ( ! isset( $_POST['pps_mcp_preflight'] ) || ! check_admin_referer( 'pps_mcp_admin' ) ) return;
+
+    $results = pps_mcp_preflight();
+    $failed  = array_values( array_filter( $results, function ( $x ) { return ! $x['ok']; } ) );
+
+    echo '<p style="padding:12px 16px;border-radius:6px;font-size:15px;display:inline-block;'
+       . ( $failed ? 'background:#fee2e2;border:1px solid #fca5a5' : 'background:#dcfce7;border:1px solid #86efac' ) . '">'
+       . ( $failed
+           ? '<strong>' . count( $failed ) . ' of ' . count( $results ) . ' checks failed.</strong> A connector will fail too. The failing rows below say what and why.'
+           : '<strong>All ' . count( $results ) . ' checks passed.</strong> Adding a connector should now reach the approval page. If it still does not, the problem is between claude.ai and this server — a firewall or DNS — rather than anything this plugin controls.' )
+       . '</p>';
+
+    echo '<table class="widefat striped" style="margin-top:12px"><thead><tr><th style="width:34px"></th><th style="width:300px">Check</th><th>Result</th></tr></thead><tbody>';
+    $text = "PPS MCP preflight — " . home_url( '/' ) . " — " . gmdate( 'c' ) . "\n"
+          . str_repeat( '=', 64 ) . "\n";
+    foreach ( $results as $x ) {
+        echo '<tr><td style="font-size:17px">' . ( $x['ok'] ? '<span style="color:#16a34a">&#10003;</span>' : '<span style="color:#dc2626">&#10007;</span>' ) . '</td>'
+           . '<td><strong>' . esc_html( $x['step'] ) . '</strong></td>'
+           . '<td><code style="font-size:11.5px">' . esc_html( $x['detail'] ) . '</code>'
+           . ( $x['fix'] ? '<br><span style="color:' . ( $x['ok'] ? '#6b7280' : '#991b1b' ) . ';font-size:12px">' . esc_html( $x['fix'] ) . '</span>' : '' )
+           . '</td></tr>';
+        $text .= ( $x['ok'] ? '[PASS] ' : '[FAIL] ' ) . $x['step'] . "\n         " . $x['detail'] . "\n"
+               . ( $x['fix'] ? "         -> " . $x['fix'] . "\n" : '' );
+    }
+    echo '</tbody></table>';
+
+    echo '<h3>Copy this whole box if you need to send it to someone</h3>';
+    echo '<textarea readonly rows="16" style="width:100%;font-family:monospace;font-size:11.5px" onclick="this.select()">'
+       . esc_textarea( $text ) . '</textarea>';
 }
