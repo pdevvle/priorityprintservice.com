@@ -262,7 +262,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-02 · DESTDATE</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-03 · PAGEAPPLY</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -5843,9 +5843,17 @@ function App(){
   // Swap whatever the trailing filename is rather than a specific one: this used to
   // hardcode calc-preview-test.html, so on any other filename (calc-modern-draft.html)
   // the replace silently no-opped and the link reloaded the current page.
+  // The fallbacks below swap one calculator FILENAME for another, which is right on the
+  // standalone Pages preview and a no-op on a WordPress product page -- there the path is
+  // /product/<slug>/, the regex matches nothing, and .replace() hands back the same URL.
+  // The "Try as Saddle Stitch" link then reloaded the perfect-bound page it was on.
+  // PPS_CONFIG.switchTargets (injected by PHP, pointing at real product URLs) is the
+  // intended source; until it is present, a target that resolves to the current page is
+  // not a target, so it is dropped rather than rendered as a dead end.
+  const _hereUrl = (location.origin + location.pathname).replace(/\/+$/, "");
   const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [
     {type:"perfect-bound",label:"Perfect Bound",url:(location.origin+location.pathname).replace(/[^/]+\.html$/,"calc-perfect-bound.html")},
-  ];
+  ].filter(t => t && t.url && t.url.replace(/\/+$/, "") !== _hereUrl);
   const buildSwitchUrl = (targetUrl) => {
     const p = new URLSearchParams();
     p.set("qty", sets[0].qty);
