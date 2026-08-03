@@ -75,7 +75,21 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'PPS_MCP_VERSION', '1.0.0' );
-define( 'PPS_MCP_NS', 'pps-mcp/v1' );
+/**
+ * The endpoint path segment, and why it is not a constant.
+ *
+ * claude.ai refuses to add a connector whose URL it has seen before — "a server with
+ * this URL already exists" — and a half-registered entry that failed its handshake
+ * still holds the URL while being invisible or unmanageable in the interface. There is
+ * no way to fix that from this side, and no reason a working server should be blocked
+ * by stale state somewhere else.
+ *
+ * So the path is issuable. "Issue a new endpoint URL" in Settings > PPS MCP bumps it,
+ * every route and both discovery documents follow, and you get an address the other
+ * end has never seen. Old URLs stop resolving, which is the point: nothing is left
+ * half-listening.
+ */
+define( 'PPS_MCP_NS', 'pps-mcp/' . preg_replace( '/[^a-z0-9]/', '', (string) get_option( 'pps_mcp_slug', 'v1' ) ?: 'v1' ) );
 define( 'PPS_MCP_PROTOCOL', '2025-06-18' );   // MCP protocol revision advertised to clients
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -886,6 +900,14 @@ function pps_mcp_admin() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Denied.' );
     $fresh = '';
 
+    if ( isset( $_POST['pps_mcp_newurl'] ) && check_admin_referer( 'pps_mcp_admin' ) ) {
+        // Short and random rather than v2, v3, v4: a sequence is guessable, and if the
+        // reason for reissuing was ever that a URL leaked, the next one should not be.
+        update_option( 'pps_mcp_slug', 'v' . substr( bin2hex( random_bytes( 4 ) ), 0, 6 ), false );
+        // Any client enrolled against the old address is pointing at nothing now.
+        update_option( 'pps_mcp_clients', array(), false );
+        echo '<div class="notice notice-success"><p>New endpoint issued. Registered OAuth clients were cleared, since they were enrolled against the old address. <strong>Reload this page</strong> to see the new URL, then add a connector with it.</p></div>';
+    }
     if ( isset( $_POST['pps_mcp_mode'] ) && check_admin_referer( 'pps_mcp_admin' ) ) {
         $want = $_POST['pps_mcp_mode'] === 'full' ? 'full' : 'read';
         update_option( 'pps_mcp_mode', $want, false );
@@ -921,6 +943,7 @@ function pps_mcp_admin() {
     echo '<form method="post" style="margin:18px 0">';
     wp_nonce_field( 'pps_mcp_admin' );
     echo '<button class="button button-primary" name="pps_mcp_gen" value="1">Generate a static token</button> ';
+    echo '<button class="button" name="pps_mcp_newurl" value="1" onclick="return confirm(\'Issue a new endpoint URL? Any connector pointing at the current one will stop working and must be re-added.\')">Issue a new endpoint URL</button> ';
     echo '<button class="button" name="pps_mcp_mode" value="' . ( pps_mcp_mode() === 'full' ? 'read' : 'full' ) . '">'
        . ( pps_mcp_mode() === 'full' ? 'Switch to read-only' : 'Allow writes (staging only)' ) . '</button> ';
     echo '<button class="button" name="pps_mcp_revoke" value="1" onclick="return confirm(\'Revoke the static token and every registered client?\')">Revoke everything</button>';
