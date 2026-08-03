@@ -779,9 +779,36 @@ function pps_mcp_meta_protected_resource() {
     );
 }
 
+/**
+ * The issuer this document must claim, derived from the URL it was fetched at.
+ *
+ * RFC 8414 §3.3: the issuer returned MUST be identical to the issuer identifier that
+ * the well-known string was inserted into to build the request URL. There are two
+ * legitimate ways a client gets here, and they imply different issuers:
+ *
+ *   /.well-known/oauth-authorization-server                        → https://host
+ *   /.well-known/oauth-authorization-server/wp-json/pps-mcp/v1     → https://host/wp-json/pps-mcp/v1
+ *
+ * A fixed issuer is therefore wrong for one of them, and a client that validates the
+ * match — which it should — rejects the document and stops without explaining why.
+ * Deriving it from the request satisfies both.
+ */
+function pps_mcp_issuer_for_request() {
+    $path = '/' . ltrim( (string) strtok( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), '?' ), '/' );
+
+    // Only a path BEGINNING with the well-known prefix is the RFC 8414 form. The copy
+    // registered under the REST namespace merely ends with the same string, and its
+    // own route identifier is the honest issuer for it.
+    if ( strpos( $path, '/.well-known/oauth-authorization-server' ) !== 0 ) {
+        return rtrim( rest_url( PPS_MCP_NS ), '/' );
+    }
+    $tail = rtrim( substr( $path, strlen( '/.well-known/oauth-authorization-server' ) ), '/' );
+    return rtrim( home_url( '/' ), '/' ) . $tail;
+}
+
 function pps_mcp_meta_authorization_server() {
     return array(
-        'issuer'                                => rest_url( PPS_MCP_NS ),
+        'issuer'                                => pps_mcp_issuer_for_request(),
         'authorization_endpoint'                => home_url( '/' ) . '?pps_mcp_authorize=1',
         'token_endpoint'                        => rest_url( PPS_MCP_NS . '/oauth/token' ),
         'registration_endpoint'                 => rest_url( PPS_MCP_NS . '/oauth/register' ),
