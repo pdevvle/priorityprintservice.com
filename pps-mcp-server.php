@@ -13,11 +13,16 @@
  * its own: one JSON-RPC endpoint, one tool registry, two ways to authenticate.
  *
  *   MCP endpoint      POST /wp-json/pps-mcp/v1/http
- *   Protected resrc.  GET  /wp-json/pps-mcp/v1/.well-known/oauth-protected-resource
- *   Auth server meta  GET  /wp-json/pps-mcp/v1/.well-known/oauth-authorization-server
+ *   Protected resrc.  GET  /.well-known/oauth-protected-resource/wp-json/pps-mcp/v1/http
+ *   Auth server meta  GET  /.well-known/oauth-authorization-server
  *   Registration      POST /wp-json/pps-mcp/v1/oauth/register     (RFC 7591)
- *   Authorize         GET  /wp-json/pps-mcp/v1/oauth/authorize
+ *   Authorize         GET  /?pps_mcp_authorize=1
  *   Token             POST /wp-json/pps-mcp/v1/oauth/token
+ *
+ * The two discovery documents are served from the ROOT .well-known path, because
+ * that is where clients look: RFC 9728 and RFC 8414 insert the well-known segment
+ * after the host and append the resource path. Copies remain under the REST
+ * namespace for any client that follows the WWW-Authenticate pointer instead.
  *
  * Routes live under pps-mcp/v1 so they cannot collide with AI Engine's mcp/v1
  * while you migrate. Nothing here reads or writes AI Engine's options.
@@ -159,7 +164,9 @@ function pps_mcp_authorize() {
         wp_set_current_user( $uid );
         return true;
     }
-    $meta = rest_url( PPS_MCP_NS . '/.well-known/oauth-protected-resource' );
+    // The standard location, so a client that builds the URL itself and a client that
+    // follows this pointer both land in the same place.
+    $meta = home_url( '/.well-known/oauth-protected-resource' . wp_parse_url( rest_url( PPS_MCP_NS . '/http' ), PHP_URL_PATH ) );
     header( 'WWW-Authenticate: Bearer realm="' . esc_url_raw( home_url() ) . '", resource_metadata="' . esc_url_raw( $meta ) . '"' );
     return new WP_Error( 'pps_mcp_unauthorized', 'Authentication required.', array( 'status' => 401 ) );
 }
@@ -702,29 +709,12 @@ add_action( 'rest_api_init', function () {
 
     register_rest_route( PPS_MCP_NS, '/.well-known/oauth-protected-resource', array(
         'methods' => 'GET', 'permission_callback' => '__return_true',
-        'callback' => function () {
-            return array(
-                'resource'                => rest_url( PPS_MCP_NS . '/http' ),
-                'authorization_servers'   => array( rest_url( PPS_MCP_NS ) ),
-                'bearer_methods_supported'=> array( 'header' ),
-            );
-        },
+        'callback' => 'pps_mcp_meta_protected_resource',
     ) );
 
     register_rest_route( PPS_MCP_NS, '/.well-known/oauth-authorization-server', array(
         'methods' => 'GET', 'permission_callback' => '__return_true',
-        'callback' => function () {
-            return array(
-                'issuer'                                => rest_url( PPS_MCP_NS ),
-                'authorization_endpoint'                => home_url( '/?pps_mcp_authorize=1' ),
-                'token_endpoint'                        => rest_url( PPS_MCP_NS . '/oauth/token' ),
-                'registration_endpoint'                 => rest_url( PPS_MCP_NS . '/oauth/register' ),
-                'response_types_supported'              => array( 'code' ),
-                'grant_types_supported'                 => array( 'authorization_code' ),
-                'code_challenge_methods_supported'      => array( 'S256' ),
-                'token_endpoint_auth_methods_supported' => array( 'none' ),
-            );
-        },
+        'callback' => 'pps_mcp_meta_authorization_server',
     ) );
 
     register_rest_route( PPS_MCP_NS, '/oauth/register', array(
@@ -740,6 +730,68 @@ add_action( 'rest_api_init', function () {
 add_action( 'init', function () {
     if ( isset( $_GET['pps_mcp_authorize'] ) ) pps_mcp_oauth_authorize();
 } );
+
+/**
+ * Serve the discovery documents from the ROOT .well-known path.
+ *
+ * This is where clients actually look. RFC 9728 and RFC 8414 insert the well-known
+ * segment directly after the host and append the resource path — so for a resource at
+ * /wp-json/pps-mcp/v1/http the metadata URL is
+ *
+ *   /.well-known/oauth-protected-resource/wp-json/pps-mcp/v1/http
+ *
+ * and NOT /wp-json/pps-mcp/v1/.well-known/oauth-protected-resource, which is where
+ * the first version of this plugin put it. A connector building the standard URL got a
+ * WordPress 404 and stopped before it ever reached the registration endpoint. The
+ * REST-namespaced copies are kept as well, since the WWW-Authenticate header names one
+ * explicitly and a client that follows the pointer should also succeed.
+ *
+ * Runs on parse_request, before WordPress resolves the URL to a post and 404s.
+ */
+add_action( 'parse_request', function () {
+    $path = strtok( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), '?' );
+    $path = '/' . ltrim( $path, '/' );
+    if ( strpos( $path, '/.well-known/oauth-' ) !== 0 ) return;
+
+    if ( strpos( $path, '/.well-known/oauth-protected-resource' ) === 0 ) {
+        $doc = pps_mcp_meta_protected_resource();
+    } elseif ( strpos( $path, '/.well-known/oauth-authorization-server' ) === 0 ) {
+        $doc = pps_mcp_meta_authorization_server();
+    } else {
+        return;
+    }
+
+    nocache_headers();
+    header( 'Content-Type: application/json; charset=utf-8' );
+    // Discovery is fetched by a client that has no credential yet, and browsers
+    // preflight it, so it has to be readable cross-origin.
+    header( 'Access-Control-Allow-Origin: *' );
+    echo wp_json_encode( $doc, JSON_UNESCAPED_SLASHES );
+    exit;
+}, 0 );
+
+function pps_mcp_meta_protected_resource() {
+    return array(
+        'resource'                 => rest_url( PPS_MCP_NS . '/http' ),
+        'authorization_servers'    => array( rest_url( PPS_MCP_NS ) ),
+        'bearer_methods_supported' => array( 'header' ),
+        'scopes_supported'         => array( 'mcp' ),
+    );
+}
+
+function pps_mcp_meta_authorization_server() {
+    return array(
+        'issuer'                                => rest_url( PPS_MCP_NS ),
+        'authorization_endpoint'                => home_url( '/' ) . '?pps_mcp_authorize=1',
+        'token_endpoint'                        => rest_url( PPS_MCP_NS . '/oauth/token' ),
+        'registration_endpoint'                 => rest_url( PPS_MCP_NS . '/oauth/register' ),
+        'response_types_supported'              => array( 'code' ),
+        'grant_types_supported'                 => array( 'authorization_code' ),
+        'code_challenge_methods_supported'      => array( 'S256' ),
+        'token_endpoint_auth_methods_supported' => array( 'none' ),
+        'scopes_supported'                      => array( 'mcp' ),
+    );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ADMIN
