@@ -29,17 +29,46 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 // SHARED: PPS ORDER VIEW HELPERS
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Every customer-chosen field that a reorder or an Edit Specs round-trip must carry.
+ *
+ * A whitelist rather than the whole metadata blob, because the blob also holds derived
+ * figures — totals, transit days, weights, the debug block — and restoring those would
+ * pin a new quote to an old calculation.
+ *
+ * It was written against the saddle-stitch calculator and never extended when the flat
+ * ones shipped, so it listed bindDir, sets, insideColor and coverColor while omitting
+ * every field a brochure, postcard, letterhead, greeting card or sticker actually
+ * prices on. Editing a single-sided brochure therefore reloaded it as double-sided —
+ * `sides` simply was not in the payload — and re-quoted $107.72 as $141.85, silently.
+ * The calculators were never the problem: their restore handlers already read all of
+ * these.
+ *
+ * When adding a pricing input to any calculator, add it here in the same change. The
+ * test is simple: if changing it changes the price, it belongs in this list.
+ */
 function pps_reorder_field_whitelist() {
     return array(
-        'sizeLabel', 'customLong', 'customShort', 'bindDir',
-        'sets',
-        'insideColor', 'coverColor',
+        // Identity
+        'jobName', 'qty',
+        // Size — presets and custom, both families
+        'sizeMode', 'sizeLabel', 'customLong', 'customShort', 'longEdge', 'shortEdge',
+        // Booklets
+        'bindDir', 'sets', 'insideColor', 'coverColor',
         'insidePaper', 'insidePaperType',
         'coverMode', 'coverPaper', 'coverPaperType',
-        'twoStaple', 'vividPrint',
-        'coating', 'bundling', 'roundCorner',
+        'twoStaple', 'outfold',
+        // Flats
+        'foldType', 'foldDir', 'frontColor', 'backColor', 'sides', 'paper', 'paperType',
+        // Finishing — vividPrint is the booklet spelling, vivid the flat one
+        'vividPrint', 'vivid', 'coating', 'coatSides', 'bundling', 'roundCorner',
+        'perforation', 'perfDir', 'perfPositions',
+        // Artwork & proofing
         'artwork', 'artEditPages', 'bleed', 'proof',
-        'shipState',
+        'proofAddrSame', 'proofAddr', 'canvaLink', 'canvaInstructions',
+        // Destination. The date is deliberately absent: a delivery date is a promise
+        // about a specific day, so it is re-quoted rather than restored.
+        'shipState', 'shipZip', 'shipAddr',
     );
 }
 

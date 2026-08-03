@@ -876,13 +876,18 @@ add_action( 'wp', function() {
             </div>';
             echo '<script>
             (function(){
+                // The calculators say "Add to Order", not "Add to cart", so this matched
+                // nothing and the button kept its append-sounding label through the whole
+                // edit flow. The cart item IS replaced -- pps_ajax_add_to_cart removes the
+                // old key after the new line succeeds -- but nothing on screen said so,
+                // which is a reasonable thing to refuse to click.
                 var observer = new MutationObserver(function(){
                     var btns = document.querySelectorAll("#pps-calculator-wrap button");
                     btns.forEach(function(b){
-                        if (b.textContent.match(/add to cart/i) && !b.dataset.ppsEdited) {
-                            b.textContent = b.textContent.replace(/add to cart/i, "Update Cart");
-                            b.dataset.ppsEdited = "1";
-                        }
+                        if (b.dataset.ppsEdited) return;
+                        if (!/add to (cart|order)/i.test(b.textContent)) return;
+                        b.textContent = b.textContent.replace(/add to (cart|order)/i, "Update Order");
+                        b.dataset.ppsEdited = "1";
                     });
                 });
                 observer.observe(document.body, {childList:true, subtree:true});
@@ -2215,24 +2220,16 @@ add_filter( 'woocommerce_cart_item_name', function( $name, $cart_item, $cart_ite
     $full = json_decode( $cart_item['pps_metadata'], true );
     if ( ! $full ) return $name;
 
-    // Build reorder config (same fields as My Account reorder)
-    $reorder_fields = array(
-        'sizeLabel', 'customLong', 'customShort', 'bindDir',
-        'sets', 'insideColor', 'coverColor',
-        'insidePaper', 'insidePaperType',
-        'coverMode', 'coverPaper', 'coverPaperType',
-        'twoStaple', 'vividPrint',
-        'coating', 'bundling', 'roundCorner',
-        'artwork', 'artEditPages', 'bleed', 'proof',
-        'shipState',
-    );
+    // One list, shared with the My Account reorder path. This used to be a second copy
+    // of that array, and the two drifted: both were written for the booklet calculators,
+    // so an Edit Specs round-trip on a flat product dropped every field it prices on.
+    $reorder_fields = function_exists( 'pps_reorder_field_whitelist' )
+        ? pps_reorder_field_whitelist()
+        : array( 'sizeLabel', 'qty', 'sides', 'paper', 'shipState' );
     $reorder_config = array();
     foreach ( $reorder_fields as $key ) {
         if ( isset( $full[ $key ] ) ) $reorder_config[ $key ] = $full[ $key ];
     }
-
-    // Include quantity if present
-    if ( isset( $full['qty'] ) ) $reorder_config['qty'] = $full['qty'];
 
     // Include artwork file info for edit mode
     if ( ! empty( $cart_item['pps_artwork_path'] ) ) {

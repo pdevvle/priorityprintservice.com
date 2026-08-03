@@ -1659,7 +1659,16 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '(function(){'
           . 'var w=document.getElementById(' . wp_json_encode( $id ) . ');'
           . 'if(!w)return;'
-          . 'var steps=[];w.querySelectorAll(".pps-wiz-step").forEach(function(el){steps.push(el.dataset.step)});'
+          // Read the step order at click time, not once at script time. Captured up
+          // front it is whatever the DOM held the instant this inline script ran, and on
+          // staging that was evidently not the finished markup: every step was present
+          // and correct afterwards, no exception was thrown, yet nothing advanced and
+          // the action bar never appeared -- which is what an empty steps array produces,
+          // since indexOf returns -1 and `si < steps.length-1` is then -1 < -1, false.
+          // A page builder, a lazy-render, or a cache plugin relocating inline scripts
+          // all cause it, and none of them are ours to control. Querying live cannot go
+          // stale, and the cost is one querySelectorAll per click.
+          . 'function stepList(){var a=[];w.querySelectorAll(".pps-wiz-step").forEach(function(el){a.push(el.dataset.step)});return a}'
           . 'var state={},base=w.dataset.link;'
           . 'var bar=w.querySelector(".pps-wiz-actions");'
           . 'var wizFiles=[];'
@@ -1729,7 +1738,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'if(selOpt&&selOpt.dataset.url)state[step].url=selOpt.dataset.url;'
           .   'var opts=w.querySelectorAll(\'[data-step="\'+step+\'"] .pps-wiz-opt\');'
           .   'opts.forEach(function(o){o.classList.toggle("is-selected",o.dataset.val===val)});'
-          .   'var si=steps.indexOf(step);'
+          .   'var steps=stepList();var si=steps.indexOf(step);'
           // A step whose data-step is not in the steps array means the markup and this
           // script disagree. Without this guard si is -1, which hides every step from
           // index 1 and then re-shows step 0 -- the wizard highlights your choice and
@@ -1755,7 +1764,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'var parts=[];'
           .   'var productUrl="";'
           .   'if(w.dataset.lead){'
-          .     'steps.forEach(function(s){if(state[s]){parts.push(state[s].label);if(state[s].url)productUrl=state[s].url}});'
+          .     'stepList().forEach(function(s){if(state[s]){parts.push(state[s].label);if(state[s].url)productUrl=state[s].url}});'
           .     'var a=w.querySelector(".pps-wiz-act-pricing");'
           .     'if(a){a.href=productUrl||base;if(productUrl){a.textContent="View Product \\u2192";a.style.display=""}else if(!base){a.style.display="none"}else{a.textContent="Proceed to Pricing \\u2192"}}'
           .   '}else{'
@@ -1774,7 +1783,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'bar.classList.toggle("is-visible",parts.length>0);'
           . '}'
           . 'function clearStep(step){'
-          .   'var si=steps.indexOf(step);if(si<0)return;'
+          .   'var steps=stepList();var si=steps.indexOf(step);if(si<0)return;'
           .   'delete state[step];'
           .   'var el=w.querySelector(\'[data-step="\'+step+\'"]\');'
           .   'if(el)el.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");if(o.dataset.ptype||o.dataset.stype)o.style.display=""});'
@@ -1812,11 +1821,11 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'if(e.target.closest(".pps-wiz-reset")){'
           .     'state={};'
           .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");o.style.display=""});'
-          .     'steps.forEach(function(s,i){if(i>0)hide(s)});'
+          .     'stepList().forEach(function(s,i){if(i>0)hide(s)});'
           .     'bar.classList.remove("is-visible");'
           .     'var ef=w.querySelector(".pps-wiz-email-form");if(ef)ef.style.display="none";'
           .     'wizFiles=[];renderFiles();'
-          .     'var firstStep=w.querySelector(\'[data-step="\'+steps[0]+\'"]\');'
+          .     'var _s0=stepList()[0];var firstStep=_s0?w.querySelector(\'[data-step="\'+_s0+\'"]\'):null;'
           .     'if(firstStep)firstStep.scrollIntoView({behavior:"smooth",block:"nearest"});'
           .     'return;'
           .   '}'
