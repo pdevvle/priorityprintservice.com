@@ -1096,10 +1096,14 @@ function pps_mcp_preflight() {
     }
 
     // ── 2. The 401 carries WWW-Authenticate pointing at real metadata ────────
-    $res  = $get( $endpoint, array( 'method' => 'POST' ) );
-    $hdrs = is_wp_error( $res ) ? array() : (array) wp_remote_retrieve_headers( $res );
-    $hdrs = array_change_key_case( is_object( $hdrs ) ? (array) $hdrs : $hdrs, CASE_LOWER );
-    $wa   = (string) ( $hdrs['www-authenticate'] ?? '' );
+    $res = $get( $endpoint, array( 'method' => 'POST' ) );
+    // wp_remote_retrieve_header(), not a cast of retrieve_headers(). That returns a
+    // CaseInsensitiveDictionary object, and casting it to an array yields the object's
+    // internal properties rather than the header map — so the lookup silently found
+    // nothing whether or not the header had been sent, and reported a failure that was
+    // entirely in this check. A false negative in a diagnostic is worse than no
+    // diagnostic: it sent us looking for a bug in working code.
+    $wa = is_wp_error( $res ) ? '' : (string) wp_remote_retrieve_header( $res, 'www-authenticate' );
     $add( '401 carries WWW-Authenticate', $wa !== '', $wa ?: '(absent)',
         'Without it a client has no way to find the authorization server. RFC 9728.' );
 
