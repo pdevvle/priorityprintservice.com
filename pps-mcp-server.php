@@ -1002,6 +1002,9 @@ function pps_mcp_admin() {
     // Everything a connector does, walked from here, with a copyable report.
     pps_mcp_render_preflight();
 
+    // Deploying should not depend on a connector that may never attach.
+    pps_mcp_render_deploy();
+
     $clients = (array) get_option( 'pps_mcp_clients', array() );
     echo '<h2>Registered OAuth clients (' . count( $clients ) . ')</h2><ul>';
     foreach ( $clients as $cid => $c ) {
@@ -1325,4 +1328,133 @@ function pps_mcp_render_preflight() {
     echo '<h3>Copy this whole box if you need to send it to someone</h3>';
     echo '<textarea readonly rows="16" style="width:100%;font-family:monospace;font-size:11.5px" onclick="this.select()">'
        . esc_textarea( $text ) . '</textarea>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DEPLOY FROM THE REPOSITORY
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Pull a set of files from a pinned commit and write them into the plugin.
+ *
+ * This exists because the MCP connector turned out to be blocked by state inside
+ * claude.ai that neither side can edit — a half-registered entry holding the hostname,
+ * invisible in the interface, unfixable from the server. Deploying should not depend on
+ * that. The same download_to_file logic is already in this plugin as an MCP tool; this
+ * is the button.
+ *
+ * Pinned to a commit SHA rather than a branch, per the project's own deploy rule: the
+ * deployed bytes stay reviewable, and rolling back is the same action with an older
+ * SHA. Before/after sha256 are shown for every file, which is what tells you whether a
+ * file on the server had been edited outside version control.
+ */
+function pps_mcp_deploy_manifest() {
+    return apply_filters( 'pps_mcp_deploy_manifest', array(
+        'PHP — the plugin itself' => array(
+            'dest' => 'pps-calculators/',
+            'files' => array( 'pps-calculators.php', 'pps-reorder.php', 'pps-term-shortcodes.php' ),
+        ),
+        'Calculators — staged for the HTML deploy step' => array(
+            'dest' => 'pps-calculators/_pending_html/',
+            'files' => array(
+                'calc-brochure.html', 'calc-coupon-book.html', 'calc-greeting-card.html',
+                'calc-letterhead.html', 'calc-modern-draft.html', 'calc-perfect-bound.html',
+                'calc-postcard.html', 'calc-preview-test.html', 'calc-sticker.html',
+            ),
+        ),
+    ) );
+}
+
+function pps_mcp_render_deploy() {
+    $repo = get_option( 'pps_mcp_repo', 'pdevvle/priorityprintservice.com' );
+    $ref  = isset( $_POST['pps_mcp_ref'] ) ? sanitize_text_field( wp_unslash( $_POST['pps_mcp_ref'] ) ) : '';
+
+    echo '<h2>Deploy from the repository</h2>';
+    echo '<p>Fetches files from a pinned commit and writes them into <code>wp-content/plugins/pps-calculators/</code>. '
+       . 'Requires write mode. Nothing is written if the download fails or the PHP does not parse.</p>';
+
+    echo '<form method="post" style="margin:12px 0">';
+    wp_nonce_field( 'pps_mcp_admin' );
+    echo '<label>Commit SHA (or branch, though a SHA is what makes a rollback exact): ';
+    echo '<input type="text" name="pps_mcp_ref" value="' . esc_attr( $ref ) . '" size="46" placeholder="e.g. 850a7ff or claude/optimistic-wozniak-11ql3y"></label> ';
+    echo '<button class="button" name="pps_mcp_deploy_dry" value="1">Preview</button> ';
+    echo '<button class="button button-primary" name="pps_mcp_deploy" value="1" onclick="return confirm(\'Write these files to the server?\')">Deploy</button>';
+    echo '</form>';
+
+    $dry = isset( $_POST['pps_mcp_deploy_dry'] );
+    $go  = isset( $_POST['pps_mcp_deploy'] );
+    if ( ( ! $dry && ! $go ) || ! check_admin_referer( 'pps_mcp_admin' ) ) return;
+
+    if ( $ref === '' ) { echo '<div class="notice notice-error"><p>Enter a commit SHA or branch name.</p></div>'; return; }
+    if ( $go && ! pps_mcp_writes_allowed() ) {
+        echo '<div class="notice notice-error"><p>This install is read-only. Switch to full mode above to deploy.</p></div>'; return;
+    }
+
+    echo '<table class="widefat striped"><thead><tr><th>File</th><th>On server</th><th>In commit</th><th>Result</th></tr></thead><tbody>';
+    $writes = 0; $errors = 0;
+
+    foreach ( pps_mcp_deploy_manifest() as $group => $spec ) {
+        echo '<tr><td colspan="4" style="background:#f0f0f1"><strong>' . esc_html( $group ) . '</strong> &rarr; <code>' . esc_html( $spec['dest'] ) . '</code></td></tr>';
+        foreach ( $spec['files'] as $name ) {
+            $url  = 'https://raw.githubusercontent.com/' . $repo . '/' . rawurlencode( $ref ) . '/' . $name;
+            $rel  = $spec['dest'] . $name;
+            $dest = pps_mcp_safe_path( $rel, WP_PLUGIN_DIR, false );
+
+            $before = ( ! is_wp_error( $dest ) && file_exists( $dest ) ) ? hash_file( 'sha256', $dest ) : null;
+            $res    = wp_remote_get( $url, array( 'timeout' => 30 ) );
+            $code   = is_wp_error( $res ) ? 0 : (int) wp_remote_retrieve_response_code( $res );
+            $body   = is_wp_error( $res ) ? '' : (string) wp_remote_retrieve_body( $res );
+            $after  = $body !== '' ? hash( 'sha256', $body ) : null;
+
+            $note = ''; $ok = false;
+            if ( is_wp_error( $dest ) ) {
+                $note = 'Destination rejected: ' . $dest->get_error_message();
+            } elseif ( $code !== 200 || $body === '' ) {
+                $note = "Download failed (HTTP $code)";
+            } elseif ( $before !== null && hash_equals( $before, $after ) ) {
+                $note = 'identical — nothing to do'; $ok = true;
+            } elseif ( $dry ) {
+                $note = $before === null ? 'would CREATE' : 'would REPLACE'; $ok = true;
+            } else {
+                // A .php file that does not parse would white-screen the site.
+                $bad = false;
+                if ( substr( $name, -4 ) === '.php' ) {
+                    if ( strpos( $body, '<?php' ) === false ) { $note = 'refused: not PHP (a 404 page?)'; $bad = true; }
+                    else {
+                        $tmp = wp_tempnam( 'pps-dep' ); file_put_contents( $tmp, $body );
+                        $lint = null; $rc = 0;
+                        if ( function_exists( 'exec' ) && ! in_array( 'exec', array_map( 'trim', explode( ',', (string) ini_get( 'disable_functions' ) ) ), true ) ) {
+                            @exec( 'php -l ' . escapeshellarg( $tmp ) . ' 2>&1', $lint, $rc );
+                        }
+                        @unlink( $tmp );
+                        if ( $rc !== 0 ) { $note = 'refused: ' . implode( ' ', (array) $lint ); $bad = true; }
+                    }
+                }
+                if ( ! $bad ) {
+                    wp_mkdir_p( dirname( $dest ) );
+                    if ( file_put_contents( $dest, $body ) === false ) $note = 'write failed (permissions?)';
+                    else { $note = $before === null ? 'CREATED' : 'REPLACED'; $ok = true; $writes++; }
+                }
+            }
+            if ( ! $ok ) $errors++;
+
+            printf(
+                '<tr><td><code>%s</code></td><td><code style="font-size:10.5px">%s</code></td><td><code style="font-size:10.5px">%s</code></td><td style="color:%s">%s</td></tr>',
+                esc_html( $name ),
+                $before ? esc_html( substr( $before, 0, 12 ) ) : '<em>absent</em>',
+                $after ? esc_html( substr( $after, 0, 12 ) ) : '—',
+                $ok ? '#166534' : '#991b1b',
+                esc_html( $note )
+            );
+        }
+    }
+    echo '</tbody></table>';
+
+    echo '<p style="padding:10px 14px;border-radius:6px;display:inline-block;'
+       . ( $errors ? 'background:#fee2e2;border:1px solid #fca5a5' : 'background:#dcfce7;border:1px solid #86efac' ) . '">'
+       . ( $dry ? 'Preview only — nothing was written. ' : '' )
+       . ( $errors ? $errors . ' file(s) had a problem. ' : '' )
+       . ( $go ? $writes . ' file(s) written.' : '' )
+       . ( $go && $writes ? ' The HTML files were staged in _pending_html/; the calculator plugin copies them into uploads on its next load, so visit the site once.' : '' )
+       . '</p>';
 }
