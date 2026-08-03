@@ -1,3 +1,6 @@
 node_modules/
 package-lock.json
 package.json
+
+# Plugin zips built by tools-plugin-zip.sh — artifacts, rebuilt on demand
+dist/
