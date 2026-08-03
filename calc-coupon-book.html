@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-03 · CB-PAGEAPPLY</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-03 · CB-PGMAX200</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -1031,7 +1031,7 @@ function TxtNum({label,value,onChange,min=1,max=99999,confirm=false,unit="",adju
   const[adjusted,setAdjusted]=useState(null);
   useEffect(()=>{
     setRaw(String(value));
-    if(typedRef.current!==null&&typedRef.current!==value)setAdjusted({from:typedRef.current,to:value});
+    if(typedRef.current!==null&&typedRef.current!==value)setAdjusted({from:typedRef.current,to:value,clamped:typedRef.current<min||typedRef.current>max});
     typedRef.current=null;
   },[value]);
   const flush=()=>{
@@ -1039,7 +1039,8 @@ function TxtNum({label,value,onChange,min=1,max=99999,confirm=false,unit="",adju
     const v=isNaN(typed)?min:Math.min(max,Math.max(min,typed));
     typedRef.current=isNaN(typed)?null:typed;
     // The clamp this component owns; the effect above catches the caller's own.
-    setAdjusted(!isNaN(typed)&&typed!==v?{from:typed,to:v}:null);
+    // out-of-range is a mistake worth flagging; a round-up to an even count is routine.
+    setAdjusted(!isNaN(typed)&&typed!==v?{from:typed,to:v,clamped:typed<min||typed>max}:null);
     onChange(v);setRaw(String(v));
   };
   // A pending edit: what's typed isn't what's actually applied to the quote yet.
@@ -1065,8 +1066,9 @@ function TxtNum({label,value,onChange,min=1,max=99999,confirm=false,unit="",adju
     {unapplied&&<div style={{marginTop:4,fontSize:11,fontWeight:600,color:CK.cyan,lineHeight:1.3}}>
       Quote still shows {value}{unit?" "+unit:""} &mdash; press Apply or Enter to update it.
     </div>}
-    {!unapplied&&adjusted&&<div style={{marginTop:4,fontSize:11,color:CC.light,lineHeight:1.3}}>
-      Adjusted {adjusted.from} &rarr; {adjusted.to}{adjustHint?" \u2014 "+adjustHint:""}
+    {!unapplied&&adjusted&&<div style={{marginTop:4,fontSize:11,lineHeight:1.3,
+      fontWeight:adjusted.clamped?600:400,color:adjusted.clamped?"#dc2626":CC.light}}>
+      {adjusted.clamped?"\u26a0 ":""}Adjusted {adjusted.from} &rarr; {adjusted.to}{adjustHint?" \u2014 "+adjustHint:""}
     </div>}
   </div>;
 }
@@ -4922,7 +4924,7 @@ function App(){
               </div>
             ) : (
               <div style={{marginTop:6}}>
-                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350} confirm unit="pages" adjustHint="page count must be even, minimum 4"/>
+                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(200,pg)});}} min={4} max={200} confirm unit="pages" adjustHint="coupon books run 4–200 pages, even numbers only"/>
               </div>
             )}
 
