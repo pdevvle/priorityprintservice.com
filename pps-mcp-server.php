@@ -343,6 +343,77 @@ function pps_mcp_tools() {
             },
         ),
 
+        'download_to_file' => array(
+            'description' => 'Fetch a URL and write the response into plugins or themes. This is the deploy path: point it at a raw GitHub URL pinned to a commit SHA, so the deployed bytes are reviewable and a rollback is the same call with an older SHA. Prefer this over write_file for deploys.',
+            'cap'    => 'edit_plugins',
+            'write'  => true,
+            'schema' => array( 'type' => 'object', 'required' => array( 'url', 'path' ), 'properties' => array(
+                'url'           => array( 'type' => 'string', 'description' => 'https only, and the host must be allowlisted.' ),
+                'path'          => array( 'type' => 'string' ),
+                'root'          => array( 'type' => 'string', 'enum' => array( 'plugins', 'themes' ), 'default' => 'plugins' ),
+                'expect_sha256' => array( 'type' => 'string', 'description' => 'sha256 of the file currently on disk. The write is refused if it does not match, so a deploy cannot silently destroy an edit made on the server.' ),
+            ) ),
+            'run' => function ( $a ) {
+                $url = (string) ( $a['url'] ?? '' );
+                // Fetching an arbitrary URL from inside the network is an SSRF primitive:
+                // it can reach cloud metadata endpoints and anything else the host can see.
+                // An allowlist of source hosts costs nothing here, because deploys only ever
+                // come from the repository.
+                $hosts = apply_filters( 'pps_mcp_download_hosts', array(
+                    'raw.githubusercontent.com', 'gist.githubusercontent.com', 'codeload.github.com',
+                ) );
+                $host = wp_parse_url( $url, PHP_URL_HOST );
+                if ( wp_parse_url( $url, PHP_URL_SCHEME ) !== 'https' || ! in_array( $host, $hosts, true ) ) {
+                    return new WP_Error( 'pps_mcp_url', 'Refused: https only, and host must be one of ' . implode( ', ', $hosts ) . '. Extend via the pps_mcp_download_hosts filter.' );
+                }
+
+                $root = ( ( $a['root'] ?? 'plugins' ) === 'themes' ) ? get_theme_root() : WP_PLUGIN_DIR;
+                $dest = pps_mcp_safe_path( $a['path'] ?? '', $root, false );
+                if ( is_wp_error( $dest ) ) return $dest;
+
+                $existed = file_exists( $dest );
+                $before  = $existed ? hash_file( 'sha256', $dest ) : null;
+                // Same optimistic lock as write_file. A deploy that overwrites a file
+                // somebody patched in place is precisely how this project lost its
+                // artwork-upload hardening; refusing is cheaper than discovering it later.
+                if ( $existed && ! empty( $a['expect_sha256'] ) && ! hash_equals( $before, (string) $a['expect_sha256'] ) ) {
+                    return new WP_Error( 'pps_mcp_conflict', "File changed since it was read (on disk $before). Re-read before deploying over it." );
+                }
+
+                $res = wp_remote_get( $url, array( 'timeout' => 30, 'redirection' => 3 ) );
+                if ( is_wp_error( $res ) ) return $res;
+                $code = wp_remote_retrieve_response_code( $res );
+                if ( $code !== 200 ) return new WP_Error( 'pps_mcp_http', "Source returned HTTP $code." );
+                $body = (string) wp_remote_retrieve_body( $res );
+                if ( $body === '' ) return new WP_Error( 'pps_mcp_http', 'Source returned an empty body.' );
+
+                if ( substr( $dest, -4 ) === '.php' ) {
+                    if ( strpos( $body, '<?php' ) === false ) {
+                        // A 404 page or an HTML error saved over a live plugin file is a
+                        // silent outage; the extension and the content have to agree.
+                        return new WP_Error( 'pps_mcp_content', 'Refused: destination is .php but the response contains no PHP open tag.' );
+                    }
+                    $tmp = wp_tempnam( 'pps-mcp' );
+                    file_put_contents( $tmp, $body );
+                    $lint = null; $rc = 0;
+                    if ( function_exists( 'exec' ) && ! in_array( 'exec', array_map( 'trim', explode( ',', (string) ini_get( 'disable_functions' ) ) ), true ) ) {
+                        @exec( 'php -l ' . escapeshellarg( $tmp ) . ' 2>&1', $lint, $rc );
+                    }
+                    @unlink( $tmp );
+                    if ( $rc !== 0 ) return new WP_Error( 'pps_mcp_lint', 'Refused: ' . implode( ' ', (array) $lint ) );
+                }
+
+                if ( file_put_contents( $dest, $body ) === false ) {
+                    return new WP_Error( 'pps_mcp_io', 'Write failed (permissions?).' );
+                }
+                return array(
+                    'path' => $a['path'], 'source' => $url, 'created' => ! $existed,
+                    'bytes' => strlen( $body ),
+                    'sha256_before' => $before, 'sha256_after' => hash_file( 'sha256', $dest ),
+                );
+            },
+        ),
+
         'get_option' => array(
             'description' => 'Read a wp_options value.',
             'cap'    => 'manage_options',
