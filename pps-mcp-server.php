@@ -166,8 +166,12 @@ function pps_mcp_authorize() {
     }
     // The standard location, so a client that builds the URL itself and a client that
     // follows this pointer both land in the same place.
-    $meta = home_url( '/.well-known/oauth-protected-resource' . wp_parse_url( rest_url( PPS_MCP_NS . '/http' ), PHP_URL_PATH ) );
-    header( 'WWW-Authenticate: Bearer realm="' . esc_url_raw( home_url() ) . '", resource_metadata="' . esc_url_raw( $meta ) . '"' );
+    // The header itself is attached in rest_post_dispatch below, not here. A raw
+    // header() call from a permission callback only lands if the callback is reached,
+    // and on this site it was not: other plugins sit on rest_authentication_errors and
+    // one of them answers an anonymous request with 401 first. The endpoint returned a
+    // correct 401 with no WWW-Authenticate on it, which is the one combination that
+    // makes a connector give up silently.
     return new WP_Error( 'pps_mcp_unauthorized', 'Authentication required.', array( 'status' => 401 ) );
 }
 
@@ -749,6 +753,32 @@ add_action( 'rest_api_init', function () {
     ) );
 } );
 
+/**
+ * Attach WWW-Authenticate to any 401 from this plugin's routes.
+ *
+ * rest_post_dispatch runs whichever layer produced the response — including when
+ * authentication fails before the route's own permission callback is ever reached.
+ * That is what happens here: WooCommerce, Jetpack, Spectra and AI Engine all sit on
+ * rest_authentication_errors, and an anonymous request is answered 401 by one of them
+ * first. A raw header() call inside the permission callback therefore never ran, and
+ * the endpoint returned a correct 401 with no header on it — the one combination that
+ * makes a connector stop without reporting anything, because a 401 it cannot follow is
+ * indistinguishable from a site that simply refuses it.
+ *
+ * Setting it on the response object rather than with header() also means WordPress
+ * emits it as part of the response, so nothing downstream can drop it.
+ */
+add_filter( 'rest_post_dispatch', function ( $result, $server, $request ) {
+    if ( ! ( $result instanceof WP_REST_Response ) ) return $result;
+    if ( strpos( (string) $request->get_route(), '/' . PPS_MCP_NS ) !== 0 ) return $result;
+    if ( (int) $result->get_status() !== 401 ) return $result;
+
+    $meta = home_url( '/.well-known/oauth-protected-resource' . wp_parse_url( rest_url( PPS_MCP_NS . '/http' ), PHP_URL_PATH ) );
+    $result->header( 'WWW-Authenticate',
+        'Bearer realm="' . esc_url_raw( home_url() ) . '", resource_metadata="' . esc_url_raw( $meta ) . '"' );
+    return $result;
+}, 999, 3 );
+
 // The authorize step is a browser page, not a REST route: it has to render HTML,
 // set cookies and run auth_redirect(), none of which belong in a JSON endpoint.
 add_action( 'init', function () {
@@ -1177,9 +1207,20 @@ function pps_mcp_preflight() {
             }
         }
     }
-    $add( 'Nothing unexpected on rest_authentication_errors', count( $names ) <= 1,
-        $names ? implode( ', ', $names ) : '(none)',
-        count( $names ) > 1 ? 'A security plugin here can 401 every REST request regardless of this plugin.' : '' );
+    // These are the ordinary occupants of a WooCommerce/Jetpack site and are not a
+    // problem in themselves. What matters is that one of them answers first, which is
+    // why the WWW-Authenticate header is attached in rest_post_dispatch rather than in
+    // this plugin's own permission callback.
+    $known = array( 'WC_REST_Authentication', 'Automattic\\Jetpack', 'rest_application_password_check_errors',
+                    'rest_cookie_check_errors', 'UAGB_Init_Blocks' );
+    $unexpected = array_values( array_filter( $names, function ( $n ) use ( $known ) {
+        foreach ( $known as $k ) if ( stripos( $n, $k ) !== false ) return false;
+        return true;
+    } ) );
+    $add( 'Nothing unexpected on rest_authentication_errors', empty( $unexpected ),
+        $unexpected ? 'unexpected: ' . implode( ', ', $unexpected ) . ' | routine: ' . count( $names ) - count( $unexpected ) . ' others'
+                    : count( $names ) . ' routine callback(s), none unexpected',
+        $unexpected ? 'Each of these can answer a REST request before this plugin sees it. Another MCP or OAuth plugin here will compete for the same handshake.' : '' );
 
     return $r;
 }
