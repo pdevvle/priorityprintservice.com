@@ -77,6 +77,56 @@ add_action( 'rest_api_init', function () {
     ) );
 } );
 
+/**
+ * The same report as a wp-admin page.
+ *
+ * The REST route above authenticates by cookie, and WordPress REST cookie auth
+ * requires an X-WP-Nonce header — so pasting that URL into a browser returns
+ * `rest_forbidden` 401 even while logged in as an administrator, which reads as the
+ * plugin refusing you rather than as a missing nonce. An admin screen is inside the
+ * normal admin auth flow and has no such requirement.
+ *
+ * Keep the REST route: it is the one that can be called with an explicit
+ * `Authorization: Bearer` header, which is how you test whether that header survives
+ * the trip to PHP at all — the single most useful thing this plugin measures.
+ */
+add_action( 'admin_menu', function () {
+    add_management_page( 'MCP Diagnostics', 'MCP Diagnostics', 'manage_options', 'pps-diag', function () {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Denied.' );
+        $report = pps_diag_report( new WP_REST_Request( 'GET', '/pps-diag/v1/report' ) );
+        $data   = $report instanceof WP_REST_Response ? $report->get_data() : $report;
+
+        echo '<div class="wrap"><h1>MCP Diagnostics</h1>';
+        echo '<p>Read-only. Safe to copy and paste — credentials are reported as present/absent with a length, never as values.</p>';
+
+        $auth = $data['authorization_header'] ?? array();
+        $got  = ! empty( $auth['HTTP_AUTHORIZATION'] ) || ! empty( $auth['REDIRECT_HTTP_AUTHORIZATION'] ) || ! empty( $auth['getallheaders'] );
+        echo '<div style="padding:12px 16px;margin:14px 0;border-radius:6px;background:' . ( $got ? '#dcfce7;border:1px solid #86efac' : '#fef3c7;border:1px solid #fcd34d' ) . '">';
+        echo '<strong>Authorization header:</strong> ' . ( $got ? 'reached PHP on this request.' : 'not present on this request — expected, since a browser does not send one. Use the curl command below to test it properly.' );
+        echo '</div>';
+
+        $wa = $data['endpoints']['mcp_http']['www_authenticate'] ?? '(not probed)';
+        $ok = $wa && strpos( $wa, 'ABSENT' ) === false;
+        echo '<div style="padding:12px 16px;margin:14px 0;border-radius:6px;background:' . ( $ok ? '#dcfce7;border:1px solid #86efac' : '#fee2e2;border:1px solid #fca5a5' ) . '">';
+        echo '<strong>MCP endpoint 401 carries WWW-Authenticate:</strong> ' . esc_html( $wa );
+        if ( ! $ok ) echo '<br><span style="color:#991b1b">Without this header an MCP client has nowhere to discover the authorization server, so it reports a bare 401 and never attempts OAuth.</span>';
+        echo '</div>';
+
+        echo '<h2>Test whether the Authorization header survives</h2>';
+        echo '<p>Run this from an external machine — a server reaching itself can bypass the edge firewall:</p>';
+        echo '<pre style="background:#f6f7f7;padding:12px;overflow:auto;user-select:all">curl -sS -H \'Authorization: Bearer probe123\' \\
+  \'' . esc_html( rest_url( 'pps-diag/v1/report' ) ) . '\' | head -c 400</pre>';
+        echo '<p>That needs a token, since it has no browser session. Generate one over SSH:</p>';
+        echo '<pre style="background:#f6f7f7;padding:12px;overflow:auto;user-select:all">wp option update pps_diag_token "$(openssl rand -hex 24)"</pre>';
+        echo '<p>then add <code>-H "X-PPS-Diag: &lt;token&gt;"</code>. In that run, <code>authorization_header</code> should show at least one <code>true</code>. If all three are false, the header is being stripped and no credential can ever work.</p>';
+
+        echo '<h2>Full report</h2>';
+        echo '<textarea readonly rows="30" style="width:100%;font-family:monospace;font-size:12px">'
+           . esc_textarea( wp_json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) ) . '</textarea>';
+        echo '</div>';
+    } );
+} );
+
 function pps_diag_report( WP_REST_Request $req ) {
     $out = array( 'generated' => gmdate( 'c' ), 'site' => home_url( '/' ) );
 
