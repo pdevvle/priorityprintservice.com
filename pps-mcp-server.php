@@ -703,8 +703,32 @@ function pps_mcp_oauth_token( WP_REST_Request $req ) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 add_action( 'rest_api_init', function () {
+    // GET and DELETE are registered alongside POST deliberately.
+    //
+    // The Streamable HTTP transport uses GET for a server-initiated SSE stream and
+    // DELETE to end a session. This server offers neither, and the correct answer to
+    // both is 405 — but only AFTER authentication. Registered as POST-only, an
+    // unauthenticated GET fell through to WordPress and returned rest_no_route 404,
+    // which tells a client "there is nothing at this URL" rather than "authenticate
+    // first". A client that probes with GET therefore never sees the 401 that carries
+    // the WWW-Authenticate header, and never begins discovery. Sharing the
+    // permission_callback is what makes the 401 arrive on every method.
     register_rest_route( PPS_MCP_NS, '/http', array(
-        'methods' => 'POST', 'permission_callback' => 'pps_mcp_authorize', 'callback' => 'pps_mcp_handle',
+        array(
+            'methods' => 'POST', 'permission_callback' => 'pps_mcp_authorize', 'callback' => 'pps_mcp_handle',
+        ),
+        array(
+            'methods' => 'GET, DELETE', 'permission_callback' => 'pps_mcp_authorize',
+            'callback' => function () {
+                return new WP_REST_Response( array(
+                    'jsonrpc' => '2.0',
+                    'error'   => array(
+                        'code'    => -32000,
+                        'message' => 'This endpoint accepts POST only. It does not offer a server-initiated SSE stream, so GET and DELETE are unsupported per the Streamable HTTP transport.',
+                    ),
+                ), 405, array( 'Allow' => 'POST' ) );
+            },
+        ),
     ) );
 
     register_rest_route( PPS_MCP_NS, '/.well-known/oauth-protected-resource', array(
