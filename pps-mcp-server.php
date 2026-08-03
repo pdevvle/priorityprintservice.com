@@ -822,8 +822,20 @@ add_filter( 'rest_post_dispatch', function ( $result, $server, $request ) {
 // The authorize step is a browser page, not a REST route: it has to render HTML,
 // set cookies and run auth_redirect(), none of which belong in a JSON endpoint.
 add_action( 'init', function () {
-    if ( isset( $_GET['pps_mcp_authorize'] ) ) pps_mcp_oauth_authorize();
-} );
+    if ( isset( $_GET['pps_mcp_authorize'] ) ) pps_mcp_oauth_authorize();   // the old form, still honoured
+
+    $path = '/' . trim( (string) strtok( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), '?' ), '/' );
+
+    // The advertised path.
+    if ( $path === '/pps-mcp-authorize' ) pps_mcp_oauth_authorize();
+
+    // And /authorize, because that is where claude.ai went regardless of what the
+    // metadata said. Only when it carries the parameters of a real authorization
+    // request, so an actual page at that slug is never hijacked.
+    if ( $path === '/authorize' && ! empty( $_GET['client_id'] ) && ! empty( $_GET['code_challenge'] ) ) {
+        pps_mcp_oauth_authorize();
+    }
+}, 0 );
 
 /**
  * Serve the discovery documents from the ROOT .well-known path.
@@ -903,7 +915,11 @@ function pps_mcp_issuer_for_request() {
 function pps_mcp_meta_authorization_server() {
     return array(
         'issuer'                                => pps_mcp_issuer_for_request(),
-        'authorization_endpoint'                => home_url( '/' ) . '?pps_mcp_authorize=1',
+        // A path, not a query parameter. RFC 6749 section 3.1 permits a query component and
+        // requires clients to retain it when appending their own, but they frequently do not:
+        // claude.ai ignored '/?pps_mcp_authorize=1' entirely and went to '/authorize'. A clean
+        // path removes the question.
+        'authorization_endpoint'                => home_url( '/pps-mcp-authorize' ),
         'token_endpoint'                        => rest_url( PPS_MCP_NS . '/oauth/token' ),
         'registration_endpoint'                 => rest_url( PPS_MCP_NS . '/oauth/register' ),
         'response_types_supported'              => array( 'code' ),
