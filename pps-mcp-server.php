@@ -793,6 +793,56 @@ function pps_mcp_admin() {
     echo '<button class="button" name="pps_mcp_revoke" value="1" onclick="return confirm(\'Revoke the static token and every registered client?\')">Revoke everything</button>';
     echo '</form>';
 
+    // ── Self-test ────────────────────────────────────────────────────────────
+    // The owner of this site has no terminal, so "run this curl" is not a usable
+    // instruction. This does the same round trip from the server: mints a token good
+    // for one minute, calls the real endpoint over HTTP, and prints what came back.
+    //
+    // It proves the endpoint, the token path and the tool dispatch all work. It cannot
+    // prove the site is reachable from the outside world — that is what adding the
+    // connector proves, and nothing here can substitute for it.
+    if ( isset( $_POST['pps_mcp_selftest'] ) && check_admin_referer( 'pps_mcp_admin' ) ) {
+        $probe = bin2hex( random_bytes( 32 ) );
+        set_transient( 'pps_mcp_tok_' . pps_mcp_hash( $probe ), array(
+            'kind' => 'access', 'user_id' => get_current_user_id(), 'client_id' => 'self-test',
+        ), 60 );
+
+        $url = rest_url( PPS_MCP_NS . '/http' );
+        $res = wp_remote_post( $url, array(
+            'timeout' => 20, 'sslverify' => false,
+            'headers' => array( 'Authorization' => 'Bearer ' . $probe, 'Content-Type' => 'application/json' ),
+            'body'    => wp_json_encode( array(
+                'jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call',
+                'params'  => array( 'name' => 'health', 'arguments' => new stdClass() ),
+            ) ),
+        ) );
+        delete_transient( 'pps_mcp_tok_' . pps_mcp_hash( $probe ) );
+
+        echo '<h2>Self-test</h2>';
+        if ( is_wp_error( $res ) ) {
+            echo '<div class="notice notice-error"><p><strong>Could not reach the endpoint:</strong> '
+               . esc_html( $res->get_error_message() ) . '</p></div>';
+        } else {
+            $code = wp_remote_retrieve_response_code( $res );
+            $body = (string) wp_remote_retrieve_body( $res );
+            $good = $code === 200 && strpos( $body, '"ok"' ) !== false;
+            echo '<div class="notice ' . ( $good ? 'notice-success' : 'notice-error' ) . '"><p><strong>HTTP ' . (int) $code . '</strong> — '
+               . ( $good ? 'the server answered and the tool ran. The MCP endpoint works.'
+                         : 'the endpoint did not return a healthy result. The response is below.' ) . '</p></div>';
+            if ( $code === 401 ) {
+                echo '<div class="notice notice-warning"><p>A 401 here, from the site to itself with a valid token, means something is rejecting the request before this plugin sees it — a security plugin on the REST API, or the Authorization header being stripped. Tools &rarr; MCP Diagnostics will say which.</p></div>';
+            }
+            echo '<textarea readonly rows="12" style="width:100%;font-family:monospace;font-size:12px">'
+               . esc_textarea( $body ) . '</textarea>';
+        }
+    }
+
+    echo '<form method="post" style="margin:18px 0">';
+    wp_nonce_field( 'pps_mcp_admin' );
+    echo '<button class="button" name="pps_mcp_selftest" value="1">Run a self-test</button> ';
+    echo '<span style="color:#6b7280">Calls the endpoint from this server and shows the result. No token needed.</span>';
+    echo '</form>';
+
     $clients = (array) get_option( 'pps_mcp_clients', array() );
     echo '<h2>Registered OAuth clients (' . count( $clients ) . ')</h2><ul>';
     foreach ( $clients as $cid => $c ) {
