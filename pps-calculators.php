@@ -487,6 +487,105 @@ function pps_admin_page() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+/**
+ * The pdf.js loader + upload preflight, shared by both embed paths.
+ *
+ * pdf.js 4.x is ES-modules-only, so the old classic-script enqueue cannot load it; this
+ * inline loader dynamic-imports it and publishes window.pdfjsLib, the global the
+ * calculator code already uses. One function rather than two copies, because the
+ * product-page and preset-URL embeds carried duplicate 3.11 enqueues and had already
+ * started to drift in whitespace.
+ *
+ * The calculator HTML files carry their own identical copy in their <head> for the
+ * GitHub Pages previews; the WP embeds never read that head, which is why this exists.
+ * If the blob changes in the HTML files, change it here in the same commit.
+ *
+ * Why 4.10.38: 3.11.174 silently dropped an entire transparency group from a customer
+ * PDF, so the approval proof was missing a block the press would print (2026-08-04).
+ * 4.10.38 is the version that was verified against that exact file.
+ */
+function pps_pdfjs_loader_js() {
+    return <<<'PPSPDFJS'
+/* pdf.js 4.x ships as ES modules only, so the classic-script global is gone. This
+   loader dynamic-imports it at parse time -- the fetch is warm before anyone can pick a
+   file -- and publishes it at window.pdfjsLib, the name every use site already resolves.
+   Use sites await window.__ppsPdfJs first, so a slow network delays the first upload
+   instead of breaking it.
+   Why 4.x at all: 3.11.174 silently dropped an entire transparency group from a
+   customer PDF -- the proof rendered without a block the press would print. 4.10.38 is
+   pinned because it is the version verified against that file. The legacy build is
+   deliberate: customers proof on phones whose Safari the modern build has dropped.
+   Two mirrors, both exact npm layouts, full prefixes as literals so the offline test
+   harness can string-replace them with vendored copies. */
+(function () {
+  var MIRRORS = [
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/",
+    "https://unpkg.com/pdfjs-dist@4.10.38/legacy/build/"
+  ];
+  function attempt(i) {
+    if (i >= MIRRORS.length) return Promise.reject(new Error("pdf.js could not be loaded from any CDN"));
+    return import(MIRRORS[i] + "pdf.min.mjs").then(function (m) {
+      m.GlobalWorkerOptions.workerSrc = MIRRORS[i] + "pdf.worker.min.mjs";
+      window.pdfjsLib = m;
+      return m;
+    }, function () { return attempt(i + 1); });
+  }
+  window.__ppsPdfJs = attempt(0);
+  window.__ppsPdfJs.catch(function (e) { console.error("[pps]", e); });
+})();
+
+/* Preflight, not gatekeeping: names the constructs in an uploaded PDF that a browser
+   preview is known to fumble -- pdf.js is a viewer, not a prepress RIP, and
+   transparency is exactly where the two part company. Reads the operator lists the
+   renderer builds anyway (they are cached and reused by the page renders that follow),
+   so the scan costs almost nothing. Never throws: a preflight that can break an upload
+   is worse than no preflight. Results accumulate in window.PPS_PDF_RISKS keyed by
+   upload slot; the proof modal renders the union. */
+window.PPS_PDF_RISKS = {};
+window.ppsPdfRisks = function () {
+  var o = window.PPS_PDF_RISKS, out = [], k, i, r;
+  for (k in o) { r = o[k] || []; for (i = 0; i < r.length; i++) if (out.indexOf(r[i]) < 0) out.push(r[i]); }
+  return out;
+};
+window.ppsAnalyzePdfRisks = async function (doc) {
+  var risks = [];
+  var add = function (x) { if (risks.indexOf(x) < 0) risks.push(x); };
+  try {
+    var OPS = window.pdfjsLib.OPS;
+    var limit = Math.min(doc.numPages, 40);   // enough pages to decide; bounded on purpose
+    for (var i = 1; i <= limit; i++) {
+      var pg = await doc.getPage(i);
+      var list = await pg.getOperatorList();
+      for (var k = 0; k < list.fnArray.length; k++) {
+        var f = list.fnArray[k], a = list.argsArray[k];
+        if (f === OPS.beginGroup) add("transparency groups");
+        else if (f === OPS.shadingFill) add("gradients");
+        else if (f === OPS.setGState && a && Array.isArray(a[0])) {
+          for (var e = 0; e < a[0].length; e++) {
+            var ent = a[0][e]; if (!Array.isArray(ent)) continue;
+            var key = ent[0], val = ent[1];
+            if (key === "SMask" && val) add("soft masks");
+            else if (key === "BM" && val && !/^(Normal|Compatible|source-over)$/i.test(String(val && val.name || val))) add("blend modes");
+            else if ((key === "ca" || key === "CA") && val > 0 && val < 1) add("partial transparency");
+          }
+        } else if (f === OPS.setFont && a && typeof a[0] === "string") {
+          try {
+            var fnt = pg.commonObjs.get(a[0]);
+            // The standard-14 faces are never embedded by design and substitute the
+            // same way in every renderer; flagging them would banner every quick-tool
+            // PDF and teach people to ignore the warning.
+            if (fnt && fnt.missingFile && !/^(Helvetica|Times|Courier|Arial|Symbol|ZapfDingbats)/i.test(String(fnt.name || ""))) add("non-embedded fonts");
+          } catch (e2) {}
+        }
+      }
+      if (risks.length >= 4) break;
+    }
+  } catch (e3) {}
+  return risks;
+};
+PPSPDFJS;
+}
+
 // FRONTEND: EMBED CALCULATOR ON PRODUCT PAGES (direct, no iframe)
 // ═══════════════════════════════════════════════════════════════
 
@@ -540,8 +639,11 @@ add_action( 'wp', function() {
     add_action( 'wp_enqueue_scripts', function() {
         wp_enqueue_script( 'pps-react', 'https://unpkg.com/react@18.3.1/umd/react.production.min.js', array(), '18.3.1', true );
         wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
-        wp_enqueue_script( 'pps-pdfjs', 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
-        wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
+        // pdf.js 4.x is ESM-only; the handle survives as an inline loader so the
+        // pps-babel dependency chain is unchanged. See pps_pdfjs_loader_js().
+        wp_register_script( 'pps-pdfjs', false, array(), '4.10.38', true );
+        wp_enqueue_script( 'pps-pdfjs' );
+        wp_add_inline_script( 'pps-pdfjs', pps_pdfjs_loader_js() );
         // jsPDF — for generating print-ready PDFs. Pre-loading via wp_enqueue_script
         // removes the runtime <script> injection in the calc HTML, which was a
         // DOM-mutation source contributing to React removeChild errors.
@@ -3967,8 +4069,10 @@ add_action( 'wp_enqueue_scripts', function() {
     if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
     wp_enqueue_script( 'pps-react',     'https://unpkg.com/react@18.3.1/umd/react.production.min.js', array(), '18.3.1', true );
     wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
-    wp_enqueue_script( 'pps-pdfjs',     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
-    wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
+    // Same ESM loader as the product-page embed; see pps_pdfjs_loader_js().
+    wp_register_script( 'pps-pdfjs', false, array(), '4.10.38', true );
+    wp_enqueue_script( 'pps-pdfjs' );
+    wp_add_inline_script( 'pps-pdfjs', pps_pdfjs_loader_js() );
     // jsPDF — pre-loaded to avoid the runtime script injection in the calc HTML
     wp_enqueue_script( 'pps-jspdf',     'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js', array(), '2.5.1', true );
     wp_enqueue_script( 'pps-babel',     'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );

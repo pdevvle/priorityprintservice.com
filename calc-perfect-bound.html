@@ -7,8 +7,85 @@
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+<script>
+/* pdf.js 4.x ships as ES modules only, so the classic-script global is gone. This
+   loader dynamic-imports it at parse time -- the fetch is warm before anyone can pick a
+   file -- and publishes it at window.pdfjsLib, the name every use site already resolves.
+   Use sites await window.__ppsPdfJs first, so a slow network delays the first upload
+   instead of breaking it.
+   Why 4.x at all: 3.11.174 silently dropped an entire transparency group from a
+   customer PDF -- the proof rendered without a block the press would print. 4.10.38 is
+   pinned because it is the version verified against that file. The legacy build is
+   deliberate: customers proof on phones whose Safari the modern build has dropped.
+   Two mirrors, both exact npm layouts, full prefixes as literals so the offline test
+   harness can string-replace them with vendored copies. */
+(function () {
+  var MIRRORS = [
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/",
+    "https://unpkg.com/pdfjs-dist@4.10.38/legacy/build/"
+  ];
+  function attempt(i) {
+    if (i >= MIRRORS.length) return Promise.reject(new Error("pdf.js could not be loaded from any CDN"));
+    return import(MIRRORS[i] + "pdf.min.mjs").then(function (m) {
+      m.GlobalWorkerOptions.workerSrc = MIRRORS[i] + "pdf.worker.min.mjs";
+      window.pdfjsLib = m;
+      return m;
+    }, function () { return attempt(i + 1); });
+  }
+  window.__ppsPdfJs = attempt(0);
+  window.__ppsPdfJs.catch(function (e) { console.error("[pps]", e); });
+})();
+
+/* Preflight, not gatekeeping: names the constructs in an uploaded PDF that a browser
+   preview is known to fumble -- pdf.js is a viewer, not a prepress RIP, and
+   transparency is exactly where the two part company. Reads the operator lists the
+   renderer builds anyway (they are cached and reused by the page renders that follow),
+   so the scan costs almost nothing. Never throws: a preflight that can break an upload
+   is worse than no preflight. Results accumulate in window.PPS_PDF_RISKS keyed by
+   upload slot; the proof modal renders the union. */
+window.PPS_PDF_RISKS = {};
+window.ppsPdfRisks = function () {
+  var o = window.PPS_PDF_RISKS, out = [], k, i, r;
+  for (k in o) { r = o[k] || []; for (i = 0; i < r.length; i++) if (out.indexOf(r[i]) < 0) out.push(r[i]); }
+  return out;
+};
+window.ppsAnalyzePdfRisks = async function (doc) {
+  var risks = [];
+  var add = function (x) { if (risks.indexOf(x) < 0) risks.push(x); };
+  try {
+    var OPS = window.pdfjsLib.OPS;
+    var limit = Math.min(doc.numPages, 40);   // enough pages to decide; bounded on purpose
+    for (var i = 1; i <= limit; i++) {
+      var pg = await doc.getPage(i);
+      var list = await pg.getOperatorList();
+      for (var k = 0; k < list.fnArray.length; k++) {
+        var f = list.fnArray[k], a = list.argsArray[k];
+        if (f === OPS.beginGroup) add("transparency groups");
+        else if (f === OPS.shadingFill) add("gradients");
+        else if (f === OPS.setGState && a && Array.isArray(a[0])) {
+          for (var e = 0; e < a[0].length; e++) {
+            var ent = a[0][e]; if (!Array.isArray(ent)) continue;
+            var key = ent[0], val = ent[1];
+            if (key === "SMask" && val) add("soft masks");
+            else if (key === "BM" && val && !/^(Normal|Compatible|source-over)$/i.test(String(val && val.name || val))) add("blend modes");
+            else if ((key === "ca" || key === "CA") && val > 0 && val < 1) add("partial transparency");
+          }
+        } else if (f === OPS.setFont && a && typeof a[0] === "string") {
+          try {
+            var fnt = pg.commonObjs.get(a[0]);
+            // The standard-14 faces are never embedded by design and substitute the
+            // same way in every renderer; flagging them would banner every quick-tool
+            // PDF and teach people to ignore the warning.
+            if (fnt && fnt.missingFile && !/^(Helvetica|Times|Courier|Arial|Symbol|ZapfDingbats)/i.test(String(fnt.name || ""))) add("non-embedded fonts");
+          } catch (e2) {}
+        }
+      }
+      if (risks.length >= 4) break;
+    }
+  } catch (e3) {}
+  return risks;
+};
+</script>
 <script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
@@ -101,7 +178,7 @@
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-03 · PB-PAGEAPPLY</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-04 · PB-PDFJS4</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -1541,7 +1618,11 @@ function DebugPanel({debug}){
 
 async function extractPdfPages(file, onProgress) {
   const buf = await file.arrayBuffer();
+  await window.__ppsPdfJs;
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  window.PPS_PDF_RISKS = {};
+  // Runs before the page renders below, so those reuse the operator lists this builds.
+  window.PPS_PDF_RISKS.doc = await window.ppsAnalyzePdfRisks(pdf);
   const result = [];
   // Get dimensions from first page (PDF units = 1/72 inch)
   const firstPg = await pdf.getPage(1);
@@ -3488,7 +3569,9 @@ update();
     if (file.type === "application/pdf") {
       try {
         const buf = await file.arrayBuffer();
+        await window.__ppsPdfJs;
         const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+        window.PPS_PDF_RISKS.cover = await window.ppsAnalyzePdfRisks(pdf);
         const pg = await pdf.getPage(1);
         const vp = pg.getViewport({ scale: 1.5 });
         const canvas = document.createElement("canvas");
@@ -3859,6 +3942,7 @@ update();
                   <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
                     {dims.w}″ × {dims.h}″ · {displayPages.length} pages
                     {shouldRotate && <span style={{ color:"#60a5fa", marginLeft:6 }}>(auto-rotated)</span>}
+                    {window.ppsPdfRisks().length > 0 && <div style={{ color:"#fbbf24", fontWeight:600, marginTop:3, maxWidth:520 }}>⚠ Uses {window.ppsPdfRisks().join(", ")} — effects a browser preview can render imperfectly. If anything differs from the file you exported, contact us before approving.</div>}
                   </div>
                 </div>
                 <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.5)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
