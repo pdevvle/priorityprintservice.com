@@ -40,7 +40,13 @@ if git diff --cached --quiet && git diff --quiet; then
   exit 0
 fi
 
-git add -A
+# Stage the whitelist and nothing else. This used to be `git add -A`, which swept in
+# whatever untracked files happened to sit in the shared worktree — plugin zips from a
+# packaging script ended up published by Pages. add -A on a publish branch is a leak
+# waiting for a stray file; naming the paths cannot be.
+git add -- "${WHITELIST[@]}"
+STRAY="$(git status --porcelain | grep -v '^A ' | grep -v '^M ' || true)"
+
 echo "Publishing:"
 git diff --cached --stat
 git commit -q -m "Sync calculators from $SRC"
