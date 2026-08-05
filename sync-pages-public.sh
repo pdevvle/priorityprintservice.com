@@ -45,6 +45,7 @@ fi
 # packaging script ended up published by Pages. add -A on a publish branch is a leak
 # waiting for a stray file; naming the paths cannot be.
 git add -- "${WHITELIST[@]}"
+
 echo "Publishing:"
 git diff --cached --stat
 git commit -q -m "Sync calculators from $SRC"
