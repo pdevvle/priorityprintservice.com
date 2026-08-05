@@ -30,11 +30,11 @@ const run = async (file, label) => {
   // Fork difference: preview-test UNMOUNTS closed sections, modern keeps them mounted
   // and hides them with a CSS var. So "the input exists" does not mean "the section is
   // visible" -- test visibility of the proof CTA, and open the section if it is hidden.
-  if (!(await p.locator('input[type="file"][accept=".pdf,image/*"]').count())) {
+  if (!(await p.locator('input[type="file"][accept=".pdf,image/*"], input[type="file"][accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif"]').count())) {
     await p.locator('button',{hasText:'Artwork & Proofing'}).first().click();
     await p.waitForTimeout(800);
   }
-  const inp=p.locator('input[type="file"][accept=".pdf,image/*"]').first();
+  const inp=p.locator('input[type="file"][accept=".pdf,image/*"], input[type="file"][accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif"]').first();
   await inp.setInputFiles(file,{timeout:20000});
   await p.waitForTimeout(2500);
   if (!(await p.locator('button:visible',{hasText:/🔍 Proof|Proof Approved/}).count())) {
