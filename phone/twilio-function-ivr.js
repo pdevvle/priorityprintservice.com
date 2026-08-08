@@ -3,11 +3,15 @@
  * Number: (623) 267-9479
  *
  * Menu:
- *   9 = shipping partners  -> forward to 602 541 7395; no answer -> voicemail (text 602 541 7395)
+ *   9 = shipping partners  -> forward to 602 541 7395; no answer -> voicemail
  *   1 = sales              -> IN HOURS: ring 623 695 5209 (12s) -> no answer -> voicemail
  *                             AFTER HOURS: straight to after-hours voicemail
- *                             either way -> text 623 695 5209
- *   2 = operations/reorder -> reorder message + voicemail -> text 602 541 7395
+ *                             + TEXT 623 695 5209 (sales is the ONLY option that texts)
+ *   2 = operations/reorder -> reorder message + voicemail
+ *
+ *   ALL voicemails (9, 1, 2) are posted to Missive by the existing account-wide
+ *   "voicemail -> Whisper -> Claude -> Missive" Make scenario (it polls this account).
+ *   Only sales (1) ALSO sends an SMS.
  *
  * Transcription is Twilio's built-in (async): each <Record> sets a transcribeCallback
  * that re-enters this Function at step=notify and sends the SMS with transcript +
@@ -149,13 +153,11 @@ exports.handler = function (context, event, callback) {
       action: `${BASE}?step=goodbye`,
       method: 'POST',
     };
-    if (reason === 'ops') {
-      // Option 2 -> Missive (not SMS). The recording lands on this Twilio account and
-      // is picked up by the existing "voicemail -> Whisper -> Claude -> Missive" Make
-      // scenario, which posts it to the shared inbox. No SMS here, and we skip Twilio's
-      // built-in transcription since Make does its own (Whisper).
-    } else {
-      recordOpts.transcribe = true;
+    // Sales (623 695 5209) is the ONLY option that sends a text. Shipping (9) and
+    // operations (2) go to Missive only — their recordings are picked up by the
+    // existing account-wide "voicemail -> Whisper -> Claude -> Missive" Make scenario.
+    if (reason === 'sales' || reason === 'sales_afterhours') {
+      recordOpts.transcribe = true; // Twilio built-in transcription for the SMS
       recordOpts.transcribeCallback = `${BASE}?step=notify&notify=${encodeURIComponent(notify)}`;
     }
     twiml.record(recordOpts);
