@@ -23,8 +23,8 @@
  *   4. SMS_FROM below must be an SMS-capable / 10DLC-registered number on THIS account.
  *
  * NOTES
- *   - Arizona has no DST, so it is UTC-7 year round; business hours = 9:00-17:59 AZ, every day.
- *     (To limit to weekdays, gate `businessHours` on the day of week too.)
+ *   - Arizona has no DST, so it is UTC-7 year round; business hours = 9:00-17:59 AZ,
+ *     Monday through Friday. Weekends and outside those hours -> after-hours voicemail.
  *   - Built-in transcription is US-English, up to 2 min, ~$0.05/min. For higher accuracy
  *     you'd route recordings through the Whisper/Make pipeline instead (option B).
  */
@@ -43,9 +43,12 @@ exports.handler = function (context, event, callback) {
   const SMS_FROM = '+16232679479'; // (623) 267-9479 — must be SMS-capable on this account
   const DIAL_TIMEOUT = 12;         // short, so the callee's carrier voicemail doesn't grab it
 
-  // Arizona = UTC-7 (no DST)
-  const azHour = (new Date().getUTCHours() - 7 + 24) % 24;
-  const businessHours = azHour >= 9 && azHour < 18;
+  // Arizona = UTC-7 (no DST). Shift "now" into AZ local time to read hour + weekday.
+  const azNow = new Date(Date.now() - 7 * 60 * 60 * 1000);
+  const azHour = azNow.getUTCHours();     // 0-23 AZ local
+  const azDay = azNow.getUTCDay();        // 0=Sun ... 6=Sat
+  const isWeekday = azDay >= 1 && azDay <= 5;
+  const businessHours = isWeekday && azHour >= 9 && azHour < 18;
 
   const step = event.step || 'menu';
 
