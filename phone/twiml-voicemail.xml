@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Priority Print Service inbound voicemail flow (Twilio TwiML Bin). -->
+<!-- SECURITY: do not commit real phone numbers to this repo. Replace the -->
+<!-- placeholder number below with your real forwarding number ONLY inside -->
+<!-- the Twilio Console (that Bin is private to your account). -->
+<!-- Flow: ring your phone for ~20s; if unanswered, greet and record a -->
+<!-- voicemail. The recording is picked up by the Make scenario, which -->
+<!-- transcribes it, summarizes with Claude, and posts it to Missive. -->
+<Response>
+  <Dial timeout="12" answerOnBridge="true">
+    <Number>+10000000000</Number>
+  </Dial>
+  <Say voice="Polly.Joanna-Neural">Thank you for calling Priority Print Service. We're sorry we missed your call. Please leave your name, number, and a brief message after the tone, and we'll get right back to you.</Say>
+  <Record maxLength="120" playBeep="true" trim="trim-silence" finishOnKey="#"/>
+  <Say voice="Polly.Joanna-Neural">Thank you. Goodbye.</Say>
+  <Hangup/>
+</Response>

@@ -1,0 +1,120 @@
+{
+  "name": "PPS: Phone — Voicemail → Whisper → Claude → Missive",
+  "flow": [
+    {
+      "id": 1,
+      "module": "twilio:WatchRecordings",
+      "version": 2,
+      "parameters": { "__IMTCONN__": 350124, "limit": 2 },
+      "mapper": {},
+      "metadata": { "designer": { "x": 0, "y": 0 }, "restore": {}, "expect": [] }
+    },
+    {
+      "id": 2,
+      "module": "twilio:GetCall",
+      "version": 2,
+      "parameters": { "__IMTCONN__": 350124 },
+      "mapper": { "id": "{{1.call_sid}}" },
+      "filter": {
+        "name": "Only recordings from 2026-07-15 onward",
+        "conditions": [
+          [
+            { "a": "{{1.date_created}}", "o": "date:greaterorequal", "b": "2026-07-15T00:00:00" }
+          ]
+        ]
+      },
+      "metadata": { "designer": { "x": 300, "y": 0 } },
+      "onerror": [
+        {
+          "id": 7,
+          "module": "builtin:Resume",
+          "version": 1,
+          "mapper": { "from_formatted": "Unknown caller", "from": "", "start_time": "", "duration": "" },
+          "metadata": { "designer": { "x": 300, "y": 300 } }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "module": "twilio:DownloadRecording",
+      "version": 2,
+      "parameters": { "__IMTCONN__": 350124 },
+      "mapper": { "id": "{{1.sid}}", "ext": "mp3" },
+      "metadata": { "designer": { "x": 600, "y": 0 } }
+    },
+    {
+      "id": 4,
+      "module": "openai-gpt-3:CreateTranscription",
+      "version": 1,
+      "parameters": { "__IMTCONN__": 4631426 },
+      "mapper": {
+        "fileName": "{{3.filename}}",
+        "fileData": "{{3.data}}",
+        "model": "gpt-4o-transcribe"
+      },
+      "metadata": { "designer": { "x": 900, "y": 0 } }
+    },
+    {
+      "id": 5,
+      "module": "anthropic-claude:createAMessage",
+      "version": 1,
+      "parameters": { "__IMTCONN__": 4822595 },
+      "mapper": {
+        "model": "claude-sonnet-5",
+        "max_tokens": 1024,
+        "messages": [
+          {
+            "role": "user",
+            "inputType": "single",
+            "content": "You are the front-desk assistant for Priority Print Service, a commercial print shop. Below is an automatic transcript of a voicemail. Write a concise internal note for our shared team inbox.\n\nCaller number: {{2.from_formatted}}\nCall time: {{2.start_time}}\n\nTranscript:\n\"\"\"\n{{4.text}}\n\"\"\"\n\nReply in GitHub-flavored Markdown with EXACTLY these four sections and nothing else:\n**Summary:** one or two sentences on what the caller wants.\n**Caller / callback:** the caller's name if stated, and the best callback number (pull from the transcript; fall back to {{2.from_formatted}}).\n**Urgency:** Low, Normal, or High followed by a 3-6 word reason.\n**Suggested reply:** a short, friendly 2-3 sentence draft we could say or send back.\n\nIf the transcript is empty, silent, or clearly not a real message, say so in Summary and set Urgency to Low."
+          }
+        ]
+      },
+      "metadata": { "designer": { "x": 1200, "y": 0 } }
+    },
+    {
+      "id": 6,
+      "module": "missive:createAPost",
+      "version": 1,
+      "parameters": { "__IMTCONN__": 1151021 },
+      "mapper": {
+        "notification": {
+          "title": "📞 New voicemail — {{2.from_formatted}}",
+          "body": "Tap to view the summary, transcript, and recording."
+        },
+        "markdown": "{{5.content[1].text}}\n\n---\n🎧 **[Listen to the recording](https://api.twilio.com{{replace(1.uri; \".json\"; \".mp3\")}})** · {{2.duration}}s · {{2.start_time}}\n\n**Full transcript**\n{{4.text}}",
+        "conversation_subject": "📞 Voicemail — {{2.from_formatted}}",
+        "organization": "6f0a0437-8237-4328-914f-341cb3cc281e",
+        "add_to_inbox": true
+      },
+      "metadata": { "designer": { "x": 1500, "y": 0 } }
+    }
+  ],
+  "metadata": {
+    "instant": false,
+    "version": 1,
+    "scenario": {
+      "roundtrips": 1,
+      "maxErrors": 3,
+      "autoCommit": true,
+      "autoCommitTriggerLast": true,
+      "sequential": false,
+      "confidential": false,
+      "dataloss": false,
+      "dlq": false
+    },
+    "designer": { "orphans": [] }
+  },
+  "_scheduling": { "type": "indefinitely", "interval": 900 },
+  "_connections_reference": {
+    "350124": "Twilio — My Twilio connection (account AC3f99…5ce8, owns the PPS/personal line)",
+    "4631426": "OpenAI — My OpenAI connection (gpt-4o-transcribe / Whisper)",
+    "4822595": "Anthropic Claude — My Anthropic Claude connection (Sonnet 5). NOTE: needs prepaid credits on the Anthropic *Developer Platform* (console.anthropic.com → Billing), which is separate from the claude.ai subscription balance.",
+    "1151021": "Missive — prestoncicala@gmail.com. Chosen over the office@ connection (434289) because Missive's API (createAPost) requires the Productive/Business plan, and this connection has it. Same Missive org (6f0a0437…), so posts land in the shared workspace.",
+    "_missive_org": "6f0a0437-8237-4328-914f-341cb3cc281e"
+  },
+  "_notes": {
+    "getcall_resume": "GetCall (module 2) has a builtin:Resume error handler: some recordings' call records 404 in Twilio, and the caller lookup must never block delivery. On error the flow continues and the caller field falls back to 'Unknown caller'; Claude still extracts a callback number from the transcript.",
+    "trigger_epoch": "On first activation, set Watch Recordings 'Choose where to start' → 'From now on' so it skips old/orphan recordings."
+  }
+}
