@@ -178,7 +178,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-04 · PB-PDFJS4</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-08 · PB-PDFJS4</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -4887,8 +4887,8 @@ function App(){
   // insideColor derived from sets' color modes (for gsFilter, metadata compat)
   const insideColor = sets.every(s => s.colorMode === "bw") ? "bw" : "color";
   const[coverColor,setCoverColor]=useState(D.coverColor||"color");
-  const[insidePaperType,setInsidePaperType]=useState(D.insidePaperType||"noncardstock");
-  const[insidePaper,setInsidePaper]=useState(()=>_findPaper(D.insidePaperType==="cardstock"?PAPERS_CS:PAPERS_NC, D.insidePaper));
+  const[insidePaperType,setInsidePaperType]=useState("noncardstock"); // inside pages are always text weight — cardstock inside is not offered
+  const[insidePaper,setInsidePaper]=useState(()=>_findPaper(PAPERS_NC, D.insidePaper));
   const[coverMode,setCoverMode]=useState(D.coverMode||"same");
   const[coverPaperType,setCoverPaperType]=useState(D.coverPaperType||"cardstock");
   const[coverPaper,setCoverPaper]=useState(()=>_findPaper(D.coverPaperType==="cardstock"?PAPERS_CS:PAPERS_NC, D.coverPaper));
@@ -4981,11 +4981,9 @@ function App(){
       if (rc.insideColor) upSet(0, { colorMode: rc.insideColor === "bw" ? "bw" : "color" });
       if (rc.coverColor) setCoverColor(rc.coverColor);
 
-      // Paper — match by label from current catalog
-      if (rc.insidePaperType) setInsidePaperType(rc.insidePaperType);
+      // Paper — inside is always text weight; match by label from the text-weight catalog
       if (rc.insidePaper) {
-        const pool = (rc.insidePaperType === "cardstock") ? PAPERS_CS : PAPERS_NC;
-        const match = pool.find(p => p.label === rc.insidePaper.label);
+        const match = PAPERS_NC.find(p => p.label === rc.insidePaper.label);
         if (match) setTimeout(() => setInsidePaper(match), 0);
       }
       if (rc.coverMode) setCoverMode(rc.coverMode);
@@ -5049,7 +5047,6 @@ function App(){
   };
   // Keep lastPreset in sync when user changes the dropdown
   const handleSizeLabel=(v)=>{setSizeLabel(v);if(v!=="Custom Size")lastPreset.current=v;};
-  const csOK=sets.every(s=>s.pages<=24);
 
   // Trim width in App scope — used to clamp perfPositions when count or size changes.
   const trimW = useMemo(() => {
@@ -5497,10 +5494,9 @@ function App(){
           {/* SECTION 2: Printing & Paper */}
           <Sec title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
             <div style={r2}>
-              <Pil label={<Tip k="inside_paper">Inside Paper</Tip>} value={insidePaperType} onChange={v=>{if(v==="cardstock"&&!csOK)return;setInsidePaperType(v);const pool=v==="cardstock"?PAPERS_CS:PAPERS_NC;setInsidePaper(pool[0])}} options={[{t:"Text Weight",v:"noncardstock"},{t:"Cardstock",v:"cardstock"}]}/>
-              <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{p.label} (Cardstock)</option>)}</optgroup>}</Sel>
+              <Sel label={<Tip k="inside_paper">Inside Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=PAPERS_NC.find(p=>String(p.val)===v);if(f)setInsidePaper(f)}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}</Sel>
+              <div style={ST.f}/>
             </div>
-            {insidePaperType==="cardstock"&&!csOK&&<p style={ST.err}>Cardstock requires all sets ≤ 24 pages</p>}
             <div style={ST.hr}/>
             {/* Cover printing + cover paper on one line */}
             <div style={r2}>
