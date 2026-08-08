@@ -32,7 +32,7 @@ exports.handler = function (context, event, callback) {
   const VoiceResponse = Twilio.twiml.VoiceResponse;
   const twiml = new VoiceResponse();
   const BASE = `https://${context.DOMAIN_NAME}/ivr`;
-  const VOICE = { voice: 'Polly.Joanna-Neural' };
+  const VOICE = { voice: 'Polly.Ruth-Generative' }; // swap to 'Polly.Ruth-Neural' if needed
 
   // --- config ---------------------------------------------------------------
   const FORWARD_SHIPPING = '+16025417395';
@@ -142,15 +142,23 @@ exports.handler = function (context, event, callback) {
     }
 
     twiml.say(VOICE, prompt);
-    twiml.record({
+    const recordOpts = {
       maxLength: 120,
       playBeep: true,
       trim: 'trim-silence',
-      transcribe: true,
-      transcribeCallback: `${BASE}?step=notify&notify=${encodeURIComponent(notify)}`,
       action: `${BASE}?step=goodbye`,
       method: 'POST',
-    });
+    };
+    if (reason === 'ops') {
+      // Option 2 -> Missive (not SMS). The recording lands on this Twilio account and
+      // is picked up by the existing "voicemail -> Whisper -> Claude -> Missive" Make
+      // scenario, which posts it to the shared inbox. No SMS here, and we skip Twilio's
+      // built-in transcription since Make does its own (Whisper).
+    } else {
+      recordOpts.transcribe = true;
+      recordOpts.transcribeCallback = `${BASE}?step=notify&notify=${encodeURIComponent(notify)}`;
+    }
+    twiml.record(recordOpts);
     twiml.redirect({ method: 'POST' }, `${BASE}?step=goodbye`);
     return callback(null, twiml);
   }
