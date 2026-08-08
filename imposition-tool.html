@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-12 · IMPOSE-V1</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-07-20 · IMPOSE-V1.3c</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -407,8 +407,11 @@ function computeSaddleLayout(pw, ph, opts) {
     target = 1;
     warnings.push("Open spread requires the 13×27.5 oversize sheet (1 spread per side).");
   }
-  const autoGutters = bleed > 0 ? [2 * bleed, bleed, 0] : [0];
-  const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : autoGutters;
+  // Saddle spreads BUTT by default: signatures share one cut line and the
+  // interior bleed is cropped at it (cell clips stop at the shared trim), so
+  // bleed never manufactures a gutter the operator didn't ask for. The
+  // Gutter override still spaces spreads out explicitly when wanted.
+  const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : [0];
   let grid = bestGridForCount(target, Math.max(spreadW, spreadH), Math.min(spreadW, spreadH), sheet, gutters);
   if (!grid) {
     if (!(opts && opts.allowBestFit)) {
@@ -419,9 +422,9 @@ function computeSaddleLayout(pw, ph, opts) {
     mismatch = true;
     warnings.push(`MISMATCH: placing ${grid.a * grid.d} spread(s)/side but pricing assumed ${target}. Review before printing.`);
   }
-  if (grid.g < gutters[0] && grid.a * grid.d > 1 && gutters.length > 1) warnings.push(grid.g === 0
-    ? "Butt-cut spread layout (no gutter) — adjacent spreads share cut lines."
-    : `Gutter squeezed to ${grid.g}″ between spreads.`);
+  if (grid.a * grid.d > 1) warnings.push(grid.g === 0
+    ? "Spreads butt (default) — one cut line between signatures, interior bleed cropped at it. Set a Gutter to space them instead."
+    : `${grid.g}″ gutter between spreads.`);
   const pieceLong = Math.max(spreadW, spreadH), pieceShort = Math.min(spreadW, spreadH);
   const layout = {
     sheet, calc: "saddle", pieceLong, pieceShort, bleed,
@@ -532,14 +535,140 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed) {
   const hasBleed = (W - trimRaw.w > 1) || (H - trimRaw.h > 1);
   if (!hasBleed) notes.push("no bleed available — cut lines may show paper white");
 
-  return { page, rot, mediaW: W, mediaH: H, trimRaw, cellRotate, scale, hasBleed, notes };
+  return { page, rot, mediaW: W, mediaH: H, trimRaw, cellRotate, scale, hasBleed, notes,
+           placedW: cellW, placedH: cellH };
+}
+
+// ---- add-bleed ink-edge detection -----------------------------------------
+// Rasterize a source page (pdf.js, low DPI) and measure how far the actual
+// ink stops short of each trim edge, in DISPLAY-space inches. A small
+// shortfall (≤ SYNTH_MAXFIX) means the designer intended full bleed but the
+// art fell shy — mirroring/scaling from the page edge would accentuate that
+// white sliver, so the synth pre-scales past it. A LARGE margin is a design
+// choice (white border, centered text page) and is left alone (gap → 0).
+const SYNTH_MAXFIX = 0.1875; // in — biggest shortfall treated as "meant to bleed"
+const SYNTH_MINGAP = 0.011;  // in — below raster resolution, treat as touching
+const INK_DPI = 144, INK_LUM = 245;
+async function detectInkGaps(pdfjsDoc, pnoZero, art) {
+  const page = await pdfjsDoc.getPage(pnoZero + 1);
+  const scale = INK_DPI / 72;
+  const vp = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  const td = displayRect(art.trimRaw, art.rot, art.mediaW, art.mediaH);
+  const dispH = art.rot % 180 ? art.mediaW : art.mediaH;
+  const x0 = Math.max(0, Math.floor(td.x * scale));
+  const x1 = Math.min(canvas.width, Math.ceil((td.x + td.w) * scale));
+  const r0 = Math.max(0, Math.floor((dispH - (td.y + td.h)) * scale));
+  const r1 = Math.min(canvas.height, Math.ceil((dispH - td.y) * scale));
+  if (x1 - x0 < 4 || r1 - r0 < 4) return null;
+  const img = ctx.getImageData(x0, r0, x1 - x0, r1 - r0);
+  const Wp = img.width, Hp = img.height, d = img.data;
+  let minX = Wp, maxX = -1, minR = Hp, maxR = -1;
+  for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
+    const i = (y * Wp + x) * 4;
+    if (d[i] < INK_LUM || d[i + 1] < INK_LUM || d[i + 2] < INK_LUM) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minR) minR = y; if (y > maxR) maxR = y;
+    }
+  }
+  if (maxX < 0) return null; // blank page — nothing to bleed
+  const toIn = p => p / INK_DPI;
+  // canvas rows grow downward: minR rows of white at the TOP edge
+  return { left: toIn(minX), right: toIn(Wp - 1 - maxX), top: toIn(minR), bottom: toIn(Hp - 1 - maxR) };
+}
+
+// Detect text objects sitting close to each trim edge (raw page space).
+// Mirror bleed would reflect a READABLE copy of such text into the bleed
+// ring — the "auto" synth method switches those edges to streak bleed.
+const TEXT_ZONE_PAD = 0.04; // in — beyond the bleed depth, catches descenders
+const STREAK_EPS = 0.025;   // in — default sliver width stretched outward by streak bleed
+const streakEpsOf = spec => Math.min(Math.max(+(spec && spec.streakEps) || STREAK_EPS, 0.005), 0.25);
+async function detectTextNearEdges(pdfjsDoc, pnoZero, art, bleed) {
+  const page = await pdfjsDoc.getPage(pnoZero + 1);
+  const tc = await page.getTextContent();
+  const v = page.view; // [x0,y0,x1,y1] media box, pts
+  const T = art.trimRaw; // pts, relative to media origin, y-up
+  const zone = (bleed + TEXT_ZONE_PAD) * PT;
+  const near = { left: false, right: false, top: false, bottom: false };
+  for (const it of tc.items || []) {
+    if (!it.str || !it.str.trim() || !it.transform) continue;
+    const tx = it.transform[4] - v[0], ty = it.transform[5] - v[1];
+    const w = it.width || 0, h = it.height || Math.hypot(it.transform[1], it.transform[3]) || 0;
+    const x0 = tx, x1 = tx + w, y0 = ty - 0.25 * h, y1 = ty + h; // pad baseline for descenders
+    if (x1 < T.x || x0 > T.x + T.w || y1 < T.y || y0 > T.y + T.h) continue; // outside trim
+    if (x0 < T.x + zone) near.left = true;
+    if (x1 > T.x + T.w - zone) near.right = true;
+    if (y0 < T.y + zone) near.bottom = true;
+    if (y1 > T.y + T.h - zone) near.top = true;
+  }
+  return near;
+}
+
+// Synthesize bleed for no-bleed source art:
+//   "mirror" — reflect the art's edge content outward past trim (classic
+//              prepress mirror bleed; content at the cut line stays put).
+//   "scale"  — enlarge the art just enough to cover the bleed box (content
+//              grows ~2b/shortdim; safety margin shrinks by the same amount).
+//   "streak" — stretch the outermost STREAK_EPS sliver of art outward to fill
+//              the bleed (mirrored-stretch: continuous at the cut; any content
+//              caught in the sliver smears into unreadable streaks).
+//   "auto"   — mirror, except edges where text sits near trim get streak
+//              (a mirror there would duplicate readable text).
+// gaps (from detectInkGaps, display-space inches) make either mode "smart":
+// fixable shortfalls fold into the scale factor so the synth never amplifies
+// a white sliver at the cut. Only applies when the source page genuinely
+// lacks bleed — files with real bleed are never touched.
+function applySynthBleed(art, mode, bleed, gaps, streakEps) {
+  if (!mode || mode === "off" || art.hasBleed) return art;
+  art.streakEps = streakEps || STREAK_EPS;
+  if (gaps && [gaps.left, gaps.right, gaps.top, gaps.bottom].every(g => g > SYNTH_MAXFIX)) {
+    art.notes.push("edges are white by design (no ink near trim) — bleed synthesis skipped");
+    return art;
+  }
+  art.synth = mode;
+  art.synthB = isFinite(bleed) ? bleed : BLEED;
+  const fix = g => (gaps && g > SYNTH_MINGAP && g <= SYNTH_MAXFIX) ? g : 0;
+  // work in PLACED space: art.scale already maps the art's trim onto the cell
+  const gs = gaps
+    ? { left: fix(gaps.left) * art.scale, right: fix(gaps.right) * art.scale,
+        top: fix(gaps.top) * art.scale, bottom: fix(gaps.bottom) * art.scale }
+    : { left: 0, right: 0, top: 0, bottom: 0 };
+  // display-orientation → placed-cell orientation (cellRotate swaps axes)
+  const [gx1, gx2, gy1, gy2] = art.cellRotate ? [gs.top, gs.bottom, gs.left, gs.right]
+                                              : [gs.left, gs.right, gs.top, gs.bottom];
+  const hw = art.placedW / 2, hh = art.placedH / 2;
+  // per edge: ink sits (h−g) from center and must reach h (mirror) or h+b
+  // (scale) after ×f about the center → f = h/(h−g) or (h+b)/(h−g).
+  const b = mode === "scale" ? art.synthB : 0;
+  let f = 1;
+  for (const [h, g] of [[hw, gx1], [hw, gx2], [hh, gy1], [hh, gy2]]) {
+    if (mode === "scale" || g > 0) f = Math.max(f, (h + b) / (h - g));
+  }
+  art.synthScale = f;
+  const short = Math.max(fix(gaps ? gaps.left : 0), fix(gaps ? gaps.right : 0), fix(gaps ? gaps.top : 0), fix(gaps ? gaps.bottom : 0));
+  const last = art.notes.length - 1;
+  if (art.notes[last] === "no bleed available — cut lines may show paper white") art.notes.pop();
+  const tn = art.textNear;
+  const streaked = mode === "auto" && tn ? ["left", "right", "top", "bottom"].filter(e => tn[e]) : [];
+  art.notes.push((mode === "scale"
+    ? `no bleed in source — art scaled up to cover ${art.synthB}″ bleed (trim-line content shifts outward by the same amount)`
+    : mode === "streak" ? `no bleed in source — ${art.synthB}″ streak bleed synthesized (outermost ${art.streakEps}″ stretched outward)`
+    : mode === "auto" ? `no bleed in source — ${art.synthB}″ bleed synthesized (mirror${streaked.length ? `; streak on ${streaked.join("/")} — text near trim, a mirror would duplicate it` : ", no text near trim"})`
+    : `no bleed in source — ${art.synthB}″ mirrored-edge bleed synthesized`)
+    + (short ? ` · art stopped ${short.toFixed(3)}″ shy of trim — pre-scaled ×${f.toFixed(4)} so ink reaches the cut` : ""));
+  return art;
 }
 
 // Stamp the art with its trim centered on targetTrim (inches, y-up),
 // hard-clipped to clipRect so neighbours can never overlap (fix c/d).
 function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
   const drawRot = (((art.cellRotate + (extraRotate || 0) - art.rot) % 360) + 360) % 360; // CCW for pdf-lib degrees()
-  const s = art.scale;
+  let s = art.scale;
+  if (art.synth) s *= art.synthScale || 1; // scale-to-bleed and/or shortfall pre-scale
   const C = { x: (targetTrim.x + targetTrim.w / 2) * PT, y: (targetTrim.y + targetTrim.h / 2) * PT };
   const tc = { x: art.trimRaw.x + art.trimRaw.w / 2, y: art.trimRaw.y + art.trimRaw.h / 2 };
   // anchor = C − s·Rot(tc): drawPage maps raw (u,v) → anchor + s·Rot_ccw(u,v)
@@ -559,6 +688,55 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
   );
   outPage.drawPage(embedded, { x: ax, y: ay, xScale: s, yScale: s, rotate: PL.degrees(drawRot) });
   outPage.pushOperators(PL.popGraphicsState());
+
+  if (art.synth && art.synth !== "scale") {
+    // Fill the bleed ring from the art's own edges. Per axis the transform is
+    // a mirrored map about the trim edge with stretch factor k: k=1 is a true
+    // mirror; k=b/STREAK_EPS stretches the outermost sliver into streaks
+    // (text-safe — nothing readable survives the stretch). "auto" picks per
+    // edge from detectTextNearEdges, mapped from raw page space through the
+    // placed rotation. Each region is clipped to (region ∩ cell clip), so
+    // interior butt cuts and the saddle spine stay untouched.
+    const b = art.synthB, T = targetTrim;
+    const xL = T.x, xR = T.x + T.w, yB = T.y, yT = T.y + T.h;
+    const K = b / (art.streakEps || STREAK_EPS);
+    const cyc = ["left", "bottom", "right", "top"]; // CCW edge cycle
+    const rawEdge = e => cyc[(((cyc.indexOf(e) - drawRot / 90) % 4) + 4) % 4];
+    const streaky = e => art.synth === "streak" || (art.synth === "auto" && art.textNear && art.textNear[rawEdge(e)]);
+    const kx = { left: streaky("left") ? K : 1, right: streaky("right") ? K : 1 };
+    const ky = { bottom: streaky("bottom") ? K : 1, top: streaky("top") ? K : 1 };
+    const mX = (E, k) => [-k, 0, 0, 1, E * (1 + k) * PT, 0];   // mirrored map about x=E
+    const mY = (F, k) => [1, 0, 0, -k, 0, F * (1 + k) * PT];   // mirrored map about y=F
+    const mXY = (E, F, k1, k2) => [-k1, 0, 0, -k2, E * (1 + k1) * PT, F * (1 + k2) * PT];
+    const regions = [
+      { r: { x: xL - b, y: yB, w: b, h: T.h }, m: mX(xL, kx.left) },
+      { r: { x: xR, y: yB, w: b, h: T.h }, m: mX(xR, kx.right) },
+      { r: { x: xL, y: yB - b, w: T.w, h: b }, m: mY(yB, ky.bottom) },
+      { r: { x: xL, y: yT, w: T.w, h: b }, m: mY(yT, ky.top) },
+      { r: { x: xL - b, y: yB - b, w: b, h: b }, m: mXY(xL, yB, kx.left, ky.bottom) },
+      { r: { x: xR, y: yB - b, w: b, h: b }, m: mXY(xR, yB, kx.right, ky.bottom) },
+      { r: { x: xL - b, y: yT, w: b, h: b }, m: mXY(xL, yT, kx.left, ky.top) },
+      { r: { x: xR, y: yT, w: b, h: b }, m: mXY(xR, yT, kx.right, ky.top) },
+    ];
+    for (const { r, m } of regions) {
+      const ix = Math.max(r.x, cl.x), iy = Math.max(r.y, cl.y);
+      const ix2 = Math.min(r.x + r.w, cl.x + cl.w), iy2 = Math.min(r.y + r.h, cl.y + cl.h);
+      if (ix2 - ix < 0.002 || iy2 - iy < 0.002) continue;
+      outPage.pushOperators(
+        PL.pushGraphicsState(),
+        PL.moveTo(ix * PT, iy * PT),
+        PL.lineTo(ix2 * PT, iy * PT),
+        PL.lineTo(ix2 * PT, iy2 * PT),
+        PL.lineTo(ix * PT, iy2 * PT),
+        PL.closePath(),
+        PL.clip(),
+        PL.endPath(),
+        PL.concatTransformationMatrix(m[0], m[1], m[2], m[3], m[4], m[5]),
+      );
+      outPage.drawPage(embedded, { x: ax, y: ay, xScale: s, yScale: s, rotate: PL.degrees(drawRot) });
+      outPage.pushOperators(PL.popGraphicsState());
+    }
+  }
 }
 
 function placeInCell(outPage, embedded, art, cell, extraRotate) {
@@ -758,15 +936,39 @@ async function imposeSaddle(artBytes, spec, layout) {
   // Resolve every page once (trim location, orientation, fit) in SPREAD
   // space — each slot is pw×ph regardless of how the grid rotated the spread.
   const slotLandscape = bk.pw >= bk.ph;
+  const abPages = spec.addBleedPages || {};
+  const abMode = i => {
+    const m = abPages[i + 1] != null ? abPages[i + 1] : spec.addBleed;
+    return m && m !== "off" ? m : null;
+  };
+  let inkDoc = null;
   const arts = [];
   const artCache = new Map(); // pages with identical geometry share one resolution
   for (let i = 0; i < n; i++) {
     const p = src.getPage(i);
     const mb = p.getMediaBox();
-    const key = `${p.getRotation().angle}|${mb.x},${mb.y},${mb.width},${mb.height}|${JSON.stringify(getPageBox(p, "TrimBox"))}|${JSON.stringify(getPageBox(p, "BleedBox"))}`;
+    const abm = abMode(i);
+    // per-page synth (mode or ink gaps) breaks geometry sharing — key by page
+    const key = abm ? `p${i}`
+      : `${p.getRotation().angle}|${mb.x},${mb.y},${mb.width},${mb.height}|${JSON.stringify(getPageBox(p, "TrimBox"))}|${JSON.stringify(getPageBox(p, "BleedBox"))}`;
     let art = artCache.get(key);
     if (!art) {
       art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed);
+      if (abm && !art.hasBleed) {
+        let gaps = null;
+        try {
+          if (!inkDoc) inkDoc = await pdfjsLib.getDocument({ data: artBytes.slice(0) }).promise;
+          if (spec.addBleedSmart !== false) gaps = await detectInkGaps(inkDoc, i, art);
+        } catch (e) { warnings.push(`add-bleed ink detection failed on page ${i + 1} (${e.message}) — synthesized from the page edge instead`); }
+        if (abm === "auto") {
+          try { art.textNear = await detectTextNearEdges(inkDoc, i, art, layout.bleed); }
+          catch (e) {
+            art.textNear = { left: true, right: true, top: true, bottom: true };
+            warnings.push(`text detection failed on page ${i + 1} (${e.message}) — streak bleed used on all edges`);
+          }
+        }
+        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec));
+      }
       artCache.set(key, art);
     }
     arts.push(art);
@@ -774,6 +976,11 @@ async function imposeSaddle(artBytes, spec, layout) {
   arts[0].notes.forEach(nt => warnings.push("page 1: " + nt));
   const scaled = arts.filter(a => a.scale !== 1).length;
   if (scaled) warnings.push(`${scaled} of ${n} pages required fit-to-trim scaling`);
+  const synCount = {};
+  arts.forEach(a => { if (a.synth) synCount[a.synth] = (synCount[a.synth] || 0) + 1; });
+  const synTotal = Object.values(synCount).reduce((s, v) => s + v, 0);
+  const synPre = arts.filter(a => a.synth && a.synth !== "scale" && a.synthScale > 1.0001).length;
+  if (synTotal) warnings.push(`add-bleed synthesized on ${synTotal} of ${n} pages (${Object.entries(synCount).map(([m, c]) => `${c} ${m}`).join(", ")}${synPre ? `; ${synPre} pre-scaled — art stopped shy of trim` : ""})`);
 
   const spreadRot = bk.spreadAlongX ? 0 : 90;
   const flip = spec.sheetFlip || "short"; // Fiery short-edge feed is the shop default
@@ -878,6 +1085,19 @@ async function imposePdf(artBytes, backBytes, spec) {
   const mode = ["gang", "stack", "each"].includes(spec.multiMode) ? spec.multiMode : "repeat";
   const backDoc = backBytes ? await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }) : null;
 
+  // add-bleed: per-page override map (1-based page keys, main file) falls
+  // back to the job-level mode; back-file pages use the job-level mode.
+  const abPages = spec.addBleedPages || {};
+  const abMode = pno => {
+    const m = abPages[pno + 1] != null ? abPages[pno + 1] : spec.addBleed;
+    return m && m !== "off" ? m : null;
+  };
+  const inkDocs = {};
+  async function inkDocFor(which) { // lazy pdf.js rasterizer per source file
+    if (!inkDocs[which]) inkDocs[which] = await pdfjsLib.getDocument({ data: (which === "F" ? artBytes : backBytes).slice(0) }).promise;
+    return inkDocs[which];
+  }
+
   // ── Piece list: each piece = one finished item {front, back} page refs.
   // "repeat" = single-design step-and-repeat (page 1 [+2] only). "gang" /
   // "stack" treat a multipage COLLATED file as distinct pieces; 2-sided
@@ -936,6 +1156,23 @@ async function imposePdf(artBytes, backBytes, spec) {
     const key = keyOf(ref);
     if (!artCache.has(key)) {
       const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed);
+      const abm = ref.doc === backDoc ? (spec.addBleed && spec.addBleed !== "off" ? spec.addBleed : null) : abMode(ref.pno);
+      if (abm && !art.hasBleed) {
+        const which = ref.doc === backDoc ? "B" : "F";
+        let gaps = null;
+        if (spec.addBleedSmart !== false) {
+          try { gaps = await detectInkGaps(await inkDocFor(which), ref.pno, art); }
+          catch (e) { warnings.push(`add-bleed ink detection failed on ${keyOf(ref)} (${e.message}) — synthesized from the page edge instead`); }
+        }
+        if (abm === "auto") {
+          try { art.textNear = await detectTextNearEdges(await inkDocFor(which), ref.pno, art, layout.bleed); }
+          catch (e) { // can't prove the edges are text-free — streak everywhere
+            art.textNear = { left: true, right: true, top: true, bottom: true };
+            warnings.push(`text detection failed on ${keyOf(ref)} (${e.message}) — streak bleed used on all edges`);
+          }
+        }
+        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec));
+      }
       if (key === keyOf(pieces[0].front)) art.notes.forEach(n => warnings.push("front: " + n));
       else if (sides === 2 && pieces[0].back && key === keyOf(pieces[0].back)) art.notes.forEach(n => warnings.push("back: " + n));
       else if (art.scale !== 1) scaledPages++;
@@ -1006,10 +1243,10 @@ async function imposePdf(artBytes, backBytes, spec) {
 
   const sideReports = [];
   const f0 = artCache.get(keyOf(pieces[0].front));
-  if (f0) sideReports.push({ side: "FRONT", rot: f0.rot, cellRotate: f0.cellRotate, scale: f0.scale, hasBleed: f0.hasBleed });
+  if (f0) sideReports.push({ side: "FRONT", rot: f0.rot, cellRotate: f0.cellRotate, scale: f0.scale, hasBleed: f0.hasBleed, synth: f0.synth });
   if (sides === 2 && pieces[0].back) {
     const b0 = artCache.get(keyOf(pieces[0].back));
-    if (b0) sideReports.push({ side: "BACK", rot: b0.rot, cellRotate: b0.cellRotate, scale: b0.scale, hasBleed: b0.hasBleed });
+    if (b0) sideReports.push({ side: "BACK", rot: b0.rot, cellRotate: b0.cellRotate, scale: b0.scale, hasBleed: b0.hasBleed, synth: b0.synth });
   }
   if (mode !== "repeat") sideReports.push({ side: "COLLATED", pieces: pieces.length, sheetsPerSet: D, modeName: mode });
 
@@ -1314,6 +1551,10 @@ function App() {
   const [manualPattern, setManualPattern] = useState([]); // row-major 0/180 per cell (rows bottom-up)
   const [forceRotated, setForceRotated] = useState("auto");
   const [bleedIn, setBleedIn] = useState(0.125);           // per-job bleed override
+  const [addBleed, setAddBleed] = useState("off");         // synthesize bleed for no-bleed files: off | mirror | scale
+  const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
+  const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
+  const [addBleedPages, setAddBleedPages] = useState({});  // per-page mode overrides {1-based page: mode}
   const [multiMode, setMultiMode] = useState("repeat");    // multipage flat files: repeat | gang | stack
   const isSaddle = calc === "saddle";
   const [art, setArt] = useState(null);      // { bytes, name, pageCount }
@@ -1355,9 +1596,10 @@ function App() {
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
-    bleed: +bleedIn, multiMode,
+    bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps,
+    addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode]);
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, addBleedPages]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -1412,6 +1654,7 @@ function App() {
       if (slot === "back") setBackArt({ bytes, name: f.name, pageCount });
       else {
         setArt({ bytes, name: f.name, pageCount });
+        setAddBleedPages({}); // per-page overrides belong to the previous file
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
         if (det) {
           const specL = Math.max(+trimLong || 0, +trimShort || 0), specS = Math.min(+trimLong || 0, +trimShort || 0);
@@ -1453,6 +1696,7 @@ function App() {
       const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
       const pageCount = doc.getPageCount();
       setArt({ bytes, name: row.art_file_name, pageCount });
+      setAddBleedPages({});
       setBackArt(null);
       let note = `Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
       try {
@@ -1620,6 +1864,67 @@ function App() {
                 <input type="number" step="0.0625" min="0" max="0.5" value={bleedIn} onChange={e => setBleedIn(e.target.value)} />
               </Field>
             </div>
+            <Field label="Add bleed (files with none)">
+              <select value={addBleed} onChange={e => setAddBleed(e.target.value)}
+                      style={addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w))
+                             ? { outline: "2px solid #e91e63" } : undefined}>
+                <option value="off">Off — use file as-is</option>
+                <option value="auto">Auto (text-safe) — mirror, streak where text is near trim</option>
+                <option value="mirror">Mirror edges outward (content at trim stays put)</option>
+                <option value="scale">Scale art up to bleed (shrinks safety margin)</option>
+                <option value="streak">Streak edges (stretch edge sliver — nothing readable)</option>
+              </select>
+              {addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w)) && (
+                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 3 }}>
+                  This file has no bleed — cut lines may show paper white. Auto is the safe default fix: it mirrors
+                  clean edges and streaks edges with nearby text. Scale suits photo collages and faces
+                  (a mirror would visibly reflect people at the edges).
+                </div>
+              )}
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 4, cursor: "pointer" }}>
+                <input type="checkbox" checked={addBleedSmart} onChange={e => setAddBleedSmart(e.target.checked)} />
+                Smart edge detect — if the art stops just short of trim (≤3/16″), pre-scale so the synthesized
+                bleed never amplifies the white sliver; big white margins are respected as design.
+              </label>
+              {(["auto", "streak"].includes(addBleed) || Object.values(addBleedPages).some(v => v === "auto" || v === "streak")) && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 4 }}>
+                  Streak sampler: outermost
+                  <input type="number" step="0.005" min="0.005" max="0.25" value={streakEps}
+                         style={{ width: 64 }} onChange={e => setStreakEps(e.target.value)} />
+                  ″ of art stretched into the bleed (smaller = purer edge color, larger = softer smear)
+                </div>
+              )}
+              {art && art.pageCount > 1 && (addBleed !== "off" || Object.keys(addBleedPages).length > 0
+                || (result && (result.warnings || []).some(w => /no bleed/i.test(w)))) && (
+                <div style={{ marginTop: 6 }}>
+                  <div style={{ fontSize: 11, color: "#777", marginBottom: 3 }}>
+                    Per-page override (blank = job setting "{addBleed}"):
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 120, overflowY: "auto" }}>
+                    {Array.from({ length: Math.min(art.pageCount, 64) }, (_, i) => (
+                      <label key={i} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11,
+                                              border: "1px solid #ddd", borderRadius: 4, padding: "1px 4px" }}>
+                        p{i + 1}
+                        <select value={addBleedPages[i + 1] || ""} style={{ fontSize: 11, padding: "1px 2px" }}
+                                onChange={e => setAddBleedPages(prev => {
+                                  const next = { ...prev };
+                                  if (e.target.value) next[i + 1] = e.target.value; else delete next[i + 1];
+                                  return next;
+                                })}>
+                          <option value=""></option>
+                          <option value="off">off</option>
+                          <option value="auto">auto</option>
+                          <option value="mirror">mirror</option>
+                          <option value="scale">scale</option>
+                          <option value="streak">streak</option>
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                  {art.pageCount > 64 && <div style={{ fontSize: 11, color: "#777" }}>overrides limited to the first 64 pages</div>}
+                </div>
+              )}
+            </Field>
             <div style={{ display: "flex", gap: 10 }}>
               {!isSaddle && (
                 <Field label="Sides" style={{ flex: 1 }}>
@@ -1670,7 +1975,7 @@ function App() {
               </Field>
               <Field label="Gutter" style={{ flex: "0 0 110px" }}>
                 <select value={gutterMode} onChange={e => setGutterMode(e.target.value)}>
-                  <option value="auto">Auto</option>
+                  <option value="auto">{isSaddle ? "Butt (default)" : "Auto"}</option>
                   <option value="0">0″ (butt)</option>
                   <option value="0.125">0.125″</option>
                   <option value="0.25">0.25″</option>
@@ -1812,7 +2117,7 @@ function App() {
                     ? <div key={i}>Booklet: {s.pages} pages{s.padded !== s.pages ? ` (padded to ${s.padded})` : ""} · {s.signatures} signatures · {s.spreadsPerSide} spread{s.spreadsPerSide === 1 ? "" : "s"}/side · back {s.tumble ? "tumbled 180°" : "upright"}{s.srcRotPages ? ` · ${s.srcRotPages} source pages carried /Rotate (normalized)` : ""}</div>
                     : s.side === "COLLATED"
                     ? <div key={i}>Collated: {s.pieces} piece{s.pieces === 1 ? "" : "s"} · {s.modeName === "gang" ? "ganged in order" : s.modeName === "stack" ? "cut & stack" : "one full sheet per piece"} · {s.sheetsPerSet} sheet{s.sheetsPerSet === 1 ? "" : "s"}{s.modeName === "each" ? " total" : " per set"}</div>
-                    : <div key={i}>{s.side}: {s.rot ? `source /Rotate ${s.rot}° normalized · ` : ""}cell rotation {s.cellRotate}° · scale ×{typeof s.scale === "number" ? s.scale.toFixed(3) : "?"} · {s.hasBleed ? "bleed present" : "no bleed"}</div>)}
+                    : <div key={i}>{s.side}: {s.rot ? `source /Rotate ${s.rot}° normalized · ` : ""}cell rotation {s.cellRotate}° · scale ×{typeof s.scale === "number" ? s.scale.toFixed(3) : "?"} · {s.hasBleed ? "bleed present" : s.synth ? `bleed synthesized (${s.synth})` : "no bleed"}</div>)}
                 </div>
               )}
               <PdfPreview bytes={result.bytes} labels={result.pageLabels} />

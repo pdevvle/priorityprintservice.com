@@ -1622,9 +1622,10 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     } // end PPS calculator steps else
 
     // Floating action bar
-    $nonce    = wp_create_nonce( 'pps_wizard_email' );
+    // No nonce attribute: see pps_wizard_email_handler() for why a cached category page
+    // makes one actively harmful here.
     $ajax_url = admin_url( 'admin-ajax.php' );
-    $out .= '<div class="pps-wiz-actions" data-nonce="' . esc_attr( $nonce ) . '" data-ajax="' . esc_url( $ajax_url ) . '">';
+    $out .= '<div class="pps-wiz-actions" data-ajax="' . esc_url( $ajax_url ) . '">';
     $out .= '<div class="pps-wiz-summary"></div>';
     $out .= '<div class="pps-wiz-actions-btns">';
     $out .= '<a class="pps-wiz-act-pricing" href="' . esc_url( $link ) . '">Proceed to Pricing &rarr;</a>';
@@ -1846,7 +1847,6 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'var digits=phone.replace(/\\D/g,"");if(digits.length<7||digits.length>15){statusEl.className="pps-wiz-email-status is-err";statusEl.textContent="Please enter a valid phone number.";return}'
           .     'var fd=new FormData();'
           .     'fd.append("action","pps_wizard_email");'
-          .     'fd.append("nonce",bar.dataset.nonce);'
           .     'fd.append("name",name);fd.append("email",email);fd.append("phone",phone);'
           .     'fd.append("calc",calc);'
           .     'if(hp)fd.append("website",hp.value);'
@@ -1877,14 +1877,32 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 add_action( 'wp_ajax_pps_wizard_email',        'pps_wizard_email_handler' );
 add_action( 'wp_ajax_nopriv_pps_wizard_email', 'pps_wizard_email_handler' );
 function pps_wizard_email_handler() {
-    check_ajax_referer( 'pps_wizard_email', 'nonce' );
+    // NO NONCE. The wizard renders on product CATEGORY archives, which WP Rocket caches, so
+    // the nonce printed into that HTML outlives its 12-24h window and then every quote
+    // request from that page fails — with a retry reloading the same cached page and the
+    // same dead nonce. That is a silent lead leak on the pages closest to a sale. For a
+    // logged-out visitor the uid-0 nonce is shared and published in the markup anyway, so
+    // it was never authentication. Honeypot and the shared per-IP rate limit below are.
     if ( ! empty( $_POST['website'] ) ) wp_send_json_error( 'Invalid submission.' );
+
+    // Everything past this point is the shared intake pipeline: one recipient, one email
+    // format, one Calc Questions record, one customer confirmation. Previously this handler
+    // had its own copy of all four, and its own hardcoded admin_email.
+    if ( ! function_exists( 'pps_intake_record' ) ) {
+        error_log( '[pps-wizard] PPS Intake not loaded — quote request refused rather than lost' );
+        wp_send_json_error( 'We could not send that just now. Please email us and we will pick it up.' );
+    }
+
+    if ( (int) get_transient( pps_intake_rate_key() ) >= 5 ) {
+        wp_send_json_error( 'Too many submissions from your connection. Please try again in a few minutes.' );
+    }
+    set_transient( pps_intake_rate_key(), (int) get_transient( pps_intake_rate_key() ) + 1, 15 * MINUTE_IN_SECONDS );
 
     $name     = sanitize_text_field( wp_unslash( $_POST['name'] ?? '' ) );
     $email    = sanitize_email( wp_unslash( $_POST['email'] ?? '' ) );
     $phone    = sanitize_text_field( wp_unslash( $_POST['phone'] ?? '' ) );
     $callback = ! empty( $_POST['callback'] );
-    $specs    = sanitize_text_field( wp_unslash( $_POST['specs'] ?? '' ) );
+    $specs    = sanitize_textarea_field( wp_unslash( $_POST['specs'] ?? '' ) );
     $url      = esc_url_raw( wp_unslash( $_POST['url'] ?? '' ) );
     $msg      = sanitize_textarea_field( wp_unslash( $_POST['message'] ?? '' ) );
 
@@ -1896,110 +1914,53 @@ function pps_wizard_email_handler() {
         wp_send_json_error( 'Please provide a valid phone number.' );
     }
 
-    $admin = get_option( 'admin_email' );
-    $subj  = $callback ? 'Quote + Callback Request from ' . $name : 'Quote Request from ' . $name;
-    $body  = "Name: {$name}\nEmail: {$email}\nPhone: {$phone}";
-    if ( $callback ) $body .= "\n*** CALLBACK REQUESTED ***";
-    $body .= "\n\nSelected Specs:\n{$specs}\n\nCalculator Link:\n{$url}";
-    if ( $msg ) $body .= "\n\nMessage:\n{$msg}";
-
-    $headers     = array( 'Reply-To: ' . $name . ' <' . $email . '>' );
-    $attachments = array();
-    $cleanup     = array();
-    $upload_urls = array();
-
-    $allowed_ext = array( 'pdf', 'png', 'jpg', 'jpeg', 'tiff', 'tif', 'ai', 'psd', 'eps' );
-    $max_per_file = 20 * 1024 * 1024; // 20 MB
-    $max_email    = 20 * 1024 * 1024;
-
-    if ( ! empty( $_FILES['files'] ) && is_array( $_FILES['files']['name'] ) ) {
-        $count = count( $_FILES['files']['name'] );
-        $total = 0;
-        $valid = array();
-
-        for ( $i = 0; $i < $count; $i++ ) {
-            if ( $_FILES['files']['error'][ $i ] !== UPLOAD_ERR_OK ) continue;
-            $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
-            $ext  = strtolower( pathinfo( $orig, PATHINFO_EXTENSION ) );
-            if ( ! in_array( $ext, $allowed_ext, true ) ) continue;
-            if ( $_FILES['files']['size'][ $i ] > $max_per_file ) continue;
-            $total += $_FILES['files']['size'][ $i ];
-            $valid[] = $i;
-        }
-
-        if ( $total <= $max_email ) {
-            $tmp_dir = get_temp_dir() . 'pps-quote-' . wp_generate_password( 8, false );
-            wp_mkdir_p( $tmp_dir );
-            foreach ( $valid as $i ) {
-                $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
-                $dest = $tmp_dir . '/' . $orig;
-                if ( move_uploaded_file( $_FILES['files']['tmp_name'][ $i ], $dest ) ) {
-                    $attachments[] = $dest;
-                }
-            }
-            $cleanup[] = $tmp_dir;
-        } else {
-            $token   = wp_generate_password( 16, false );
-            $upl_dir = wp_upload_dir();
-            $quote_dir = $upl_dir['basedir'] . '/pps-quotes/' . $token;
-            wp_mkdir_p( $quote_dir );
-            $htaccess = $quote_dir . '/.htaccess';
-            if ( ! file_exists( $htaccess ) ) {
-                file_put_contents( $htaccess, "Options -Indexes\n" );
-            }
-            foreach ( $valid as $i ) {
-                $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
-                $dest = $quote_dir . '/' . $orig;
-                if ( move_uploaded_file( $_FILES['files']['tmp_name'][ $i ], $dest ) ) {
-                    $upload_urls[] = $upl_dir['baseurl'] . '/pps-quotes/' . $token . '/' . $orig;
-                }
-            }
-            if ( $upload_urls ) {
-                $body .= "\n\nUploaded Files (too large for email attachment):\n" . implode( "\n", $upload_urls );
-            }
-        }
+    // The re-open URL goes in an email; keep it on our own host so it cannot be used as an
+    // open redirector, exactly as pps_ajax_quote_question() does.
+    if ( $url ) {
+        $u_host = wp_parse_url( $url, PHP_URL_HOST );
+        if ( ! $u_host || strcasecmp( $u_host, (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) !== 0 ) $url = '';
     }
 
-    $calc_type  = sanitize_key( wp_unslash( $_POST['calc'] ?? '' ) );
-    $calc_label = ucwords( str_replace( array( '-', '_' ), ' ', $calc_type ) );
-    if ( $calc_label === '' ) $calc_label = 'Category Wizard';
-    $is_lead = ( strpos( $url, 'product' ) === false );
+    $calc       = sanitize_key( wp_unslash( $_POST['calc'] ?? '' ) );
+    $calc_label = $calc !== '' ? ucwords( str_replace( array( '-', '_' ), ' ', $calc ) ) : 'Category Wizard';
+    // A lead wizard runs where no calculator exists, so there is no pricing page to point at.
+    $is_lead    = ( $url === '' || strpos( $url, 'product' ) === false );
 
-    $post_title = sprintf( '%s — %s', $name, $calc_label );
-    if ( $callback ) $post_title .= ' (callback)';
-    $post_id = wp_insert_post( array(
-        'post_type'   => 'pps_question',
-        'post_status' => 'publish',
-        'post_title'  => wp_strip_all_tags( $post_title ),
-        'post_content' => $msg !== '' ? $msg : '(no message)',
-    ), true );
-    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
-        update_post_meta( $post_id, '_pps_q_name',        $name );
-        update_post_meta( $post_id, '_pps_q_email',       $email );
-        update_post_meta( $post_id, '_pps_q_phone',       $phone );
-        update_post_meta( $post_id, '_pps_q_calc_type',   $calc_type );
-        update_post_meta( $post_id, '_pps_q_calc_label',  ( $is_lead ? 'Lead: ' : 'Wizard: ' ) . $calc_label );
-        update_post_meta( $post_id, '_pps_q_summary',     $specs );
-        update_post_meta( $post_id, '_pps_q_reorder_url', $url );
-        update_post_meta( $post_id, '_pps_q_user_ip',     isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '' );
-        if ( $callback ) update_post_meta( $post_id, '_pps_q_callback', 1 );
-        if ( $upload_urls ) update_post_meta( $post_id, '_pps_q_files', $upload_urls );
+    $forms = pps_intake_forms();
+    $form  = $is_lead ? $forms['lead'] : $forms['wizard'];
+    $form['title'] = ( $is_lead ? 'Lead: ' : 'Wizard: ' ) . $calc_label;
+
+    $values = array(
+        'name'     => $name,
+        'email'    => $email,
+        'phone'    => $phone,
+        'callback' => $callback ? '1' : '',
+        'message'  => $msg,
+    );
+
+    // Shared upload handling: the narrower allowlist, the per-file and per-submission caps,
+    // and the inner-dot flattening that stops shell.php.jpg being stored executable. The
+    // copy that lived here had none of the last one.
+    $uploads = pps_intake_take_uploads();
+    if ( $uploads['error'] !== '' ) {
+        wp_send_json_error( pps_intake_error_text( $form, $uploads['error'], '' ) );
     }
 
-    $sent = wp_mail( $admin, $subj, $body, $headers, $attachments );
+    $extra_meta = array(
+        '_pps_q_calc_type'   => $calc,
+        '_pps_q_summary'     => $specs,
+        '_pps_q_reorder_url' => $url,
+    );
+    $extra_lines = array();
+    if ( $specs ) { $extra_lines[] = 'Selected specs:'; $extra_lines[] = $specs; }
+    if ( $url )   { $extra_lines[] = ''; $extra_lines[] = 'Open this in the calculator:'; $extra_lines[] = $url; }
 
-    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
-        update_post_meta( $post_id, '_pps_q_email_sent', $sent ? 1 : 0 );
-    }
+    $post_id = pps_intake_record( $is_lead ? 'lead' : 'wizard', $form, $values, $uploads['urls'], $extra_meta );
+    pps_intake_notify( $is_lead ? 'lead' : 'wizard', $form, $values, $uploads['urls'], $post_id, $extra_lines );
 
-    foreach ( $cleanup as $dir ) {
-        $files_in = glob( $dir . '/*' );
-        if ( $files_in ) array_map( 'unlink', $files_in );
-        @rmdir( $dir );
-    }
-
-    if ( $sent ) wp_send_json_success( 'Your quote request has been sent! We\'ll be in touch shortly.' );
-    else         wp_send_json_error( 'Could not send email. Please try again or call us directly.' );
+    // Recorded, so say so. Previously this reported failure whenever wp_mail() returned
+    // false, telling a customer their request had not gone through when it had.
+    wp_send_json_success( 'Your quote request has been sent! We\'ll be in touch shortly.' );
 }
 
 // ── Purge quote uploads older than 60 days ──
