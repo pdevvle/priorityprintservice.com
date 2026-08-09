@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Priority Print MCP Tools
  * Plugin URI:  https://woocommerce-70867-4915293.cloudwaysapps.com/
- * Description: Companion plugin for AI Engine that adds custom WooCommerce, theme, plugin file management, WordPress update, and URL-download tools to the MCP server.
- * Version:     1.5.0
+ * Description: Companion plugin for AI Engine that adds custom WooCommerce, theme, plugin file management, uploads cleanup, WordPress update, and URL-download tools to the MCP server.
+ * Version:     1.6.0
  * Author:      Preston / Priority Print Service
  * License:     GPL v2 or later
  * Requires PHP: 8.0
@@ -14,6 +14,17 @@
  *  - Path traversal is blocked via realpath() validation
  *  - plugin_download_url enforces https:// only, 12MB max, 60s timeout
  *  - plugin_delete_file removes a single file only: refuses directories, this plugin's own file, and any active plugin's entry file
+ *  - Uploads tools are restricted to wp_upload_dir()['basedir'] only, with a stricter containment
+ *    test than the plugin/theme helpers (exact match or trailing separator, so a prefix-sharing
+ *    sibling like wp-content/uploads-old cannot pass)
+ *  - uploads_delete_file / uploads_delete_batch take explicit paths only -- never a pattern or
+ *    glob -- so a bad filter cannot cascade into an over-delete. Both refuse directories, the
+ *    directory-guard files (index.php / index.html / .htaccess / web.config) that keep the uploads
+ *    tree unbrowsable, and any file still backing a media-library attachment (that would orphan the
+ *    attachment row; use the media tools instead). Batch is capped at 500 paths and reports each
+ *    per-file failure rather than aborting
+ *  - uploads_list_files reports matched_count / matched_total_bytes for the FULL match set even when
+ *    the returned list is limited, so a cap is never mistaken for the whole picture
  *  - Every write / download / delete calls opcache_invalidate() on the affected file, so new
  *    bytecode takes effect on the next request even when OPcache runs with validate_timestamps=0
  *    (the Cloudways default) -- without this a deployed .php sits on disk while stale bytecode runs
@@ -253,6 +264,49 @@ class Priority_Print_MCP {
 				),
 			),
 
+			self::PREFIX . 'uploads_list_files' => array(
+				'name'        => self::PREFIX . 'uploads_list_files',
+				'description' => 'List files under wp-content/uploads, with optional age and size filters. Built for finding old, large customer artwork that has no media-library attachment row and so is invisible to the media tools. Returns path / size / mtime / age_days per file, plus the total size of the whole matched set so you can see what a cleanup would reclaim before deleting anything.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'subdirectory' => array( 'type' => 'string',  'description' => 'Optional. Scope the scan to this path relative to the uploads root (e.g. "pps-artwork"). Omit to scan the whole uploads tree.' ),
+						'min_age_days' => array( 'type' => 'integer', 'description' => 'Optional. Only return files whose mtime is at least this many days old.' ),
+						'min_size_kb'  => array( 'type' => 'integer', 'description' => 'Optional. Only return files of at least this many KB.' ),
+						'order_by'     => array( 'type' => 'string',  'description' => 'Optional. "size" (default) or "age". Both descending — largest, or oldest, first.' ),
+						'limit'        => array( 'type' => 'integer', 'description' => 'Optional. Max files to return; default 200, max 2000. matched_count and matched_total_bytes always describe the full match, so a limit is never a silent cap.' ),
+					),
+				),
+			),
+
+			self::PREFIX . 'uploads_delete_file' => array(
+				'name'        => self::PREFIX . 'uploads_delete_file',
+				'description' => 'WRITE OPERATION. Permanently delete a single file under wp-content/uploads (irreversible). Refuses directories, path traversal, directory-guard files (index.php / index.html / .htaccess / web.config), and any file still attached to a media-library item. Returns bytes_deleted. Confirm with the user before calling.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'relative_path' => array( 'type' => 'string', 'description' => 'Path relative to the uploads root of the single file to delete.' ),
+					),
+					'required' => array( 'relative_path' ),
+				),
+			),
+
+			self::PREFIX . 'uploads_delete_batch' => array(
+				'name'        => self::PREFIX . 'uploads_delete_batch',
+				'description' => 'WRITE OPERATION. Permanently delete many files under wp-content/uploads in one call (irreversible). Takes an explicit list of paths only — never a pattern or glob — and applies the same per-file guards as uploads_delete_file. A file that fails its guard is reported and skipped rather than aborting the batch. Max 500 paths per call. Returns per-file results plus total bytes_deleted. Confirm with the user before calling.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'relative_paths' => array(
+							'type'        => 'array',
+							'items'       => array( 'type' => 'string' ),
+							'description' => 'Explicit list of paths relative to the uploads root. Max 500.',
+						),
+					),
+					'required' => array( 'relative_paths' ),
+				),
+			),
+
 			self::PREFIX . 'wp_check_updates' => array(
 				'name'        => self::PREFIX . 'wp_check_updates',
 				'description' => 'Refresh and return available core, plugin, and theme updates. Read-only.',
@@ -312,6 +366,7 @@ class Priority_Print_MCP {
 				$name === self::PREFIX . 'theme_read_file'   ||
 				$name === self::PREFIX . 'plugin_list_files' ||
 				$name === self::PREFIX . 'plugin_read_file'  ||
+				$name === self::PREFIX . 'uploads_list_files' ||
 				$name === self::PREFIX . 'wp_check_updates'  ||
 				$name === self::PREFIX . 'wp_get_plugin_versions'
 			);
@@ -321,6 +376,8 @@ class Priority_Print_MCP {
 				$name === self::PREFIX . 'plugin_write_file'       ||
 				$name === self::PREFIX . 'plugin_download_url'     ||
 				$name === self::PREFIX . 'plugin_delete_file'      ||
+				$name === self::PREFIX . 'uploads_delete_file'     ||
+				$name === self::PREFIX . 'uploads_delete_batch'    ||
 				$name === self::PREFIX . 'woo_update_product'      ||
 				$name === self::PREFIX . 'woo_update_order_status' ||
 				$name === self::PREFIX . 'wp_update_plugin'        ||
@@ -366,6 +423,9 @@ class Priority_Print_MCP {
 				case self::PREFIX . 'plugin_write_file':       $data = $this->plugin_write_file( $args ); break;
 				case self::PREFIX . 'plugin_download_url':     $data = $this->plugin_download_url( $args ); break;
 				case self::PREFIX . 'plugin_delete_file':      $data = $this->plugin_delete_file( $args ); break;
+				case self::PREFIX . 'uploads_list_files':      $data = $this->uploads_list_files( $args ); break;
+				case self::PREFIX . 'uploads_delete_file':     $data = $this->uploads_delete_file( $args ); break;
+				case self::PREFIX . 'uploads_delete_batch':    $data = $this->uploads_delete_batch( $args ); break;
 				case self::PREFIX . 'wp_check_updates':        $data = $this->wp_check_updates(); break;
 				case self::PREFIX . 'wp_get_plugin_versions':  $data = $this->wp_get_plugin_versions(); break;
 				case self::PREFIX . 'wp_update_plugin':        $data = $this->wp_update_plugin( $args ); break;
@@ -774,6 +834,206 @@ class Priority_Print_MCP {
 		if ( ! unlink( $full_path ) ) throw new Exception( 'Could not delete file. Check filesystem permissions.' );
 		if ( function_exists( 'opcache_invalidate' ) ) opcache_invalidate( $full_path, true );
 		return array( 'success' => true, 'relative_path' => $args['relative_path'], 'bytes_deleted' => $bytes );
+	}
+
+	// ── Uploads (wp-content/uploads) ──────────────────────────────────────────
+	//
+	// Customer artwork accumulates here without media-library attachment rows, so
+	// the media tools cannot see it and the plugin-scoped tools cannot reach it.
+	// These three close that gap: one read tool that can answer "what is old and
+	// large", and two delete tools that take explicit paths only. No pattern or
+	// glob deletion — the caller decides exactly which files die, so the tool
+	// cannot over-delete on a bad filter.
+
+	private function uploads_root() : string {
+		$upload = wp_upload_dir();
+		if ( ! empty( $upload['error'] ) ) throw new Exception( 'Could not resolve uploads directory: ' . $upload['error'] );
+		$root = realpath( $upload['basedir'] );
+		if ( ! $root ) throw new Exception( 'Could not resolve uploads directory.' );
+		return $root;
+	}
+
+	/**
+	 * Resolve a path inside the uploads root, refusing anything outside it.
+	 *
+	 * The containment test is stricter than the plugin/theme helpers above: it
+	 * requires an exact match or a trailing separator, so a sibling directory
+	 * that merely shares the prefix (wp-content/uploads-old) cannot pass.
+	 */
+	private function safe_uploads_path( string $relative_path ) : string {
+		$uploads_root  = $this->uploads_root();
+		$relative_path = ltrim( $relative_path, '/\\' );
+		if ( strpos( $relative_path, '..' ) !== false ) throw new Exception( 'Path traversal not allowed.' );
+		$full_path = $uploads_root . DIRECTORY_SEPARATOR . $relative_path;
+		$check = file_exists( $full_path ) ? realpath( $full_path ) : realpath( dirname( $full_path ) );
+		if ( ! $check ) throw new Exception( 'Path is outside the uploads directory.' );
+		if ( $check !== $uploads_root && strpos( $check, $uploads_root . DIRECTORY_SEPARATOR ) !== 0 ) {
+			throw new Exception( 'Path is outside the uploads directory.' );
+		}
+		return $full_path;
+	}
+
+	private function uploads_list_files( array $args ) : array {
+		$uploads_root = $this->uploads_root();
+
+		$start_dir = $uploads_root;
+		$scope     = '';
+		if ( ! empty( $args['subdirectory'] ) ) {
+			$scope     = trim( str_replace( '\\', '/', sanitize_text_field( $args['subdirectory'] ) ), '/' );
+			$start_dir = $this->safe_uploads_path( $scope );
+			if ( ! is_dir( $start_dir ) ) throw new Exception( 'Directory not found under uploads: ' . $scope );
+		}
+
+		$min_age_days = isset( $args['min_age_days'] ) ? max( 0, (int) $args['min_age_days'] ) : 0;
+		$min_size_kb  = isset( $args['min_size_kb'] )  ? max( 0, (int) $args['min_size_kb'] )  : 0;
+		$limit        = isset( $args['limit'] ) ? max( 1, min( 2000, (int) $args['limit'] ) ) : 200;
+		$order_by     = ( isset( $args['order_by'] ) && $args['order_by'] === 'age' ) ? 'age' : 'size';
+
+		$now      = time();
+		$cutoff   = $min_age_days > 0 ? ( $now - $min_age_days * DAY_IN_SECONDS ) : 0;
+		$min_size = $min_size_kb * 1024;
+
+		// Soft cap so a very large tree cannot hang the request. Always reported.
+		$scan_cap       = 200000;
+		$scanned        = 0;
+		$scan_truncated = false;
+
+		$files       = array();
+		$total_bytes = 0;
+
+		$iterator = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator( $start_dir, RecursiveDirectoryIterator::SKIP_DOTS ),
+			RecursiveIteratorIterator::LEAVES_ONLY
+		);
+
+		foreach ( $iterator as $file ) {
+			if ( ++$scanned > $scan_cap ) { $scan_truncated = true; break; }
+			if ( ! $file->isFile() ) continue;
+
+			$size  = $file->getSize();
+			$mtime = $file->getMTime();
+
+			if ( $min_size && $size < $min_size ) continue;
+			if ( $cutoff && $mtime > $cutoff ) continue;
+
+			$rel = str_replace( '\\', '/', str_replace( $uploads_root . DIRECTORY_SEPARATOR, '', $file->getPathname() ) );
+
+			$total_bytes += $size;
+			$files[]      = array(
+				'path'          => $rel,
+				'size_bytes'    => $size,
+				'last_modified' => date( 'c', $mtime ),
+				'age_days'      => (int) floor( ( $now - $mtime ) / DAY_IN_SECONDS ),
+			);
+		}
+
+		$matched_count = count( $files );
+
+		usort( $files, function( $a, $b ) use ( $order_by ) {
+			return $order_by === 'age'
+				? $b['age_days'] <=> $a['age_days']
+				: $b['size_bytes'] <=> $a['size_bytes'];
+		} );
+
+		$returned = array_slice( $files, 0, $limit );
+
+		return array(
+			'uploads_scope'      => $scope === '' ? '(entire uploads tree)' : $scope,
+			'filters'            => array( 'min_age_days' => $min_age_days, 'min_size_kb' => $min_size_kb, 'order_by' => $order_by ),
+			'matched_count'      => $matched_count,
+			'matched_total_bytes' => $total_bytes,
+			'matched_total_mb'   => round( $total_bytes / 1048576, 1 ),
+			'returned_count'     => count( $returned ),
+			'truncated'          => $matched_count > count( $returned ),
+			'scanned_entries'    => $scanned,
+			'scan_truncated'     => $scan_truncated,
+			'files'              => $returned,
+		);
+	}
+
+	/**
+	 * Guards shared by both uploads delete tools.
+	 *
+	 * Refuses the directory-guard files that stop the uploads tree being browsed
+	 * publicly, and refuses any file that still backs a media-library attachment
+	 * (deleting those here would leave an orphaned attachment row pointing at a
+	 * missing file — that is the media tools' job).
+	 */
+	private function assert_uploads_file_deletable( string $full_path, string $relative_path ) {
+		if ( ! file_exists( $full_path ) ) throw new Exception( 'File not found: ' . $relative_path );
+		if ( is_dir( $full_path ) ) throw new Exception( 'Refusing to delete a directory; these tools remove single files only.' );
+
+		$basename = strtolower( basename( $full_path ) );
+		if ( in_array( $basename, array( 'index.php', 'index.html', '.htaccess', 'web.config' ), true ) ) {
+			throw new Exception( 'Refusing to delete a directory guard file (' . $basename . '); it blocks public indexing of the uploads tree.' );
+		}
+
+		$attached = get_posts( array(
+			'post_type'        => 'attachment',
+			'post_status'      => 'any',
+			'numberposts'      => 1,
+			'fields'           => 'ids',
+			'meta_key'         => '_wp_attached_file',
+			'meta_value'       => $relative_path,
+			'suppress_filters' => true,
+		) );
+		if ( ! empty( $attached ) ) {
+			throw new Exception( 'Refusing to delete a file attached to media item #' . (int) $attached[0] . '; use the media tools so the attachment row goes with it.' );
+		}
+	}
+
+	private function uploads_delete_file( array $args ) : array {
+		if ( empty( $args['relative_path'] ) ) throw new Exception( 'relative_path is required.' );
+		$relative_path = ltrim( str_replace( '\\', '/', (string) $args['relative_path'] ), '/' );
+		$full_path     = $this->safe_uploads_path( $relative_path );
+
+		$this->assert_uploads_file_deletable( $full_path, $relative_path );
+
+		$bytes = filesize( $full_path );
+		if ( ! unlink( $full_path ) ) throw new Exception( 'Could not delete file. Check filesystem permissions.' );
+
+		return array( 'success' => true, 'relative_path' => $relative_path, 'bytes_deleted' => $bytes );
+	}
+
+	private function uploads_delete_batch( array $args ) : array {
+		if ( empty( $args['relative_paths'] ) || ! is_array( $args['relative_paths'] ) ) {
+			throw new Exception( 'relative_paths is required and must be an array of paths.' );
+		}
+
+		$paths = array_values( array_unique( array_filter( array_map( 'strval', $args['relative_paths'] ) ) ) );
+		if ( count( $paths ) > 500 ) {
+			throw new Exception( 'Too many paths in one call (' . count( $paths ) . '); max 500.' );
+		}
+
+		$deleted = array();
+		$failed  = array();
+		$total   = 0;
+
+		foreach ( $paths as $path ) {
+			$relative_path = ltrim( str_replace( '\\', '/', $path ), '/' );
+			try {
+				$full_path = $this->safe_uploads_path( $relative_path );
+				$this->assert_uploads_file_deletable( $full_path, $relative_path );
+				$bytes = filesize( $full_path );
+				if ( ! unlink( $full_path ) ) throw new Exception( 'Could not delete file. Check filesystem permissions.' );
+				$total    += $bytes;
+				$deleted[] = array( 'path' => $relative_path, 'bytes_deleted' => $bytes );
+			} catch ( Exception $e ) {
+				// One bad path must not abort the rest of the batch.
+				$failed[] = array( 'path' => $relative_path, 'error' => $e->getMessage() );
+			}
+		}
+
+		return array(
+			'success'       => empty( $failed ),
+			'requested'     => count( $paths ),
+			'deleted_count' => count( $deleted ),
+			'failed_count'  => count( $failed ),
+			'bytes_deleted' => $total,
+			'mb_deleted'    => round( $total / 1048576, 1 ),
+			'deleted'       => $deleted,
+			'failed'        => $failed,
+		);
 	}
 
 	private function require_upgrader() {
