@@ -33,6 +33,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `imposition-tool.html` | Browser-based auto-imposition tool (React + pdf-lib): vector-preserving sheetwise step-and-repeat onto press sheets, mirrors calculator pricing imp exactly. Works standalone (drag & drop) or inside wp-admin. See `docs/IMPOSITION_TOOL.md`. |
 | `pps-imposition.php` | wp-admin host for the imposition tool (PPS Calculators → Imposition): iframe app + AJAX bridge (order queue w/ parsed spec, Drive artwork proxy-download, imposed-PDF upload back to the order folder via existing Drive OAuth) |
 | `pps-reorder.php` | Guest order lookup (`[pps_order_lookup]` shortcode) and single-item reorder for legacy/WCPA orders. Loaded by `pps-calculators.php`. |
+| `pps-term-shortcodes.php` | Everything that makes a `product_cat` archive and `/shop/` look the way they do: category URL routing/redirects, the modern card CSS, the shop masthead, the guided `[pps_cat_wizard]`, the attribute shortcodes and the preset lineup. See "Category page composition" below. |
 | `docs/MASTER_PRICING_LOGIC.md` | Single source of truth for pricing strategy, applied values, rollback notes, knob-tuning patterns. **Read before suggesting any formula change.** |
 | `docs/PRICING_MATRIX.md` + `docs/pricing-matrix.json` | Captured output: what all 8 calculators actually quote across size, paper and page count (1,816 points), read from the rendered UI rather than the constants. Reference *and* regression gate — re-run before/after any pricing or styling port and diff. Regenerate with `tools-pricing-matrix.mjs`. |
 | `ups-zone-map-seed.json` | UPS Ground transit days by 3-digit ZIP prefix (1000 entries) |
@@ -96,6 +97,51 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 - Per-product defaults: "PPS Defaults" tab in WooCommerce product editor
 - Tooltips: centralized in `wp_options['pps_tooltips']`, AJAX-saved (no admin tab UI in this repo), injected as PPS_CONFIG.tips
 - GDrive: credentials in wp_options (not source), idempotent upload with retry, artwork path preserved for reorder
+
+## Category page composition
+
+A `product_cat` archive is assembled from three sources, in this render order:
+
+1. **The term description** — hand-authored per category, stored in the database, printed
+   by WooCommerce *before* the product loop. `pps-term-shortcodes.php` runs shortcodes
+   inside it (`add_filter('term_description', 'do_shortcode', 11)`). Holds the
+   `.pps-cat-hero` masthead markup, the optional `.pps-cat-usps` bar, the
+   `[pps_cat_wizard]` guided picker, marketing prose, and `[pps_cat_attributes]`.
+2. **The WooCommerce product loop** (`ul.products`) — the product cards.
+3. **Plugin hooks after the loop** — `woocommerce_after_shop_loop` priority 15 emits the
+   "More {Category} Options" preset lineup, priority 20 flushes the attributes section;
+   `wp_footer` priority 20 emits the tooltip modal.
+
+Intended reading order: **masthead → wizard → prose → product links → attributes → footer.**
+
+### The attributes section renders from a hook, not where it is written
+
+The paper / coating / turnaround / add-on blocks belong *after* the product links, but the
+term description is printed *before* them. So `[pps_cat_attributes]` is a marker: on a
+product-category archive it prints nothing where it sits, records its atts, and
+`pps_cat_flush_attributes()` emits the section after the preset lineup. On any other page
+it renders inline like a normal shortcode.
+
+- Per-category variation rides on **shortcode atts, not term meta** — `papers="text,cover"`,
+  `cover_label`, `coatings="yes"`, `addons="<calc>"`, `turnaround`, plus `*_heading`
+  overrides. Config stays in the term description next to the rest of the per-category
+  content instead of splitting across two un-versioned stores.
+- **Section headings live in PHP** (`pps_cat_render_attributes()`), not in the term
+  description. Markup echoed from a hook sits outside `.term-description`, so it would not
+  pick up that scoped `h2` styling — hence the `.pps-cat-attributes` CSS rules.
+- The individual `[pps_cat_papers]` / `[pps_cat_coatings]` / `[pps_cat_turnaround]` /
+  `[pps_cat_addons]` shortcodes are still registered and render inline wherever they appear.
+  They now delegate to `pps_cat_render_*()` functions shared with the deferred section, so
+  a change to one block shows up in both paths.
+- The queue is keyed by att signature and latches after it prints. Necessary because
+  **the term description is expanded roughly four times per page load** (SEO plugins build
+  meta/OG descriptions from it), which is exactly why the old inline attribute blocks were
+  emitted ~4× and the deferred section is emitted once. Migrating a category drops ~10–15KB
+  of duplicated markup from its page.
+
+**Term descriptions are un-versioned content.** They live only in the database, so a repo
+checkout does not describe what a category page actually renders — read the live term
+description (`pps_woo_get_category`) before reasoning about a category's layout.
 
 ## Security (audited, 33+ bugs fixed)
 - No credentials in source code (OAuth moved to wp_options)
