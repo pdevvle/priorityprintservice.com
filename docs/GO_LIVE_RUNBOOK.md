@@ -279,8 +279,11 @@ delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
   > 1. `_set` the `directory` (and `min_age_days` if not 730) — leave `enabled` false.
   > 2. `_run_now` (dry run by default) and read `expired_count` / `expired_mb` /
   >    `samples` / `skipped`. Nothing is deleted.
-  > 3. When the report looks right, `_run_now` with `dry_run=false` for the first
-  >    real sweep, then `_set` `enabled=true` and `dry_run=false` to let cron keep up.
+  > 3. When the report looks right, `_run_now` with `dry_run=false` for the real sweep.
+  >
+  > Step 4 would be `_set enabled=true, dry_run=false` to let cron maintain it —
+  > **but the owner decided on 2026-08-09 to keep this on-demand and leave the cron
+  > off.** Don't enable it without asking; run it deliberately instead.
   >
   > Guards: refuses the uploads root (so a blank or `.` directory cannot cascade),
   > floors `min_age_days` at 30 so a typo cannot mean "2 days", skips directory
@@ -373,8 +376,15 @@ Left behind deliberately: `nbdesigner/` still holds 2,331 post-migration files
 now-empty directory trees. Removing those is a Cloudways job — the tools delete
 files, not directories.
 
-**Policy left live on staging:** `wcpa_uploads`, `min_age_days=730`,
-`max_deletes_per_run=500`, enabled, dry_run off.
+**Policy left on staging (owner decision 2026-08-09: on-demand, no cron):**
+`wcpa_uploads`, `min_age_days=730`, `max_deletes_per_run=500`, **`enabled=false`
+(cron unscheduled, `next_run` null)**, `dry_run=true`.
+
+The directory and threshold stay configured so an on-demand sweep is a single
+`pps_uploads_retention_run_now` call. `dry_run` is parked back at `true` so that if
+anyone ever flips `enabled`, the job starts by *reporting* rather than deleting —
+and it costs nothing, because `run_now` already requires an explicit
+`dry_run=false` to delete regardless of the stored value.
 
 **Three defects found by running it for real** (not yet fixed — see PR discussion):
 
