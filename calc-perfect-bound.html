@@ -88,6 +88,9 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 </script>
 <script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: 0; }
@@ -113,7 +116,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
   .bp-open .bp-page.left{border-radius:4px 0 0 4px}
   .bp-open .bp-page.right{border-radius:0 4px 4px 0}
   .bp-page img{width:100%;height:100%;display:block}
-  .bp-page-num{position:absolute;bottom:6px;font-size:9px;color:rgba(0,0,0,.3);font-family:'Segoe UI',sans-serif}
+  .bp-page-num{position:absolute;bottom:6px;font-size:9px;color:rgba(0,0,0,.3);font-family:var(--pps-sans)}
   .bp-page.left .bp-page-num{right:8px}
   .bp-page.right .bp-page-num{left:8px}
   .bp-shadow-l{position:absolute;top:0;right:0;width:30px;height:100%;background:linear-gradient(to left,rgba(0,0,0,.12),transparent);pointer-events:none}
@@ -128,7 +131,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
   .bp-turning.flip-left{transform-origin:right center;transform:rotateY(0deg)}
   .bp-turning.flip-left.flipped{transform:rotateY(180deg)}
   /* Upload zone */
-  .bp-dropzone{border:2px dashed rgba(0,126,255,.3);border-radius:8px;padding:14px;text-align:center;cursor:pointer;transition:all .25s;background:rgba(0,126,255,.03);position:relative}
+  .bp-dropzone{border:2px dashed rgba(0,126,255,.3);border-radius:12px;padding:14px;text-align:center;cursor:pointer;transition:all .25s;background:rgba(0,126,255,.03);position:relative}
   .bp-dropzone:hover{border-color:rgba(0,126,255,.6);background:rgba(0,126,255,.06)}
   .bp-dropzone.has-file{border-style:solid;border-color:rgba(0,126,255,.4);background:rgba(0,126,255,.05)}
   .bp-dropzone.drag-active{border-color:#007eff;background:rgba(0,126,255,.1);box-shadow:0 0 0 3px rgba(0,126,255,.15)}
@@ -136,21 +139,54 @@ window.ppsAnalyzePdfRisks = async function (doc) {
   /* Thumbstrip */
   .bp-thumbs{display:flex;gap:6px;overflow-x:auto;padding:6px 0;scrollbar-width:thin}
   .bp-thumbs::-webkit-scrollbar{height:4px}
-  .bp-thumbs::-webkit-scrollbar-thumb{background:rgba(0,0,0,.15);border-radius:2px}
+  .bp-thumbs::-webkit-scrollbar-thumb{background:var(--bp-line);border-radius:99px}
   .bp-thumb{flex-shrink:0;text-align:center}
-  .bp-thumb img{height:44px;border-radius:2px;box-shadow:0 1px 4px rgba(0,0,0,.15);border:1px solid #e0e0e0}
-  .bp-thumb span{display:block;font-size:8px;color:#999;margin-top:2px}
-  /* Modal */
-  .bp-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
-  .bp-modal{background:#1a1d23;border:1px solid rgba(255,255,255,.1);border-radius:14px;width:90%;max-width:940px;max-height:90vh;display:flex;flex-direction:column;overflow:visible;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-  .bp-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;overflow:visible}
-  .bp-modal-body{padding:16px 20px;overflow-y:auto;flex:1;min-height:0;border-radius:0 0 14px 14px}
-  .bp-mode-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.6);padding:7px 18px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;transition:all .25s;font-family:inherit}
-  .bp-mode-btn:hover{background:rgba(0,126,255,.12);border-color:#007eff;color:#007eff}
-  .bp-mode-btn.on{background:#007eff;border-color:#007eff;color:#000;box-shadow:0 4px 16px rgba(0,126,255,.3)}
-  .bp-nav-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);width:36px;height:36px;min-width:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit;flex-shrink:0;box-sizing:border-box}
-  .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.15);border-color:#007eff;color:#007eff}
+  .bp-thumb img{height:44px;border-radius:6px;box-shadow:0 1px 3px rgba(16,24,40,.14);border:1px solid var(--bp-line)}
+  .bp-thumb span{display:block;font-size:8.5px;color:var(--bp-faint);margin-top:3px}
+  /* ── Modal chrome ──────────────────────────────────────────────────────────
+     The proof and 3D preview modals used to be their own dark-only surface with
+     white-on-black controls hardcoded inline. They now share the calculator's
+     surface, ink and hairline tokens through these variables, so both modals sit
+     in the modern skin and follow the light/dark toggle with everything else.
+     Set here rather than from CC so plain CSS rules can reach them too. */
+  :root{
+    --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
+    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#94a3b8;
+    --bp-btn:#f1f4f8; --bp-scrim:rgba(15,23,42,.55);
+  }
+  :root[data-pps-theme="dark"]{
+    --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
+    --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
+    --bp-btn:#0f151d; --bp-scrim:rgba(2,6,12,.66);
+  }
+  .bp-modal-bg{position:fixed;inset:0;background:var(--bp-scrim);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
+  .bp-modal{background:var(--bp-surface);border:1px solid var(--bp-line);border-radius:16px;width:90%;max-width:940px;max-height:90vh;display:flex;flex-direction:column;overflow:visible;box-shadow:0 4px 6px rgba(16,24,40,.06), 0 24px 64px rgba(16,24,40,.28)}
+  .bp-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--bp-line);flex-shrink:0;overflow:visible;border-radius:16px 16px 0 0;background:var(--bp-surface)}
+  .bp-modal-body{padding:16px 20px;overflow-y:auto;flex:1;min-height:0;border-radius:0 0 16px 16px;background:var(--bp-surface-2)}
+  .bp-modal-title{font-family:var(--pps-display);font-weight:650;letter-spacing:-0.01em;color:var(--bp-ink)}
+  .bp-mode-btn{background:var(--bp-btn);border:1px solid var(--bp-line);color:var(--bp-dim);padding:7px 18px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;transition:all .2s;font-family:inherit}
+  .bp-mode-btn:hover{background:rgba(0,126,255,.1);border-color:#007eff;color:#007eff}
+  .bp-mode-btn.on{background:#007eff;border-color:#007eff;color:#fff;box-shadow:0 2px 10px rgba(0,126,255,.3)}
+  .bp-nav-btn{background:var(--bp-btn);border:1px solid var(--bp-line);color:var(--bp-dim);width:36px;height:36px;min-width:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit;flex-shrink:0;box-sizing:border-box}
+  .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.12);border-color:#007eff;color:#007eff}
   .bp-nav-btn:disabled{opacity:.25;cursor:not-allowed}
+  /* Segmented control, matching the form's Pil: inset track with a rounded thumb
+     rather than butted-together buttons, so the modals read as the same system. */
+  .bp-seg{display:flex;gap:3;padding:3px;border-radius:10px;border:1px solid var(--bp-line);
+    background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
+  .bp-seg-btn{padding:6px 14px;border:none;border-radius:7px;background:transparent;color:var(--bp-dim);
+    font-size:11.5px;font-weight:500;font-family:inherit;cursor:pointer;transition:all .18s cubic-bezier(.4,0,.2,1);
+    display:flex;align-items:center;justify-content:center;gap:5px}
+  .bp-seg-btn:hover:not(.on){color:#007eff}
+  .bp-seg-btn.on{background:#007eff;color:#fff;font-weight:600;box-shadow:0 1px 2px rgba(0,126,255,.35)}
+  /* View settings popover — guides, zoom and the loupe now live behind a gear so the
+     page-nav row has room for the page label instead of six competing controls. */
+  .bp-viewmenu{position:absolute;top:calc(100% + 6px);right:0;z-index:70;min-width:236px;padding:8px;
+    background:var(--bp-surface);border:1px solid var(--bp-line);border-radius:12px;
+    box-shadow:0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.18)}
+  .bp-viewmenu-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 8px;border-radius:8px}
+  .bp-viewmenu-row + .bp-viewmenu-row{border-top:1px solid var(--bp-line)}
+  .bp-viewmenu-label{font-size:12px;font-weight:600;color:var(--bp-ink)}
   /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
   .bp-checker{
     background-color:#3a3e46;
@@ -163,22 +199,148 @@ window.ppsAnalyzePdfRisks = async function (doc) {
     background-position:0 0,0 8px,8px -8px,-8px 0;
   }
   /* Approve Now CTA — strong call-to-action when art needs approval */
+  /* Approve artwork — the primary action in the proof modal.
+     It used to be a red five-stop gloss with a hard red pulse, welded to the two
+     proof-type buttons inside a red 2px frame. Three alarm signals stacked on the
+     one control we actually want pressed, and red reads as "something is wrong"
+     rather than "confirm". It is now the same flat brand CTA as Add to Order, with
+     one soft brand ring to keep the nudge, and it turns green once approved. */
   @keyframes bp-approve-pulse{
-    0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55),0 4px 14px rgba(239,68,68,.35)}
-    50%{box-shadow:0 0 0 6px rgba(239,68,68,0),0 4px 14px rgba(239,68,68,.35)}
+    0%,100%{box-shadow:0 0 0 0 rgba(0,126,255,.42),0 2px 10px rgba(0,126,255,.32)}
+    50%{box-shadow:0 0 0 7px rgba(0,126,255,0),0 2px 10px rgba(0,126,255,.32)}
   }
-  .bp-approve-cta{
-    background:linear-gradient(135deg,#ef4444 0%,#dc2626 40%,#f87171 50%,#dc2626 60%,#b91c1c 100%) !important;
-    color:#fff !important;
-    text-shadow:0 1px 2px rgba(0,0,0,.25);
-    animation:bp-approve-pulse 2s ease-in-out infinite;
+  /* A light sweep travels across the button on a loop. It is the one control in the
+     modal we want pressed, and flat blue read as just another button beside the proof
+     picker. The gradient is oversized and its position animated, so nothing paints
+     outside the button and there is no overlay element to sit above the label. */
+  @keyframes bp-approve-shimmer{
+    from{background-position:150% 0}
+    to{background-position:-50% 0}
   }
-  .bp-approve-cta:hover{filter:brightness(1.08)}
+  .bp-approve{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    padding:14px 23px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
+    font-size:15px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+    color:#fff;white-space:nowrap;
+    background:linear-gradient(105deg,#0062cc 0%,#007eff 34%,#8ccbff 50%,#007eff 66%,#0062cc 100%);
+    background-size:300% 100%;
+    animation:bp-approve-shimmer 2.9s linear infinite;
+    box-shadow:0 3px 14px rgba(0,126,255,.4);
+    transition:transform .15s ease,box-shadow .15s ease}
+  /* Nudge adds the expanding ring on top of the sweep; both run together. */
+  .bp-approve.nudge{animation:bp-approve-shimmer 2.9s linear infinite,
+    bp-approve-pulse 2.4s ease-in-out infinite}
+  /* Hover drops the ring but keeps the sweep — killing all animation on hover made the
+     button look dead exactly when someone was about to press it. */
+  .bp-approve:hover:not(:disabled){transform:translateY(-1px);
+    box-shadow:0 8px 22px rgba(0,126,255,.5);
+    animation:bp-approve-shimmer 1.5s linear infinite}
+  .bp-approve:active:not(:disabled){transform:translateY(0);box-shadow:0 2px 8px rgba(0,126,255,.4)}
+  /* Generating: a frozen gradient would strand a pale band mid-button, so go flat. */
+  .bp-approve:disabled{cursor:wait;animation:none;background:#0062cc;filter:saturate(.7)}
+  /* The global reduced-motion rule only shortens durations, which would freeze the
+     sweep at whatever position it stopped on. Give it a flat brand fill instead. */
+  @media (prefers-reduced-motion: reduce){
+    .bp-approve,.bp-approve.nudge,.bp-approve:hover:not(:disabled){
+      background:#007eff;background-size:auto;animation:none}
+  }
+  /* Done state: a status, not a button — flat green, no lift, no pointer. */
+  .bp-approved{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:9px;
+    background:#16a34a;color:#fff;font-size:13px;font-weight:700;letter-spacing:.01em;white-space:nowrap;
+    box-shadow:0 2px 10px rgba(22,163,74,.28)}
+  .bp-prooflabel{font-size:10px;font-weight:700;color:var(--bp-dim);letter-spacing:.08em;
+    text-transform:uppercase;flex-shrink:0}
+
+  /* Primary CTA — lifts on hover so it reads as the one thing to press. */
+  [data-pps-cta]:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06);box-shadow:0 7px 20px rgba(0,126,255,.48) !important}
+  [data-pps-cta]:active:not(:disabled){transform:translateY(0);box-shadow:0 3px 10px rgba(0,126,255,.4) !important}
+
+  /* ===== MODERN DRAFT — typography =====
+     Montserrat for display, Work Sans for UI and body, matching the site. The
+     fallbacks are the stack this page used previously, so a blocked or slow font
+     request degrades to the old look rather than to Times. */
+  :root{
+    --pps-display:'Montserrat','Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --pps-sans:'Work Sans','Segoe UI','Helvetica Neue',Arial,sans-serif;
+  }
+  body{font-family:var(--pps-sans)}
+
+  /* ===== MODERN DRAFT — motion ===== */
+  /* Select "pop" on choose. Two identical animations under different names so the
+     same element can re-trigger without being remounted — remounting a <select>
+     would drop focus and break keyboard use. */
+  @keyframes pps-pop-0{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
+  @keyframes pps-pop-1{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
+  /* Condensed desktop total sliding up as the price card leaves the viewport. */
+  @keyframes pps-mini-in{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
+  /* Editable job title in a section header: invisible at rest so the header reads as a
+     heading, a real field the moment it is hovered or focused. The placeholder has to
+     announce itself, since there is no label and no box to hint that it is editable. */
+  /* Job name reads as one of the header's summary pills — same chip shape, background
+     and hairline — so it belongs to the heading rather than looking like a form field
+     wedged into it. Hover/focus deepen it just enough to say it is editable. */
+  .pps-jobtitle{transition:background .15s ease, border-color .15s ease, box-shadow .15s ease}
+  .pps-jobtitle::placeholder{color:#94a3b8;font-weight:600;opacity:1}
+  .pps-jobtitle:hover:not(:focus){border-color:#cbd5e1 !important}
+  .pps-jobtitle:focus{background:#fff}
+  :root[data-pps-theme="dark"] .pps-jobtitle::placeholder{color:#7183a0}
+  :root[data-pps-theme="dark"] .pps-jobtitle:hover:not(:focus){border-color:#3b4757 !important}
+  :root[data-pps-theme="dark"] .pps-jobtitle:focus{background:#0f151d}
+  /* Anyone who has asked their OS to reduce motion gets none of it. */
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;transition-delay:0s !important;animation-delay:0s !important}
+  }
+
+  /* ===== MODERN DRAFT — interaction states & page field ===== */
+  body{background:#f6f7f9}
+  /* ── Dark mode. Most surfaces repaint via the CC/ST swap; these are the ones
+        inline styles can't reach: the page field, native select popups, and the
+        handful of hardcoded #fafafa chrome bars (React emits them as rgb()). ── */
+  html[data-pps-theme="dark"] body{background:#0d1117;color:#e6edf6}
+  html[data-pps-theme="dark"] option{background:#161b22;color:#e6edf6}
+  html[data-pps-theme="dark"] input::placeholder,html[data-pps-theme="dark"] textarea::placeholder{color:#5b6b83}
+  html[data-pps-theme="dark"] [style*="rgb(250, 250, 250)"]{background:#1a212b !important}
+  /* Status tints (error / warning / success banners) are pale by construction and
+     stay bright on a dark page. Their ink lives on child spans with its own inline
+     colour, so each family remaps the container AND its descendants. Matching on the
+     rgb() React emits catches every site, including ones not enumerated by hand. */
+  html[data-pps-theme="dark"] [style*="rgb(254, 242, 242)"],
+  html[data-pps-theme="dark"] [style*="rgb(254, 226, 226)"]{background:#2a1416 !important;border-color:#5b2b2f !important}
+  /* ...but NOT the controls inside them. A tinted box that wraps buttons (the Proof /
+     Preview pair sits in the red "approval required" box) is a container, not a banner:
+     its buttons carry their own surface and their own ink, and repainting them made the
+     labels read as error text. Form controls opt out of the descendant repaint. */
+  html[data-pps-theme="dark"] [style*="rgb(254, 242, 242)"] *:not(button):not(select):not(input):not(textarea),
+  html[data-pps-theme="dark"] [style*="rgb(254, 226, 226)"] *:not(button):not(select):not(input):not(textarea){color:#fca5a5 !important}
+  html[data-pps-theme="dark"] [style*="rgb(254, 243, 199)"],
+  html[data-pps-theme="dark"] [style*="rgb(255, 251, 235)"]{background:#2a2210 !important;border-color:#5a4a1e !important}
+  html[data-pps-theme="dark"] [style*="rgb(254, 243, 199)"] *:not(button):not(select):not(input):not(textarea),
+  html[data-pps-theme="dark"] [style*="rgb(255, 251, 235)"] *:not(button):not(select):not(input):not(textarea){color:#fcd34d !important}
+  html[data-pps-theme="dark"] [style*="rgb(232, 245, 227)"],
+  html[data-pps-theme="dark"] [style*="rgb(240, 253, 244)"]{background:#10231a !important;border-color:#245c3a !important}
+  html[data-pps-theme="dark"] [style*="rgb(232, 245, 227)"] *:not(button):not(select):not(input):not(textarea),
+  html[data-pps-theme="dark"] [style*="rgb(240, 253, 244)"] *:not(button):not(select):not(input):not(textarea){color:#6ee7b7 !important}
+  html[data-pps-theme="dark"] input:hover:not(:focus),html[data-pps-theme="dark"] select:hover:not(:focus){border-color:#3b4757 !important}
+  html[data-pps-theme="dark"] ::-webkit-scrollbar-thumb{background:#2a3340;background-clip:content-box}
+  html[data-pps-theme="dark"] ::-webkit-scrollbar-thumb:hover{background:#3b4757;background-clip:content-box}
+  html[data-pps-theme="dark"] input,html[data-pps-theme="dark"] select,html[data-pps-theme="dark"] textarea{color-scheme:dark}
+  input:hover:not(:focus), select:hover:not(:focus){border-color:#cbd5e1 !important}
+  input:focus, select:focus, textarea:focus{
+    border-color:#007eff !important;
+    box-shadow:0 0 0 3px rgba(0,126,255,.14) !important;
+  }
+  button{transition:filter .15s ease, transform .06s ease}
+  button:active{transform:translateY(.5px)}
+  button:focus-visible{outline:2px solid rgba(0,126,255,.55);outline-offset:2px}
+  /* headings: tighter optical tracking at large sizes */
+  h1,h2{letter-spacing:-.02em}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px;border:3px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#94a3b8;background-clip:content-box;border:3px solid transparent}
 </style>
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · PAPERS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · MODERN</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -1153,7 +1315,7 @@ function calculate(c) {
   const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
   const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
   return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,q100,coatOK,vividOK:c.insidePaper.coatable,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
-    shipping:{estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,needByPast,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
+    shipping:{hasDest:_hasDest,estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,needByPast,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1174,17 +1336,25 @@ const CK = {
 
 const PPS_LOGO = "data:image/png;base64,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";
 
+// Theme palettes. CC's keys are semantic, not literal: `white` is the card surface
+// and `dark` is the ink, so both invert cleanly. Swapping happens by mutating CC in
+// place (pps_applyTheme) — components read CC/ST at render time, so a re-render picks
+// the new values up without threading a theme prop through every component.
+const PALETTES = {
+  light: { dark:"#0f172a", mid:"#475569", light:"#94a3b8", bg:"#f6f7f9", white:"#fff",
+           border:"#e3e8ef", red:"#dc2626", track:"#f1f4f8", errBg:"#fef2f2", errBorder:"#fecaca",
+           heroBg:"#0f172a", rowHi:"#f0f9ff", tint:"#eff6ff", tintBorder:"#cfe6ff" },
+  dark:  { dark:"#e6edf6", mid:"#9fb0c6", light:"#7183a0", bg:"#0d1117", white:"#161b22",
+           border:"#2a3340", red:"#f87171", track:"#0f151d", errBg:"#2a1416", errBorder:"#5b2b2f",
+           // Stays a dark surface in both themes, lifted here so it still reads as a
+           // distinct card against the near-black page rather than blending into it.
+           heroBg:"#1e2a38", rowHi:"#17263a", tint:"#12243a", tintBorder:"#24405e" },
+};
 const CC = {
   primary: CK.cyan,
   accent: CK.magenta,
   warm: CK.yellow,
-  dark: CK.key,
-  mid: "#555",
-  light: "#999",
-  bg: "#f4f4f4",
-  white: "#fff",
-  border: "#d8d8d8",
-  red: "#c25050",
+  ...PALETTES.light,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1193,9 +1363,10 @@ const CC = {
 
 const Chev=()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>;
 
-function Sel({label,value,onChange,children,disabled,note,badge,autoComplete,name}){
+function Sel({label,value,onChange,children,disabled,note,badge,wrapStyle,name,autoComplete,selectId}){
   const m=useIsMobile();
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} autoComplete={autoComplete} name={name} style={{...ST.sel,fontSize:m?16:15,padding:m?"10px 32px 10px 12px":"10px 32px 10px 12px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
+  const[pop,setPop]=useState(0);
+  return <div style={{...ST.f,...wrapStyle}}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={{position:"relative",animation:pop?`pps-pop-${pop%2} .28s ease`:undefined}}><select id={selectId} name={name} autoComplete={autoComplete} value={value} onChange={e=>{setPop(n=>n+1);onChange(e.target.value);}} style={{...ST.sel,fontSize:m?16:15,padding:m?"20px 32px 20px 13px":"20px 34px 20px 14px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
 }
 
 // confirm=true is for fields whose value drives expensive downstream work (page
@@ -1254,7 +1425,7 @@ function TxtNum({label,value,onChange,min=1,max=99999,confirm=false,unit="",adju
 
 function Pil({label,options,value,onChange,disabled,badge}){
   const m=useIsMobile();
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={ST.pills}>{options.map(o=><button type="button" aria-pressed={value===o.v} key={String(o.v)} onClick={()=>!disabled&&onChange(o.v)} style={{...ST.pill,padding:m?"11px 10px":"9px 10px",...(value===o.v?(o.onStyle||ST.pillOn):{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>)}</div></div>;
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={ST.pills}>{options.map(o=><button type="button" aria-pressed={value===o.v} key={String(o.v)} onClick={()=>!disabled&&onChange(o.v)} style={{...ST.pill,padding:m?"18px 10px":"17px 10px",...(value===o.v?(o.onStyle||ST.pillOn):{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>)}</div></div>;
 }
 
 function TurnBadge({days}){
@@ -1264,9 +1435,51 @@ function TurnBadge({days}){
   return <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,fontWeight:600,color:CK.magenta,background:CK.magentaLight,padding:"1px 6px",borderRadius:8,marginLeft:6,whiteSpace:"nowrap",verticalAlign:"middle"}}>⏱ {label}</span>;
 }
 
-function Sec({title,open,onToggle,children,badge}){
+// Pill-chip style shared by Sec summary chips and the job-name header field. `let`
+// because the theme swap rebuilds it in place.
+function buildCHIP(){ return {fontSize:11,fontWeight:600,color:CC.mid,background:CC.track,border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99,whiteSpace:"nowrap",maxWidth:170,overflow:"hidden",textOverflow:"ellipsis",display:"inline-block",lineHeight:1.3}; }
+let CHIP = buildCHIP();
+
+function Sec({title,open,onToggle,children,badge,subtitle,step,summary,headerField,keepMounted}){
   const m=useIsMobile();
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}><span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  // Summaries arrive as a list of characteristics. Cap how many render so a section
+  // with several add-ons can not push the header taller or crowd out the title; the
+  // remainder collapses into a "+N" chip.
+  const _items=(Array.isArray(summary)?summary:summary?[summary]:[]).filter(Boolean);
+  const _cap=m?1:3;
+  // Overflowing the cap costs one slot to the "+N" chip — but never the last one, or
+  // a capped-at-1 mobile header would show "+3" and nothing else.
+  const _shown=_items.length>_cap?_items.slice(0,Math.max(1,_cap-1)):_items;
+  const _extra=_items.length-_shown.length;
+  const _chip=m?{...CHIP,maxWidth:118}:CHIP;
+  // A header field (e.g. Job Name) only makes sense while the section is open — when
+  // it is closed its value is already showing as a summary chip, and an input crammed
+  // between the title and the chips would crowd both. The header is therefore two
+  // toggle buttons flanking the field rather than one button wrapping it: an <input>
+  // nested inside a <button> is invalid and swallows its own clicks.
+  const _hf=headerField&&open;
+  const _pad=m?12:14, _padX=m?14:18;
+  return <div style={ST.card}>
+    <div style={{...ST.cardH,padding:0,cursor:"default",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}>
+      {/* With a header field present the title shrinks to its own width so the field can
+          take the slack and sit right beside it, reading as a continuation of the
+          heading. Fixed-width fields overflowed narrow phones. */}
+      <button type="button" onClick={onToggle} aria-expanded={open} style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:_hf?"0 0 auto":1,minWidth:0,textAlign:"left",padding:`${_pad}px 0 ${_pad}px ${_padX}px`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
+        {step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}
+        <div style={{flex:_hf?"0 0 auto":1,minWidth:0}}><div style={{fontFamily:"var(--pps-display)",fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div>
+      </button>
+      {_hf&&<div style={{flex:"1 1 auto",minWidth:40,padding:m?"0 4px 0 8px":"0 8px 0 10px",marginTop:subtitle?1:0}}>{headerField}</div>}
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-label={open?"Collapse section":"Expand section"} style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,minWidth:0,marginTop:subtitle?2:0,padding:`${_pad}px ${_padX}px ${_pad}px 0`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
+        {!open&&_shown.length>0&&_shown.map((t,i)=><span key={i} style={_chip}>{t}</span>)}{!open&&_extra>0&&<span style={{..._chip,color:CC.light}}>+{_extra}</span>}{badge&&!(m&&_hf)&&<span style={_chip}>{badge}</span>}
+        <span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span>
+      </button>
+    </div>
+    {/* Collapsing normally unmounts the body, which is fine for sections whose values
+        all live in App state. A section that owns state internally — the artwork
+        uploader holds the extracted pages, the original File and the proof approval —
+        must be hidden instead, or closing it silently throws the upload away. */}
+    {(open||keepMounted)&&<div hidden={!open} style={{display:open?"block":"none",padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}
+  </div>;
 }
 
 const DNAMES=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -1430,27 +1643,40 @@ function DatePicker({value, onChange, earliestDate, freeDate}) {
   );
 }
 
-function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
+// Portal helper: fixed overlays render to <body>. Rendered in place they live inside
+// whatever the WordPress theme wraps the calculator in, and a single ancestor with a
+// transform, filter, or scroll-animation will-change traps them in THAT element's
+// stacking context — after which later page sections paint straight over them no
+// matter how high their z-index is. Portalling takes the ancestor out of the question.
+// z-index stays under the 9999 modal band so proof/preview still cover these.
+const Float = ({ children }) => ReactDOM.createPortal(children, document.body);
+
+function Panel({result,compact,debugUnlocked,expanded,onToggleExpand,coupon,totalRef}){
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your booklet to see pricing</p></div>;
   if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
   const{total,baseTotal,perUnit,days,tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
   const hasRush=sh&&sh.rushCost>0;
-  const availRange=sh?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):String(days);
+  // Before a destination is entered the free-ground date is a guess on a guess —
+  // 2× production buffer plus a placeholder transit — and it read a week later than
+  // the job actually needs. Until the address is known, quote production + 1 transit
+  // day (which is also what AZ ground is), then switch to the real committed date.
+  const _dest=!sh||sh.hasDest;
+  const availRange=sh?(_dest?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):`${sh.earliestBizDays}`):String(days);
   // A date the customer picked is an instruction, not an estimate, so it wins the
-  // availability display. This used to be conditional and got it wrong two ways: the
-  // modern draft fell back to the earliest-possible placeholder whenever no address
-  // had been entered yet, and the rest honoured a picked date only when it triggered
-  // a rush charge. Either way somebody who chose Aug 14 was told "as soon as Aug 7".
-  // sh.needByFmt is non-null exactly when a picked date is valid and not too soon, so
-  // it is the whole condition.
-  // Compared against the free date, not merely checked for existence: four of these
-  // calculators pre-fill the date field with the free delivery date as a convenience,
-  // so "a date is set" is the default state and would make every quote read as a
-  // promise. A date that DIFFERS from the free one is the customer actually asking
+  // availability display. sh.needByFmt is non-null exactly when a picked date is valid
+  // and not too soon. Compared against the free date, not merely checked for
+  // existence: a date that DIFFERS from the free one is the customer actually asking
   // for something.
   const requestedDate = sh && sh.needByFmt && sh.needByFmt !== sh.freeDeliveryDate
     ? sh.needByFmt : null;
-  const deliveryDate = sh?(requestedDate || (sh.hasDest?((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate):null)) : null;
+  const deliveryDate = sh?(requestedDate || (!_dest?sh.earliestDate:((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate))) : null;
+  // A discount code reduces what the customer pays but never the quoted line price —
+  // WooCommerce applies it at cart level. So show it as a deduction FROM the total
+  // rather than by rewriting the total, which is also how the order will read.
+  const _cpn=coupon&&coupon.discount>0?coupon:null;
+  const _cpnAmt=_cpn?Math.min(_cpn.discount,total):0;
+  const _afterCpn=Math.max(0,Math.round((total-_cpnAmt)*100)/100);
+  const _cpnUnit=(_cpn&&tQ>0)?Math.max(0,_afterCpn/tQ):null;
   const ti=result.ti||{};
   const _factors=[];
   if(ti.coverPaper>0)_factors.push("paper lead time");
@@ -1470,39 +1696,53 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
     const [dC,cC]=moneyC.split(".");
     return(
       <div>
-        <div onClick={onToggleExpand} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:hasRush?CK.rush:CK.cyan,borderRadius:expanded?"6px 6px 0 0":6,padding:"8px 14px",color:hasRush?"#333":"#fff",cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
-          <div>
-            <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
-              {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
-              <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
-              <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
+        {/* Collapsed, this strip shares a row with the Add to Order button — price and
+            the disclosure sit on one line; the delivery date gets the strip's full
+            width on a second. $/ea + Qty move into the expanded sheet. */}
+        <div onClick={onToggleExpand} style={{background:hasRush?CK.rush:CK.cyan,borderRadius:expanded?"6px 6px 0 0":6,padding:"8px 14px",color:hasRush?"#333":"#fff",cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+            <div style={{minWidth:0}}>
+              <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
+                {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
+                <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
+                <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
+              </div>
+              {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
             </div>
-            {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
+            <div style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+              <span style={{fontSize:9.5,fontWeight:700,letterSpacing:".5px",textTransform:"uppercase",opacity:.75}}>{expanded?"Hide":"Details"}</span>
+              <span style={{fontSize:10,opacity:.6,transition:"transform .2s",display:"inline-block",transform:expanded?"rotate(180deg)":"none"}}>▼</span>
+            </div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:12}}>
-            {[["$/ea",Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()],[(requestedDate||hasRush)?"Delivery":"Avail.",deliveryDate||availRange+" days"]].map(([l,v],i)=>(
-              <div key={i} style={{textAlign:"center"}}>
-                <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",opacity:.7}}>{l}</div>
-                <div style={{fontSize:13,fontWeight:700}}>{v}</div>
+          <div style={{fontSize:10.5,fontWeight:600,opacity:.9,marginTop:3,letterSpacing:".2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            {requestedDate ? "Delivery by" : "As soon as"} {deliveryDate||availRange+" days"}
+          </div>
+          {_cpn&&<div style={{fontSize:10.5,fontWeight:700,marginTop:2,letterSpacing:".2px",whiteSpace:"nowrap"}}>
+            {_cpn.code} −${_cpnAmt.toFixed(2)} · you pay ${_afterCpn.toFixed(2)}
+          </div>}
+        </div>
+        {expanded&&<div style={{background:CC.white,borderRadius:"0 0 6px 6px",border:`1px solid ${CC.border}`,borderTop:"none",maxHeight:"40vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+          {/* Same stat row desktop shows under its price card, at full width. */}
+          <div style={{display:"flex",borderBottom:`1px solid ${CC.border}`}}>
+            {[["$/ea","$"+Math.max(0,perUnit).toFixed(2),_cpnUnit!=null?"$"+_cpnUnit.toFixed(2):null],["Qty",tQ.toLocaleString(),null],[requestedDate ? "Delivery by" : "As soon as",deliveryDate||availRange+" days",null]].map(([l,v,net],i)=>(
+              <div key={i} style={{flex:1,padding:"9px 6px",textAlign:"center",borderLeft:i?`1px solid ${CC.border}`:"none",background:(i===2&&_hasExtra)?"#fffbeb":"transparent"}}>
+                <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:(i===2&&_hasExtra)?"#92400e":CC.light}}>{l}</div>
+                {net
+                  ? <><div style={{fontSize:9.5,fontWeight:600,color:CC.light,textDecoration:"line-through",lineHeight:1.1,marginTop:1}}>{v}</div>
+                      <div style={{fontSize:12.5,fontWeight:700,color:CK.cyan,lineHeight:1.15}}>{net}</div></>
+                  : <div style={{fontSize:12.5,fontWeight:700,color:(i===2&&_hasExtra)?"#b45309":CC.dark,marginTop:1}}>{v}</div>}
               </div>
             ))}
-            <div style={{fontSize:10,opacity:.5,marginLeft:2,transition:"transform .2s",transform:expanded?"rotate(180deg)":"none"}}>▼</div>
           </div>
-        </div>
-        {expanded&&<div style={{background:"#fff",borderRadius:"0 0 6px 6px",border:`1px solid ${CC.border}`,borderTop:"none",maxHeight:"40vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
           {_hasExtra&&<div style={{padding:"5px 14px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
             <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>+{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
           </div>}
-          {sh&&sh.freeDeliveryDate&&<div style={{padding:"6px 14px",borderBottom:`1px solid ${CC.border}`,background:"#fafafa"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontSize:10.5,color:CC.light}}>Free delivery by</span>
-              <span style={{fontSize:11,fontWeight:600,color:CC.mid}}>{sh.freeDeliveryDate}</span>
-            </div>
-          </div>}
-          <div style={{padding:"6px 12px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2.5px 0"}}>
+          {/* Cost breakdown is internal. Desktop keeps it behind the %3414 unlock;
+              mobile rendered it to every customer, which exposed per-line costs. */}
+          {debugUnlocked&&<div style={{padding:"6px 12px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2.5px 0"}}>
             <span style={{fontSize:11,color:CC.light}}>{r.l}</span>
             <span style={{fontSize:11,fontWeight:600,color:r.v<0?CK.cyan:CC.mid}}>{r.v<0?"−":""}${Math.abs(r.v).toFixed(2)}</span>
-          </div>))}</div>
+          </div>))}</div>}
         </div>}
       </div>
     );
@@ -1510,45 +1750,57 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand}){
 
   const moneyD=Math.max(0,total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
   const [dD,cD]=moneyD.split(".");
+  const eyeCol=hasRush?"rgba(51,51,51,.8)":"rgba(255,255,255,.85)";
   return(
     <div style={{...ST.pnl, pointerEvents: "none"}}>
-      <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:`linear-gradient(135deg, ${CK.cyan} 0%, ${CK.cyan}dd 100%)`,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
-        <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",opacity:.8,marginBottom:4}}>{hasRush?"Rush Total":"Estimated Total"}</div>
+      {/* Sentinel for the condensed-total bar. Anchored at the TOP of the card so it
+          leaves the viewport when the total does. */}
+      <div ref={totalRef} style={{height:1,marginBottom:-1}} aria-hidden="true"/>
+      {/* Ink price card, not brand cyan: cyan is reserved for the CTA and active
+          states so the Add to Order button stays the loudest thing in the rail.
+          Rush keeps its own colour — that's a state signal, not decoration. */}
+      <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:CC.heroBg,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
+        <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol,marginBottom:6}}>{hasRush?"Rush Total":"Estimated Total"}</div>
         <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
           {saleActive&&<span style={{fontSize:18,opacity:.55,textDecoration:"line-through",fontWeight:700,letterSpacing:"-.5px"}}>${totalWithoutSale.toFixed(2)}</span>}
           <span style={{fontSize:38,fontWeight:800,letterSpacing:"-1.5px"}}>${dD}</span>
           <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
           {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
         </div>
+        {_cpn&&(
+          <div style={{marginTop:10,paddingTop:9,borderTop:`1px solid ${hasRush?"rgba(0,0,0,.15)":"rgba(255,255,255,.18)"}`}}>
+            <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,fontSize:12.5,fontWeight:700}}>
+              <span style={{textTransform:"uppercase",letterSpacing:".5px",opacity:.85}}>{_cpn.code} · {_cpn.label}</span>
+              <span>−${_cpnAmt.toFixed(2)}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,marginTop:6}}>
+              <span style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",opacity:.8}}>You pay</span>
+              <span style={{fontSize:24,fontWeight:800,letterSpacing:"-.7px"}}>${_afterCpn.toFixed(2)}</span>
+            </div>
+            <div style={{fontSize:10,opacity:.62,marginTop:3,lineHeight:1.35}}>Applied at checkout{_cpn.free_shipping?" · includes free shipping":""}</div>
+          </div>
+        )}
         {hasRush&&<div style={{fontSize:13.5,fontWeight:800,marginTop:6,letterSpacing:".2px"}}>Delivery by {sh.needByFmt}</div>}
         {hasRush&&debugUnlocked&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
       </div>
       <div style={{display:"flex",borderBottom:`1px solid ${CC.border}`}}>
-        {[["Per Unit","$"+Math.max(0,perUnit).toFixed(2)],["Qty",tQ.toLocaleString()]].map(([l,v],i)=>(
+        {[["Per Unit","$"+Math.max(0,perUnit).toFixed(2),_cpnUnit!=null?"$"+_cpnUnit.toFixed(2):null],["Qty",tQ.toLocaleString(),null]].map(([l,v,net],i)=>(
           <div key={i} style={{flex:1,padding:"11px 8px",textAlign:"center",borderRight:`1px solid ${CC.border}`}}>
             <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:CC.light,marginBottom:1}}>{l}</div>
-            <div style={{fontSize:14.5,fontWeight:700,color:CC.dark}}>{v}</div>
+            {net
+              ? <><div style={{fontSize:10.5,fontWeight:600,color:CC.light,textDecoration:"line-through",lineHeight:1.1}}>{v}</div>
+                  <div style={{fontSize:14.5,fontWeight:700,color:CK.cyan,lineHeight:1.15}}>{net}</div></>
+              : <div style={{fontSize:14.5,fontWeight:700,color:CC.dark}}>{v}</div>}
           </div>
         ))}
         <div style={{flex:1,padding:"11px 8px",textAlign:"center",background:_hasExtra?"#fffbeb":"transparent",transition:"background .3s"}}>
-          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>{(requestedDate||hasRush)?"Delivery by":"Availability"}</div>
+          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>{requestedDate ? "Delivery by" : "As soon as"}</div>
           <div style={{fontSize:13.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{deliveryDate||availRange+" days"}</div>
+
         </div>
       </div>
       {_hasExtra&&<div style={{padding:"5px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
         <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>* +{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
-      </div>}
-      {sh&&<div style={{padding:"8px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fafafa",pointerEvents:"none"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:11,color:CC.light}}>Free delivery by</span>
-          <span style={{fontSize:11.5,fontWeight:600,color:CC.mid}}>{sh.freeDeliveryDate}</span>
-        </div>
-      </div>}
-      {hasRush&&debugUnlocked&&<div style={{padding:"14px 18px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0"}}>
-          <div style={{display:"flex",alignItems:"center",gap:7}}><span style={{width:7,height:7,borderRadius:"50%",background:CK.rush}}/><span style={{fontSize:13,color:CC.mid}}>Rush Surcharge</span></div>
-          <span style={{fontSize:13,fontWeight:600,color:CK.rush}}>+${sh.rushCost.toFixed(2)}</span>
-        </div>
       </div>}
       {debugUnlocked&&<details style={{borderTop:`1px solid ${CC.border}`,pointerEvents:"auto"}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
         <div style={{padding:"0 18px 14px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
@@ -2107,9 +2359,9 @@ function RichTip({ children, tipKey, title, content, dark, media }) {
         {children}
         <button type="button" aria-label="More information" aria-expanded={open} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }} style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: "inherit", background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : CK.cyan, flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</button>
       </span>
-      {open && <>
+      {open && <Float>
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 99999 }} />
-        <div style={{ position: "fixed", ...(mob ? { bottom: 0, left: 0, right: 0, borderRadius: "16px 16px 0 0", maxHeight: "80vh" } : { top: "50%", left: "50%", transform: "translate(-50%, -50%)", borderRadius: 12, maxHeight: "80vh", width: "min(420px, 90vw)" }), background: dark ? "#1a1d23" : "#fff", border: `1px solid ${dark ? "rgba(255,255,255,.1)" : "#ddd"}`, boxShadow: "0 16px 48px rgba(0,0,0,.25)", zIndex: 100000, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+        <div style={{ position: "fixed", ...(mob ? { bottom: "var(--pps-bottombar, 0px)", left: 0, right: 0, borderRadius: "16px 16px 0 0", maxHeight: "calc(80vh - var(--pps-bottombar, 0px))" } : { top: "50%", left: "50%", transform: "translate(-50%, -50%)", borderRadius: 12, maxHeight: "80vh", width: "min(420px, 90vw)" }), background: dark ? "#1a1d23" : "#fff", border: `1px solid ${dark ? "rgba(255,255,255,.1)" : "#ddd"}`, boxShadow: "0 16px 48px rgba(0,0,0,.25)", zIndex: 100000, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
           <div style={{ padding: "14px 18px 10px", borderBottom: `1px solid ${dark ? "rgba(255,255,255,.08)" : "#eee"}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: dark ? "#1a1d23" : "#fff", zIndex: 1 }}>
             <span style={{ fontWeight: 700, fontSize: 14, color: dark ? "#fff" : CC.dark }}>{editing ? "Edit Tooltip" : (resolvedTitle || "Info")}</span>
             <span style={{ display:"flex", gap:8, alignItems:"center" }}>
@@ -2138,7 +2390,7 @@ function RichTip({ children, tipKey, title, content, dark, media }) {
             })}
           </div>
         </div>
-      </>}
+      </Float>}
     </span>
   );
 }
@@ -3715,26 +3967,26 @@ update();
   // Fit toggle (light theme for inline)
   const FitToggle = ({ dark }) => (
     <div style={{ display: "flex", alignItems:"center", gap: 6 }}>
-      <span style={{ fontSize:10, fontWeight:700, color:"rgba(255,255,255,.55)", letterSpacing:".08em", textTransform:"uppercase", marginRight:2 }}>Art:</span>
-      <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
+      <span style={{ fontSize:10, fontWeight:700, color:"var(--bp-dim)", letterSpacing:".08em", textTransform:"uppercase", marginRight:2 }}>Art:</span>
+      <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
         {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Force Fill" }, { v: "scale", l: "Scale" }].map(o => (
           <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} title={o.v === "stretch" ? "Stretch art to fill the entire bleed area — distorts aspect ratio" : undefined} style={{
             padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-            background: fitMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
-            color: fitMode === o.v ? "#000" : "rgba(255,255,255,.5)",
+            background: fitMode === o.v ? CK.cyan : "var(--bp-btn)",
+            color: fitMode === o.v ? "#000" : "var(--bp-faint)",
           }}>{o.l}</button>
         ))}
         <button type="button" onClick={() => setRotateSteps(s => (s + 1) % 4)} style={{
-          padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor:"pointer", fontFamily:"inherit",
-          background: rotateSteps > 0 ? CK.cyan : "rgba(255,255,255,.06)",
-          color: rotateSteps > 0 ? "#000" : "rgba(255,255,255,.5)",
+          padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)", cursor:"pointer", fontFamily:"inherit",
+          background: rotateSteps > 0 ? CK.cyan : "var(--bp-btn)",
+          color: rotateSteps > 0 ? "#000" : "var(--bp-faint)",
         }}>Rotate 90°{rotateSteps > 0 ? ` (${rotateSteps * 90}°)` : ""}</button>
         {(displayPages?.length || 0) > 1 && (
           <select value="" onChange={e => { const v = e.target.value; if (v) rotateAll(v); e.target.value = ""; }}
             title="Rotate every page at once. Heads → Spine rotates facing pages in opposite directions so each head points into the binding."
             style={{
-              padding:"6px 10px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)",
-              cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.6)",
+              padding:"6px 10px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)",
+              cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-dim)",
             }}>
             <option value="" disabled>Rotate all…</option>
             <option value="uniform">↻ Uniform 90°</option>
@@ -3743,24 +3995,24 @@ update();
           </select>
         )}
         <button type="button" onClick={undoTx} disabled={txHistory.length === 0} title={txHistory.length ? `Undo last art change (${txHistory.length} step${txHistory.length === 1 ? "" : "s"} available)` : "No changes to undo"} style={{
-          padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid rgba(255,255,255,.08)", cursor: txHistory.length ? "pointer" : "default", fontFamily:"inherit",
-          background:"rgba(255,255,255,.06)",
-          color: txHistory.length ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.2)",
+          padding:"6px 12px", fontSize:11, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)", cursor: txHistory.length ? "pointer" : "default", fontFamily:"inherit",
+          background:"var(--bp-btn)",
+          color: txHistory.length ? "var(--bp-dim)" : "rgba(255,255,255,.2)",
         }}>↶ Undo</button>
       </div>
       {fitMode === "scale" && (
         <div style={{ display:"flex", alignItems:"center", gap:3 }}>
-          <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
+          <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
             <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 1))} style={{
               padding:"6px 10px", fontSize:12, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.5)",
+              background:"var(--bp-btn)", color:"var(--bp-faint)",
             }}>−</button>
             <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 1))} style={{
               padding:"6px 10px", fontSize:12, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-              background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.5)",
+              background:"var(--bp-btn)", color:"var(--bp-faint)",
             }}>+</button>
           </div>
-          <span style={{ fontSize:10, fontWeight:600, color:"rgba(255,255,255,.4)", minWidth:32, textAlign:"center" }}>{artScale}%</span>
+          <span style={{ fontSize:10, fontWeight:600, color:"var(--bp-faint)", minWidth:32, textAlign:"center" }}>{artScale}%</span>
         </div>
       )}
     </div>
@@ -3978,26 +4230,36 @@ update();
       {/* ════════════════════════════════════════════════════════════
            PROOF MODAL — flat page proof with guides, controls, approve
          ════════════════════════════════════════════════════════════ */}
-      {activeModal === "proof" && hasFile && displayPages.length > 0 && (
+      {activeModal === "proof" && hasFile && displayPages.length > 0 && (<Float>
         <div className="bp-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) setActiveModal(null); }}>
           <div className="bp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
               <div style={{ flex:1, minWidth:180, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <div>
-                  <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>Artwork Proof</div>
-                  <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
+                  <div className="bp-modal-title" style={{ fontSize:15 }}>Artwork Proof</div>
+                  <div style={{ fontSize:11, color:"var(--bp-faint)" }}>
                     {dims.w}″ × {dims.h}″ · {displayPages.length} pages
                     {shouldRotate && <span style={{ color:"#60a5fa", marginLeft:6 }}>(auto-rotated)</span>}
                     {window.ppsPdfRisks().length > 0 && <div style={{ color:"#fbbf24", fontWeight:600, marginTop:3, maxWidth:520 }}>⚠ Uses {window.ppsPdfRisks().join(", ")} — effects a browser preview can render imperfectly. If anything differs from the file you exported, contact us before approving.</div>}
                   </div>
                 </div>
-                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.5)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
+                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid var(--bp-line)", color:"var(--bp-faint)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
               </div>
               {/* Proof approval + fit controls row */}
-              <div style={{ width:"100%", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
+              <div style={{ width:"100%", borderTop:"1px solid var(--bp-line)", paddingTop:10 }}>
                 <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", justifyContent:"space-between" }}>
-                  <div style={{ display:"flex", borderRadius:6, border: artApproved && proof===0 ? "2px solid #22c55e" : "2px solid #ef4444", boxShadow: artApproved && proof===0 ? "0 2px 10px rgba(34,197,94,.3)" : "0 2px 10px rgba(239,68,68,.2)" }}>
-                    <button type="button" disabled={generatingPdf} onClick={async () => {
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                    {/* Proof type is a CHOICE; approving is an ACTION — the choice lives in a
+                        segmented control, the CTA stands alone as the same brand button as
+                        Add to Order (red read as "something is wrong", not "confirm"). */}
+                    <span className="bp-prooflabel">Proof type</span>
+                    <div className="bp-seg">
+                      <button type="button" className={"bp-seg-btn"+(proof===0?" on":"")} onClick={() => setProof(0)}>Approve Online</button>
+                      <button type="button" className={"bp-seg-btn"+(proof===0.01?" on":"")} onClick={() => setProof(0.01)}>Professional</button>
+                      <button type="button" className={"bp-seg-btn"+(proof>=3?" on":"")} onClick={() => setProof(3.01)}>Hardcopy</button>
+                    </div>
+                    {proof===0 && artApproved && !generatingPdf && <span className="bp-approved">✓ Approved</span>}
+                    {proof===0 && (!artApproved || generatingPdf) && <button type="button" disabled={generatingPdf} onClick={async () => {
                       if (proof===0 && !artApproved) {
                         setGeneratingPdf(true);
                         setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
@@ -4029,44 +4291,25 @@ update();
                           setGenProgress(null);
                         }
                       } else if (proof!==0) { setProof(0); }
-                    }} className={proof===0 && !artApproved && !generatingPdf ? "bp-approve-cta" : ""} style={{
-                      padding: proof===0 && !artApproved ? "10px 24px" : "8px 18px",
-                      fontSize: proof===0 && !artApproved ? 13 : 12,
-                      fontWeight:800, border:"none", borderRadius:"4px 0 0 4px", cursor: artApproved && proof===0 ? "default" : "pointer", fontFamily:"inherit", letterSpacing:".04em", textTransform:"uppercase",
-                      background: artApproved && proof===0
-                        ? "linear-gradient(135deg, #22c55e 0%, #16a34a 40%, #4ade80 50%, #16a34a 60%, #15803d 100%)"
-                        : proof===0 ? undefined : "rgba(255,255,255,.04)",
-                      color: artApproved && proof===0 ? "#fff" : proof===0 ? undefined : "rgba(255,255,255,.3)",
-                      borderRight:"1px solid rgba(255,255,255,.08)",
-                    }}>{generatingPdf && genProgress ? (
+                    }} className="bp-approve nudge" style={{ padding:"11px 20px", fontSize:13 }}>{generatingPdf && genProgress ? (
                       <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", gap:2 }}>
                         <span>{genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… {genProgress.page}/{genProgress.totalPages}</span>
                         <span style={{ display:"block", width:80, height:4, background:"rgba(255,255,255,.15)", borderRadius:2, overflow:"hidden" }}>
-                          <span style={{ display:"block", height:"100%", borderRadius:2, background: proof===0 ? "#ef4444" : "#3b82f6", transition:"width .15s", width: `${Math.round((genProgress.page / genProgress.totalPages) * 100)}%` }} />
+                          <span style={{ display:"block", height:"100%", borderRadius:2, background:"#fff", transition:"width .15s", width: `${Math.round((genProgress.page / genProgress.totalPages) * 100)}%` }} />
                         </span>
                       </span>
-                    ) : artApproved && proof===0 ? "✓ Approved" : "Approve Now"}</button>
-                    <button type="button" onClick={() => setProof(0.01)} style={{
-                      padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
-                      background: proof===0.01 ? "linear-gradient(135deg, #3b82f6 0%, #2563eb 40%, #60a5fa 50%, #2563eb 60%, #1d4ed8 100%)" : "rgba(255,255,255,.04)",
-                      color: proof===0.01 ? "#fff" : "rgba(255,255,255,.4)", borderRight:"1px solid rgba(255,255,255,.08)",
-                    }}>Professional Proof</button>
-                    <button type="button" onClick={() => setProof(3.01)} style={{
-                      padding:"8px 14px", fontSize:10, fontWeight:700, border:"none", borderRadius:"0 4px 4px 0", cursor:"pointer", fontFamily:"inherit",
-                      background: proof>=3 ? "linear-gradient(135deg, #f59e0b 0%, #d97706 40%, #fbbf24 50%, #d97706 60%, #b45309 100%)" : "rgba(255,255,255,.04)",
-                      color: proof>=3 ? "#000" : "rgba(255,255,255,.4)",
-                    }}>Hardcopy Proof</button>
+                    ) : "Approve Now"}</button>}
                   </div>
                   <FitToggle dark />
                 </div>
-                <label style={{ display:"flex", alignItems:"center", gap:8, marginTop:8, padding:"7px 10px", borderRadius:6, background:"rgba(255,255,255,.05)", border:"1px solid rgba(255,255,255,.1)", fontSize:11, color:"rgba(255,255,255,.7)", cursor:"pointer", userSelect:"none" }}
+                <label style={{ display:"flex", alignItems:"center", gap:8, marginTop:8, padding:"7px 10px", borderRadius:6, background:"var(--bp-btn)", border:"1px solid var(--bp-line)", fontSize:11, color:"var(--bp-dim)", cursor:"pointer", userSelect:"none" }}
                   title="Turn on if your PDF has two pages side-by-side per sheet (reader's spreads). Each spread is split down the middle into single pages.">
                   <input type="checkbox" checked={readerSpreads}
                     onChange={e => { const v = e.target.checked; setReaderSpreads(v); if (rawFileRef.current) processFiles([rawFileRef.current], { splitSpreads: v }); }}
                     style={{ width:15, height:15, cursor:"pointer", accentColor: CK.cyan, flexShrink:0 }} />
                   <span><strong style={{ color:"#fff" }}>Activate Reader's Spread Formatting</strong> — your file has two pages per sheet; split each spread into single pages.</span>
                 </label>
-                <div style={{ fontSize:10, color:"rgba(255,255,255,.45)", marginTop:6, lineHeight:1.4 }}>
+                <div style={{ fontSize:10, color:"var(--bp-faint)", marginTop:6, lineHeight:1.4 }}>
                   {proof === 0 && !artApproved && "Review each page, then click Approve Now to confirm your artwork is print-ready. Your approval means we print exactly what you see."}
                   {proof === 0 && artApproved && "✓ Artwork approved — we'll print exactly what you see. You can change your proof option or close this modal."}
                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
@@ -4113,25 +4356,25 @@ update();
                         }}>⬇ Download All</button>
                         {rawFileRef.current && (
                           <button type="button" onClick={() => dlFile(rawFileRef.current, rawFileRef.current.name || baseName + "_raw")} style={{
-                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-faint)",
                           }}>Raw file</button>
                         )}
                         {!approvalPkg.skippedGeneration && approvalPkg.printReadyBlob && (
                           <button type="button" onClick={() => dlFile(approvalPkg.printReadyBlob, baseName + "_print-ready.pdf")} style={{
-                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-faint)",
                           }}>Print-ready PDF</button>
                         )}
                         {approvalPkg.previewPdfBlob ? (
                           <button type="button" onClick={() => dlFile(approvalPkg.previewPdfBlob, baseName + "_proof.pdf")} style={{
-                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-faint)",
                           }}>Proof PDF ({previewCount} pp)</button>
                         ) : previewCount > 0 ? (
                           <button type="button" onClick={() => approvalPkg.previewBlobs.forEach((b, i) => { if (b) dlFile(b, `${baseName}_preview_page_${String(i+1).padStart(3,"0")}.jpg`); })} style={{
-                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                            padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                            borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-faint)",
                           }}>Previews ({previewCount})</button>
                         ) : null}
                         {approvalPkg.previewHtmlBlob && (
@@ -4141,12 +4384,12 @@ update();
                           }}>Preview HTML</button>
                         )}
                         <button type="button" onClick={() => dlFile(approvalPkg.manifestBlob, baseName + "_manipulation_manifest.txt")} style={{
-                          padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid rgba(255,255,255,.12)",
-                          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"rgba(255,255,255,.04)", color:"rgba(255,255,255,.5)",
+                          padding:"5px 10px", fontSize:10, fontWeight:600, border:"1px solid var(--bp-line)",
+                          borderRadius:4, cursor:"pointer", fontFamily:"inherit", background:"var(--bp-btn)", color:"var(--bp-faint)",
                         }}>Manifest</button>
                       </div>
                       {approvalPkg.skippedGeneration && (
-                        <div style={{ fontSize:9, color:"rgba(255,255,255,.35)", marginTop:4 }}>No print-ready PDF generated — raw file is already print-ready (no transforms applied)</div>
+                        <div style={{ fontSize:9, color:"var(--bp-faint)", marginTop:4 }}>No print-ready PDF generated — raw file is already print-ready (no transforms applied)</div>
                       )}
                     </div>
                   );
@@ -4154,13 +4397,13 @@ update();
               </div>
             </div>
             {!artApproved && proof === 0 && (
-              <div style={{ padding:"4px 20px", borderBottom:"1px solid rgba(255,255,255,.06)", fontSize:10, color:"#f87171" }}>
+              <div style={{ padding:"4px 20px", borderBottom:"1px solid var(--bp-line)", fontSize:10, color:"#f87171" }}>
                 * Proof approval is required before your order can be placed.
               </div>
             )}
             {/* Preflight bar — warnings only */}
             {preflight && preflight.some(c => c.level !== "pass") && (
-              <div style={{ padding:"8px 20px", borderBottom:"1px solid rgba(255,255,255,.06)", display:"flex", gap:16, flexWrap:"wrap" }}>
+              <div style={{ padding:"8px 20px", borderBottom:"1px solid var(--bp-line)", display:"flex", gap:16, flexWrap:"wrap" }}>
                 {preflight.filter(c => c.level !== "pass").map((c, i) => (
                   <div key={i} style={{ display:"flex", alignItems:"center", gap:6 }}>
                     <span style={{ width:6, height:6, borderRadius:"50%", background:PF[c.level].dot }} />
@@ -4219,32 +4462,32 @@ update();
                       <button type="button" disabled={proofIdx<=0} onClick={() => setProofIdx(i => { let n=i-1; while(n>=0 && displayPages[n]?.isBlank) n--; return n>=0?n:i; })} style={{
                         padding:"8px 16px", borderRadius:6, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit",
                         display:"flex", alignItems:"center", gap:4, transition:"all .2s",
-                        border:"1px solid rgba(255,255,255,.2)", background:"rgba(255,255,255,.08)", color:"rgba(255,255,255,.7)",
+                        border:"1px solid var(--bp-line)", background:"var(--bp-btn)", color:"var(--bp-dim)",
                         opacity: proofIdx<=0 ? 0.2 : 1,
                       }}>‹ Prev</button>
-                      <span style={{ fontSize:13, color:"rgba(255,255,255,.6)", minWidth:100, textAlign:"center", fontWeight:500 }}>{proofPage.label} ({proofIdx+1}/{displayPages.length})</span>
+                      <span style={{ fontSize:13, color:"var(--bp-dim)", minWidth:100, textAlign:"center", fontWeight:500 }}>{proofPage.label} ({proofIdx+1}/{displayPages.length})</span>
                       <button type="button" disabled={proofIdx>=displayPages.length-1} onClick={() => setProofIdx(i => { let n=i+1; while(n<displayPages.length && displayPages[n]?.isBlank) n++; return n<displayPages.length?n:i; })} style={{
                         padding:"8px 16px", borderRadius:6, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit",
                         display:"flex", alignItems:"center", gap:4, transition:"all .2s",
-                        border:"1px solid rgba(255,255,255,.2)", background:"rgba(255,255,255,.08)", color:"rgba(255,255,255,.7)",
+                        border:"1px solid var(--bp-line)", background:"var(--bp-btn)", color:"var(--bp-dim)",
                         opacity: proofIdx>=displayPages.length-1 ? 0.2 : 1,
                       }}>Next ›</button>
                       <button type="button" onClick={() => setShowGuides(g => !g)} style={{
-                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
-                        background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
-                        color: showGuides ? "#38a169" : "rgba(255,255,255,.4)",
+                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid var(--bp-line)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
+                        background: showGuides ? "rgba(56,161,105,.2)" : "var(--bp-btn)",
+                        color: showGuides ? "#38a169" : "var(--bp-faint)",
                       }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
                       {/* Viewport zoom controls */}
-                      <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.04)" }}>
-                        <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>−</button>
-                        <span style={{ fontSize:10.5, fontWeight:600, color:"rgba(255,255,255,.65)", minWidth:38, textAlign:"center", letterSpacing:".02em" }}>{Math.round(vpScale*100)}%</span>
-                        <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>+</button>
-                        <button type="button" onClick={vpReset} disabled={vpScale===VP_FIT && vpX===0 && vpY===0} title="Fit page" style={{padding:"4px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid rgba(255,255,255,.12)",marginLeft:2,borderRadius:0,cursor:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"rgba(255,255,255,.2)":"rgba(255,255,255,.55)",fontFamily:"inherit"}}>⛶</button>
+                      <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid var(--bp-line)", background:"var(--bp-btn)" }}>
+                        <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"var(--bp-faint)":"var(--bp-dim)",fontFamily:"inherit"}}>−</button>
+                        <span style={{ fontSize:10.5, fontWeight:600, color:"var(--bp-dim)", minWidth:38, textAlign:"center", letterSpacing:".02em" }}>{Math.round(vpScale*100)}%</span>
+                        <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"var(--bp-faint)":"var(--bp-dim)",fontFamily:"inherit"}}>+</button>
+                        <button type="button" onClick={vpReset} disabled={vpScale===VP_FIT && vpX===0 && vpY===0} title="Fit page" style={{padding:"4px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid var(--bp-line)",marginLeft:2,borderRadius:0,cursor:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"var(--bp-faint)":"var(--bp-dim)",fontFamily:"inherit"}}>⛶</button>
                       </div>
                       <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} style={{
-                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(255,255,255,.12)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
-                        background: showMagnifier ? "rgba(59,130,246,.2)" : "rgba(255,255,255,.06)",
-                        color: showMagnifier ? "#3b82f6" : "rgba(255,255,255,.4)",
+                        padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid var(--bp-line)", borderRadius:6, cursor:"pointer", fontFamily:"inherit",
+                        background: showMagnifier ? "rgba(59,130,246,.2)" : "var(--bp-btn)",
+                        color: showMagnifier ? "#3b82f6" : "var(--bp-faint)",
                       }}>🔍</button>
                       {debug && <button type="button" disabled={generatingPdf} title="Debug: regenerate the approval package without locking approval" onClick={async () => {
                         setGeneratingPdf(true);
@@ -4263,12 +4506,12 @@ update();
                         padding:"6px 10px", fontSize:11, fontWeight:600, border:"1px solid rgba(251,191,36,.4)", borderRadius:6, cursor: generatingPdf ? "wait" : "pointer", fontFamily:"inherit",
                         background:"rgba(251,191,36,.12)", color:"#fbbf24",
                       }}>🔧 {generatingPdf ? "Generating…" : "Generate"}</button>}
-                      <div style={{ marginLeft:4, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
+                      <div style={{ marginLeft:4, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
                         {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (
                           <button type="button" key={o.v} onClick={() => setProofView(o.v)} title={o.v === "single" ? "Single page view" : "Grid view — all pages"} style={{
                             padding:"6px 10px", fontSize:13, border:"none", cursor:"pointer", fontFamily:"inherit",
-                            background: proofView === o.v ? CK.cyan : "rgba(255,255,255,.06)",
-                            color: proofView === o.v ? "#000" : "rgba(255,255,255,.5)",
+                            background: proofView === o.v ? CK.cyan : "var(--bp-btn)",
+                            color: proofView === o.v ? "#000" : "var(--bp-faint)",
                           }}>{o.l}</button>
                         ))}
                       </div>
@@ -4313,7 +4556,7 @@ update();
                           return (
                             <div className="bp-checker" style={{ position:"absolute", inset:0, overflow:"hidden" }}>
                               {proofPage.isBlank
-                                ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.3)", fontSize:14 }}>Blank page</div>
+                                ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:14 }}>Blank page</div>
                                 : <img src={hiResValid ? hiResProof.dataUrl : proofPage.dataUrl} style={{
                                     ...(fitMode === "crop" ? cropStyle(1)
                                       : fitMode === "scale" ? cropStyle(artScale / 100)
@@ -4326,10 +4569,10 @@ update();
                           );
                         })()}
                         {!proofPage.isBlank && !hiResValid && artDims?.source === "pdf" && (
-                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"rgba(255,255,255,.5)", background:"rgba(0,0,0,.5)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>Rendering 300 DPI…</div>
+                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"var(--bp-faint)", background:"rgba(0,0,0,.5)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>Rendering 300 DPI…</div>
                         )}
                         {!proofPage.isBlank && hiResValid && (
-                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"rgba(255,255,255,.4)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>300 DPI</div>
+                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"var(--bp-faint)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>300 DPI</div>
                         )}
                         {/* Guide overlays — togglable */}
                         {showGuides && !proofPage.isBlank && (() => {
@@ -4349,9 +4592,9 @@ update();
                               <div style={{ position:"absolute", left:`${spineLeftPct}%`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, background:"#3b82f6", boxShadow:"0 0 0 1px rgba(59,130,246,.2)" }}/>
                               <div style={{ position:"absolute", left:`${spineRightPct}%`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, background:"#3b82f6", boxShadow:"0 0 0 1px rgba(59,130,246,.2)" }}/>
                               {/* Panel labels */}
-                              <div style={{ position:"absolute", left:`${(bleedPctX + spineLeftPct)/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"rgba(255,255,255,.7)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Back</div>
+                              <div style={{ position:"absolute", left:`${(bleedPctX + spineLeftPct)/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"var(--bp-dim)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Back</div>
                               <div style={{ position:"absolute", left:`${(spineLeftPct + spineRightPct)/2}%`, top:"50%", transform:"translate(-50%, -50%) rotate(-90deg)", fontSize:9, fontWeight:700, color:"#3b82f6", letterSpacing:".08em", textTransform:"uppercase", whiteSpace:"nowrap", textShadow:"0 1px 2px rgba(0,0,0,.5)" }}>Spine · {fmtSpine(spineInchesNow)}</div>
-                              <div style={{ position:"absolute", left:`${(spineRightPct + (100 - bleedPctX))/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"rgba(255,255,255,.7)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Front</div>
+                              <div style={{ position:"absolute", left:`${(spineRightPct + (100 - bleedPctX))/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"var(--bp-dim)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Front</div>
                             </> : <>
                               {/* Spine — perfect bound: binding edge always on left (glued spine) */}
                               <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2 }}/>
@@ -4409,7 +4652,7 @@ update();
                               position:"absolute", pointerEvents:"none", zIndex:10,
                               left: magPos.x - magSize / 2, top: magPos.y - magSize / 2,
                               width: magSize, height: magSize, borderRadius:"50%",
-                              border:"3px solid rgba(255,255,255,.8)", boxShadow:"0 4px 20px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.3)",
+                              border:"3px solid var(--bp-ink)", boxShadow:"0 4px 20px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.3)",
                               overflow: "hidden",
                             }}>
                               {/* Bleed-zoomed proof viewport — mirrors the main proof container at zoom× scale */}
@@ -4469,7 +4712,7 @@ update();
                       {displayPages.map((p, i) => (
                         <div key={i} className="bp-thumb" style={{ cursor:"pointer", outline: i===proofIdx ? `2px solid ${CK.cyan}` : "none", borderRadius:3 }} onClick={() => !p.isBlank && setProofIdx(i)}>
                           <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.3 : i===proofIdx ? 1 : 0.7, border: p.isBlank ? "1px dashed rgba(255,255,255,.2)" : undefined }} />
-                          <span style={{ color: i===proofIdx ? CK.cyan : p.isBlank ? CK.yellow : "rgba(255,255,255,.4)" }}>{p.label}</span>
+                          <span style={{ color: i===proofIdx ? CK.cyan : p.isBlank ? CK.yellow : "var(--bp-faint)" }}>{p.label}</span>
                         </div>
                       ))}
                     </div>
@@ -4481,13 +4724,13 @@ update();
               {proofView === "grid" && (
                 <div style={{ padding:"16px 20px" }}>
                   <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12 }}>
-                    <span style={{ fontSize:12, color:"rgba(255,255,255,.5)", fontWeight:500 }}>All Pages — click to inspect</span>
-                    <div style={{ marginLeft:8, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
+                    <span style={{ fontSize:12, color:"var(--bp-faint)", fontWeight:500 }}>All Pages — click to inspect</span>
+                    <div style={{ marginLeft:8, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
                       {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (
                         <button type="button" key={o.v} onClick={() => setProofView(o.v)} title={o.v === "single" ? "Single page view" : "Grid view — all pages"} style={{
                           padding:"6px 10px", fontSize:13, border:"none", cursor:"pointer", fontFamily:"inherit",
-                          background: proofView === o.v ? CK.cyan : "rgba(255,255,255,.06)",
-                          color: proofView === o.v ? "#000" : "rgba(255,255,255,.5)",
+                          background: proofView === o.v ? CK.cyan : "var(--bp-btn)",
+                          color: proofView === o.v ? "#000" : "var(--bp-faint)",
                         }}>{o.l}</button>
                       ))}
                     </div>
@@ -4495,13 +4738,13 @@ update();
                   <div style={{ display:"grid", gridTemplateColumns:`repeat(auto-fill, minmax(${mob ? 100 : 140}px, 1fr))`, gap:10 }}>
                     {displayPages.map((p, i) => (
                       <div key={i} style={{ cursor: p.isBlank ? "default" : "pointer", textAlign:"center" }} onClick={() => { if (!p.isBlank) { setProofIdx(i); setProofView("single"); } }}>
-                        <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid rgba(255,255,255,.1)" }}>
+                        <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:4, overflow:"hidden", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid var(--bp-line)" }}>
                           {p.isBlank
-                            ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"rgba(255,255,255,.2)", fontSize:10 }}>Blank</div>
+                            ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:10 }}>Blank</div>
                             : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", filter:gsFilter }} />
                           }
                         </div>
-                        <span style={{ fontSize:9, color: p.isBlank ? "rgba(255,255,255,.3)" : "rgba(255,255,255,.5)", marginTop:3, display:"block" }}>{p.label}</span>
+                        <span style={{ fontSize:9, color: p.isBlank ? "var(--bp-faint)" : "var(--bp-faint)", marginTop:3, display:"block" }}>{p.label}</span>
                       </div>
                     ))}
                   </div>
@@ -4510,33 +4753,33 @@ update();
             </div>
           </div>
         </div>
-      )}
+      </Float>)}
 
       {/* ════════════════════════════════════════════════════════════
            PREVIEW MODAL — 3D closed book, page spreads, animations
          ════════════════════════════════════════════════════════════ */}
-      {activeModal === "preview" && hasFile && displayPages.length > 0 && (
+      {activeModal === "preview" && hasFile && displayPages.length > 0 && (<Float>
         <div className="bp-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) setActiveModal(null); }}>
           <div className="bp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="bp-modal-head" style={{ flexWrap:"wrap", gap:10 }}>
               <div style={{ flex:1, minWidth:180, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <div>
-                  <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>Book Preview</div>
-                  <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
+                  <div className="bp-modal-title" style={{ fontSize:15 }}>Book Preview</div>
+                  <div style={{ fontSize:11, color:"var(--bp-faint)" }}>
                     {dims.w}″ × {dims.h}″ · {displayPages.length} pages · Perfect Bound
                     {reconcileInfo?.type === "padded" && <InfoTip dark text={`Perfect bound booklets require an even page count. Your file has ${reconcileInfo.raw} pages, so ${reconcileInfo.count} blank page${reconcileInfo.count > 1 ? "s are" : " is"} added to reach ${reconcileInfo.target}.`}><span style={{ color: CK.yellow, marginLeft: 6 }}>({reconcileInfo.count} blank{reconcileInfo.count > 1 ? "s" : ""} added)</span></InfoTip>}
                   </div>
                 </div>
-                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.5)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid var(--bp-line)", color:"var(--bp-faint)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
               </div>
               {/* Cover / Pages toggle */}
-              <div style={{ width:"100%", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
-                <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
+              <div style={{ width:"100%", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", borderTop:"1px solid var(--bp-line)", paddingTop:10 }}>
+                <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
                   {[{v:"closed",l:"Cover"},{v:"open",l:"Pages"}].map(o => (
                     <button type="button" key={o.v} onClick={() => { setPreviewMode(o.v); if(o.v==="closed") setRot({x:-15,y:-25}); if(o.v==="open"){setSpread(0);setRot({x:-5,y:0});} }} style={{
                       padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
-                      background: previewMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
-                      color: previewMode === o.v ? "#000" : "rgba(255,255,255,.5)",
+                      background: previewMode === o.v ? CK.cyan : "var(--bp-btn)",
+                      color: previewMode === o.v ? "#000" : "var(--bp-faint)",
                     }}>{o.l}</button>
                   ))}
                 </div>
@@ -4549,13 +4792,13 @@ update();
                   ? <BookClosed3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spineW={spineW} rotateX={rot.x} rotateY={rot.y} scale={exScale} fitMode="stretch" />
                   : <BookOpen3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spread={spread} scale={exScale} rotateX={-5} rotateY={0} fitMode="stretch" />
                 }
-                {previewMode === "closed" && <div style={{ position:"absolute", bottom:10, left:"50%", transform:"translateX(-50%)", fontSize:10, color:"rgba(255,255,255,.3)", letterSpacing:".08em" }}>↔ Drag to rotate</div>}
+                {previewMode === "closed" && <div style={{ position:"absolute", bottom:10, left:"50%", transform:"translateX(-50%)", fontSize:10, color:"var(--bp-faint)", letterSpacing:".08em" }}>↔ Drag to rotate</div>}
               </div>
 
               {previewMode === "open" && (
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:16, marginTop:12 }}>
                   <button type="button" className="bp-nav-btn" disabled={spread <= 0} onClick={() => setSpread(s => s - 1)}>‹</button>
-                  <span style={{ fontSize:12, color:"rgba(255,255,255,.5)", minWidth:100, textAlign:"center" }}>
+                  <span style={{ fontSize:12, color:"var(--bp-faint)", minWidth:100, textAlign:"center" }}>
                     {(() => { const int = displayPages.slice(1, displayPages.length - 1); const li = spread * 2, ri = spread * 2 + 1; return int[ri] ? `Pages ${li + 2}–${ri + 2}` : `Page ${li + 2}`; })()}
                   </span>
                   <button type="button" className="bp-nav-btn" disabled={spread >= totalSpreads - 1} onClick={() => setSpread(s => s + 1)}>›</button>
@@ -4567,14 +4810,14 @@ update();
                 {displayPages.map((p, i) => (
                   <div key={i} className="bp-thumb">
                     <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.5 : 1, border: p.isBlank ? "1px dashed rgba(255,255,255,.2)" : undefined }} />
-                    <span style={{ color: p.isBlank ? CK.yellow : "rgba(255,255,255,.4)" }}>{p.label}</span>
+                    <span style={{ color: p.isBlank ? CK.yellow : "var(--bp-faint)" }}>{p.label}</span>
                   </div>
                 ))}
               </div>
             </div>
           </div>
         </div>
-      )}
+      </Float>)}
     </div>
   );
 }
@@ -4718,7 +4961,7 @@ function uploadWithProgress(url, formData, onProgress) {
   });
 }
 
-async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress) {
+async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress, couponCode) {
   const PPS = window.PPS_CONFIG || {};
 
   // ── Standalone mode: download artwork + order summary as a zip-like package ──
@@ -4801,6 +5044,7 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     fd.append("pps_rush", rushCost.toFixed(2));
     fd.append("pps_summary", summary);
     fd.append("pps_metadata", metadata);
+    if (couponCode) fd.append("pps_coupon", couponCode);
     const parsed = JSON.parse(metadata);
     fd.append("pps_biz_days", String(parsed.requestedBizDays || parsed.freeDeliveryBizDays || 5));
     if (artworkPath) fd.append("pps_artwork_path", artworkPath);
@@ -4871,7 +5115,74 @@ function App(){
   const[qMessage,setQMessage]=useState("");
   const[qStatus,setQStatus]=useState("idle");
   const[qErrorMsg,setQErrorMsg]=useState("");
-  const tog=k=>setOp(p=>({...p,[k]:!p[k]}));
+  // The mobile bar is fixed to the bottom of the viewport, so anything else that docks
+  // there — the tooltip sheet today, anything added later — has to know how tall it is
+  // or it lands on top of the price and the Add to Order button. Published as a CSS
+  // variable on <html> so a portalled overlay can read it without being handed a prop.
+  // Its height changes with the shipping warning and the expanded panel, hence the
+  // ResizeObserver rather than a one-off measurement.
+  const bottomBarRef = useRef(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!mob) { root.style.setProperty("--pps-bottombar", "0px"); return; }
+    const set = () => root.style.setProperty("--pps-bottombar",
+      (bottomBarRef.current ? bottomBarRef.current.offsetHeight : 0) + "px");
+    set();
+    let ro = null;
+    if (window.ResizeObserver && bottomBarRef.current) {
+      ro = new ResizeObserver(set); ro.observe(bottomBarRef.current);
+    }
+    window.addEventListener("resize", set);
+    return () => { if (ro) ro.disconnect(); window.removeEventListener("resize", set);
+                   root.style.setProperty("--pps-bottombar", "0px"); };
+  }, [mob]);
+  // Theme. Persisted per browser like the focus-mode preference; falls back to the
+  // OS setting on first visit so a dark-mode user isn't flashed a white page.
+  const[theme,setTheme]=useState(()=>{
+    try{
+      const v=localStorage.getItem("pps_theme");
+      if(v==="dark"||v==="light")return v;
+      return (window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
+    }catch(e){return "light";}
+  });
+  const[themeTick,setThemeTick]=useState(0);
+  useEffect(()=>{
+    pps_applyTheme(theme);
+    try{localStorage.setItem("pps_theme",theme);}catch(e){}
+    // CC/ST are mutated in place, so nothing re-renders on its own — bump a counter
+    // to repaint the tree with the new palette.
+    setThemeTick(t=>t+1);
+  },[theme]);
+  const[setOpen,setSetOpen]=useState(false);
+  useEffect(()=>{
+    if(!setOpen)return;
+    const onDoc=e=>{ if(!e.target.closest||!e.target.closest("[data-pps-settings]")) setSetOpen(false); };
+    const onKey=e=>{ if(e.key==="Escape") setSetOpen(false); };
+    document.addEventListener("mousedown",onDoc);
+    document.addEventListener("keydown",onKey);
+    return()=>{document.removeEventListener("mousedown",onDoc);document.removeEventListener("keydown",onKey);};
+  },[setOpen]);
+  // "One section at a time" — on by default: opening a section collapses the rest so
+  // the customer is only looking at one topic. Preference is remembered per browser.
+  const[soloSec,setSoloSec]=useState(()=>{
+    try{const v=localStorage.getItem("pps_solo_sections");return v===null?true:v==="1";}catch(e){return true;}
+  });
+  useEffect(()=>{try{localStorage.setItem("pps_solo_sections",soloSec?"1":"0");}catch(e){}},[soloSec]);
+  // Turning it on mid-session collapses down to whichever section is already open
+  // (the first one), rather than leaving several open and contradicting the setting.
+  useEffect(()=>{
+    if(!soloSec)return;
+    setOp(p=>{
+      const openKeys=Object.keys(p).filter(k=>p[k]);
+      if(openKeys.length<=1)return p;
+      const next={};for(const k in p)next[k]=false;next[openKeys[0]]=true;return next;
+    });
+  },[soloSec]);
+  const tog=k=>setOp(p=>{
+    const opening=!p[k];
+    if(soloSec&&opening){const next={};for(const key in p)next[key]=false;next[k]=true;return next;}
+    return {...p,[k]:!p[k]};
+  });
   // Proof-debug mode — toggled by `?debug=1` (or `pps_debug=1` in localStorage). When on,
   // the proof modal exposes a "Generate Package" button that runs the approval generator
   // without locking the approval state, and the TEST DOWNLOAD bar appears as soon as a
@@ -4956,7 +5267,7 @@ function App(){
   const[proofAddrSame,setProofAddrSame]=useState(true);
   const[proofAddr,setProofAddr]=useState({name:"",street:"",city:"",state:"",zip:""});
   // Shipping & Rush
-  const[shipState,setShipState]=useState(D.shipState||"AZ");
+  const[shipState,setShipState]=useState(D.shipState||"");
   const[shipAddr,setShipAddr]=useState({name:"",company:"",street1:"",street2:"",city:"",zip:""});
   const[needByDate,setNeedByDate]=useState("");
   const[coverArt,setCoverArt]=useState(null);
@@ -5145,17 +5456,35 @@ function App(){
         : _destMissing.slice(0, -1).join(", ") + " and " + _destMissing[_destMissing.length - 1]);
   // Send them to the field rather than leaving them to hunt for it. Opens the section
   // first when it is collapsed, because the input is not in the DOM until then.
-  const focusShipping = () => {
-    if (!document.querySelector('[autocomplete="shipping address-line1"]')) {
-      const hdr = Array.prototype.find.call(document.querySelectorAll("button"),
-        b => /Shipping\s*&\s*Delivery/i.test(b.textContent || ""));
-      if (hdr) hdr.click();
-    }
+  const openShipping = () => {
+    setOp(p=>{
+      if(p.s5)return p;
+      if(soloSec){const n={};for(const k in p)n[k]=false;n.s5=true;return n;}
+      return {...p,s5:true};
+    });
     setTimeout(() => {
       const t = document.querySelector('[autocomplete="shipping address-line1"]');
       if (t) { t.scrollIntoView({ behavior: "smooth", block: "center" }); t.focus(); }
     }, 120);
   };
+  // Opening the preview from outside the Artwork section: expand the owning section
+  // first (a fixed modal inside a collapsed keepMounted subtree would be invisible
+  // without the portal, and the section context matters either way), then fire once
+  // the modal opener has mounted.
+  const[pendingPreview,setPendingPreview]=useState(false);
+  const openPreview=()=>{
+    setOp(p=>{
+      if(p.s4)return p;
+      if(soloSec){const n={};for(const k in p)n[k]=false;n.s4=true;return n;}
+      return {...p,s4:true};
+    });
+    if(openPreviewModalRef.current){openPreviewModalRef.current();return;}
+    setPendingPreview(true);
+  };
+  useEffect(()=>{
+    if(!pendingPreview)return;
+    if(openPreviewModalRef.current){openPreviewModalRef.current();setPendingPreview(false);}
+  });
 
   // Shippo live transit: re-run the pricing memo when a live lookup lands.
   const [ltTick, setLtTick] = useState(0);
@@ -5263,6 +5592,130 @@ function App(){
       : {...p, total: p.total * adj, perUnit: p.perUnit * adj});
   }, [projectionsRaw, tableAdjPct]);
 
+  // ── Discount code ─────────────────────────────────────────────────────────
+  // The code is previewed here and applied for real by WooCommerce at add-to-cart.
+  // Nothing about it touches the quoted line price: pps_price stays the true product
+  // price so the materials floor and the pps_lock checksum still hold. What the panel
+  // shows is an estimate of the effect; Woo re-validates and does the real maths.
+  const[couponInput,setCouponInput]=useState("");
+  const[coupon,setCoupon]=useState(null);      // {code,label,discount,type,free_shipping}
+  const[couponMsg,setCouponMsg]=useState("");
+  const[couponBusy,setCouponBusy]=useState(false);
+  const applyCoupon=async()=>{
+    const code=(couponInput||"").trim();
+    if(!code||couponBusy)return;
+    const subtotal=Number(result&&result.total)||0;
+    if(subtotal<=0){setCouponMsg("Configure your order first.");return;}
+    setCouponBusy(true); setCouponMsg("");
+    try{
+      const root=((window.PPS_CONFIG||{}).ajaxUrl||"").replace(/wp-admin\/admin-ajax\.php.*$/,"");
+      const r=await fetch((root||"/")+"wp-json/pps/v1/coupon/preview",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({code,subtotal,product_id:(window.PPS_CONFIG||{}).productId||0}),
+      });
+      if(!r.ok&&r.status!==200){ setCoupon(null); setCouponMsg(r.status===429?"Too many attempts — please wait a minute.":"Could not check that code."); return; }
+      const j=await r.json();
+      if(j&&j.valid){ setCoupon(j); setCouponMsg(""); }
+      else { setCoupon(null); setCouponMsg((j&&j.message)||"That code is not valid for this order."); }
+    }catch(e){ setCoupon(null); setCouponMsg("Could not reach the server — the code will still be checked at checkout."); }
+    finally{ setCouponBusy(false); }
+  };
+  const clearCoupon=()=>{ setCoupon(null); setCouponInput(""); setCouponMsg(""); };
+  // One place that answers "what does this amount cost once the code is applied", so
+  // the price card, the per-unit figure and the quantity table cannot disagree.
+  // A percentage code scales, so it re-prices every quantity tier honestly. Anything
+  // else is a flat amount off the cart: it comes off each row whole and is clamped at
+  // the row's own total, which is what WooCommerce will do at checkout.
+  const _cpnPct=(coupon&&coupon.discount>0&&coupon.type==="percent"&&(Number(coupon.amount)||0)>0)
+    ? Math.min(1,(Number(coupon.amount)||0)/100) : 0;
+  const _cpnFlat=(coupon&&coupon.discount>0&&!_cpnPct) ? Math.max(0,Number(coupon.discount)||0) : 0;
+  const couponActive=_cpnPct>0||_cpnFlat>0;
+  const netOf=(amt)=>{
+    const a=Number(amt)||0;
+    if(!couponActive||a<=0) return a;
+    const off=_cpnPct>0 ? a*_cpnPct : Math.min(_cpnFlat,a);
+    return Math.max(0,Math.round((a-off)*100)/100);
+  };
+  // Rendered in the desktop rail and again in the mobile form. Defined once so the two
+  // cannot drift.
+  //
+  // A FUNCTION THAT RETURNS JSX, NOT A COMPONENT, and it must stay that way. Declared
+  // inside this component, every render makes a new function identity; used as
+  // <DiscountField/> that is a new element *type* each time, so React unmounts the old
+  // subtree and mounts a fresh one — the field accepted exactly one character and then
+  // dropped focus to <body>. Called as {discountField()} the JSX becomes part of this
+  // component's own tree and reconciles against the previous render normally.
+  const discountField=()=>(
+    <div>
+      {coupon ? (
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"9px 11px",borderRadius:9,
+          background:CC.tint,border:`1px solid ${CK.cyan}55`}}>
+          <span style={{fontSize:12.5,fontWeight:700,color:CK.cyan,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            &#10003; {coupon.code} — {coupon.label}
+          </span>
+          <button type="button" onClick={clearCoupon} title="Remove this code"
+            style={{border:"none",background:"none",cursor:"pointer",fontFamily:"inherit",
+              fontSize:11.5,fontWeight:600,color:CC.light,padding:"2px 4px"}}>Remove</button>
+        </div>
+      ) : (
+        <div style={{display:"flex",gap:6}}>
+          <input type="text" value={couponInput} aria-label="Discount code"
+            onChange={e=>{setCouponInput(e.target.value.toUpperCase());setCouponMsg("");}}
+            onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();applyCoupon();}}}
+            placeholder="Discount code"
+            style={{...ST.inp,flex:1,minWidth:0,padding:"10px 12px",fontSize:mob?16:13,letterSpacing:".04em",textTransform:"uppercase"}}/>
+          <button type="button" onClick={applyCoupon} disabled={couponBusy||!couponInput.trim()}
+            style={{flexShrink:0,padding:"10px 15px",borderRadius:9,border:`1px solid ${CC.border}`,
+              background:CC.white,color:couponInput.trim()?CC.dark:CC.light,fontSize:12.5,fontWeight:650,
+              cursor:(couponBusy||!couponInput.trim())?"default":"pointer",fontFamily:"inherit",transition:"all .15s ease"}}>
+            {couponBusy?"Checking…":"Apply"}
+          </button>
+        </div>
+      )}
+      {couponMsg&&<div style={{fontSize:11.5,color:CC.red,marginTop:5,lineHeight:1.35}}>{couponMsg}</div>}
+    </div>
+  );
+  // A percentage code has to be re-priced whenever the quote changes, or the panel
+  // would keep showing a discount computed against a stale subtotal.
+  useEffect(()=>{
+    if(!coupon)return;
+    const subtotal=Number(result&&result.total)||0;
+    if(subtotal<=0)return;
+    if(coupon.type==="percent"){
+      const d=Math.min(Math.round(subtotal*(coupon.amount/100)*100)/100,subtotal);
+      if(Math.abs(d-coupon.discount)>0.005) setCoupon(c=>c?{...c,discount:d}:c);
+    } else if(coupon.discount>subtotal){
+      setCoupon(c=>c?{...c,discount:Math.round(subtotal*100)/100}:c);
+    }
+  },[result&&result.total,coupon&&coupon.type,coupon&&coupon.amount]);
+
+  // The quantity table is the tallest thing in the rail. Left whole it pushes the rail
+  // past the viewport, and a rail taller than the page's left column cannot stick — so
+  // the total and the CTA scroll away. Collapsed it shows a window around the current
+  // selection and the rail stays short enough to stay put.
+  const[projOpen,setProjOpen]=useState(false);
+  // Belt and braces for the same problem: when the price card does leave the viewport
+  // (very short window, or a rail taller than everything else), a condensed bar takes
+  // its place, tracked to the rail's own column so it reads as the rail folding up.
+  const railRef=useRef(null);
+  // Callback ref, not useRef: the sentinel lives inside Panel, which early-returns
+  // before rendering it while the quote is still resolving. A plain ref plus a
+  // run-once effect therefore observed nothing and the bar never appeared. A state
+  // setter as the ref re-runs the effect the moment the node actually attaches.
+  const[totalEl,setTotalEl]=useState(null);
+  const[miniBar,setMiniBar]=useState(null); // null | {left,width}
+  useEffect(()=>{
+    if(mob) { setMiniBar(null); return; }
+    const el=totalEl; if(!el||typeof IntersectionObserver==="undefined") return;
+    const place=()=>{ const r=railRef.current&&railRef.current.getBoundingClientRect();
+      setMiniBar(r?{left:Math.round(r.left),width:Math.round(r.width)}:null); };
+    const io=new IntersectionObserver(([e])=>{ if(e.isIntersecting) setMiniBar(null); else place(); },{threshold:0});
+    io.observe(el);
+    const onResize=()=>{ setMiniBar(v=>v?(railRef.current?{left:Math.round(railRef.current.getBoundingClientRect().left),width:Math.round(railRef.current.getBoundingClientRect().width)}:v):v); };
+    window.addEventListener("resize",onResize);
+    return ()=>{ io.disconnect(); window.removeEventListener("resize",onResize); };
+  },[mob,totalEl]);
+
   useEffect(()=>{if(r.coatOK===false)setCoating(0)},[r.coatOK]);
   useEffect(()=>{if(r.vividOK===false)setVividPrint(false)},[r.vividOK]);
   useEffect(()=>{if(r.q100===false)setBundling(0)},[r.q100]);
@@ -5289,6 +5742,42 @@ function App(){
     }
     return n;
   }));
+  // Collapsed-header summaries. Built from the SAME option labels the controls use,
+  // so a closed section reports exactly the wording the customer picked rather than a
+  // paraphrase that could drift out of sync with the dropdowns.
+  const secSummary=(()=>{
+    const lbl=(arr,v)=>{const o=arr.find(x=>x.val===v);return o?o.label:null;};
+    const col=v=>v==="color"?"Full Color":v==="mixed"?"Mixed Color":"Greyscale";
+    const q=sets.reduce((a,x)=>a+(x.qty||0),0)||sets[0]?.qty||0;
+    const jobName=(sets[0]?.name||"").trim();
+    const pg=sets[0]?.pages||0;
+    const fin=[
+      coating>0&&lbl(COATINGS,coating),
+      bundling>0&&lbl(BUNDLING,bundling),
+      roundCorner>0&&lbl(CORNERS,roundCorner),
+      outfold>0&&lbl(OUTFOLD_OPTS,outfold),
+      perforation>0&&lbl(PERF_OPTS,perforation),
+      vividPrint&&"Enhanced Vivid Print",
+    ].filter(Boolean);
+    const sh=result?.shipping;
+    const proofLbl=proof>=3?"Hardcopy Proof":proof>0?"Manual Digital Proof":"Proof & Approve Online";
+    return {
+      // Job name leads the chips — it is what identifies the job at a glance, and on
+      // mobile only the first chip survives the cap. The unlock code is deliberately
+      // not echoed back as a chip; it is a code, not a name.
+      s1:[jobName&&jobName!=="%3414"?jobName:null,q.toLocaleString()+" qty",pg+"pp"],
+      s2:[col(sets[0]?.colorMode),insidePaper.label].concat(coverMode!=="same"?[coverPaper.label+" cover"]:[]),
+      s3:fin.length?fin:["No finishing added"],
+      s4:[lbl(ART_OPTS,artwork),proofLbl].filter(Boolean),
+      // Destination, then the date the customer actually gets. Same expression the
+      // price panel uses, so the chip can never disagree with it.
+      s5:shipState
+        ? [shipState+(shipZip?(" "+shipZip):"")]
+            .concat(sh ? [((sh.rushCost>0 && sh.needByFmt) ? sh.needByFmt : sh.freeDeliveryDate)] : [])
+            .filter(Boolean)
+        : ["Add a destination"],
+    };
+  })();
   const r2=mob?{display:"grid",gridTemplateColumns:"1fr",gap:8}:ST.row2;
   const r3=mob?{display:"grid",gridTemplateColumns:"1fr",gap:8}:ST.row3;
 
@@ -5333,7 +5822,7 @@ function App(){
   // not a target, so it is dropped rather than rendered as a dead end.
   const _hereUrl = (location.origin + location.pathname).replace(/\/+$/, "");
   const switchTargets = (window.PPS_CONFIG && window.PPS_CONFIG.switchTargets) || [
-    {type:"saddle",label:"Saddle Stitch",url:(location.origin+location.pathname).replace(/calc-perfect-bound\.html/,"calc-preview-test.html")},
+    {type:"saddle",label:"Saddle Stitch",url:(location.origin+location.pathname).replace(/[^/]+\.html$/,"calc-preview-test.html")},
   ].filter(t => t && t.url && t.url.replace(/\/+$/, "") !== _hereUrl);
   const buildSwitchUrl = (targetUrl) => {
     const p = new URLSearchParams();
@@ -5352,7 +5841,7 @@ function App(){
     if (coating > 0) p.set("coating", coating);
     if (bundling > 0) p.set("bundling", bundling);
     if (roundCorner > 0) p.set("corner", roundCorner);
-    if (shipState !== "AZ") p.set("state", shipState);
+    if (shipState) p.set("state", shipState);
     p.set("from", "perfect-bound");
     const qs = p.toString();
     return qs ? targetUrl + (targetUrl.includes("?") ? "&" : "?") + qs : targetUrl;
@@ -5419,7 +5908,7 @@ function App(){
 
   const handleAddToOrder = async () => {
     if (!result || result.error?.length || submitting) return;
-    if (missingDest) { focusShipping(); return; }
+    if (missingDest) { openShipping(); return; }
     // Artwork integrity guard: pageTransforms must be a real object before we
     // serialize order metadata. An empty {} is fine (customer didn't open the
     // proof transform UI); undefined/non-object means something is wrong with
@@ -5442,18 +5931,20 @@ function App(){
     const summary = buildSummary(config, result);
     const metadata = buildMetadata(config, result);
     const rushCost = result.shipping?.rushCost || 0;
-    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress);
+    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress, coupon ? coupon.code : "");
     // If still here (standalone mode), re-enable
     setUploadProgress(null);
     setSubmitting(false);
   };
 
   return(
-    <div style={{minHeight:"100vh",background:CC.bg,fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",color:CC.dark}}>
+    <div style={{minHeight:"100vh",background:CC.bg,fontFamily:"var(--pps-sans)",color:CC.dark}}>
       <style>{`
                 button:focus-visible,[role="button"]:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid #1d6fe0 !important;outline-offset:2px;border-radius:3px;}
 @media(max-width:700px){
-          select,input[type="text"],input[type="number"],input[type="tel"],input[type="email"]{font-size:16px!important;padding:10px 12px!important;min-height:46px!important}
+          /* 60px, not 44, to match the pill toggle beside them — 44 is only the bare
+             iOS minimum for a tap target. tel/email added so the address form matches. */
+          select,input[type="text"],input[type="number"],input[type="tel"],input[type="email"]{font-size:16px!important;padding:10px 12px!important;min-height:60px!important}
           /* Here the toggle is the short one — 40px, under the 44px tap-target minimum —
              so raise it to the fields rather than shrink the fields down to it. */
           button[aria-pressed]{min-height:44px!important}
@@ -5468,7 +5959,7 @@ function App(){
         <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:mob?10:20}}>
           <div style={{flex:"1 1 320px",minWidth:0}}>
             <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:CK.magenta}}>Configure · Perfect-bound Booklet</div>
-            <h1 style={{fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",fontWeight:800,lineHeight:1,letterSpacing:"-0.02em",color:CC.dark,textTransform:"uppercase",margin:mob?"8px 0 0":"10px 0 0",maxWidth:720,fontSize:mob?28:44}}>
+            <h1 style={{fontFamily:"var(--pps-display)",fontWeight:800,lineHeight:1,letterSpacing:"-0.02em",color:CC.dark,textTransform:"uppercase",margin:mob?"8px 0 0":"10px 0 0",maxWidth:720,fontSize:mob?28:44}}>
               Perfect-bound Booklet<br/>
               <span style={{color:CK.cyan}}>Instant Quote</span>
             </h1>
@@ -5476,13 +5967,73 @@ function App(){
         </div>
       </section>
 
-      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={openPreview}/>}
 
       <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
 
+          {/* Settings — preferences live behind a gear so they read as settings
+              rather than as more configuration choices competing with the form. */}
+          <div data-pps-settings style={{position:"relative",display:"flex",justifyContent:"flex-end",padding:mob?"2px 2px 0":"0 2px 2px"}}>
+            <button type="button" onClick={()=>setSetOpen(o=>!o)} aria-haspopup="true" aria-expanded={setOpen} aria-label="Form settings"
+              title="Form settings"
+              style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",
+                fontSize:12,fontWeight:600,color:setOpen?CC.dark:CC.light,background:setOpen?CC.track:"transparent",
+                border:`1px solid ${setOpen?CC.border:"transparent"}`,transition:"all .15s ease"}}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+              Form settings
+            </button>
+            {setOpen&&(
+              <div role="menu" style={{position:"absolute",top:"100%",right:0,marginTop:6,zIndex:60,minWidth:250,
+                background:CC.white,border:`1px solid ${CC.border}`,borderRadius:12,
+                boxShadow:"0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.14)",padding:6}}>
+                {[
+                  {k:"theme", label:"Dark mode", hint:"Easier on the eyes in low light.",
+                   on:theme==="dark", set:()=>setTheme(t=>t==="dark"?"light":"dark")},
+                  {k:"solo", label:"One section at a time", hint:"Opening a section collapses the others.",
+                   on:soloSec, set:()=>setSoloSec(v=>!v)},
+                ].map(o=>(
+                  <button key={o.k} type="button" role="menuitemcheckbox" aria-checked={o.on} onClick={o.set}
+                    style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"9px 10px",borderRadius:8,
+                      border:"none",background:"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                    <span style={{flex:1,minWidth:0}}>
+                      <span style={{display:"block",fontSize:13,fontWeight:600,color:CC.dark}}>{o.label}</span>
+                      <span style={{display:"block",fontSize:11,color:CC.light,marginTop:1}}>{o.hint}</span>
+                    </span>
+                    <span style={{flex:"none",width:34,height:20,borderRadius:99,position:"relative",
+                      background:o.on?CK.cyan:CC.border,
+                      transition:"background .8s cubic-bezier(.4,0,.2,1) .25s"}}>
+                      {/* Straight slide: a quarter-second beat after the click, then the knob
+                          travels for .8s. Symmetric easing, no overshoot and no flip, so it
+                          reads as the control moving rather than performing. */}
+                      <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,borderRadius:99,
+                        background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",
+                        transition:"left .8s cubic-bezier(.4,0,.2,1) .25s"}}/>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* SECTION 1: Size */}
-          <Sec title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}>
+          <Sec step={1} summary={secSummary.s1} title="Booklet Size" open={op.s1} onToggle={()=>tog("s1")} badge={isCustom?`${customLong}×${customShort}"`:sizeLabel.split(" (")[0]}
+            headerField={
+              /* Job Name lives in the header rather than the body: it names the whole
+                 job, not the trim size, and it is the one field an operator scans for.
+                 Styled as one of the header's summary pills. The 16px mobile size is
+                 deliberate: anything smaller and iOS zooms on focus. When the section
+                 collapses the value returns as a summary chip. */
+              <input id="pps-job-name" className="pps-jobtitle" type="text" value={sets[0].name}
+                onChange={e=>upSet(0,{name:e.target.value})}
+                placeholder="Job name/PO" aria-label="Job name or PO number"
+                style={{...CHIP,width:"100%",minWidth:0,maxWidth:"none",display:"block",
+                  padding:mob?"6px 12px":"6px 13px",fontSize:mob?16:12,
+                  textAlign:"center",outline:"none",textOverflow:"ellipsis"}}/>
+            }>
             <div style={r2}>
               <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
               {isCustom
@@ -5512,7 +6063,6 @@ function App(){
             <div style={ST.hr}/>
             <div style={r2}>
               <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>
-              <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
             </div>
             {sets[0].colorMode === "mixed" ? (
               <>
@@ -5534,11 +6084,11 @@ function App(){
             )}
 
             {/* Perfect Binding — always applied, no toggle needed */}
-            <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="perfect_binding">Binding</RichTip></label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CK.cyanLight,padding:"7px 12px",borderRadius:4}}>Perfect Bound (Glue Spine)</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#6366f1",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
+            <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="perfect_binding">Binding</RichTip></label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:CC.primary,fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4}}>Perfect Bound (Glue Spine)</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#6366f1",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
-          <Sec title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
+          <Sec step={2} summary={secSummary.s2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
             <div style={r2}>
               <Sel label={<Tip k="inside_paper">Inside Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=PAPERS_NC.find(p=>String(p.val)===v);if(f)setInsidePaper(f)}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label}</option>)}</Sel>
               <div style={ST.f}/>
@@ -5558,7 +6108,7 @@ function App(){
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
-          <Sec title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
+          <Sec step={3} summary={secSummary.s3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
             {(_AD.vivid!==false || vividPrint===true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} disabled={!r.vividOK} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
             {(_AD.vivid!==false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-8,marginBottom:4}}>Requires matte or gloss coated paper</div>}
             {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
@@ -5616,7 +6166,7 @@ function App(){
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
-          <Sec title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          <Sec step={4} summary={secSummary.s4} keepMounted title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
             {/* Art options dropdown */}
             <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
@@ -5792,22 +6342,23 @@ function App(){
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
-          <Sec title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          <Sec step={5} summary={secSummary.s5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
 
             <form autoComplete="on" onSubmit={e=>e.preventDefault()}>
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>
-              <div style={ST.f}><label style={ST.lbl}>Full Name</label><input type="text" name="shipping-name" autoComplete="shipping name" value={shipAddr.name} onChange={e=>setShipAddr(p=>({...p,name:e.target.value}))} placeholder="Full Name" style={ST.inp}/></div>
-              <div style={ST.f}><label style={ST.lbl}>Company <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" name="shipping-organization" autoComplete="shipping organization" value={shipAddr.company} onChange={e=>setShipAddr(p=>({...p,company:e.target.value}))} placeholder="Company" style={ST.inp}/></div>
+              <div style={ST.f}><label style={ST.lbl}>Full Name</label><input id="pps-ship-name" type="text" name="shipping-name" autoComplete="shipping name" value={shipAddr.name} onChange={e=>setShipAddr(p=>({...p,name:e.target.value}))} placeholder="Full Name" style={ST.inp}/></div>
+              <div style={ST.f}><label style={ST.lbl}>Company <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input id="pps-ship-org" type="text" name="shipping-organization" autoComplete="shipping organization" value={shipAddr.company} onChange={e=>setShipAddr(p=>({...p,company:e.target.value}))} placeholder="Company" style={ST.inp}/></div>
             </div>
-            <div style={{...ST.f,marginTop:6}}><label style={ST.lbl}>Street Address</label><input type="text" name="shipping-address-line1" autoComplete="shipping address-line1" value={shipAddr.street1} onChange={e=>setShipAddr(p=>({...p,street1:e.target.value}))} placeholder="Street address" style={ST.inp}/></div>
-            <div style={{...ST.f,marginTop:6}}><label style={ST.lbl}>Address Line 2 <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" name="shipping-address-line2" autoComplete="shipping address-line2" value={shipAddr.street2} onChange={e=>setShipAddr(p=>({...p,street2:e.target.value}))} placeholder="Apt, suite, unit, etc." style={ST.inp}/></div>
-            <div style={{...r3,marginTop:6}}>
-              <div style={ST.f}><label style={ST.lbl}>City</label><input type="text" name="shipping-address-level2" autoComplete="shipping address-level2" value={shipAddr.city} onChange={e=>setShipAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={ST.inp}/></div>
-              <Sel label={<Tip k="ship_state">State</Tip>} value={shipState} onChange={v=>{setShipState(v)}} name="shipping-address-level1" autoComplete="shipping address-level1">
+            <div style={{...ST.f,marginTop:6}}><label style={ST.lbl}>Street Address</label><input id="pps-ship-street1" type="text" name="shipping-address-line1" autoComplete="shipping address-line1" value={shipAddr.street1} onChange={e=>setShipAddr(p=>({...p,street1:e.target.value}))} placeholder="Street address" style={ST.inp}/></div>
+            <div style={{...ST.f,marginTop:6}}><label style={ST.lbl}>Address Line 2 <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input id="pps-ship-street2" type="text" name="shipping-address-line2" autoComplete="shipping address-line2" value={shipAddr.street2} onChange={e=>setShipAddr(p=>({...p,street2:e.target.value}))} placeholder="Apt, suite, unit, etc." style={ST.inp}/></div>
+            <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"2fr 1fr 1fr",gap:mob?8:18,marginTop:6}}>
+              <div style={{...ST.f,...(mob?{gridColumn:"1 / -1"}:{})}}><label style={ST.lbl}>City</label><input id="pps-ship-city" type="text" name="shipping-address-level2" autoComplete="shipping address-level2" value={shipAddr.city} onChange={e=>setShipAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={ST.inp}/></div>
+              <Sel label={<Tip k="ship_state">State</Tip>} value={shipState} onChange={v=>{setShipState(v)}} selectId="pps-ship-state" name="shipping-address-level1" autoComplete="shipping address-level1">
+                <option value="">Select&hellip;</option>
                 {US_STATES.map(st=><option key={st} value={st}>{st}</option>)}
               </Sel>
-              <div style={ST.f}><label style={ST.lbl}>ZIP Code</label><input type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>{
+              <div style={ST.f}><label style={ST.lbl}>ZIP Code</label><input id="pps-ship-zip" type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>{
                 const z=e.target.value.replace(/[^\d-]/g,"").slice(0,10);
                 setShipAddr(p=>({...p,zip:z}));
               }} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
@@ -5815,14 +6366,14 @@ function App(){
             </form>
 
             {result&&!result.error?.length&&<>
-              <div style={{marginTop:10,padding:mob?"8px 10px":"10px 14px",background:CK.cyanLight,borderRadius:5,border:`1px solid ${CK.cyan}33`}}>
+              <div style={{marginTop:10,padding:mob?"8px 10px":"10px 14px",background:CC.tint,borderRadius:5,border:`1px solid ${CK.cyan}33`}}>
                 <div style={{fontSize:10.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:CK.cyan,marginBottom:2}}>Free Delivery Estimate</div>
                 <div style={{fontSize:mob?14:15,fontWeight:700,color:CC.dark}}>{r.shipping?.freeDeliveryDate}</div>
                 <div style={{fontSize:mob?10.5:11,color:CC.mid,marginTop:2}}>
                   {r.shipping?.freeDeliveryBizDays} business days
                 </div>
-                {/* Turnaround breakdown */}
-                {r.ti && (() => {
+                {/* Turnaround breakdown — internal maths, staff-gated */}
+                {debugUnlocked && r.ti && (() => {
                   const items = [
                     {l:"Base production", d:r.debug?.turnaround?.baseDays},
                     {l:"Paper lead time", d:r.ti.insidePaper + r.ti.coverPaper},
@@ -5845,20 +6396,20 @@ function App(){
                     </div>
                   );
                 })()}
-                {/* Production & ship-by dates */}
-                <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #b3dff044",display:"flex",flexWrap:"wrap",gap:"2px 16px",fontSize:10.5}}>
+                {/* Production & ship-by dates — staff-gated */}
+                {debugUnlocked && <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #b3dff044",display:"flex",flexWrap:"wrap",gap:"2px 16px",fontSize:10.5}}>
                   <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Production starts:</span> {r.shipping?.productionStartDate}</span>
                   <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Must ship by:</span> {r.shipping?.mustShipDate}</span>
                   <span style={{color: r.shipping?.effectiveTransit < r.shipping?.transitDays ? "#f59e0b" : CC.light}}>
                     ({r.shipping?.effectiveTransit}d {r.shipping?.effectiveTransit < r.shipping?.transitDays ? "overnight" : "ground"} transit)
                   </span>
-                </div>
+                </div>}
                 {!mob&&<div style={{fontSize:10,color:CC.light,marginTop:6,paddingTop:6,borderTop:"1px solid #b3dff044"}}>
                   Earliest possible: <strong style={{color:CC.mid}}>{r.shipping?.earliestDate}</strong> ({r.shipping?.earliestBizDays} business days)
                 </div>}
-                <div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,...(mob?{paddingTop:4,borderTop:"1px solid #b3dff044"}:{})}}>
-                  {mob?<>{r.shipping?.earliestDate} earliest · {r.shipping?.pastCutoff} shop time</>:<>Shop time: {r.shipping?.pastCutoff} ({PCF.shop_timezone.replace("America/","")}) · Cutoff: {PCF.shop_cutoff_hour>12?PCF.shop_cutoff_hour-12:PCF.shop_cutoff_hour}:00 {PCF.shop_cutoff_hour>=12?"PM":"AM"} · Starts: {r.shipping?.shopToday}</>}
-                </div>
+                {(mob||debugUnlocked)&&<div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,...(mob?{paddingTop:4,borderTop:"1px solid #b3dff044"}:{})}}>
+                  {mob?<>{r.shipping?.earliestDate} earliest{debugUnlocked&&<> · {r.shipping?.pastCutoff} shop time</>}</>:<>Shop time: {r.shipping?.pastCutoff} ({PCF.shop_timezone.replace("America/","")}) · Cutoff: {PCF.shop_cutoff_hour>12?PCF.shop_cutoff_hour-12:PCF.shop_cutoff_hour}:00 {PCF.shop_cutoff_hour>=12?"PM":"AM"} · Starts: {r.shipping?.shopToday}</>}
+                </div>}
               </div>
 
               <div style={ST.f}>
@@ -5892,112 +6443,120 @@ function App(){
           </Sec>
 
 
-        {mob && projections && <div style={{...ST.pnl,marginTop:10,marginBottom:100,overflow:"hidden"}}>
-          <div style={{padding:"10px 14px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
-            {debugUnlocked&&(
-                  <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3,marginLeft:"auto",marginRight:8}}>
-                    <span style={{fontSize:9,fontWeight:700,color:CC.light,textTransform:"uppercase",letterSpacing:".4px"}}>Adjust Table</span>
-                    <input type="text" inputMode="decimal" value={tableAdjPct} onChange={e=>setTableAdjPct(e.target.value)} placeholder="0"
-                      style={{width:46,padding:"2px 5px",fontSize:11,textAlign:"right",border:`1px solid ${(parseFloat(tableAdjPct)||0)!==0?CK.magenta:CC.border}`,borderRadius:4,fontFamily:"inherit",color:CC.dark,background:"#fff",outline:"none"}}/>
-                    <span style={{fontSize:10,color:CC.light,fontWeight:600}}>%</span>
-                    {(parseFloat(tableAdjPct)||0)!==0&&<span style={{fontSize:9,fontWeight:700,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
-                  </span>
-                )}
-                <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
-          </div>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
-            <thead>
-              <tr style={{borderBottom:`1px solid ${CC.border}`}}>
-                <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Qty</th>
-                <th style={{padding:"6px 4px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Unit</th>
-                <th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:600,color:CC.light,textTransform:"uppercase"}}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {projections.map((p,i) => p.total !== null && (
-                <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?"#f0f9ff":"transparent"}}
-                  onClick={() => {if(!p.current) upSet(0,{qty:p.qty})}}>
-                  <td style={{padding:"5px 10px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>{p.qty.toLocaleString()}{p.current&&" ●"}</td>
-                  <td style={{padding:"5px 4px",textAlign:"right",color:CC.mid}}>${p.perUnit.toFixed(2)}</td>
-                  <td style={{padding:"5px 10px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toFixed(0)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>}
+        {/* Discount code on mobile — the rail (and its field) is desktop-only. */}
+        {mob&&<div style={{...ST.card,padding:"12px 14px",marginBottom:100}}>{discountField()}</div>}
         </div>
-        {!mob&&<div style={{width:320,flexShrink:0,display:"flex",flexDirection:"column",gap:10}}>
+        {!mob&&<div ref={railRef} style={{width:320,flexShrink:0,position:"sticky",top:16,alignSelf:"flex-start"}}>
+          {/* Sticky quote rail — the price and CTA stay in view while the job is built,
+              instead of scrolling away on long configurations. */}
           <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
-            <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
-            <Panel result={result} debugUnlocked={debugUnlocked}/>
+            <SidebarBookPreview sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={openPreview}/>
+            <div><Panel result={result} debugUnlocked={debugUnlocked} coupon={coupon} totalRef={setTotalEl}/></div>
           </div>
-          {missingDest && <div style={{marginTop:10,fontSize:12,fontWeight:600,color:"#dc2626",lineHeight:1.35}}>{missingDestMsg}</div>}
-          <button type="button" onClick={handleAddToOrder} style={{width:"100%",padding:"14px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:15,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",transition:"opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
+          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",marginTop:16,padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
+          {/* Shipping is required to place the order, but the CTA keeps its own label —
+              a button that renames itself to describe a missing field reads as broken.
+              Pressing it jumps to the shipping section. */}
+          {missingDest && (
+            <div style={{marginTop:7,fontSize:12,fontWeight:600,color:CC.red,lineHeight:1.35}}>
+              {missingDestMsg}
+            </div>
+          )}
+          {/* Discount code — one definition, mounted here and in the mobile flow. */}
+          <div style={{marginTop:10}}>{discountField()}</div>
+          {/* Secondary action, directly under the CTA: visible without scrolling past
+              the pricing table, which is where it used to sit. */}
+          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}}
+            style={{width:"100%",marginTop:9,padding:"11px 10px",borderRadius:9,border:`1px solid ${CK.cyan}55`,
+              background:CC.tint,color:CK.cyan,fontSize:13,fontWeight:650,cursor:"pointer",fontFamily:"inherit",
+              transition:"all .2s"}}>
+            Ask a question about this quote →
+          </button>
           {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
-            <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light}}>Quantity Pricing</div>
-              {debugUnlocked&&(
-                  <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3,marginLeft:"auto",marginRight:8}}>
+            <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light,minWidth:0,flex:"1 1 auto",lineHeight:1.5}}>Quantity Pricing
+                {(parseFloat(tableAdjPct)||0)!==0&&<span style={{marginLeft:6,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
+                {couponActive&&<span style={{marginLeft:6,color:CK.cyan,letterSpacing:".3px",whiteSpace:"nowrap"}}>{coupon.code} applied</span>}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:"auto"}}>
+                {debugUnlocked&&(
+                  <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3}}>
                     <span style={{fontSize:9,fontWeight:700,color:CC.light,textTransform:"uppercase",letterSpacing:".4px"}}>Adjust Table</span>
                     <input type="text" inputMode="decimal" value={tableAdjPct} onChange={e=>setTableAdjPct(e.target.value)} placeholder="0"
                       style={{width:46,padding:"2px 5px",fontSize:11,textAlign:"right",border:`1px solid ${(parseFloat(tableAdjPct)||0)!==0?CK.magenta:CC.border}`,borderRadius:4,fontFamily:"inherit",color:CC.dark,background:"#fff",outline:"none"}}/>
                     <span style={{fontSize:10,color:CC.light,fontWeight:600}}>%</span>
-                    {(parseFloat(tableAdjPct)||0)!==0&&<span style={{fontSize:9,fontWeight:700,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
                   </span>
                 )}
                 <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
+              </div>
             </div>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
               <thead>
                 <tr style={{borderBottom:`1px solid ${CC.border}`}}>
-                  <th style={{padding:"7px 14px",textAlign:"left",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Qty</th>
-                  <th style={{padding:"7px 6px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Unit</th>
-                  <th style={{padding:"7px 14px",textAlign:"right",fontSize:9.5,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Total</th>
+                  <th style={{padding:"7px 18px",textAlign:"left",fontSize:10,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Qty</th>
+                  <th style={{padding:"7px 10px",textAlign:"right",fontSize:10,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Unit</th>
+                  <th style={{padding:"7px 18px",textAlign:"right",fontSize:10,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Total</th>
                 </tr>
               </thead>
               <tbody>
-                {projections.map((p,i) => p.total !== null && (
-                  <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?"#f0f9ff":"transparent",cursor:p.current?"default":"pointer"}}
-                    onClick={() => {if(!p.current) upSet(0,{qty:p.qty})}}>
-                    <td style={{padding:"6px 14px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>
-                      {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
-                    </td>
-                    <td style={{padding:"6px 6px",textAlign:"right",color:CC.mid,fontWeight:500}}>${p.perUnit.toFixed(2)}</td>
-                    <td style={{padding:"6px 14px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                  </tr>
-                ))}
+                {(()=>{
+                  // Collapsed, the table is a window centred on the selected quantity —
+                  // two rows either side, held at five rows even when the selection sits
+                  // at one end, so the neighbours a customer wants to compare are the
+                  // ones on screen. Expanded shows every tier.
+                  const rows=projections.filter(p=>p.total!==null);
+                  const ci=Math.max(0,rows.findIndex(p=>p.current));
+                  const WIN=2;
+                  let lo=Math.max(0,ci-WIN), hi=Math.min(rows.length-1,ci+WIN);
+                  while(hi-lo<WIN*2 && (lo>0||hi<rows.length-1)){ if(lo>0)lo--; else hi++; }
+                  const shown=projOpen?rows:rows.slice(lo,hi+1);
+                  // With a code applied every tier is re-priced through the same netOf()
+                  // the price card uses. The list price stays visible, struck through, so
+                  // the table still shows what the job costs as well as what they pay.
+                  const money=n=>n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+                  return shown.map((p,i)=>{
+                    const nT=couponActive?netOf(p.total):null;
+                    const nU=nT!=null&&p.qty>0?nT/p.qty:null;
+                    return (
+                    <tr key={p.qty} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?CC.rowHi:"transparent",cursor:p.current?"default":"pointer"}}
+                      onClick={() => {if(!p.current) upSet(0,{qty:p.qty})}}>
+                      <td style={{padding:"6px 18px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>
+                        {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
+                      </td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:CC.mid,fontWeight:500}}>
+                        {nU!=null
+                          ? <><div style={{fontSize:10,color:CC.light,textDecoration:"line-through",lineHeight:1.15}}>${p.perUnit.toFixed(2)}</div>
+                              <div style={{color:CK.cyan,fontWeight:600,lineHeight:1.2}}>${nU.toFixed(2)}</div></>
+                          : <>${p.perUnit.toFixed(2)}</>}
+                      </td>
+                      <td style={{padding:"6px 18px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>
+                        {nT!=null
+                          ? <><div style={{fontSize:10,color:CC.light,textDecoration:"line-through",fontWeight:500,lineHeight:1.15}}>${money(p.total)}</div>
+                              <div style={{color:CK.cyan,fontWeight:p.current?700:600,lineHeight:1.2}}>${money(nT)}</div></>
+                          : <>${money(p.total)}</>}
+                      </td>
+                    </tr>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
+            {(()=>{
+              const n=projections.filter(p=>p.total!==null).length;
+              if(n<=5) return null;
+              return <button type="button" onClick={()=>setProjOpen(v=>!v)}
+                style={{width:"100%",padding:"9px 10px",border:"none",borderTop:`1px solid ${CC.border}`,
+                  background:CC.track,color:CK.cyan,fontSize:12,fontWeight:500,letterSpacing:".01em",
+                  cursor:"pointer",fontFamily:"inherit"}}>
+                {projOpen?"Show fewer ▴":"Show more ▾"}
+              </button>;
+            })()}
           </div>}
-          <button type="button" onClick={handleAddToOrder} disabled={!!result?.error?.length||submitting} style={{width:"100%",marginTop:10,padding: submitting && uploadProgress ? "10px 12px 6px" : "12px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,transition:"all .2s",overflow:"hidden"}}>
-            {submitting && uploadProgress ? (
-              <div>
-                <div style={{marginBottom:6}}>
-                  {uploadProgress.phase === "upload"
-                    ? `Uploading${uploadProgress.fileCount > 1 ? ` file ${uploadProgress.fileIdx + 1}/${uploadProgress.fileCount}` : ""}… ${uploadProgress.pct}%`
-                    : "Adding to cart…"
-                  }
-                </div>
-                <div style={{width:"100%",height:4,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden"}}>
-                  <div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width: uploadProgress.phase === "upload"
-                    ? `${((uploadProgress.fileIdx / uploadProgress.fileCount) + (uploadProgress.pct / 100 / uploadProgress.fileCount)) * 100}%`
-                    : "100%"
-                  }}/>
-                </div>
-                {uploadProgress.phase === "upload" && uploadProgress.fileName && (
-                  <div style={{fontSize:10,fontWeight:500,opacity:.7,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{uploadProgress.fileName}</div>
-                )}
-              </div>
-            ) : submitting ? "Uploading artwork…" : "Add to Order"}
-          </button>
-          <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:4,border:`1px solid ${shareCopied?"#86efac":"#ddd"}`,background:shareCopied?"#f0fdf4":"#fafafa",color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
-            {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
+          <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"9px",borderRadius:9,border:`1px solid ${shareCopied?"#86efac":CC.border}`,background:shareCopied?"#f0fdf4":CC.track,color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+            {shareCopied ? "✓ Link copied to clipboard" : "Save configuration"}
           </button>
           {switchTargets.length > 0 && <div style={{display:"flex",gap:6,marginTop:8}}>
-            {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} target="_blank" rel="noopener" style={{flex:1,display:"block",padding:"8px 6px",borderRadius:4,border:"1px solid #dbeafe",background:"#eff6ff",color:"#1d4ed8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}
-              onMouseOver={e=>{e.currentTarget.style.background="#dbeafe";e.currentTarget.style.borderColor="#93c5fd"}}
-              onMouseOut={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor="#dbeafe"}}>
+            {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} target="_blank" rel="noopener" style={{flex:1,display:"block",padding:"8px 6px",borderRadius:9,border:`1px solid ${CC.tintBorder}`,background:CC.tint,color:CK.cyan,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}>
               Try as {t.label} →
             </a>)}
           </div>}
@@ -6011,9 +6570,6 @@ function App(){
             </div>
           );})()}
           {debugUnlocked&&showDebug&&<DebugPanel debug={result?.debug}/>}
-          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px solid ${CK.cyan}55`,background:"#fff",color:CK.cyan,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
-            Have a question about this quote? →
-          </button>
           {debugUnlocked && showDebug && schemaData && (
             <div style={{...ST.pnl, marginTop:10}}>
               <div style={{padding:"10px 16px",background:"#1a1a1a",borderBottom:"1px solid #333",display:"flex",alignItems:"center",gap:8}}>
@@ -6068,15 +6624,48 @@ function App(){
         </div>}
       </div>
 
+      {/* Desktop condensed total — only while the price card is off screen. Tracked to
+          the rail's own column so it reads as the rail folding up rather than as a new
+          element arriving. Same numbers, same action, one line. */}
+      {!mob&&miniBar&&result&&!result.error?.length&&(()=>{
+        const _t=Math.max(0,result.total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+        const _sh=result.shipping;
+        const _when=_sh?(_sh.needByFmt||((_sh.hasDest)?(((_sh.rushCost>0)&&_sh.needByFmt)?_sh.needByFmt:_sh.freeDeliveryDate):_sh.earliestDate)):null;
+        const _net=couponActive?netOf(result.total):null;
+        return <Float><div style={{position:"fixed",bottom:16,left:miniBar.left,width:miniBar.width,zIndex:9990,
+          background:CC.white,border:`1px solid ${CC.border}`,borderRadius:12,
+          boxShadow:"0 6px 24px rgba(16,24,40,.16)",padding:"10px 12px",
+          display:"flex",alignItems:"center",gap:10,animation:"pps-mini-in .22s ease-out"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:19,fontWeight:800,color:CC.dark,lineHeight:1.05}}>${_t}</div>
+            <div style={{fontSize:10.5,color:missingDest?CC.red:CC.light,fontWeight:600,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {missingDest ? missingDestMsg
+                           : `${(result.tQ||0).toLocaleString()} qty${_when?` · ${_sh&&_sh.needByFmt?"delivery by":"as soon as"} ${_when}`:""}`}
+            </div>
+            {/* The condensed bar is the only price on screen once the card scrolls off,
+                so it cannot be the one place a live code goes unmentioned. */}
+            {_net!=null&&<div style={{fontSize:10.5,fontWeight:700,color:CK.cyan,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {coupon.code} · you pay ${_net.toFixed(2)}
+            </div>}
+          </div>
+          <button type="button" onClick={handleAddToOrder} disabled={submitting}
+            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.light:CK.cyan,
+              color:"#fff",fontSize:14,fontWeight:750,cursor:submitting?"default":"pointer",fontFamily:"inherit",
+              opacity:submitting?.5:1,whiteSpace:"nowrap"}}>
+            {submitting?"Adding…":"Add to Order"}
+          </button>
+        </div></Float>;
+      })()}
+
       {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
-      {mob&&!qOpen&&!mobExpanded&&(
-        <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{position:"fixed",bottom:"calc(70px + env(safe-area-inset-bottom))",right:12,zIndex:9989,padding:"7px 13px",borderRadius:16,border:`1px solid ${CK.cyan}`,background:"#fff",color:CK.cyan,fontSize:11.5,fontWeight:700,boxShadow:"0 2px 8px rgba(0,0,0,.12)",cursor:"pointer",fontFamily:"inherit"}}>
+      {mob&&!qOpen&&!mobExpanded&&(<Float>
+        <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}} style={{position:"fixed",bottom:"calc(var(--pps-bottombar, 70px) + 8px)",right:12,zIndex:9989,padding:"7px 13px",borderRadius:16,border:`1px solid ${CK.cyan}`,background:CC.white,color:CK.cyan,fontSize:11.5,fontWeight:700,boxShadow:"0 2px 8px rgba(0,0,0,.12)",cursor:"pointer",fontFamily:"inherit"}}>
           Have a question? →
         </button>
-      )}
+      </Float>)}
 
       {/* Fixed bottom bar — mobile */}
-      {mob&&<>
+      {mob&&<Float>
         {debugUnlocked&&showDebug&&<div style={{position:"fixed",bottom:76,left:0,right:0,zIndex:9989,maxHeight:"60vh",overflowY:"auto",background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.12)",padding:"0 10px 10px",paddingBottom:"env(safe-area-inset-bottom)"}}>
           <DebugPanel debug={result?.debug}/>
           {schemaData && (
@@ -6097,10 +6686,11 @@ function App(){
             </div>
           )}
         </div>}
-        <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:9990,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
+        <div ref={bottomBarRef} style={{position:"fixed",bottom:0,left:0,right:0,zIndex:9990,background:CC.white,borderTop:`1px solid ${CC.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)",padding:"8px 10px",paddingBottom:"max(8px, env(safe-area-inset-bottom))"}}>
+        {missingDest&&<div style={{fontSize:11,fontWeight:600,color:CC.red,lineHeight:1.35,padding:"0 4px 6px"}}>{missingDestMsg}</div>}
         <div style={{display:"flex",flexDirection:mobExpanded?"column":"row",alignItems:mobExpanded?"stretch":"center",gap:10}}>
           <div style={{flex:mobExpanded?undefined:1,minWidth:0}}>
-            <Panel result={result} compact expanded={mobExpanded} onToggleExpand={()=>setMobExpanded(p=>!p)}/>
+            <Panel result={result} compact debugUnlocked={debugUnlocked} coupon={coupon} expanded={mobExpanded} onToggleExpand={()=>setMobExpanded(p=>!p)}/>
             {debugUnlocked&&<div style={{fontSize:8,textAlign:"center",color:showDebug?CK.cyan:CC.light,marginTop:2,letterSpacing:".5px",textTransform:"uppercase",fontWeight:600,cursor:"pointer"}} onClick={()=>setShowDebug(p=>!p)}>{showDebug?"▼ Hide Debug":"▲ Debug"}</div>}
           </div>
           <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined,width:mobExpanded?"100%":undefined}}
@@ -6119,12 +6709,12 @@ function App(){
           </button>
         </div>
       </div>
-      </>}
+      </Float>}
 
       {/* Question modal — overlay rendered at App root */}
-      {qOpen && (
+      {qOpen && (<Float>
         <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"min(8vh,60px) 16px 16px",overflowY:"auto"}} onClick={resetQuestionForm}>
-          <div style={{background:"#fff",borderRadius:8,maxWidth:520,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
+          <div style={{background:CC.white,borderRadius:16,maxWidth:520,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
             <div style={{padding:"16px 20px",borderBottom:`1px solid ${CC.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:15,fontWeight:700,color:CC.dark}}>Have a question about this quote?</div>
               <button type="button" onClick={resetQuestionForm} style={{background:"none",border:"none",fontSize:22,lineHeight:1,color:CC.light,cursor:"pointer",padding:0,marginLeft:12}} aria-label="Close">×</button>
@@ -6169,7 +6759,7 @@ function App(){
             )}
           </div>
         </div>
-      )}
+      </Float>)}
     </div>
   );
 }
@@ -6177,26 +6767,49 @@ function App(){
 // ═══════════════════════════════════════════════════════════════
 // STYLES
 // ═══════════════════════════════════════════════════════════════
-const ST = {
-  f:{marginTop:10},
-  lbl:{display:"block",fontSize:13,fontWeight:600,color:CC.mid,marginBottom:5},
-  sel:{width:"100%",padding:"10px 32px 10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"linear-gradient(180deg, #fff 0%, #f9f9fa 100%)",fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 3px rgba(0,0,0,.04)"},
-  selA:{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
-  inp:{width:"100%",padding:"10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"linear-gradient(180deg, #fff 0%, #f9f9fa 100%)",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 3px rgba(0,0,0,.04)"},
-  pills:{display:"flex",borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,.06)"},
-  pill:{flex:1,padding:"9px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRight:`1px solid ${CC.border}`,background:`linear-gradient(180deg, #fff 0%, #f7f7f8 100%)`,color:"#555",cursor:"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"inset 0 1px 0 rgba(255,255,255,.8), inset 0 -1px 0 rgba(0,0,0,.04)"},
-  pillOn:{background:`linear-gradient(135deg, ${CK.cyan} 0%, #0070e6 40%, #3d9cff 50%, #0070e6 60%, #005cc8 100%)`,color:"#fff",fontWeight:600,boxShadow:"inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(0,0,0,.15), 0 1px 3px rgba(0,126,255,.2)"},
-  row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12},
-  row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12},
-  hr:{height:1,background:"#eee",margin:"14px 0 4px"},
-  setBox:{marginTop:10,padding:12,borderRadius:4,background:"#fafafa",border:"1px solid #eee"},
-  addBtn:{width:"100%",marginTop:10,padding:"10px",borderRadius:4,border:`1px dashed ${CK.cyan}`,background:CC.white,color:CK.cyan,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"},
-  err:{color:CC.red,fontSize:13,margin:"8px 0 0",padding:"8px 10px",background:"#fef2f2",borderRadius:4,border:"1px solid #f5cccc"},
-  note:{fontSize:12,color:CC.light,margin:"4px 0 0"},
-  card:{background:CC.white,borderRadius:6,border:`1px solid ${CC.border}`,borderLeft:`3px solid ${CC.primary}`,overflow:"hidden"},
-  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"#fafafa",border:"none",borderBottom:"1px solid #eee",cursor:"pointer",fontFamily:"inherit",fontSize:15},
-  pnl:{background:CC.white,borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden"},
-};
+function buildST(){ return {
+  f:{marginTop:18},
+  lbl:{display:"block",fontSize:14,fontWeight:600,color:CC.mid,marginBottom:7,letterSpacing:".005em"},
+  sel:{width:"100%",padding:"20px 34px 20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:CC.white,fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  selA:{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
+  inp:{width:"100%",padding:"20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:CC.white,fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  // Segmented control: inset track + flat brand thumb (replaces the bevelled 5-stop gradient)
+  pills:{display:"flex",borderRadius:10,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.track,padding:3,gap:3,boxShadow:"inset 0 1px 2px rgba(16,24,40,.04)"},
+  pill:{flex:1,padding:"17px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRadius:7,background:"transparent",color:CC.mid,cursor:"pointer",transition:"all .18s cubic-bezier(.4,0,.2,1)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
+  pillOn:{background:CK.cyan,color:"#fff",fontWeight:600,boxShadow:"0 1px 2px rgba(0,126,255,.35)"},
+  row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18},
+  row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:18},
+  hr:{height:1,background:CC.border,margin:"16px 0 4px"},
+  setBox:{marginTop:12,padding:14,borderRadius:10,background:CC.track,border:`1px solid ${CC.border}`},
+  addBtn:{width:"100%",marginTop:12,padding:"11px",borderRadius:10,border:`1px dashed ${CC.border}`,background:CC.white,color:CK.cyan,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .15s ease"},
+  err:{color:CC.red,fontSize:13,margin:"10px 0 0",padding:"10px 12px",background:CC.errBg,borderRadius:9,border:`1px solid ${CC.errBorder}`},
+  note:{fontSize:12,color:CC.light,margin:"5px 0 0"},
+  // Section cards: the old left-edge accent stripe is gone; depth now comes from a
+  // layered shadow instead of a hard border.
+  card:{background:CC.white,borderRadius:14,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(16,24,40,.04), 0 2px 6px rgba(16,24,40,.03)"},
+  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"15px 18px",background:CC.white,border:"none",borderBottom:`1px solid ${CC.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:15},
+  pnl:{background:CC.white,borderRadius:14,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(16,24,40,.04), 0 6px 16px rgba(16,24,40,.05)"},
+  secSub:{margin:"3px 0 0",fontSize:11.5,fontWeight:400,color:CC.light,lineHeight:1.4,textTransform:"none",letterSpacing:0},
+  brkBar:{height:8,borderRadius:99,background:"#eef2f6",overflow:"hidden",display:"flex",marginBottom:10},
+  specCard:{background:CC.dark,color:"#e2e8f0",borderRadius:12,padding:"16px 18px",marginTop:16,fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"},
+  specEye:{fontSize:10,letterSpacing:".14em",opacity:.55,marginBottom:10},
+  specGrid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px 14px",fontSize:12},
+}; }
+const ST = buildST();
+
+/**
+ * Swap theme in place. CC/ST are module-level objects read at render time, so
+ * mutating them and re-rendering repaints everything — no theme prop threading.
+ */
+function pps_applyTheme( name ) {
+  const p = PALETTES[ name ] || PALETTES.light;
+  Object.assign( CC, p );
+  const next = buildST();
+  for ( const k in ST ) delete ST[ k ];
+  Object.assign( ST, next );
+  CHIP = buildCHIP();
+  if ( typeof document !== "undefined" ) document.documentElement.dataset.ppsTheme = name;
+}
 
 // Mount
 ReactDOM.createRoot(document.getElementById('pps-calculator-root'))
