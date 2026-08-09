@@ -189,6 +189,12 @@ ul.products{max-width:var(--pps-max-w,1200px)!important;margin-left:auto!importa
 .term-description ul li{padding:6px 0 6px 22px;position:relative;font-size:15px;color:#475569;line-height:1.6}
 .term-description ul li::before{content:"\25B8";position:absolute;left:0;color:#007eff;font-weight:700}
 
+/* ── Attribute section (echoed after the product grid, so outside .term-description) ── */
+.pps-cat-attributes{border-top:1px solid #e2e8f0;padding-top:28px}
+.pps-cat-attributes h2{font-size:20px;font-weight:700;color:#0f172a;margin:32px 0 12px;padding:0 0 0 14px;border-left:3px solid #007eff;border-bottom:none;line-height:1.3}
+.pps-cat-attributes h2:first-child{margin-top:0}
+.pps-cat-attributes h3{font-size:15px;font-weight:600;color:#1e293b;margin:18px 0 8px}
+
 /* ── Features list (papers, coatings, add-ons) ── */
 .pps-cat-features{list-style:none;padding:0;margin:14px 0 24px;columns:2;column-gap:32px}
 .pps-cat-features li{padding:5px 0 5px 20px;position:relative;font-size:14px;color:#475569;line-height:1.6;break-inside:avoid}
@@ -538,9 +544,15 @@ add_filter( 'woocommerce_show_page_title', function( $show ) {
 } );
 
 
+// ── Attribute blocks ──────────────────────────────────────────────────────────
+//
+// Each block is a named render function so it can be emitted from two places:
+// the individual [pps_cat_*] shortcodes, and the deferred attributes section
+// that [pps_cat_attributes] queues up for after the product grid.
+
 // ── [pps_cat_papers type="text|cover|all" factory="yes|no"] ──
 
-add_shortcode( 'pps_cat_papers', function( $atts ) {
+function pps_cat_render_papers( $atts = array() ) {
     if ( ! function_exists( 'pps_get_config' ) ) return '';
     $a   = shortcode_atts( array( 'type' => 'all', 'factory' => 'yes', 'link' => '' ), $atts );
     $cfg = pps_get_config();
@@ -593,11 +605,13 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
     }
     $out .= '</ul>';
     return $out;
-} );
+}
+
+add_shortcode( 'pps_cat_papers', 'pps_cat_render_papers' );
 
 // ── [pps_cat_turnaround] ──
 
-add_shortcode( 'pps_cat_turnaround', function() {
+function pps_cat_render_turnaround() {
     if ( ! function_exists( 'pps_get_config' ) ) return '';
     $cfg  = pps_get_config();
     $days = isset( $cfg['pcf']['minimum_turnaround_days'] ) ? intval( $cfg['pcf']['minimum_turnaround_days'] ) : 3;
@@ -609,11 +623,13 @@ add_shortcode( 'pps_cat_turnaround', function() {
          . 'Our pricing calculator shows real-time delivery dates based on your ZIP code &mdash; '
          . 'you&#8217;ll see an accurate eta before the order is placed.'
          . '</p></div>';
-} );
+}
+
+add_shortcode( 'pps_cat_turnaround', 'pps_cat_render_turnaround' );
 
 // ── [pps_cat_coatings] ──
 
-add_shortcode( 'pps_cat_coatings', function() {
+function pps_cat_render_coatings() {
     if ( ! function_exists( 'pps_get_config' ) ) return '';
     $cfg      = pps_get_config();
     $coatings = isset( $cfg['coatings'] ) ? $cfg['coatings'] : array();
@@ -631,11 +647,13 @@ add_shortcode( 'pps_cat_coatings', function() {
     }
     $out .= '</div>';
     return $out;
-} );
+}
+
+add_shortcode( 'pps_cat_coatings', 'pps_cat_render_coatings' );
 
 // ── [pps_cat_addons calc="brochure"] ──
 
-add_shortcode( 'pps_cat_addons', function( $atts ) {
+function pps_cat_render_addons( $atts = array() ) {
     if ( ! function_exists( 'pps_get_addons_visibility' ) ) return '';
     $a    = shortcode_atts( array( 'calc' => '' ), $atts );
     $calc = $a['calc'];
@@ -670,7 +688,168 @@ add_shortcode( 'pps_cat_addons', function( $atts ) {
     }
     $out .= '</div>';
     return $out;
+}
+
+add_shortcode( 'pps_cat_addons', 'pps_cat_render_addons' );
+
+
+// ── [pps_cat_attributes] — the spec blocks, rendered after the product links ───
+//
+// A category page is assembled from three sources: the hand-authored term
+// description (printed before the product loop), the WooCommerce product loop,
+// and the plugin hooks below it. The attribute blocks used to be written into
+// the term description, which forced them *above* the product grid. This
+// shortcode is a marker: on a product-category archive it prints nothing where
+// it sits, records what to render, and the flush below emits it after the grid
+// and the preset lineup — so the page reads
+//
+//     masthead → wizard → prose → product links → attributes → footer.
+//
+// Anywhere else (a page, a widget) it renders inline like a normal shortcode,
+// and the individual [pps_cat_*] shortcodes are still registered above for
+// authors who want a single block in a specific spot.
+//
+// Headings live here rather than in the term description precisely because the
+// section moves: markup echoed from a hook is outside .term-description, so it
+// would not pick up that scoped heading styling.
+
+/**
+ * True when attribute blocks should be deferred to after the product loop.
+ *
+ * The defer test and the flush guard must agree, or a deferred block is
+ * recorded and never printed — so both go through this one predicate.
+ */
+function pps_cat_defer_attributes() {
+    if ( is_admin() || ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() ) ) return false;
+    if ( ! function_exists( 'is_product_category' ) ) return false;
+    return is_product_category() || is_product_taxonomy();
+}
+
+/**
+ * Holds the attribute sections queued during the term description render.
+ *
+ * @param string $op   'push' to queue $args, 'take' to drain the queue.
+ * @param array  $args Shortcode atts, when pushing.
+ * @return array Queued att sets, when taking.
+ */
+function pps_cat_attributes_store( $op, $args = array() ) {
+    static $queue   = array();
+    static $flushed = false;
+
+    if ( $op === 'push' ) {
+        // Keyed, not appended: SEO plugins run the term description through
+        // do_shortcode a second time to build a meta description, which would
+        // otherwise queue the same section twice.
+        $queue[ md5( (string) wp_json_encode( $args ) ) ] = $args;
+        return array();
+    }
+
+    if ( $op === 'take' ) {
+        // Only latch once something was actually rendered, so a later hook can
+        // still print a section that was queued after the first flush point.
+        if ( $flushed || empty( $queue ) ) return array();
+        $flushed = true;
+        $out     = $queue;
+        $queue   = array();
+        return $out;
+    }
+
+    return array();
+}
+
+function pps_cat_render_attributes( $atts = array() ) {
+    $a = shortcode_atts( array(
+        'turnaround'       => 'yes',
+        'papers'           => '',   // comma list of text|cover; empty = no paper block
+        'papers_heading'   => 'Paper Options',
+        'text_label'       => 'Text Weight',
+        'cover_label'      => 'Cardstock',
+        'coatings'         => 'no',
+        'coatings_heading' => 'Coatings',
+        'addons'           => '',   // calc slug for the add-on grid; empty = none
+        'addons_heading'   => 'Finishing Add-ons',
+        'factory'          => 'yes',
+        'link'             => '',
+    ), $atts );
+
+    // Intersect against the known list so the order is always text-then-cover
+    // regardless of how the atts were written, and junk values are dropped.
+    $types = array_map( 'trim', explode( ',', strtolower( $a['papers'] ) ) );
+    $types = array_values( array_intersect( array( 'text', 'cover' ), $types ) );
+
+    $blocks = '';
+
+    if ( $a['turnaround'] === 'yes' ) {
+        $blocks .= pps_cat_render_turnaround();
+    }
+
+    if ( ! empty( $types ) ) {
+        $papers = '';
+        // A single stock reads fine under the section heading alone.
+        $sub = count( $types ) > 1;
+        foreach ( $types as $type ) {
+            $body = pps_cat_render_papers( array(
+                'type'    => $type,
+                'factory' => $a['factory'],
+                'link'    => $a['link'],
+            ) );
+            if ( $body === '' ) continue;
+            if ( $sub ) {
+                $label   = $type === 'text' ? $a['text_label'] : $a['cover_label'];
+                $papers .= '<h3>' . esc_html( $label ) . '</h3>';
+            }
+            $papers .= $body;
+        }
+        if ( $papers !== '' ) {
+            $blocks .= '<h2>' . esc_html( $a['papers_heading'] ) . '</h2>' . $papers;
+        }
+    }
+
+    if ( $a['coatings'] === 'yes' ) {
+        $body = pps_cat_render_coatings();
+        if ( $body !== '' ) {
+            $blocks .= '<h2>' . esc_html( $a['coatings_heading'] ) . '</h2>' . $body;
+        }
+    }
+
+    if ( $a['addons'] !== '' ) {
+        $body = pps_cat_render_addons( array( 'calc' => $a['addons'] ) );
+        if ( $body !== '' ) {
+            $blocks .= '<h2>' . esc_html( $a['addons_heading'] ) . '</h2>' . $body;
+        }
+    }
+
+    if ( $blocks === '' ) return '';
+
+    return '<div class="pps-cat-body pps-cat-attributes">' . $blocks . '</div>';
+}
+
+add_shortcode( 'pps_cat_attributes', function( $atts ) {
+    $atts = is_array( $atts ) ? $atts : array();
+
+    if ( pps_cat_defer_attributes() ) {
+        pps_cat_attributes_store( 'push', $atts );
+        return '';
+    }
+
+    return pps_cat_render_attributes( $atts );
 } );
+
+function pps_cat_flush_attributes() {
+    if ( ! pps_cat_defer_attributes() ) return;
+
+    foreach ( pps_cat_attributes_store( 'take' ) as $atts ) {
+        echo pps_cat_render_attributes( $atts ); // escaped as it is assembled
+    }
+}
+
+// After the preset lineup (priority 15) when the category has products, after
+// the empty-archive notice when it has none, and a backstop for templates that
+// fire neither. The store latches on the first flush that prints something.
+add_action( 'woocommerce_after_shop_loop',    'pps_cat_flush_attributes', 20 );
+add_action( 'woocommerce_no_products_found',  'pps_cat_flush_attributes', 20 );
+add_action( 'woocommerce_after_main_content', 'pps_cat_flush_attributes', 5 );
+
 
 // ── Dynamic business-card wizard config from WooCommerce products ──
 
