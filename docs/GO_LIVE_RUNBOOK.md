@@ -94,7 +94,7 @@ Each group is a candidate, not a verdict — the gate is "plugin not installed":
 | ProjectHuddle | `wp_ph_members`, `wp_ph_thread_members` | Feedback tool — defunct if uninstalled. |
 | Ultimate Member VIP | `wp_um_vip_users` | Defunct if UM uninstalled. |
 | JetEngine | `wp_jet_post_types`, `wp_jet_taxonomies` | Defunct if uninstalled — verify no CPTs/taxonomies in use came from it first. |
-| Groups | `wp_groups_*` (5) | Was it used for wholesale pricing/roles? **Owner call** — if never used, drop. |
+| Groups | `wp_groups_*` (5) | **Owner decision 2026-08-09: never used — drop all 5** (and delete the plugin if installed). |
 | Save/Share Cart | `wp_wcss_saved_cart`, `wp_wcss_shared_cart` | Drop if uninstalled. |
 | Woo File Dropzone (old upload flow) | `wp_woo_file_dropzone` | Superseded by the Drive upload flow. Uploads in section D. |
 | One of the two image optimizers | `wp_ewwwio_images` OR `wp_imagify_*` | Two optimizers are installed; keep the active one, drop the other's tables. |
@@ -142,12 +142,15 @@ delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
 - **Old customer artwork uploads** (`wp-content/uploads/` trees from the
   NBDesigner era, Woo File Dropzone dirs, any pre-Drive WCPA upload dirs, and
   legacy local PPS artwork if any predates the Drive flow).
-  **⚠ Decision required before deleting: legacy reorders restore the original
-  artwork by path.** Deleting old uploads breaks re-ordering for the orders
-  that reference them. Recommended policy: archive everything to a Drive
-  folder (zip, labeled by year), then delete local copies older than an
-  owner-chosen cutoff (e.g. 2 years); keep anything referenced by orders
-  newer than the cutoff. Record the cutoff here when chosen: ______
+  **Owner decision 2026-08-09: thin the files — delete the old upload trees
+  outright. The owner retains offline archives going back years, so no
+  pre-delete archiving step is needed.** Known consequence, accepted: a
+  legacy reorder that references a deleted file won't auto-restore its
+  artwork — the customer re-uploads, or the file is retrieved from the
+  offline archive. Current-order artwork lives in Google Drive and is
+  unaffected. Practical guidance for the executor: keep uploads referenced
+  by orders from the last ~90 days (open/recent jobs), delete the rest of
+  the legacy upload trees.
 - Deactivated themes (Astra + child, anything not `pps-theme` and one default
   fallback like twentytwentyfour) and deleted-but-present plugin directories.
 - Image-optimizer backup originals (EWWW/Imagify keep pre-optimization copies
