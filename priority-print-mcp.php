@@ -3,7 +3,7 @@
  * Plugin Name: Priority Print MCP Tools
  * Plugin URI:  https://woocommerce-70867-4915293.cloudwaysapps.com/
  * Description: Companion plugin for AI Engine that adds custom WooCommerce, theme, plugin file management, WordPress update, and URL-download tools to the MCP server.
- * Version:     1.4.0
+ * Version:     1.5.0
  * Author:      Preston / Priority Print Service
  * License:     GPL v2 or later
  * Requires PHP: 8.0
@@ -14,6 +14,9 @@
  *  - Path traversal is blocked via realpath() validation
  *  - plugin_download_url enforces https:// only, 12MB max, 60s timeout
  *  - plugin_delete_file removes a single file only: refuses directories, this plugin's own file, and any active plugin's entry file
+ *  - Every write / download / delete calls opcache_invalidate() on the affected file, so new
+ *    bytecode takes effect on the next request even when OPcache runs with validate_timestamps=0
+ *    (the Cloudways default) -- without this a deployed .php sits on disk while stale bytecode runs
  *  - Each tool declares MCP annotations (readOnlyHint, destructiveHint)
  *  - Update tools wrap WordPress's own Plugin_Upgrader / Theme_Upgrader / Core_Upgrader
  *  - Auth is handled by AI Engine's MCP layer (bearer token)
@@ -622,6 +625,7 @@ class Priority_Print_MCP {
 		if ( ! is_dir( $dir ) ) wp_mkdir_p( $dir );
 		$bytes = file_put_contents( $full_path, $args['contents'] );
 		if ( $bytes === false ) throw new Exception( 'Could not write file.' );
+		if ( function_exists( 'opcache_invalidate' ) ) opcache_invalidate( $full_path, true );
 		return array( 'success' => true, 'relative_path' => $args['relative_path'], 'bytes_written' => $bytes );
 	}
 
@@ -674,6 +678,7 @@ class Priority_Print_MCP {
 		if ( ! is_dir( $dir ) ) wp_mkdir_p( $dir );
 		$bytes = file_put_contents( $full_path, $args['contents'] );
 		if ( $bytes === false ) throw new Exception( 'Could not write file.' );
+		if ( function_exists( 'opcache_invalidate' ) ) opcache_invalidate( $full_path, true );
 		return array( 'success' => true, 'relative_path' => $args['relative_path'], 'bytes_written' => $bytes );
 	}
 
@@ -728,6 +733,8 @@ class Priority_Print_MCP {
 			throw new Exception( 'Could not write file. Check filesystem permissions.' );
 		}
 
+		if ( function_exists( 'opcache_invalidate' ) ) opcache_invalidate( $full_path, true );
+
 		return array(
 			'success'       => true,
 			'relative_path' => $args['relative_path'],
@@ -765,6 +772,7 @@ class Priority_Print_MCP {
 
 		$bytes = filesize( $full_path );
 		if ( ! unlink( $full_path ) ) throw new Exception( 'Could not delete file. Check filesystem permissions.' );
+		if ( function_exists( 'opcache_invalidate' ) ) opcache_invalidate( $full_path, true );
 		return array( 'success' => true, 'relative_path' => $args['relative_path'], 'bytes_deleted' => $bytes );
 	}
 
