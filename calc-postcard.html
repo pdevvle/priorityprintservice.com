@@ -87,6 +87,9 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 };
 </script>
 <script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: 0; }
@@ -99,13 +102,48 @@ window.ppsAnalyzePdfRisks = async function (doc) {
   .fold-face img{display:block}
   .fold-face.ff{z-index:2}
   .fold-face.fb{transform:rotateY(180deg);z-index:1}
-          button:focus-visible,[role="button"]:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid #1d6fe0 !important;outline-offset:2px;border-radius:3px;}
-@media(max-width:700px){
-    /* 56px to meet the pill toggle beside them, which sits at 56 because it carries
-       no .pps-pill class and escapes this clamp. Fields at 44 against a 56 toggle
-       read as two different form systems in one column. */
-    select,input[type="text"],input[type="number"],input[type="tel"],input[type="email"]{font-size:16px!important;padding:10px 12px!important;min-height:56px!important}
+  /* ── Modal chrome ──────────────────────────────────────────────────────────
+     Shared surface, ink and hairline tokens for modal-style overlays, so they sit
+     in the modern skin and follow the light/dark toggle with everything else.
+     Set here rather than from CC so plain CSS rules can reach them too. */
+  :root{
+    --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
+    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#94a3b8;
+    --bp-btn:#f1f4f8; --bp-scrim:rgba(15,23,42,.55);
   }
+  :root[data-pps-theme="dark"]{
+    --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
+    --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
+    --bp-btn:#0f151d; --bp-scrim:rgba(2,6,12,.66);
+  }
+  .bp-modal-bg{position:fixed;inset:0;background:var(--bp-scrim);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
+  .bp-modal{background:var(--bp-surface);border:1px solid var(--bp-line);border-radius:16px;width:90%;max-width:940px;max-height:90vh;display:flex;flex-direction:column;overflow:visible;box-shadow:0 4px 6px rgba(16,24,40,.06), 0 24px 64px rgba(16,24,40,.28)}
+  .bp-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--bp-line);flex-shrink:0;overflow:visible;border-radius:16px 16px 0 0;background:var(--bp-surface)}
+  .bp-modal-body{padding:16px 20px;overflow-y:auto;flex:1;min-height:0;border-radius:0 0 16px 16px;background:var(--bp-surface-2)}
+  .bp-modal-title{font-family:var(--pps-display);font-weight:650;letter-spacing:-0.01em;color:var(--bp-ink)}
+  .bp-mode-btn{background:var(--bp-btn);border:1px solid var(--bp-line);color:var(--bp-dim);padding:7px 18px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;transition:all .2s;font-family:inherit}
+  .bp-mode-btn:hover{background:rgba(0,126,255,.1);border-color:#007eff;color:#007eff}
+  .bp-mode-btn.on{background:#007eff;border-color:#007eff;color:#fff;box-shadow:0 2px 10px rgba(0,126,255,.3)}
+  .bp-nav-btn{background:var(--bp-btn);border:1px solid var(--bp-line);color:var(--bp-dim);width:36px;height:36px;min-width:36px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit;flex-shrink:0;box-sizing:border-box}
+  .bp-nav-btn:hover:not(:disabled){background:rgba(0,126,255,.12);border-color:#007eff;color:#007eff}
+  .bp-nav-btn:disabled{opacity:.25;cursor:not-allowed}
+  /* Segmented control, matching the form's Pil: inset track with a rounded thumb
+     rather than butted-together buttons, so the modals read as the same system. */
+  .bp-seg{display:flex;gap:3;padding:3px;border-radius:10px;border:1px solid var(--bp-line);
+    background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
+  .bp-seg-btn{padding:6px 14px;border:none;border-radius:7px;background:transparent;color:var(--bp-dim);
+    font-size:11.5px;font-weight:500;font-family:inherit;cursor:pointer;transition:all .18s cubic-bezier(.4,0,.2,1);
+    display:flex;align-items:center;justify-content:center;gap:5px}
+  .bp-seg-btn:hover:not(.on){color:#007eff}
+  .bp-seg-btn.on{background:#007eff;color:#fff;font-weight:600;box-shadow:0 1px 2px rgba(0,126,255,.35)}
+  /* View settings popover — guides, zoom and the loupe live behind a gear so the
+     page-nav row has room for the page label instead of six competing controls. */
+  .bp-viewmenu{position:absolute;top:calc(100% + 6px);right:0;z-index:70;min-width:236px;padding:8px;
+    background:var(--bp-surface);border:1px solid var(--bp-line);border-radius:12px;
+    box-shadow:0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.18)}
+  .bp-viewmenu-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 8px;border-radius:8px}
+  .bp-viewmenu-row + .bp-viewmenu-row{border-top:1px solid var(--bp-line)}
+  .bp-viewmenu-label{font-size:12px;font-weight:600;color:var(--bp-ink)}
   /* Transparency checker (Photoshop-style) — used as background where art doesn't cover */
   .bp-checker{
     background-color:#3a3e46;
@@ -117,22 +155,149 @@ window.ppsAnalyzePdfRisks = async function (doc) {
     background-size:16px 16px;
     background-position:0 0,0 8px,8px -8px,-8px 0;
   }
-  /* Approve Now CTA — strong call-to-action when art needs approval */
+  /* Approve artwork — the primary action in the proof modal.
+     It used to be a red five-stop gloss with a hard red pulse. Three alarm signals
+     stacked on the one control we actually want pressed, and red reads as
+     "something is wrong" rather than "confirm". It is now the same flat brand CTA
+     as Add to Order, with one soft brand ring to keep the nudge, and it turns
+     green once approved. */
   @keyframes bp-approve-pulse{
-    0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55),0 4px 14px rgba(239,68,68,.35)}
-    50%{box-shadow:0 0 0 6px rgba(239,68,68,0),0 4px 14px rgba(239,68,68,.35)}
+    0%,100%{box-shadow:0 0 0 0 rgba(0,126,255,.42),0 2px 10px rgba(0,126,255,.32)}
+    50%{box-shadow:0 0 0 7px rgba(0,126,255,0),0 2px 10px rgba(0,126,255,.32)}
   }
-  .bp-approve-cta{
-    background:linear-gradient(135deg,#ef4444 0%,#dc2626 40%,#f87171 50%,#dc2626 60%,#b91c1c 100%) !important;
-    color:#fff !important;
-    text-shadow:0 1px 2px rgba(0,0,0,.25);
-    animation:bp-approve-pulse 2s ease-in-out infinite;
+  /* A light sweep travels across the button on a loop. It is the one control in the
+     modal we want pressed, and flat blue read as just another button beside the proof
+     picker. The gradient is oversized and its position animated, so nothing paints
+     outside the button and there is no overlay element to sit above the label. */
+  @keyframes bp-approve-shimmer{
+    from{background-position:150% 0}
+    to{background-position:-50% 0}
   }
-  .bp-approve-cta:hover{filter:brightness(1.08)}
+  .bp-approve{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    padding:14px 23px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
+    font-size:15px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+    color:#fff;white-space:nowrap;
+    background:linear-gradient(105deg,#0062cc 0%,#007eff 34%,#8ccbff 50%,#007eff 66%,#0062cc 100%);
+    background-size:300% 100%;
+    animation:bp-approve-shimmer 2.9s linear infinite;
+    box-shadow:0 3px 14px rgba(0,126,255,.4);
+    transition:transform .15s ease,box-shadow .15s ease}
+  /* Nudge adds the expanding ring on top of the sweep; both run together. */
+  .bp-approve.nudge{animation:bp-approve-shimmer 2.9s linear infinite,
+    bp-approve-pulse 2.4s ease-in-out infinite}
+  /* Hover drops the ring but keeps the sweep — killing all animation on hover made the
+     button look dead exactly when someone was about to press it. */
+  .bp-approve:hover:not(:disabled){transform:translateY(-1px);
+    box-shadow:0 8px 22px rgba(0,126,255,.5);
+    animation:bp-approve-shimmer 1.5s linear infinite}
+  .bp-approve:active:not(:disabled){transform:translateY(0);box-shadow:0 2px 8px rgba(0,126,255,.4)}
+  /* Generating: a frozen gradient would strand a pale band mid-button, so go flat. */
+  .bp-approve:disabled{cursor:wait;animation:none;background:#0062cc;filter:saturate(.7)}
+  /* The global reduced-motion rule only shortens durations, which would freeze the
+     sweep at whatever position it stopped on. Give it a flat brand fill instead. */
+  @media (prefers-reduced-motion: reduce){
+    .bp-approve,.bp-approve.nudge,.bp-approve:hover:not(:disabled){
+      background:#007eff;background-size:auto;animation:none}
+  }
+  /* Done state: a status, not a button — flat green, no lift, no pointer. */
+  .bp-approved{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:9px;
+    background:#16a34a;color:#fff;font-size:13px;font-weight:700;letter-spacing:.01em;white-space:nowrap;
+    box-shadow:0 2px 10px rgba(22,163,74,.28)}
+  .bp-prooflabel{font-size:10px;font-weight:700;color:var(--bp-dim);letter-spacing:.08em;
+    text-transform:uppercase;flex-shrink:0}
+
+  /* Primary CTA — lifts on hover so it reads as the one thing to press. */
+  [data-pps-cta]:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06);box-shadow:0 7px 20px rgba(0,126,255,.48) !important}
+  [data-pps-cta]:active:not(:disabled){transform:translateY(0);box-shadow:0 3px 10px rgba(0,126,255,.4) !important}
+
+  /* ===== MODERN DRAFT — typography =====
+     Montserrat for display, Work Sans for UI and body, matching the site. The
+     fallbacks are the stack this page used previously, so a blocked or slow font
+     request degrades to the old look rather than to Times. */
+  :root{
+    --pps-display:'Montserrat','Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --pps-sans:'Work Sans','Segoe UI','Helvetica Neue',Arial,sans-serif;
+  }
+  body{font-family:var(--pps-sans)}
+
+  /* ===== MODERN DRAFT — motion ===== */
+  /* Select "pop" on choose. Two identical animations under different names so the
+     same element can re-trigger without being remounted — remounting a <select>
+     would drop focus and break keyboard use. */
+  @keyframes pps-pop-0{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
+  @keyframes pps-pop-1{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
+  /* Condensed desktop total sliding up as the price card leaves the viewport. */
+  @keyframes pps-mini-in{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
+  /* Job name reads as one of the header's summary pills — same chip shape, background
+     and hairline — so it belongs to the heading rather than looking like a form field
+     wedged into it. Hover/focus deepen it just enough to say it is editable. */
+  .pps-jobtitle{transition:background .15s ease, border-color .15s ease, box-shadow .15s ease}
+  .pps-jobtitle::placeholder{color:#94a3b8;font-weight:600;opacity:1}
+  .pps-jobtitle:hover:not(:focus){border-color:#cbd5e1 !important}
+  .pps-jobtitle:focus{background:#fff}
+  :root[data-pps-theme="dark"] .pps-jobtitle::placeholder{color:#7183a0}
+  :root[data-pps-theme="dark"] .pps-jobtitle:hover:not(:focus){border-color:#3b4757 !important}
+  :root[data-pps-theme="dark"] .pps-jobtitle:focus{background:#0f151d}
+  /* Anyone who has asked their OS to reduce motion gets none of it. */
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;transition-delay:0s !important;animation-delay:0s !important}
+  }
+
+  /* ===== MODERN DRAFT — interaction states & page field ===== */
+  body{background:#f6f7f9}
+  /* ── Dark mode. Most surfaces repaint via the CC/ST swap; these are the ones
+        inline styles can't reach: the page field, native select popups, and the
+        handful of hardcoded #fafafa chrome bars (React emits them as rgb()). ── */
+  html[data-pps-theme="dark"] body{background:#0d1117;color:#e6edf6}
+  html[data-pps-theme="dark"] option{background:#161b22;color:#e6edf6}
+  html[data-pps-theme="dark"] input::placeholder,html[data-pps-theme="dark"] textarea::placeholder{color:#5b6b83}
+  html[data-pps-theme="dark"] [style*="rgb(250, 250, 250)"]{background:#1a212b !important}
+  html[data-pps-theme="dark"] [style*="rgb(248, 250, 252)"]{background:#1a212b !important}
+  html[data-pps-theme="dark"] [style*="rgb(248, 248, 250)"]{background:#1a212b !important}
+  html[data-pps-theme="dark"] [style*="rgb(248, 249, 250)"]{background:#1a212b !important}
+  /* Status tints (error / warning / success banners) are pale by construction and
+     stay bright on a dark page. Their ink lives on child spans with its own inline
+     colour, so each family remaps the container AND its descendants. Matching on the
+     rgb() React emits catches every site, including ones not enumerated by hand. */
+  html[data-pps-theme="dark"] [style*="rgb(254, 242, 242)"],
+  html[data-pps-theme="dark"] [style*="rgb(254, 226, 226)"]{background:#2a1416 !important;border-color:#5b2b2f !important}
+  /* ...but NOT the controls inside them. A tinted box that wraps buttons is a
+     container, not a banner: its buttons carry their own surface and their own ink,
+     and repainting them made the labels read as error text. Form controls opt out. */
+  html[data-pps-theme="dark"] [style*="rgb(254, 242, 242)"] *:not(button):not(select):not(input):not(textarea),
+  html[data-pps-theme="dark"] [style*="rgb(254, 226, 226)"] *:not(button):not(select):not(input):not(textarea){color:#fca5a5 !important}
+  html[data-pps-theme="dark"] [style*="rgb(254, 243, 199)"],
+  html[data-pps-theme="dark"] [style*="rgb(255, 251, 235)"],
+  html[data-pps-theme="dark"] [style*="rgb(254, 252, 232)"]{background:#2a2210 !important;border-color:#5a4a1e !important}
+  html[data-pps-theme="dark"] [style*="rgb(254, 243, 199)"] *:not(button):not(select):not(input):not(textarea),
+  html[data-pps-theme="dark"] [style*="rgb(255, 251, 235)"] *:not(button):not(select):not(input):not(textarea),
+  html[data-pps-theme="dark"] [style*="rgb(254, 252, 232)"] *:not(button):not(select):not(input):not(textarea){color:#fcd34d !important}
+  html[data-pps-theme="dark"] [style*="rgb(232, 245, 227)"],
+  html[data-pps-theme="dark"] [style*="rgb(240, 253, 244)"]{background:#10231a !important;border-color:#245c3a !important}
+  html[data-pps-theme="dark"] [style*="rgb(232, 245, 227)"] *:not(button):not(select):not(input):not(textarea),
+  html[data-pps-theme="dark"] [style*="rgb(240, 253, 244)"] *:not(button):not(select):not(input):not(textarea){color:#6ee7b7 !important}
+  html[data-pps-theme="dark"] [style*="rgb(240, 249, 255)"]{background:#12243a !important;border-color:#24405e !important}
+  html[data-pps-theme="dark"] input:hover:not(:focus),html[data-pps-theme="dark"] select:hover:not(:focus){border-color:#3b4757 !important}
+  html[data-pps-theme="dark"] ::-webkit-scrollbar-thumb{background:#2a3340;background-clip:content-box}
+  html[data-pps-theme="dark"] ::-webkit-scrollbar-thumb:hover{background:#3b4757;background-clip:content-box}
+  html[data-pps-theme="dark"] input,html[data-pps-theme="dark"] select,html[data-pps-theme="dark"] textarea{color-scheme:dark}
+  input:hover:not(:focus), select:hover:not(:focus){border-color:#cbd5e1 !important}
+  input:focus, select:focus, textarea:focus{
+    border-color:#007eff !important;
+    box-shadow:0 0 0 3px rgba(0,126,255,.14) !important;
+  }
+  button{transition:filter .15s ease, transform .06s ease}
+  button:active{transform:translateY(.5px)}
+  button:focus-visible{outline:2px solid rgba(0,126,255,.55);outline-offset:2px}
+  /* headings: tighter optical tracking at large sizes */
+  h1,h2{letter-spacing:-.02em}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px;border:3px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#94a3b8;background-clip:content-box;border:3px solid transparent}
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · PAPERS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · MODERN</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
@@ -141,11 +306,38 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 function useIsMobile(bp=700){const[m,s]=useState(window.innerWidth<=bp);useEffect(()=>{const h=()=>s(window.innerWidth<=bp);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h)},[bp]);return m}
 
+// Overlays render into <body>. Rendered in place they live inside whatever the
+// WordPress theme wraps the calculator in, and a single ancestor with a transform,
+// filter, or scroll-animation will-change traps position:fixed in THAT element's
+// stacking context — after which later page sections paint straight over it no
+// matter how high its z-index is. Portalling takes the ancestor out of the question.
+// z-index stays under the 9999 modal band so proof/preview still cover these.
+const Float = ({ children }) => ReactDOM.createPortal(children, document.body);
+
 // ═══════════════════════════════════════════════════════════════
 // COLORS & CONSTANTS
 // ═══════════════════════════════════════════════════════════════
-const CC={bg:"#f8fafc",white:"#fff",dark:"#0f172a",mid:"#475569",light:"#94a3b8",border:"#e2e8f0",primary:"#007eff"};
+// Theme palettes. CC's keys are semantic, not literal: `white` is the card surface
+// and `dark` is the ink, so both invert cleanly. Swapping happens by mutating CC in
+// place (pps_applyTheme) — components read CC/ST at render time, so a re-render picks
+// the new values up without threading a theme prop through every component.
+const PALETTES = {
+  light: { dark:"#0f172a", mid:"#475569", light:"#94a3b8", bg:"#f6f7f9", white:"#fff",
+           border:"#e3e8ef", red:"#dc2626", track:"#f1f4f8", errBg:"#fef2f2", errBorder:"#fecaca",
+           heroBg:"#0f172a", rowHi:"#f0f9ff", tint:"#eff6ff", tintBorder:"#cfe6ff" },
+  dark:  { dark:"#e6edf6", mid:"#9fb0c6", light:"#7183a0", bg:"#0d1117", white:"#161b22",
+           border:"#2a3340", red:"#f87171", track:"#0f151d", errBg:"#2a1416", errBorder:"#5b2b2f",
+           // Stays a dark surface in both themes, lifted here so it still reads as a
+           // distinct card against the near-black page rather than blending into it.
+           heroBg:"#1e2a38", rowHi:"#17263a", tint:"#12243a", tintBorder:"#24405e" },
+};
 const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
+const CC = {
+  primary: CK.cyan,
+  accent: CK.magenta,
+  warm: CK.yellow,
+  ...PALETTES.light,
+};
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
 // Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
@@ -2642,7 +2834,7 @@ generate();
           style={{
             padding: mob ? "24px 16px" : "32px 20px", borderRadius: 8,
             border: `2px dashed ${dropHover ? CK.cyan : CC.border}`,
-            background: dropHover ? CK.cyanLight : "#f8fafc",
+            background: dropHover ? CC.tint : CC.track,
             cursor: "pointer", textAlign: "center", transition: "all .15s",
           }}>
           <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif" onChange={e => processFile(e.target.files)} style={{ display: "none" }} />
@@ -2717,7 +2909,7 @@ generate();
             const tooSmall2 = panelSize2 < 2;
             const throatExceeded2 = foldDir === "short" && longEdge > 13;
             return <>
-              <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall2 || throatExceeded2 ? "#fef2f2" : CK.cyanLight, borderRadius: 5, fontSize: 11, color: tooSmall2 || throatExceeded2 ? "#dc2626" : CC.mid, border: tooSmall2 || throatExceeded2 ? "1px solid #f5cccc" : "none" }}>
+              <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall2 || throatExceeded2 ? "#fef2f2" : CC.tint, borderRadius: 8, fontSize: 11, color: tooSmall2 || throatExceeded2 ? "#dc2626" : CC.mid, border: tooSmall2 || throatExceeded2 ? "1px solid #f5cccc" : "none" }}>
                 Folded size: <strong>{fmtInch(staticDim2)}" × {fmtInch(panelSize2)}"</strong> ({panels} panels)
                 {tooSmall2 && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
                 {throatExceeded2 && <span style={{marginLeft:8,fontWeight:700}}>— Cannot fold, unfolded edge exceeds 13 inches</span>}
@@ -2807,8 +2999,8 @@ generate();
         </div>
       )}
 
-      {/* Proof Modal */}
-      {proofOpen && currentArt && (
+      {/* Proof Modal — portalled so a transformed WordPress ancestor can't trap it */}
+      {proofOpen && currentArt && (<Float>
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.85)", display: "flex", flexDirection: "column" }}>
           {/* Header */}
           <div style={{ padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
@@ -2862,13 +3054,13 @@ generate();
                     setGeneratingPdf(false);
                     setGenProgress(null);
                   }
-                }} className={!approved && !generatingPdf ? "bp-approve-cta" : ""} style={{
+                }} className={!approved && !generatingPdf ? "bp-approve nudge" : ""} style={{
                   padding: !approved ? "9px 22px" : "5px 14px",
                   fontSize: !approved ? 13 : 11,
-                  fontWeight: 800, borderRadius: 4, cursor: generatingPdf ? "wait" : "pointer", fontFamily: "inherit", letterSpacing: ".04em", textTransform: "uppercase",
-                  background: approved ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)" : undefined,
+                  fontWeight: 800, borderRadius: 8, cursor: generatingPdf ? "wait" : "pointer", fontFamily: "inherit", letterSpacing: ".04em", textTransform: "uppercase",
+                  background: approved ? "#16a34a" : undefined,
                   color: approved ? "#fff" : undefined,
-                  border: approved ? "none" : "2px solid #b91c1c",
+                  border: "none",
                 }}>{generatingPdf && genProgress ? `${genProgress.step === "print-ready" ? "Rendering" : genProgress.step === "previews" ? "Previews" : genProgress.step === "manifest" ? "Finalizing" : "Preparing"}… ${genProgress.page}/${genProgress.totalPages}` : approved ? "✓ Approved" : "Approve Now"}</button>
                 <button type="button" onClick={() => setShowGuides(g => !g)} title="Toggle bleed / trim / safety / fold guides" style={{
                   padding: "5px 10px", fontSize: 11, fontWeight: 600, border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
@@ -3194,10 +3386,10 @@ generate();
           </div>
           </div>
         </div>
-      )}
+      </Float>)}
 
-      {/* Preview Modal — matches booklet previewer style */}
-      {previewOpen && (
+      {/* Preview Modal — matches booklet previewer style; portalled like the proof */}
+      {previewOpen && (<Float>
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", background: "linear-gradient(135deg,#1a1d23,#2a2e36)" }}>
           {/* Header bar */}
           <div style={{ padding: "10px 20px", background: "rgba(0,0,0,.3)", borderBottom: "1px solid rgba(255,255,255,.06)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -3277,7 +3469,7 @@ generate();
             );
           })()}
         </div>
-      )}
+      </Float>)}
     </div>
   );
 }
@@ -3285,14 +3477,39 @@ generate();
 // ═══════════════════════════════════════════════════════════════
 // UI COMPONENTS
 // ═══════════════════════════════════════════════════════════════
-function Panel({ result, compact, expanded, onToggleExpand }) {
-  if (!result || result.error) {
-    const err = result?.error?.[0] || "Configure options";
-    return <div style={{ padding: compact ? "6px 10px" : "12px 18px", background: compact ? "transparent" : CC.white, borderRadius: 8, border: compact ? "none" : `1px solid ${CC.border}` }}><div style={{ color: CC.light, fontSize: compact ? 11 : 13 }}>{err}</div></div>;
-  }
-  const r = result;
-  const sh = r.shipping || {};
-  const ti=r.ti||{};
+function Panel({ result, compact, debugUnlocked, expanded, onToggleExpand, coupon, totalRef }) {
+  if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your postcards to see pricing</p></div>;
+  if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
+  const{total,baseTotal,perUnit,days,qty:tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
+  const hasRush=sh&&sh.rushCost>0;
+  // Before a destination is entered the free-ground date is a guess on a guess —
+  // 2× production buffer plus a placeholder transit — and it read a week later than
+  // the job actually needs. Until the address is known, quote production + 1 transit
+  // day (which is also what AZ ground is), then switch to the real committed date.
+  const _dest=!sh||sh.hasDest;
+  const availRange=sh?(_dest?(sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`):`${sh.earliestBizDays}`):String(days);
+  // Availability reads as a single date: the rush need-by date when rush is applied,
+  // else the free-delivery date — or the production+1 placeholder pre-address.
+  // A date the customer picked is an instruction, not an estimate, so it wins the
+  // availability display. sh.needByFmt is non-null exactly when a picked date is
+  // valid and not too soon. Compared against the free date, not merely checked for
+  // existence: the date field pre-fills with the free delivery date as a convenience,
+  // so "a date is set" is the default state — a date that DIFFERS from the free one
+  // is the customer actually asking for something.
+  const requestedDate = sh && sh.needByFmt && sh.needByFmt !== sh.freeDeliveryDate
+    ? sh.needByFmt : null;
+  const deliveryDate = sh?(requestedDate || (!_dest?sh.earliestDate:((hasRush&&sh.needByFmt)?sh.needByFmt:sh.freeDeliveryDate))) : null;
+  // A discount code reduces what the customer pays but never the quoted line price —
+  // WooCommerce applies it at cart level. So show it as a deduction FROM the total
+  // rather than by rewriting the total, which is also how the order will read.
+  const _cpn=coupon&&coupon.discount>0?coupon:null;
+  const _cpnAmt=_cpn?Math.min(_cpn.discount,total):0;
+  const _afterCpn=Math.max(0,Math.round((total-_cpnAmt)*100)/100);
+  // Per unit moves with the code too. Quoting a discounted total beside an
+  // undiscounted $/ea leaves the customer to do the division, and the two numbers
+  // read as a contradiction. Derived from what they actually pay, so it can't drift.
+  const _cpnUnit=(_cpn&&tQ>0)?Math.max(0,_afterCpn/tQ):null;
+  const ti=result.ti||{};
   const _factors=[];
   if(ti.paper>0)_factors.push("paper lead time");
   if(ti.vivid>0)_factors.push("vivid printing");
@@ -3304,117 +3521,174 @@ function Panel({ result, compact, expanded, onToggleExpand }) {
   if(ti.proof>0)_factors.push("proofing");
   const _extraDays=Object.values(ti).reduce((s,v)=>s+(v||0),0);
   const _hasExtra=_extraDays>=1&&_factors.length>0;
-  const availRange=sh.earliestBizDays===sh.freeDeliveryBizDays?`${sh.earliestBizDays}`:`${sh.earliestBizDays}–${sh.freeDeliveryBizDays}`;
-  const hasRush = sh && sh.rushCost > 0;
-  // Availability reads as a single date: rush need-by date when rush is applied, else the free-delivery date.
-  // A date the customer picked is an instruction, not an estimate, so it wins the
-  // availability display. This used to be conditional and got it wrong two ways: the
-  // modern draft fell back to the earliest-possible placeholder whenever no address
-  // had been entered yet, and the rest honoured a picked date only when it triggered
-  // a rush charge. Either way somebody who chose Aug 14 was told "as soon as Aug 7".
-  // sh.needByFmt is non-null exactly when a picked date is valid and not too soon, so
-  // it is the whole condition.
-  // Compared against the free date, not merely checked for existence: four of these
-  // calculators pre-fill the date field with the free delivery date as a convenience,
-  // so "a date is set" is the default state and would make every quote read as a
-  // promise. A date that DIFFERS from the free one is the customer actually asking
-  // for something.
-  const requestedDate = sh && sh.needByFmt && sh.needByFmt !== sh.freeDeliveryDate
-    ? sh.needByFmt : null;
-  const deliveryDate = sh ? (requestedDate || (sh.hasDest ? ((hasRush && sh.needByFmt) ? sh.needByFmt : sh.freeDeliveryDate) : null)) : null;
-  const moneyStr = Math.max(0, r.total).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const [dPart, cPart] = moneyStr.split(".");
-  const saleActive = !!r.saleActive;
-  if (compact) {
-    return (
+
+  if(compact){
+    const moneyC=Math.max(0,total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const [dC,cC]=moneyC.split(".");
+    return(
       <div>
-        <div onClick={onToggleExpand} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: hasRush ? CK.rush : CK.cyan, borderRadius: expanded ? "6px 6px 0 0" : 6, padding: "8px 14px", color: hasRush ? "#333" : "#fff", cursor: "pointer", WebkitTapHighlightColor: "transparent" }}>
-          <div>
-            <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", gap: 6 }}>
-              {saleActive && <span style={{ fontSize: 13, opacity: .6, textDecoration: "line-through", fontWeight: 600 }}>${r.totalWithoutSale.toFixed(2)}</span>}
-              <span style={{ fontSize: 22, fontWeight: 800 }}>${dPart}</span>
-              <span style={{ fontSize: 13, fontWeight: 600, opacity: .7, marginLeft: 1 }}>.{cPart}</span>
+        {/* Collapsed, this strip shares a 390px row with the Add to Order button —
+            three stat columns beside the price truncated the delivery date to
+            "Mon, Aug". Price and the disclosure sit on one line; the delivery date
+            gets the strip's full width on a second. $/ea and Qty move into the
+            expanded sheet, where the panel is full width and lays them out the way
+            desktop does. */}
+        <div onClick={onToggleExpand} style={{background:hasRush?CK.rush:CK.cyan,borderRadius:expanded?"6px 6px 0 0":6,padding:"8px 14px",color:hasRush?"#333":"#fff",cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+            <div style={{minWidth:0}}>
+              <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:6}}>
+                {saleActive&&<span style={{fontSize:13,opacity:.6,textDecoration:"line-through",fontWeight:600}}>${totalWithoutSale.toFixed(2)}</span>}
+                <span style={{fontSize:22,fontWeight:800}}>${dC}</span>
+                <span style={{fontSize:13,fontWeight:600,opacity:.7,marginLeft:1}}>.{cC}</span>
+              </div>
+              {saleActive&&<div style={{fontSize:9,fontWeight:700,marginTop:1,letterSpacing:".5px",textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</div>}
             </div>
-            {saleActive && <div style={{ fontSize: 9, fontWeight: 700, marginTop: 1, letterSpacing: ".5px", textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</div>}
+            <div style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+              <span style={{fontSize:9.5,fontWeight:700,letterSpacing:".5px",textTransform:"uppercase",opacity:.75}}>{expanded?"Hide":"Details"}</span>
+              <span style={{fontSize:10,opacity:.6,transition:"transform .2s",display:"inline-block",transform:expanded?"rotate(180deg)":"none"}}>▼</span>
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {[["$/ea", r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()], [(requestedDate || hasRush) ? "Delivery" : "Avail.", deliveryDate || availRange + " days"]].map(([l, v], i) => (
-              <div key={i} style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 8.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", opacity: .7 }}>{l}</div>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>{v}</div>
+          <div style={{fontSize:10.5,fontWeight:600,opacity:.9,marginTop:3,letterSpacing:".2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            {requestedDate ? "Delivery by" : "As soon as"} {deliveryDate||availRange+" days"}
+          </div>
+          {_cpn&&<div style={{fontSize:10.5,fontWeight:700,marginTop:2,letterSpacing:".2px",whiteSpace:"nowrap"}}>
+            {_cpn.code} −${_cpnAmt.toFixed(2)} · you pay ${_afterCpn.toFixed(2)}
+          </div>}
+        </div>
+        {expanded&&<div style={{background:CC.white,borderRadius:"0 0 6px 6px",border:`1px solid ${CC.border}`,borderTop:"none",maxHeight:"40vh",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+          {/* Same stat row desktop shows under its price card, at full width. */}
+          <div style={{display:"flex",borderBottom:`1px solid ${CC.border}`}}>
+            {[["$/ea","$"+Math.max(0,perUnit).toFixed(2),_cpnUnit!=null?"$"+_cpnUnit.toFixed(2):null],["Qty",tQ.toLocaleString(),null],[requestedDate ? "Delivery by" : "As soon as",deliveryDate||availRange+" days",null]].map(([l,v,net],i)=>(
+              <div key={i} style={{flex:1,padding:"9px 6px",textAlign:"center",borderLeft:i?`1px solid ${CC.border}`:"none",background:(i===2&&_hasExtra)?"#fffbeb":"transparent"}}>
+                <div style={{fontSize:8.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:(i===2&&_hasExtra)?"#92400e":CC.light}}>{l}</div>
+                {net
+                  ? <><div style={{fontSize:9.5,fontWeight:600,color:CC.light,textDecoration:"line-through",lineHeight:1.1,marginTop:1}}>{v}</div>
+                      <div style={{fontSize:12.5,fontWeight:700,color:CK.cyan,lineHeight:1.15}}>{net}</div></>
+                  : <div style={{fontSize:12.5,fontWeight:700,color:(i===2&&_hasExtra)?"#b45309":CC.dark,marginTop:1}}>{v}</div>}
               </div>
             ))}
-            <div style={{ fontSize: 10, opacity: .5, marginLeft: 2, transition: "transform .2s", transform: expanded ? "rotate(180deg)" : "none" }}>▼</div>
           </div>
-        </div>
-        {expanded && <div style={{ background: "#fff", borderRadius: "0 0 6px 6px", border: `1px solid ${CC.border}`, borderTop: "none", maxHeight: "40vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-          {_hasExtra && <div style={{ padding: "5px 14px", borderBottom: `1px solid ${CC.border}`, background: "#fffbeb" }}>
-            <div style={{ fontSize: 10.5, color: "#92400e", lineHeight: 1.4 }}>+{Math.round(_extraDays)} day{Math.round(_extraDays) !== 1 ? "s" : ""} due to {_factors.join(", ")}</div>
+          {_hasExtra&&<div style={{padding:"5px 14px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
+            <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>+{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
           </div>}
-          {sh.freeDeliveryDate && <div style={{ padding: "6px 14px", borderBottom: `1px solid ${CC.border}`, background: "#f8fafc" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 10.5, color: CC.light }}>Free delivery by</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: CC.mid }}>{sh.freeDeliveryDate}</span>
-            </div>
-          </div>}
-          {r.grouped.length > 0 && <div style={{ padding: "6px 12px" }}>{r.grouped.map((g, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "2.5px 0" }}>
-            <span style={{ fontSize: 11, color: CC.light }}>{g.label}</span>
-            <span style={{ fontSize: 11, fontWeight: 600, color: g.val < 0 ? "#16a34a" : CC.mid }}>{g.val < 0 ? "-" : ""}${Math.abs(g.val).toFixed(2)}</span>
+          {/* Cost breakdown is internal. Desktop keeps it behind the %3414 unlock;
+              mobile rendered it to every customer, which exposed per-line costs. */}
+          {debugUnlocked&&<div style={{padding:"6px 12px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2.5px 0"}}>
+            <span style={{fontSize:11,color:CC.light}}>{r.l}</span>
+            <span style={{fontSize:11,fontWeight:600,color:r.v<0?CK.cyan:CC.mid}}>{r.v<0?"−":""}${Math.abs(r.v).toFixed(2)}</span>
           </div>))}</div>}
         </div>}
       </div>
     );
   }
-  return (
-    <div style={{ background: CC.white, borderRadius: 8, border: `1px solid ${CC.border}`, overflow: "hidden", pointerEvents: "none" }}>
-      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${CC.border}`, background: hasRush ? CK.rush : CC.white, pointerEvents: "none" }}>
-        <div style={{ fontSize: 11, color: hasRush ? "rgba(51,51,51,.75)" : CC.light, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 2 }}>{hasRush ? "Rush Total" : "Estimated Total"}</div>
-        <div style={{ lineHeight: 1, display: "flex", alignItems: "baseline", color: hasRush ? "#333" : CC.dark, gap: 10, flexWrap: "wrap" }}>
-          {saleActive && <span style={{ fontSize: 16, color: hasRush ? "rgba(51,51,51,.55)" : CC.light, textDecoration: "line-through", fontWeight: 700 }}>${r.totalWithoutSale.toFixed(2)}</span>}
-          <span style={{ fontSize: 28, fontWeight: 800 }}>${dPart}</span>
-          <span style={{ fontSize: 18, fontWeight: 700, color: hasRush ? "rgba(51,51,51,.7)" : CC.light, marginLeft: -7 }}>.{cPart}</span>
-          {saleActive && <span style={{ display: "inline-block", background: CK.magenta, color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: ".5px", padding: "3px 8px", borderRadius: 4, textTransform: "uppercase" }}>{r.saleLabel} · Save ${r.saleAmount.toFixed(2)}</span>}
+
+  const moneyD=Math.max(0,total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const [dD,cD]=moneyD.split(".");
+  const eyeCol=hasRush?"rgba(51,51,51,.8)":"rgba(255,255,255,.85)";
+  return(
+    <div style={{...ST.pnl, pointerEvents: "none"}}>
+      {/* Sentinel for the condensed-total bar. Watching the whole panel was wrong — on
+          a tall rail the total scrolls away while the panel's lower half is still on
+          screen, so the bar stayed hidden exactly when it was needed. Anchored at the
+          TOP of the card so it leaves the viewport when the total does. */}
+      <div ref={totalRef} style={{height:1,marginBottom:-1}} aria-hidden="true"/>
+      {/* Ink price card, not brand cyan: cyan is reserved for the CTA and active
+          states so the Add to Order button stays the loudest thing in the rail.
+          Rush keeps its own colour — that's a state signal, not decoration. */}
+      <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:CC.heroBg,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
+        <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol,marginBottom:6}}>{hasRush?"Rush Total":"Estimated Total"}</div>
+        <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
+          {saleActive&&<span style={{fontSize:18,opacity:.55,textDecoration:"line-through",fontWeight:700,letterSpacing:"-.5px"}}>${totalWithoutSale.toFixed(2)}</span>}
+          <span style={{fontSize:38,fontWeight:800,letterSpacing:"-1.5px"}}>${dD}</span>
+          <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
+          {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
         </div>
-        {hasRush && <div style={{ fontSize: 13, fontWeight: 800, marginTop: 6, color: "#333", letterSpacing: ".2px" }}>Delivery by {sh.needByFmt}</div>}
+        {_cpn&&(
+          <div style={{marginTop:10,paddingTop:9,borderTop:`1px solid ${hasRush?"rgba(0,0,0,.15)":"rgba(255,255,255,.18)"}`}}>
+            <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,fontSize:12.5,fontWeight:700}}>
+              <span style={{textTransform:"uppercase",letterSpacing:".5px",opacity:.85}}>{_cpn.code} · {_cpn.label}</span>
+              <span>−${_cpnAmt.toFixed(2)}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,marginTop:6}}>
+              <span style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",opacity:.8}}>You pay</span>
+              <span style={{fontSize:24,fontWeight:800,letterSpacing:"-.7px"}}>${_afterCpn.toFixed(2)}</span>
+            </div>
+            <div style={{fontSize:10,opacity:.62,marginTop:3,lineHeight:1.35}}>Applied at checkout{_cpn.free_shipping?" · includes free shipping":""}</div>
+          </div>
+        )}
+        {hasRush&&<div style={{fontSize:13.5,fontWeight:800,marginTop:6,letterSpacing:".2px"}}>Delivery by {sh.needByFmt}</div>}
+        {hasRush&&debugUnlocked&&<div style={{fontSize:12,opacity:.75,marginTop:4}}>Base ${baseTotal.toFixed(2)} + Rush ${sh.rushCost.toFixed(2)} ({sh.rushMultiplier.toFixed(2)}×)</div>}
       </div>
-      <div style={{ display: "flex", borderBottom: `1px solid ${CC.border}` }}>
-        {[["Per Unit", "$" + r.perUnit.toFixed(2)], ["Qty", r.qty.toLocaleString()]].map(([l, v], i) => (
-          <div key={i} style={{ flex: 1, padding: "11px 8px", textAlign: "center", borderRight: `1px solid ${CC.border}` }}>
-            <div style={{ fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px", color: CC.light, marginBottom: 1 }}>{l}</div>
-            <div style={{ fontSize: 14.5, fontWeight: 700, color: CC.dark }}>{v}</div>
+      <div style={{display:"flex",borderBottom:`1px solid ${CC.border}`}}>
+        {[["Per Unit","$"+Math.max(0,perUnit).toFixed(2),_cpnUnit!=null?"$"+_cpnUnit.toFixed(2):null],["Qty",tQ.toLocaleString(),null]].map(([l,v,net],i)=>(
+          <div key={i} style={{flex:1,padding:"11px 8px",textAlign:"center",borderRight:`1px solid ${CC.border}`}}>
+            <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:CC.light,marginBottom:1}}>{l}</div>
+            {net
+              ? <><div style={{fontSize:10.5,fontWeight:600,color:CC.light,textDecoration:"line-through",lineHeight:1.1}}>{v}</div>
+                  <div style={{fontSize:14.5,fontWeight:700,color:CK.cyan,lineHeight:1.15}}>{net}</div></>
+              : <div style={{fontSize:14.5,fontWeight:700,color:CC.dark}}>{v}</div>}
           </div>
         ))}
         <div style={{flex:1,padding:"11px 8px",textAlign:"center",background:_hasExtra?"#fffbeb":"transparent",transition:"background .3s"}}>
-          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>{(requestedDate||hasRush)?"Delivery by":"Availability"}</div>
+          <div style={{fontSize:9.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:_hasExtra?"#92400e":CC.light,marginBottom:1}}>{requestedDate ? "Delivery by" : "As soon as"}</div>
           <div style={{fontSize:13.5,fontWeight:700,color:_hasExtra?"#b45309":CC.dark}}>{deliveryDate||availRange+" days"}</div>
         </div>
       </div>
       {_hasExtra&&<div style={{padding:"5px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
         <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>* +{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
       </div>}
-      {sh.freeDeliveryDate && <div style={{ padding: "8px 18px", background: "#f8fafc", fontSize: 11, color: CC.mid, pointerEvents: "none" }}>
-        Free delivery est: <strong>{sh.freeDeliveryDate}</strong> ({sh.freeDeliveryBizDays} biz days)
-      </div>}
+      {debugUnlocked&&<details style={{borderTop:`1px solid ${CC.border}`,pointerEvents:"auto"}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
+        <div style={{padding:"0 18px 14px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
+          <span style={{fontSize:11.5,color:CC.light}}>{r.l}</span>
+          <span style={{fontSize:11.5,fontWeight:600,color:r.v<0?CK.cyan:CC.mid}}>{r.v<0?"−":""}${Math.abs(r.v).toFixed(2)}</span>
+        </div>))}</div>
+      </details>}
     </div>
   );
 }
 
 const Chev=()=><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>;
 
-function Sel({label,value,onChange,children,disabled,note,badge,autoComplete,name}){
+function Sel({label,value,onChange,children,disabled,note,badge,wrapStyle,name,autoComplete,selectId}){
   const m=useIsMobile();
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={{position:"relative"}}><select value={value} onChange={e=>onChange(e.target.value)} autoComplete={autoComplete} name={name} style={{...ST.sel,fontSize:m?16:15,padding:m?"10px 32px 10px 12px":"10px 32px 10px 12px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
+  const[pop,setPop]=useState(0);
+  return <div style={{...ST.f,...wrapStyle}}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={{position:"relative",animation:pop?`pps-pop-${pop%2} .28s ease`:undefined}}><select id={selectId} name={name} autoComplete={autoComplete} value={value} onChange={e=>{setPop(n=>n+1);onChange(e.target.value);}} style={{...ST.sel,fontSize:m?16:15,padding:m?"20px 32px 20px 13px":"20px 34px 20px 14px",...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select><span style={ST.selA}><Chev/></span></div>{note&&<p style={ST.note}>{note}</p>}</div>;
 }
 
 function TxtNum({label,value,onChange,min=1,max=99999}){
   const[raw,setRaw]=useState(String(value));
+  const[note,setNote]=useState(null);
+  // What we last handed the parent. The parent may normalise it — Quantity rounds, for
+  // instance — and when its normalised result happens to equal the value it already
+  // held, a [value]-keyed effect never fires and the box goes on showing "11.4" while
+  // the quote says 11. Reconciling on every render instead means the field always ends
+  // up displaying the number actually being priced. It does not fight mid-typing:
+  // "10." parses to 10, the parent stores 10, and pushed===value so nothing snaps.
+  const pushed=useRef(null);
   useEffect(()=>setRaw(String(value)),[value]);
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}<input type="text" inputMode="decimal" value={raw} onChange={e=>{setRaw(e.target.value);const v=parseFloat(e.target.value);/* Commit ANY parsed number, in range or not. Committing only in-range values left the state holding the previous number while the field showed the new one, so a short edge typed as 0 kept feeding 4 to the preview and the chip. Out of range now reaches calculate(), which rejects it and disables the order — a visible error beats a silent disagreement. onBlur still clamps. */if(!isNaN(v))onChange(v)}} onBlur={()=>{let v=parseFloat(raw);if(isNaN(v))v=min;v=Math.min(max,Math.max(min,v));onChange(v);setRaw(String(v))}} style={ST.inp}/></div>;
+  useEffect(()=>{
+    if(pushed.current!==null && value!==pushed.current){ setRaw(String(value)); pushed.current=value; }
+  });
+  const commit=v=>{ pushed.current=v; onChange(v); };
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}</label>}
+    <input type="text" inputMode="decimal" value={raw}
+      onChange={e=>{setRaw(e.target.value);setNote(null);const v=parseFloat(e.target.value);if(!isNaN(v)&&v>=min&&v<=max)commit(v)}}
+      onBlur={()=>{
+        const typed=parseFloat(raw);
+        let v=typed; if(isNaN(v))v=min;
+        v=Math.min(max,Math.max(min,v));
+        // Rewriting someone's number without telling them is how a 18" height silently
+        // becomes 13.25". Say what happened and why.
+        setNote(!isNaN(typed)&&typed!==v ? `Adjusted to ${v} — allowed range is ${min}–${max}` : null);
+        commit(v); setRaw(String(v));
+      }} style={ST.inp}/>
+    {note&&<div style={{fontSize:11,color:"#b45309",marginTop:4,lineHeight:1.35}}>{note}</div>}
+  </div>;
 }
 
 function Pil({label,options,value,onChange,disabled,badge}){
   const m=useIsMobile();
-  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={ST.pills}>{options.map(o=><button type="button" aria-pressed={value===o.v} key={String(o.v)} onClick={()=>!disabled&&onChange(o.v)} style={{...ST.pill,padding:m?"11px 10px":"9px 10px",...(value===o.v?(o.onStyle||ST.pillOn):{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>)}</div></div>;
+  return <div style={ST.f}>{label&&<label style={ST.lbl}>{label}{badge}</label>}<div style={ST.pills}>{options.map(o=><button type="button" aria-pressed={value===o.v} key={String(o.v)} onClick={()=>!disabled&&onChange(o.v)} style={{...ST.pill,padding:m?"18px 10px":"17px 10px",...(value===o.v?(o.onStyle||ST.pillOn):{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>)}</div></div>;
 }
 
 function TurnBadge({days}){
@@ -3424,9 +3698,51 @@ function TurnBadge({days}){
   return <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,fontWeight:600,color:CK.magenta,background:"#fdf2f8",padding:"1px 6px",borderRadius:8,marginLeft:6,whiteSpace:"nowrap",verticalAlign:"middle"}}>⏱ {label}</span>;
 }
 
-function Sec({title,open,onToggle,children,badge}){
+// Pill-chip style used by Sec summary chips and the job-name header field. `let`
+// because the theme swap reassigns it; defined before Sec, which reads it.
+function buildCHIP(){ return {fontSize:11,fontWeight:600,color:CC.mid,background:CC.track,border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99,whiteSpace:"nowrap",maxWidth:170,overflow:"hidden",textOverflow:"ellipsis",display:"inline-block",lineHeight:1.3}; }
+let CHIP = buildCHIP();
+
+function Sec({title,open,onToggle,children,badge,subtitle,step,summary,headerField,keepMounted}){
   const m=useIsMobile();
-  return <div style={ST.card}><button type="button" onClick={onToggle} style={{...ST.cardH,padding:m?"12px 14px":"14px 18px",fontSize:m?14:15}}><div style={{display:"flex",alignItems:"center",gap:m?10:12,flex:1,minWidth:0,textAlign:"left"}}><span style={{fontWeight:700,color:CC.dark,fontSize:"inherit",textTransform:"uppercase",letterSpacing:"-0.005em"}}>{title}</span></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>{badge&&<span style={{fontSize:11,fontWeight:700,color:CC.primary,background:CK.cyanLight,padding:"3px 9px",borderRadius:10}}>{badge}</span>}<span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span></div></button>{open&&<div style={{padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}</div>;
+  // Summaries arrive as a list of characteristics. Cap how many render so a section
+  // with several add-ons can not push the header taller or crowd out the title; the
+  // remainder collapses into a "+N" chip.
+  const _items=(Array.isArray(summary)?summary:summary?[summary]:[]).filter(Boolean);
+  const _cap=m?1:3;
+  // Overflowing the cap costs one slot to the "+N" chip — but never the last one, or
+  // a capped-at-1 mobile header would show "+3" and nothing else.
+  const _shown=_items.length>_cap?_items.slice(0,Math.max(1,_cap-1)):_items;
+  const _extra=_items.length-_shown.length;
+  const _chip=m?{...CHIP,maxWidth:118}:CHIP;
+  // A header field (e.g. Job Name) only makes sense while the section is open — when
+  // it is closed its value is already showing as a summary chip, and an input crammed
+  // between the title and the chips would crowd both. The header is therefore two
+  // toggle buttons flanking the field rather than one button wrapping it: an <input>
+  // nested inside a <button> is invalid and swallows its own clicks.
+  const _hf=headerField&&open;
+  const _pad=m?12:14, _padX=m?14:18;
+  return <div style={ST.card}>
+    <div style={{...ST.cardH,padding:0,cursor:"default",fontSize:m?14:15,alignItems:subtitle?"flex-start":"center"}}>
+      {/* With a header field present the title shrinks to its own width so the field can
+          take the slack and sit right beside it, reading as a continuation of the
+          heading. Fixed-width fields overflowed narrow phones. */}
+      <button type="button" onClick={onToggle} aria-expanded={open} style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:_hf?"0 0 auto":1,minWidth:0,textAlign:"left",padding:`${_pad}px 0 ${_pad}px ${_padX}px`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
+        {step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}
+        <div style={{flex:_hf?"0 0 auto":1,minWidth:0}}><div style={{fontFamily:"var(--pps-display)",fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div>
+      </button>
+      {_hf&&<div style={{flex:"1 1 auto",minWidth:40,padding:m?"0 4px 0 8px":"0 8px 0 10px",marginTop:subtitle?1:0}}>{headerField}</div>}
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-label={open?"Collapse section":"Expand section"} style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,minWidth:0,marginTop:subtitle?2:0,padding:`${_pad}px ${_padX}px ${_pad}px 0`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
+        {!open&&_shown.length>0&&_shown.map((t,i)=><span key={i} style={_chip}>{t}</span>)}{!open&&_extra>0&&<span style={{..._chip,color:CC.light}}>+{_extra}</span>}{badge&&!(m&&_hf)&&<span style={_chip}>{badge}</span>}
+        <span style={{color:CC.light,transition:"transform .2s",display:"flex",transform:open?"rotate(180deg)":"none"}}><Chev/></span>
+      </button>
+    </div>
+    {/* Collapsing normally unmounts the body, which is fine for sections whose values
+        all live in App state. A section that owns state internally — the artwork
+        uploader holds the extracted pages, the original File and the proof approval —
+        must be hidden instead, or closing it silently throws the upload away. */}
+    {(open||keepMounted)&&<div hidden={!open} style={{display:open?"block":"none",padding:m?"12px 14px":"14px 18px",borderTop:`1px solid ${CC.border}`}}>{children}</div>}
+  </div>;
 }
 
 function DatePicker({value, onChange, earliestDate, freeDate}) {
@@ -3545,9 +3861,9 @@ function RichTip({ children, tipKey, title, content, dark }) {
         {children}
         <button type="button" aria-label="More information" aria-expanded={open} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }} style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: "inherit", background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : CK.cyan, flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</button>
       </span>
-      {open && <>
+      {open && <Float>
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 99999 }} />
-        <div style={{ position: "fixed", ...(mob ? { bottom: 0, left: 0, right: 0, borderRadius: "16px 16px 0 0", maxHeight: "80vh" } : { top: "50%", left: "50%", transform: "translate(-50%, -50%)", borderRadius: 12, maxHeight: "80vh", width: "min(420px, 90vw)" }), background: dark ? "#1a1d23" : "#fff", border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CC.border}`, boxShadow: "0 16px 48px rgba(0,0,0,.25)", zIndex: 100000, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+        <div style={{ position: "fixed", ...(mob ? { bottom: "var(--pps-bottombar, 0px)", left: 0, right: 0, borderRadius: "16px 16px 0 0", maxHeight: "calc(80vh - var(--pps-bottombar, 0px))" } : { top: "50%", left: "50%", transform: "translate(-50%, -50%)", borderRadius: 12, maxHeight: "80vh", width: "min(420px, 90vw)" }), background: dark ? "#1a1d23" : CC.white, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CC.border}`, boxShadow: "0 16px 48px rgba(0,0,0,.25)", zIndex: 100000, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
           <div style={{ padding: "14px 18px 10px", borderBottom: `1px solid ${dark ? "rgba(255,255,255,.08)" : CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: dark ? "#1a1d23" : "#fff", zIndex: 1 }}>
             <span style={{ fontWeight: 700, fontSize: 14, color: dark ? "#fff" : CC.dark }}>{editing ? "Edit Tooltip" : (resolvedTitle || "Info")}</span>
             <span style={{ display:"flex", gap:8, alignItems:"center" }}>
@@ -3576,7 +3892,7 @@ function RichTip({ children, tipKey, title, content, dark }) {
             })}
           </div>
         </div>
-      </>}
+      </Float>}
     </span>
   );
 }
@@ -3726,7 +4042,7 @@ function uploadWithProgress(url, formData, onProgress) {
   });
 }
 
-async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress) {
+async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress, couponCode) {
   const PPS = window.PPS_CONFIG || {};
 
   // ── Standalone mode: download artwork + order summary as a zip-like package ──
@@ -3828,6 +4144,8 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     fd.append("pps_biz_days", String(parsed.requestedBizDays || parsed.freeDeliveryBizDays || 5));
     if (artworkPath) fd.append("pps_artwork_path", artworkPath);
     if (uploadedFiles.length) fd.append("pps_artwork_files", JSON.stringify(uploadedFiles));
+    // Woo validates and applies the code for real at cart level; this only carries it.
+    if (couponCode) fd.append("pps_coupon", couponCode);
 
     const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: fd });
     const data = await resp.json();
@@ -3856,7 +4174,75 @@ function App() {
     } catch {}
     return false;
   }, []);
-  const tog = k => setOp(p => ({ ...p, [k]: !p[k] }));
+  // The mobile bar is fixed to the bottom of the viewport, so anything else that docks
+  // there — the tooltip sheet today, anything added later — has to know how tall it is
+  // or it lands on top of the price and the Add to Order button. Published as a CSS
+  // variable on <html> so a portalled overlay can read it without being handed a prop.
+  // Its height changes with the shipping warning and the expanded panel, hence the
+  // ResizeObserver rather than a one-off measurement.
+  const bottomBarRef = useRef(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!mob) { root.style.setProperty("--pps-bottombar", "0px"); return; }
+    const set = () => root.style.setProperty("--pps-bottombar",
+      (bottomBarRef.current ? bottomBarRef.current.offsetHeight : 0) + "px");
+    set();
+    let ro = null;
+    if (window.ResizeObserver && bottomBarRef.current) {
+      ro = new ResizeObserver(set); ro.observe(bottomBarRef.current);
+    }
+    window.addEventListener("resize", set);
+    return () => { if (ro) ro.disconnect(); window.removeEventListener("resize", set);
+                   root.style.setProperty("--pps-bottombar", "0px"); };
+  }, [mob]);
+  // Theme. Persisted per browser like the focus-mode preference; falls back to the
+  // OS setting on first visit so a dark-mode user isn't flashed a white page.
+  const[theme,setTheme]=useState(()=>{
+    try{
+      const v=localStorage.getItem("pps_theme");
+      if(v==="dark"||v==="light")return v;
+      return (window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
+    }catch(e){return "light";}
+  });
+  const[themeTick,setThemeTick]=useState(0);
+  useEffect(()=>{
+    pps_applyTheme(theme);
+    try{localStorage.setItem("pps_theme",theme);}catch(e){}
+    // CC/ST are mutated in place, so nothing re-renders on its own — bump a counter
+    // to repaint the tree with the new palette.
+    setThemeTick(t=>t+1);
+  },[theme]);
+  const[setOpen,setSetOpen]=useState(false);
+  useEffect(()=>{
+    if(!setOpen)return;
+    const onDoc=e=>{ if(!e.target.closest||!e.target.closest("[data-pps-settings]")) setSetOpen(false); };
+    const onKey=e=>{ if(e.key==="Escape") setSetOpen(false); };
+    document.addEventListener("mousedown",onDoc);
+    document.addEventListener("keydown",onKey);
+    return()=>{document.removeEventListener("mousedown",onDoc);document.removeEventListener("keydown",onKey);};
+  },[setOpen]);
+  // "One section at a time" — on by default: opening a section collapses the rest so
+  // the customer is only looking at one topic. Preference is remembered per browser,
+  // because someone who prefers seeing everything at once will want that every visit.
+  const[soloSec,setSoloSec]=useState(()=>{
+    try{const v=localStorage.getItem("pps_solo_sections");return v===null?true:v==="1";}catch(e){return true;}
+  });
+  useEffect(()=>{try{localStorage.setItem("pps_solo_sections",soloSec?"1":"0");}catch(e){}},[soloSec]);
+  // Turning it on mid-session collapses down to whichever section is already open
+  // (the first one), rather than leaving several open and contradicting the setting.
+  useEffect(()=>{
+    if(!soloSec)return;
+    setOp(p=>{
+      const openKeys=Object.keys(p).filter(k=>p[k]);
+      if(openKeys.length<=1)return p;
+      const next={};for(const k in p)next[k]=false;next[openKeys[0]]=true;return next;
+    });
+  },[soloSec]);
+  const tog=k=>setOp(p=>{
+    const opening=!p[k];
+    if(soloSec&&opening){const next={};for(const key in p)next[key]=false;next[k]=true;return next;}
+    return {...p,[k]:!p[k]};
+  });
   const [showDebug, setShowDebug] = useState(false);
   const [mobExpanded, setMobExpanded] = useState(false);
   const [jobName, setJobName] = useState("");
@@ -3889,12 +4275,32 @@ function App() {
   const [proof, setProof] = useState(0);
   const [coverArt, setCoverArt] = useState(null); // mirrors SheetPreview's frontArt for the sidebar preview
   const openPreviewModalRef = useRef(null);
+  // A fixed modal inside a collapsed keepMounted section sits in a display:none
+  // subtree and is invisible — expand the owning section first, then fire. If the
+  // uploader has not registered its opener yet (section never opened), remember the
+  // intent and fire the moment it mounts.
+  const [pendingPreview, setPendingPreview] = useState(false);
+  const openPreview = () => {
+    setOp(p => {
+      if (p.s4) return p;
+      if (soloSec) { const n = {}; for (const k in p) n[k] = false; n.s4 = true; return n; }
+      return { ...p, s4: true };
+    });
+    if (openPreviewModalRef.current) { openPreviewModalRef.current(); return; }
+    setPendingPreview(true);
+  };
+  useEffect(() => {
+    if (!pendingPreview) return;
+    if (openPreviewModalRef.current) { openPreviewModalRef.current(); setPendingPreview(false); }
+  });
   const [proofAddrSame, setProofAddrSame] = useState(true);
   const [proofAddr, setProofAddr] = useState({name:"",street:"",city:"",state:"",zip:""});
   const [canvaLink, setCanvaLink] = useState("");
   const [canvaInstructions, setCanvaInstructions] = useState("");
   const [referenceFiles, setReferenceFiles] = useState([]);
-  const [shipState, setShipState] = useState("AZ");
+  // Empty until the customer picks one: pre-filling AZ made every quote read as an
+  // Arizona delivery promise and hid that a destination was still needed (hasDest).
+  const [shipState, setShipState] = useState("");
   const [shipAddr, setShipAddr] = useState({ name: "", company: "", street1: "", street2: "", city: "", zip: "" });
   const [needByDate, setNeedByDate] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
@@ -3921,7 +4327,6 @@ function App() {
       setProjCopied(true); setTimeout(() => setProjCopied(false), 2000);
     }).catch(() => prompt("Copy this:", lines.join("\n")));
   };
-  const [mobPricing, setMobPricing] = useState(false);
   // Cart submission state — matches saddle stitch + perfect bound
   const [artFiles, setArtFiles] = useState({ type: "none" });
   const [submitting, setSubmitting] = useState(false);
@@ -4066,13 +4471,14 @@ function App() {
     : "Shipping address incomplete \u2014 add " + (_destMissing.length === 1 ? _destMissing[0]
         : _destMissing.slice(0, -1).join(", ") + " and " + _destMissing[_destMissing.length - 1]);
   // Send them to the field rather than leaving them to hunt for it. Opens the section
-  // first when it is collapsed, because the input is not in the DOM until then.
+  // through state (respecting solo mode) because the input is not in the DOM until
+  // the section is open — no header-text DOM crawling.
   const focusShipping = () => {
-    if (!document.querySelector('[autocomplete="shipping address-line1"]')) {
-      const hdr = Array.prototype.find.call(document.querySelectorAll("button"),
-        b => /Shipping\s*&\s*Delivery/i.test(b.textContent || ""));
-      if (hdr) hdr.click();
-    }
+    setOp(p => {
+      if (p.s5) return p;
+      if (soloSec) { const n = {}; for (const k in p) n[k] = false; n.s5 = true; return n; }
+      return { ...p, s5: true };
+    });
     setTimeout(() => {
       const t = document.querySelector('[autocomplete="shipping address-line1"]');
       if (t) { t.scrollIntoView({ behavior: "smooth", block: "center" }); t.focus(); }
@@ -4143,8 +4549,251 @@ function App() {
       : {...p, total: p.total * adj, perUnit: p.perUnit * adj});
   }, [projectionsRaw, tableAdjPct]);
 
-  const r2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
-  const r3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
+  // ── Discount code ─────────────────────────────────────────────────────────
+  // The code is previewed here and applied for real by WooCommerce at add-to-cart.
+  // Nothing about it touches the quoted line price: pps_price stays the true product
+  // price so the materials floor and the pps_lock checksum still hold. What the panel
+  // shows is an estimate of the effect; Woo re-validates and does the real maths.
+  const[couponInput,setCouponInput]=useState("");
+  const[coupon,setCoupon]=useState(null);      // {code,label,discount,type,free_shipping}
+  const[couponMsg,setCouponMsg]=useState("");
+  const[couponBusy,setCouponBusy]=useState(false);
+  const applyCoupon=async()=>{
+    const code=(couponInput||"").trim();
+    if(!code||couponBusy)return;
+    const subtotal=Number(result&&result.total)||0;
+    if(subtotal<=0){setCouponMsg("Configure your order first.");return;}
+    setCouponBusy(true); setCouponMsg("");
+    try{
+      const root=((window.PPS_CONFIG||{}).ajaxUrl||"").replace(/wp-admin\/admin-ajax\.php.*$/,"");
+      const r=await fetch((root||"/")+"wp-json/pps/v1/coupon/preview",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({code,subtotal,product_id:(window.PPS_CONFIG||{}).productId||0}),
+      });
+      if(!r.ok&&r.status!==200){ setCoupon(null); setCouponMsg(r.status===429?"Too many attempts — please wait a minute.":"Could not check that code."); return; }
+      const j=await r.json();
+      if(j&&j.valid){ setCoupon(j); setCouponMsg(""); }
+      else { setCoupon(null); setCouponMsg((j&&j.message)||"That code is not valid for this order."); }
+    }catch(e){ setCoupon(null); setCouponMsg("Could not reach the server — the code will still be checked at checkout."); }
+    finally{ setCouponBusy(false); }
+  };
+  const clearCoupon=()=>{ setCoupon(null); setCouponInput(""); setCouponMsg(""); };
+  // One place that answers "what does this amount cost once the code is applied", so
+  // the price card, the per-unit figure and the quantity table cannot disagree.
+  // A percentage code scales, so it re-prices every quantity tier honestly. Anything
+  // else is a flat amount off the cart: it comes off each row whole and is clamped at
+  // the row's own total, which is what WooCommerce will do at checkout. A percent code
+  // that somehow arrives without an `amount` falls through to the flat branch — exact
+  // at the configured quantity, approximate elsewhere, rather than silently zero.
+  const _cpnPct=(coupon&&coupon.discount>0&&coupon.type==="percent"&&(Number(coupon.amount)||0)>0)
+    ? Math.min(1,(Number(coupon.amount)||0)/100) : 0;
+  const _cpnFlat=(coupon&&coupon.discount>0&&!_cpnPct) ? Math.max(0,Number(coupon.discount)||0) : 0;
+  const couponActive=_cpnPct>0||_cpnFlat>0;
+  const netOf=(amt)=>{
+    const a=Number(amt)||0;
+    if(!couponActive||a<=0) return a;
+    const off=_cpnPct>0 ? a*_cpnPct : Math.min(_cpnFlat,a);
+    return Math.max(0,Math.round((a-off)*100)/100);
+  };
+  // Rendered in the desktop rail and again in the mobile form. Defined once so the two
+  // cannot drift.
+  //
+  // A FUNCTION THAT RETURNS JSX, NOT A COMPONENT, and it must stay that way. Declared
+  // inside this component, every render makes a new function identity; used as
+  // <DiscountField/> that is a new element *type* each time, so React unmounts the old
+  // subtree and mounts a fresh one. The <input> DOM node is destroyed on every
+  // keystroke, taking focus with it — the field accepted exactly one character and then
+  // dropped focus to <body>. Called as {discountField()} the JSX becomes part of this
+  // component's own tree and reconciles against the previous render normally.
+  const discountField=()=>(
+    <div>
+      {coupon ? (
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"9px 11px",borderRadius:9,
+          background:CC.tint,border:`1px solid ${CK.cyan}55`}}>
+          <span style={{fontSize:12.5,fontWeight:700,color:CK.cyan,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            &#10003; {coupon.code} — {coupon.label}
+          </span>
+          <button type="button" onClick={clearCoupon} title="Remove this code"
+            style={{border:"none",background:"none",cursor:"pointer",fontFamily:"inherit",
+              fontSize:11.5,fontWeight:600,color:CC.light,padding:"2px 4px"}}>Remove</button>
+        </div>
+      ) : (
+        <div style={{display:"flex",gap:6}}>
+          <input type="text" value={couponInput} aria-label="Discount code"
+            onChange={e=>{setCouponInput(e.target.value.toUpperCase());setCouponMsg("");}}
+            onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();applyCoupon();}}}
+            placeholder="Discount code"
+            style={{...ST.inp,flex:1,minWidth:0,padding:"10px 12px",fontSize:mob?16:13,letterSpacing:".04em",textTransform:"uppercase"}}/>
+          <button type="button" onClick={applyCoupon} disabled={couponBusy||!couponInput.trim()}
+            style={{flexShrink:0,padding:"10px 15px",borderRadius:9,border:`1px solid ${CC.border}`,
+              background:CC.white,color:couponInput.trim()?CC.dark:CC.light,fontSize:12.5,fontWeight:650,
+              cursor:(couponBusy||!couponInput.trim())?"default":"pointer",fontFamily:"inherit",transition:"all .15s ease"}}>
+            {couponBusy?"Checking…":"Apply"}
+          </button>
+        </div>
+      )}
+      {couponMsg&&<div style={{fontSize:11.5,color:CC.red,marginTop:5,lineHeight:1.35}}>{couponMsg}</div>}
+    </div>
+  );
+  // A percentage code has to be re-priced whenever the quote changes, or the panel
+  // would keep showing a discount computed against a stale subtotal.
+  useEffect(()=>{
+    if(!coupon)return;
+    const subtotal=Number(result&&result.total)||0;
+    if(subtotal<=0)return;
+    if(coupon.type==="percent"){
+      const d=Math.min(Math.round(subtotal*(coupon.amount/100)*100)/100,subtotal);
+      if(Math.abs(d-coupon.discount)>0.005) setCoupon(c=>c?{...c,discount:d}:c);
+    } else if(coupon.discount>subtotal){
+      setCoupon(c=>c?{...c,discount:Math.round(subtotal*100)/100}:c);
+    }
+  },[result&&result.total,coupon&&coupon.type,coupon&&coupon.amount]);
+
+  // The quantity table is the tallest thing in the rail. Left whole it pushes the rail
+  // past the viewport, and a rail taller than the page's left column cannot stick — so
+  // the total and the CTA scroll away. Collapsed it shows a window around the current
+  // selection and the rail stays short enough to stay put.
+  const[projOpen,setProjOpen]=useState(false);
+  // Belt and braces for the same problem: when the price card does leave the viewport
+  // (very short window, or a rail taller than everything else), a condensed bar takes
+  // its place, tracked to the rail's own column so it reads as the rail folding up.
+  const railRef=useRef(null);
+  // Callback ref, not useRef: the sentinel lives inside Panel, which early-returns
+  // before rendering it while the quote is still resolving. A plain ref plus a
+  // run-once effect therefore observed nothing and the bar never appeared. A state
+  // setter as the ref re-runs the effect the moment the node actually attaches.
+  const[totalEl,setTotalEl]=useState(null);
+  const[miniBar,setMiniBar]=useState(null); // null | {left,width}
+  useEffect(()=>{
+    if(mob) { setMiniBar(null); return; }
+    const el=totalEl; if(!el||typeof IntersectionObserver==="undefined") return;
+    const place=()=>{ const r=railRef.current&&railRef.current.getBoundingClientRect();
+      setMiniBar(r?{left:Math.round(r.left),width:Math.round(r.width)}:null); };
+    const io=new IntersectionObserver(([e])=>{ if(e.isIntersecting) setMiniBar(null); else place(); },{threshold:0});
+    io.observe(el);
+    const onResize=()=>{ setMiniBar(v=>v?(railRef.current?{left:Math.round(railRef.current.getBoundingClientRect().left),width:Math.round(railRef.current.getBoundingClientRect().width)}:v):v); };
+    window.addEventListener("resize",onResize);
+    return ()=>{ io.disconnect(); window.removeEventListener("resize",onResize); };
+  },[mob,totalEl]);
+
+  // Collapsed-header summaries. Built from the SAME option labels the controls use,
+  // so a closed section reports exactly the wording the customer picked rather than a
+  // paraphrase that could drift out of sync with the dropdowns.
+  const secSummary=(()=>{
+    const lbl=(arr,v)=>{const o=arr.find(x=>x.val===v);return o?o.label:null;};
+    const _fold=FOLD_TYPES.find(f=>f.val===foldType);
+    const fin=[
+      coating>0&&lbl(COATINGS,coating),
+      bundling>0&&lbl(BUNDLING,bundling),
+      perforation>0&&lbl(PERF_OPTS,perforation),
+      roundCorner>0&&lbl(CORNERS,roundCorner),
+      vivid&&"Enhanced Vivid Print",
+    ].filter(Boolean);
+    const sh=result?.shipping;
+    const proofLbl=proof>=3?"Hardcopy Proof":proof>0?"Manual Digital Proof":(artwork===0.01?"Proof & Approve Online":"No Proof Needed");
+    return {
+      // Job name leads the chips — it is what identifies the job at a glance, and on
+      // mobile only the first chip survives the cap. The unlock code is deliberately
+      // not echoed back as a chip; it is a code, not a name.
+      s1:[jobName&&jobName!=="%3414"?jobName.trim():null,qty.toLocaleString()+" qty",(_fold&&foldType!=="flat")?_fold.label:null].filter(Boolean),
+      s2:[(frontColor==="color"?"Full Color":"Greyscale")+(sides===2?"":" front only"),paper.label],
+      s3:fin.length?fin:["No finishing added"],
+      s4:[lbl(ART_OPTS,artwork),proofLbl].filter(Boolean),
+      // Destination, then the date the customer actually gets. Rushed jobs show the
+      // requested need-by date; otherwise the free-delivery date. Same expression the
+      // price panel uses, so the chip can never disagree with it.
+      s5:shipState
+        ? [shipState+(shipZip?(" "+shipZip):"")]
+            .concat(sh ? [((sh.rushCost>0 && sh.needByFmt) ? sh.needByFmt : sh.freeDeliveryDate)] : [])
+            .filter(Boolean)
+        : ["Add a destination"],
+    };
+  })();
+
+  // Shared by the desktop rail and the mobile flow — one definition so the two
+  // renders cannot drift (same reason discountField is a function, not a component).
+  const qtyTable=()=>projections && <div style={{...ST.pnl,overflow:"hidden"}}>
+    <div style={{padding:"10px 18px",background:"#fafafa",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+      <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.light,minWidth:0,flex:"1 1 auto",lineHeight:1.5}}>Quantity Pricing
+        {(parseFloat(tableAdjPct)||0)!==0&&<span style={{marginLeft:6,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
+        {couponActive&&<span style={{marginLeft:6,color:CK.cyan,letterSpacing:".3px",whiteSpace:"nowrap"}}>{coupon.code} applied</span>}
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:"auto"}}>
+        {debugUnlocked&&(
+          <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3}}>
+            <span style={{fontSize:9,fontWeight:700,color:CC.light,textTransform:"uppercase",letterSpacing:".4px"}}>Adjust Table</span>
+            <input type="text" inputMode="decimal" value={tableAdjPct} onChange={e=>setTableAdjPct(e.target.value)} placeholder="0"
+              style={{width:46,padding:"2px 5px",fontSize:11,textAlign:"right",border:`1px solid ${(parseFloat(tableAdjPct)||0)!==0?CK.magenta:CC.border}`,borderRadius:4,fontFamily:"inherit",color:CC.dark,background:"#fff",outline:"none"}}/>
+            <span style={{fontSize:10,color:CC.light,fontWeight:600}}>%</span>
+          </span>
+        )}
+        <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
+      </div>
+    </div>
+    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
+      <thead>
+        <tr style={{borderBottom:`1px solid ${CC.border}`}}>
+          <th style={{padding:"7px 18px",textAlign:"left",fontSize:10,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Qty</th>
+          <th style={{padding:"7px 10px",textAlign:"right",fontSize:10,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Unit</th>
+          <th style={{padding:"7px 18px",textAlign:"right",fontSize:10,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {(()=>{
+          // Collapsed, the table is a window centred on the selected quantity —
+          // two rows either side, held at five rows even when the selection sits
+          // at one end, so the neighbours a customer wants to compare are the
+          // ones on screen. Expanded shows every tier.
+          const rows=projections.filter(p=>p.total!==null);
+          const ci=Math.max(0,rows.findIndex(p=>p.current));
+          const WIN=2;
+          let lo=Math.max(0,ci-WIN), hi=Math.min(rows.length-1,ci+WIN);
+          while(hi-lo<WIN*2 && (lo>0||hi<rows.length-1)){ if(lo>0)lo--; else hi++; }
+          const shown=projOpen?rows:rows.slice(lo,hi+1);
+          // With a code applied every tier is re-priced through the same netOf()
+          // the price card uses. The list price stays visible, struck through, so
+          // the table still shows what the job costs as well as what they pay.
+          const money=n=>n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+          return shown.map((p,i)=>{
+            const nT=couponActive?netOf(p.total):null;
+            const nU=nT!=null&&p.qty>0?nT/p.qty:null;
+            return (
+            <tr key={p.qty} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?CC.rowHi:"transparent",cursor:p.current?"default":"pointer"}}
+              onClick={() => {if(!p.current) setQty(p.qty)}}>
+              <td style={{padding:"6px 18px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>
+                {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
+              </td>
+              <td style={{padding:"6px 10px",textAlign:"right",color:CC.mid,fontWeight:500}}>
+                {nU!=null
+                  ? <><div style={{fontSize:10,color:CC.light,textDecoration:"line-through",lineHeight:1.15}}>${p.perUnit.toFixed(2)}</div>
+                      <div style={{color:CK.cyan,fontWeight:600,lineHeight:1.2}}>${nU.toFixed(2)}</div></>
+                  : <>${p.perUnit.toFixed(2)}</>}
+              </td>
+              <td style={{padding:"6px 18px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>
+                {nT!=null
+                  ? <><div style={{fontSize:10,color:CC.light,textDecoration:"line-through",fontWeight:500,lineHeight:1.15}}>${money(p.total)}</div>
+                      <div style={{color:CK.cyan,fontWeight:p.current?700:600,lineHeight:1.2}}>${money(nT)}</div></>
+                  : <>${money(p.total)}</>}
+              </td>
+            </tr>
+            );
+          });
+        })()}
+      </tbody>
+    </table>
+    {(()=>{
+      const n=projections.filter(p=>p.total!==null).length;
+      if(n<=5) return null;
+      return <button type="button" onClick={()=>setProjOpen(v=>!v)}
+        style={{width:"100%",padding:"9px 10px",border:"none",borderTop:`1px solid ${CC.border}`,
+          background:CC.track,color:CK.cyan,fontSize:12,fontWeight:500,letterSpacing:".01em",
+          cursor:"pointer",fontFamily:"inherit"}}>
+        {projOpen?"Show fewer ▴":"Show more ▾"}
+      </button>;
+    })()}
+  </div>;
+
+  const r2 = mob ? { display: "grid", gridTemplateColumns: "1fr", gap: 8 } : ST.row2;
   const preset = SIZE_PRESETS.find(s => s.label === sizeLabel);
   // calculate() normalises with Math.max/min, so anything that DESCRIBES the sheet
   // has to as well. Without it, entering Long=4 / Short=12 left the fold buttons
@@ -4246,7 +4895,7 @@ function App() {
     const summary  = buildSummary(config, result);
     const metadata = buildMetadata(config, result);
     const rushCost = result.shipping?.rushCost || 0;
-    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress);
+    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress, coupon&&coupon.code?coupon.code:"");
     // If still here (standalone mode), re-enable
     setUploadProgress(null);
     setSubmitting(false);
@@ -4322,15 +4971,28 @@ function App() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: CC.bg, fontFamily: "'Segoe UI','Helvetica Neue',Arial,sans-serif", color: CC.dark }}>
-      <style>{`@media(max-width:700px){.pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}.pps-sec-body{padding:12px 14px!important}}`}</style>
+    <div style={{ minHeight: "100vh", background: CC.bg, fontFamily: "var(--pps-sans)", color: CC.dark }}>
+      <style>{`
+                button:focus-visible,[role="button"]:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid #1d6fe0 !important;outline-offset:2px;border-radius:3px;}
+@media(max-width:700px){
+          /* 60px, not 44, to match the pill toggle beside them — those escape this
+             clamp because they carry no .pps-pill class, so a column of controls was
+             reading as two different form systems. 44 is also only the bare iOS
+             minimum for a tap target. tel/email added so the address form matches. */
+          select,input[type="text"],input[type="number"],input[type="tel"],input[type="email"]{font-size:16px!important;padding:10px 12px!important;min-height:60px!important}
+          .pps-sec-hdr{padding:12px 14px!important;font-size:13px!important}
+          .pps-sec-body{padding:12px 14px!important}
+          .pps-pill{padding:10px 6px!important;font-size:12px!important;min-height:44px!important}
+          .pps-ship-box{font-size:10px!important}
+        }
+      `}</style>
 
       {/* Hero header — eyebrow + display + tagline */}
       <section style={{maxWidth:1180,margin:"0 auto",padding:mob?"18px 14px 6px":"34px 28px 18px"}}>
         <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:mob?10:20}}>
           <div style={{flex:"1 1 320px",minWidth:0}}>
             <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:CK.magenta}}>Configure · Postcards</div>
-            <h1 style={{fontFamily:"'Segoe UI','Helvetica Neue',Arial,sans-serif",fontWeight:800,lineHeight:1,letterSpacing:"-0.02em",color:CC.dark,textTransform:"uppercase",margin:mob?"8px 0 0":"10px 0 0",maxWidth:720,fontSize:mob?28:44}}>
+            <h1 style={{fontFamily:"var(--pps-display)",fontWeight:800,lineHeight:1,letterSpacing:"-0.02em",color:CC.dark,textTransform:"uppercase",margin:mob?"8px 0 0":"10px 0 0",maxWidth:720,fontSize:mob?28:44}}>
               Postcards<br/>
               <span style={{color:CK.cyan}}>Instant Quote</span>
             </h1>
@@ -4338,16 +5000,83 @@ function App() {
         </div>
       </section>
 
-      {mob && <MobilePreviewBar longEdge={previewLong} shortEdge={previewShort} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar longEdge={previewLong} shortEdge={previewShort} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={openPreview}/>}
 
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "0 10px 140px" : "0 24px 80px", display: "flex", gap: 20, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
-        <div style={{ flex: 1, minWidth: 0, paddingBottom: mob ? 80 : 0 }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: mob ? "0 10px 140px" : "0 24px 80px", display: "flex", gap: mob ? 8 : 18, alignItems: mob ? "stretch" : "flex-start", flexDirection: mob ? "column" : "row" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: mob ? 6 : 10, width: mob ? "100%" : undefined }}>
+
+          {/* Settings — preferences live behind a gear so they read as settings
+              rather than as more configuration choices competing with the form. */}
+          <div data-pps-settings style={{position:"relative",display:"flex",justifyContent:"flex-end",padding:mob?"2px 2px 0":"0 2px 2px"}}>
+            <button type="button" onClick={()=>setSetOpen(o=>!o)} aria-haspopup="true" aria-expanded={setOpen} aria-label="Form settings"
+              title="Form settings"
+              style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",
+                fontSize:12,fontWeight:600,color:setOpen?CC.dark:CC.light,background:setOpen?CC.track:"transparent",
+                border:`1px solid ${setOpen?CC.border:"transparent"}`,transition:"all .15s ease"}}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+              Form settings
+            </button>
+            {setOpen&&(
+              <div role="menu" style={{position:"absolute",top:"100%",right:0,marginTop:6,zIndex:60,minWidth:250,
+                background:CC.white,border:`1px solid ${CC.border}`,borderRadius:12,
+                boxShadow:"0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.14)",padding:6}}>
+                {[
+                  {k:"theme", label:"Dark mode", hint:"Easier on the eyes in low light.",
+                   on:theme==="dark", set:()=>setTheme(t=>t==="dark"?"light":"dark")},
+                  {k:"solo", label:"One section at a time", hint:"Opening a section collapses the others.",
+                   on:soloSec, set:()=>setSoloSec(v=>!v)},
+                ].map(o=>(
+                  <button key={o.k} type="button" role="menuitemcheckbox" aria-checked={o.on} onClick={o.set}
+                    style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"9px 10px",borderRadius:8,
+                      border:"none",background:"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                    <span style={{flex:1,minWidth:0}}>
+                      <span style={{display:"block",fontSize:13,fontWeight:600,color:CC.dark}}>{o.label}</span>
+                      <span style={{display:"block",fontSize:11,color:CC.light,marginTop:1}}>{o.hint}</span>
+                    </span>
+                    <span style={{flex:"none",width:34,height:20,borderRadius:99,position:"relative",
+                      background:o.on?CK.cyan:CC.border,
+                      transition:"background .8s cubic-bezier(.4,0,.2,1) .25s"}}>
+                      {/* Straight slide: a quarter-second beat after the click, then the knob
+                          travels for .8s. Symmetric easing, no overshoot and no flip, so it
+                          reads as the control moving rather than performing. The track colour
+                          runs on the same delay and duration so the two move as one. */}
+                      <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,borderRadius:99,
+                        background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",
+                        transition:"left .8s cubic-bezier(.4,0,.2,1) .25s"}}/>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* SECTION 1: Size & Quantity */}
-          <Sec title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}>
+          <Sec step={1} summary={secSummary.s1} title="Size, Quantity & Fold" open={op.s1} onToggle={() => tog("s1")} badge={sizeMode === "custom" ? `${longEdge}×${shortEdge}"` : sizeLabel}
+            headerField={
+              /* Job Name lives in the header rather than the body: it names the whole
+                 job, not the trim size, and it is the one field an operator scans for.
+                 Styled as an editable title — heading typography, no chrome at rest —
+                 so it reads as part of the heading instead of a form box wedged into
+                 it. Width is fluid; a fixed width overflowed narrow phones. The 16px
+                 mobile size is deliberate: anything smaller and iOS zooms on focus.
+                 When the section collapses the value returns as a summary chip. */
+              <input id="pps-job-name" className="pps-jobtitle" type="text" value={jobName}
+                onChange={e=>setJobName(e.target.value)}
+                placeholder="Job name/PO" aria-label="Job name or PO number"
+                style={{...CHIP,width:"100%",minWidth:0,maxWidth:"none",display:"block",
+                  padding:mob?"6px 12px":"6px 13px",fontSize:mob?16:12,
+                  textAlign:"center",outline:"none",textOverflow:"ellipsis"}}/>
+                  /* background + border live in .pps-jobtitle, not here: an inline
+                     background would outrank the :hover and :focus rules. */
+            }>
+            {/* Job Name moved to the section header (headerField) — the old
+                qty | job-name row is now qty alone. */}
             <div style={r2}>
               <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={qty} onChange={v => setQty(Math.max(1, Math.round(v)))} min={1} />
-              <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={jobName} onChange={e=>setJobName(e.target.value)} placeholder="Optional" style={ST.inp}/></div>
+              {!mob&&<div style={ST.f}/>}
             </div>
             <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
               <div style={{ flex: "1 1 220px", minWidth: 0 }}>
@@ -4380,7 +5109,7 @@ function App() {
               const tooSmall = panelSize < 2;
               const throatExceeded = foldDir === "short" && dimLong > 13;
               return <>
-                <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall || throatExceeded ? "#fef2f2" : CK.cyanLight, borderRadius: 5, fontSize: 11, color: tooSmall || throatExceeded ? "#dc2626" : CC.mid, border: tooSmall || throatExceeded ? "1px solid #f5cccc" : "none" }}>
+                <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall || throatExceeded ? "#fef2f2" : CC.tint, borderRadius: 8, fontSize: 11, color: tooSmall || throatExceeded ? "#dc2626" : CC.mid, border: tooSmall || throatExceeded ? "1px solid #f5cccc" : "none" }}>
                   Folded size: <strong>{fmtInch(staticDim)}" × {fmtInch(panelSize)}"</strong> ({fold.panels} panels)
                   {tooSmall && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
                   {throatExceeded && <span style={{marginLeft:8,fontWeight:700}}>— Cannot fold, unfolded edge exceeds 13 inches</span>}
@@ -4392,15 +5121,15 @@ function App() {
           </Sec>
 
           {/* SECTION 2: Printing & Paper */}
-          <Sec title="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
+          <Sec step={2} summary={secSummary.s2} title="Printing & Paper" open={op.s2} onToggle={() => tog("s2")}>
             <Pil label={<Tip k="sides">Sides Printed</Tip>} value={sides} onChange={v => setSides(Number(v))} options={[{ t: "Both Sides", v: 2 }, { t: "Front Only", v: 1 }]} />
             <div style={{ ...r2, marginTop: 10 }}>
               <Pil label={frontLabel + " Color"} value={frontColor} onChange={setFrontColor} options={[
-                { t: "Full Color", v: "color", onStyle: { background: "conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)", color: "#fff", fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,.5)" } },
+                { t: "Full Color", v: "color", onStyle: { background: "linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)", color: "#fff", fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,.5)" } },
                 { t: "Greyscale", v: "bw", onStyle: { background: "linear-gradient(135deg, #888 0%, #444 50%, #999 100%)", color: "#fff", fontWeight: 600 } }
               ]} />
               {sides === 2 && <Pil label={backLabel + " Color"} value={backColor} onChange={setBackColor} options={[
-                { t: "Full Color", v: "color", onStyle: { background: "conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)", color: "#fff", fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,.5)" } },
+                { t: "Full Color", v: "color", onStyle: { background: "linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)", color: "#fff", fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,.5)" } },
                 { t: "Greyscale", v: "bw", onStyle: { background: "linear-gradient(135deg, #888 0%, #444 50%, #999 100%)", color: "#fff", fontWeight: 600 } }
               ]} />}
             </div>
@@ -4412,14 +5141,14 @@ function App() {
           </Sec>
 
           {/* SECTION 3: Addons */}
-          <Sec title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
+          <Sec step={3} summary={secSummary.s3} title="Finishing & Addons" open={op.s3} onToggle={() => tog("s3")}>
             <Sel label={<Tip k="fold_type">Fold Type</Tip>} value={foldType} onChange={setFoldType}>
               {availableFoldTypes(dimLong, dimShort, true).map(f => <option key={f.val} value={f.val}>{f.label}</option>)}
             </Sel>
             <div style={ST.hr} />
-            {(_AD.vivid !== false || vivid === true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} value={vivid} onChange={v => setVivid(v === true || v === "true")} disabled={!r.vividOK} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
-            {(_AD.vivid !== false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-4,marginBottom:4}}>Requires matte or gloss coated paper</div>}
-            {(_AD.vivid !== false || vivid === true) && <div style={ST.hr} />}
+            {/* Hidden when unavailable rather than shown-disabled-with-explainer. */}
+            {(_AD.vivid !== false || vivid === true) && r.vividOK && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} value={vivid} onChange={v => setVivid(v === true || v === "true")} options={[{ t: "Standard", v: false }, { t: "Enhanced Vivid", v: true }]} />}
+            {(_AD.vivid !== false || vivid === true) && r.vividOK && <div style={ST.hr} />}
             {(_AD.coating !== false || coating > 0) && (paper.coatable ? (
               <>
                 <Sel label={<RichTip tipKey="coating">Additional Coating</RichTip>} value={coating} onChange={v => setCoating(Number(v))}>
@@ -4463,8 +5192,10 @@ function App() {
             )}
           </Sec>
 
-          {/* SECTION 4: Artwork & Proofing */}
-          <Sec title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
+          {/* SECTION 4: Artwork & Proofing — keepMounted: the uploader owns the
+              extracted pages, the original File and the proof approval; unmounting
+              on collapse would silently throw the upload away. */}
+          <Sec step={4} summary={secSummary.s4} keepMounted title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")}>
 
             <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
 
@@ -4564,7 +5295,7 @@ function App() {
               </div>
               <button type="button" onClick={() => generatePostcardTemplate(dimLong, dimShort, foldType, fold.panels, foldDir, (sizeMode === "custom" ? `${dimShort}×${dimLong}` : sizeLabel), perfCount, perfDir, perfPositions)} style={{
                 padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
-                border: `1px solid ${CK.cyan}`, background: CK.cyanLight, color: CK.cyan, whiteSpace: "nowrap",
+                border: `1px solid ${CK.cyan}55`, background: CC.tint, color: CK.cyan, whiteSpace: "nowrap",
               }}>📐 Download Template</button>
             </div>
 
@@ -4604,7 +5335,7 @@ function App() {
           </Sec>
 
           {/* SECTION 5: Shipping & Delivery */}
-          <Sec title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+          <Sec step={5} summary={secSummary.s5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
             <form autoComplete="on" onSubmit={e=>e.preventDefault()}>
             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
             <div style={r2}>
@@ -4613,30 +5344,37 @@ function App() {
             </div>
             <div style={{...ST.f,marginTop:6}}><label style={ST.lbl}>Street Address</label><input type="text" name="shipping-address-line1" autoComplete="shipping address-line1" value={shipAddr.street1} onChange={e=>setShipAddr(p=>({...p,street1:e.target.value}))} placeholder="Street address" style={ST.inp}/></div>
             <div style={{...ST.f,marginTop:6}}><label style={ST.lbl}>Address Line 2 <span style={{fontWeight:400,color:CC.light}}>(optional)</span></label><input type="text" name="shipping-address-line2" autoComplete="shipping address-line2" value={shipAddr.street2} onChange={e=>setShipAddr(p=>({...p,street2:e.target.value}))} placeholder="Apt, suite, unit, etc." style={ST.inp}/></div>
-            <div style={{...r3,marginTop:6}}>
-              <div style={ST.f}><label style={ST.lbl}>City</label><input type="text" name="shipping-address-level2" autoComplete="shipping address-level2" value={shipAddr.city} onChange={e=>setShipAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={ST.inp}/></div>
-              <Sel label={<Tip k="ship_state">State</Tip>} value={shipState} onChange={setShipState} name="shipping-address-level1" autoComplete="shipping address-level1">
+            {/* City/State/ZIP share a row: 2fr 1fr 1fr on desktop, two columns on
+                mobile with City spanning both. Cells zero their own marginTop so the
+                grid gap governs alignment. */}
+            <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"2fr 1fr 1fr",gap:mob?8:18,marginTop:12}}>
+              <div style={{...ST.f,marginTop:0,gridColumn:mob?"1 / -1":undefined}}><label style={ST.lbl} htmlFor="pps-ship-city">City</label><input id="pps-ship-city" type="text" name="shipping-address-level2" autoComplete="shipping address-level2" value={shipAddr.city} onChange={e=>setShipAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={ST.inp}/></div>
+              <Sel label={<Tip k="ship_state">State</Tip>} wrapStyle={{marginTop:0}} selectId="pps-ship-state" value={shipState} onChange={setShipState} name="shipping-address-level1" autoComplete="shipping address-level1">
+                <option value="">Select&hellip;</option>
                 {US_STATES.map(st=><option key={st} value={st}>{st}</option>)}
               </Sel>
-              <div style={ST.f}><label style={ST.lbl}>ZIP Code</label><input type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:e.target.value.replace(/[^\d-]/g,"").slice(0,10)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
+              <div style={{...ST.f,marginTop:0}}><label style={ST.lbl} htmlFor="pps-ship-zip">ZIP Code</label><input id="pps-ship-zip" type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:e.target.value.replace(/[^\d-]/g,"").slice(0,10)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
             </div>
             </form>
 
             {r.shipping&&<>
-              <div style={{marginTop:10,padding:mob?"8px 10px":"10px 14px",background:CK.cyanLight,borderRadius:5,border:`1px solid ${CK.cyan}33`}}>
+              <div style={{marginTop:10,padding:mob?"8px 10px":"10px 14px",background:CC.tint,borderRadius:10,border:`1px solid ${CC.tintBorder}`}}>
                 <div style={{fontSize:10.5,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",color:CK.cyan,marginBottom:2}}>Free Delivery Estimate</div>
                 <div style={{fontSize:mob?14:15,fontWeight:700,color:CC.dark}}>{r.shipping.freeDeliveryDate}</div>
                 <div style={{fontSize:mob?10.5:11,color:CC.mid,marginTop:2}}>{r.shipping.freeDeliveryBizDays} business days</div>
-                <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #b3dff044",display:"flex",flexWrap:"wrap",gap:"2px 16px",fontSize:10.5}}>
+                {/* Production & ship-by dates + transit — shop internals, staff-gated.
+                    Customers get the delivery date above and "As soon as" in the panel. */}
+                {debugUnlocked&&<div style={{marginTop:6,paddingTop:6,borderTop:`1px solid ${CC.tintBorder}`,display:"flex",flexWrap:"wrap",gap:"2px 16px",fontSize:10.5}}>
                   <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Production starts:</span> {r.shipping.productionStartDate}</span>
                   <span style={{color:CC.mid}}><span style={{fontWeight:600}}>Must ship by:</span> {r.shipping.mustShipDate}</span>
                   <span style={{color: r.shipping.effectiveTransit < r.shipping.transitDays ? "#f59e0b" : CC.light}}>
                     ({r.shipping.effectiveTransit}d {r.shipping.effectiveTransit < r.shipping.transitDays ? "overnight" : "ground"} transit)
                   </span>
-                </div>
-                <div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,paddingTop:4,borderTop:"1px solid #b3dff044"}}>
+                </div>}
+                {/* Mobile keeps the earliest date customer-visible; the shop clock is staff-only. */}
+                {(mob||debugUnlocked)&&<div style={{fontSize:mob?9:10,color:CC.light,marginTop:4,paddingTop:4,borderTop:`1px solid ${CC.tintBorder}`}}>
                   {mob?<>{r.shipping.earliestDate} earliest</>:<>Earliest possible: <strong style={{color:CC.mid}}>{r.shipping.earliestDate}</strong> ({r.shipping.earliestBizDays} biz days) · Shop: {r.shipping.shopToday}</>}
-                </div>
+                </div>}
               </div>
 
               <div style={ST.f}>
@@ -4669,72 +5407,47 @@ function App() {
 
         </div>
 
-        {/* Desktop sidebar — pointer-events:none only on read-only preview+Panel
-            so the projections rows, Share button, and Debug button (siblings
-            below) still receive clicks. Mirrors the saddle calculator's split. */}
-        {!mob && <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none" }}>
+        {/* Mobile: discount code + quantity table after the last section; the
+            bottom margin keeps them clear of the fixed bar. */}
+        {mob && <div style={{...ST.card,padding:"12px 14px",marginTop:10}}>{discountField()}</div>}
+        {mob && projections && <div style={{marginTop:10,marginBottom:100}}>{qtyTable()}</div>}
+
+        {/* Sticky quote rail — the price and CTA stay in view while the job is built,
+            instead of scrolling away on long configurations. */}
+        {!mob&&<div ref={railRef} style={{width:320,flexShrink:0,position:"sticky",top:16,alignSelf:"flex-start",display:"flex",flexDirection:"column",gap:0}}>
+          <div style={{display:"flex",flexDirection:"column",gap:10,pointerEvents:"none"}}>
             {/* The engine's resolved dimensions, not the custom-size state. calculate() reads
                 long/short out of SIZE_PRESETS in preset mode, while longEdge/shortEdge are only
                 ever written by the custom inputs, a reorder restore or a URL param — so choosing
                 a preset repriced correctly while the preview kept whatever the custom fields last
                 held, which is the 11x8.5 default on a fresh load. Custom mode looked fine for the
                 same reason it was broken: there, those fields ARE the source. */}
-            <SidebarPostcardPreview longEdge={previewLong} shortEdge={previewShort} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>
-            <Panel result={result} />
+            <SidebarPostcardPreview longEdge={previewLong} shortEdge={previewShort} quantity={qty} panels={fold.panels} foldType={foldType} frontArt={coverArt} frontColor={frontColor} sides={sides} onOpenPreview={openPreview}/>
+            <div><Panel result={result} debugUnlocked={debugUnlocked} coupon={coupon} totalRef={setTotalEl}/></div>
           </div>
-          {missingDest && <div style={{marginTop:10,fontSize:12,fontWeight:600,color:"#dc2626",lineHeight:1.35}}>{missingDestMsg}</div>}
-          <button type="button" onClick={handleAddToOrder} disabled={!!result?.error || submitting} style={{ width: "100%", marginTop: 10, padding: submitting && uploadProgress ? "10px 12px 6px" : "12px", borderRadius: 6, border: "none", background: (result?.error || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error || submitting) ? .5 : 1, transition: "all .2s", overflow: "hidden" }}>
-            {submitting && uploadProgress ? (
-              <div>
-                <div style={{ fontSize: 12 }}>{uploadProgress.phase === "upload" ? `Uploading file(s)… ${uploadProgress.pct}%` : "Adding…"}</div>
-                <div style={{ width: "100%", height: 3, borderRadius: 2, background: "rgba(255,255,255,.2)", overflow: "hidden", marginTop: 4 }}>
-                  <div style={{ height: "100%", borderRadius: 2, background: "#fff", transition: "width .15s", width: uploadProgress.phase === "upload"
-                    ? `${((uploadProgress.fileIdx / uploadProgress.fileCount) + (uploadProgress.pct / 100 / uploadProgress.fileCount)) * 100}%`
-                    : "100%"
-                  }}/>
-                </div>
-              </div>
-            ) : submitting ? "Uploading…" : "Add to Order"}
-          </button>
-          {projections && <div style={{...ST.pnl,marginTop:10,overflow:"hidden"}}>
-            <div style={{padding:"10px 18px",background:"#f8fafc",borderBottom:`1px solid ${CC.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:CC.primary}}>Quantity Pricing</div>
-              {debugUnlocked&&(
-                  <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3,marginLeft:"auto",marginRight:8}}>
-                    <span style={{fontSize:9,fontWeight:700,color:CC.light,textTransform:"uppercase",letterSpacing:".4px"}}>Adjust Table</span>
-                    <input type="text" inputMode="decimal" value={tableAdjPct} onChange={e=>setTableAdjPct(e.target.value)} placeholder="0"
-                      style={{width:46,padding:"2px 5px",fontSize:11,textAlign:"right",border:`1px solid ${(parseFloat(tableAdjPct)||0)!==0?CK.magenta:CC.border}`,borderRadius:4,fontFamily:"inherit",color:CC.dark,background:"#fff",outline:"none"}}/>
-                    <span style={{fontSize:10,color:CC.light,fontWeight:600}}>%</span>
-                    {(parseFloat(tableAdjPct)||0)!==0&&<span style={{fontSize:9,fontWeight:700,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
-                  </span>
-                )}
-                <button type="button" onClick={copyProjections} title="Copy pricing table" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,color:projCopied?"#16a34a":CC.light,fontFamily:"inherit",fontWeight:600,transition:"color .2s",letterSpacing:".3px"}}>{projCopied?"✓ Copied":"Copy"}</button>
+          {/* CTA directly under the panel; the old duplicate below the table is gone. */}
+          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",marginTop:16,padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
+          {/* Shipping is required to place the order, but the CTA keeps its own label —
+              a button that renames itself to describe a missing field reads as broken.
+              Pressing it jumps to the shipping section. */}
+          {missingDest && (
+            <div style={{marginTop:7,fontSize:12,fontWeight:600,color:CC.red,lineHeight:1.35}}>
+              {missingDestMsg}
             </div>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
-              <thead>
-                <tr style={{borderBottom:`1px solid ${CC.border}`}}>
-                  <th style={{padding:"7px 18px",textAlign:"left",fontSize:10,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Qty</th>
-                  <th style={{padding:"7px 10px",textAlign:"right",fontSize:10,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Unit</th>
-                  <th style={{padding:"7px 18px",textAlign:"right",fontSize:10,fontWeight:600,color:CC.light,textTransform:"uppercase",letterSpacing:".5px"}}>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projections.map((p,i) => p.total !== null && (
-                  <tr key={i} style={{borderBottom:`1px solid ${CC.border}22`,background:p.current?"#f0f9ff":"transparent",cursor:p.current?"default":"pointer"}}
-                    onClick={() => {if(!p.current) setQty(p.qty)}}>
-                    <td style={{padding:"6px 18px",fontWeight:p.current?700:400,color:p.current?CK.cyan:CC.dark}}>
-                      {p.qty.toLocaleString()}{p.current&&<span style={{fontSize:9,color:CK.cyan,marginLeft:4}}>●</span>}
-                    </td>
-                    <td style={{padding:"6px 10px",textAlign:"right",color:CC.mid,fontWeight:500}}>${p.perUnit.toFixed(2)}</td>
-                    <td style={{padding:"6px 18px",textAlign:"right",fontWeight:p.current?700:500,color:p.current?CK.cyan:CC.dark}}>${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>}
-          <button type="button" onClick={handleShareLink} style={{ width: "100%", marginTop: 8, padding: "8px", borderRadius: 6, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : "#f8fafc", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
-            {shareCopied ? "✓ Link copied to clipboard" : "Share this configuration"}
+          )}
+          {/* Discount code — one definition, mounted here and in the mobile flow. */}
+          <div style={{marginTop:10}}>{discountField()}</div>
+          {/* Secondary action, directly under the CTA: visible without scrolling past
+              the pricing table, which is where it used to sit. */}
+          <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}}
+            style={{width:"100%",marginTop:9,padding:"11px 10px",borderRadius:9,border:`1px solid ${CK.cyan}55`,
+              background:CC.tint,color:CK.cyan,fontSize:13,fontWeight:650,cursor:"pointer",fontFamily:"inherit",
+              transition:"all .2s"}}>
+            Ask a question about this quote →
+          </button>
+          <div style={{marginTop:10}}>{qtyTable()}</div>
+          <button type="button" onClick={handleShareLink} style={{width:"100%",marginTop:8,padding:"9px",borderRadius:9,border:`1px solid ${shareCopied?"#86efac":CC.border}`,background:shareCopied?"#f0fdf4":CC.white,color:shareCopied?"#16a34a":CC.mid,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+            {shareCopied ? "✓ Link copied to clipboard" : "Save configuration"}
           </button>
           {debugUnlocked&&r.shipping&&r.shipping.estWeightLb>0&&(()=>{queueShipCost(shipZip,shipState,r.shipping.estWeightLb);const _sc=getShipCostEst(shipZip,r.shipping.estWeightLb);return(
             <div style={{marginTop:8,padding:"7px 10px",background:"#1a1a1a",color:"#9fe870",borderRadius:5,fontSize:10.5,fontFamily:"monospace",lineHeight:1.5}}>
@@ -4742,7 +5455,7 @@ function App() {
               {_sc?(" · UPS Ground $"+_sc.amount.toFixed(2)+(_sc.parcels>1?" ("+_sc.parcels+" pkg)":"")):(String(shipZip||"").replace(/[^0-9]/g,"").length>=5?" · rate…":" · enter ZIP for rate")}
             </div>
           );})()}
-          {debugUnlocked&&<button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 4, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#f8fafc", color: showDebug ? "#888" : "#bbb", fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
+          {debugUnlocked&&<button type="button" onClick={() => setShowDebug(p => !p)} style={{ width: "100%", marginTop: 8, padding: "6px", borderRadius: 8, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : CC.white, color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
             {showDebug ? "▼ Hide" : "▶ Show"} Debug Panel
           </button>}
           {debugUnlocked && showDebug && r.debug && (
@@ -4764,23 +5477,55 @@ function App() {
               </details>}
             </div>
           )}
-          <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 4, border: `1px solid ${CK.cyan}55`, background: "#fff", color: CK.cyan, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
-            Have a question about this quote? →
-          </button>
         </div>}
       </div>
 
-      {/* Mobile-only floating "Have a question?" chip — sits just above the bottom bar */}
-      {mob && !qOpen && !mobExpanded && (
-        <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ position: "fixed", bottom: "calc(70px + env(safe-area-inset-bottom))", right: 12, zIndex: 9989, padding: "7px 13px", borderRadius: 16, border: `1px solid ${CK.cyan}`, background: "#fff", color: CK.cyan, fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 8px rgba(0,0,0,.12)", cursor: "pointer", fontFamily: "inherit" }}>
+      {/* Desktop condensed total — only while the price card is off screen. Tracked to
+          the rail's own column so it reads as the rail folding up rather than as a new
+          element arriving. Same numbers, same action, one line. */}
+      {!mob&&miniBar&&result&&!result.error?.length&&(()=>{
+        const _t=Math.max(0,result.total).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+        const _sh=result.shipping;
+        const _when=_sh?(_sh.needByFmt||((_sh.hasDest)?(((_sh.rushCost>0)&&_sh.needByFmt)?_sh.needByFmt:_sh.freeDeliveryDate):_sh.earliestDate)):null;
+        const _net=couponActive?netOf(result.total):null;
+        return <Float><div style={{position:"fixed",bottom:16,left:miniBar.left,width:miniBar.width,zIndex:9990,
+          background:CC.white,border:`1px solid ${CC.border}`,borderRadius:12,
+          boxShadow:"0 6px 24px rgba(16,24,40,.16)",padding:"10px 12px",
+          display:"flex",alignItems:"center",gap:10,animation:"pps-mini-in .22s ease-out"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:19,fontWeight:800,color:CC.dark,lineHeight:1.05}}>${_t}</div>
+            <div style={{fontSize:10.5,color:missingDest?CC.red:CC.light,fontWeight:600,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {missingDest ? missingDestMsg
+                           : `${(result.qty||0).toLocaleString()} qty${_when?` · ${_sh&&_sh.needByFmt?"delivery by":"as soon as"} ${_when}`:""}`}
+            </div>
+            {/* The condensed bar is the only price on screen once the card scrolls off,
+                so it cannot be the one place a live code goes unmentioned. */}
+            {_net!=null&&<div style={{fontSize:10.5,fontWeight:700,color:CK.cyan,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {coupon.code} · you pay ${_net.toFixed(2)}
+            </div>}
+          </div>
+          <button type="button" onClick={handleAddToOrder} disabled={submitting}
+            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.light:CK.cyan,
+              color:"#fff",fontSize:14,fontWeight:750,cursor:submitting?"default":"pointer",fontFamily:"inherit",
+              opacity:submitting?.5:1,whiteSpace:"nowrap"}}>
+            {submitting?"Adding…":"Add to Order"}
+          </button>
+        </div></Float>;
+      })()}
+
+      {/* Mobile-only floating "Have a question?" chip — portalled, docked above the
+          bottom bar via the height it publishes. */}
+      {mob && !qOpen && !mobExpanded && (<Float>
+        <button type="button" onClick={() => { setQOpen(true); setQStatus("idle"); setQErrorMsg(""); }} style={{ position: "fixed", bottom: "calc(var(--pps-bottombar, 70px) + 6px)", right: 12, zIndex: 9989, padding: "7px 13px", borderRadius: 16, border: `1px solid ${CK.cyan}`, background: CC.white, color: CK.cyan, fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 8px rgba(0,0,0,.12)", cursor: "pointer", fontFamily: "inherit" }}>
           Have a question? →
         </button>
-      )}
+      </Float>)}
 
-      {/* Mobile bottom bar */}
-      {mob && <>
-        {/* Slide-up panels: debug or qty pricing */}
-        {debugUnlocked && showDebug && r.debug && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 9989, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
+      {/* Fixed bottom bar — mobile. Portalled: a WordPress-theme ancestor with a
+          transform would trap position:fixed in its stacking context. */}
+      {mob && <Float>
+        {/* Slide-up panel: debug */}
+        {debugUnlocked && showDebug && r.debug && <div style={{ position: "fixed", bottom: "var(--pps-bottombar, 76px)", left: 0, right: 0, zIndex: 9989, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)", padding: "10px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: CC.mid, marginBottom: 6 }}>DEBUG</div>
           {Object.entries(r.debug).filter(([k]) => k !== "P").map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "1px 0" }}>
@@ -4789,63 +5534,20 @@ function App() {
             </div>
           ))}
         </div>}
-        {mobPricing && projections && <div style={{ position: "fixed", bottom: 76, left: 0, right: 0, zIndex: 9989, maxHeight: "60vh", overflowY: "auto", background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.12)" }}>
-          <div style={{ padding: "8px 14px", background: "#f8fafc", borderBottom: `1px solid ${CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: CC.light }}>Quantity Pricing</span>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              {debugUnlocked&&(
-                  <span title="Debug only — marks this table up or down. Does NOT change the order price." style={{display:"inline-flex",alignItems:"center",gap:3,marginLeft:"auto",marginRight:8}}>
-                    <span style={{fontSize:9,fontWeight:700,color:CC.light,textTransform:"uppercase",letterSpacing:".4px"}}>Adjust Table</span>
-                    <input type="text" inputMode="decimal" value={tableAdjPct} onChange={e=>setTableAdjPct(e.target.value)} placeholder="0"
-                      style={{width:46,padding:"2px 5px",fontSize:11,textAlign:"right",border:`1px solid ${(parseFloat(tableAdjPct)||0)!==0?CK.magenta:CC.border}`,borderRadius:4,fontFamily:"inherit",color:CC.dark,background:"#fff",outline:"none"}}/>
-                    <span style={{fontSize:10,color:CC.light,fontWeight:600}}>%</span>
-                    {(parseFloat(tableAdjPct)||0)!==0&&<span style={{fontSize:9,fontWeight:700,color:CK.magenta,letterSpacing:".3px"}}>{(parseFloat(tableAdjPct)>0?"+":"")+parseFloat(tableAdjPct)}% applied</span>}
-                  </span>
-                )}
-                <button type="button" onClick={copyProjections} style={{ fontSize: 10, fontWeight: 600, color: projCopied ? "#16a34a" : CC.light, background: "none", border: "none", cursor: "pointer", padding: "2px 6px", fontFamily: "inherit" }}>
-                {projCopied ? "Copied!" : "Copy"}
-              </button>
-              <button type="button" onClick={handleShareLink} style={{ fontSize: 10, fontWeight: 600, color: shareCopied ? "#16a34a" : CK.cyan, background: "none", border: "none", cursor: "pointer", padding: "2px 6px", fontFamily: "inherit" }}>
-                {shareCopied ? "Copied!" : "Share Link"}
-              </button>
-            </div>
-          </div>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${CC.border}` }}>
-                <th style={{ padding: "6px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: CC.light, textTransform: "uppercase", letterSpacing: ".5px" }}>Qty</th>
-                <th style={{ padding: "6px 10px", textAlign: "right", fontSize: 9, fontWeight: 600, color: CC.light, textTransform: "uppercase", letterSpacing: ".5px" }}>Unit</th>
-                <th style={{ padding: "6px 14px", textAlign: "right", fontSize: 9, fontWeight: 600, color: CC.light, textTransform: "uppercase", letterSpacing: ".5px" }}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {projections.map((p, i) => p.total !== null && (
-                <tr key={i} style={{ borderBottom: `1px solid ${CC.border}22`, background: p.current ? "#f0f9ff" : "transparent" }}
-                  onClick={() => { if (!p.current) { setQty(p.qty); setMobPricing(false); } }}>
-                  <td style={{ padding: "7px 14px", fontWeight: p.current ? 700 : 400, color: p.current ? CK.cyan : CC.dark }}>
-                    {p.qty.toLocaleString()}{p.current && <span style={{ fontSize: 9, color: CK.cyan, marginLeft: 4 }}>&#9679;</span>}
-                  </td>
-                  <td style={{ padding: "7px 10px", textAlign: "right", color: CC.mid, fontWeight: 500 }}>${p.perUnit.toFixed(2)}</td>
-                  <td style={{ padding: "7px 14px", textAlign: "right", fontWeight: p.current ? 700 : 500, color: p.current ? CK.cyan : CC.dark }}>${p.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>}
         {/* Fixed bottom bar */}
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 9990, background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.08)", padding: "8px 10px", paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}>
+        <div ref={bottomBarRef} style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 9990, background: CC.white, borderTop: `1px solid ${CC.border}`, boxShadow: "0 -4px 16px rgba(0,0,0,.08)", padding: "8px 10px", paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}>
+          {missingDest && <div style={{ fontSize: 11, fontWeight: 600, color: CC.red, lineHeight: 1.3, padding: "0 2px 6px" }}>{missingDestMsg}</div>}
           <div style={{ display: "flex", flexDirection: mobExpanded ? "column" : "row", alignItems: mobExpanded ? "stretch" : "center", gap: 8 }}>
             <div style={{ flex: mobExpanded ? undefined : 1, minWidth: 0 }}>
-              <Panel result={result} compact expanded={mobExpanded} onToggleExpand={() => { setMobExpanded(p => !p); if (mobPricing) setMobPricing(false); if (showDebug) setShowDebug(false); }} />
-              {!mobExpanded && <div style={{ fontSize: 8, textAlign: "center", color: mobPricing ? CK.cyan : CC.light, marginTop: 2, letterSpacing: ".5px", textTransform: "uppercase", fontWeight: 600, cursor: "pointer" }} onClick={() => { setMobPricing(p => !p); if (showDebug) setShowDebug(false); }}>{mobPricing ? "▼ Hide Pricing" : "▲ Qty Pricing"}</div>}
+              <Panel result={result} compact debugUnlocked={debugUnlocked} coupon={coupon} expanded={mobExpanded} onToggleExpand={() => { setMobExpanded(p => !p); if (showDebug) setShowDebug(false); }} />
             </div>
-            {!mobExpanded && <button type="button" onClick={handleShareLink} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : "#f8fafc", color: shareCopied ? "#16a34a" : CC.mid, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s", lineHeight: 1 }} title="Share link">
+            {!mobExpanded && <button type="button" onClick={handleShareLink} style={{ flexShrink: 0, padding: "10px", borderRadius: 8, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : CC.track, color: shareCopied ? "#16a34a" : CC.mid, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s", lineHeight: 1 }} title="Share link">
               {shareCopied ? "✓" : "🔗"}
             </button>}
-            {!mobExpanded && debugUnlocked&&<button type="button" onClick={() => { setShowDebug(p => !p); if (mobPricing) setMobPricing(false); }} style={{ flexShrink: 0, padding: "10px", borderRadius: 6, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : "#f8fafc", color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
+            {!mobExpanded && debugUnlocked&&<button type="button" onClick={() => setShowDebug(p => !p)} style={{ flexShrink: 0, padding: "10px", borderRadius: 8, border: `1px solid ${showDebug ? "#555" : CC.border}`, background: showDebug ? "#1a1a1a" : CC.track, color: showDebug ? "#888" : CC.light, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }} title="Debug">
               {showDebug ? "✕" : "⚙"}
             </button>}
-            <button type="button" onClick={handleAddToOrder} style={{ flexShrink: 0, padding: "12px 18px", borderRadius: 6, border: "none", background: (result?.error || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error || submitting) ? .5 : 1, whiteSpace: "nowrap", minWidth: submitting && uploadProgress ? 140 : undefined }}
+            <button type="button" onClick={handleAddToOrder} style={{ flexShrink: 0, padding: "12px 18px", borderRadius: 8, border: "none", background: (result?.error || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error || submitting) ? .5 : 1, whiteSpace: "nowrap", minWidth: submitting && uploadProgress ? 140 : undefined }}
               disabled={!!result?.error || submitting}>
               {submitting && uploadProgress ? (
                 <div>
@@ -4861,12 +5563,12 @@ function App() {
             </button>
           </div>
         </div>
-      </>}
+      </Float>}
 
-      {/* Question modal — overlay rendered at App root */}
-      {qOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "min(8vh,60px) 16px 16px", overflowY: "auto" }} onClick={resetQuestionForm}>
-          <div style={{ background: "#fff", borderRadius: 8, maxWidth: 520, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.3)", overflow: "hidden" }} onClick={e => e.stopPropagation()}>
+      {/* Question modal — portalled overlay */}
+      {qOpen && (<Float>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "var(--bp-scrim)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "min(8vh,60px) 16px 16px", overflowY: "auto", backdropFilter: "blur(6px)" }} onClick={resetQuestionForm}>
+          <div style={{ background: CC.white, border: `1px solid ${CC.border}`, borderRadius: 16, maxWidth: 520, width: "100%", boxShadow: "0 4px 6px rgba(16,24,40,.06), 0 24px 64px rgba(16,24,40,.28)", overflow: "hidden" }} onClick={e => e.stopPropagation()}>
             <div style={{ padding: "16px 20px", borderBottom: `1px solid ${CC.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: CC.dark }}>Have a question about this quote?</div>
               <button type="button" onClick={resetQuestionForm} style={{ background: "none", border: "none", fontSize: 22, lineHeight: 1, color: CC.light, cursor: "pointer", padding: 0, marginLeft: 12 }} aria-label="Close">×</button>
@@ -4876,7 +5578,7 @@ function App() {
                 <div style={{ fontSize: 34, marginBottom: 8 }}>✓</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: CC.dark, marginBottom: 6 }}>Question sent!</div>
                 <div style={{ fontSize: 13, color: CC.mid, lineHeight: 1.5, maxWidth: 380, margin: "0 auto" }}>We&rsquo;ve emailed a copy of your quote to <strong>{qEmail}</strong>. A team member will reply within 1 business day.</div>
-                <button type="button" onClick={resetQuestionForm} style={{ marginTop: 18, padding: "9px 20px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#f8fafc", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
+                <button type="button" onClick={resetQuestionForm} style={{ marginTop: 18, padding: "9px 20px", borderRadius: 8, border: `1px solid ${CC.border}`, background: CC.track, color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
               </div>
             ) : (
               <form onSubmit={handleQuestionSubmit} style={{ padding: "16px 20px" }}>
@@ -4904,14 +5606,14 @@ function App() {
                   <div style={{ padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 4, fontSize: 12, color: "#b91c1c", marginBottom: 10 }}>{qErrorMsg}</div>
                 )}
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                  <button type="button" onClick={resetQuestionForm} style={{ padding: "9px 16px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#f8fafc", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }} disabled={qStatus === "sending"}>Cancel</button>
+                  <button type="button" onClick={resetQuestionForm} style={{ padding: "9px 16px", borderRadius: 8, border: `1px solid ${CC.border}`, background: CC.track, color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }} disabled={qStatus === "sending"}>Cancel</button>
                   <button type="submit" disabled={qStatus === "sending"} style={{ padding: "9px 18px", borderRadius: 5, border: "none", background: qStatus === "sending" ? CC.light : CK.cyan, color: "#fff", fontSize: 13, fontWeight: 700, cursor: qStatus === "sending" ? "wait" : "pointer", fontFamily: "inherit" }}>{qStatus === "sending" ? "Sending…" : "Send question"}</button>
                 </div>
               </form>
             )}
           </div>
         </div>
-      )}
+      </Float>)}
     </div>
   );
 }
@@ -4919,24 +5621,49 @@ function App() {
 // ═══════════════════════════════════════════════════════════════
 // STYLES
 // ═══════════════════════════════════════════════════════════════
-const ST = {
-  f:{marginTop:10},
-  lbl:{display:"block",fontSize:13,fontWeight:600,color:CC.mid,marginBottom:5},
-  sel:{width:"100%",padding:"10px 32px 10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(0,0,0,.05)"},
-  selA:{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
-  inp:{width:"100%",padding:"10px 12px",borderRadius:6,border:`1px solid ${CC.border}`,background:"#fff",fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(0,0,0,.05)"},
-  pills:{display:"flex",borderRadius:6,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(0,0,0,.05)"},
-  pill:{flex:1,padding:"9px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRight:`1px solid ${CC.border}`,background:"#fff",color:CC.mid,cursor:"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
-  pillOn:{background:`linear-gradient(135deg, ${CK.cyan} 0%, #0070e6 40%, #3d9cff 50%, #0070e6 60%, #005cc8 100%)`,color:"#fff",fontWeight:600,boxShadow:"inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(0,0,0,.15), 0 1px 3px rgba(0,126,255,.2)"},
-  row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12},
-  row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12},
-  hr:{height:1,background:CC.border,margin:"14px 0 4px"},
-  note:{fontSize:12,color:CC.light,margin:"4px 0 0"},
-  err:{color:"#dc2626",fontSize:13,margin:"8px 0 0",padding:"8px 10px",background:"#fef2f2",borderRadius:4,border:"1px solid #f5cccc"},
-  card:{background:CC.white,borderRadius:8,border:`1px solid ${CC.border}`,borderLeft:`3px solid ${CC.primary}`,overflow:"hidden",marginBottom:10},
-  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"#f8fafc",border:"none",borderBottom:`1px solid ${CC.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:15},
-  pnl:{background:CC.white,borderRadius:8,border:`1px solid ${CC.border}`,overflow:"hidden"},
-};
+function buildST(){ return {
+  f:{marginTop:18},
+  lbl:{display:"block",fontSize:14,fontWeight:600,color:CC.mid,marginBottom:7,letterSpacing:".005em"},
+  sel:{width:"100%",padding:"20px 34px 20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:CC.white,fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  selA:{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
+  inp:{width:"100%",padding:"20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:CC.white,fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxSizing:"border-box",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  // Segmented control: inset track + flat brand thumb (replaces the bevelled 5-stop gradient)
+  pills:{display:"flex",borderRadius:10,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.track,padding:3,gap:3,boxShadow:"inset 0 1px 2px rgba(16,24,40,.04)"},
+  pill:{flex:1,padding:"17px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRadius:7,background:"transparent",color:CC.mid,cursor:"pointer",transition:"all .18s cubic-bezier(.4,0,.2,1)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"none"},
+  pillOn:{background:CK.cyan,color:"#fff",fontWeight:600,boxShadow:"0 1px 2px rgba(0,126,255,.35)"},
+  row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18},
+  row3:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:18},
+  hr:{height:1,background:CC.border,margin:"16px 0 4px"},
+  setBox:{marginTop:12,padding:14,borderRadius:10,background:CC.track,border:`1px solid ${CC.border}`},
+  addBtn:{width:"100%",marginTop:12,padding:"11px",borderRadius:10,border:`1px dashed ${CC.border}`,background:CC.white,color:CK.cyan,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .15s ease"},
+  err:{color:CC.red,fontSize:13,margin:"10px 0 0",padding:"10px 12px",background:CC.errBg,borderRadius:9,border:`1px solid ${CC.errBorder}`},
+  note:{fontSize:12,color:CC.light,margin:"5px 0 0"},
+  // Section cards: the old left-edge accent stripe is gone; depth now comes from a
+  // layered shadow instead of a hard border.
+  card:{background:CC.white,borderRadius:14,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(16,24,40,.04), 0 2px 6px rgba(16,24,40,.03)"},
+  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"15px 18px",background:CC.white,border:"none",borderBottom:`1px solid ${CC.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:15},
+  pnl:{background:CC.white,borderRadius:14,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(16,24,40,.04), 0 6px 16px rgba(16,24,40,.05)"},
+  secSub:{margin:"3px 0 0",fontSize:11.5,fontWeight:400,color:CC.light,lineHeight:1.4,textTransform:"none",letterSpacing:0},
+  brkBar:{height:8,borderRadius:99,background:"#eef2f6",overflow:"hidden",display:"flex",marginBottom:10},
+  specCard:{background:CC.dark,color:"#e2e8f0",borderRadius:12,padding:"16px 18px",marginTop:16,fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"},
+  specEye:{fontSize:10,letterSpacing:".14em",opacity:.55,marginBottom:10},
+  specGrid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px 14px",fontSize:12},
+}; }
+const ST = buildST();
+
+/**
+ * Swap theme in place. CC/ST are module-level objects read at render time, so
+ * mutating them and re-rendering repaints everything — no theme prop threading.
+ */
+function pps_applyTheme( name ) {
+  const p = PALETTES[ name ] || PALETTES.light;
+  Object.assign( CC, p );
+  const next = buildST();
+  for ( const k in ST ) delete ST[ k ];
+  Object.assign( ST, next );
+  CHIP = buildCHIP();
+  if ( typeof document !== "undefined" ) document.documentElement.dataset.ppsTheme = name;
+}
 
 ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<App />);
 
