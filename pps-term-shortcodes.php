@@ -157,7 +157,7 @@ add_filter( 'woocommerce_product_add_to_cart_text', function() {
 }, 10, 2 );
 
 add_action( 'wp_head', function() {
-    if ( ! is_product_category() && ! is_product_taxonomy() ) return;
+    if ( ! is_product_category() && ! is_product_taxonomy() && ! is_shop() ) return;
     ?>
 <style id="pps-cat-shortcode-css">
 /* ── Page-level resets ── */
@@ -266,6 +266,12 @@ ul.products li.product img{border-radius:8px}
 .pps-preset-card-price{font-size:14px;font-weight:700;color:#007eff}
 .pps-preset-card-cta{font-size:12px;font-weight:600;color:#fff;background:#007eff;padding:7px 16px;border-radius:6px;text-transform:none;letter-spacing:.3px;transition:background .15s;white-space:nowrap}
 .pps-preset-card:hover .pps-preset-card-cta{background:#0070e6}
+
+/* ── Shop archive (/shop/): reuse the category modern styling + tidy the WooCommerce controls ── */
+.woocommerce-result-count{color:#64748b;font-size:13px;margin:0 0 8px}
+.woocommerce-ordering{margin-bottom:14px}
+.woocommerce-ordering select{border:1px solid #e2e8f0;border-radius:8px;padding:9px 12px;font-size:13px;color:#334155;background:#fff;font-family:inherit;transition:border-color .15s,box-shadow .15s}
+.woocommerce-ordering select:focus{outline:none;border-color:#60a5fa;box-shadow:0 0 0 2px rgba(0,126,255,.15)}
 
 /* ── Responsive ── */
 @media(max-width:768px){
@@ -509,6 +515,27 @@ add_action( 'woocommerce_after_shop_loop', function() {
     echo '</div>';
     echo '</div>';
 }, 15 );
+
+
+// ── Shop archive masthead: mirror the category hero so /shop/ matches the modern look ──
+
+add_action( 'woocommerce_before_main_content', function() {
+    if ( ! is_shop() ) return;
+    $shop_id = function_exists( 'wc_get_page_id' ) ? wc_get_page_id( 'shop' ) : 0;
+    $title   = $shop_id > 0 ? get_the_title( $shop_id ) : '';
+    if ( $title === '' ) $title = 'Shop All Products';
+    $sub = $shop_id > 0 ? (string) get_post_meta( $shop_id, '_pps_shop_subtitle', true ) : '';
+    if ( $sub === '' ) $sub = 'Every product we print. Pick a category or product to configure options, see live pricing, and upload your artwork.';
+    echo '<div class="pps-cat-hero pps-shop-hero">';
+    echo '<h1 class="pps-cat-hero-title">' . esc_html( $title ) . '</h1>';
+    echo '<p class="pps-cat-hero-sub">' . esc_html( $sub ) . '</p>';
+    echo '</div>';
+}, 5 );
+
+// The masthead already shows the title, so suppress WooCommerce's duplicate shop <h1>.
+add_filter( 'woocommerce_show_page_title', function( $show ) {
+    return is_shop() ? false : $show;
+} );
 
 
 // ── [pps_cat_papers type="text|cover|all" factory="yes|no"] ──
