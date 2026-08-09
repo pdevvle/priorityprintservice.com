@@ -22,6 +22,41 @@ Order data storage`, or read `wp_options.woocommerce_custom_orders_table_enabled
 
 - **HPOS on** → the table-copy plan works. Proceed.
   **✔ Confirmed by owner 2026-08-09: live is on HPOS.**
+
+  > **⚠ Gate 1 is NOT yet satisfied — compatibility sync is ON.** Read from
+  > staging 2026-08-09 (`wp_get_option`, raw):
+  >
+  > | Option | Value |
+  > |---|---|
+  > | `woocommerce_custom_orders_table_enabled` | `yes` |
+  > | `woocommerce_custom_orders_table_data_sync_enabled` | **`yes`** |
+  > | `woocommerce_feature_custom_order_tables_enabled` | `no` (stale row; the
+  >   authoritative flag is the first one) |
+  >
+  > Sync being on puts this squarely in the **third** bullet below, not the
+  > first: orders are written to `wp_wc_orders` *and* mirrored into
+  > `wp_posts`/`wp_postmeta`. Since staging is a clone of live, live almost
+  > certainly has sync on too — but **this was read on staging, and Gate 1 asks
+  > about live.** Nothing here can read live (no production connector, and the
+  > sandbox's egress policy blocks both hosts), so the owner must confirm the
+  > same two options on live before the pull.
+  >
+  > Why it matters: the pull list copies the HPOS tables but — correctly, per
+  > Gate 2 — **not** `wp_posts`/`wp_postmeta`. With sync on, that leaves the two
+  > stores disagreeing on staging: HPOS holds the new orders, the posts mirror
+  > does not. WooCommerce's sync can then reconcile in either direction, and the
+  > direction that resolves toward the (stale) posts mirror loses order data.
+  > Resolve one of these before pulling:
+  >
+  > 1. **Turn compat sync off on live** after confirming HPOS is authoritative
+  >    there, then proceed as plain HPOS (the runbook's own suggestion, and the
+  >    cleanest).
+  > 2. Pull HPOS tables, then on staging **disable sync before the push** and
+  >    let HPOS be the single store, accepting that the posts mirror is stale.
+  > 3. Row-level order export/import instead of table copies (most work, least
+  >    coupled to sync state).
+  >
+  > Do not start the freeze window until one is chosen.
 - **Legacy (posts) on** → **STOP. The plan as written cannot work**, because the
   new orders live inside `wp_posts`/`wp_postmeta`, and pulling those two tables
   wholesale would overwrite months of staging content work (products, `_virtual`
@@ -83,22 +118,30 @@ can be re-verified afterward at leisure.
 
 ### A. Defunct-plugin tables — verify, then deactivate/delete plugin, then DROP
 
-Each group is a candidate, not a verdict — the gate is "plugin not installed":
+Each group is a candidate, not a verdict — the gate is "plugin not installed".
+
+**The gate has been run (staging, 2026-08-09).** The installed-plugin list (31
+entries, active *and* inactive) and the on-disk plugin folders (30) were both
+read; the resolved verdicts are in the "Verdict gate" column below, and the
+evidence is in "Phase 0 execution status" at the end of this file. Two of the
+runbook's original open choices are now decided outright: **Imagify is the live
+optimizer** (EWWW absent) and **Forminator is the live form stack** (WPForms and
+Elementor both absent).
 
 | Group | Tables | Verdict gate |
 |---|---|---|
-| Yoast SEO | `wp_yoast_*` (8 tables — `indexable` + `prominent_words` are often huge) | Site runs Rank Math. If Yoast is uninstalled, drop all 8. |
-| Slider Revolution | `wp_revslider_*` (6) | Custom theme doesn't use it. Verify no page renders a slider. |
-| LayerSlider | `wp_layerslider`, `_revisions` | Same. |
-| NBDesigner (old product designer) | `wp_nbdesigner_*` (7) | Superseded by PPS calculators. Verify nothing links to designer pages. **Its customer-design uploads are handled in section D.** |
-| ProjectHuddle | `wp_ph_members`, `wp_ph_thread_members` | Feedback tool — defunct if uninstalled. |
-| Ultimate Member VIP | `wp_um_vip_users` | Defunct if UM uninstalled. |
-| JetEngine | `wp_jet_post_types`, `wp_jet_taxonomies` | Defunct if uninstalled — verify no CPTs/taxonomies in use came from it first. |
-| Groups | `wp_groups_*` (5) | **Owner decision 2026-08-09: never used — drop all 5** (and delete the plugin if installed). |
-| Save/Share Cart | `wp_wcss_saved_cart`, `wp_wcss_shared_cart` | Drop if uninstalled. |
-| Woo File Dropzone (old upload flow) | `wp_woo_file_dropzone` | Superseded by the Drive upload flow. Uploads in section D. |
-| One of the two image optimizers | `wp_ewwwio_images` OR `wp_imagify_*` | Two optimizers are installed; keep the active one, drop the other's tables. |
-| Whichever forms plugins are redundant | `wp_frmt_*` (Forminator) / `wp_wpforms_*` / Elementor `wp_e_submissions*` | Three form stacks exist. Identify which forms are actually live; drop the uninstalled stacks' tables. Live-collected submissions in the KEEP stack are pulled fresh from live anyway (see pull list). |
+| Yoast SEO | `wp_yoast_*` (8 tables — `indexable` + `prominent_words` are often huge) | **DROP all 8.** Rank Math 1.0.275 installed; Yoast absent from the plugin list and has no folder. |
+| Slider Revolution | `wp_revslider_*` (6) | **DROP.** Absent from the plugin list and no folder. |
+| LayerSlider | `wp_layerslider`, `_revisions` | **DROP.** Same — absent, no folder. |
+| NBDesigner (old product designer) | `wp_nbdesigner_*` (7) | **DROP.** Absent, no folder. **Its customer-design uploads are handled in section D.** |
+| ProjectHuddle | `wp_ph_members`, `wp_ph_thread_members` | **DROP.** Absent, no folder. |
+| Ultimate Member VIP | `wp_um_vip_users` | **DROP.** Ultimate Member absent, no folder. |
+| JetEngine | `wp_jet_post_types`, `wp_jet_taxonomies` | **DROP.** Absent, no folder, and the CPT gate passes: the only registered post types are `post`, `page`, `attachment`, `product`, `share-cart-urls` (Share Cart URL) and `astra-advanced-hook` (Astra Pro) — none from JetEngine. |
+| Groups | `wp_groups_*` (5) | **DROP all 5** (owner decision 2026-08-09: never used). Confirmed absent from the plugin list, so there is nothing to delete first. |
+| Save/Share Cart | `wp_wcss_saved_cart`, `wp_wcss_shared_cart` | **DROP, but verify first — this is the one row the audit could not fully close.** A *different* plugin, "Share Cart URL for WooCommerce" 2.1.3, **is** installed, and it stores shared carts as the `share-cart-urls` **custom post type**, not in a `wcss_` table (its `uninstall.php` is untouched boilerplate and names no tables). So `wp_wcss_*` most likely belongs to the defunct "WooCommerce Save & Share Cart". Before dropping, confirm the installed plugin never references `wcss` (grep `share-cart-url-for-woo/` for `wcss`). |
+| Woo File Dropzone (old upload flow) | `wp_woo_file_dropzone` | **DROP.** Absent, no folder; superseded by the Drive upload flow. Uploads in section D. |
+| One of the two image optimizers | `wp_ewwwio_images` OR `wp_imagify_*` | **RESOLVED: Imagify 2.3.1 installed, EWWW absent → DROP `wp_ewwwio_images`, KEEP `wp_imagify_*`.** |
+| Whichever forms plugins are redundant | `wp_frmt_*` (Forminator) / `wp_wpforms_*` / Elementor `wp_e_submissions*` | **RESOLVED: Forminator 1.56.2 is the only form stack installed. WPForms absent, Elementor absent → KEEP `wp_frmt_*`; DROP `wp_wpforms_*` and `wp_e_submissions*`/`wp_e_events`.** Note the two `*-addons-for-elementor` folders are orphaned directories (§D). |
 | Misc: `wp_sm_sessions`, `wp_event_hours`, `wp_tm_tasks`/`_taskmeta`, `wp_vi_wbe_history`, `wp_wt_iew_*`, `wp_pmxe_*` | Identify the owning plugin first (`grep` the plugins dir for the table name); drop only when the owner plugin is confirmed gone. Import/export history (`wt_iew`, `pmxe`) is safely droppable even if the plugins stay — they're job history, keep the `_template`/`_templates` rows if the plugins remain. |
 
 ### B. Active-plugin log/queue purge — TRUNCATE, don't drop
@@ -122,6 +165,23 @@ connector auth — truncating OAuth tables severs Claude's access), `wp_snippets
 (Code Snippets **carry live site behavior** — audit its contents and copy
 anything load-bearing into the repo per the server-patch rule, but never bulk
 delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
+
+> **Correction (2026-08-09 audit): Code Snippets is not installed** — absent from
+> the plugin list and no folder on disk. So any `wp_snippets` table is orphaned
+> and its snippets are **not executing**, which changes the handling: nothing in
+> it is load-bearing *today*, but it may still describe behavior a past session
+> relied on. Read its rows and copy anything meaningful into the repo per the
+> CLAUDE.md server-patch rule **before** dropping. Do not bulk-delete unread —
+> "not running" is not the same as "not worth reading."
+>
+> Of the active-plugin log tables listed above, these are confirmed relevant
+> (owner plugin installed): `wp_actionscheduler_*` (WooCommerce),
+> `wp_woocommerce_log`, `wp_woocommerce_sessions`, `wp_wpmailsmtp_debug_events`
+> (WP Mail SMTP 4.9.0), `wp_aiowps_*` (All-In-One Security 5.4.9), `wp_wpr_*`
+> (WP Rocket 3.18.3 — clear via the plugin), `wp_mwai_tasklogs` (AI Engine).
+> **Moot — owner plugin absent, so these are §A drops, not truncates:**
+> `wp_wpforms_logs`, `wp_wpai_request_logs` (WP All Import), `wp_e_events`
+> (Elementor), `wp_mailchimp_carts`.
 
 ### C. WordPress-core bloat
 
@@ -151,8 +211,37 @@ delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
   unaffected. Practical guidance for the executor: keep uploads referenced
   by orders from the last ~90 days (open/recent jobs), delete the rest of
   the legacy upload trees.
-- Deactivated themes (Astra + child, anything not `pps-theme` and one default
-  fallback like twentytwentyfour) and deleted-but-present plugin directories.
+- Deactivated themes and deleted-but-present plugin directories.
+
+  > **🛑 Correction (2026-08-09 audit) — do NOT delete Astra.** This bullet
+  > originally read "Astra + child, anything not `pps-theme`". On staging today
+  > both `template` and `stylesheet` are **`astra`** — Astra is the **active
+  > theme**, `pps-theme` is not in use, and Astra Pro (`astra-addon`) is an
+  > installed plugin registering the `astra-advanced-hook` Site Builder post
+  > type. Deleting Astra would take the site down and drop whatever Site Builder
+  > layouts exist. The original wording assumed the `pps-theme` migration had
+  > already happened; it has not. Revisit this bullet only after `pps-theme` is
+  > actually the active theme and the Site Builder hooks have been accounted for.
+  >
+  > **Deleted-but-present plugin directories — confirmed orphans** (folder on
+  > disk, no matching entry in the installed-plugin list). These are the safe
+  > §D deletions:
+  >
+  > | Folder | Note |
+  > |---|---|
+  > | `essential-addons-for-elementor-lite` | Elementor itself is gone |
+  > | `premium-addons-for-elementor` | same |
+  > | `multi-order-for-woocommerce` | |
+  > | `offload-media-cloud-storage` | check no uploads are still served from a CDN/bucket URL before deleting |
+  > | `uni-woo-custom-product-options-premium 4.5.3 ` | **note the spaces and the trailing space in the folder name** — quote it in any shell command |
+  >
+  > Do not touch `woo-custom-product-addons-pro` (WCPA — live, per the CLAUDE.md
+  > coexistence rule), `astra-addon`, `spectra-pro`, `ultimate-addons-for-gutenberg`,
+  > `share-cart-url-for-woo`, `priority-print-mcp`, or `pps-calculators`.
+  >
+  > Also present and shipping to production: stray `.DS_Store` files inside
+  > third-party plugin folders (3 in `share-cart-url-for-woo` alone). Harmless,
+  > and they return on plugin update, so not worth chasing.
 - Image-optimizer backup originals (EWWW/Imagify keep pre-optimization copies
   in uploads) — safe to purge once optimization is accepted.
 - Cache directories (`wp-content/cache/*`) — purge, they regenerate.
@@ -202,9 +291,9 @@ are disposable (stale pull + test orders you want gone anyway). This is not a
 
 | Table | What you lose if you skip it |
 |---|---|
-| `wp_e_submissions` + `_actions_log` + `_values` | Elementor form submissions (quote requests, contact forms) |
-| `wp_frmt_form_entry` + `_entry_meta` | Forminator entries |
-| `wp_wpforms_payments` + `_payment_meta` | WPForms payment records |
+| ~~`wp_e_submissions` + `_actions_log` + `_values`~~ | **Skip — Elementor is not installed** (2026-08-09 audit; only orphaned addon folders remain). Nothing is collecting into these. Confirm the same on live, then drop them per §A instead of pulling. |
+| `wp_frmt_form_entry` + `_entry_meta` | Forminator entries. **This is the only live form stack — pull these.** |
+| ~~`wp_wpforms_payments` + `_payment_meta`~~ | **Skip — WPForms is not installed** (2026-08-09 audit). Drop per §A instead of pulling. |
 | `wp_rank_math_redirections` (+`_cache`) | Redirects added on live since the pull — CLAUDE.md says redirects are managed in Rank Math, so whichever site is where you actually edit them is canonical. If that's live, pull these. |
 | `wp_woocommerce_tax_rates` + `_locations`, `wp_woocommerce_shipping_zone*` | Only if tax/shipping config was changed on live since the pull |
 
@@ -305,9 +394,82 @@ whole plan B — which is why step 2 is not skippable.
 
 ## Open questions to resolve before scheduling the window
 
-1. Gate 1: HPOS or legacy on live? (Decides everything.)
+1. Gate 1: HPOS or legacy on live? **Partly answered — and it surfaced a new
+   blocker.** Staging is HPOS with **compatibility sync ON**; see the Gate 1
+   warning box. Still needs confirming on live, and one of the three listed
+   resolutions chosen, before any pull.
 2. Does Cloudways' pipeline support **table-selective pull** on this plan tier,
    and is the push all-or-nothing? (The runbook assumes selective pull,
-   whole push.)
-3. Where are Rank Math redirects actually edited — live or staging?
-4. Any tax/shipping config changes made on live since the last pull?
+   whole push.) **Still open — Cloudways-console question, not answerable from
+   the WordPress side.** This is the assumption the whole plan rests on; check
+   it first, because if the pull is all-or-nothing it would drag `wp_posts` and
+   `wp_options` across and violate Gate 2.
+3. Where are Rank Math redirects actually edited — live or staging? **Still
+   open.** Rank Math keeps redirects in its own table, which no available tool
+   can count, so this can't be settled from here.
+4. Any tax/shipping config changes made on live since the last pull? **Still
+   open** (owner knowledge). For reference, staging's
+   `woocommerce_default_country` is `US:AZ`.
+
+---
+
+## Phase 0 execution status (2026-08-09)
+
+**Nothing destructive has been run.** Phase 0's safety rail 1 requires a
+Cloudways full backup of staging first, and taking Cloudways backups is outside
+what this session can do — so every drop/truncate/delete above is still pending.
+What *was* done is the read-only work that resolves the decisions, so the
+eventual Cloudways session is mechanical rather than investigative.
+
+### Done
+
+- **Gate 1 re-verified against staging** rather than taken on trust — which is
+  how the compatibility-sync problem surfaced. See the Gate 1 warning box; it is
+  the one finding that can invalidate the pull plan.
+- **§A verdict gate run for every row.** Installed plugins (31, active and
+  inactive) and on-disk plugin folders (30) both enumerated. Every "drop if
+  uninstalled" is now a definite DROP or KEEP, except `wp_wcss_*`, which carries
+  a named one-line check.
+- **Two of the runbook's open choices decided:** Imagify is the optimizer to
+  keep (EWWW absent); Forminator is the only live form stack (WPForms and
+  Elementor both absent). The latter removes two tables from the freeze-window
+  pull list.
+- **Two instructions corrected that would have broken the site or lost data if
+  followed literally:** deleting Astra (it is the *active* theme, not a
+  deactivated one), and treating `wp_snippets` as live behavior (Code Snippets is
+  uninstalled, so those snippets are inert — read them before dropping, but they
+  are not running).
+- **§D orphan-directory list resolved** to five confirmed-safe folder deletions,
+  including one with a trailing space in its name that will bite any unquoted
+  shell command.
+- **Pre-push checklist item verified:** `blog_public = 1` on staging, so
+  "Discourage search engines" is already OFF and the push will not carry a
+  noindex to production. (Worth noting the flip side: staging is currently
+  crawlable, which is its own SEO exposure — see `docs/SEO_CANNIBALIZATION_ANALYSIS.md`.)
+- **Stray-file audit (pre-push checklist) came back clean for `pps-calculators/`.**
+  Every `pps-*.php` on the server now exists in the repo, including the five
+  files the 2026-08-01 audit flagged as agent-authored and un-versioned
+  (`pps-intake.php`, `pps-home-probe.php`, `pps-shippo-test.php`,
+  `pps-term-html.php`, `pps-login-brand.php`). They have since been brought home
+  and several are registered plugins in their own right ("PPS Intake" 0.1.0
+  etc.), so they are load-bearing — **do not delete them as strays.** The
+  `pps-calculators.php.prehardening.bak` from that audit is gone. Note that
+  `pps-calculators/` hosts several distinct registered plugins as sibling files,
+  which is why the folder count (30) and plugin count (31) disagree.
+
+### Deliberately not read
+
+`woocommerce_stripe_settings` and `pps_gdrive` hold live API keys and OAuth
+secrets. Verifying "Stripe in live mode" and "Drive folder IDs are production's"
+means reading options that would pull those secrets into a transcript and risk
+them reaching a commit or PR body, against the CLAUDE.md treat-the-repo-as-public
+rule. **Both stay owner-verified in the Cloudways/wp-admin UI.**
+
+### Blocked here, needs the Cloudways console
+
+Everything requiring SQL or the pipeline: the `information_schema` size
+measurements (so no before/after MB recorded yet), the autoload audit, every
+`DROP`/`TRUNCATE`, the core-bloat cleanup, uploads thinning (§D — no filesystem
+access outside `plugins/` and `themes/`, and it needs the 90-day order-reference
+analysis), the live→staging pull, the auto-increment alignment, and the push
+itself. No available tool runs SQL against this database.
