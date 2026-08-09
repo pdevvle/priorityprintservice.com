@@ -5,11 +5,36 @@ the description line under each calculator's paper picker, and the per-stock
 tooltips on category pages (`paper_text_*` / `paper_cs_*` keys in
 `pps_tooltips`).
 
-**Editing copy:** change it here first, then mirror into (a) the `PAPER_DESC`
-map in each calculator HTML and (b) `pps_default_tooltips()` in
-`pps-calculators.php`. The live tooltip option (`wp_options['pps_tooltips']`)
-must be synced through the staging connector — seeds only apply on fresh
-activation.
+## How the data flows (single-source system)
+
+`pps_paper_meta_defaults()` in `pps-config-admin.php` is the **runtime**
+canonical copy of this catalog (desc + days keyed by val, nc/cs pools).
+`pps_get_config()` runs every `papers_nc`/`papers_cs` row through
+`pps_paper_enrich()`, which fills `desc`/`days` when the admin row lacks them
+and stamps the computed `inv` flag (`pps_paper_is_inventoried()` = not factory
+AND 0 days). Every surface reads those enriched rows:
+
+- **Calculators** — rows arrive via `PPS_CONFIG.calc`; server `desc` wins,
+  the embedded `PAPER_DESC` maps are the standalone/GitHub-Pages fallback
+  only; `paperInv` honors the server `inv` flag when present.
+- **Category wizard** — paper steps render `$p['desc']`, the shared badge
+  (`pps_paper_stock_badge()`: blue-dot In Stock / Special Order +Nd / Factory
+  Order +Nd), and the legend (`pps_paper_inv_legend()`).
+- **Attribute cards** — `pps_cat_render_papers()` shows the same desc, badge,
+  and legend, both inline and in the deferred `[pps_cat_attributes]` section.
+- **Wizard flat sizes** mirror `cfg['brochure_sizes']` — the same rows the
+  brochure calculator reads — so size changes propagate too. Booklet sizes
+  already mirror `size_presets`.
+
+Admin-entered desc/days (Papers tab columns) override the canonical defaults
+row-by-row; blank fields fall back here.
+
+**Editing copy:** change it here first, then mirror into (a)
+`pps_paper_meta_defaults()` in `pps-config-admin.php`, (b) the `PAPER_DESC`
+fallback map in each calculator HTML, and (c) `pps_default_tooltips()` in
+`pps-calculators.php` — same commit. The live tooltip option
+(`wp_options['pps_tooltips']`) must be synced through the staging connector —
+seeds only apply on fresh activation.
 
 ## Inventory dot
 

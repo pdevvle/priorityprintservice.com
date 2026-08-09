@@ -314,6 +314,75 @@ function pps_default_config() {
 // GET / SAVE CONFIG
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Canonical per-stock lead-time days + customer-facing copy, keyed by val
+ * within the nc/cs pools. Single source of truth: docs/PAPER_CATALOG.md.
+ * Every surface derives from this via pps_get_config() enrichment — the
+ * calculators (rows injected as PPS_CONFIG.calc win over their embedded
+ * PAPER_DESC fallback maps), the category wizard paper steps, and the
+ * [pps_cat_papers] cards. When copy changes, update this, the calculators'
+ * embedded maps, and docs/PAPER_CATALOG.md in the same commit.
+ */
+function pps_paper_meta_defaults() {
+    return array(
+        'nc' => array(
+            '0.001' => array( 'days' => 0, 'desc' => 'Classic uncoated paper with a natural feel that\'s easy to write on. Crisp text and a soft, non-reflective look — letterhead, inserts, forms, and reading-heavy pages.' ),
+            '0.002' => array( 'days' => 0, 'desc' => 'Smooth coated sheet with a soft, glare-free finish. Richer color than uncoated without the shine — the all-purpose choice for brochures and flyers.' ),
+            '0.003' => array( 'days' => 0, 'desc' => 'Shiny coated sheet that makes photos and color pop. The standard for marketing brochures, catalogs, and mailers.' ),
+            '2.001' => array( 'days' => 2, 'desc' => 'Our lightest uncoated sheet, a touch heavier than copy paper. Keeps page-heavy books thin and light.' ),
+            '2.002' => array( 'days' => 2, 'desc' => 'Light uncoated sheet with good opacity for its weight. Economical for manuals, workbooks, and text-heavy booklets.' ),
+            '2.003' => array( 'days' => 2, 'desc' => 'Sturdy uncoated sheet with excellent opacity. The uncoated feel with less show-through — workbooks, journals, and premium text pages.' ),
+            '2.004' => array( 'days' => 2, 'desc' => 'Lightweight gloss sheet with vivid color reproduction. A thinner, economical alternative to 100lb gloss for catalogs and mailers.' ),
+            '2.005' => array( 'days' => 2, 'desc' => 'Heavy matte sheet with a refined, low-glare surface. Upscale brochures, art books, and photography that shouldn\'t shine.' ),
+            '2.006' => array( 'days' => 4, 'desc' => 'Premium stock with a woven linen texture you can feel. Distinctive for invitations, stationery, and fine-dining menus.' ),
+        ),
+        'cs' => array(
+            '0.01' => array( 'days' => 0, 'desc' => 'Our lightest cardstock, uncoated and easy to write on. Greeting cards, reply cards, and covers that fold cleanly.' ),
+            '0.02' => array( 'days' => 0, 'desc' => 'Light cardstock with a smooth matte coating. A soft, modern look for covers and cards.' ),
+            '0.03' => array( 'days' => 0, 'desc' => 'Mid-weight cardstock with a glossy face that makes color punchy. Covers, postcards, and hang tags.' ),
+            '1.01' => array( 'days' => 1, 'desc' => 'Thick card, gloss-coated on one side with an uncoated back that\'s easy to write on. The postcard standard (C1S = coated one side).' ),
+            '1.02' => array( 'days' => 1, 'desc' => 'Our heaviest everyday card, gloss-coated both sides (C2S). Substantial, premium feel for business cards, postcards, and covers.' ),
+            '2.21' => array( 'days' => 2, 'desc' => 'Light, flexible cardstock with a gloss coat on both sides. Economical covers and cards with vivid color.' ),
+            '2.22' => array( 'days' => 2, 'desc' => 'Mid-weight matte card with an elegant, glare-free surface. Book covers and upscale cards.' ),
+            '2.23' => array( 'days' => 2, 'desc' => 'Flexible coated card, thinner than 14pt. Tickets, tags, and lightweight postcards.' ),
+            '2.24' => array( 'days' => 2, 'desc' => 'Thick card gloss-coated both sides for all-over shine. Postcards and covers that want gloss front and back.' ),
+            '2.25' => array( 'days' => 2, 'desc' => 'Our most rigid card — gloss front, uncoated writable back. Heavy-duty hang tags, counter cards, and premium postcards.' ),
+        ),
+    );
+}
+
+/**
+ * The one inventory rule, shared by every surface. The calculators mirror it
+ * in JS (paperInv) but prefer this server-computed 'inv' flag when present.
+ */
+function pps_paper_is_inventoried( $row ) {
+    return empty( $row['factory'] ) && empty( $row['days'] );
+}
+
+/**
+ * Fill desc/days from canonical defaults when a row lacks them (admin rows
+ * predate both fields), then stamp the computed 'inv' flag. Admin-entered
+ * desc/days always win over the canonical defaults.
+ */
+function pps_paper_enrich( $rows, $pool ) {
+    if ( ! is_array( $rows ) ) return $rows;
+    $meta = pps_paper_meta_defaults();
+    $m    = isset( $meta[ $pool ] ) ? $meta[ $pool ] : array();
+    foreach ( $rows as &$p ) {
+        if ( ! is_array( $p ) || ! isset( $p['val'] ) ) continue;
+        $k = rtrim( rtrim( sprintf( '%.3F', (float) $p['val'] ), '0' ), '.' );
+        if ( isset( $m[ $k ] ) ) {
+            if ( ! isset( $p['days'] ) || $p['days'] === '' ) $p['days'] = $m[ $k ]['days'];
+            if ( empty( $p['desc'] ) ) $p['desc'] = $m[ $k ]['desc'];
+        }
+        if ( ! isset( $p['days'] ) || $p['days'] === '' ) $p['days'] = 0;
+        $p['days'] = intval( $p['days'] );
+        $p['inv']  = pps_paper_is_inventoried( $p );
+    }
+    unset( $p );
+    return $rows;
+}
+
 function pps_get_config() {
     $defaults = pps_default_config();
     $saved    = get_option( PPS_CONFIG_OPTION, array() );
@@ -324,6 +393,9 @@ function pps_get_config() {
         $defaults['pcf'],
         isset( $saved['pcf'] ) && is_array( $saved['pcf'] ) ? $saved['pcf'] : array()
     );
+
+    if ( isset( $result['papers_nc'] ) ) $result['papers_nc'] = pps_paper_enrich( $result['papers_nc'], 'nc' );
+    if ( isset( $result['papers_cs'] ) ) $result['papers_cs'] = pps_paper_enrich( $result['papers_cs'], 'cs' );
 
     return $result;
 }
@@ -1491,12 +1563,14 @@ function pps_config_tab_papers( $cfg ) {
         array( 'field' => 'label',    'header' => 'Paper Name',  'type' => 'text',     'width' => '40%' ),
         array( 'field' => 'val',      'header' => 'Val',         'type' => 'number',   'width' => '70px' ),
         array( 'field' => 'price',    'header' => '$/Sheet',     'type' => 'number',   'width' => '80px' ),
+        array( 'field' => 'days',     'header' => '+Days',       'type' => 'number',   'width' => '54px' ),
         array( 'field' => 'factory',  'header' => 'Factory',     'type' => 'checkbox', 'width' => '48px' ),
         array( 'field' => 'coatable', 'header' => 'Coat.',       'type' => 'checkbox', 'width' => '44px' ),
+        array( 'field' => 'desc',     'header' => 'Customer description (shown in calculators, wizard & category cards)', 'type' => 'text' ),
     );
 
-    pps_render_spreadsheet( 'papers_nc', 'Text Weight Papers', $cfg['papers_nc'], $cols, 'val: 0.00x=in-stock, 2.00x=factory' );
-    pps_render_spreadsheet( 'papers_cs', 'Cardstock Papers', $cfg['papers_cs'], $cols, 'val: 0.0x=in-stock, 1.0x=special, 2.2x=factory' );
+    pps_render_spreadsheet( 'papers_nc', 'Text Weight Papers', $cfg['papers_nc'], $cols, 'val: 0.00x=in-stock, 2.00x=factory. Blue inventory dot = no factory flag AND 0 days. Blank desc/days fall back to the canonical catalog (docs/PAPER_CATALOG.md).' );
+    pps_render_spreadsheet( 'papers_cs', 'Cardstock Papers', $cfg['papers_cs'], $cols, 'val: 0.0x=in-stock, 1.0x=special, 2.2x=factory. Blue inventory dot = no factory flag AND 0 days. Blank desc/days fall back to the canonical catalog.' );
 
     // Cover same
     echo '<div class="pps-ss-section">Cover "Same as Inside" Default</div>';

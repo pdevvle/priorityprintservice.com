@@ -195,6 +195,12 @@ ul.products{max-width:var(--pps-max-w,1200px)!important;margin-left:auto!importa
 .pps-cat-attributes h2:first-child{margin-top:0}
 .pps-cat-attributes h3{font-size:15px;font-weight:600;color:#1e293b;margin:18px 0 8px}
 
+/* ── Inventory dot + legend (papers: cards, wizard steps) ── */
+.pps-inv-dot{width:8px;height:8px;border-radius:50%;background:#007eff;display:inline-block;flex-shrink:0;vertical-align:middle}
+.pps-inv-legend{font-size:11px;color:#94a3b8;display:flex;align-items:center;gap:5px;margin:2px 0 18px}
+.pps-cat-card-desc{font-size:12px;color:#64748b;line-height:1.45;margin:2px 0 4px}
+.pps-cat-badge--stock .pps-inv-dot{width:6px;height:6px;margin-right:4px}
+
 /* ── Features list (papers, coatings, add-ons) ── */
 .pps-cat-features{list-style:none;padding:0;margin:14px 0 24px;columns:2;column-gap:32px}
 .pps-cat-features li{padding:5px 0 5px 20px;position:relative;font-size:14px;color:#475569;line-height:1.6;break-inside:avoid}
@@ -550,6 +556,26 @@ add_filter( 'woocommerce_show_page_title', function( $show ) {
 // the individual [pps_cat_*] shortcodes, and the deferred attributes section
 // that [pps_cat_attributes] queues up for after the product grid.
 
+// Stock badge + inventory legend, shared by the attribute cards and the wizard.
+// The inventory rule lives in pps_paper_is_inventoried() (pps-config-admin.php);
+// rows arrive here already stamped with desc/days/'inv' by pps_paper_enrich(),
+// so every surface — calculator pickers, wizard steps, these cards — shows the
+// same names, designations, and copy from the one config source.
+
+function pps_paper_stock_badge( $p ) {
+    $days = isset( $p['days'] ) ? intval( $p['days'] ) : 0;
+    $inv  = isset( $p['inv'] ) ? ! empty( $p['inv'] ) : ( empty( $p['factory'] ) && $days < 1 );
+    if ( $inv ) {
+        return '<span class="pps-cat-badge pps-cat-badge--stock"><span class="pps-inv-dot"></span>In Stock</span>';
+    }
+    $word = empty( $p['factory'] ) ? 'Special Order' : 'Factory Order';
+    return '<span class="pps-cat-badge pps-cat-badge--factory">' . $word . ( $days > 0 ? ' +' . $days . 'd' : '' ) . '</span>';
+}
+
+function pps_paper_inv_legend() {
+    return '<div class="pps-inv-legend"><span class="pps-inv-dot"></span>In stock &mdash; best for quick turnaround, small quantity, and hardcopy proofs</div>';
+}
+
 // ── [pps_cat_papers type="text|cover|all" factory="yes|no"] ──
 
 function pps_cat_render_papers( $atts = array() ) {
@@ -583,14 +609,14 @@ function pps_cat_render_papers( $atts = array() ) {
         $label   = esc_html( $p['label'] );
         $tip_key = $p['_tip'] ?? '';
         $has_tip = $tip_key && isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] );
-        $stock = empty( $p['factory'] )
-            ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
-            : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+        $stock = pps_paper_stock_badge( $p );
         $coat  = ! empty( $p['coatable'] )
             ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
             : '';
         $tip_btn = $has_tip ? '<span class="pps-cat-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>' : '';
+        $dsc   = ! empty( $p['desc'] ) ? '<div class="pps-cat-card-desc">' . esc_html( $p['desc'] ) . '</div>' : '';
         $inner = '<div class="pps-cat-card-name">' . $label . $tip_btn . '</div>'
+               . $dsc
                . '<div class="pps-cat-card-meta">' . $stock . $coat . '</div>';
 
         if ( $base_link ) {
@@ -604,6 +630,7 @@ function pps_cat_render_papers( $atts = array() ) {
         }
     }
     $out .= '</ul>';
+    $out .= pps_paper_inv_legend();
     return $out;
 }
 
@@ -1505,20 +1532,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     unset( $_p );
     $papers = array_merge( $nc, $cs );
 
-    $paper_hints = array(
-        '70lb Uncoated Opaque Text'  => 'Lightweight, natural feel — inserts & newsletters',
-        '80lb Matte Text'            => 'Smooth matte — versatile for brochures & catalogs',
-        '100lb Gloss Text'           => 'Glossy, vibrant — premium marketing materials',
-        '60lb Offset Smooth Opaque'  => 'Economy weight — budget-friendly for large runs',
-        '80lb Offset Smooth Opaque'  => 'Mid-weight offset — solid quality at great value',
-        '80lb Gloss Factory Coated'  => 'Pre-coated gloss — vivid colors out of the box',
-        '100lb Matte Factory Coated' => 'Pre-coated matte — rich feel, great ink holdout',
-        '80lb Opaque Uncoated'       => 'Sturdy uncoated cardstock — professional feel',
-        '80lb Matte Cardstock'       => 'Smooth matte cardstock — elegant & substantial',
-        '100lb Gloss Cardstock'      => 'Glossy cardstock — bold colors, sharp images',
-        '14pt Gloss C1S'             => 'Thick, coated one side — postcards & covers',
-        '16pt Coated C2S'            => 'Premium double-coated — maximum durability',
-    );
+    // Per-stock hints come from the enriched config rows themselves ($p['desc'],
+    // filled by pps_paper_enrich from pps_paper_meta_defaults) — the same copy
+    // the calculators show. No wizard-local paper copy to drift.
 
     if ( $is_booklet ) {
         $size_groups = isset( $cfg['size_presets'] ) ? $cfg['size_presets'] : array();
@@ -1552,22 +1568,63 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         $folds = array();
         foreach ( $fold_groups as $fg ) { foreach ( $fg['items'] as $fi ) { $folds[] = $fi; } }
 
-        $size_groups = array(
-            array( 'group' => 'Standard', 'items' => array(
-                array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5', 'desc' => 'Half letter — compact' ),
-                array( 'val' => '6x9',     'label' => '6 × 9',      'desc' => 'Common mailer size' ),
-                array( 'val' => '8.5x11',  'label' => '8.5 × 11',   'desc' => 'Letter — the standard' ),
-            )),
-            array( 'group' => 'Large', 'items' => array(
-                array( 'val' => '8.5x14', 'label' => '8.5 × 14', 'desc' => 'Legal — extra room' ),
-                array( 'val' => '9x12',   'label' => '9 × 12',    'desc' => 'Fits inside folders' ),
-                array( 'val' => '11x17',  'label' => '11 × 17',   'desc' => 'Tabloid — large format' ),
-            )),
-            array( 'group' => 'Oversized', 'items' => array(
-                array( 'val' => '12x18',   'label' => '12 × 18',   'desc' => 'Oversized tabloid' ),
-                array( 'val' => '11x25.5', 'label' => '11 × 25.5', 'desc' => 'Extra-long mailer' ),
-            )),
+        // Sizes mirror the brochure calculator's own list (config key
+        // brochure_sizes, the same rows injected as PPS_CONFIG.calc): change
+        // the calculator's sizes and the wizard follows. Hints are cosmetic
+        // and keyed by val; unknown sizes simply render without one.
+        $size_hints = array(
+            '4.25x5.5' => 'Quarter sheet — handouts & inserts',
+            '4x6'      => 'Postcard size',
+            '5.5x8.5'  => 'Half letter — compact',
+            '6x9'      => 'Common mailer size',
+            '8.5x11'   => 'Letter — the standard',
+            '8.5x14'   => 'Legal — extra room',
+            '9x12'     => 'Fits inside folders',
+            '11x17'    => 'Tabloid — large format',
+            '12x18'    => 'Oversized tabloid',
+            '11x25.5'  => 'Extra-long mailer',
         );
+        $bs = isset( $cfg['brochure_sizes'] ) && is_array( $cfg['brochure_sizes'] ) ? $cfg['brochure_sizes'] : array();
+        $size_groups = array();
+        if ( ! empty( $bs ) ) {
+            $buckets = array( 'Standard' => array(), 'Large' => array(), 'Oversized' => array(), 'Square' => array() );
+            foreach ( $bs as $bsz ) {
+                if ( ! is_array( $bsz ) || empty( $bsz['label'] ) ) continue;
+                $long  = isset( $bsz['long'] ) ? floatval( $bsz['long'] ) : 0;
+                $short = isset( $bsz['short'] ) ? floatval( $bsz['short'] ) : 0;
+                $val   = str_replace( array( '×', ' ' ), array( 'x', '' ), $bsz['label'] );
+                $lbl   = str_replace( '×', ' × ', $bsz['label'] );
+                $g     = ( $long > 0 && $long === $short ) ? 'Square'
+                       : ( $long <= 11 ? 'Standard' : ( $long <= 17 ? 'Large' : 'Oversized' ) );
+                $buckets[ $g ][] = array(
+                    'val'   => $val,
+                    'label' => $lbl,
+                    'desc'  => isset( $size_hints[ $val ] ) ? $size_hints[ $val ] : '',
+                );
+            }
+            foreach ( $buckets as $gname => $items ) {
+                if ( ! empty( $items ) ) $size_groups[] = array( 'group' => $gname, 'items' => $items );
+            }
+        }
+        if ( empty( $size_groups ) ) {
+            // Fallback when config carries no brochure_sizes rows.
+            $size_groups = array(
+                array( 'group' => 'Standard', 'items' => array(
+                    array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5', 'desc' => 'Half letter — compact' ),
+                    array( 'val' => '6x9',     'label' => '6 × 9',      'desc' => 'Common mailer size' ),
+                    array( 'val' => '8.5x11',  'label' => '8.5 × 11',   'desc' => 'Letter — the standard' ),
+                )),
+                array( 'group' => 'Large', 'items' => array(
+                    array( 'val' => '8.5x14', 'label' => '8.5 × 14', 'desc' => 'Legal — extra room' ),
+                    array( 'val' => '9x12',   'label' => '9 × 12',    'desc' => 'Fits inside folders' ),
+                    array( 'val' => '11x17',  'label' => '11 × 17',   'desc' => 'Tabloid — large format' ),
+                )),
+                array( 'group' => 'Oversized', 'items' => array(
+                    array( 'val' => '12x18',   'label' => '12 × 18',   'desc' => 'Oversized tabloid' ),
+                    array( 'val' => '11x25.5', 'label' => '11 × 25.5', 'desc' => 'Extra-long mailer' ),
+                )),
+            );
+        }
         $sizes = array();
         foreach ( $size_groups as $sg ) { foreach ( $sg['items'] as $si ) { $sizes[] = $si; } }
         $page_counts = array();
@@ -1645,6 +1702,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
             'Standard'          => 'Common formats &mdash; half letter, mailer &amp; letter size',
             'Large'             => 'Legal, folder-fit &amp; tabloid',
             'Oversized'         => 'Extra-large for maximum impact',
+            'Square'            => 'Equal-sided &mdash; modern, social-style layouts',
         );
         $out .= '<div class="pps-wiz-step is-active" data-step="sizetype">';
         $out .= '<div class="pps-wiz-prompt">What type of size do you need? <span class="pps-wiz-clear">&times; clear</span></div>';
@@ -1755,11 +1813,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="papertype"></span> — pick your paper stock: <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
     foreach ( $papers as $p ) {
-        $hint  = isset( $paper_hints[ $p['label'] ] ) ? $paper_hints[ $p['label'] ] : '';
+        $hint  = isset( $p['desc'] ) ? $p['desc'] : '';
         $ptype = ! empty( $p['_cs'] ) ? 'cs' : 'text';
-        $stock = empty( $p['factory'] )
-            ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
-            : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+        $stock = pps_paper_stock_badge( $p );
         $coat  = ! empty( $p['coatable'] )
             ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
             : '';
@@ -1770,7 +1826,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
               . '<div class="pps-wiz-opt-badges">' . $stock . $coat . '</div>'
               . '</button>';
     }
-    $out .= '</div></div>';
+    $out .= '</div>' . pps_paper_inv_legend() . '</div>';
 
     // Step 5 (booklets only): Cover stock
     if ( $is_booklet ) {
@@ -1782,16 +1838,16 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
               . '<div class="pps-wiz-opt-desc">Use the same paper stock for the cover</div>'
               . '</button>';
         foreach ( $cs as $p ) {
-            $stock = empty( $p['factory'] )
-                ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
-                : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+            $stock = pps_paper_stock_badge( $p );
+            $chint = isset( $p['desc'] ) ? $p['desc'] : '';
             $ctk   = $paper_tip_key( $p['label'], true );
             $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $p['val'] ) . '" data-label="' . esc_attr( $p['label'] ) . '">'
                   . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . $wiz_tip_icon( $ctk ) . '</div>'
+                  . ( $chint ? '<div class="pps-wiz-opt-desc">' . esc_html( $chint ) . '</div>' : '' )
                   . '<div class="pps-wiz-opt-badges">' . $stock . '</div>'
                   . '</button>';
         }
-        $out .= '</div></div>';
+        $out .= '</div>' . pps_paper_inv_legend() . '</div>';
     }
 
     // Coating (optional)

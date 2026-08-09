@@ -51,6 +51,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 - `FitToggle` — art transform controls (Crop/Fill/Fit/Stretch/Scale/Rotate 90°)
 - `DebugPanel` — calculation breakdown with turnaround/shipping/SEO schema debug
 - Zone map (1000 entries) embedded inline, overridden by PHP
+- `PAPER_DESC` + `paperInv` + `PaperNote` — paper descriptions, inventory blue-dot, and legend. **Fallbacks only**: the runtime source of truth is `pps_paper_meta_defaults()`/`pps_paper_enrich()` in `pps-config-admin.php`, which injects `desc`/`days`/`inv` onto every paper row in `PPS_CONFIG.calc` and feeds the category wizard + `[pps_cat_papers]` cards from the same rows. Copy changes touch `docs/PAPER_CATALOG.md`, `pps_paper_meta_defaults()`, the calculators' embedded maps, and `pps_default_tooltips()` in the same commit (see docs/PAPER_CATALOG.md for the full chain).
 
 ## Saddle Stitch Calculator (calc-preview-test.html)
 - **Status:** Most complete. Full proof/preview system.

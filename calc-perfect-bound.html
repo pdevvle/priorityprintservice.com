@@ -604,9 +604,9 @@ const PAPER_DESC={
     "2.25":"Our most rigid card — gloss front, uncoated writable back. Heavy-duty hang tags, counter cards, and premium postcards."
   }
 };
-const paperInv=p=>!!p&&!p.factory&&!(p.days>0)&&!/same as inside/i.test(p.label||"");
+const paperInv=p=>{if(!p||/same as inside/i.test(p.label||""))return false;return p.inv!==undefined?!!p.inv:(!p.factory&&!(p.days>0))};
 const paperDot=p=>paperInv(p)?"● ":"";
-const paperDesc=(p,pool)=>{if(!p||/same as inside/i.test(p.label||""))return"";const m=PAPER_DESC[pool||(p.type==="cardstock"?"cs":"nc")];return(m&&m[String(p.val)])||p.desc||"";};
+const paperDesc=(p,pool)=>{if(!p||/same as inside/i.test(p.label||""))return"";const m=PAPER_DESC[pool||(p.type==="cardstock"?"cs":"nc")];return p.desc||(m&&m[String(p.val)])||"";};
 const PaperNote=({p,pool,legend})=>{
   const d=paperDesc(p,pool);
   const days=p&&p.days>0?p.days:0;
