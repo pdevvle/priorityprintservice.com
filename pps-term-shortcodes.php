@@ -1757,12 +1757,16 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     if ( $is_booklet ) {
         // Step 2: Page Count
         $out .= '<div class="pps-wiz-step" data-step="pages">';
-        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — how many pages? ' . $wiz_tip_icon( 'page_count' ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
+        // Coupon books are quoted in sheets (leaves, 2 pages each); the calculator's
+        // URL param stays in pages, so only the display text converts.
+        $is_coupon_wiz = ( $calc === 'coupon' );
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — how many ' . ( $is_coupon_wiz ? 'sheets' : 'pages' ) . '? ' . $wiz_tip_icon( 'page_count' ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
         $out .= '<div class="pps-wiz-grid">';
         foreach ( $page_counts as $pc ) {
-            $pc = intval( $pc );
-            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . $pc . '" data-label="' . $pc . ' pages">'
-                  . '<div class="pps-wiz-opt-name">' . $pc . ' Pages</div>'
+            $pc   = intval( $pc );
+            $disp = $is_coupon_wiz ? ( intdiv( $pc, 2 ) . ' Sheets' ) : ( $pc . ' Pages' );
+            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . $pc . '" data-label="' . esc_attr( strtolower( $disp ) ) . '">'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $disp ) . '</div>'
                   . '</button>';
         }
         $out .= '</div></div>';
