@@ -53,7 +53,6 @@ the dot; factory stocks (+2–4 days) do not get the dot.
 | 70lb Uncoated Opaque Text | 0.001 | ● in stock | Classic uncoated paper with a natural feel that's easy to write on. Crisp text and a soft, non-reflective look — letterhead, inserts, forms, and reading-heavy pages. |
 | 80lb Matte Text | 0.002 | ● in stock | Smooth coated sheet with a soft, glare-free finish. Richer color than uncoated without the shine — the all-purpose choice for brochures and flyers. |
 | 100lb Gloss Text | 0.003 | ● in stock | Shiny coated sheet that makes photos and color pop. The standard for marketing brochures, catalogs, and mailers. |
-| 50lb Offset Smooth Opaque | 2.001 | factory, +2 days | Our lightest uncoated sheet, a touch heavier than copy paper. Keeps page-heavy books thin and light. |
 | 60lb Offset Smooth Opaque | 2.002 | factory, +2 days | Light uncoated sheet with good opacity for its weight. Economical for manuals, workbooks, and text-heavy booklets. |
 | 80lb Offset Smooth Opaque | 2.003 | factory, +2 days | Sturdy uncoated sheet with excellent opacity. The uncoated feel with less show-through — workbooks, journals, and premium text pages. |
 | 80lb Gloss Factory Coated | 2.004 | factory, +2 days | Lightweight gloss sheet with vivid color reproduction. A thinner, economical alternative to 100lb gloss for catalogs and mailers. |

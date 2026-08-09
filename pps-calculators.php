@@ -3604,13 +3604,6 @@ function pps_default_tooltips() {
                 array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
             ),
         ),
-        'paper_text_50lb_offset_smooth_opaque' => array(
-            'title' => '50lb Offset Smooth Opaque',
-            'content' => array(
-                array( 'type' => 'text', 'value' => 'Our lightest uncoated sheet, a touch heavier than copy paper. Keeps page-heavy books thin and light.' ),
-                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
-            ),
-        ),
         'paper_text_60lb_offset_smooth_opaque' => array(
             'title' => '60lb Offset Smooth Opaque',
             'content' => array(

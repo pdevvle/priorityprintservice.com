@@ -184,7 +184,6 @@ function pps_default_config() {
             array( 'label' => '70lb Uncoated Opaque Text',  'val' => 0.001, 'price' => 0.06,   'factory' => false, 'coatable' => false ),
             array( 'label' => '80lb Matte Text',            'val' => 0.002, 'price' => 0.069,  'factory' => false, 'coatable' => false ),
             array( 'label' => '100lb Gloss Text',           'val' => 0.003, 'price' => 0.085,  'factory' => false, 'coatable' => true ),
-            array( 'label' => '50lb Offset Smooth Opaque',  'val' => 2.001, 'price' => 0.039,  'factory' => true,  'coatable' => false ),
             array( 'label' => '60lb Offset Smooth Opaque',  'val' => 2.002, 'price' => 0.042,  'factory' => true,  'coatable' => false ),
             array( 'label' => '80lb Offset Smooth Opaque',  'val' => 2.003, 'price' => 0.056,  'factory' => true,  'coatable' => false ),
             array( 'label' => '80lb Gloss Factory Coated',  'val' => 2.004, 'price' => 0.0525, 'factory' => true,  'coatable' => true ),
@@ -326,27 +325,26 @@ function pps_default_config() {
 function pps_paper_meta_defaults() {
     return array(
         'nc' => array(
-            '0.001' => array( 'days' => 0, 'desc' => 'Classic uncoated paper with a natural feel that\'s easy to write on. Crisp text and a soft, non-reflective look — letterhead, inserts, forms, and reading-heavy pages.' ),
-            '0.002' => array( 'days' => 0, 'desc' => 'Smooth coated sheet with a soft, glare-free finish. Richer color than uncoated without the shine — the all-purpose choice for brochures and flyers.' ),
-            '0.003' => array( 'days' => 0, 'desc' => 'Shiny coated sheet that makes photos and color pop. The standard for marketing brochures, catalogs, and mailers.' ),
-            '2.001' => array( 'days' => 2, 'desc' => 'Our lightest uncoated sheet, a touch heavier than copy paper. Keeps page-heavy books thin and light.' ),
-            '2.002' => array( 'days' => 2, 'desc' => 'Light uncoated sheet with good opacity for its weight. Economical for manuals, workbooks, and text-heavy booklets.' ),
-            '2.003' => array( 'days' => 2, 'desc' => 'Sturdy uncoated sheet with excellent opacity. The uncoated feel with less show-through — workbooks, journals, and premium text pages.' ),
-            '2.004' => array( 'days' => 2, 'desc' => 'Lightweight gloss sheet with vivid color reproduction. A thinner, economical alternative to 100lb gloss for catalogs and mailers.' ),
-            '2.005' => array( 'days' => 2, 'desc' => 'Heavy matte sheet with a refined, low-glare surface. Upscale brochures, art books, and photography that shouldn\'t shine.' ),
-            '2.006' => array( 'days' => 4, 'desc' => 'Premium stock with a woven linen texture you can feel. Distinctive for invitations, stationery, and fine-dining menus.' ),
+            '0.001' => array( 'days' => 0, 'spec' => '5pt · 104gsm — Best for writing', 'desc' => 'Classic uncoated paper with a natural feel that\'s easy to write on. Crisp text and a soft, non-reflective look — letterhead, inserts, forms, and reading-heavy pages.' ),
+            '0.002' => array( 'days' => 0, 'spec' => '5pt · 118gsm — Distinct feel, slightly writable', 'desc' => 'Smooth coated sheet with a soft, glare-free finish. Richer color than uncoated without the shine — the all-purpose choice for brochures and flyers.' ),
+            '0.003' => array( 'days' => 0, 'spec' => '6pt · 148gsm — Best image quality', 'desc' => 'Shiny coated sheet that makes photos and color pop. The standard for marketing brochures, catalogs, and mailers.' ),
+            '2.002' => array( 'days' => 2, 'spec' => '4pt · 89gsm — Best for writing', 'desc' => 'Light uncoated sheet with good opacity for its weight. Economical for manuals, workbooks, and text-heavy booklets.' ),
+            '2.003' => array( 'days' => 2, 'spec' => '5pt · 118gsm — Best for writing', 'desc' => 'Sturdy uncoated sheet with excellent opacity. The uncoated feel with less show-through — workbooks, journals, and premium text pages.' ),
+            '2.004' => array( 'days' => 2, 'spec' => '5pt · 118gsm — Best image quality', 'desc' => 'Lightweight gloss sheet with vivid color reproduction. A thinner, economical alternative to 100lb gloss for catalogs and mailers.' ),
+            '2.005' => array( 'days' => 2, 'spec' => '6pt · 148gsm — Distinct feel, slightly writable', 'desc' => 'Heavy matte sheet with a refined, low-glare surface. Upscale brochures, art books, and photography that shouldn\'t shine.' ),
+            '2.006' => array( 'days' => 4, 'spec' => '7pt · 118gsm — Textured, best for writing', 'desc' => 'Premium stock with a woven linen texture you can feel. Distinctive for invitations, stationery, and fine-dining menus.' ),
         ),
         'cs' => array(
-            '0.01' => array( 'days' => 0, 'desc' => 'Our lightest cardstock, uncoated and easy to write on. Greeting cards, reply cards, and covers that fold cleanly.' ),
-            '0.02' => array( 'days' => 0, 'desc' => 'Light cardstock with a smooth matte coating. A soft, modern look for covers and cards.' ),
-            '0.03' => array( 'days' => 0, 'desc' => 'Mid-weight cardstock with a glossy face that makes color punchy. Covers, postcards, and hang tags.' ),
-            '1.01' => array( 'days' => 1, 'desc' => 'Thick card, gloss-coated on one side with an uncoated back that\'s easy to write on. The postcard standard (C1S = coated one side).' ),
-            '1.02' => array( 'days' => 1, 'desc' => 'Our heaviest everyday card, gloss-coated both sides (C2S). Substantial, premium feel for business cards, postcards, and covers.' ),
-            '2.21' => array( 'days' => 2, 'desc' => 'Light, flexible cardstock with a gloss coat on both sides. Economical covers and cards with vivid color.' ),
-            '2.22' => array( 'days' => 2, 'desc' => 'Mid-weight matte card with an elegant, glare-free surface. Book covers and upscale cards.' ),
-            '2.23' => array( 'days' => 2, 'desc' => 'Flexible coated card, thinner than 14pt. Tickets, tags, and lightweight postcards.' ),
-            '2.24' => array( 'days' => 2, 'desc' => 'Thick card gloss-coated both sides for all-over shine. Postcards and covers that want gloss front and back.' ),
-            '2.25' => array( 'days' => 2, 'desc' => 'Our most rigid card — gloss front, uncoated writable back. Heavy-duty hang tags, counter cards, and premium postcards.' ),
+            '0.01' => array( 'days' => 0, 'spec' => '10pt · 216gsm — Best for writing', 'desc' => 'Our lightest cardstock, uncoated and easy to write on. Greeting cards, reply cards, and covers that fold cleanly.' ),
+            '0.02' => array( 'days' => 0, 'spec' => '9pt · 216gsm — Distinct feel, slightly writable', 'desc' => 'Light cardstock with a smooth matte coating. A soft, modern look for covers and cards.' ),
+            '0.03' => array( 'days' => 0, 'spec' => '10pt · 270gsm — Best image quality', 'desc' => 'Mid-weight cardstock with a glossy face that makes color punchy. Covers, postcards, and hang tags.' ),
+            '1.01' => array( 'days' => 1, 'spec' => '300gsm — Best image quality', 'desc' => 'Thick card, gloss-coated on one side with an uncoated back that\'s easy to write on. The postcard standard (C1S = coated one side).' ),
+            '1.02' => array( 'days' => 1, 'spec' => '350gsm — Best image quality', 'desc' => 'Our heaviest everyday card, gloss-coated both sides (C2S). Substantial, premium feel for business cards, postcards, and covers.' ),
+            '2.21' => array( 'days' => 2, 'spec' => '9pt · 216gsm — Best image quality', 'desc' => 'Light, flexible cardstock with a gloss coat on both sides. Economical covers and cards with vivid color.' ),
+            '2.22' => array( 'days' => 2, 'spec' => '10pt · 270gsm — Distinct feel, slightly writable', 'desc' => 'Mid-weight matte card with an elegant, glare-free surface. Book covers and upscale cards.' ),
+            '2.23' => array( 'days' => 2, 'spec' => '260gsm — Best image quality', 'desc' => 'Flexible coated card, thinner than 14pt. Tickets, tags, and lightweight postcards.' ),
+            '2.24' => array( 'days' => 2, 'spec' => '300gsm — Best image quality', 'desc' => 'Thick card gloss-coated both sides for all-over shine. Postcards and covers that want gloss front and back.' ),
+            '2.25' => array( 'days' => 2, 'spec' => '400gsm — Best image quality', 'desc' => 'Our most rigid card — gloss front, uncoated writable back. Heavy-duty hang tags, counter cards, and premium postcards.' ),
         ),
     );
 }
@@ -374,6 +372,7 @@ function pps_paper_enrich( $rows, $pool ) {
         if ( isset( $m[ $k ] ) ) {
             if ( ! isset( $p['days'] ) || $p['days'] === '' ) $p['days'] = $m[ $k ]['days'];
             if ( empty( $p['desc'] ) ) $p['desc'] = $m[ $k ]['desc'];
+            if ( empty( $p['spec'] ) && isset( $m[ $k ]['spec'] ) ) $p['spec'] = $m[ $k ]['spec'];
         }
         if ( ! isset( $p['days'] ) || $p['days'] === '' ) $p['days'] = 0;
         $p['days'] = intval( $p['days'] );
