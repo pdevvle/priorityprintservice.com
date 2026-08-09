@@ -177,7 +177,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · CB-SHEETS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · CB-SHEETS2</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -1928,7 +1928,7 @@ function MobilePreviewBar(props){
         </div>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:1}}>
           <div style={{fontSize:8,fontWeight:700,letterSpacing:".12em",opacity:.6,textTransform:"uppercase"}}>{hasArt?"Your Artwork":"3D Preview"}</div>
-          <div style={{fontSize:12,fontWeight:700,letterSpacing:".01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{wIn}×{hIn}″ · {pages/2} sheets · {quantity.toLocaleString()} qty</div>
+          <div style={{fontSize:12,fontWeight:700,letterSpacing:".01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{wIn}×{hIn}″ · {pages} sheets · {quantity.toLocaleString()} qty</div>
         </div>
       </div>
     </>
@@ -2005,7 +2005,7 @@ const TT = {
   inside_print:{t:"Inside Printing",c:"Full color or greyscale printing on the inside pages."},
   color_pages:{t:"Color Pages",c:"How many interior pages print in full color. The remaining pages print in black & white."},
   bw_pages:{t:"Black & White Pages",c:"How many interior pages print in black only."},
-  page_count:{t:"Sheets",c:"The total number of sheets in your coupon book, including the cover or top sheet. Each sheet is one leaf of the book — printed front and back when you choose double-sided."},
+  page_count:{t:"Sheets",c:"The total number of sheets in your coupon book, including the cover or top sheet. Each sheet is one leaf of the book: double-sided printing uses the front and back of every sheet, while single-sided prints the front only and leaves the back blank."},
   cover_layout:{t:"Cover Layout",c:"How the cover is imposed on press, which affects the spine wrap and pricing."},
   bind_style:{t:"Bind Style",c:"How the book is bound along its spine edge."},
   magnetic_backer:{t:"Magnetic Backer",c:"Add a magnet to the back so the finished piece sticks to metal surfaces."},
@@ -4200,8 +4200,9 @@ function buildSummary(config, result) {
   const sh = r.shipping || {};
 
   // Size & quantity
+  const summarySpp = config.sidesPrinted === "single" ? 1 : 2;
   const setsStr = config.sets.map(s =>
-    `${s.qty.toLocaleString()} qty × ${s.pages / 2} sheets` + (s.name ? ` "${s.name}"` : "")
+    `${s.qty.toLocaleString()} qty × ${s.pages / summarySpp} sheets` + (s.name ? ` "${s.name}"` : "")
   ).join(", ");
   lines.push(`${config.sizeLabel} · ${setsStr}`);
 
@@ -4470,7 +4471,7 @@ function App(){
     const specs = [
       "Coupon Books",
       `Size: ${sz}`,
-      `Sheets: ${totalPages / 2}`,
+      `Sheets: ${totalPages / (sidesPrinted === "single" ? 1 : 2)}`,
       `${bindStyle === "wraparound" ? "Cover" : "Top Sheet"}: ${coverColor === "color" ? "Full Color" : "B&W"} · ${cvr.label}`,
       `Inside: ${insideColor === "color" ? "Full Color" : "B&W"} · ${insidePaper.label}`,
     ];
@@ -4525,6 +4526,9 @@ function App(){
 
   const[bindStyle,setBindStyle]=useState(D.bindStyle||"openface");
   const[sidesPrinted,setSidesPrinted]=useState(D.sidesPrinted||"double");
+  // Pages-per-sheet ratio for the sheet-count UI: mirrors the engine's sidesMult
+  // (double-sided leaf = 2 pages; single-sided leaf = 1 page, blank back).
+  const sheetSpp=sidesPrinted==="single"?1:2;
   const[magnetBacker,setMagnetBacker]=useState(Number(D.magnetBacker)||0);
   const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||10, name:"", colorMode:D.insideColor==="bw"?"bw":"color", colorPages:D.pages||10, bwPages:0}]);
   const debugUnlocked = sets.some(s => s.name === "%3414");
@@ -5012,7 +5016,7 @@ function App(){
         </div>
       </section>
 
-      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={sets[0]?.pages||0} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
+      {mob && <MobilePreviewBar sizeLabel={sizeLabel} pages={(sets[0]?.pages||0)/sheetSpp} quantity={sets.reduce((s,x)=>s+(x.qty||0),0)||sets[0]?.qty||0} coverColor={coverColor} coverPaper={coverPaper} insidePaper={insidePaper} coverMode={coverMode} coverArt={coverArt} backCoverArt={backCoverArt} bindEdge={result?.bindingEdge || result?.sz?.bindEdge} onOpenPreview={()=>openPreviewModalRef.current&&openPreviewModalRef.current()}/>}
 
       <div style={{maxWidth:1180,margin:"0 auto",padding:mob?"0 10px 140px":"0 24px 80px",display:"flex",flexDirection:mob?"column":"row",gap:mob?8:18,alignItems:"flex-start"}}>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:mob?6:10,width:mob?"100%":undefined}}>
@@ -5059,9 +5063,11 @@ function App(){
               </div>
             ) : (
               <div style={{marginTop:6}}>
-                {/* Customers count sheets (leaves); the engine keeps pages (2 per sheet), so
-                  the conversion happens only here at the input boundary. */}
-              <TxtNum label={<Tip k="page_count">{bindStyle==="openface"?"Total Sheets (incl. top sheet)":"Total Sheets (incl. cover)"}</Tip>} value={sets[0].pages/2} onChange={v=>{const sh=Math.max(2,Math.round(v)); upSet(0,{pages:Math.min(200,sh*2)});}} min={2} max={100} confirm unit="sheets" adjustHint="coupon books run 2–100 sheets"/>
+                {/* Customers count sheets (leaves); the engine keeps pages. The ratio depends
+                  on Printing Sides (see sidesMult): double-sided = 2 pages per sheet,
+                  single-sided = 1 page per sheet (blank backs). Conversion lives only at
+                  this boundary — the engine is untouched. */}
+              <TxtNum label={<Tip k="page_count">{bindStyle==="openface"?"Total Sheets (incl. top sheet)":"Total Sheets (incl. cover)"}</Tip>} value={sets[0].pages/sheetSpp} onChange={v=>{const sh=Math.max(4/sheetSpp,Math.round(v)); upSet(0,{pages:Math.min(200,sh*sheetSpp)});}} min={4/sheetSpp} max={200/sheetSpp} confirm unit="sheets" adjustHint={`coupon books run ${4/sheetSpp}–${200/sheetSpp} sheets`}/>
               </div>
             )}
 
@@ -5069,7 +5075,9 @@ function App(){
             <div style={ST.hr}/>
             <div style={r2}>
               <Pil label={<Tip k="bind_style">Bind Style</Tip>} value={bindStyle} onChange={setBindStyle} options={[{t:"Open Faced / Padded",v:"openface"},{t:"Wraparound Cover",v:"wraparound"}]}/>
-              <Pil label={<Tip k="sides">Printing Sides</Tip>} value={sidesPrinted} onChange={setSidesPrinted} options={[{t:"Double Sided",v:"double"},{t:"Single Sided",v:"single"}]}/>
+              {/* Switching sides preserves the physical book (sheet count) and recomputes
+                  pages, since the pages-per-sheet ratio changes with the mode. */}
+              <Pil label={<Tip k="sides">Printing Sides</Tip>} value={sidesPrinted} onChange={v=>{if(v===sidesPrinted)return;const sheets=sets[0].pages/sheetSpp;const nSpp=v==="double"?2:1;setSidesPrinted(v);upSet(0,{pages:Math.min(200,Math.max(4,Math.round(sheets)*nSpp))});}} options={[{t:"Double Sided",v:"double"},{t:"Single Sided",v:"single"}]}/>
             </div>
           </Sec>
 
@@ -5084,7 +5092,7 @@ function App(){
               <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label} (Cardstock)</option>)}</optgroup>}</Sel>
             </div>
             <PaperNote p={insidePaper} pool={insidePaperType==="cardstock"?"cs":"nc"} legend/>
-            {insidePaperType==="cardstock"&&!csOK&&<p style={ST.err}>Cardstock requires all sets ≤ 12 sheets</p>}
+            {insidePaperType==="cardstock"&&!csOK&&<p style={ST.err}>Cardstock requires all sets ≤ {24/sheetSpp} sheets</p>}
             {bindStyle==="wraparound"&&<>
             <div style={ST.hr}/>
             <div style={r2}>
