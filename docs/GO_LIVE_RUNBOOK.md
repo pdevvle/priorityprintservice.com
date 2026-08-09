@@ -202,6 +202,41 @@ delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
 - **Old customer artwork uploads** (`wp-content/uploads/` trees from the
   NBDesigner era, Woo File Dropzone dirs, any pre-Drive WCPA upload dirs, and
   legacy local PPS artwork if any predates the Drive flow).
+
+  > **Directory map (2026-08-09, read from the plugin source):**
+  >
+  > | Path under `wp-content/uploads/` | What it is | Verdict |
+  > |---|---|---|
+  > | `pps-artwork/` | current PPS artwork (`pps_artwork_dir()`) | thin old files |
+  > | `pps-calculators/` | PPS general uploads (`PPS_UPLOAD_SUBDIR`) | thin old files |
+  > | NBDesigner trees | plugin uninstalled | delete |
+  > | Woo File Dropzone trees | plugin uninstalled | delete |
+  > | WCPA upload dir | **Woo Custom Product Addons 5.5.0 is INSTALLED and live** | **do not delete** |
+  >
+  > **🛑 Correction — "pre-Drive WCPA upload dirs" is wrong as written.** WCPA is
+  > still installed and, per the CLAUDE.md coexistence rule, owns the order flow
+  > for every non-registry product *today*. Its upload directory is live, not
+  > legacy; deleting it breaks current uploads on those products. Identify it
+  > from a recent WCPA-era order's file link and leave it alone.
+  >
+  > **`pps-artwork/` is safer to thin than this section implies.** The order-item
+  > writer sets `_pps_artwork_on_drive = yes` whenever the local file is already
+  > gone and keeps the path only as a Drive/reorder reference, so for PPS-era
+  > orders Drive is authoritative and the local copy is redundant. The accepted
+  > "reorder can't auto-restore artwork" consequence really only applies to
+  > genuinely pre-Drive files.
+  >
+  > **Deriving the keep-list** for the ~90-day rule: referenced files appear in
+  > order-item meta as `_pps_artwork_path` (relative, starts `pps-artwork/`) and
+  > `_pps_artwork_files` (JSON array covering the full approval package). Build
+  > the list from those, then delete everything in the directory that is not on
+  > it.
+  >
+  > **Not doable from a Claude session.** The MCP file tools are scoped to
+  > `wp-content/plugins` and the theme directory, and the delete tool refuses
+  > directories and path traversal; files with no attachment row are also
+  > invisible to the media tools. Uploads cleanup is a Cloudways File
+  > Manager/SFTP job.
   **Owner decision 2026-08-09: thin the files — delete the old upload trees
   outright. The owner retains offline archives going back years, so no
   pre-delete archiving step is needed.** Known consequence, accepted: a
