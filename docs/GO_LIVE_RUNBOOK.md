@@ -266,6 +266,38 @@ delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
   >
   > Still a Cloudways job: removing the now-empty **directories** themselves, since
   > these tools delete files only.
+  >
+  > **Automatic retention (MCP tools v1.7.0).** For art that keeps accumulating —
+  > the WCPA tree especially — there is now a daily WP-Cron policy instead of a
+  > manual pass: `pps_uploads_retention_get` / `_set` / `_run_now`. It deletes files
+  > older than `min_age_days` (default **730**, i.e. 2 years) from **one** configured
+  > uploads subdirectory, capped per run.
+  >
+  > It **ships off, with `dry_run` on and no directory**, so it is inert until
+  > deliberately configured. Bring-up order:
+  >
+  > 1. `_set` the `directory` (and `min_age_days` if not 730) — leave `enabled` false.
+  > 2. `_run_now` (dry run by default) and read `expired_count` / `expired_mb` /
+  >    `samples` / `skipped`. Nothing is deleted.
+  > 3. When the report looks right, `_run_now` with `dry_run=false` for the first
+  >    real sweep, then `_set` `enabled=true` and `dry_run=false` to let cron keep up.
+  >
+  > Guards: refuses the uploads root (so a blank or `.` directory cannot cascade),
+  > floors `min_age_days` at 30 so a typo cannot mean "2 days", skips directory
+  > guards and media-attached files with a reason, and caps deletes per run —
+  > remaining work resumes on the next run.
+  >
+  > **Behaviour-carrying options** (un-versioned, so they are written down here per
+  > the CLAUDE.md server-patch rule):
+  >
+  > | Option | Holds |
+  > |---|---|
+  > | `pps_uploads_retention` | the policy: enabled, dry_run, directory, min_age_days, max_deletes_per_run |
+  > | `pps_uploads_retention_log` | last run's report plus cumulative deleted count/bytes |
+  >
+  > Note WP-Cron only fires on traffic. On a quiet staging site the job may not run
+  > on schedule — either use `_run_now`, or point a real Cloudways cron at
+  > `wp-cron.php`. On production, normal traffic is enough.
   **Owner decision 2026-08-09: thin the files — delete the old upload trees
   outright. The owner retains offline archives going back years, so no
   pre-delete archiving step is needed.** Known consequence, accepted: a

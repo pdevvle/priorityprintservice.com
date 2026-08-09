@@ -198,7 +198,9 @@ Whole-file deploys are the mechanism that destroys surgical patches, so check fi
 ### Applies equally to
 
 Anything edited outside version control and relied upon: `wp_options` values that
-carry behaviour (`pps_calc_config`, the registry, the tooltips table), one-shot
+carry behaviour (`pps_calc_config`, the registry, the tooltips table,
+`pps_uploads_retention` — the automatic uploads-cleanup policy, documented in
+`docs/GO_LIVE_RUNBOOK.md` §D), one-shot
 `_pps_*` helper files, and files added to `active_plugins` by hand. If it changes what
 production does and it is not in the repo, it is one deploy from being undone.
 
