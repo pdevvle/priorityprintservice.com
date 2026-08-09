@@ -3,7 +3,7 @@
  * Plugin Name: Priority Print MCP Tools
  * Plugin URI:  https://woocommerce-70867-4915293.cloudwaysapps.com/
  * Description: Companion plugin for AI Engine that adds custom WooCommerce, theme, plugin file management, uploads cleanup, WordPress update, and URL-download tools to the MCP server.
- * Version:     1.6.0
+ * Version:     1.7.0
  * Author:      Preston / Priority Print Service
  * License:     GPL v2 or later
  * Requires PHP: 8.0
@@ -25,6 +25,15 @@
  *    per-file failure rather than aborting
  *  - uploads_list_files reports matched_count / matched_total_bytes for the FULL match set even when
  *    the returned list is limited, so a cap is never mistaken for the whole picture
+ *  - Uploads retention (the daily WP-Cron age-based cleanup) ships OFF, with dry_run ON and no
+ *    directory, so it is inert until deliberately configured. It refuses the uploads root (a blank
+ *    or "/" directory cannot cascade), floors min_age_days at RETENTION_MIN_AGE_FLOOR so a typo
+ *    cannot mean "2 days", caps deletes per run, reuses the same per-file guards as the manual
+ *    delete tools, and logs every run (counts, bytes, sample paths, skip reasons) to
+ *    pps_uploads_retention_log. uploads_retention_run_now defaults to a dry run even when the
+ *    stored policy is live -- deleting from a manual call requires an explicit dry_run=false
+ *  - Behaviour-carrying options: pps_uploads_retention (policy) and pps_uploads_retention_log
+ *    (history). Both are documented in docs/GO_LIVE_RUNBOOK.md per the CLAUDE.md server-patch rule
  *  - Every write / download / delete calls opcache_invalidate() on the affected file, so new
  *    bytecode takes effect on the next request even when OPcache runs with validate_timestamps=0
  *    (the Cloudways default) -- without this a deployed .php sits on disk while stale bytecode runs
@@ -43,8 +52,19 @@ class Priority_Print_MCP {
 	const PLUGIN_SCOPE       = 'all';
 	const PREFIX             = 'pps_';
 
+	// Uploads retention (automatic age-based cleanup of a single uploads subdirectory)
+	const RETENTION_OPTION = 'pps_uploads_retention';
+	const RETENTION_LOG    = 'pps_uploads_retention_log';
+	const RETENTION_CRON   = 'pps_uploads_retention_run';
+	const RETENTION_MIN_AGE_FLOOR = 30;   // refuse to treat anything younger than this as expired
+
 	public function __construct() {
 		add_action( 'rest_api_init', array( $this, 'register_filters' ) );
+
+		// Retention runs from WP-Cron, which never reaches rest_api_init, so these
+		// two hooks are registered at load time rather than in register_filters().
+		add_action( 'init', array( $this, 'maybe_schedule_retention' ) );
+		add_action( self::RETENTION_CRON, array( $this, 'retention_cron_run' ) );
 	}
 
 	public function register_filters() {
@@ -307,6 +327,38 @@ class Priority_Print_MCP {
 				),
 			),
 
+			self::PREFIX . 'uploads_retention_get' => array(
+				'name'        => self::PREFIX . 'uploads_retention_get',
+				'description' => 'Read the automatic uploads-retention policy (the daily cron that deletes aged files from one configured uploads subdirectory), plus the next scheduled run and the last run\'s log.',
+				'inputSchema' => array( 'type' => 'object', 'properties' => array() ),
+			),
+
+			self::PREFIX . 'uploads_retention_set' => array(
+				'name'        => self::PREFIX . 'uploads_retention_set',
+				'description' => 'WRITE OPERATION. Configure the automatic uploads-retention policy. Starts disabled with dry_run on and no directory, and does nothing until a directory is set and enabled is true. Setting enabled schedules/unschedules the daily cron. min_age_days is floored at 30 and the directory may not be the uploads root.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'enabled'             => array( 'type' => 'boolean', 'description' => 'Turn the daily cron on or off.' ),
+						'dry_run'             => array( 'type' => 'boolean', 'description' => 'When true (the default) the job reports what it would delete and deletes nothing.' ),
+						'directory'           => array( 'type' => 'string',  'description' => 'Target path relative to the uploads root, e.g. "wcpa_uploads". Must exist and may not be the uploads root itself.' ),
+						'min_age_days'        => array( 'type' => 'integer', 'description' => 'Delete files older than this. Default 730 (2 years); minimum 30.' ),
+						'max_deletes_per_run' => array( 'type' => 'integer', 'description' => 'Per-run delete cap, default 500, max 5000.' ),
+					),
+				),
+			),
+
+			self::PREFIX . 'uploads_retention_run_now' => array(
+				'name'        => self::PREFIX . 'uploads_retention_run_now',
+				'description' => 'WRITE OPERATION. Run the retention policy immediately instead of waiting for cron. Defaults to a DRY RUN regardless of the stored setting — pass dry_run=false to actually delete. Returns counts, bytes, sample paths and skip reasons.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'dry_run' => array( 'type' => 'boolean', 'description' => 'Defaults to true. Pass false to delete for real.' ),
+					),
+				),
+			),
+
 			self::PREFIX . 'wp_check_updates' => array(
 				'name'        => self::PREFIX . 'wp_check_updates',
 				'description' => 'Refresh and return available core, plugin, and theme updates. Read-only.',
@@ -367,6 +419,7 @@ class Priority_Print_MCP {
 				$name === self::PREFIX . 'plugin_list_files' ||
 				$name === self::PREFIX . 'plugin_read_file'  ||
 				$name === self::PREFIX . 'uploads_list_files' ||
+				$name === self::PREFIX . 'uploads_retention_get' ||
 				$name === self::PREFIX . 'wp_check_updates'  ||
 				$name === self::PREFIX . 'wp_get_plugin_versions'
 			);
@@ -378,6 +431,8 @@ class Priority_Print_MCP {
 				$name === self::PREFIX . 'plugin_delete_file'      ||
 				$name === self::PREFIX . 'uploads_delete_file'     ||
 				$name === self::PREFIX . 'uploads_delete_batch'    ||
+				$name === self::PREFIX . 'uploads_retention_set'   ||
+				$name === self::PREFIX . 'uploads_retention_run_now' ||
 				$name === self::PREFIX . 'woo_update_product'      ||
 				$name === self::PREFIX . 'woo_update_order_status' ||
 				$name === self::PREFIX . 'wp_update_plugin'        ||
@@ -426,6 +481,9 @@ class Priority_Print_MCP {
 				case self::PREFIX . 'uploads_list_files':      $data = $this->uploads_list_files( $args ); break;
 				case self::PREFIX . 'uploads_delete_file':     $data = $this->uploads_delete_file( $args ); break;
 				case self::PREFIX . 'uploads_delete_batch':    $data = $this->uploads_delete_batch( $args ); break;
+				case self::PREFIX . 'uploads_retention_get':     $data = $this->uploads_retention_get(); break;
+				case self::PREFIX . 'uploads_retention_set':     $data = $this->uploads_retention_set( $args ); break;
+				case self::PREFIX . 'uploads_retention_run_now': $data = $this->uploads_retention_run_now( $args ); break;
 				case self::PREFIX . 'wp_check_updates':        $data = $this->wp_check_updates(); break;
 				case self::PREFIX . 'wp_get_plugin_versions':  $data = $this->wp_get_plugin_versions(); break;
 				case self::PREFIX . 'wp_update_plugin':        $data = $this->wp_update_plugin( $args ); break;
@@ -1034,6 +1092,221 @@ class Priority_Print_MCP {
 			'deleted'       => $deleted,
 			'failed'        => $failed,
 		);
+	}
+
+	// ── Uploads retention (automatic, age-based) ──────────────────────────────
+	//
+	// A daily WP-Cron job that deletes files older than N days from ONE configured
+	// uploads subdirectory. Built for legacy customer artwork (e.g. the WCPA tree)
+	// where the orders are long closed and offline archives exist.
+	//
+	// Deliberately conservative, because this deletes customer files with nobody
+	// watching:
+	//   - disabled by default, and does nothing at all until a directory is set
+	//   - dry_run defaults to true: it reports what it WOULD delete and deletes
+	//     nothing, so the first runs are reviewable before anything is destroyed
+	//   - refuses the uploads root itself, so a blank or "/" directory cannot
+	//     cascade into wiping every upload on the site
+	//   - min_age_days is floored at RETENTION_MIN_AGE_FLOOR, so a typo like 2
+	//     cannot mean "two days old"
+	//   - per-run delete cap bounds the damage of any misconfiguration and keeps
+	//     the cron run inside PHP's time limit
+	//   - reuses the same per-file guards as the manual delete tools
+	//   - every run writes a log (counts, bytes, sample paths, skip reasons)
+
+	public function retention_defaults() : array {
+		return array(
+			'enabled'             => false,
+			'dry_run'             => true,
+			'directory'           => '',     // relative to the uploads root; empty = no-op
+			'min_age_days'        => 730,    // 2 years
+			'max_deletes_per_run' => 500,
+		);
+	}
+
+	public function retention_settings() : array {
+		$saved = get_option( self::RETENTION_OPTION, array() );
+		if ( ! is_array( $saved ) ) $saved = array();
+		return array_merge( $this->retention_defaults(), $saved );
+	}
+
+	/**
+	 * Keep the daily cron event in step with the enabled flag.
+	 */
+	public function maybe_schedule_retention() {
+		$enabled   = (bool) $this->retention_settings()['enabled'];
+		$scheduled = wp_next_scheduled( self::RETENTION_CRON );
+
+		if ( $enabled && ! $scheduled ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::RETENTION_CRON );
+		} elseif ( ! $enabled && $scheduled ) {
+			wp_unschedule_event( $scheduled, self::RETENTION_CRON );
+		}
+	}
+
+	public function retention_cron_run() {
+		$settings = $this->retention_settings();
+		if ( empty( $settings['enabled'] ) ) return;
+		try {
+			$this->retention_run();
+		} catch ( Exception $e ) {
+			update_option( self::RETENTION_LOG, array_merge(
+				(array) get_option( self::RETENTION_LOG, array() ),
+				array( 'last_error' => $e->getMessage(), 'last_error_at' => date( 'c' ) )
+			), false );
+		}
+	}
+
+	/**
+	 * Enforce the retention policy once.
+	 *
+	 * @param array $overrides Settings to override for this run only (e.g. dry_run).
+	 */
+	private function retention_run( array $overrides = array() ) : array {
+		$s = array_merge( $this->retention_settings(), $overrides );
+
+		$min_age = max( self::RETENTION_MIN_AGE_FLOOR, (int) $s['min_age_days'] );
+		$cap     = max( 1, min( 5000, (int) $s['max_deletes_per_run'] ) );
+		$dry_run = ! empty( $s['dry_run'] );
+
+		$result = array(
+			'ran_at'         => date( 'c' ),
+			'dry_run'        => $dry_run,
+			'directory'      => (string) $s['directory'],
+			'min_age_days'   => $min_age,
+			'scanned'        => 0,
+			'expired_count'  => 0,
+			'expired_bytes'  => 0,
+			'deleted_count'  => 0,
+			'deleted_bytes'  => 0,
+			'skipped_count'  => 0,
+			'cap_reached'    => false,
+			'samples'        => array(),
+			'skipped'        => array(),
+		);
+
+		if ( trim( (string) $s['directory'] ) === '' ) {
+			$result['error'] = 'No directory configured; retention is a no-op until one is set.';
+			return $result;
+		}
+
+		$uploads_root = $this->uploads_root();
+		$dir          = $this->safe_uploads_path( (string) $s['directory'] );
+
+		if ( ! is_dir( $dir ) ) {
+			$result['error'] = 'Configured directory not found under uploads: ' . $s['directory'];
+			return $result;
+		}
+		if ( realpath( $dir ) === $uploads_root ) {
+			$result['error'] = 'Refusing to run retention against the uploads root; configure a specific subdirectory.';
+			return $result;
+		}
+
+		$cutoff = time() - $min_age * DAY_IN_SECONDS;
+
+		$iterator = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator( $dir, RecursiveDirectoryIterator::SKIP_DOTS ),
+			RecursiveIteratorIterator::LEAVES_ONLY
+		);
+
+		foreach ( $iterator as $file ) {
+			$result['scanned']++;
+			if ( ! $file->isFile() ) continue;
+			if ( $file->getMTime() > $cutoff ) continue;
+
+			$size = $file->getSize();
+			$rel  = str_replace( '\\', '/', str_replace( $uploads_root . DIRECTORY_SEPARATOR, '', $file->getPathname() ) );
+
+			$result['expired_count']++;
+			$result['expired_bytes'] += $size;
+
+			try {
+				$this->assert_uploads_file_deletable( $file->getPathname(), $rel );
+			} catch ( Exception $e ) {
+				$result['skipped_count']++;
+				if ( count( $result['skipped'] ) < 25 ) {
+					$result['skipped'][] = array( 'path' => $rel, 'reason' => $e->getMessage() );
+				}
+				continue;
+			}
+
+			if ( count( $result['samples'] ) < 25 ) {
+				$result['samples'][] = array( 'path' => $rel, 'size_bytes' => $size, 'age_days' => (int) floor( ( time() - $file->getMTime() ) / DAY_IN_SECONDS ) );
+			}
+
+			if ( $dry_run ) continue;
+
+			if ( @unlink( $file->getPathname() ) ) {
+				$result['deleted_count']++;
+				$result['deleted_bytes'] += $size;
+				if ( $result['deleted_count'] >= $cap ) { $result['cap_reached'] = true; break; }
+			} else {
+				$result['skipped_count']++;
+				if ( count( $result['skipped'] ) < 25 ) {
+					$result['skipped'][] = array( 'path' => $rel, 'reason' => 'unlink failed; check filesystem permissions' );
+				}
+			}
+		}
+
+		$result['expired_mb'] = round( $result['expired_bytes'] / 1048576, 1 );
+		$result['deleted_mb'] = round( $result['deleted_bytes'] / 1048576, 1 );
+
+		$prev = (array) get_option( self::RETENTION_LOG, array() );
+		update_option( self::RETENTION_LOG, array(
+			'last_run'              => $result,
+			'cumulative_deleted'    => (int) ( $prev['cumulative_deleted'] ?? 0 ) + $result['deleted_count'],
+			'cumulative_bytes'      => (int) ( $prev['cumulative_bytes'] ?? 0 ) + $result['deleted_bytes'],
+		), false );
+
+		return $result;
+	}
+
+	private function uploads_retention_get() : array {
+		return array(
+			'settings'      => $this->retention_settings(),
+			'defaults'      => $this->retention_defaults(),
+			'min_age_floor' => self::RETENTION_MIN_AGE_FLOOR,
+			'next_run'      => wp_next_scheduled( self::RETENTION_CRON ) ? date( 'c', wp_next_scheduled( self::RETENTION_CRON ) ) : null,
+			'log'           => get_option( self::RETENTION_LOG, array() ),
+		);
+	}
+
+	private function uploads_retention_set( array $args ) : array {
+		$s = $this->retention_settings();
+
+		if ( isset( $args['enabled'] ) )    $s['enabled'] = (bool) $args['enabled'];
+		if ( isset( $args['dry_run'] ) )    $s['dry_run'] = (bool) $args['dry_run'];
+		if ( isset( $args['directory'] ) ) {
+			$dir = trim( str_replace( '\\', '/', sanitize_text_field( (string) $args['directory'] ) ), '/' );
+			if ( $dir !== '' ) {
+				$full = $this->safe_uploads_path( $dir );   // rejects traversal / outside-root now, not at cron time
+				if ( ! is_dir( $full ) ) throw new Exception( 'Directory not found under uploads: ' . $dir );
+				if ( realpath( $full ) === $this->uploads_root() ) throw new Exception( 'Refusing to target the uploads root.' );
+			}
+			$s['directory'] = $dir;
+		}
+		if ( isset( $args['min_age_days'] ) ) {
+			$age = (int) $args['min_age_days'];
+			if ( $age < self::RETENTION_MIN_AGE_FLOOR ) {
+				throw new Exception( 'min_age_days must be at least ' . self::RETENTION_MIN_AGE_FLOOR . '.' );
+			}
+			$s['min_age_days'] = $age;
+		}
+		if ( isset( $args['max_deletes_per_run'] ) ) {
+			$s['max_deletes_per_run'] = max( 1, min( 5000, (int) $args['max_deletes_per_run'] ) );
+		}
+
+		update_option( self::RETENTION_OPTION, $s, false );
+		$this->maybe_schedule_retention();
+
+		return array( 'success' => true, 'settings' => $s, 'next_run' => wp_next_scheduled( self::RETENTION_CRON ) ? date( 'c', wp_next_scheduled( self::RETENTION_CRON ) ) : null );
+	}
+
+	private function uploads_retention_run_now( array $args ) : array {
+		// Defaults to a dry run regardless of the stored setting: an explicit
+		// dry_run=false is required to actually delete from a manual invocation.
+		$dry_run = isset( $args['dry_run'] ) ? (bool) $args['dry_run'] : true;
+		return $this->retention_run( array( 'dry_run' => $dry_run ) );
 	}
 
 	private function require_upgrader() {
