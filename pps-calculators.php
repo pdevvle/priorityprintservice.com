@@ -3499,45 +3499,49 @@ function pps_default_tooltips() {
         'vivid' => array(
             'title' => 'Enhanced Vivid Printing',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'Our vivid print mode runs your job through an enhanced print profile that produces richer blacks, more saturated colors, and sharper detail. Great for photography-heavy pieces and marketing materials.' ),
-                array( 'type' => 'text', 'value' => 'Adds approximately 1 day per 2,500 sheets to turnaround. Cost is roughly equivalent to a second press pass.' ),
+                array( 'type' => 'text', 'value' => 'Every job receives high quality printing, but enhanced vivid mode increases color saturation and contrast. It is best used for high-density art on gloss paper.' ),
             ),
         ),
         'coating' => array(
-            'title' => 'UV Cover Coating',
+            'title' => 'UV Coating',
             'content' => array(
                 array( 'type' => 'text', 'value' => 'A liquid UV coating applied after printing. Enhances durability, color vibrancy, and provides a professional finish.' ),
                 array( 'type' => 'text', 'value' => 'UV Gloss: High-shine reflective finish that makes colors pop. UV Matte: Soft, non-reflective finish with a velvety feel.' ),
                 array( 'type' => 'text', 'value' => 'Requires a glossy or coated paper. Cannot be applied to uncoated stocks.' ),
             ),
         ),
+        'cover_coating' => array(
+            'title' => 'UV Cover Coating',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Additional coating applied to the outside of the front and back cover sheets. This will retexture the printing from the paper\'s default finish.' ),
+                array( 'type' => 'text', 'value' => 'UV Matte adds a distinctive roughness that reduces glare. UV Gloss greatly increases sheen and color saturation with a mirror-like coating.' ),
+            ),
+        ),
         'bundling' => array(
             'title' => 'Bundling',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'Pieces are counted and bundled in your chosen quantity using kraft paper or shrink wrap. Keeps your order organized and protected during shipping and storage.' ),
-                array( 'type' => 'text', 'value' => 'Available for orders of 100+ pieces. Bundle sizes: 25, 50, or 100 per bundle.' ),
+                array( 'type' => 'text', 'value' => 'Bundling in quantities within the same package. We make no guarantee as to what material is used for the bundling; whether rubber bands, plastic bands, paper bands, or paper or plastic wrapping.' ),
+                array( 'type' => 'text', 'value' => 'If you have particular needs, be sure to request a quote before placing an order.' ),
             ),
         ),
         'round_cornering' => array(
             'title' => 'Round Cornering',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'Rounds the corners of your finished piece for a softer, modern look. Available in two radius sizes and two corner configurations.' ),
-                array( 'type' => 'text', 'value' => 'Outside 2: rounds the two corners on the open (non-spine) edge. All 4: rounds every corner including the spine side.' ),
-                array( 'type' => 'text', 'value' => '1/4" radius is subtle and professional. 3/8" radius is more pronounced and playful.' ),
+                array( 'type' => 'text', 'value' => 'Rounded corners add a distinctive appeal. Choose from two sizes, narrow and wide corner.' ),
+                array( 'type' => 'text', 'value' => 'In the case of booklets, a wider radius works best with greater page counts.' ),
             ),
         ),
         'perforation' => array(
             'title' => 'Perforation',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'A line of small holes punched through the paper, allowing a section to be torn off cleanly. Common for reply cards, coupons, and tear-off tabs.' ),
-                array( 'type' => 'text', 'value' => 'Available for select sizes. Perforation lines run parallel to the fold or binding edge.' ),
+                array( 'type' => 'text', 'value' => 'Adds perforations to the sheet(s) to make them easier to tear.' ),
             ),
         ),
         'outfold' => array(
             'title' => 'Fold-Out Page (Outfold)',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'An extra panel that folds out from the booklet, like a brochure insert inside the book. Printed full color on both sides.' ),
-                array( 'type' => 'text', 'value' => 'Adds both printing cost (full color) and folding labor. Available as single or double fold-out.' ),
+                array( 'type' => 'text', 'value' => 'An outfold is like having a brochure within the book. It is specially-sized, folded and then inserted before binding. Excellent for diagrams and schematics.' ),
+                array( 'type' => 'text', 'value' => 'The design of these is intricate, so feel free to reach out before or after placing your order.' ),
             ),
         ),
         'perfect_binding' => array(

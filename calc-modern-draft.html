@@ -6299,7 +6299,7 @@ function App(){
             {r.vividOK && (_AD.vivid!==false || vividPrint===true) && <Pil label={<RichTip tipKey="vivid">Print Quality</RichTip>} badge={<TurnBadge days={r.ti?.vivid}/>} value={vividPrint} onChange={setVividPrint} options={[{t:"Standard HQ",v:false},{t:"Enhanced Vivid",v:true}]}/>}
             {r.vividOK && (_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
-              {(_AD.coating!==false || coating>0) && <Sel label={<RichTip tipKey="coating">Cover Coating</RichTip>} badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+              {(_AD.coating!==false || coating>0) && <Sel label={<RichTip tipKey="cover_coating">Cover Coating</RichTip>} badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
               {(_AD.bundling!==false || bundling>0) && (r.q100!==false
                 ? <Sel label={<RichTip tipKey="bundling">Bundling</RichTip>} badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
                 : <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="bundling">Bundling</RichTip></label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>)}
