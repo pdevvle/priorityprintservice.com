@@ -177,7 +177,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · PAPERS</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · CB-SHEETS</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -1179,7 +1179,7 @@ function TxtNum({label,value,onChange,min=1,max=99999,confirm=false,unit="",adju
         // preventDefault on mousedown keeps focus, so blur can't unmount the
         // button out from under the click that's about to land on it.
         <button type="button" onMouseDown={e=>e.preventDefault()} onClick={flush}
-          title="Apply this page count to the quote"
+          title="Apply this count to the quote"
           style={{position:"absolute",right:5,top:"50%",transform:"translateY(-50%)",padding:"5px 10px",fontSize:12,fontWeight:700,border:"none",borderRadius:4,cursor:"pointer",fontFamily:"inherit",background:CK.cyan,color:"#fff",lineHeight:1.2,whiteSpace:"nowrap"}}>✓ Apply</button>
       )}
     </div>
@@ -1928,7 +1928,7 @@ function MobilePreviewBar(props){
         </div>
         <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:1}}>
           <div style={{fontSize:8,fontWeight:700,letterSpacing:".12em",opacity:.6,textTransform:"uppercase"}}>{hasArt?"Your Artwork":"3D Preview"}</div>
-          <div style={{fontSize:12,fontWeight:700,letterSpacing:".01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{wIn}×{hIn}″ · {pages}pp · {quantity.toLocaleString()} qty</div>
+          <div style={{fontSize:12,fontWeight:700,letterSpacing:".01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{wIn}×{hIn}″ · {pages/2} sheets · {quantity.toLocaleString()} qty</div>
         </div>
       </div>
     </>
@@ -2005,7 +2005,7 @@ const TT = {
   inside_print:{t:"Inside Printing",c:"Full color or greyscale printing on the inside pages."},
   color_pages:{t:"Color Pages",c:"How many interior pages print in full color. The remaining pages print in black & white."},
   bw_pages:{t:"Black & White Pages",c:"How many interior pages print in black only."},
-  page_count:{t:"Pages",c:"The total number of pages in your finished booklet, counting every printed side — the front and back of each sheet. The animation shows how to count pages.",media:[{type:"image",src:"https://priorityprintservice.com/wp-content/uploads/2025/05/how-to-count-booklet-pages.webp",alt:"How to count booklet pages"}]},
+  page_count:{t:"Sheets",c:"The total number of sheets in your coupon book, including the cover or top sheet. Each sheet is one leaf of the book — printed front and back when you choose double-sided."},
   cover_layout:{t:"Cover Layout",c:"How the cover is imposed on press, which affects the spine wrap and pricing."},
   bind_style:{t:"Bind Style",c:"How the book is bound along its spine edge."},
   magnetic_backer:{t:"Magnetic Backer",c:"Add a magnet to the back so the finished piece sticks to metal surfaces."},
@@ -4143,7 +4143,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               {/* Cover / Pages toggle */}
               <div style={{ width:"100%", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
                 <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
-                  {[{v:"closed",l:"Cover"},{v:"open",l:"Pages"}].map(o => (
+                  {[{v:"closed",l:"Cover"},{v:"open",l:"Sheets"}].map(o => (
                     <button type="button" key={o.v} onClick={() => { setPreviewMode(o.v); if(o.v==="closed") setRot({x:-15,y:-25}); if(o.v==="open"){setSpread(0);setRot({x:-5,y:0});} }} style={{
                       padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
                       background: previewMode === o.v ? CK.cyan : "rgba(255,255,255,.06)",
@@ -4201,15 +4201,18 @@ function buildSummary(config, result) {
 
   // Size & quantity
   const setsStr = config.sets.map(s =>
-    `${s.qty.toLocaleString()} qty × ${s.pages}pg` + (s.name ? ` "${s.name}"` : "")
+    `${s.qty.toLocaleString()} qty × ${s.pages / 2} sheets` + (s.name ? ` "${s.name}"` : "")
   ).join(", ");
   lines.push(`${config.sizeLabel} · ${setsStr}`);
 
   // Paper
   const colorName = v => v === "color" ? "Full Color" : "Black & White";
+  const isOpenFaceBind = config.bindStyle !== "wraparound";
   lines.push(`Inside: ${config.insidePaper.label} · ${colorName(config.insideColor)}`);
   if (config.coverMode !== "same") {
     lines.push(`Cover: ${config.coverPaper.label} · ${colorName(config.coverColor)}`);
+  } else if (isOpenFaceBind) {
+    lines.push(`Top sheet: same stock as coupon sheets`);
   } else {
     lines.push(`Cover: Self-cover (same as inside)`);
   }
@@ -4467,8 +4470,8 @@ function App(){
     const specs = [
       "Coupon Books",
       `Size: ${sz}`,
-      `Pages: ${totalPages}`,
-      `Cover: ${coverColor === "color" ? "Full Color" : "B&W"} · ${cvr.label}`,
+      `Sheets: ${totalPages / 2}`,
+      `${bindStyle === "wraparound" ? "Cover" : "Top Sheet"}: ${coverColor === "color" ? "Full Color" : "B&W"} · ${cvr.label}`,
       `Inside: ${insideColor === "color" ? "Full Color" : "B&W"} · ${insidePaper.label}`,
     ];
     const lines = [...specs, "", "Qty\tUnit\tTotal", ...rows.map(p =>
@@ -4546,6 +4549,10 @@ function App(){
   const[roundCorner,setRoundCorner]=useState(Number(D.roundCorner)||0);
   const[outfold,setOutfold]=useState(Number(D.outfold)||0);
   const[perforation,setPerforation]=useState(Number(D.perforation)||0);
+  // Wraparound binding perforates the cover as part of the bind style (P.wraparoundPerf),
+  // so the separate coupon-perforation add-on is openface-only. Clearing here covers
+  // both a live style switch and a restored legacy wraparound+perforation config.
+  useEffect(()=>{if(bindStyle==="wraparound"&&perforation>0)setPerforation(0)},[bindStyle,perforation]);
   const[artwork,setArtwork]=useState(Number(D.artwork)||0.01);
   const[artEditPages,setArtEditPages]=useState(Number(D.artEditPages)||0);
   const[bleed,setBleed]=useState(Number(D.bleed)||0);
@@ -5041,7 +5048,7 @@ function App(){
             <div style={ST.hr}/>
             <div style={r3}>
               <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>
-              <Pil label={<Tip k="inside_print">Inside Print Color</Tip>} value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}},{t:"Mixed",v:"mixed",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #888 100%)",color:"#fff",fontWeight:600}}]}/>
+              <Pil label={<Tip k="inside_print">Inside Print Color</Tip>} value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}} /* Mixed mothballed 2026-08-09 (owner) — per-set colorPages/bwPages logic preserved below; re-add {t:"Mixed",v:"mixed"} here to revive */]}/>
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
             </div>
             {sets[0].colorMode === "mixed" ? (
@@ -5052,7 +5059,9 @@ function App(){
               </div>
             ) : (
               <div style={{marginTop:6}}>
-                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(200,pg)});}} min={4} max={200} confirm unit="pages" adjustHint="coupon books run 4–200 pages, even numbers only"/>
+                {/* Customers count sheets (leaves); the engine keeps pages (2 per sheet), so
+                  the conversion happens only here at the input boundary. */}
+              <TxtNum label={<Tip k="page_count">{bindStyle==="openface"?"Total Sheets (incl. top sheet)":"Total Sheets (incl. cover)"}</Tip>} value={sets[0].pages/2} onChange={v=>{const sh=Math.max(2,Math.round(v)); upSet(0,{pages:Math.min(200,sh*2)});}} min={2} max={100} confirm unit="sheets" adjustHint="coupon books run 2–100 sheets"/>
               </div>
             )}
 
@@ -5075,7 +5084,7 @@ function App(){
               <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label} (Cardstock)</option>)}</optgroup>}</Sel>
             </div>
             <PaperNote p={insidePaper} pool={insidePaperType==="cardstock"?"cs":"nc"} legend/>
-            {insidePaperType==="cardstock"&&!csOK&&<p style={ST.err}>Cardstock requires all sets ≤ 24 pages</p>}
+            {insidePaperType==="cardstock"&&!csOK&&<p style={ST.err}>Cardstock requires all sets ≤ 12 sheets</p>}
             {bindStyle==="wraparound"&&<>
             <div style={ST.hr}/>
             <div style={r2}>
@@ -5087,7 +5096,7 @@ function App(){
             </div>
             {coverMode==="separate"&&<PaperNote p={coverPaper} pool={coverPaperType==="cardstock"?"cs":"nc"}/>}
             </>}
-            {bindStyle==="openface"&&<div style={{fontSize:12,color:CC.light,padding:"6px 0",fontStyle:"italic"}}>Open-faced pads use the same paper throughout — no separate cover.</div>}
+            {bindStyle==="openface"&&<div style={{fontSize:12,color:CC.light,padding:"6px 0",fontStyle:"italic"}}>Open-faced pads use the same paper throughout — the top sheet is simply your first coupon sheet.</div>}
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}
@@ -5096,7 +5105,7 @@ function App(){
             {(_AD.vivid!==false) && !r.vividOK && <div style={{fontSize:12,color:CC.light,marginTop:-8,marginBottom:4}}>Requires matte or gloss coated paper</div>}
             {(_AD.vivid!==false || vividPrint===true) && <div style={ST.hr}/>}
             <div style={r2}>
-              {(_AD.coating!==false || coating>0) && <Sel label={<RichTip tipKey="coating">Cover Coating</RichTip>} badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?"Requires glossy/coated cover":null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+              {(_AD.coating!==false || coating>0) && <Sel label={<RichTip tipKey="coating">{bindStyle==="openface"?"Top Sheet Coating":"Cover Coating"}</RichTip>} badge={<TurnBadge days={r.ti?.coating}/>} value={coating} onChange={v=>setCoating(Number(v))} disabled={!r.coatOK} note={!r.coatOK?(bindStyle==="openface"?"Requires glossy/coated paper":"Requires glossy/coated cover"):null}>{COATINGS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
               {(_AD.bundling!==false || bundling>0) && (r.q100!==false
                 ? <Sel label={<RichTip tipKey="bundling">Bundling</RichTip>} badge={<TurnBadge days={r.ti?.bundling}/>} value={bundling} onChange={v=>setBundling(Number(v))}>{BUNDLING.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
                 : <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="bundling">Bundling</RichTip></label><div style={{fontSize:12.5,color:CC.light}}>Available at qty ≥ 100</div></div>)}
@@ -5119,9 +5128,14 @@ function App(){
             </div>}
 
             {/* Coupon book specific addons */}
-            {(_AD.perforation!==false || perforation>0) && <Sel label={<RichTip tipKey="perforation">{bindStyle==="openface"?"Coupon Perforation (tear-out)":"Cover Perforation"}</RichTip>} badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+            {/* Wraparound style perforates the cover as part of the binding, so the
+                perforation add-on only offers coupon tear-outs on openface pads. */}
+            {bindStyle==="openface" && (_AD.perforation!==false || perforation>0) && <Sel label={<RichTip tipKey="perforation">Coupon Perforation (tear-out)</RichTip>} badge={<TurnBadge days={r.ti?.perforation}/>} value={perforation} onChange={v=>setPerforation(Number(v))}>{PERF_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
             <Sel label={<Tip k="magnetic_backer">Magnetic Backer</Tip>} badge={<TurnBadge days={r.ti?.magnetBacker}/>} value={magnetBacker} onChange={v=>setMagnetBacker(Number(v))}>{MAGNET_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+            {/* Outfold — mothballed 2026-08-09 (owner). OUTFOLD_OPTS + pricing logic preserved;
+                legacy restores with outfold>0 still price it. Re-enable by uncommenting:
             {(_AD.outfold!==false || outfold>0) && <Sel label={<RichTip tipKey="outfold">Outfold (Fold-Out Page)</RichTip>} badge={<TurnBadge days={r.ti?.outfold}/>} value={outfold} onChange={v=>setOutfold(Number(v))}>{OUTFOLD_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>}
+            */}
           </Sec>
 
           {/* SECTION 4: Artwork & Proofing */}
