@@ -211,13 +211,26 @@ delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
   > | `pps-calculators/` | PPS general uploads (`PPS_UPLOAD_SUBDIR`) | thin old files |
   > | NBDesigner trees | plugin uninstalled | delete |
   > | Woo File Dropzone trees | plugin uninstalled | delete |
-  > | WCPA upload dir | **Woo Custom Product Addons 5.5.0 is INSTALLED and live** | **do not delete** |
+  > | WCPA upload dir | **Woo Custom Product Addons 5.5.0 is INSTALLED and live** | keep the directory, **thin aged files inside it** |
   >
-  > **🛑 Correction — "pre-Drive WCPA upload dirs" is wrong as written.** WCPA is
-  > still installed and, per the CLAUDE.md coexistence rule, owns the order flow
-  > for every non-registry product *today*. Its upload directory is live, not
-  > legacy; deleting it breaks current uploads on those products. Identify it
-  > from a recent WCPA-era order's file link and leave it alone.
+  > **Correction — "pre-Drive WCPA upload dirs" is wrong as written, but only
+  > about the directory.** WCPA is still installed and, per the CLAUDE.md
+  > coexistence rule, owns the order flow for every non-registry product *today*,
+  > so **do not delete the directory itself** (or its `index.php` / `.htaccess`
+  > guards) and keep files belonging to recent or open orders. Aged art inside it
+  > is a different matter and is safe to delete — this is where the gigabytes are.
+  >
+  > Verified 2026-08-09: **nothing in the PPS codebase reads legacy artwork
+  > files.** In `pps_render_order_item()` the artwork-thumb meta is only read when
+  > `$is_pps` is true, and legacy reorder (`pps_build_single_item_reorder_url()`)
+  > re-adds the product with the frozen `pps_legacy_unit_price` without restoring
+  > artwork. The only reference that can survive is a file URL inside WCPA's own
+  > visible line-item meta, so the worst consequence of deleting old art is a dead
+  > link in an old order view. Cosmetic, not a break.
+  >
+  > Use a date cutoff rather than trying to reason per-file: all WCPA/NBDesigner
+  > era art predates the PPS calculators taking over (registry migration
+  > 2026-07-19), so anything years old is dead weight.
   >
   > **`pps-artwork/` is safer to thin than this section implies.** The order-item
   > writer sets `_pps_artwork_on_drive = yes` whenever the local file is already
