@@ -58,6 +58,8 @@ function pps_reorder_field_whitelist() {
         'insidePaper', 'insidePaperType',
         'coverMode', 'coverPaper', 'coverPaperType',
         'twoStaple', 'outfold',
+        // Coupon books
+        'bindStyle', 'sidesPrinted', 'magnetBacker',
         // Flats
         'foldType', 'foldDir', 'frontColor', 'backColor', 'sides', 'paper', 'paperType',
         // Finishing — vividPrint is the booklet spelling, vivid the flat one

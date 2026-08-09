@@ -2995,17 +2995,21 @@ add_filter( 'woocommerce_my_account_my_orders_actions', function( $actions, $ord
         $full = json_decode( $metadata_json, true );
         if ( ! $full ) continue;
 
-        $reorder_fields = array(
-            'sizeLabel', 'customLong', 'customShort', 'bindDir',
-            'sets',
-            'insideColor', 'coverColor',
-            'insidePaper', 'insidePaperType',
-            'coverMode', 'coverPaper', 'coverPaperType',
-            'twoStaple', 'vividPrint',
-            'coating', 'bundling', 'roundCorner',
-            'artwork', 'artEditPages', 'bleed', 'proof',
-            'shipState',
-        );
+        // Shared list (pps-reorder.php) so this copy can't drift; inline fallback
+        // only if the reorder module isn't loaded.
+        $reorder_fields = function_exists( 'pps_reorder_field_whitelist' )
+            ? pps_reorder_field_whitelist()
+            : array(
+                'sizeLabel', 'customLong', 'customShort', 'bindDir',
+                'sets',
+                'insideColor', 'coverColor',
+                'insidePaper', 'insidePaperType',
+                'coverMode', 'coverPaper', 'coverPaperType',
+                'twoStaple', 'vividPrint',
+                'coating', 'bundling', 'roundCorner',
+                'artwork', 'artEditPages', 'bleed', 'proof',
+                'shipState',
+            );
         $reorder_config = array();
         foreach ( $reorder_fields as $key ) {
             if ( isset( $full[ $key ] ) ) {

@@ -177,7 +177,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · CB-SHEETS2</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · CB-FRONTBACK</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -2001,7 +2001,9 @@ const TT = {
   spine_side:{t:"Spine Side",c:"Which edge the binding runs along — where the spine sits on the finished book."},
   cover_paper:{t:"Cover Paper",c:"The stock used for the cover. A heavier cover gives the book a sturdier feel."},
   inside_paper:{t:"Inside Paper",c:"The stock used for the inside pages."},
-  cover_print:{t:"Cover Printing",c:"Full color or greyscale printing on the cover."},
+  cover_print:{t:"Cover / Top Sheet Printing",c:"Full color or greyscale printing for the cover (wraparound) or the top sheet (open-faced pads). One choice applies to both sides of that sheet."},
+  front_print:{t:"Sheet Front Printing",c:"Full color or greyscale printing on the front of every coupon sheet."},
+  back_print:{t:"Sheet Back Printing",c:"Full color or greyscale printing on the back of every coupon sheet. Only applies to double-sided books — mixing a color front with a greyscale back is a great way to save."},
   inside_print:{t:"Inside Printing",c:"Full color or greyscale printing on the inside pages."},
   color_pages:{t:"Color Pages",c:"How many interior pages print in full color. The remaining pages print in black & white."},
   bw_pages:{t:"Black & White Pages",c:"How many interior pages print in black only."},
@@ -4209,13 +4211,16 @@ function buildSummary(config, result) {
   // Paper
   const colorName = v => v === "color" ? "Full Color" : "Black & White";
   const isOpenFaceBind = config.bindStyle !== "wraparound";
-  lines.push(`Inside: ${config.insidePaper.label} · ${colorName(config.insideColor)}`);
+  const fbStr = config.sidesPrinted === "single"
+    ? `Front ${colorName(config.frontColor || config.insideColor)}`
+    : `Front ${colorName(config.frontColor || config.insideColor)} · Back ${colorName(config.backColor || config.insideColor)}`;
+  lines.push(`Coupon Sheets: ${config.insidePaper.label} · ${fbStr}`);
   if (config.coverMode !== "same") {
     lines.push(`Cover: ${config.coverPaper.label} · ${colorName(config.coverColor)}`);
   } else if (isOpenFaceBind) {
-    lines.push(`Top sheet: same stock as coupon sheets`);
+    lines.push(`Top sheet: same stock as coupon sheets · ${colorName(config.coverColor)}`);
   } else {
-    lines.push(`Cover: Self-cover (same as inside)`);
+    lines.push(`Cover: Self-cover (same as inside) · ${colorName(config.coverColor)}`);
   }
 
   // Binding
@@ -4260,6 +4265,8 @@ function buildMetadata(config, result) {
     bindDir: config.bindDir,
     sets: config.sets,
     insideColor: config.insideColor,
+    frontColor: config.frontColor,
+    backColor: config.backColor,
     coverColor: config.coverColor,
     insidePaper: config.insidePaper,
     insidePaperType: config.insidePaperType,
@@ -4473,7 +4480,7 @@ function App(){
       `Size: ${sz}`,
       `Sheets: ${totalPages / (sidesPrinted === "single" ? 1 : 2)}`,
       `${bindStyle === "wraparound" ? "Cover" : "Top Sheet"}: ${coverColor === "color" ? "Full Color" : "B&W"} · ${cvr.label}`,
-      `Inside: ${insideColor === "color" ? "Full Color" : "B&W"} · ${insidePaper.label}`,
+      `Sheets: ${frontColor === "color" ? "Color" : "B&W"} front · ${sidesPrinted === "single" ? "blank" : (backColor === "color" ? "Color" : "B&W")} back · ${insidePaper.label}`,
     ];
     const lines = [...specs, "", "Qty\tUnit\tTotal", ...rows.map(p =>
       `${p.qty.toLocaleString()}\t$${p.perUnit.toFixed(2)}\t$${p.total.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`
@@ -4507,6 +4514,8 @@ function App(){
       if (p.has("short") && _float(p.get("short"))) base.customShort = _float(p.get("short"));
       if (p.has("bind")) base.bindDir = p.get("bind");
       if (p.has("color")) base.insideColor = p.get("color");
+      if (p.has("frontcolor")) base.frontColor = p.get("frontcolor");
+      if (p.has("backcolor")) base.backColor = p.get("backcolor");
       if (p.has("covercolor")) base.coverColor = p.get("covercolor");
       if (p.has("paper")) base.insidePaperType = p.get("paper");
       if (p.has("covermode")) base.coverMode = p.get("covermode");
@@ -4529,6 +4538,9 @@ function App(){
   // Pages-per-sheet ratio for the sheet-count UI: mirrors the engine's sidesMult
   // (double-sided leaf = 2 pages; single-sided leaf = 1 page, blank back).
   const sheetSpp=sidesPrinted==="single"?1:2;
+  // Per-side sheet printing (brochure-style). Legacy configs carried only insideColor.
+  const[frontColor,setFrontColor]=useState(D.frontColor||(D.insideColor==="bw"?"bw":"color"));
+  const[backColor,setBackColor]=useState(D.backColor||(D.insideColor==="bw"?"bw":"color"));
   const[magnetBacker,setMagnetBacker]=useState(Number(D.magnetBacker)||0);
   const[sets,setSets]=useState([{qty:D.qty||100, pages:D.pages||10, name:"", colorMode:D.insideColor==="bw"?"bw":"color", colorPages:D.pages||10, bwPages:0}]);
   const debugUnlocked = sets.some(s => s.name === "%3414");
@@ -4666,6 +4678,10 @@ function App(){
       if (rc.shipAddr) setShipAddr(rc.shipAddr);
       if (rc.bindStyle) setBindStyle(rc.bindStyle);
       if (rc.magnetBacker != null) setMagnetBacker(Number(rc.magnetBacker) || 0);
+      if (rc.frontColor) setFrontColor(rc.frontColor);
+      if (rc.backColor) setBackColor(rc.backColor);
+      // Legacy configs (pre front/back) only carried insideColor / set colorMode.
+      if (!rc.frontColor && (rc.insideColor === "bw" || (rc.sets && rc.sets[0] && rc.sets[0].colorMode === "bw"))) { setFrontColor("bw"); setBackColor("bw"); }
 
       // Existing artwork (edit mode — file already on server)
       if (rc.artworkPath) setArtFiles({ type: "existing", path: rc.artworkPath });
@@ -4747,7 +4763,7 @@ function App(){
     return () => window.removeEventListener("pps-live-transit", _f);
   }, []);
   const result=useMemo(()=>calculate({
-    sets,sizeLabel,customLong,customShort,bindDir,insideColor,coverColor,
+    sets,sizeLabel,customLong,customShort,bindDir,insideColor,frontColor,backColor,coverColor,
     insidePaperType,insidePaper,coverMode:effectiveCoverMode,coverPaperType,coverPaper,
     twoStaple,vividPrint,coating,bundling,roundCorner,outfold,perforation,
     bindStyle,sidesPrinted,magnetBacker,
@@ -4879,6 +4895,20 @@ function App(){
     }
     return n;
   }));
+  // Sheet Front/Back Printing drive the per-set color engine: matching sides use the
+  // plain color/bw path; a split maps onto the preserved mixed plumbing — half the
+  // pages color, half greyscale (every sheet front is one page, its back the next).
+  // Single-sided books only ask for the front.
+  useEffect(()=>{
+    const eff=sidesPrinted==="double"?backColor:frontColor;
+    if(frontColor===eff){
+      const cm=frontColor==="bw"?"bw":"color";
+      if(sets[0].colorMode!==cm) upSet(0,{colorMode:cm});
+    } else if(sets[0].colorMode!=="mixed"||sets[0].colorPages*2!==sets[0].pages){
+      const cp=sets[0].pages/2;
+      upSet(0,{colorMode:"mixed",colorPages:cp,bwPages:sets[0].pages-cp});
+    }
+  },[frontColor,backColor,sidesPrinted,sets]);
   const r2=mob?{display:"grid",gridTemplateColumns:"1fr",gap:8}:ST.row2;
   const r3=mob?{display:"grid",gridTemplateColumns:"1fr",gap:8}:ST.row3;
 
@@ -5050,26 +5080,23 @@ function App(){
 
             {/* Set 1 — always in the size section */}
             <div style={ST.hr}/>
-            <div style={r3}>
+            <div style={r2}>
               <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>
-              <Pil label={<Tip k="inside_print">Inside Print Color</Tip>} value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}} /* Mixed mothballed 2026-08-09 (owner) — per-set colorPages/bwPages logic preserved below; re-add {t:"Mixed",v:"mixed"} here to revive */]}/>
               <div style={ST.f}><label style={ST.lbl}>Job Name</label><input type="text" value={sets[0].name} onChange={e=>upSet(0,{name:e.target.value})} placeholder="Optional" style={ST.inp}/></div>
             </div>
-            {sets[0].colorMode === "mixed" ? (
-              <div style={{...r3, marginTop:6}}>
-                <TxtNum label={<Tip k="color_pages">Color Pages</Tip>} value={sets[0].colorPages} onChange={v=>upSet(0,{colorPages:Math.max(0,Math.round(v))})} min={0} max={350}/>
-                <TxtNum label={<Tip k="bw_pages">B&W Pages</Tip>} value={sets[0].bwPages} onChange={v=>upSet(0,{bwPages:Math.max(0,Math.round(v))})} min={0} max={350}/>
-                <div style={{...ST.f, justifyContent:"center"}}><span style={{fontSize:11,color:CC.mid,fontWeight:600}}>{sets[0].colorPages+sets[0].bwPages} total pages</span></div>
-              </div>
-            ) : (
-              <div style={{marginTop:6}}>
-                {/* Customers count sheets (leaves); the engine keeps pages. The ratio depends
+            {/* Inside Print Color pill replaced 2026-08-09 by the Sheet Front/Back Printing
+                pills in Printing & Paper — a front/back split maps onto the preserved
+                per-set mixed engine (colorPages/bwPages). The manual mixed inputs
+                (Color Pages / B&W Pages) are likewise retired from the UI; the effect
+                below the state block now maintains those fields. */}
+            <div style={{marginTop:6}}>
+              {/* Customers count sheets (leaves); the engine keeps pages. The ratio depends
                   on Printing Sides (see sidesMult): double-sided = 2 pages per sheet,
                   single-sided = 1 page per sheet (blank backs). Conversion lives only at
                   this boundary — the engine is untouched. */}
               <TxtNum label={<Tip k="page_count">{bindStyle==="openface"?"Total Sheets (incl. top sheet)":"Total Sheets (incl. cover)"}</Tip>} value={sets[0].pages/sheetSpp} onChange={v=>{const sh=Math.max(4/sheetSpp,Math.round(v)); upSet(0,{pages:Math.min(200,sh*sheetSpp)});}} min={4/sheetSpp} max={200/sheetSpp} confirm unit="sheets" adjustHint={`coupon books run ${4/sheetSpp}–${200/sheetSpp} sheets`}/>
-              </div>
-            )}
+              <div style={{fontSize:12,color:CC.light,marginTop:4,fontStyle:"italic"}}>Coupons are collated. Every page can have its own artwork.</div>
+            </div>
 
             {/* Bind Style & Printing Sides */}
             <div style={ST.hr}/>
@@ -5083,10 +5110,20 @@ function App(){
 
           {/* SECTION 2: Printing & Paper */}
           <Sec title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
-            {bindStyle==="wraparound"&&<div style={r2}>
-              <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
-            </div>}
-            {bindStyle==="wraparound"&&<div style={ST.hr}/>}
+            {/* Per-side sheet printing (brochure-style). Back only applies double-sided. */}
+            <div style={r2}>
+              <Pil label={<Tip k="front_print">Sheet Front Printing</Tip>} value={frontColor} onChange={setFrontColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
+              {sidesPrinted==="double"
+                ? <Pil label={<Tip k="back_print">Sheet Back Printing</Tip>} value={backColor} onChange={setBackColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
+                : <div style={{...ST.f,marginTop:0}}><label style={ST.lbl}>Sheet Back Printing</label><div style={{fontSize:14,color:CC.light,padding:"10px 0"}}>Blank — single-sided printing</div></div>}
+            </div>
+            <div style={ST.hr}/>
+            {/* One choice for the whole cover/top sheet — no inside/outside distinction. */}
+            <div style={r2}>
+              <Pil label={<Tip k="cover_print">{bindStyle==="openface"?"Top Sheet Printing":"Cover Printing"}</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"conic-gradient(from 45deg, #00aeef 0deg, #ec008c 90deg, #fff200 180deg, #231f20 270deg, #00aeef 360deg)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
+              <div style={ST.f}/>
+            </div>
+            <div style={ST.hr}/>
             <div style={r2}>
               <Pil label={<Tip k="inside_paper">Inside Paper</Tip>} value={insidePaperType} onChange={v=>{if(v==="cardstock"&&!csOK)return;setInsidePaperType(v);const pool=v==="cardstock"?PAPERS_CS:PAPERS_NC;setInsidePaper(pool[0])}} options={[{t:"Text Weight",v:"noncardstock"},{t:"Cardstock",v:"cardstock"}]}/>
               <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label} (Cardstock)</option>)}</optgroup>}</Sel>
