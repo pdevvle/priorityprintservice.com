@@ -138,7 +138,7 @@ Elementor both absent).
 | Ultimate Member VIP | `wp_um_vip_users` | **DROP.** Ultimate Member absent, no folder. |
 | JetEngine | `wp_jet_post_types`, `wp_jet_taxonomies` | **DROP.** Absent, no folder, and the CPT gate passes: the only registered post types are `post`, `page`, `attachment`, `product`, `share-cart-urls` (Share Cart URL) and `astra-advanced-hook` (Astra Pro) — none from JetEngine. |
 | Groups | `wp_groups_*` (5) | **DROP all 5** (owner decision 2026-08-09: never used). Confirmed absent from the plugin list, so there is nothing to delete first. |
-| Save/Share Cart | `wp_wcss_saved_cart`, `wp_wcss_shared_cart` | **DROP, but verify first — this is the one row the audit could not fully close.** A *different* plugin, "Share Cart URL for WooCommerce" 2.1.3, **is** installed, and it stores shared carts as the `share-cart-urls` **custom post type**, not in a `wcss_` table (its `uninstall.php` is untouched boilerplate and names no tables). So `wp_wcss_*` most likely belongs to the defunct "WooCommerce Save & Share Cart". Before dropping, confirm the installed plugin never references `wcss` (grep `share-cart-url-for-woo/` for `wcss`). |
+| Save/Share Cart | `wp_wcss_saved_cart`, `wp_wcss_shared_cart` | **DROP — verified.** A *different* plugin, "Share Cart URL for WooCommerce" 2.1.3, is installed, but its bootstrap was read and it does not own these tables: it prefixes everything `scuf_`, stores shared carts in the `share-cart-urls` **custom post type** with `update_post_meta`, and its `register_activation_hook` callback creates **options only** — no `dbDelta`, no `CREATE TABLE`, no `wcss` reference anywhere. `wp_wcss_*` belongs to the uninstalled "WooCommerce Save & Share Cart". |
 | Woo File Dropzone (old upload flow) | `wp_woo_file_dropzone` | **DROP.** Absent, no folder; superseded by the Drive upload flow. Uploads in section D. |
 | One of the two image optimizers | `wp_ewwwio_images` OR `wp_imagify_*` | **RESOLVED: Imagify 2.3.1 installed, EWWW absent → DROP `wp_ewwwio_images`, KEEP `wp_imagify_*`.** |
 | Whichever forms plugins are redundant | `wp_frmt_*` (Forminator) / `wp_wpforms_*` / Elementor `wp_e_submissions*` | **RESOLVED: Forminator 1.56.2 is the only form stack installed. WPForms absent, Elementor absent → KEEP `wp_frmt_*`; DROP `wp_wpforms_*` and `wp_e_submissions*`/`wp_e_events`.** Note the two `*-addons-for-elementor` folders are orphaned directories (§D). |
@@ -426,10 +426,12 @@ eventual Cloudways session is mechanical rather than investigative.
 - **Gate 1 re-verified against staging** rather than taken on trust — which is
   how the compatibility-sync problem surfaced. See the Gate 1 warning box; it is
   the one finding that can invalidate the pull plan.
-- **§A verdict gate run for every row.** Installed plugins (31, active and
-  inactive) and on-disk plugin folders (30) both enumerated. Every "drop if
-  uninstalled" is now a definite DROP or KEEP, except `wp_wcss_*`, which carries
-  a named one-line check.
+- **§A verdict gate run for every row — all rows closed.** Installed plugins
+  (31, active and inactive) and on-disk plugin folders (30) both enumerated, so
+  every "drop if uninstalled" is now a definite DROP or KEEP. The last ambiguous
+  row, `wp_wcss_*`, was settled by reading the installed share-cart plugin's
+  bootstrap: it is `scuf_`-prefixed, CPT-backed, and creates no tables, so the
+  `wcss` tables are a different plugin's orphans.
 - **Two of the runbook's open choices decided:** Imagify is the optimizer to
   keep (EWWW absent); Forminator is the only live form stack (WPForms and
   Elementor both absent). The latter removes two tables from the freeze-window
