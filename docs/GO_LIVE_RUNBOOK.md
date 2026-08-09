@@ -21,6 +21,7 @@ Order data storage`, or read `wp_options.woocommerce_custom_orders_table_enabled
 (`yes` = HPOS). Also note whether "compatibility mode" (sync to posts) is on.
 
 - **HPOS on** → the table-copy plan works. Proceed.
+  **✔ Confirmed by owner 2026-08-09: live is on HPOS.**
 - **Legacy (posts) on** → **STOP. The plan as written cannot work**, because the
   new orders live inside `wp_posts`/`wp_postmeta`, and pulling those two tables
   wholesale would overwrite months of staging content work (products, `_virtual`
@@ -47,6 +48,123 @@ customer, or form submission that lands on live between your pull and your push
 is silently destroyed by the push. Sequence is therefore: freeze live checkout →
 pull → verify → push → verify → unfreeze, in one sitting. Keep the window short
 (realistically 30–60 minutes). Do it in your lowest-traffic hour.
+
+---
+
+## Phase 0 — Prepare staging: remove bloat (days BEFORE the freeze window)
+
+Everything on staging — files and database — becomes production at push time,
+so cleaning staging now is cleaning the future live site. It also shrinks the
+push and shortens the freeze window. Do this well ahead of go-live so the site
+can be re-verified afterward at leisure.
+
+### Safety rails (non-negotiable)
+
+1. **Cloudways full backup of staging first.** Also note Cloudways backup
+   retention is finite — anything you might *ever* need again gets archived
+   off-host (zip to Google Drive) before deletion, not just "it's in a backup."
+2. **Measure before deciding.** Get real table sizes and let size drive effort:
+   ```sql
+   SELECT table_name, ROUND((data_length+index_length)/1024/1024,1) AS mb,
+          table_rows
+   FROM information_schema.tables
+   WHERE table_schema = DATABASE()
+   ORDER BY (data_length+index_length) DESC LIMIT 30;
+   ```
+   Record the top 30 before and after. Don't spend an afternoon dropping 40
+   tiny tables if three log tables are 95% of the bloat (they usually are).
+3. **Deactivate + delete the defunct plugin BEFORE dropping its tables** —
+   otherwise the plugin quietly recreates them. Drop tables only for plugins
+   confirmed absent from the plugins list (active AND inactive).
+4. **`DROP` is for defunct plugins' tables. `TRUNCATE`/purge is for active
+   plugins' logs.** Never drop a table belonging to an active plugin.
+5. After each stage: load the calculators, a category page, /shop/, wp-admin
+   orders list, and run one test add-to-cart on staging.
+
+### A. Defunct-plugin tables — verify, then deactivate/delete plugin, then DROP
+
+Each group is a candidate, not a verdict — the gate is "plugin not installed":
+
+| Group | Tables | Verdict gate |
+|---|---|---|
+| Yoast SEO | `wp_yoast_*` (8 tables — `indexable` + `prominent_words` are often huge) | Site runs Rank Math. If Yoast is uninstalled, drop all 8. |
+| Slider Revolution | `wp_revslider_*` (6) | Custom theme doesn't use it. Verify no page renders a slider. |
+| LayerSlider | `wp_layerslider`, `_revisions` | Same. |
+| NBDesigner (old product designer) | `wp_nbdesigner_*` (7) | Superseded by PPS calculators. Verify nothing links to designer pages. **Its customer-design uploads are handled in section D.** |
+| ProjectHuddle | `wp_ph_members`, `wp_ph_thread_members` | Feedback tool — defunct if uninstalled. |
+| Ultimate Member VIP | `wp_um_vip_users` | Defunct if UM uninstalled. |
+| JetEngine | `wp_jet_post_types`, `wp_jet_taxonomies` | Defunct if uninstalled — verify no CPTs/taxonomies in use came from it first. |
+| Groups | `wp_groups_*` (5) | Was it used for wholesale pricing/roles? **Owner call** — if never used, drop. |
+| Save/Share Cart | `wp_wcss_saved_cart`, `wp_wcss_shared_cart` | Drop if uninstalled. |
+| Woo File Dropzone (old upload flow) | `wp_woo_file_dropzone` | Superseded by the Drive upload flow. Uploads in section D. |
+| One of the two image optimizers | `wp_ewwwio_images` OR `wp_imagify_*` | Two optimizers are installed; keep the active one, drop the other's tables. |
+| Whichever forms plugins are redundant | `wp_frmt_*` (Forminator) / `wp_wpforms_*` / Elementor `wp_e_submissions*` | Three form stacks exist. Identify which forms are actually live; drop the uninstalled stacks' tables. Live-collected submissions in the KEEP stack are pulled fresh from live anyway (see pull list). |
+| Misc: `wp_sm_sessions`, `wp_event_hours`, `wp_tm_tasks`/`_taskmeta`, `wp_vi_wbe_history`, `wp_wt_iew_*`, `wp_pmxe_*` | Identify the owning plugin first (`grep` the plugins dir for the table name); drop only when the owner plugin is confirmed gone. Import/export history (`wt_iew`, `pmxe`) is safely droppable even if the plugins stay — they're job history, keep the `_template`/`_templates` rows if the plugins remain. |
+
+### B. Active-plugin log/queue purge — TRUNCATE, don't drop
+
+Usually the real bulk:
+
+- `wp_actionscheduler_actions` + `_logs`: delete `complete`/`failed`/`canceled`
+  rows (or Tools → Scheduled Actions → delete finished). Often the single
+  biggest table on any Woo site. Keep `pending`.
+- `wp_woocommerce_log`, `wp_wpmailsmtp_debug_events`, `wp_aiowps_audit_log` +
+  `_debug_log` + `_events`, `wp_wpforms_logs`, `wp_wpai_request_logs`,
+  `wp_mwai_tasklogs`: truncate.
+- `wp_woocommerce_sessions`: truncate (transient carts; staging's are test junk).
+- `wp_mailchimp_carts`, `wp_queue`, `wp_failed_jobs`: truncate.
+- WP Rocket (`wp_wpr_*` incl. `rucss_used_css`): clear via the plugin (purge +
+  clear used CSS) rather than SQL; it regenerates.
+- `wp_e_events` (Elementor events log): truncate if present.
+
+**Do NOT touch:** `wp_mwai_files`/`_filemeta`/`_mcp_oauth_*` (the AI-engine /
+connector auth — truncating OAuth tables severs Claude's access), `wp_snippets`
+(Code Snippets **carry live site behavior** — audit its contents and copy
+anything load-bearing into the repo per the server-patch rule, but never bulk
+delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
+
+### C. WordPress-core bloat
+
+- Post revisions, auto-drafts, trashed posts/comments, orphaned postmeta and
+  term relationships (WP-Optimize/Advanced DB Cleaner can do all of these, or
+  standard cleanup SQL).
+- **Expired transients** in `wp_options`, and an autoload audit:
+  ```sql
+  SELECT ROUND(SUM(LENGTH(option_value))/1024/1024,1) AS autoload_mb
+  FROM wp_options WHERE autoload='yes';
+  ```
+  If autoload_mb is over ~3–5 MB, list the biggest autoloaded rows and flip
+  defunct plugins' leftovers to `autoload='no'` / delete their option rows.
+  Orphaned options from every plugin in section A can go.
+
+### D. File-side bloat (this ships to production too)
+
+- **Old customer artwork uploads** (`wp-content/uploads/` trees from the
+  NBDesigner era, Woo File Dropzone dirs, any pre-Drive WCPA upload dirs, and
+  legacy local PPS artwork if any predates the Drive flow).
+  **⚠ Decision required before deleting: legacy reorders restore the original
+  artwork by path.** Deleting old uploads breaks re-ordering for the orders
+  that reference them. Recommended policy: archive everything to a Drive
+  folder (zip, labeled by year), then delete local copies older than an
+  owner-chosen cutoff (e.g. 2 years); keep anything referenced by orders
+  newer than the cutoff. Record the cutoff here when chosen: ______
+- Deactivated themes (Astra + child, anything not `pps-theme` and one default
+  fallback like twentytwentyfour) and deleted-but-present plugin directories.
+- Image-optimizer backup originals (EWWW/Imagify keep pre-optimization copies
+  in uploads) — safe to purge once optimization is accepted.
+- Cache directories (`wp-content/cache/*`) — purge, they regenerate.
+- Stray root/plugin files not in the repo (the 2026-08-01 audit list:
+  `_pps_*.php`, `*.bak`, test files) — this is also a pre-push checklist item,
+  but sweep it now.
+
+### E. Verify and record
+
+- Re-run the size query; record before/after MB in this file.
+- Full staging smoke test: all nine calculators, a category page with wizard,
+  /shop/, add-to-cart → checkout reaches payment, wp-admin order screens,
+  Drive upload, the connector still authenticates (mwai untouched).
+- Take a fresh Cloudways backup of the cleaned staging — this becomes the
+  "known-good clean base" for the go-live window.
 
 ---
 
