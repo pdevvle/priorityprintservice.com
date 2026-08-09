@@ -742,6 +742,52 @@ const INV_NC=_INV_NC, INV_CS=_INV_CS, COVER_INV=[COVER_SAME.val,...INV_NC,...INV
 const LARGE_SHEET_VALS=_CFG.large_sheet_vals||[0.003,0.03]; // 100lb Gloss Text, 100lb Gloss Cardstock
 // Combined paper lists: text weight first, then cardstock with suffix
 const ALL_PAPERS=[...PAPERS_NC.map(p=>({...p,type:"noncardstock"})),...PAPERS_CS.map(p=>({...p,label:p.label+" (Cardstock)",type:"cardstock"}))];
+// Customer-facing paper copy + inventory dot. Canonical text: docs/PAPER_CATALOG.md.
+// Keyed by val within nc/cs namespaces so server-config array overrides keep their copy.
+const PAPER_DESC={
+  nc:{
+    "0.001":"Classic uncoated paper with a natural feel that's easy to write on. Crisp text and a soft, non-reflective look — letterhead, inserts, forms, and reading-heavy pages.",
+    "0.002":"Smooth coated sheet with a soft, glare-free finish. Richer color than uncoated without the shine — the all-purpose choice for brochures and flyers.",
+    "0.003":"Shiny coated sheet that makes photos and color pop. The standard for marketing brochures, catalogs, and mailers.",
+    "2.001":"Our lightest uncoated sheet, a touch heavier than copy paper. Keeps page-heavy books thin and light.",
+    "2.002":"Light uncoated sheet with good opacity for its weight. Economical for manuals, workbooks, and text-heavy booklets.",
+    "2.003":"Sturdy uncoated sheet with excellent opacity. The uncoated feel with less show-through — workbooks, journals, and premium text pages.",
+    "2.004":"Lightweight gloss sheet with vivid color reproduction. A thinner, economical alternative to 100lb gloss for catalogs and mailers.",
+    "2.005":"Heavy matte sheet with a refined, low-glare surface. Upscale brochures, art books, and photography that shouldn't shine.",
+    "2.006":"Premium stock with a woven linen texture you can feel. Distinctive for invitations, stationery, and fine-dining menus."
+  },
+  cs:{
+    "0.01":"Our lightest cardstock, uncoated and easy to write on. Greeting cards, reply cards, and covers that fold cleanly.",
+    "0.02":"Light cardstock with a smooth matte coating. A soft, modern look for covers and cards.",
+    "0.03":"Mid-weight cardstock with a glossy face that makes color punchy. Covers, postcards, and hang tags.",
+    "1.01":"Thick card, gloss-coated on one side with an uncoated back that's easy to write on. The postcard standard (C1S = coated one side).",
+    "1.02":"Our heaviest everyday card, gloss-coated both sides (C2S). Substantial, premium feel for business cards, postcards, and covers.",
+    "2.21":"Light, flexible cardstock with a gloss coat on both sides. Economical covers and cards with vivid color.",
+    "2.22":"Mid-weight matte card with an elegant, glare-free surface. Book covers and upscale cards.",
+    "2.23":"Flexible coated card, thinner than 14pt. Tickets, tags, and lightweight postcards.",
+    "2.24":"Thick card gloss-coated both sides for all-over shine. Postcards and covers that want gloss front and back.",
+    "2.25":"Our most rigid card — gloss front, uncoated writable back. Heavy-duty hang tags, counter cards, and premium postcards."
+  }
+};
+const paperInv=p=>!!p&&!p.factory&&!(p.days>0)&&!/same as inside/i.test(p.label||"");
+const paperDot=p=>paperInv(p)?"● ":"";
+const paperDesc=(p,pool)=>{if(!p||/same as inside/i.test(p.label||""))return"";const m=PAPER_DESC[pool||(p.type==="cardstock"?"cs":"nc")];return(m&&m[String(p.val)])||p.desc||"";};
+const PaperNote=({p,pool,legend})=>{
+  const d=paperDesc(p,pool);
+  const days=p&&p.days>0?p.days:0;
+  if(!d&&!days&&!legend)return null;
+  return(
+    <div style={{margin:"6px 0 2px"}}>
+      {(d||days>0)&&<div style={{fontSize:12,color:"#64748b",lineHeight:1.5}}>
+        {d}{days>0&&<span style={{color:"#92400e"}}>{d?" ":""}{p.factory?"Factory-ordered":"Special order"} — adds {days} production day{days>1?"s":""}.</span>}
+      </div>}
+      {legend&&<div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",alignItems:"center",gap:5}}>
+        <span style={{width:8,height:8,borderRadius:"50%",background:"#007eff",flexShrink:0}}></span>
+        <span>In stock — best for quick turnaround, small quantity, and hardcopy proofs</span>
+      </div>}
+    </div>
+  );
+};
 const isCardstockVal=v=>PAPERS_CS.some(p=>p.val===v);
 
 const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
@@ -6229,17 +6275,19 @@ function App(){
             <div style={ST.hr}/>
             <div style={r2}>
               <Pil label={<Tip k="inside_paper">Inside Paper</Tip>} value={insidePaperType} onChange={v=>{if(v==="cardstock"&&!csOK)return;setInsidePaperType(v);const pool=ALL_PAPERS.filter(p=>p.type===v);setInsidePaper(pool[0])}} options={[{t:"Text Weight",v:"noncardstock"},{t:"Cardstock",v:"cardstock"}]}/>
-              <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{p.label} (Cardstock)</option>)}</optgroup>}{!csOK&&isCardstockVal(insidePaper.val)&&<optgroup label="Not available at this page count"><option value={insidePaper.val}>{insidePaper.label}</option></optgroup>}</Sel>
+              <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.insidePaper}/>} value={insidePaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setInsidePaper(f);setInsidePaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label}</option>)}{csOK&&<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label} (Cardstock)</option>)}</optgroup>}{!csOK&&isCardstockVal(insidePaper.val)&&<optgroup label="Not available at this page count"><option value={insidePaper.val}>{insidePaper.label}</option></optgroup>}</Sel>
             </div>
+            <PaperNote p={insidePaper} pool={insidePaperType==="cardstock"?"cs":"nc"} legend/>
             {insidePaperType==="cardstock"&&!csOK&&<p style={ST.err}>Cardstock requires all sets ≤ 24 pages</p>}
             <div style={ST.hr}/>
             <div style={r2}>
               <Pil label={<Tip k="cover_paper">Cover Paper</Tip>} value={coverMode} onChange={setCoverMode} options={[{t:"Same as Inside",v:"same"},{t:"Different Cover",v:"separate"}]}/>
               {coverMode==="separate"
-                ? <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.coverPaper}/>} value={coverPaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setCoverPaper(f);setCoverPaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{p.label}</option>)}<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{p.label} (Cardstock)</option>)}</optgroup></Sel>
+                ? <Sel label={<Tip k="paper">Select Paper</Tip>} badge={<TurnBadge days={r.ti?.coverPaper}/>} value={coverPaper.val} onChange={v=>{const f=ALL_PAPERS.find(p=>String(p.val)===v);if(f){setCoverPaper(f);setCoverPaperType(f.type)}}}>{PAPERS_NC.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label}</option>)}<optgroup label="Cardstock">{PAPERS_CS.map(p=><option key={p.val} value={p.val}>{paperDot(p)+p.label} (Cardstock)</option>)}</optgroup></Sel>
                 : <div style={{...ST.f,marginTop:0}}><label style={ST.lbl}>&nbsp;</label><div style={{fontSize:14,color:CC.light,padding:"10px 0"}}>Uses same paper as inside pages</div></div>
               }
             </div>
+            {coverMode==="separate"&&<PaperNote p={coverPaper} pool={coverPaperType==="cardstock"?"cs":"nc"}/>}
           </Sec>
 
           {/* SECTION 3: Finishing & Addons */}

@@ -3571,6 +3571,143 @@ function pps_default_tooltips() {
                 array( 'type' => 'text', 'value' => '80lb Cardstock: Light card, good for self-mailers. 14pt C1S: One glossy side, one uncoated — premium cover stock. 16pt C2S: Glossy both sides, thick and sturdy.' ),
             ),
         ),
+        // ── Per-stock paper descriptions ──
+        // Canonical copy lives in docs/PAPER_CATALOG.md — edit there first, mirror here
+        // and in each calculator's PAPER_DESC map. Keys follow the category-shortcode
+        // slug rule: paper_text_/paper_cs_ + lowercased label, spaces → underscores.
+        'paper_text_70lb_uncoated_opaque_text' => array(
+            'title' => '70lb Uncoated Opaque Text',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Classic uncoated paper with a natural feel that\'s easy to write on. Crisp text and a soft, non-reflective look — letterhead, inserts, forms, and reading-heavy pages.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_text_80lb_matte_text' => array(
+            'title' => '80lb Matte Text',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Smooth coated sheet with a soft, glare-free finish. Richer color than uncoated without the shine — the all-purpose choice for brochures and flyers.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_text_100lb_gloss_text' => array(
+            'title' => '100lb Gloss Text',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Shiny coated sheet that makes photos and color pop. The standard for marketing brochures, catalogs, and mailers.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_text_50lb_offset_smooth_opaque' => array(
+            'title' => '50lb Offset Smooth Opaque',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Our lightest uncoated sheet, a touch heavier than copy paper. Keeps page-heavy books thin and light.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_text_60lb_offset_smooth_opaque' => array(
+            'title' => '60lb Offset Smooth Opaque',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Light uncoated sheet with good opacity for its weight. Economical for manuals, workbooks, and text-heavy booklets.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_text_80lb_offset_smooth_opaque' => array(
+            'title' => '80lb Offset Smooth Opaque',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Sturdy uncoated sheet with excellent opacity. The uncoated feel with less show-through — workbooks, journals, and premium text pages.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_text_80lb_gloss_factory_coated' => array(
+            'title' => '80lb Gloss Factory Coated',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Lightweight gloss sheet with vivid color reproduction. A thinner, economical alternative to 100lb gloss for catalogs and mailers.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_text_100lb_matte_factory_coated' => array(
+            'title' => '100lb Matte Factory Coated',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Heavy matte sheet with a refined, low-glare surface. Upscale brochures, art books, and photography that shouldn\'t shine.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_text_linen' => array(
+            'title' => 'Linen',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Premium stock with a woven linen texture you can feel. Distinctive for invitations, stationery, and fine-dining menus.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 4 production days.' ),
+            ),
+        ),
+        'paper_cs_80lb_opaque_uncoated' => array(
+            'title' => '80lb Opaque Uncoated Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Our lightest cardstock, uncoated and easy to write on. Greeting cards, reply cards, and covers that fold cleanly.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_cs_80lb_matte_cardstock' => array(
+            'title' => '80lb Matte Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Light cardstock with a smooth matte coating. A soft, modern look for covers and cards.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_cs_100lb_gloss_cardstock' => array(
+            'title' => '100lb Gloss Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Mid-weight cardstock with a glossy face that makes color punchy. Covers, postcards, and hang tags.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_cs_14pt_gloss_c1s' => array(
+            'title' => '14pt Gloss C1S',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Thick card, gloss-coated on one side with an uncoated back that\'s easy to write on. The postcard standard (C1S = coated one side).' ),
+                array( 'type' => 'text', 'value' => 'Special-order size — typically adds about 1 production day.' ),
+            ),
+        ),
+        'paper_cs_16pt_coated_c2s' => array(
+            'title' => '16pt Coated C2S',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Our heaviest everyday card, gloss-coated both sides (C2S). Substantial, premium feel for business cards, postcards, and covers.' ),
+                array( 'type' => 'text', 'value' => 'Special-order size — typically adds about 1 production day.' ),
+            ),
+        ),
+        'paper_cs_80lb_gloss_factory_coated' => array(
+            'title' => '80lb Gloss Factory Coated Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Light, flexible cardstock with a gloss coat on both sides. Economical covers and cards with vivid color.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_cs_100lb_matte_factory_coated' => array(
+            'title' => '100lb Matte Factory Coated Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Mid-weight matte card with an elegant, glare-free surface. Book covers and upscale cards.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_cs_12pt_c2s_factory_coated' => array(
+            'title' => '12pt C2S Factory Coated',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Flexible coated card, thinner than 14pt. Tickets, tags, and lightweight postcards.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_cs_14pt_c2s_factory_coated' => array(
+            'title' => '14pt C2S Factory Coated',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Thick card gloss-coated both sides for all-over shine. Postcards and covers that want gloss front and back.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_cs_18pt_c1s_factory_gloss' => array(
+            'title' => '18pt C1S Factory Gloss',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Our most rigid card — gloss front, uncoated writable back. Heavy-duty hang tags, counter cards, and premium postcards.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
     );
 }
 
