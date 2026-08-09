@@ -385,6 +385,14 @@ function pps_paper_enrich( $rows, $pool ) {
 function pps_get_config() {
     $defaults = pps_default_config();
     $saved    = get_option( PPS_CONFIG_OPTION, array() );
+    // The MCP wp_update_option endpoint can store an array payload as a JSON
+    // string; decode rather than discard, or every admin-set price and paper row
+    // silently reverts to defaults. Same tolerance pps_get_registry() and
+    // pps_get_tooltips() apply — the tooltips option was hit by exactly this.
+    if ( is_string( $saved ) ) {
+        $decoded = json_decode( $saved, true );
+        $saved   = is_array( $decoded ) ? $decoded : array();
+    }
     if ( ! is_array( $saved ) ) $saved = array();
 
     $result = array_replace( $defaults, $saved );
