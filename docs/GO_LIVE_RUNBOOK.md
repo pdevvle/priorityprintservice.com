@@ -345,6 +345,51 @@ delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
   `_pps_*.php`, `*.bak`, test files) — this is also a pre-push checklist item,
   but sweep it now.
 
+### D-results. Uploads cleanup actually performed (staging, 2026-08-09)
+
+| Scope | Before | After | Freed |
+|---|---|---|---|
+| **Entire uploads tree** | 46,750 files / 81,078 MB | 25,695 files / 35,498 MB | **21,055 files / 45,580 MB** |
+| `wcpa_uploads/` | 7,114 / 59,273 MB | 2,445 / 22,045 MB | 4,667 / 37,228 MB |
+| `nbdesigner/` | 18,719 / 8,373 MB | 2,331 / 20 MB | 16,388 / 8,353 MB |
+| `pps-artwork/` | 27 / 60 MB | untouched | — |
+
+**The mtimes in this tree are not upload dates.** Everything was re-stamped by a
+bulk copy on **2024-09-29** (wcpa 22:09–22:13, nbdesigner 22:06–22:07), so no file
+appeared older than ~678 days and a 730-day rule matched *nothing*. Filenames gave
+it away (`MCV-2023-Trifold`, `Wedding-Booklet-2024`). The error direction was safe —
+clone stamps make files look younger, never older — so `min_age_days=678` was used
+as an exact proxy for "existed before the migration", i.e. a real upload date of
+Sept 2024 or earlier. Counts at 670 and 678 were identical, confirming a clean gap
+with nothing recent caught.
+
+**Useful side effect: the retention policy is now semantically correct.** Every
+migration-stamped file is gone, so everything left in `wcpa_uploads/` has a *true*
+mtime. The "on 2026-09-29 the whole pre-clone set becomes eligible at once" cliff no
+longer exists, and a plain 730-day rule now rolls naturally.
+
+Left behind deliberately: `nbdesigner/` still holds 2,331 post-migration files
+(20 MB, mostly optimizer-touched thumbnails) plus its `index.html` guard, and the
+now-empty directory trees. Removing those is a Cloudways job — the tools delete
+files, not directories.
+
+**Policy left live on staging:** `wcpa_uploads`, `min_age_days=730`,
+`max_deletes_per_run=500`, enabled, dry_run off.
+
+**Three defects found by running it for real** (not yet fixed — see PR discussion):
+
+1. **No concurrency guard.** A client-side 60s timeout does not stop the PHP run;
+   it keeps deleting. Starting another run then races the first. This inflated the
+   skip count and made per-run accounting disagree with the observed tree delta
+   (cumulative totals were still right).
+2. **Misleading skip reason.** Files already removed by that racing run were
+   reported as `unlink failed; check filesystem permissions`. **There is no
+   permissions problem** — do not go hunting one. The message should distinguish
+   "file vanished" from "permission denied".
+3. **A DB query per file.** The media-attachment guard calls `get_posts()` for
+   every candidate, which is what pushes large runs past 60s. It should pre-fetch
+   the attached-path set once per run.
+
 ### E. Verify and record
 
 - Re-run the size query; record before/after MB in this file.
