@@ -414,7 +414,7 @@ add_action( 'wp_footer', function() {
 
 add_action( 'wp_footer', function() {
     if ( ! is_product_category() && ! is_product_taxonomy() ) return;
-    $tips = get_option( 'pps_tooltips', array() );
+    $tips = pps_get_tooltips();
     if ( empty( $tips ) || ! is_array( $tips ) ) return;
 
     $tip_json = wp_json_encode( $tips, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE );
@@ -601,7 +601,7 @@ function pps_cat_render_papers( $atts = array() ) {
     }
     if ( empty( $papers ) ) return '';
 
-    $tips      = get_option( 'pps_tooltips', array() );
+    $tips      = pps_get_tooltips();
     $base_link = trim( $a['link'] );
 
     $out = '<ul class="pps-cat-features">';
@@ -663,7 +663,7 @@ function pps_cat_render_coatings() {
     $coatings = array_filter( $coatings, function( $c ) { return ! empty( $c['val'] ); } );
     if ( empty( $coatings ) ) return '';
 
-    $tips    = get_option( 'pps_tooltips', array() );
+    $tips    = pps_get_tooltips();
     $has_tip = isset( $tips['coating'] ) && ! empty( $tips['coating']['title'] );
 
     $out = '<div class="pps-cat-chips">';
@@ -701,7 +701,7 @@ function pps_cat_render_addons( $atts = array() ) {
         'rc' => 'round_cornering', 'two_staple' => 'saddle_stitch',
         'perforation' => 'perforation', 'outfold' => 'outfold',
     );
-    $tips = get_option( 'pps_tooltips', array() );
+    $tips = pps_get_tooltips();
 
     $out = '<div class="pps-cat-addon-grid">';
     foreach ( $items as $item ) {
@@ -1509,7 +1509,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $id = 'pps-wiz-' . wp_unique_id();
 
     // Load tooltips for "?" triggers on wizard options
-    $wiz_tips = get_option( 'pps_tooltips', array() );
+    $wiz_tips = pps_get_tooltips();
     $wiz_tip_icon = function( $tip_key ) use ( $wiz_tips ) {
         if ( empty( $tip_key ) || ! isset( $wiz_tips[ $tip_key ] ) ) return '';
         return ' <span class="pps-cat-tip pps-wiz-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>';

@@ -886,7 +886,7 @@ add_action( 'wp', function() {
         // per key, but code-shipped defaults always ride along — otherwise a new
         // default tooltip never reaches sites whose pps_tooltips option was
         // seeded before it existed.
-        $tips = array_merge( pps_default_tooltips(), (array) get_option( 'pps_tooltips', array() ) );
+        $tips = pps_get_tooltips();
         if ( ! empty( $tips ) ) {
             $config['tips'] = $tips;
         }
@@ -3572,6 +3572,17 @@ function pps_default_tooltips() {
                 array( 'type' => 'text', 'value' => '70lb Uncoated: Clean, natural feel. Best for text-heavy content. 80lb Matte: Smooth with slight sheen. Good all-purpose choice. 100lb Gloss: Shiny, vibrant colors. Best for photo-heavy content.' ),
             ),
         ),
+        // Lives here so booklet calculators deliver it without a database row —
+        // it previously existed only in wp_options and rendered nothing when that
+        // option was stored as a JSON string.
+        'page_count' => array(
+            'title' => 'How to Count Booklet Pages',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Count pages, not sheets. Each folded sheet holds 4 pages — front and back of each half — and the front and back covers each count as a page.' ),
+                array( 'type' => 'text', 'value' => 'Saddle-stitch booklets must be a multiple of 4 pages. If your file isn\'t divisible by 4, blank pages are added to reach the next multiple.' ),
+                array( 'type' => 'image', 'src' => 'https://priorityprintservice.com/wp-content/uploads/2025/05/how-to-count-booklet-pages.webp', 'alt' => 'Animated guide to counting saddle-stitch booklet pages' ),
+            ),
+        ),
         'paper_cardstock' => array(
             'title' => 'Cardstock',
             'content' => array(
@@ -3710,6 +3721,33 @@ function pps_default_tooltips() {
             ),
         ),
     );
+}
+
+/**
+ * The tooltip set every surface should read: code defaults with saved entries
+ * layered on top.
+ *
+ * Two failure modes this guards, both seen on staging 2026-08-09:
+ *
+ * 1. The MCP wp_update_option endpoint can serialise an array payload as a JSON
+ *    *string*. A plain (array) cast on that yields array( 0 => '{"…"}' ), which
+ *    ships the whole blob to the front end under a numeric key and delivers not
+ *    one real entry. pps_get_registry() carries the same tolerance for the same
+ *    reason. Decoding here also means the admin Tooltips tab (which writes a
+ *    native array) and the MCP path agree.
+ * 2. Callers that read the raw option get only what is in the database, so a key
+ *    that lives solely in pps_default_tooltips() renders no tooltip at all. The
+ *    category-page shortcodes did exactly this, which is why clearing stale DB
+ *    keys took their "?" icons with them.
+ */
+function pps_get_tooltips() {
+    $saved = get_option( 'pps_tooltips', array() );
+    if ( is_string( $saved ) ) {
+        $decoded = json_decode( $saved, true );
+        $saved   = is_array( $decoded ) ? $decoded : array();
+    }
+    if ( ! is_array( $saved ) ) $saved = array();
+    return array_merge( pps_default_tooltips(), $saved );
 }
 
 /**
