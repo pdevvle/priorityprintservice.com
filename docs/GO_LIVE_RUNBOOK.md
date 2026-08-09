@@ -245,11 +245,27 @@ delete), anything `wp_wc_*`/`wp_woocommerce_*` structural, and all PPS options.
   > the list from those, then delete everything in the directory that is not on
   > it.
   >
-  > **Not doable from a Claude session.** The MCP file tools are scoped to
-  > `wp-content/plugins` and the theme directory, and the delete tool refuses
-  > directories and path traversal; files with no attachment row are also
-  > invisible to the media tools. Uploads cleanup is a Cloudways File
-  > Manager/SFTP job.
+  > **Now doable from a Claude session** (as of MCP tools **v1.6.0**, deployed to
+  > staging 2026-08-09). It previously was not: the file tools were scoped to
+  > `wp-content/plugins` and the theme, and files with no attachment row are
+  > invisible to the media tools — and staging has **5 attachments total** against
+  > gigabytes of uploaded art, so essentially none of it was manageable.
+  >
+  > `priority-print-mcp.php` now also provides:
+  >
+  > | Tool | Use |
+  > |---|---|
+  > | `pps_uploads_list_files` | scope by `subdirectory`, filter by `min_age_days` / `min_size_kb`, order by size or age; reports `matched_total_bytes` for the full match so you can see the reclaim before deleting |
+  > | `pps_uploads_delete_file` | one file |
+  > | `pps_uploads_delete_batch` | up to 500 explicit paths per call |
+  >
+  > Explicit paths only — no glob or pattern deletion — and both delete tools
+  > refuse directories, traversal, the `index.php`/`.htaccess` directory guards,
+  > and any file still backing a media attachment. This is also what finally makes
+  > §E's before/after MB measurable for the uploads tree.
+  >
+  > Still a Cloudways job: removing the now-empty **directories** themselves, since
+  > these tools delete files only.
   **Owner decision 2026-08-09: thin the files — delete the old upload trees
   outright. The owner retains offline archives going back years, so no
   pre-delete archiving step is needed.** Known consequence, accepted: a
