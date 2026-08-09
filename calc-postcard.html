@@ -477,7 +477,6 @@ const PAPER_DESC={
     "0.001":"Classic uncoated paper with a natural feel that's easy to write on. Crisp text and a soft, non-reflective look — letterhead, inserts, forms, and reading-heavy pages.",
     "0.002":"Smooth coated sheet with a soft, glare-free finish. Richer color than uncoated without the shine — the all-purpose choice for brochures and flyers.",
     "0.003":"Shiny coated sheet that makes photos and color pop. The standard for marketing brochures, catalogs, and mailers.",
-    "2.001":"Our lightest uncoated sheet, a touch heavier than copy paper. Keeps page-heavy books thin and light.",
     "2.002":"Light uncoated sheet with good opacity for its weight. Economical for manuals, workbooks, and text-heavy booklets.",
     "2.003":"Sturdy uncoated sheet with excellent opacity. The uncoated feel with less show-through — workbooks, journals, and premium text pages.",
     "2.004":"Lightweight gloss sheet with vivid color reproduction. A thinner, economical alternative to 100lb gloss for catalogs and mailers.",
@@ -498,8 +497,15 @@ const PAPER_DESC={
   }
 };
 const paperInv=p=>{if(!p||/same as inside/i.test(p.label||""))return false;return p.inv!==undefined?!!p.inv:(!p.factory&&!(p.days>0))};
-const paperDot=p=>paperInv(p)?"● ":"";
+const paperDot=p=>paperInv(p)?"🔵 ":"";
 const paperDesc=(p,pool)=>{if(!p||/same as inside/i.test(p.label||""))return"";const m=PAPER_DESC[pool||(p.type==="cardstock"?"cs":"nc")];return p.desc||(m&&m[String(p.val)])||"";};
+// Approximate caliper + weight and a one-line use case, shown next to each stock
+// in the picker. Server rows win (p.spec); canonical table: docs/PAPER_CATALOG.md.
+const PAPER_SPEC={
+  nc:{"0.001":"5pt · 104gsm — Best for writing","0.002":"5pt · 118gsm — Distinct feel, slightly writable","0.003":"6pt · 148gsm — Best image quality","2.002":"4pt · 89gsm — Best for writing","2.003":"5pt · 118gsm — Best for writing","2.004":"5pt · 118gsm — Best image quality","2.005":"6pt · 148gsm — Distinct feel, slightly writable","2.006":"7pt · 118gsm — Textured, best for writing"},
+  cs:{"0.01":"10pt · 216gsm — Best for writing","0.02":"9pt · 216gsm — Distinct feel, slightly writable","0.03":"10pt · 270gsm — Best image quality","1.01":"300gsm — Best image quality","1.02":"350gsm — Best image quality","2.21":"9pt · 216gsm — Best image quality","2.22":"10pt · 270gsm — Distinct feel, slightly writable","2.23":"260gsm — Best image quality","2.24":"300gsm — Best image quality","2.25":"400gsm — Best image quality"}
+};
+const paperSpec=(p,pool)=>{if(!p||/same as inside/i.test(p.label||""))return"";const m=PAPER_SPEC[pool||(p.type==="cardstock"?"cs":"nc")];const s=p.spec||(m&&m[String(p.val)])||"";return s?" ("+s+")":"";};
 const PaperNote=({p,pool,legend})=>{
   const d=paperDesc(p,pool);
   const days=p&&p.days>0?p.days:0;
@@ -511,7 +517,7 @@ const PaperNote=({p,pool,legend})=>{
       </div>}
       {legend&&<div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",alignItems:"center",gap:5}}>
         <span style={{width:8,height:8,borderRadius:"50%",background:"#007eff",flexShrink:0}}></span>
-        <span>In stock — best for quick turnaround, small quantity, and hardcopy proofs</span>
+        <span>Popular — best for quick turnaround, small quantity, and hardcopy proofs</span>
       </div>}
     </div>
   );
@@ -5135,7 +5141,7 @@ function App() {
             </div>
             <div style={ST.hr} />
             <Sel label={<Tip k="paper">Paper</Tip>} value={paper.val} onChange={v => { const f = ALL_PAPERS.find(p => String(p.val) === v); if (f) setPaper(f); }}>
-              {PAPERS.map(p => <option key={p.val} value={p.val}>{paperDot(p) + p.label}</option>)}
+              {PAPERS.map(p => <option key={p.val} value={p.val}>{paperDot(p) + p.label + paperSpec(p)}</option>)}
             </Sel>
             <PaperNote p={paper} pool="cs" legend />
           </Sec>
