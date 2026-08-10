@@ -84,6 +84,9 @@ price; corrupting it silently reverts all pricing to defaults.
 
 - **Disable New Relic browser monitoring on staging** (Cloudways panel). The
   retry-looping NR chunk is half the freeze cluster.
+  **VOID — owner, 2026-08-10: that was his browser's ad blocker, not New Relic.**
+  Nothing to disable. Delay JS + Lazy Render is the whole hypothesis; see
+  `docs/NEXT_SESSION_BRIEF_2026-08-10.md` §2 B.
 
 ## After Tasks 2 + owner NR toggle: re-test the cluster
 

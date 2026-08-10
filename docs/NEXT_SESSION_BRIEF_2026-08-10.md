@@ -64,7 +64,6 @@ rediscover them.
 |---|---|
 | **WP Rocket: disable Delay JS + Automatic Lazy Rendering** | `wp_rocket_settings.consumer_key` reads back as `"********"` and there is no way to tell a transit mask from the stored value. `wp_update_option` writes the whole option, so a read-modify-write risks storing asterisks over the license key. Separately, **there is no lazy-render key in the option at all** in 3.18.3 — that toggle exists only in the UI. |
 | **Delete the 50lb row** | Confirmed still present: `pps_calc_config.papers_nc[3]`, `val: 2.001`, "50lb Offset Smooth Opaque". Owner fix is one click (PPS Config → Papers → delete → Save). Rewriting a ~300-line pricing structure to drop one row is disproportionate, and it would round-trip a live API token (see §5). |
-| **Disable New Relic browser monitoring** | Cloudways panel. Half the freeze cluster. |
 | **`nbdesigner/` remainder** | 2,331 post-migration files (~20 MB) plus every now-empty directory. The uploads tools delete files, not directories. |
 | **16 administrator accounts** | See §4 — needs human judgement about who is who. |
 
@@ -85,11 +84,24 @@ matched the fetches, so the right bytes are live — but nobody has *looked*:
 
 ### B. The freeze-cluster retest — this is the 3.0 blocker gate
 
-Only meaningful **after** the owner's Rocket + New Relic changes. Re-run QA's
-failing paths on staging: interact with a calculator immediately after load (no
-~30s freeze), toggle accordions (no blank gaps with content present in DOM), and
-click the cart's "Proceed to checkout" **button** (it should navigate). Go-live
-should not be scheduled until this passes.
+Only meaningful **after the owner's WP Rocket change** — that is now the *only*
+prerequisite. Re-run QA's failing paths on staging: interact with a calculator
+immediately after load (no ~30s freeze), toggle accordions (no blank gaps with
+content present in DOM), and click the cart's "Proceed to checkout" **button** (it
+should navigate). Go-live should not be scheduled until this passes.
+
+> **Correction (owner, 2026-08-10): New Relic was never part of this.** The
+> "failing/retry-looping New Relic chunk" in `DEPLOY_QA_FIXES_BRIEF.md` was the
+> owner's **browser ad blocker** killing that request locally. There is nothing to
+> disable in Cloudways, and that brief's owner-side action is void.
+>
+> Two consequences. **Delay JS + Lazy Render is now the whole hypothesis**, not
+> half of it — so the Rocket change is the fix or the diagnosis is wrong, with no
+> second factor to hide behind. And **run the retest in a clean browser profile
+> with the blocker off**: an ad blocker can itself stall a page when script code
+> awaits a request it killed, so any symptom observed in that same browser may be a
+> local artifact. Without a clean profile you can't tell a failed fix from a
+> blocked request.
 
 ### C. Is the pulled order data actually usable for testing?
 
