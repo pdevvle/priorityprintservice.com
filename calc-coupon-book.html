@@ -5366,7 +5366,9 @@ function App(){
     const el=totalEl; if(!el||typeof IntersectionObserver==="undefined") return;
     const place=()=>{ const r=railRef.current&&railRef.current.getBoundingClientRect();
       setMiniBar(r?{left:Math.round(r.left),width:Math.round(r.width)}:null); };
-    const io=new IntersectionObserver(([e])=>{ if(e.isIntersecting) setMiniBar(null); else place(); },{threshold:0});
+    // Show the floating bar only once the price card has been scrolled PAST
+    // (top < 0) - not merely because it is still below the fold on load.
+    const io=new IntersectionObserver(([e])=>{ if(e.isIntersecting || e.boundingClientRect.top >= 0) setMiniBar(null); else place(); },{threshold:0});
     io.observe(el);
     const onResize=()=>{ setMiniBar(v=>v?(railRef.current?{left:Math.round(railRef.current.getBoundingClientRect().left),width:Math.round(railRef.current.getBoundingClientRect().width)}:v):v); };
     window.addEventListener("resize",onResize);

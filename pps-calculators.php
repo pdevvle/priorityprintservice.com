@@ -647,10 +647,58 @@ function pps_parse_calculator_html( $html ) {
 function pps_calc_file_is_compiled( $filepath ) {
     static $cache = array();
     if ( ! isset( $cache[ $filepath ] ) ) {
-        $head = (string) file_get_contents( $filepath, false, null, 0, 8192 );
-        $cache[ $filepath ] = ( strpos( $head, 'tools-compile-calcs.mjs' ) !== false );
+        // Full read, not a head-sniff: the compile marker sits at the app
+        // <script>, tens of KB in past the styles — an 8KB sniff missed it,
+        // which is why compiled pages kept enqueuing Babel (round-4 QA).
+        $body = (string) file_get_contents( $filepath );
+        $cache[ $filepath ] = ( strpos( $body, 'tools-compile-calcs.mjs' ) !== false );
     }
     return $cache[ $filepath ];
+}
+
+/**
+ * Serve a compiled calculator's app code as a real enqueued file instead of a
+ * giant inline <script>. Round-4 QA found the inline form dies twice over:
+ * executed synchronously it runs ~26 scripts before React exists
+ * ("ReferenceError: React is not defined" — text/babel used to defer it, a
+ * plain script tag does not), and WP Rocket's minifier deletes 400KB+ inline
+ * blocks from the cached page outright. A dependency-ordered footer enqueue
+ * fixes the ordering; an external file survives the minifier (and the
+ * existing 'pps-calculator' Rocket exclusion covers its URL); the page sheds
+ * ~450KB of HTML. Content-hashed filename = immutable, browser-cacheable.
+ * Returns false if the file can't be written, so callers can fall back.
+ */
+function pps_enqueue_calc_app_file( $filepath, $app_code ) {
+    $hash = substr( md5( $app_code ), 0, 10 );
+    $base = preg_replace( '/\.html$/', '', basename( $filepath ) );
+    $dir  = trailingslashit( pps_upload_dir() ) . 'js';
+    $file = $dir . '/' . $base . '-' . $hash . '.js';
+
+    if ( ! file_exists( $file ) ) {
+        if ( ! file_exists( $dir ) ) {
+            wp_mkdir_p( $dir );
+            @file_put_contents( $dir . '/index.php', '<?php // Silence is golden.' );
+        }
+        // Write-then-rename so a concurrent request never serves a half file.
+        $tmp = $file . '.' . wp_generate_password( 6, false ) . '.tmp';
+        if ( false === @file_put_contents( $tmp, $app_code ) ) return false;
+        if ( ! @rename( $tmp, $file ) ) { @unlink( $tmp ); return false; }
+    }
+
+    $upload = wp_upload_dir();
+    $url    = str_replace(
+        trailingslashit( $upload['basedir'] ),
+        trailingslashit( $upload['baseurl'] ),
+        $file
+    );
+    wp_enqueue_script(
+        'pps-calc-app',
+        $url,
+        array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ),
+        $hash,
+        true
+    );
+    return true;
 }
 
 /**
@@ -1074,11 +1122,17 @@ add_action( 'wp', function() {
         echo '<div id="pps-calculator-root"></div>';
         echo '</div>';
 
-        // ── App code ── (plain script for precompiled builds; text/babel for JSX source)
+        // ── App code ──
+        // JSX source ships inline as text/babel (Babel Standalone defers it).
+        // Compiled builds enqueue an external dependency-ordered file; the
+        // inline fallback is wrapped in DOMContentLoaded so it can never run
+        // ahead of the footer-loaded React (round-4 QA blocker).
         if ( $parts['app_code'] ) {
-            echo empty( $parts['compiled'] )
-                ? '<script type="text/babel">' . $parts['app_code'] . '</script>'
-                : '<script>' . $parts['app_code'] . '</script>';
+            if ( empty( $parts['compiled'] ) ) {
+                echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+            } elseif ( ! pps_enqueue_calc_app_file( $filepath, $parts['app_code'] ) ) {
+                echo '<script>document.addEventListener("DOMContentLoaded",function(){' . $parts['app_code'] . "\n});</script>";
+            }
         }
     }, 25 );
 });
@@ -4491,10 +4545,14 @@ function pps_render_preset_calculator( $preset ) {
     echo '<div id="pps-calculator-root"></div>';
     echo '</div>';
 
+    // Same split as the product path: external enqueue for compiled builds,
+    // DOMContentLoaded-wrapped inline as the write-failure fallback.
     if ( $parts['app_code'] ) {
-        echo empty( $parts['compiled'] )
-            ? '<script type="text/babel">' . $parts['app_code'] . '</script>'
-            : '<script>' . $parts['app_code'] . '</script>';
+        if ( empty( $parts['compiled'] ) ) {
+            echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+        } elseif ( ! pps_enqueue_calc_app_file( $filepath, $parts['app_code'] ) ) {
+            echo '<script>document.addEventListener("DOMContentLoaded",function(){' . $parts['app_code'] . "\n});</script>";
+        }
     }
 
     return ob_get_clean();
