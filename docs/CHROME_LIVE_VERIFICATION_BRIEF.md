@@ -37,7 +37,12 @@ Open each; confirm it renders styled, no white screen, no PHP errors:
   and a real dollar Estimated Total. An empty area under the product title =
   **hard failure** (this exact defect shipped twice on staging; the fix is in
   this push, and this is its production proof).
-- Build chip bottom-right reads `BUILD 2026-08-09 · MODERN`.
+- **Do NOT look for a build chip** — WP product pages never render one (the
+  PHP extracts only styles + app code; the chip exists solely on the GitHub
+  Pages previews). Its absence is correct, not a defect. Freshness is proven
+  by the new-build behavior itself: blue-dot paper picker, spec labels, and
+  (if in doubt) view-source containing `tools-compile-calcs.mjs` with no
+  `babel.min.js` include.
 - Click something immediately — first click responds, no multi-second stall.
 - Open the Paper dropdown: blue dot 🔵 on stocked papers, specs in
   parentheses like "(5pt · 104gsm — Best for writing)", **no** "50lb Offset
@@ -82,7 +87,9 @@ Open each; confirm it renders styled, no white screen, no PHP errors:
   a hard failure).
 - `/robots.txt` loads and does NOT disallow everything; no
   `<meta name="robots" content="noindex">` on the homepage.
-- `/llms.txt` loads. Sitemap URL loads (owner knows which).
+- `/llms.txt` loads. `https://priorityprintservice.com/sitemap_index.xml`
+  loads (Rank Math; rewrite rules were reset 2026-08-10 to fix its 404 — if
+  it still 404s after a WP Rocket clear, report it).
 - One old URL spot-check if the owner has one handy (301s to the new slug).
 
 ## 4. Report

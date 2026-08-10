@@ -569,6 +569,11 @@ be production-configured before the button is pressed:
    - [ ] Flush permalinks (`Settings → Permalinks → Save`) — the preset URLs
          register per-slug rewrite rules and need it.
    - [ ] Clear caches (WP Rocket tables pushed stale — purge; object cache).
+   - [ ] **Search the production DB for the staging domain.** Cloudways'
+         push search-replace rewrites URLs but NOT email addresses, so
+         `office@`/`orders@` mailboxes come across mangled to
+         `…@woocommerce-70867-4915293.cloudwaysapps.com` (see the 2026-08-10
+         aftercare record at the end of this file for the exact spots it hit).
    - [ ] Open 3 recent real orders — intact. Admin order list count sane.
    - [ ] **Place a real test order end-to-end** (then refund it): proves
          checkout, payment in live mode, new order ID mints ABOVE the copied
@@ -669,3 +674,70 @@ measurements (so no before/after MB recorded yet), the autoload audit, every
 access outside `plugins/` and `themes/`, and it needs the 90-day order-reference
 analysis), the live→staging pull, the auto-increment alignment, and the push
 itself. No available tool runs SQL against this database.
+
+---
+
+## Post-push aftercare record (2026-08-10, production, executed via MCP)
+
+The push happened 2026-08-09 evening. Claude-in-Chrome's frozen-state
+verification returned STOP with blockers; all were diagnosed and fixed on
+production the next morning. What was found and what future pushes must
+expect:
+
+### 1. Staging-domain email leakage (the big one — WILL recur on every push)
+
+Cloudways' staging→production search-replace rewrites **URLs** but not
+**email addresses** containing the staging domain. Production went live
+with every contact mailbox mangled to `…@woocommerce-70867-4915293.cloudwaysapps.com`:
+
+- **4 `wp_options`:** `woocommerce_email_from_address` (the From on every
+  store email — deliverability killer), plus the recipient in
+  `woocommerce_new_order_settings` / `woocommerce_failed_order_settings`
+  (both **enabled** — new-order notifications were silently going to a dead
+  address) and `woocommerce_cancelled_order_settings` (disabled).
+- **6 content locations, 21 raw occurrences** (several duplicate into UAGB
+  FAQ JSON-LD, so Google was served the staging email too): checkout page
+  15372, privacy policy 17416 (×4), return/reprint policy 28850, mailers
+  page 21027 (×3 incl. schema), Astra Site Builder "Footer Site
+  Information" 85236 (×4 — the site-wide footer), Astra Site Builder
+  "Product Page Bottom" 34095 (×8 incl. `mailto:` links + schema).
+
+**Fix applied:** domain-restore preserving each local part
+(`office@…cloudwaysapps.com` → `office@priorityprintservice.com`,
+`orders@…` → `orders@priorityprintservice.com`), via `wp_alter_post`
+search-replace + option rewrites. Verified zero occurrences remain.
+Credit: a parallel claude.ai session with the production connector ran the
+site-wide search that produced the complete location map, including the
+Astra Site Builder post type a plain post search misses.
+
+### 2. Other fixes in the same pass
+
+- **Brochures category (term 81):** its description ended with a bare
+  `[pps_cat_attributes]`, so the paper/attribute cards never rendered.
+  Restored to `[pps_cat_attributes papers="text,cover"
+  cover_label="Cardstock (Covers)" coatings="yes" addons="brochure"]`
+  (mirrors booklets, addons switched to brochure).
+- **`sitemap_index.xml` 404:** Rank Math's sitemap module was confirmed
+  active, so the cause was stale rewrite rules; `rewrite_rules` was reset
+  to force regeneration on the next request. (The step-8 permalink flush
+  covers this when it's actually run.)
+- **Build chip "missing" on product pages = FALSE ALARM.** The renderer
+  extracts only styles + app code from calculator HTML and never emits the
+  chip div; the chip exists solely on GitHub Pages previews. Verification
+  criterion on WP pages is the new-build behavior itself (blue-dot paper
+  picker, compiled marker in view-source), not the chip. The Chrome brief
+  has been corrected.
+
+### 3. Notes for the unfreeze decision
+
+- Owner's real test order **86973** ($148.87 — the expected coupon figure)
+  minted above customer order 86961: **order-ID sequencing above the copied
+  range is proven, no collision.** Its status is *cancelled*, not
+  *refunded* — if the card was actually charged, confirm the Stripe refund
+  separately.
+- Any order placed between the push and this fix had its new-order
+  notification sent to the dead staging address — eyeball WooCommerce →
+  Orders for anything unseen (86961, processing, 2026-08-09 17:01 UTC is
+  the one to check).
+- These fixes are DB-side; **WP Rocket still serves the old HTML** (the
+  footer email is on every cached page) until a Clear-and-preload.
