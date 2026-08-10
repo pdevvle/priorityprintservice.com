@@ -118,7 +118,7 @@ rediscover them.
 |---|---|
 | **WP Rocket: disable Delay JS + Automatic Lazy Rendering** | `wp_rocket_settings.consumer_key` reads back as `"********"` and there is no way to tell a transit mask from the stored value. `wp_update_option` writes the whole option, so a read-modify-write risks storing asterisks over the license key. Separately, **there is no lazy-render key in the option at all** in 3.18.3 — that toggle exists only in the UI. |
 | **Delete the 50lb row** | Confirmed still present: `pps_calc_config.papers_nc[3]`, `val: 2.001`, "50lb Offset Smooth Opaque". Owner fix is one click (PPS Config → Papers → delete → Save). Rewriting a ~300-line pricing structure to drop one row is disproportionate, and it would round-trip a live API token (see §5). |
-| **Disable New Relic browser monitoring** | Cloudways panel. Half the freeze cluster. |
+| **Find and remove the New Relic browser-agent injector** | NOT the Cloudways/server agent — owner confirms that has been stopped all along, and the repo greps clean for newrelic/NREUM/nr-spa. Yet QA sees the loader on every page including uncached cart/checkout, so something page-side injects it. Suspects in order: a **GTM custom-HTML tag** (owner: search the GTM container for "relic"), a **Code Snippets row** (`wp_snippets` — already flagged for audit), a header-scripts option or mu-plugin (connector session: read wp_snippets + theme header + header-script options). Purge WP Rocket after removal. |
 | **`nbdesigner/` remainder** | 2,331 post-migration files (~20 MB) plus every now-empty directory. The uploads tools delete files, not directories. |
 | **16 administrator accounts** | See §4 — needs human judgement about who is who. |
 
