@@ -26,9 +26,9 @@ button.
 Every "unchanged" defect in the final QA re-test is unchanged because THIS
 deploy never ran. It is all pinned and verified.
 
-**A. Five PHP files @ integration-branch commit `2c908f3`** — via
+**A. Five PHP files @ integration-branch commit `0349f9a`** — via
 `pps_plugin_download_url`, url
-`https://raw.githubusercontent.com/pdevvle/priorityprintservice.com/2c908f3/<file>`,
+`https://raw.githubusercontent.com/pdevvle/priorityprintservice.com/0349f9a/<file>`,
 relative_path `pps-calculators/<file>`:
 
 1. `pps-calculators.php` (296KB+ — billing prefill fix, /pps/v1/nonces, cache-purge hooks)
@@ -54,9 +54,9 @@ on `pps-calculators/_pending_html` — all 8 must have moved into a fresh
 byte counts matched the fetches.
 
 **C2. CRITICAL — this deploy includes the round-3 blocker fix.** The PHP at
-`2c908f3` is what makes the compiled calculators RENDER: the previous renderer
+`0349f9a` is what makes the compiled calculators RENDER: the previous renderer
 only recognised JSX-source files, which is why round-3 QA saw an empty
-calculator on every product page. Deploy `pps-calculators.php` from `2c908f3`
+calculator on every product page. Deploy `pps-calculators.php` from `0349f9a`
 FIRST, before or with the HTML files. It also holds the coupon-field CSS fix
 and drops the 3MB Babel ship on compiled pages.
 
