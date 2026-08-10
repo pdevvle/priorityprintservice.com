@@ -744,3 +744,31 @@ Astra Site Builder post type a plain post search misses.
   the one to check).
 - These fixes are DB-side; **WP Rocket still serves the old HTML** (the
   footer email is on every cached page) until a Clear-and-preload.
+
+### 4. Later same-day findings (Shippo, sitemap, presets — 2026-08-10 midday)
+
+- **Corrected timeline:** the push completed the evening of 2026-08-09 (the
+  uniform 09:27 UTC file mtimes were a later file-level sweep, not the push).
+  Test orders 86973 and 86982 were both placed on the NEW production.
+- **Shippo order feed: never broken.** Shippo's WooCommerce store sync is
+  poll-based; 86982 appeared in Shippo a few hours after placement. The WC
+  REST key Shippo authenticates with survived the push because staging's
+  `wp_woocommerce_api_keys` rows descend from the original live clone. Do
+  not panic at a missing order until at least one sync cycle has passed.
+- **Calculator→order→Shippo address chain confirmed end-to-end:** the
+  calculator-collected address lands in the order's shipping envelope
+  (verified on 86982) and arrives in Shippo with the order.
+- **Shippo quote-side battery: 18/18 on production** (live token, real
+  rates, guest loopback through priorityprintservice.com). Gotcha for
+  future diagnosis: `pps_shippo_test_maybe_run()` calls
+  `rocket_clean_domain()` when it runs — an 03:26 suite run purged Rocket
+  BEFORE the morning's email/term fixes, which is why the late-morning
+  re-test still saw stale footer/brochure pages. Varnish is disabled on
+  this app; WP Rocket is the only page-cache layer.
+- **Sitemap fixed:** the regenerated `rewrite_rules` now carry Rank Math's
+  `sitemap_index\.xml` rule and `pps-presets-sitemap.xml`. The 404s seen
+  in testing predate the regeneration.
+- **Preset "loss" was a false alarm:** `pps_presets` contains exactly one
+  row (letterhead) on BOTH sites — the preset system is built but content
+  rows were never populated. One preset rule in `rewrite_rules` is the
+  correct count. Populating presets is day-2 work.
