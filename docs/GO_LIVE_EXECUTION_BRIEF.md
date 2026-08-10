@@ -26,9 +26,9 @@ button.
 Every "unchanged" defect in the final QA re-test is unchanged because THIS
 deploy never ran. It is all pinned and verified.
 
-**A. Five PHP files @ integration-branch commit `4ab317c`** — via
+**A. Five PHP files @ integration-branch commit `001bb06`** — via
 `pps_plugin_download_url`, url
-`https://raw.githubusercontent.com/pdevvle/priorityprintservice.com/4ab317c/<file>`,
+`https://raw.githubusercontent.com/pdevvle/priorityprintservice.com/001bb06/<file>`,
 relative_path `pps-calculators/<file>`:
 
 1. `pps-calculators.php` (296KB+ — billing prefill fix, /pps/v1/nonces, cache-purge hooks)
@@ -52,6 +52,19 @@ relative_path `pps-calculators/_pending_html/<file>`:
 on `pps-calculators/_pending_html` — all 8 must have moved into a fresh
 `_archive/<timestamp>/`; pending root retains nothing. Confirm the deployed
 byte counts matched the fetches.
+
+**C2. CRITICAL — this deploy includes the round-3 blocker fix.** The PHP at
+`001bb06` is what makes the compiled calculators RENDER: the previous renderer
+only recognised JSX-source files, which is why round-3 QA saw an empty
+calculator on every product page. Deploy `pps-calculators.php` from `001bb06`
+FIRST, before or with the HTML files. It also holds the coupon-field CSS fix
+and drops the 3MB Babel ship on compiled pages.
+
+**C3. Owner one-liners while Phase 1 runs:** WooCommerce -> Settings ->
+General -> "Default customer location" -> **"No location by default"** (kills
+the Arizona preselect at checkout). And confirm in WCPA whether removing
+"Proof Options" from the Reorders form was intentional (it vanished from the
+form but still prints in cart summaries).
 
 **D. Tell the owner:** "Phase 1 deployed — do your Rocket step now." (Owner:
 WP Rocket → File Optimization → uncheck Delay JavaScript execution; Media →
