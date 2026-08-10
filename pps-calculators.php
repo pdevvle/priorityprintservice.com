@@ -1058,6 +1058,29 @@ add_action( 'wp', function() {
                 WC()->session->set( 'pps_edit_key_' . $product_id, $edit_key );
                 $config['editMode'] = true;
 
+                // Rebuild the restore payload from the cart session instead of
+                // trusting a URL to carry it (the Edit Specs link is now a bare
+                // token). Same whitelist as every other reorder path; encoded
+                // the same way, so the calculators' PPS_CONFIG.reorder reader
+                // is none the wiser.
+                $edit_meta = json_decode( (string) ( WC()->cart->get_cart()[ $edit_key ]['pps_metadata'] ?? '' ), true );
+                if ( is_array( $edit_meta ) ) {
+                    $edit_fields = function_exists( 'pps_reorder_field_whitelist' )
+                        ? pps_reorder_field_whitelist()
+                        : array( 'sizeLabel', 'qty', 'sides', 'paper', 'shipState' );
+                    $edit_cfg = array();
+                    foreach ( $edit_fields as $ek ) {
+                        if ( isset( $edit_meta[ $ek ] ) ) $edit_cfg[ $ek ] = $edit_meta[ $ek ];
+                    }
+                    if ( ! empty( WC()->cart->get_cart()[ $edit_key ]['pps_artwork_path'] ) ) {
+                        $edit_cfg['artworkPath']     = WC()->cart->get_cart()[ $edit_key ]['pps_artwork_path'];
+                        $edit_cfg['artworkFilename'] = basename( WC()->cart->get_cart()[ $edit_key ]['pps_artwork_path'] );
+                    }
+                    if ( $edit_cfg ) {
+                        $config['reorder'] = rtrim( strtr( base64_encode( wp_json_encode( $edit_cfg ) ), '+/', '-_' ), '=' );
+                    }
+                }
+
                 // Pass existing artwork info so calculator can display it
                 $edit_item = WC()->cart->get_cart()[ $edit_key ];
                 if ( ! empty( $edit_item['pps_artwork_path'] ) ) {
@@ -2433,6 +2456,15 @@ add_action( 'wp_enqueue_scripts', function () {
   opacity: 1 !important;
 }
 
+/* Round-5 QA / owner: the theme's "Have a coupon?" toggle is dead UI — its
+   handler never binds, while the always-visible #ast-coupon-code field is the
+   one that works. Delete the dead pair outright rather than leaving two
+   coupon inputs, one of which ignores clicks. */
+.pps-cart .wc-proceed-to-checkout p[tabindex="0"],
+.pps-cart div.coupon {
+  display: none !important;
+}
+
 /* Owner screenshot 2026-08-10: at wide viewports the theme floats the totals
    column beside the items and our form width leaves it a ~1ch sliver, so the
    delivery estimate rendered one letter per line. Stack the collaterals
@@ -2459,31 +2491,13 @@ add_filter( 'woocommerce_cart_item_name', function( $name, $cart_item, $cart_ite
     $product = wc_get_product( $cart_item['product_id'] );
     if ( ! $product ) return $name;
 
-    $full = json_decode( $cart_item['pps_metadata'], true );
-    if ( ! $full ) return $name;
-
-    // One list, shared with the My Account reorder path. This used to be a second copy
-    // of that array, and the two drifted: both were written for the booklet calculators,
-    // so an Edit Specs round-trip on a flat product dropped every field it prices on.
-    $reorder_fields = function_exists( 'pps_reorder_field_whitelist' )
-        ? pps_reorder_field_whitelist()
-        : array( 'sizeLabel', 'qty', 'sides', 'paper', 'shipState' );
-    $reorder_config = array();
-    foreach ( $reorder_fields as $key ) {
-        if ( isset( $full[ $key ] ) ) $reorder_config[ $key ] = $full[ $key ];
-    }
-
-    // Include artwork file info for edit mode
-    if ( ! empty( $cart_item['pps_artwork_path'] ) ) {
-        $reorder_config['artworkPath'] = $cart_item['pps_artwork_path'];
-        $reorder_config['artworkFilename'] = basename( $cart_item['pps_artwork_path'] );
-    }
-
-    $encoded = rtrim( strtr( base64_encode( json_encode( $reorder_config ) ), '+/', '-_' ), '=' );
-    $url = add_query_arg( array(
-        'pps_reorder'  => $encoded,
-        'pps_edit_key' => $cart_item_key,
-    ), $product->get_permalink() );
+    // Token only. The restore payload used to travel in the URL as base64
+    // (round-5 QA: a 1,425-character query string carrying shipState/shipZip
+    // into access logs, history and Referer headers). The cart session holds
+    // the full metadata under this key, so the render path now rebuilds the
+    // payload server-side — see the pps_edit_key branch in the product config
+    // build, which injects PPS_CONFIG.reorder from the cart item.
+    $url = add_query_arg( 'pps_edit_key', $cart_item_key, $product->get_permalink() );
 
     $name .= ' <a href="' . esc_url( $url ) . '" style="display:inline-block;margin-left:8px;font-size:12px;color:#007eff;text-decoration:none;border:1px solid #007eff;padding:2px 8px;border-radius:3px;white-space:nowrap">✏️ Edit Specs</a>';
 
