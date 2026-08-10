@@ -3,7 +3,7 @@
  * Plugin Name: Priority Print MCP Tools
  * Plugin URI:  https://woocommerce-70867-4915293.cloudwaysapps.com/
  * Description: Companion plugin for AI Engine that adds custom WooCommerce, theme, plugin file management, uploads cleanup, WordPress update, and URL-download tools to the MCP server.
- * Version:     1.7.0
+ * Version:     1.8.0
  * Author:      Preston / Priority Print Service
  * License:     GPL v2 or later
  * Requires PHP: 8.0
@@ -1017,13 +1017,22 @@ class Priority_Print_MCP {
 	 * (deleting those here would leave an orphaned attachment row pointing at a
 	 * missing file — that is the media tools' job).
 	 */
-	private function assert_uploads_file_deletable( string $full_path, string $relative_path ) {
+	private function assert_uploads_file_deletable( string $full_path, string $relative_path, ?array $attached_paths = null ) {
 		if ( ! file_exists( $full_path ) ) throw new Exception( 'File not found: ' . $relative_path );
 		if ( is_dir( $full_path ) ) throw new Exception( 'Refusing to delete a directory; these tools remove single files only.' );
 
 		$basename = strtolower( basename( $full_path ) );
 		if ( in_array( $basename, array( 'index.php', 'index.html', '.htaccess', 'web.config' ), true ) ) {
 			throw new Exception( 'Refusing to delete a directory guard file (' . $basename . '); it blocks public indexing of the uploads tree.' );
+		}
+
+		// Retention passes the prefetched set (one query per run); the single-file
+		// tools pass nothing and keep the targeted per-path query.
+		if ( is_array( $attached_paths ) ) {
+			if ( isset( $attached_paths[ ltrim( str_replace( '\\', '/', $relative_path ), '/' ) ] ) ) {
+				throw new Exception( 'Refusing to delete a file attached to a media item; use the media tools so the attachment row goes with it.' );
+			}
+			return;
 		}
 
 		$attached = get_posts( array(
@@ -1162,8 +1171,45 @@ class Priority_Print_MCP {
 	 *
 	 * @param array $overrides Settings to override for this run only (e.g. dry_run).
 	 */
+	/**
+	 * All attachment-backed upload paths, fetched once per retention run. The
+	 * per-candidate get_posts() this replaces is what pushed large runs past the
+	 * client's 60s timeout (one meta query per expired file).
+	 */
+	private function attached_upload_paths() : array {
+		global $wpdb;
+		$rows = $wpdb->get_col(
+			"SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file'"
+		);
+		$set = array();
+		foreach ( (array) $rows as $p ) {
+			if ( is_string( $p ) && $p !== '' ) $set[ ltrim( str_replace( '\\', '/', $p ), '/' ) ] = true;
+		}
+		return $set;
+	}
+
 	private function retention_run( array $overrides = array() ) : array {
 		$s = array_merge( $this->retention_settings(), $overrides );
+
+		// Concurrency guard: a client-side timeout does not stop a PHP run — it
+		// keeps deleting server-side, and a second run started meanwhile races it
+		// (each sees files the other already removed). Refuse instead. The lock
+		// self-expires so a fataled run cannot wedge retention permanently.
+		if ( get_transient( 'pps_retention_run_lock' ) ) {
+			return array(
+				'ran_at' => date( 'c' ),
+				'error'  => 'A retention run is already in progress (lock held; expires within 10 minutes). Not started.',
+			);
+		}
+		set_transient( 'pps_retention_run_lock', time(), 10 * MINUTE_IN_SECONDS );
+		try {
+			return $this->retention_run_locked( $s );
+		} finally {
+			delete_transient( 'pps_retention_run_lock' );
+		}
+	}
+
+	private function retention_run_locked( array $s ) : array {
 
 		$min_age = max( self::RETENTION_MIN_AGE_FLOOR, (int) $s['min_age_days'] );
 		$cap     = max( 1, min( 5000, (int) $s['max_deletes_per_run'] ) );
@@ -1204,6 +1250,9 @@ class Priority_Print_MCP {
 
 		$cutoff = time() - $min_age * DAY_IN_SECONDS;
 
+		// One query for the whole run instead of one get_posts() per candidate.
+		$attached_paths = $this->attached_upload_paths();
+
 		$iterator = new RecursiveIteratorIterator(
 			new RecursiveDirectoryIterator( $dir, RecursiveDirectoryIterator::SKIP_DOTS ),
 			RecursiveIteratorIterator::LEAVES_ONLY
@@ -1221,7 +1270,7 @@ class Priority_Print_MCP {
 			$result['expired_bytes'] += $size;
 
 			try {
-				$this->assert_uploads_file_deletable( $file->getPathname(), $rel );
+				$this->assert_uploads_file_deletable( $file->getPathname(), $rel, $attached_paths );
 			} catch ( Exception $e ) {
 				$result['skipped_count']++;
 				if ( count( $result['skipped'] ) < 25 ) {
@@ -1243,7 +1292,12 @@ class Priority_Print_MCP {
 			} else {
 				$result['skipped_count']++;
 				if ( count( $result['skipped'] ) < 25 ) {
-					$result['skipped'][] = array( 'path' => $rel, 'reason' => 'unlink failed; check filesystem permissions' );
+					// "vanished" is normal (another process removed it between the
+					// scan and the unlink) and is not a permissions problem.
+					$reason = file_exists( $file->getPathname() )
+						? 'unlink failed with the file still present — likely a real permission problem'
+						: 'file vanished before deletion (removed by another process); nothing to fix';
+					$result['skipped'][] = array( 'path' => $rel, 'reason' => $reason );
 				}
 			}
 		}
