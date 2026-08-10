@@ -26,9 +26,9 @@ button.
 Every "unchanged" defect in the final QA re-test is unchanged because THIS
 deploy never ran. It is all pinned and verified.
 
-**A. Five PHP files @ integration-branch commit `001bb06`** — via
+**A. Five PHP files @ integration-branch commit `76703fc`** — via
 `pps_plugin_download_url`, url
-`https://raw.githubusercontent.com/pdevvle/priorityprintservice.com/001bb06/<file>`,
+`https://raw.githubusercontent.com/pdevvle/priorityprintservice.com/76703fc/<file>`,
 relative_path `pps-calculators/<file>`:
 
 1. `pps-calculators.php` (296KB+ — billing prefill fix, /pps/v1/nonces, cache-purge hooks)
@@ -37,11 +37,11 @@ relative_path `pps-calculators/<file>`:
 4. `pps-reorder.php` (PII stripped from URL payloads)
 5. `priority-print-mcp.php` (v1.9.0 — includes read-only `woo_get_order_meta`)
 
-**B. Eight COMPILED calculators from `pps-pricing-config` commit `2df6543`**
+**B. Eight COMPILED calculators from `pps-pricing-config` commit `e683c17`**
 — NOT from the integration branch (integration carries JSX source; compiled
 pages have no in-browser Babel and go interactive in ~0.3s vs ~5-6s). Same
 tool, url
-`https://raw.githubusercontent.com/pdevvle/priorityprintservice.com/2df6543/<file>`,
+`https://raw.githubusercontent.com/pdevvle/priorityprintservice.com/e683c17/<file>`,
 relative_path `pps-calculators/_pending_html/<file>`:
 
 `calc-preview-test.html`, `calc-perfect-bound.html`, `calc-coupon-book.html`,
@@ -54,9 +54,9 @@ on `pps-calculators/_pending_html` — all 8 must have moved into a fresh
 byte counts matched the fetches.
 
 **C2. CRITICAL — this deploy includes the round-3 blocker fix.** The PHP at
-`001bb06` is what makes the compiled calculators RENDER: the previous renderer
+`76703fc` is what makes the compiled calculators RENDER: the previous renderer
 only recognised JSX-source files, which is why round-3 QA saw an empty
-calculator on every product page. Deploy `pps-calculators.php` from `001bb06`
+calculator on every product page. Deploy `pps-calculators.php` from `76703fc`
 FIRST, before or with the HTML files. It also holds the coupon-field CSS fix
 and drops the 3MB Babel ship on compiled pages.
 
