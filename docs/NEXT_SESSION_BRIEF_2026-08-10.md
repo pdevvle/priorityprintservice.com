@@ -30,9 +30,32 @@
 >    doing for cart/checkout and console hygiene.
 > 4. Still data-side, unassigned: per-product PPS Defaults seeding (QA-2 #1 —
 >    every booklet opens generic 5.5×8.5; Square/8×8/Trifold products need
->    their defaults set in the product meta box or via connector post-meta),
->    and catalog "from" prices (QA-2 #2 — $50/$88 placeholders vs real
->    defaults). Owner decides the prices; either party can key them in.
+>    their defaults set in the product meta box or via connector post-meta).
+> 5. **Catalog/schema "from" prices — POLICY DECIDED (owner, 2026-08-10):**
+>    the price a product advertises in the catalog, on cards, and in Product
+>    schema is **the lowest orderable price its calculator allows** — the real
+>    floor of the config space reachable on that product page (min quantity,
+>    smallest size, cheapest paper, greyscale, single-sided where offered, no
+>    add-ons), respecting any options the product locks (a forced-trifold
+>    product's floor includes trifold folding). Plan to make it workable:
+>    a. **Compute, don't hand-enter.** New `tools-from-prices.mjs` reusing the
+>       pricing-matrix headless harness: load each product's calculator
+>       (compiled dist + that product's defaults/locks), drive every
+>       price-relevant control to its cheapest orderable value, read the
+>       rendered total, emit `docs/from-prices.json` (calc type + per-product
+>       rows where locks change the floor). The rendered UI is the truth
+>       source, same principle as `docs/PRICING_MATRIX.md`.
+>    b. **Apply via connector**: set each registry product's catalog price
+>       (`_regular_price`/`_price`) and each `pps_presets` row's `price_from`
+>       from that JSON. Verify one category card, one preset card, and one
+>       Product-schema block render the same figure.
+>    c. **Maintain**: the from-price refresh joins the pricing-matrix
+>       regression flow — any PCF/config pricing change re-runs both tools and
+>       re-applies (b). A floor that drifts from the calculator is the same
+>       class of bug as the $50/$88 placeholders QA caught.
+>    d. Schema note: with real floors applied, "from" pricing is what Product
+>       schema `offers.price` should carry (matches Google's price-mismatch
+>       expectations far better than a placeholder).
 
 Written 2026-08-10 at the end of a long session. **Read `CLAUDE.md` first — its
 rules bind.** Then skim `docs/GO_LIVE_RUNBOOK.md` (the Gate 1 warning box, the
