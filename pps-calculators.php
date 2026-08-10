@@ -2432,6 +2432,19 @@ add_action( 'wp_enqueue_scripts', function () {
   overflow: visible !important;
   opacity: 1 !important;
 }
+
+/* Owner screenshot 2026-08-10: at wide viewports the theme floats the totals
+   column beside the items and our form width leaves it a ~1ch sliver, so the
+   delivery estimate rendered one letter per line. Stack the collaterals
+   full-width below the items instead — no float math to collapse. */
+.pps-cart .cart-collaterals,
+.pps-cart .cart_totals {
+  float: none !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  clear: both;
+}
+.pps-cart .cart-collaterals { max-width: 720px; margin-top: 18px; }
 CSS
     );
 }, 20 );
