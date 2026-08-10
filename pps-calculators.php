@@ -618,6 +618,7 @@ function pps_parse_calculator_html( $html ) {
     $parts = array(
         'styles'   => '',
         'app_code' => '',
+        'compiled' => false,
     );
 
     // <style>...</style> block
@@ -625,12 +626,48 @@ function pps_parse_calculator_html( $html ) {
         $parts['styles'] = $m[1];
     }
 
-    // <script type="text/babel">...</script> app code
+    // App code: either the JSX source block, or the precompiled plain-script
+    // block tools-compile-calcs.mjs emits (identified by its marker comment).
+    // Matching ONLY text/babel is how the compiled deploy rendered an empty
+    // calculator on every product page (round-3 QA blocker): no match, no app.
     if ( preg_match( '/<script type="text\/babel">(.*)<\/script>/s', $html, $m ) ) {
         $parts['app_code'] = trim( $m[1] );
+    } elseif ( preg_match( '/<script>(\/\* compiled by tools-compile-calcs\.mjs.*)<\/script>/s', $html, $m ) ) {
+        $parts['app_code'] = trim( $m[1] );
+        $parts['compiled'] = true;
     }
 
     return $parts;
+}
+
+/**
+ * True when the uploaded calculator file is a precompiled build (no
+ * in-browser Babel needed). Read the head only; cached per path.
+ */
+function pps_calc_file_is_compiled( $filepath ) {
+    static $cache = array();
+    if ( ! isset( $cache[ $filepath ] ) ) {
+        $head = (string) file_get_contents( $filepath, false, null, 0, 8192 );
+        $cache[ $filepath ] = ( strpos( $head, 'tools-compile-calcs.mjs' ) !== false );
+    }
+    return $cache[ $filepath ];
+}
+
+/**
+ * Compiled-ness of the calculator serving the CURRENT request (product page
+ * or preset URL) — used to skip the Babel Standalone enqueue, ~3MB of decoded
+ * JS that compiled pages never execute.
+ */
+function pps_current_calc_is_compiled() {
+    $filename = '';
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) && function_exists( 'pps_get_filename_for_calc_type' ) ) {
+        $filename = pps_get_filename_for_calc_type( $GLOBALS['pps_active_preset']['calc'] );
+    } elseif ( function_exists( 'is_product' ) && is_product() ) {
+        $filename = pps_get_calculator_for_product( get_queried_object_id() );
+    }
+    if ( ! $filename ) return false;
+    $filepath = trailingslashit( pps_upload_dir() ) . $filename;
+    return file_exists( $filepath ) && pps_calc_file_is_compiled( $filepath );
 }
 
 add_action( 'wp', function() {
@@ -668,8 +705,10 @@ add_action( 'wp', function() {
         // removes the runtime <script> injection in the calc HTML, which was a
         // DOM-mutation source contributing to React removeChild errors.
         wp_enqueue_script( 'pps-jspdf', 'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js', array(), '2.5.1', true );
-        // Babel must load after React so transpiled code can find it
-        wp_enqueue_script( 'pps-babel', 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
+        // Babel only for JSX-source builds; compiled pages skip ~3MB of dead JS.
+        if ( ! pps_current_calc_is_compiled() ) {
+            wp_enqueue_script( "pps-babel", 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
+        }
     });
 
     // ── Kill WC's gallery slider / lightbox / zoom on calc product pages ──
@@ -1035,9 +1074,11 @@ add_action( 'wp', function() {
         echo '<div id="pps-calculator-root"></div>';
         echo '</div>';
 
-        // ── App code ──
+        // ── App code ── (plain script for precompiled builds; text/babel for JSX source)
         if ( $parts['app_code'] ) {
-            echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+            echo empty( $parts['compiled'] )
+                ? '<script type="text/babel">' . $parts['app_code'] . '</script>'
+                : '<script>' . $parts['app_code'] . '</script>';
         }
     }, 25 );
 });
@@ -2324,6 +2365,18 @@ add_action( 'wp_enqueue_scripts', function () {
       "money money money";
   }
   .pps-cart tr.cart_item td.product-price { justify-self: start; }
+}
+
+/* Round-3 QA: the theme's "Have a coupon?" toggle handler stopped binding,
+   leaving div.coupon at display:none with no way for a customer to enter a
+   code. Keep the field permanently open — pure CSS, so there is no race with
+   whatever theme handler may or may not attach. The toggle text becomes an
+   inert label above an already-open field, which reads fine. */
+.pps-cart div.coupon {
+  display: block !important;
+  height: auto !important;
+  overflow: visible !important;
+  opacity: 1 !important;
 }
 CSS
     );
@@ -4304,7 +4357,10 @@ add_action( 'wp_enqueue_scripts', function() {
     wp_add_inline_script( 'pps-pdfjs', pps_pdfjs_loader_js() );
     // jsPDF — pre-loaded to avoid the runtime script injection in the calc HTML
     wp_enqueue_script( 'pps-jspdf',     'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js', array(), '2.5.1', true );
-    wp_enqueue_script( 'pps-babel',     'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
+    // Babel only for JSX-source builds; compiled pages skip ~3MB of dead JS.
+    if ( ! pps_current_calc_is_compiled() ) {
+        wp_enqueue_script( "pps-babel", 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
+    }
 } );
 
 // ── External-JS hardening on preset URLs (mirrors the product-page logic) ──
@@ -4436,7 +4492,9 @@ function pps_render_preset_calculator( $preset ) {
     echo '</div>';
 
     if ( $parts['app_code'] ) {
-        echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+        echo empty( $parts['compiled'] )
+            ? '<script type="text/babel">' . $parts['app_code'] . '</script>'
+            : '<script>' . $parts['app_code'] . '</script>';
     }
 
     return ob_get_clean();
