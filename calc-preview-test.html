@@ -5642,6 +5642,12 @@ function App(){
     setSizeMode(mode);
     if(mode==="custom"){
       if(sizeLabel!=="Custom Size") lastPreset.current=sizeLabel;
+      // Seed the custom fields from the preset being left, in its displayed WxH
+      // order (the engine normalizes long/short via Math.max everywhere, so
+      // customLong < customShort is fine). Without this the fields reveal their
+      // 8.5/5.5 defaults, which reads as a silent W/H swap of a 5.5x8.5 preset.
+      const m=/([\d.]+)\s*[\u00d7x]\s*([\d.]+)/.exec(sizeLabel!=="Custom Size"?sizeLabel:(lastPreset.current||""));
+      if(m){setCustomLong(parseFloat(m[1]));setCustomShort(parseFloat(m[2]));}
       setSizeLabel("Custom Size");
     } else {
       setSizeLabel(lastPreset.current);
