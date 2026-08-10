@@ -41,6 +41,14 @@ descriptions** (the hand-authored category pages), term meta, page content,
 them from live erases staging's months of work. They flow the other way, on the
 final push.
 
+## Gate 2b — Version freeze through the window
+
+No WooCommerce, WordPress, or plugin updates on either site between the
+order-table pull and the verified push. WooCommerce 11 in particular does
+schema work on `wp_wc_orders_meta` at update time — a cross-version order-table
+copy is an avoidable variable. WC 11 lands for both sites together in the 3.1
+release (`docs/PPS_3.1_WC11_PLAN.md`), after go-live is stable.
+
 ## Gate 3 — The freeze window is not optional
 
 The final push **replaces production's database with staging's**. Any order,
