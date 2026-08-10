@@ -70,7 +70,12 @@ function pps_reorder_field_whitelist() {
         'proofAddrSame', 'proofAddr', 'canvaLink', 'canvaInstructions',
         // Destination. The date is deliberately absent: a delivery date is a promise
         // about a specific day, so it is re-quoted rather than restored.
-        'shipState', 'shipZip', 'shipAddr',
+        // shipAddr (name/company/street/city) is deliberately absent: these
+        // payloads travel in URL query strings (cart Edit-Specs links, reorder
+        // links), which land in access logs, browser history, and Referer
+        // headers to third parties. State+ZIP stay — they are quote inputs.
+        // The full address re-enters the checkout session at add-to-cart.
+        'shipState', 'shipZip',
     );
 }
 

@@ -132,6 +132,7 @@ function pps_presets_render_page() {
                     ) ) );
                     $presets[ $slug ]['categories'] = $clean_cats;
                     update_option( PPS_PRESETS_OPTION, $presets, false );
+                    if ( function_exists( 'pps_purge_page_cache' ) ) pps_purge_page_cache();
                 }
 
                 // If the slug changed during edit, remove the old entry

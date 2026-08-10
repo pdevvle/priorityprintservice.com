@@ -4050,6 +4050,16 @@ function uploadWithProgress(url, formData, onProgress) {
 
 async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress, couponCode) {
   const PPS = window.PPS_CONFIG || {};
+  // Cached product pages can outlive the WordPress nonce tick (~12h), and the
+  // nonces ride inside that cached HTML. Refresh just before submit so an aged
+  // page still checks out; on any failure keep the baked values.
+  if (PPS.ajaxUrl) {
+    try {
+      const _nroot = (PPS.ajaxUrl || "").replace(/wp-admin\/admin-ajax\.php.*$/, "");
+      const _nr = await fetch((_nroot || "/") + "wp-json/pps/v1/nonces", { credentials: "same-origin" });
+      if (_nr.ok) { const _nj = await _nr.json(); if (_nj && _nj.cart) { PPS.cartNonce = _nj.cart; if (_nj.upload) PPS.uploadNonce = _nj.upload; } }
+    } catch (_e) {}
+  }
 
   // ── Standalone mode: download artwork + order summary as a zip-like package ──
   if (!PPS.ajaxUrl) {

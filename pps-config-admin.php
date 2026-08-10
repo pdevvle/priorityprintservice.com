@@ -409,6 +409,9 @@ function pps_get_config() {
 
 function pps_save_config( $data ) {
     update_option( PPS_CONFIG_OPTION, $data, false );
+    // Pricing tables are baked into page-cached product HTML; a price edit
+    // must invalidate the cache or visitors keep seeing pre-edit rates.
+    if ( function_exists( 'pps_purge_page_cache' ) ) pps_purge_page_cache();
 }
 
 // ═══════════════════════════════════════════════════════════════

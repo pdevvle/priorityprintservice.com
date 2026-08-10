@@ -50,6 +50,18 @@ function pps_get_closures() {
  * config is emitted to the browser (window.PPS_CONFIG). Server-side callers
  * (e.g. the Shippo REST proxies) keep using pps_get_config() for the real token.
  */
+/**
+ * Purge the page cache after saving anything that is baked into cached HTML —
+ * pricing tables (pps_calc_config), presets, tooltips. Without this, cached
+ * product pages keep quoting pre-edit rates until the cache expires on its
+ * own (QA finding, 2026-08-09). No-op when WP Rocket is absent.
+ */
+function pps_purge_page_cache() {
+    if ( function_exists( 'rocket_clean_domain' ) ) {
+        rocket_clean_domain();
+    }
+}
+
 function pps_get_public_config() {
     $cfg = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
     if ( isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ) {
@@ -2794,6 +2806,21 @@ function pps_prefill_customer_shipping( $metadata_json ) {
     // The calculator prices US ground transit only and has no country field. Stated
     // rather than left blank, because a blank country makes an address unrateable.
     WC()->customer->set_shipping_country( 'US' );
+    // Mirror into billing: the checkout form's visible fields are the billing
+    // set, and without this they sit empty and the state control falls back to
+    // the store base (Arizona) — a mis-selection waiting to be submitted. Same
+    // trade-off as above for logged-in customers: the typed address wins.
+    if ( $name !== '' ) {
+        WC()->customer->set_billing_first_name( $first );
+        WC()->customer->set_billing_last_name( $last );
+    }
+    WC()->customer->set_billing_company( trim( (string) ( $a['company'] ?? '' ) ) );
+    WC()->customer->set_billing_address_1( $street );
+    WC()->customer->set_billing_address_2( trim( (string) ( $a['street2'] ?? '' ) ) );
+    WC()->customer->set_billing_city( $city );
+    WC()->customer->set_billing_state( $state );
+    WC()->customer->set_billing_postcode( $zip );
+    WC()->customer->set_billing_country( 'US' );
     WC()->customer->save();
 
     return true;
@@ -3202,6 +3229,23 @@ add_action( 'rest_api_init', function() {
     // WooCommerce at cart level in pps_ajax_add_to_cart(), which also means cart,
     // checkout, order emails and the admin screen render it natively for free.
     // A tampered client can therefore only lie to itself: Woo re-validates at checkout.
+    // Fresh nonces on demand. The nonces baked into PPS_CONFIG ride inside
+    // page-cached HTML, and once the cache outlives the nonce tick (~12h) an
+    // aged page's add-to-cart starts failing. The calculators call this just
+    // before submit and swap the baked values for live ones. Public on
+    // purpose: a nonce is minted for the caller's own session cookie and
+    // grants nothing by itself.
+    register_rest_route( 'pps/v1', '/nonces', array(
+        'methods'             => 'GET',
+        'permission_callback' => '__return_true',
+        'callback'            => function () {
+            return array(
+                'cart'   => wp_create_nonce( 'pps_add_to_cart' ),
+                'upload' => wp_create_nonce( 'pps_upload_artwork' ),
+            );
+        },
+    ) );
+
     register_rest_route( 'pps/v1', '/coupon/preview', array(
         'methods'             => 'POST',
         // Public: guests are most customers, and they need to see the effect too.
@@ -3794,6 +3838,7 @@ add_action( 'wp_ajax_pps_save_tooltips', function() {
     }
 
     update_option( 'pps_tooltips', $clean, false );
+    pps_purge_page_cache();
     wp_send_json_success( 'Saved ' . count( $clean ) . ' tooltips.' );
 } );
 
