@@ -253,6 +253,17 @@ PPS React calculators and the legacy WCPA plugin run side-by-side on the same Wo
 - **Pages source branch:** `pps-pricing-config` — GitHub Pages serves directly from the root of this branch. All calculator changes must be pushed here. No separate deploy step.
 - **`.nojekyll` is MANDATORY** on `pps-pricing-config`. Without it, Pages runs Jekyll, which silently breaks the build because the inline JSX/Babel inside the calculator HTML contains `{{ }}` that Jekyll tries to parse as Liquid templates. Symptom: your pushes never appear on the preview URL even though the file on GitHub looks correct. **Never delete `.nojekyll`.**
 - **Never write a literal `</script>` inside the `<script type="text/babel">` block** — not even inside a JS string, template literal, or JSX prop. The HTML parser scans script content byte-by-byte and closes the outer block at the first `</script>` it sees, regardless of JS quoting. Symptom is identical to the Jekyll one (build stamp updates but the page renders as a wall of source text), so it gets misdiagnosed. The canonical fix is escape it as `<\/script>` — JavaScript treats `\/` as `/` at runtime so any HTML you generate still serializes cleanly, but the HTML parser's close-tag matcher misses the backslashed form. This bit me on 2026-05-08 in the `buildPreviewHtml` template literal; if you embed HTML strings that contain `</script></body></html>` (e.g. self-contained downloadable HTML), always backslash the slash. Same rule applies for any future HTML-builder helper.
+- **Calculators publish COMPILED (2026-08-10).** `node tools-compile-calcs.mjs`
+  transpiles each calculator's inline JSX (`@babel/preset-react`) into `dist/`
+  (gitignored) and strips the Babel Standalone include. **Publish branches and
+  staging `_pending_html` deploys carry the `dist/` output** under the same
+  filenames; the integration branch keeps JSX source. QA measured the
+  in-browser transpile at ~5–6s of main-thread blocking per page load; compiled
+  pages go interactive in ~0.2–0.4s (93–96% faster, pricing parity verified).
+  Never edit a compiled file (its script block opens with a DO-NOT-EDIT
+  marker) — edit the source and rebuild. The `</script>`-inside-Babel rule
+  below still applies to SOURCE, and the tool refuses to emit any output that
+  contains a literal close tag.
 - Do NOT push to `website` — it's unrelated to the preview.
 - **Preview URLs** (served by GitHub Pages from `pps-pricing-config`):
   - https://pdevvle.github.io/priorityprintservice.com/calc-preview-test.html (saddle stitch)
