@@ -5,9 +5,10 @@ rules bind.** Then skim `docs/GO_LIVE_RUNBOOK.md` (the Gate 1 warning box, the
 §D-results block, and the resolved Phase 0 verdicts) and
 `docs/CATEGORY_ATTRIBUTES_MIGRATION.md`.
 
-Repo state: everything from that session is on **`claude/shop-category-reorg-mn1kl1`**
-(open draft **PR #45**), branched from the integration branch
-`claude/optimistic-wozniak-11ql3y`.
+Repo state: **PR #45 is merged** — that session's work is on the integration
+branch `claude/optimistic-wozniak-11ql3y`, along with `922b463` (v1.8.0) which a
+later session added on top. Follow-up work restarts `claude/shop-category-reorg-mn1kl1`
+from the integration branch head.
 
 ---
 
@@ -41,10 +42,12 @@ Repo state: everything from that session is on **`claude/shop-category-reorg-mn1
   customer addresses are in the order data now. Do not un-mute.
 - **Uploads cleaned:** 46,750 files / 81,078 MB → 25,695 / 35,498 MB, i.e.
   **45,580 MB freed**. Details and the mtime caveat in the runbook §D-results.
-- **MCP tools v1.7.0** is deployed to staging: `pps_uploads_list_files`,
+- **MCP tools v1.8.0** is deployed to staging (as of 2026-08-10 05:08, pinned to
+  `922b463`, 71,633 bytes — repo and server agree): `pps_uploads_list_files`,
   `pps_uploads_delete_file`, `pps_uploads_delete_batch`, plus retention
   (`pps_uploads_retention_get` / `_set` / `_run_now`). Source is
-  `priority-print-mcp.php` in the repo.
+  `priority-print-mcp.php` in the repo. **Production is still on whatever it had —
+  these tools have never been deployed there.**
 - **Retention cron is OFF by owner decision** — on-demand only. Directory and
   threshold stay configured (`wcpa_uploads`, 730 days). Do not enable it.
 - **Category reorg is deployed** and all nine term descriptions migrated to
@@ -103,6 +106,24 @@ archives) and nothing in the PPS codebase reads legacy artwork — verified:
 reorder re-adds the product with the frozen `pps_legacy_unit_price`. Worst case
 is a dead link in an old order view. Current-order artwork lives in Drive.
 
+**Blocked by a tooling gap, found 2026-08-10 while attempting this.**
+`woo_get_order` returns id/status/total/currency/dates/billing/shipping/
+payment_method/line_items/notes — and **no order meta or line-item meta**. So
+`_pps_artwork_path`, `_pps_artwork_files`, `_pps_artwork_on_drive`, `_pps_summary`
+and the `PPS-Spec` string are **not readable with current tooling**, and under HPOS
+they live in `wp_wc_orders_meta`, which `wp_get_post_meta` cannot reach either.
+Doing this task needs a small read-only addition to `priority-print-mcp.php` — e.g.
+a `woo_get_order_meta` tool, or a `meta` field on `woo_get_order` (the class
+already has a `flatten_meta()` helper). Owner sanction pending.
+
+**The artwork worry behind this task is already answered, though**, and does not
+need the meta: the cleanup only removed files whose mtime predated the 2024-10-01
+migration stamp, so everything remaining has a genuine mtime from Oct 2024 onward.
+Artwork uploaded with any 2025–2026 order was written after the migration and was
+never in the delete set. Exposure is confined to orders whose art was uploaded
+before Sept 2024 — ≥ ~23 months old, long closed, and covered by the owner's
+offline archives.
+
 ### D. Close Gate 1 on production (read-only, four calls)
 
 Still unverified because the production connector never held. When it does:
@@ -110,10 +131,29 @@ Still unverified because the production connector never held. When it does:
 `woocommerce_custom_orders_table_enabled`, `..._data_sync_enabled` (owner says
 now off — confirm), and `blog_public`. **Read-only. Do not write to production.**
 
-### E. Fix three defects in the v1.7.0 retention code before it reaches production
+Retried 2026-08-10 05:08: the `PPS_Production` connector was still absent
+(searched by exact name and by keyword). It has appeared and dropped ~6 times
+across two sessions and has never stayed up long enough to load a schema. A fresh
+chat is the better bet than toggling.
 
-Found by running it for real. None risks data loss; all three produce confusing
-logs or slow runs:
+### E. ✅ DONE — three retention defects fixed and deployed
+
+Fixed in **`922b463` (v1.8.0)** and **deployed to staging 2026-08-10 05:08**,
+pinned to that commit: 71,633 bytes written, matching the repo blob exactly.
+Staging and repo HEAD now agree on `priority-print-mcp.php`.
+
+Reviewed before deploying (it is code that deletes customer files): the lock uses
+`try/finally` so it releases on exception and self-expires against a fatal; the
+skip reason re-checks `file_exists()` after a failed unlink, which is the right
+discriminator; and the prefetch normalises paths identically when building the set
+and when looking up. `php -l` clean, verified independently.
+
+Post-deploy test: two sequential dry runs both proceeded — the second would have
+been refused if `finally` had failed to release the lock — and `expired_count: 0`
+across 2,447 files confirms the post-cleanup state (everything left in
+`wcpa_uploads` now has a true mtime under 730 days).
+
+Original defect list, for the record:
 
 1. **No concurrency guard.** A client-side 60s timeout does not stop the PHP run —
    it keeps deleting. Starting another run races the first. Add a transient lock
