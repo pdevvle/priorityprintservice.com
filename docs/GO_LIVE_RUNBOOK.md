@@ -569,11 +569,14 @@ be production-configured before the button is pressed:
    - [ ] Flush permalinks (`Settings → Permalinks → Save`) — the preset URLs
          register per-slug rewrite rules and need it.
    - [ ] Clear caches (WP Rocket tables pushed stale — purge; object cache).
-   - [ ] **Search the production DB for the staging domain.** Cloudways'
+   - [ ] **Run `docs/POST_PUSH_PATCHWORK_BRIEF.md` (Mode B).** Cloudways'
          push search-replace rewrites URLs but NOT email addresses, so
          `office@`/`orders@` mailboxes come across mangled to
          `…@woocommerce-70867-4915293.cloudwaysapps.com` (see the 2026-08-10
-         aftercare record at the end of this file for the exact spots it hit).
+         aftercare record at the end of this file for the exact spots it
+         hit). The brief is the executable version of that record — hand it
+         to a fresh session with the production connector; its Mode A is
+         the pre-push staging fix that prevents the leak at the source.
    - [ ] Open 3 recent real orders — intact. Admin order list count sane.
    - [ ] **Place a real test order end-to-end** (then refund it): proves
          checkout, payment in live mode, new order ID mints ABOVE the copied
