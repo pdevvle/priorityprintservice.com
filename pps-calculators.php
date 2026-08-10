@@ -2189,6 +2189,11 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
     if ( ! isset( $cart_item['pps_summary'] ) || ! is_array( $data ) ) return $data;
     return array_values( array_filter( $data, function( $row ) {
         if ( ! is_array( $row ) ) return true;
+        // Any WCPA row is foreign on a PPS item (systems never share products) —
+        // including the literal 'wcpa_empty_label' placeholder keys the blocks
+        // checkout surfaced. Kill by key prefix, then kill anything valueless.
+        $key = strtolower( trim( (string) ( $row['key'] ?? ( $row['name'] ?? '' ) ) ) );
+        if ( strpos( $key, 'wcpa' ) === 0 ) return false;
         $value   = trim( (string) ( $row['value'] ?? '' ) );
         $display = trim( wp_strip_all_tags( (string) ( $row['display'] ?? '' ) ) );
         return $value !== '' || $display !== '';
