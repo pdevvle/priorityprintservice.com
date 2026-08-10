@@ -37,6 +37,8 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `docs/MASTER_PRICING_LOGIC.md` | Single source of truth for pricing strategy, applied values, rollback notes, knob-tuning patterns. **Read before suggesting any formula change.** |
 | `docs/PRICING_MATRIX.md` + `docs/pricing-matrix.json` | Captured output: what all 8 calculators actually quote across size, paper and page count (1,816 points), read from the rendered UI rather than the constants. Reference *and* regression gate — re-run before/after any pricing or styling port and diff. Regenerate with `tools-pricing-matrix.mjs`. |
 | `ups-zone-map-seed.json` | UPS Ground transit days by 3-digit ZIP prefix (1000 entries) |
+| `docs/GO_LIVE_RUNBOOK.md` | The 3.0 go-live: staging de-bloat (Phase 0), selective order-table pull live→staging, freeze-window sequence, auto-increment fix, staging→production push, verification. HPOS confirmed on live. **Read before any go-live or cross-site DB work.** |
+| `docs/PPS_3.1_WC11_PLAN.md` | **The release after go-live**: WooCommerce 11 + Action Scheduler 4.0 update for both sites, compatibility test matrix (Drive/AS artwork pipeline is the top risk), default-on feature postures (POS, abandoned-cart stays OFF), hardening riders. Binding rule it carries: **version freeze — no WC/WP/plugin updates on either site during the go-live window**; WC 11 lands in 3.1, both sites together. |
 | `pps-theme/` | Custom WordPress theme replacing Astra Pro — owns site chrome, typography, color tokens, WooCommerce shell. Stays out of the calculator plugin's way. `pps-theme/preview.html` is a Pages-served standalone preview of the header. |
 
 ## Shared Components (in each calculator HTML)
