@@ -2180,6 +2180,21 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
     return $data;
 }, 10, 2 );
 
+// WCPA (still active for non-registry products) also filters this hook and
+// emits its form-field labels — valueless — on registry products it does not
+// own ("Booklet Finished Size:", "Insides Print Color:", …). Scrub
+// empty-valued rows off PPS items late, after every plugin has added its
+// rows. WCPA-owned products are untouched: they carry no pps_summary.
+add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
+    if ( ! isset( $cart_item['pps_summary'] ) || ! is_array( $data ) ) return $data;
+    return array_values( array_filter( $data, function( $row ) {
+        if ( ! is_array( $row ) ) return true;
+        $value   = trim( (string) ( $row['value'] ?? '' ) );
+        $display = trim( wp_strip_all_tags( (string) ( $row['display'] ?? '' ) ) );
+        return $value !== '' || $display !== '';
+    } ) );
+}, 999, 2 );
+
 // ═══════════════════════════════════════════════════════════════
 // CART & CHECKOUT: SKIN
 // ═══════════════════════════════════════════════════════════════
