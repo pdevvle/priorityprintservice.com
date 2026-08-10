@@ -10,6 +10,29 @@
 > audit is on the pre-push checklist (owner acknowledged). §2D was attempted
 > from the integration session; the read call awaits owner approval. §§2A/B/C
 > and §1 remain open exactly as written.
+>
+> **Addendum 2 (same day, post caching-QA):** the QA-2 fixes are committed and
+> the staging deploy set is now, all pinned:
+> 1. **PHP @ integration-branch HEAD**: `pps-calculators.php` (billing-mirror
+>    prefill, `/pps/v1/nonces` endpoint, cache-purge helper+hooks),
+>    `pps-config-admin.php` (purge on config save), `pps-presets-admin.php`
+>    (purge on preset save), `pps-reorder.php` (shipAddr stripped from URL
+>    payloads), `priority-print-mcp.php` (v1.8.0).
+> 2. **Calculators: deploy the COMPILED files from `pps-pricing-config`**
+>    (commit `2df6543`), NOT the integration branch — calculators now publish
+>    precompiled (no in-browser Babel; see CLAUDE.md Branch & Deploy). Raw
+>    URLs: `raw.githubusercontent.com/pdevvle/priorityprintservice.com/2df6543/calc-*.html`
+>    → `pps-calculators/_pending_html/`.
+> 3. After deploy: QA's freeze retest (§2B) should now pass on the calculator
+>    side even before the owner's Rocket/New Relic changes — the ~5.4s
+>    main-thread Babel transpile QA measured is gone from compiled pages
+>    (93–96% faster interactive, parity-verified). Rocket/NR remain worth
+>    doing for cart/checkout and console hygiene.
+> 4. Still data-side, unassigned: per-product PPS Defaults seeding (QA-2 #1 —
+>    every booklet opens generic 5.5×8.5; Square/8×8/Trifold products need
+>    their defaults set in the product meta box or via connector post-meta),
+>    and catalog "from" prices (QA-2 #2 — $50/$88 placeholders vs real
+>    defaults). Owner decides the prices; either party can key them in.
 
 Written 2026-08-10 at the end of a long session. **Read `CLAUDE.md` first — its
 rules bind.** Then skim `docs/GO_LIVE_RUNBOOK.md` (the Gate 1 warning box, the
