@@ -1,5 +1,16 @@
 # Brief — post-QA staging state, owner-gated items, and the 3.0 retest gate
 
+> **Addendum 2026-08-10 (integration session):** §E is DONE — shipped as MCP
+> tools **v1.8.0** in `priority-print-mcp.php` @ `922b463` on
+> `claude/optimistic-wozniak-11ql3y` (this branch was merged there; that branch
+> is now the one to deploy from). **Pending: deploy v1.8.0 to staging** as a
+> pinned-commit `pps_plugin_download_url`. §3 is DECIDED — owner confirmed the
+> wholesale push (2026-08-10); the stale posts-mirror cleanup is now a REQUIRED
+> pre-push step with exact SQL in `docs/GO_LIVE_RUNBOOK.md`, and the §4 admin
+> audit is on the pre-push checklist (owner acknowledged). §2D was attempted
+> from the integration session; the read call awaits owner approval. §§2A/B/C
+> and §1 remain open exactly as written.
+
 Written 2026-08-10 at the end of a long session. **Read `CLAUDE.md` first — its
 rules bind.** Then skim `docs/GO_LIVE_RUNBOOK.md` (the Gate 1 warning box, the
 §D-results block, and the resolved Phase 0 verdicts) and

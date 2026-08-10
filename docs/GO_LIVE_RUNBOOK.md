@@ -497,11 +497,46 @@ Cheap insurance; skipping it is how the first post-launch order fails.
 
 ---
 
+## Decision record — push confirmed (owner, 2026-08-10)
+
+The "push vs forward-deploy" question raised in
+`docs/NEXT_SESSION_BRIEF_2026-08-10.md` §3 is resolved: **the wholesale
+staging → production push stays the plan of record.** That makes the stale
+posts-mirror cleanup below a REQUIRED pre-push step, not an optional tidy-up.
+
 ## Pre-push checklist (on staging, during the freeze)
 
 The push sends staging's `wp_options` and files to production, so staging must
 be production-configured before the button is pressed:
 
+- [ ] **Stale posts-mirror orders cleared (REQUIRED — owner-side SQL).**
+      Staging's `wp_posts` still holds ~4,015 `shop_order` + 161
+      `shop_order_refund` rows from the legacy/sync era. Inert on staging now
+      that HPOS is authoritative and compat sync is off — but a whole-database
+      push sends them to production as phantom orders beside the real HPOS
+      ones. In Cloudways DB manager, after the backup, with sync confirmed OFF:
+      ```sql
+      -- sanity: expect ~4,176 total
+      SELECT post_type, COUNT(*) FROM wp_posts
+        WHERE post_type IN ('shop_order','shop_order_refund') GROUP BY post_type;
+      -- their meta first, then the rows
+      DELETE pm FROM wp_postmeta pm JOIN wp_posts p ON p.ID = pm.post_id
+        WHERE p.post_type IN ('shop_order','shop_order_refund');
+      DELETE FROM wp_posts
+        WHERE post_type IN ('shop_order','shop_order_refund');
+      ```
+      Do NOT touch `shop_order_placehold` rows if any exist (they reserve HPOS
+      order IDs). Afterwards re-check `wp_posts` AUTO_INCREMENT is still
+      ≥ 86,971 (deleting rows must not lower it; if a tool "optimized" it,
+      re-run the ALTER from the auto-increment section). Order notes for the
+      stale orders need no cleanup — `wp_comments` was replaced by the pull.
+- [ ] **Administrator audit on BOTH sites (owner).** Staging shows 16
+      administrators, including `fake_admin`, an unrecognised gmail at an
+      adjacent ID, and vendor accounts for plugins that no longer exist
+      (CmsMart/NBDesigner, unicpo, AcoWebs). Staging is a clone, so production
+      almost certainly matches. Delete or demote everyone you can't name
+      before the push (and treat production's copy of this list as a live
+      security question today, not a go-live question).
 - [ ] **Search engines**: `Settings → Reading` — "Discourage search engines"
       must be OFF (`blog_public = 1`). Pushing a noindexed options table to
       production is an SEO catastrophe.

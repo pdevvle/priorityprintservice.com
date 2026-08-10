@@ -1,5 +1,15 @@
 # Brief — deploy the QA-round fixes to staging + apply the freeze-cluster config
 
+> **Superseded 2026-08-10** by `docs/NEXT_SESSION_BRIEF_2026-08-10.md`. Task 1
+> was executed (deploy archives `2026-08-10-0200*`). Task 2's write-hazard
+> analysis is outdated: the array round-trip is safe in MCP tools ≥ v1.7.0, but
+> `wp_rocket_settings` is still **owner-UI only** for a different reason — the
+> license `consumer_key` reads back masked (`********`), so any
+> read-modify-write risks storing asterisks over the real key, and the
+> lazy-render toggle has no option key at all. Tasks 3–4 remain open,
+> owner-side preferred. Do not execute this file's instructions; read the newer
+> brief.
+
 For a session with the **PPS_STAGING_AI_ENGINE** connector. Everything is
 committed on `claude/optimistic-wozniak-11ql3y`; deploy pinned to commit
 **`4012e8f4f7ac1ffe66968d6afbafc931035d3af9`**. Read CLAUDE.md first — its
