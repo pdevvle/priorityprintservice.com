@@ -3,7 +3,7 @@
  * Plugin Name: Priority Print MCP Tools
  * Plugin URI:  https://woocommerce-70867-4915293.cloudwaysapps.com/
  * Description: Companion plugin for AI Engine that adds custom WooCommerce, theme, plugin file management, uploads cleanup, WordPress update, and URL-download tools to the MCP server.
- * Version:     1.8.0
+ * Version:     1.9.0
  * Author:      Preston / Priority Print Service
  * License:     GPL v2 or later
  * Requires PHP: 8.0
@@ -154,6 +154,19 @@ class Priority_Print_MCP {
 					'type'       => 'object',
 					'properties' => array(
 						'order_id' => array( 'type' => 'integer', 'description' => 'The WooCommerce order ID.' ),
+					),
+					'required' => array( 'order_id' ),
+				),
+			),
+
+			self::PREFIX . 'woo_get_order_meta' => array(
+				'name'        => self::PREFIX . 'woo_get_order_meta',
+				'description' => 'Read-only: all meta on a WooCommerce order (HPOS wp_wc_orders_meta included) plus per-line-item meta. Built to verify PPS data (PPS-Spec, _pps_artwork_*, _pps_summary) on orders, which woo_get_order and wp_get_post_meta cannot reach. Optionally filter by key prefix.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'order_id'   => array( 'type' => 'integer', 'description' => 'The WooCommerce order ID.' ),
+						'key_prefix' => array( 'type' => 'string', 'description' => 'Optional. Only return meta whose key starts with this (e.g. "_pps" or "PPS").' ),
 					),
 					'required' => array( 'order_id' ),
 				),
@@ -420,6 +433,7 @@ class Priority_Print_MCP {
 				$name === self::PREFIX . 'plugin_read_file'  ||
 				$name === self::PREFIX . 'uploads_list_files' ||
 				$name === self::PREFIX . 'uploads_retention_get' ||
+				$name === self::PREFIX . 'woo_get_order_meta' ||
 				$name === self::PREFIX . 'wp_check_updates'  ||
 				$name === self::PREFIX . 'wp_get_plugin_versions'
 			);
@@ -468,6 +482,7 @@ class Priority_Print_MCP {
 				case self::PREFIX . 'woo_get_category':        $data = $this->woo_get_category( $args ); break;
 				case self::PREFIX . 'woo_list_orders':         $data = $this->woo_list_orders( $args ); break;
 				case self::PREFIX . 'woo_get_order':           $data = $this->woo_get_order( $args ); break;
+				case self::PREFIX . 'woo_get_order_meta':      $data = $this->woo_get_order_meta( $args ); break;
 				case self::PREFIX . 'woo_update_order_status': $data = $this->woo_update_order_status( $args ); break;
 				case self::PREFIX . 'woo_add_order_note':      $data = $this->woo_add_order_note( $args ); break;
 				case self::PREFIX . 'theme_list_files':        $data = $this->theme_list_files( $args ); break;
@@ -633,6 +648,46 @@ class Priority_Print_MCP {
 			);
 		}
 		return array( 'count' => count( $rows ), 'orders' => $rows );
+	}
+
+	/**
+	 * Read-only order meta, order-level and per-line-item. Exists because
+	 * woo_get_order returns no meta and wp_get_post_meta cannot reach the HPOS
+	 * wp_wc_orders_meta store — which made PPS-Spec/_pps_* verification on the
+	 * production orders pulled to staging impossible (DEPLOY_QA_FIXES_REPORT).
+	 */
+	private function woo_get_order_meta( array $args ) : array {
+		$this->require_woo();
+		if ( empty( $args['order_id'] ) ) throw new Exception( 'order_id is required.' );
+		$order = wc_get_order( (int) $args['order_id'] );
+		if ( ! $order ) throw new Exception( 'Order not found.' );
+
+		$prefix = isset( $args['key_prefix'] ) ? (string) $args['key_prefix'] : '';
+		$keep   = function ( array $meta ) use ( $prefix ) : array {
+			if ( $prefix === '' ) return $meta;
+			return array_filter( $meta, function ( $k ) use ( $prefix ) {
+				return strpos( (string) $k, $prefix ) === 0;
+			}, ARRAY_FILTER_USE_KEY );
+		};
+
+		$items = array();
+		foreach ( $order->get_items() as $item_id => $item ) {
+			$m = $keep( $this->flatten_meta( $item->get_meta_data() ) );
+			if ( ! empty( $m ) ) {
+				$items[] = array(
+					'item_id' => (int) $item_id,
+					'name'    => $item->get_name(),
+					'meta'    => $m,
+				);
+			}
+		}
+
+		return array(
+			'order_id'   => (int) $args['order_id'],
+			'status'     => $order->get_status(),
+			'order_meta' => $keep( $this->flatten_meta( $order->get_meta_data() ) ),
+			'line_items' => $items,
+		);
 	}
 
 	private function woo_get_order( array $args ) : array {
