@@ -123,6 +123,12 @@ if ( file_exists( PPS_CALC_DIR . 'pps-shippo-test.php' )
     require_once PPS_CALC_DIR . 'pps-shippo-test.php';
 }
 
+// Single-source product-family facts + homepage card shortcodes.
+// Guarded so this file deploys safely ahead of (or without) that one.
+if ( file_exists( PPS_CALC_DIR . 'pps-featured-cards.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-featured-cards.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════

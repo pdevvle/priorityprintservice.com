@@ -772,3 +772,17 @@ Astra Site Builder post type a plain post search misses.
   row (letterhead) on BOTH sites — the preset system is built but content
   rows were never populated. One preset rule in `rewrite_rules` is the
   correct count. Populating presets is day-2 work.
+
+### 5. Stale sibling-plugin files on both servers (found 2026-08-11)
+
+The Phase-1 deploy list carried only five PHP files, so every OTHER
+`pps-*.php` sibling in the plugin folder is still running whatever the last
+ad-hoc deploy left there. Confirmed drifted (server bytes vs repo HEAD):
+`pps-term-shortcodes.php` 138,932 vs 126,426 — the server runs commit
+`6463954`'s copy, predating the category/shop restyle refactors — and
+`pps-html-deploy.php` 10,971 vs 10,748. Both server copies ARE versioned
+(no un-versioned edits to rescue), but the HEAD pairing with the deployed
+`pps-calculators.php` has never run on a server. Upgrade them deliberately,
+staging first, with a category-page eyeball before production. Future
+deploys: diff the whole sibling set against the repo, not just the files
+you remember changing.
