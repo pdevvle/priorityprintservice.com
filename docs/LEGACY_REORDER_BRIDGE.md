@@ -1,5 +1,9 @@
 # Legacy reorder bridge — design
 
+> Part of a larger pattern — see `docs/ORDER_INGEST_ARCHITECTURE.md`, which
+> generalises this envelope to orders placed outside WooCommerce entirely
+> (QuickBooks invoices, phone orders). Same envelope, same reorder payoff.
+
 **Problem.** A WCPA-era order line whose product was retired from the 3.0
 catalog cannot be reordered: there is no product row to add to the cart, and
 no calculator that owns it. Today those cards render with a disabled action
