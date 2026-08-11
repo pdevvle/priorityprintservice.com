@@ -151,13 +151,13 @@ function pps_render_pps_item_card( $item, $order ) {
     $metadata_json = $item->get_meta( '_pps_metadata' );
     $is_pps = (bool) $metadata_json;
 
-    // Legacy (WCPA-era) fallback: skip cards for items whose product is gone
-    if ( ! $is_pps ) {
-        $product = wc_get_product( $item->get_product_id() );
-        if ( ! $product || ! $product->exists() ) return '';
-    } else {
-        $product = wc_get_product( $item->get_product_id() );
-    }
+    // Legacy (WCPA-era) items may point at a product retired in the 3.0
+    // catalog. Render the card anyway — silently skipping it made a
+    // customer's whole history "yield nothing" — but withhold the one-click
+    // reorder and route them to Contact Us, which already carries the
+    // order/item/specs payload for a manual re-quote.
+    $product      = wc_get_product( $item->get_product_id() );
+    $product_gone = ( ! $product || ! $product->exists() );
 
     $product_url = ( $product && $product->exists() ) ? $product->get_permalink() : '';
 
@@ -166,7 +166,7 @@ function pps_render_pps_item_card( $item, $order ) {
     $thumb_name      = $is_pps ? (string) $item->get_meta( '_pps_artwork_thumb' ) : '';
     $rush            = $is_pps ? (float) $item->get_meta( '_pps_rush' ) : 0;
     $reorder         = $is_pps ? pps_build_reorder_url( $item ) : '';
-    $legacy_reorder  = $is_pps ? '' : pps_build_single_item_reorder_url( $order, $item );
+    $legacy_reorder  = ( $is_pps || $product_gone ) ? '' : pps_build_single_item_reorder_url( $order, $item );
     // Pass '_' to filter underscore-prefixed (internal) meta keys per WP/WC
     // convention. Empty string previously disabled the filter and exposed
     // internal keys like _pi_item_min_preparation_days to the customer.
@@ -271,6 +271,8 @@ function pps_render_pps_item_card( $item, $order ) {
                 <a href="<?php echo esc_url( $reorder ); ?>" class="btn btn-primary">Reorder</a>
             <?php elseif ( $legacy_reorder ) : ?>
                 <a href="<?php echo esc_url( $legacy_reorder ); ?>" class="btn btn-primary">Reorder (same as before)</a>
+            <?php elseif ( $product_gone ) : ?>
+                <button type="button" class="btn btn-ghost" disabled style="opacity:.6;cursor:not-allowed" title="This product was retired from the online catalog — use Contact Us and we'll re-quote it.">No longer sold online</button>
             <?php endif; ?>
             <?php
             $contact_data = array(
