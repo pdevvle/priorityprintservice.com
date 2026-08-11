@@ -129,7 +129,24 @@ def process(path, args):
     im = Image.open(path)
     src_size, src_mode = im.size, im.mode
 
-    im = ImageOps.exif_transpose(im)  # bake in rotation before discarding EXIF
+    # Honour the EXIF orientation tag, then discard it — but the tag is not always
+    # telling the truth. Share sheets and upload pipelines routinely bake the
+    # rotation into the pixels and leave the stale tag behind, so obeying it puts an
+    # already-correct photo on its side. Auto-rotate stays the default because it is
+    # right far more often than not; --no-auto-rotate and --rotate cover the liars.
+    # Any rotation is reported so it gets eyeballed rather than assumed.
+    orientation = im.getexif().get(274, 1)
+    rotation_note = ""
+    if args.rotate:
+        im = im.rotate(-args.rotate, expand=True)  # positive arg = clockwise
+        rotation_note = f"manually rotated {args.rotate}deg CW"
+    elif args.no_auto_rotate:
+        if orientation not in (0, 1):
+            rotation_note = f"exif orientation {orientation} IGNORED"
+    elif orientation not in (0, 1):
+        im = ImageOps.exif_transpose(im)
+        rotation_note = f"auto-rotated (exif orientation {orientation})"
+
     im, note = to_srgb(im)
 
     alpha = has_alpha(im)
@@ -182,6 +199,7 @@ def process(path, args):
         "out_size": list(im.size),
         "saved_pct": round(100 - 100 * os.path.getsize(primary) / orig_bytes, 1),
         "colour_note": note,
+        "rotation_note": rotation_note,
         "alpha": alpha,
         "grew": grew,
         # Filled in per job — the pipeline cleans pixels, a human or a vision pass
@@ -199,6 +217,10 @@ def main():
     ap.add_argument("--webp", action="store_true")
     ap.add_argument("--out", default="media-out")
     ap.add_argument("--prefix", default="")
+    ap.add_argument("--no-auto-rotate", action="store_true",
+                    help="ignore the EXIF orientation tag (use when it is stale/lying)")
+    ap.add_argument("--rotate", type=int, choices=[90, 180, 270], default=None,
+                    help="rotate this many degrees clockwise; overrides EXIF entirely")
     args = ap.parse_args()
 
     files = []
@@ -225,7 +247,7 @@ def main():
                              for o in r["outputs"])
             pct = r["saved_pct"]
             delta = f"{pct:.1f}% smaller" if pct >= 0 else f"{-pct:.1f}% LARGER"
-            notes = [n for n in (r["colour_note"],
+            notes = [n for n in (r["rotation_note"], r["colour_note"],
                                  "kept clean copy despite growth" if r["grew"] else "") if n]
             flag = f"  [{'; '.join(notes)}]" if notes else ""
             print(f"  {os.path.basename(f):<34} {r['source_bytes']/1024:>7.0f}KB -> {outs}"
