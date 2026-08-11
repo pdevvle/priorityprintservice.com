@@ -32,11 +32,22 @@
 #   --webp         also emit a .webp beside each file
 #   --out DIR      output directory                   (default ./media-out)
 #   --prefix S     slug prefix for output filenames
+#   --no-auto-rotate   ignore the EXIF orientation tag (use when it lies)
+#   --rotate N     rotate 90/180/270 clockwise; overrides EXIF entirely
+#   --copyright [S]    embed an ownership claim (bare flag uses the house default)
+#   --credit S     creator/Artist value; defaults to the copyright holder
+#
+# --copyright is not in tension with the metadata strip, because it runs after it:
+# everything is removed, then exactly two known fields are written back. That is
+# what lets a photo drop its GPS coordinates and still carry a rights claim. Note
+# that WordPress regenerates sub-sizes itself and does not necessarily copy these
+# fields onto them — the full-size file is the one that carries the claim.
 #
 # Never upscales: an image already under --max keeps its dimensions, because
 # inventing pixels to hit a target is worse than serving a smaller file.
 
 import argparse
+import datetime
 import io
 import json
 import os
@@ -45,12 +56,19 @@ import subprocess
 import sys
 
 try:
-    from PIL import Image, ImageCms, ImageOps
+    from PIL import Image, ImageCms, ImageOps, PngImagePlugin
 except ImportError:
     subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "pillow"], check=True)
-    from PIL import Image, ImageCms, ImageOps
+    from PIL import Image, ImageCms, ImageOps, PngImagePlugin
 
 Image.MAX_IMAGE_PIXELS = 400_000_000  # generous, but still a decompression-bomb guard
+
+# Spelled out rather than using "©" on purpose. EXIF Copyright/Artist are ASCII
+# fields: Pillow substitutes "?" for the symbol, so the shipped claim reads
+# "? 2026 Priority Print Service", which looks broken and is worse than none.
+# PNG tEXt is UTF-8 and would keep it, but a claim that differs by format is its
+# own trap, so the house default stays ASCII everywhere.
+DEFAULT_RIGHTS = f"Copyright {datetime.date.today().year} Priority Print Service"
 
 EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".gif"}
 SRGB = ImageCms.createProfile("sRGB")
@@ -114,13 +132,51 @@ FORMAT_FOR_EXT = {
 }
 
 
-def encode(im, fmt, path, quality):
+def exif_safe(text):
+    """Fold a rights string down to ASCII for EXIF's ASCII-only string fields.
+
+    Anything non-ASCII would otherwise be written as "?", so a caller who passes
+    "© 2026 Foo" gets "(c) 2026 Foo" rather than "? 2026 Foo". PNG text chunks are
+    UTF-8 and keep the original, so only the EXIF side is folded.
+    """
+    return (text.replace("©", "(c)").replace("℗", "(p)")
+                .replace("—", "-").replace("–", "-")
+                .encode("ascii", "ignore").decode("ascii").strip())
+
+
+def rights_tags(args):
+    """Build the only metadata we deliberately put back after stripping.
+
+    Order matters: this runs AFTER strip_metadata, never before. Stripping first
+    and re-adding a known-good pair is what lets us drop GPS while still shipping
+    an ownership claim — the two are not in tension, but only in that order.
+    """
+    if not args.copyright:
+        return None, None
+    holder = args.copyright
+    creator = args.credit or holder
+    exif = Image.Exif()
+    exif[0x8298] = exif_safe(holder)   # Copyright
+    exif[0x013B] = exif_safe(creator)  # Artist
+    png = PngImagePlugin.PngInfo()
+    png.add_text("Copyright", holder)
+    png.add_text("Author", creator)
+    return exif, png
+
+
+def encode(im, fmt, path, quality, exif=None, png=None):
     if fmt == "JPEG":
-        im.save(path, "JPEG", quality=quality, optimize=True, progressive=True, subsampling=2)
+        kw = {"quality": quality, "optimize": True, "progressive": True, "subsampling": 2}
+        if exif is not None:
+            kw["exif"] = exif.tobytes()
+        im.save(path, "JPEG", **kw)
     elif fmt == "PNG":
-        im.save(path, "PNG", optimize=True)
+        im.save(path, "PNG", optimize=True, pnginfo=png)
     else:
-        im.save(path, "WEBP", quality=quality, method=6)
+        kw = {"quality": quality, "method": 6}
+        if exif is not None:
+            kw["exif"] = exif.tobytes()
+        im.save(path, "WEBP", **kw)
     return os.path.getsize(path)
 
 
@@ -174,7 +230,8 @@ def process(path, args):
 
     outputs = []
     primary = os.path.join(args.out, slug + suffix)
-    encode(im, fmt, primary, args.quality)
+    exif_tags, png_tags = rights_tags(args)
+    encode(im, fmt, primary, args.quality, exif_tags, png_tags)
     outputs.append(primary)
 
     # Occasionally the cleaned file is LARGER than the source — typically a tiny,
@@ -188,7 +245,7 @@ def process(path, args):
     if args.webp:
         p = os.path.join(args.out, slug + ".webp")
         if p != primary:
-            encode(im, "WEBP", p, args.quality)
+            encode(im, "WEBP", p, args.quality, exif_tags, png_tags)
             outputs.append(p)
     return {
         "source": path,
@@ -200,6 +257,7 @@ def process(path, args):
         "saved_pct": round(100 - 100 * os.path.getsize(primary) / orig_bytes, 1),
         "colour_note": note,
         "rotation_note": rotation_note,
+        "rights": args.copyright or "",
         "alpha": alpha,
         "grew": grew,
         # Filled in per job — the pipeline cleans pixels, a human or a vision pass
@@ -221,6 +279,10 @@ def main():
                     help="ignore the EXIF orientation tag (use when it is stale/lying)")
     ap.add_argument("--rotate", type=int, choices=[90, 180, 270], default=None,
                     help="rotate this many degrees clockwise; overrides EXIF entirely")
+    ap.add_argument("--copyright", nargs="?", const=DEFAULT_RIGHTS, default=None,
+                    help=f"embed a copyright claim; bare flag uses \"{DEFAULT_RIGHTS}\"")
+    ap.add_argument("--credit", default=None,
+                    help="creator/Artist value; defaults to the copyright holder")
     args = ap.parse_args()
 
     files = []
