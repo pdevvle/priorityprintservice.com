@@ -199,6 +199,21 @@ Two upload paths that do work:
    `filename`. Costs roughly 135k tokens per 400 KB image, so it is a one-or-two-file
    option, not a batch one.
 
+**Adding an image to a product gallery needs a product re-save afterwards.** The gallery
+lives in `_product_image_gallery` as a comma-separated attachment-ID string, and
+`pps_woo_update_product` does not expose it — so it gets written with
+`wp_update_post_meta`. That updates the database but fires none of the hooks the caches
+listen for, and with WP Rocket and Object Cache Pro both active the front end keeps
+serving the old page. The database looks right, the page looks wrong, and it reads like
+the write failed. Follow the meta write with `pps_woo_update_product` passing the
+product's existing name — a content no-op that routes through `WC_Product::save()`,
+firing `save_post` so WooCommerce clears its product cache and WP Rocket purges the URL.
+Confirmed on product 22872 (2026-08-11): image invisible until the re-save, visible after.
+
+Do not attempt to verify the result by fetching the page — `priorityprintservice.com` is
+egress-blocked from the sandbox for both `curl` and WebFetch, exactly like the Cloudways
+host. Verify through the MCP tools and have the owner eyeball the page.
+
 Always set `alt` — the site carries a lot of SEO machinery and blank alt text wastes it.
 Verify with `get_media` (`context: edit`) after upload: `media_details.sizes` should list
 the generated sizes and `image_meta` should come back empty, which is the proof the strip
