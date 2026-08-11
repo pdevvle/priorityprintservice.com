@@ -158,6 +158,15 @@ window.ppsAnalyzePdfRisks = async function (doc) {
     --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
     --bp-btn:#0f151d; --bp-scrim:rgba(2,6,12,.66);
   }
+  /* The coupon's modal contents are authored in the dark design (hardcoded
+     white text/controls). Pin the modal's token scope to the dark palette in
+     every page theme so the shell always matches its contents — the light
+     shell rendered the title, close button and toggles white-on-white. */
+  .bp-modal-bg{
+    --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
+    --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
+    --bp-btn:#0f151d; --bp-scrim:rgba(2,6,12,.66);
+  }
   .bp-modal-bg{position:fixed;inset:0;background:var(--bp-scrim);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
   .bp-modal{background:var(--bp-surface);border:1px solid var(--bp-line);border-radius:16px;width:90%;max-width:940px;max-height:90vh;display:flex;flex-direction:column;overflow:visible;box-shadow:0 4px 6px rgba(16,24,40,.06), 0 24px 64px rgba(16,24,40,.28)}
   .bp-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--bp-line);flex-shrink:0;overflow:visible;border-radius:16px 16px 0 0;background:var(--bp-surface)}
@@ -4406,8 +4415,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                 <div>
                   <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>Book Preview</div>
                   <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
-                    {dims.w}″ × {dims.h}″ · {displayPages.length} pages · Perfect Bound
-                    {reconcileInfo?.type === "padded" && <InfoTip dark text={`Perfect bound booklets require an even page count. Your file has ${reconcileInfo.raw} pages, so ${reconcileInfo.count} blank page${reconcileInfo.count > 1 ? "s are" : " is"} added to reach ${reconcileInfo.target}.`}><span style={{ color: CK.yellow, marginLeft: 6 }}>({reconcileInfo.count} blank{reconcileInfo.count > 1 ? "s" : ""} added)</span></InfoTip>}
+                    {dims.w}″ × {dims.h}″ · {displayPages.length} pages · Coupon Book
+                    {reconcileInfo?.type === "padded" && <InfoTip dark text={`Coupon books are filled to your ordered page count. Your file has ${reconcileInfo.raw} pages, so ${reconcileInfo.count} blank page${reconcileInfo.count > 1 ? "s are" : " is"} added to reach ${reconcileInfo.target}.`}><span style={{ color: CK.yellow, marginLeft: 6 }}>({reconcileInfo.count} blank{reconcileInfo.count > 1 ? "s" : ""} added)</span></InfoTip>}
                   </div>
                 </div>
                 <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.5)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
