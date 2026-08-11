@@ -36,6 +36,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `docs/MASTER_PRICING_LOGIC.md` | Single source of truth for pricing strategy, applied values, rollback notes, knob-tuning patterns. **Read before suggesting any formula change.** |
 | `docs/PRICING_MATRIX.md` + `docs/pricing-matrix.json` | Captured output: what all 8 calculators actually quote across size, paper and page count (1,816 points), read from the rendered UI rather than the constants. Reference *and* regression gate — re-run before/after any pricing or styling port and diff. Regenerate with `tools-pricing-matrix.mjs`. |
 | `ups-zone-map-seed.json` | UPS Ground transit days by 3-digit ZIP prefix (1000 entries) |
+| `tools-media-prep.py` | Prep marketing photos for the WordPress media library: auto-rotate, convert to sRGB, cap the long edge, strip all metadata (phone photos carry GPS), minify, and rename to a WP-friendly slug. Output format mirrors input; alpha never goes to JPEG. Writes `manifest.json` with before/after sizes plus empty `title`/`alt` slots to fill per job. Defaults: 2000 px, q82. See "Photo rollout to the media library" below. |
 | `pps-theme/` | Custom WordPress theme replacing Astra Pro — owns site chrome, typography, color tokens, WooCommerce shell. Stays out of the calculator plugin's way. `pps-theme/preview.html` is a Pages-served standalone preview of the header. |
 | `designer/` | **Spike.** Print-first layout editor (Vite + React + TS) — the document *is* a product; press-PDF export with CMYK, bleed/trim boxes and subset font embedding. Unlike the calculators this is a real build, not a single inline-Babel HTML. `dist/` is committed for Pages. **Read `docs/DESIGNER_SPIKE.md` before touching it** — it records what's proven vs faked and the next steps in order. Run `cd designer && npm test` after any change to `src/export/pdf.ts`. |
 
@@ -172,6 +173,36 @@ PPS React calculators and the legacy WCPA plugin run side-by-side on the same Wo
 **Do NOT add WCPA-active product IDs to the PPS calculator registry** — that would route them through both systems simultaneously and likely double-bill or break the cart. WCPA products should not appear on any of: `pps_get_registry()` entries, `wp_options['pps_presets']` rows, or the "PPS Defaults" product meta box. WCPA products will not use the integrated Google Drive uploads or shipping/turnaround logic by design.
 
 **Every product assigned a PPS calculator MUST be a WooCommerce *virtual* product** (`_virtual` = `yes`, owner rule 2026-07-19). The calculator collects the shipping address itself and PPS owns shipping/turnaround; marking the product virtual keeps WooCommerce's own shipping machinery (and coexisting addon/shipping plugins) out of the cart/checkout for these items. Flipping `_virtual` is part of the registry-migration checklist — set it in the same change that adds the product ID to `pps_get_registry()`. All 34 registry products were flipped on staging 2026-07-19.
+
+## Photo rollout to the media library
+
+The owner uploads marketing photos into the chat; Claude preps them and files them in
+the WordPress media library. Run `tools-media-prep.py` first — the defaults are the
+house style, so don't hand-roll a one-off resize.
+
+**The sandbox cannot reach the WordPress host directly.** Outbound HTTPS goes through
+a policy proxy that answers 403 CONNECT for `*.cloudwaysapps.com`. This means the
+`wp_upload_request` tool's advertised flow — take the returned one-time URL and `curl -F`
+the file at it — **cannot work from here**, and the failure looks like a network glitch
+rather than a policy denial. Do not retry it and do not try to route around it. The MCP
+tools themselves reach WordPress over a separate channel and work fine.
+
+Two upload paths that do work:
+
+1. **WordPress pulls it** (default for batches). Commit the processed file to a branch,
+   then call `wp_upload_media` with the `raw.githubusercontent.com` URL pinned to the
+   commit SHA. WordPress downloads it server-side and generates all the responsive sizes
+   (including the WooCommerce ones). Remove the temp commit afterwards. The file is
+   briefly readable at a public URL — fine for marketing photos, reconsider for anything
+   customer-owned.
+2. **Base64 over MCP** (no public transit). `wp_upload_media` accepts `base64` +
+   `filename`. Costs roughly 135k tokens per 400 KB image, so it is a one-or-two-file
+   option, not a batch one.
+
+Always set `alt` — the site carries a lot of SEO machinery and blank alt text wastes it.
+Verify with `get_media` (`context: edit`) after upload: `media_details.sizes` should list
+the generated sizes and `image_meta` should come back empty, which is the proof the strip
+actually took.
 
 ## Branch & Deploy
 
