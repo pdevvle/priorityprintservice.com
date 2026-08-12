@@ -3609,7 +3609,7 @@ function Panel({ result, compact, debugUnlocked, expanded, onToggleExpand, coupo
           <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
           {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
         </div>
-        <div style={{fontSize:10,fontWeight:600,opacity:.62,marginTop:5,lineHeight:1.35}}>Includes all applicable taxes, fees, and shipping.</div>
+        <div style={{fontSize:10,fontWeight:600,opacity:.62,marginTop:5,lineHeight:1.35}}>Includes all applicable taxes, fees, and shipping.*</div>
         {_cpn&&(
           <div style={{marginTop:10,paddingTop:9,borderTop:`1px solid ${hasRush?"rgba(0,0,0,.15)":"rgba(255,255,255,.18)"}`}}>
             <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,fontSize:12.5,fontWeight:700}}>
@@ -3644,6 +3644,7 @@ function Panel({ result, compact, debugUnlocked, expanded, onToggleExpand, coupo
       {_hasExtra&&<div style={{padding:"5px 18px",borderBottom:`1px solid ${CC.border}`,background:"#fffbeb"}}>
         <div style={{fontSize:10.5,color:"#92400e",lineHeight:1.4}}>* +{Math.round(_extraDays)} day{Math.round(_extraDays)!==1?"s":""} due to {_factors.join(", ")}</div>
       </div>}
+      <div style={{padding:"6px 18px 8px",fontSize:9,lineHeight:1.4,color:CC.light,opacity:.85}}>*Printing bound for AK, HI, PR, VI, Guam, other U.S. territories, APO/FPO/DPO addresses, or non-U.S. destinations may carry additional shipping cost.</div>
       {debugUnlocked&&<details style={{borderTop:`1px solid ${CC.border}`,pointerEvents:"auto"}}><summary style={{padding:"10px 18px",fontSize:10.5,color:CC.light,cursor:"pointer",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>Line Items</summary>
         <div style={{padding:"0 18px 14px"}}>{bd.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
           <span style={{fontSize:11.5,color:CC.light}}>{r.l}</span>
