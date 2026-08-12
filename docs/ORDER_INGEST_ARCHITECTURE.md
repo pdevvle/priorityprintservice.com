@@ -227,31 +227,52 @@ Woo → invoice in QuickBooks → payment in QuickBooks → payment state writte
 back to Woo. Woo still holds the order and the specs; QuickBooks still holds
 the money.
 
-## First: check whether you already have most of this
+## Why: chargeback protection, not fees
 
-Production checkout currently offers **Card and US bank account** — Stripe
-ACH is already live. If the motivation for this feature is **card fees**,
-the comparison on a $3,000 order is:
+**Owner's motivation (clarified 2026-08-11):** these customers *want to pay
+by card*. Routing the payment through QuickBooks Payments is about availing
+the shop of QBO's chargeback protection on large card transactions. The
+higher processing cost is accepted deliberately — it buys transfer of
+dispute risk on the orders where a chargeback hurts most.
 
-| Method | Cost | Machinery needed |
-|---|---|---|
-| Stripe card | ~2.9% + 30¢ ≈ **$87** | none (today) |
-| Stripe ACH | 0.8% capped at **$5** | none (today — already enabled) |
-| QuickBooks ACH quick-pay | **$0–1%** | the whole pipeline below |
+That inverts the usual fee logic, so state it plainly: **this feature costs
+money on purpose.** A $3,000 card payment through QBO runs roughly $87–105
+in processing versus ~$5 on the Stripe ACH rail already at checkout. The
+premium is the insurance. (ACH remains the cheap option for customers who
+volunteer it, and is worth offering alongside — but it is not what this
+feature is for.)
 
-If fees are the driver, **defaulting high-value checkouts to the US bank
-account option already at checkout** captures nearly all of the saving for
-roughly none of the work — a checkout-side nudge, not an integration.
+### Verify the coverage before building on it
 
-The QuickBooks path is the right answer for a **different** need: customers
-who require an *invoice document* to pay — nonprofits, school districts,
-university chapters, anyone cutting a check against a PO or working on net
-terms. Several of the shop's customers look exactly like that. Those buyers
-cannot use a card checkout at all, regardless of fees.
+One caveat worth an email to Intuit before this gets built, because it
+decides whether the pipeline is worth it:
 
-**Decide which need is driving this**, because it changes the build. They
-are not exclusive — the honest answer may be "ACH nudge for everyone above
-$1,500, invoice path on request or for known institutional buyers."
+**Chargeback-protection programs generally cover _fraud_ disputes — stolen
+card, "I didn't authorize this" — and generally exclude "item not as
+described" and "item not received."** For a custom print shop, the second
+category is the likelier dispute: a customer unhappy with colour, trim, or
+turnaround. If QBO's protection excludes those, the pipeline transfers a
+risk you rarely face and leaves the one you actually face.
+
+Confirm with Intuit, in writing: which dispute reason codes are covered,
+whether coverage applies to **quick-pay links** or only to sent invoices,
+any per-transaction or annual cap, eligibility requirements, and what
+evidence the shop must retain. Terms change; do not build on a marketing
+page.
+
+### The defence you already own
+
+Independent of processor, the strongest chargeback evidence for custom print
+is the approval trail this system already produces: the proof modal's
+approval package — raw file, print-ready PDF, preview JPEGs with guides, and
+the manipulation manifest — plus timestamped customer approval and the
+PPS-Spec the job was produced against. That set answers "not as described"
+directly, which is the category protection programs usually decline.
+
+Worth ensuring those artifacts are retained beyond the uploads-retention
+window for orders above the invoice threshold — a dispute can arrive 60–120
+days after delivery, and the retention policy currently thins uploads on a
+schedule that predates this requirement.
 
 ## Checkout routing
 
@@ -296,22 +317,55 @@ auto-cancels `pending` orders after N minutes. An invoiced order waiting a
 week must be exempt — use `on-hold` (which is not auto-cancelled) rather
 than `pending`, and confirm the hold-stock minutes setting.
 
-## Flow
+## Flow — and why "email them a link" is the wrong default
+
+The customer is at checkout with a card in hand, ready to pay. Sending them
+away to wait for an email is where high-value orders get abandoned — they
+came to buy, and the site just told them to check their inbox. Since the
+goal is routing the *card* payment through QBO (not collecting a check), the
+design should keep the pay-now moment intact and simply move it to QBO's
+rail:
 
 1. Checkout above threshold → order created **`on-hold`**, payment method
-   "Invoice — QuickBooks", `_pps_payment_route = invoice`.
+   "Card — QuickBooks", `_pps_payment_route = qbo_card`.
 2. Artwork still uploads to Drive; PPS-Spec still written; production queue
    shows it as **awaiting payment**.
-3. Order → Make → QuickBooks: create invoice against the matched customer,
-   with the PPS spec summary in the line description and the Woo order
-   number in the memo.
-4. **Let QuickBooks send its own invoice email.** It carries the native
-   pay-now button, handles reminders, and keeps the payment experience in
-   the system that will record it. The site's "order received" email says
-   *"your invoice is on its way"* — never *"thanks for your payment."*
+3. Invoice created in QuickBooks against the matched customer — PPS spec
+   summary in the line description, Woo order number in the memo (that
+   number is also the loop guard).
+4. **Customer is handed straight to the QBO payment page** and pays by card
+   in the same session. The QuickBooks invoice email is the *fallback* — it
+   still goes, so an interrupted customer can finish later, and QBO handles
+   reminders.
 5. QuickBooks payment → Make → `POST /pps/v1/orders/payment` → order moves
-   to `processing`, delivery date recomputed, production start stamped,
-   customer gets the normal "in production" notice.
+   to `processing`, delivery date recomputed from the payment date,
+   production start stamped, customer gets the normal "in production" notice.
+
+### The transport tension this creates
+
+Step 4 wants the payment link *during* checkout, which conflicts with the
+async Make transport recommended for ingest. Three options:
+
+| Option | UX | Infrastructure |
+|---|---|---|
+| **A. Direct QBO API from PHP** | Best — instant redirect | Intuit developer app, OAuth2, token refresh, credential storage on the server |
+| **B. Make + interstitial** | Good — "preparing your secure payment link" page polls, auto-redirects when Make delivers (typically seconds) | None beyond the existing Make bus |
+| **C. Email only** | Worst for a card-in-hand customer | None |
+
+**Recommended: B.** It keeps the single Make transport, needs no OAuth app,
+and the interstitial reads as a normal payment step rather than a dead end.
+Escalate to A only if the observed wait proves too long. C stays as the
+fallback path inside B — if the link has not arrived in ~30 seconds, the
+page says the invoice is on its way by email and the order is safe.
+
+### Refunds move to QuickBooks
+
+An order paid through QBO cannot be refunded from the WooCommerce order
+screen — the money never touched Stripe. Woo's refund button on these
+orders would record a refund that never happens. Mark them clearly in
+admin ("Paid via QuickBooks — refund in QBO") and record the QBO refund
+back onto the Woo order through the same payment endpoint, so the order
+history stays truthful.
 
 ## The loop guard stops being hypothetical
 
@@ -334,7 +388,7 @@ important line in this document.
 | Key | Default | Meaning |
 |---|---|---|
 | `invoice_threshold` | 1500 | Order total at/above which invoicing engages |
-| `invoice_posture` | `preferred` | `preferred` \| `mandatory` |
+| `invoice_posture` | `mandatory` | `preferred` \| `mandatory` — mandatory is the point when the goal is dispute protection: leaving Stripe available means the risky orders keep landing on the unprotected rail |
 | `invoice_rush_bypass` | `true` | Rush orders stay on card |
 | `invoice_production_start` | `on_payment` | `on_payment` \| `on_order` (credit risk) |
 
