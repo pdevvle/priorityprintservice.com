@@ -3602,13 +3602,14 @@ function Panel({ result, compact, debugUnlocked, expanded, onToggleExpand, coupo
           states so the Add to Order button stays the loudest thing in the rail.
           Rush keeps its own colour — that's a state signal, not decoration. */}
       <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:CC.heroBg,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
-        <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol,marginBottom:6}}>{hasRush?"Rush Total":"Estimated Total"}</div>
+        <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol,marginBottom:6}}>{hasRush?"Rush · Grand Total":"Grand Total"}</div>
         <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
           {saleActive&&<span style={{fontSize:18,opacity:.55,textDecoration:"line-through",fontWeight:700,letterSpacing:"-.5px"}}>${totalWithoutSale.toFixed(2)}</span>}
           <span style={{fontSize:38,fontWeight:800,letterSpacing:"-1.5px"}}>${dD}</span>
           <span style={{fontSize:22,fontWeight:700,opacity:.7,letterSpacing:"-0.5px",marginLeft:-9}}>.{cD}</span>
           {saleActive&&<span style={{display:"inline-block",background:CK.magenta,color:"#fff",fontSize:11,fontWeight:800,letterSpacing:".5px",padding:"3px 8px",borderRadius:4,textTransform:"uppercase"}}>{saleLabel} · Save ${saleAmount.toFixed(2)}</span>}
         </div>
+        <div style={{fontSize:10,fontWeight:600,opacity:.62,marginTop:5,lineHeight:1.35}}>Includes all applicable taxes, fees, and shipping.</div>
         {_cpn&&(
           <div style={{marginTop:10,paddingTop:9,borderTop:`1px solid ${hasRush?"rgba(0,0,0,.15)":"rgba(255,255,255,.18)"}`}}>
             <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,fontSize:12.5,fontWeight:700}}>
