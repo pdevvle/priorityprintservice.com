@@ -93,8 +93,7 @@ as a pre-address placeholder, never as a committed date.
 The price card now reads *"Includes all applicable taxes, fees, and shipping."*
 Any AK/HI/territory surcharge must therefore be **inside** the quoted total. A
 checkout-added surcharge would make that line false. The rated amount flows
-through the same `shipping` object the engine already returns, with a config
-margin applied.
+through the same `shipping` object the engine already returns, at cost.
 
 ### 4. Config knobs (Central Config → Shipping)
 
