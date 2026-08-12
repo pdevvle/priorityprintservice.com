@@ -304,6 +304,66 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 
 // PRIORITY PRINT SERVICE — Postcard Calculator v1
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+// ── Defensive DOM guard ────────────────────────────────────────
+// Third-party scripts (translate widgets, chat bubbles) mutate our DOM and
+// make React's removeChild/insertBefore throw. Guarding keeps a foreign
+// mutation from taking the calculator down with it.
+(function(){
+  if (typeof Node !== "function" || !Node.prototype || Node.prototype.__ppsDomGuard) return;
+  Node.prototype.__ppsDomGuard = true;
+  const _removeChild = Node.prototype.removeChild;
+  Node.prototype.removeChild = function(child){
+    if (child && child.parentNode !== this) {
+      try { console.warn("[PPS calc] removeChild guard: node is not a child of the expected parent; skipping.", child); } catch(e){}
+      return child;
+    }
+    return _removeChild.apply(this, arguments);
+  };
+  const _insertBefore = Node.prototype.insertBefore;
+  Node.prototype.insertBefore = function(newNode, referenceNode){
+    if (referenceNode && referenceNode.parentNode !== this) {
+      try { console.warn("[PPS calc] insertBefore guard: reference node is not a child of the expected parent; appending instead.", referenceNode); } catch(e){}
+      return this.appendChild(newNode);
+    }
+    return _insertBefore.apply(this, arguments);
+  };
+})();
+
+// ── Error boundary ─────────────────────────────────────────────
+// Ported from calc-preview-test.html. Without this, ANY render-time throw
+// unmounts the whole tree and the customer sees a blank page where the
+// calculator was — reported 2026-08-12 after proof approval. A boundary
+// turns that into a recoverable message plus a console trace we can act on.
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state = { hasError:false, err:null }; }
+  static getDerivedStateFromError(err){ return { hasError:true, err:err }; }
+  componentDidCatch(err, info){
+    try { console.error("[PPS calc] render error caught by ErrorBoundary:", err, info); } catch(e){}
+  }
+  render(){
+    if(this.state.hasError){
+      const msg = (this.state.err && this.state.err.message) ? String(this.state.err.message) : "Unknown error";
+      return (
+        <div style={{maxWidth:520,margin:"48px auto",padding:"24px 26px",border:"1px solid #f0c0c0",borderRadius:8,background:"#fff6f6",fontFamily:"var(--pps-sans)",color:"#333",lineHeight:1.5}}>
+          <div style={{fontSize:17,fontWeight:700,color:"#c0392b",marginBottom:8}}>The calculator hit a display error</div>
+          <p style={{margin:"0 0 14px",fontSize:14}}>
+            Your work wasn't lost on our end, but the page needs a refresh to recover.
+            Please reload this page (Ctrl/Cmd+Shift+R) and try again. If it keeps
+            happening after approving artwork, let us know.
+          </p>
+          <button onClick={()=>{ try{ window.location.reload(); }catch(e){} }}
+            style={{appearance:"none",border:"none",borderRadius:6,background:"#c0392b",color:"#fff",fontSize:14,fontWeight:600,padding:"9px 18px",cursor:"pointer",fontFamily:"inherit"}}>
+            Reload calculator
+          </button>
+          <div style={{marginTop:14,fontSize:11,color:"#8a6d6d",fontFamily:"monospace",wordBreak:"break-word"}}>{msg}</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function useIsMobile(bp=700){const[m,s]=useState(window.innerWidth<=bp);useEffect(()=>{const h=()=>s(window.innerWidth<=bp);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h)},[bp]);return m}
 
 // Overlays render into <body>. Rendered in place they live inside whatever the
@@ -5514,7 +5574,7 @@ function App() {
           display:"flex",alignItems:"center",gap:10,animation:"pps-mini-in .22s ease-out"}}>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:19,fontWeight:800,color:CC.dark,lineHeight:1.05}}>${_t}</div>
-            <div style={{fontSize:10.5,color:missingDest?CC.red:CC.light,fontWeight:600,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            <div style={{fontSize:10.5,color:missingDest?CC.red:CC.light,fontWeight:600,marginTop:1,whiteSpace:missingDest?"normal":"nowrap",overflow:"hidden",textOverflow:missingDest?"clip":"ellipsis",lineHeight:1.25}}>
               {missingDest ? missingDestMsg
                            : `${(result.qty||0).toLocaleString()} qty${_when?` · ${_sh&&_sh.needByFmt?"delivery by":"as soon as"} ${_when}`:""}`}
             </div>
@@ -5685,7 +5745,7 @@ function pps_applyTheme( name ) {
   if ( typeof document !== "undefined" ) document.documentElement.dataset.ppsTheme = name;
 }
 
-ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("pps-calculator-root")).render(<ErrorBoundary><App /></ErrorBoundary>);
 
 })();
 </script>

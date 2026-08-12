@@ -894,6 +894,27 @@ add_action( 'wp', function() {
             padding: 0;
             overflow: hidden;
         }
+        /* Everything BELOW the calculator must also cover the sticky gallery.
+           Only #pps-calculator-wrap used to carry the overlay, so the gallery —
+           pinned at top:0 — showed through the description, tabs and Site
+           Builder blocks further down the page. That is the "image floating
+           over the description" and the "collapsing the description doesn't
+           hide it" reports (2026-08-12): the gallery was bleeding through,
+           the description was never the problem. */
+        .single-product .woocommerce-tabs,
+        .single-product .wc-tabs-wrapper,
+        .single-product .woocommerce-Tabs-panel,
+        .single-product .ast-single-product-tabs,
+        .single-product .related,
+        .single-product .up-sells,
+        .single-product .cross-sells,
+        .single-product .ast-advanced-hook-markup,
+        .single-product .site-footer {
+            position: relative;
+            z-index: 1;
+            background: #fff;
+        }
+
         /* Parallax overlay — the calc wrap slides up over the sticky gallery. */
         #pps-calculator-wrap {
             position: relative !important;

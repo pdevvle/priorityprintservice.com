@@ -6768,7 +6768,7 @@ function App(){
           display:"flex",alignItems:"center",gap:10,animation:"pps-mini-in .22s ease-out"}}>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:19,fontWeight:800,color:CC.dark,lineHeight:1.05}}>${_t}</div>
-            <div style={{fontSize:10.5,color:missingDest?CC.red:CC.light,fontWeight:600,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            <div style={{fontSize:10.5,color:missingDest?CC.red:CC.light,fontWeight:600,marginTop:1,whiteSpace:missingDest?"normal":"nowrap",overflow:"hidden",textOverflow:missingDest?"clip":"ellipsis",lineHeight:1.25}}>
               {missingDest ? missingDestMsg
                            : `${(result.tQ||0).toLocaleString()} qty${_when?` · ${_sh&&_sh.needByFmt?"delivery by":"as soon as"} ${_when}`:""}`}
             </div>
