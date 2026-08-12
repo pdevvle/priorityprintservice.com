@@ -242,37 +242,38 @@ premium is the insurance. (ACH remains the cheap option for customers who
 volunteer it, and is worth offering alongside — but it is not what this
 feature is for.)
 
-### Verify the coverage before building on it
+### Why evidence is not the answer here (owner, from experience)
 
-One caveat worth an email to Intuit before this gets built, because it
-decides whether the pipeline is worth it:
+The instinct is to answer chargebacks with documentation — approval trails,
+timestamps, specs. **In practice that loses.** Owner's experience, and the
+general merchant reality: you can hold a signed approval from on high and
+the issuing bank still sides with its cardholder. Representment is a coin
+flip weighted against the merchant, and "not as described" on a custom
+product is the hardest category to win.
 
-**Chargeback-protection programs generally cover _fraud_ disputes — stolen
-card, "I didn't authorize this" — and generally exclude "item not as
-described" and "item not received."** For a custom print shop, the second
-category is the likelier dispute: a customer unhappy with colour, trim, or
-turnaround. If QBO's protection excludes those, the pipeline transfers a
-risk you rarely face and leaves the one you actually face.
+So this design does **not** rest on building a better evidence package. It
+rests on moving the transaction to a rail that **insures the loss**.
+QuickBooks Payments' protection pays regardless of how the dispute story is
+argued — that is the entire reason for the detour, and it is worth the
+processing premium precisely because the alternative is not "win the
+dispute," it is "eat the loss."
 
-Confirm with Intuit, in writing: which dispute reason codes are covered,
-whether coverage applies to **quick-pay links** or only to sent invoices,
-any per-transaction or annual cap, eligibility requirements, and what
-evidence the shop must retain. Terms change; do not build on a marketing
-page.
+Still worth confirming with Intuit — not to decide *whether* to do this,
+but to size it correctly: per-transaction and annual caps, eligibility
+requirements, whether coverage attaches to **quick-pay links** as well as
+sent invoices, and what (if anything) must be filed to claim. Those numbers
+set the threshold, below.
 
-### The defence you already own
+The proof-approval package keeps its own value — resolving quality
+complaints directly with customers before they reach a bank, and answering
+reprint arguments — but it is not load-bearing for chargeback outcomes.
 
-Independent of processor, the strongest chargeback evidence for custom print
-is the approval trail this system already produces: the proof modal's
-approval package — raw file, print-ready PDF, preview JPEGs with guides, and
-the manipulation manifest — plus timestamped customer approval and the
-PPS-Spec the job was produced against. That set answers "not as described"
-directly, which is the category protection programs usually decline.
+### Retention still matters, for a different reason
 
-Worth ensuring those artifacts are retained beyond the uploads-retention
-window for orders above the invoice threshold — a dispute can arrive 60–120
-days after delivery, and the retention policy currently thins uploads on a
-schedule that predates this requirement.
+Orders routed for protection should be exempt from the uploads-retention
+thinning, not to win disputes but because a claim, a reprint argument, or a
+production question can land months after delivery. Exempting orders above
+the routing threshold is cheap and keeps the record intact.
 
 ## Checkout routing
 
@@ -293,6 +294,35 @@ including shipping and rush, since that is the number the fee is taken on.
 days cannot wait on an invoice-and-check cycle. Recommended: orders carrying
 a rush charge stay on card regardless of total, or the checkout says plainly
 that production starts when payment is received.
+
+## Route on risk, not only on dollars
+
+If the point is insuring against chargebacks, then the routing rule should
+track **chargeback risk**, and order value is only one input. A five-year
+repeat customer spending $2,000 is not the exposure; a brand-new customer
+spending $1,800, rush, shipping to an address that does not match billing,
+is the textbook pattern.
+
+The site already knows enough to score this at checkout:
+
+| Signal | Source | Direction |
+|---|---|---|
+| Order total | cart | higher ⇒ route |
+| Prior paid orders on this billing email | Woo order history | repeat ⇒ keep on Stripe |
+| Billing/shipping address mismatch | checkout fields | mismatch ⇒ route |
+| Rush on a first-time order | calculator + history | both ⇒ route |
+| Free-mail domain + large first order | billing email | ⇒ route |
+
+Implementation is a small scoring function feeding the same gateway filter:
+`invoice_threshold` stays the blunt rule, and any risk signal can force
+routing below it. Two knobs worth having: `invoice_risk_routing` (on/off)
+and a `always_stripe_after_n_orders` trust rule so loyal customers keep the
+frictionless path.
+
+This is also the answer to "what should the threshold be" — with caps and
+fees known from Intuit, the break-even is roughly *(expected chargeback rate
+× average order value) vs. the processing premium*. Risk routing lets you
+sit above break-even on the risky slice without taxing the safe majority.
 
 ## The two traps
 
