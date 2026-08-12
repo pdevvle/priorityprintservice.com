@@ -30,30 +30,39 @@ Verified live on production 2026-08-10: 18/18, real UPS rates, guest-reachable.
 So this spec is mostly **using the `amount` we already fetch** and **trusting
 `transit_days` over the static map** for one class of destination.
 
-## Destination classes
+## Destination classes — the rate response IS the classifier
 
-| Class | Members | Behaviour |
+**Owner rules (2026-08-11): no margin on the UPS rate, and any address UPS
+will not deliver to is treated as foreign.** Together those collapse the
+design to two rules and remove the hardcoded territory list from the runtime
+path entirely:
+
+| Class | Test | Behaviour |
 |---|---|---|
 | **Contiguous** | 48 states + DC | Unchanged: free ground, static map + live transit |
-| **Rated** | AK, HI, PR, VI, GU, MP | UPS live rate charged; UPS transit days used |
-| **Quote-only** | AS, UM, AA/AE/AP (APO/FPO/DPO), FM, MH, PW, all non-US | No self-serve checkout — "Contact us for a shipping quote" |
+| **Rated** | UPS returns a rate | Charge that rate **at cost, no margin**; use that rate's transit days |
+| **Foreign** | UPS returns no rate | No self-serve checkout — "Contact us for a shipping quote" |
 
-**Why quote-only is a real class, not a cop-out:** UPS cannot deliver to
-APO/FPO/DPO at all (military mail is USPS-only), and American Samoa, the Minor
-Outlying Islands and the Freely Associated States (Micronesia, Marshall Islands,
-Palau) are not UPS domestic destinations. Since the owner rule forbids USPS,
-these lanes have no rate to quote. Returning "contact us" is the honest answer;
-inventing a surcharge would be a promise we cannot keep.
+Asking UPS is better than maintaining a list, because UPS's own coverage is
+the truth and it changes without telling us. APO/FPO/DPO (military mail is
+USPS-only), American Samoa, the Minor Outlying Islands, and the Freely
+Associated States all fall out as **foreign** automatically — no rate comes
+back, so no quote is offered. Guam, Puerto Rico, USVI and the Northern
+Marianas fall out as **rated** when UPS prices them, and silently become
+foreign if UPS ever stops.
 
-### Exhaustive US non-contiguous list (for the classifier)
+The exhaustive list below is therefore **reference, not logic** — useful for
+copy, QA fixtures, and knowing what to expect, but nothing branches on it.
+
+### Exhaustive US non-contiguous reference list
 
 - **Non-contiguous states:** AK (Alaska), HI (Hawaii)
 - **Inhabited territories:** PR (Puerto Rico), VI (US Virgin Islands),
   GU (Guam), AS (American Samoa), MP (Northern Mariana Islands)
 - **Minor Outlying Islands (UM):** Baker, Howland, Jarvis, Johnston Atoll,
-  Kingman Reef, Midway, Navassa, Palmyra, Wake — effectively unshippable
+  Kingman Reef, Midway, Navassa, Palmyra, Wake
 - **Military ZIPs:** AA (Americas), AE (Europe/Mideast/Africa), AP (Pacific) —
-  USPS-only, so UPS-only means quote-only
+  USPS-only, so always foreign under the UPS-only rule
 - **Freely Associated States** (USPS-domestic but *not* US territories):
   FM (Micronesia), MH (Marshall Islands), PW (Palau)
 
@@ -75,7 +84,7 @@ Contiguous behaviour is unchanged (prefer true Ground).
 For rated destinations the static `pps_seed_zone_map()` value is a placeholder
 only. When a live rate exists, its `estimated_days` **replaces** the map value
 in `freeDeliveryBizDays = bufferedProdDays + transitDays`. When no live rate
-exists, the destination is quote-only and no date is promised at all — the 7-day
+exists, the destination is foreign and no date is promised at all — the 7-day
 AK/HI map entries should be raised to a conservative stand-in (AK 7, HI 8) purely
 as a pre-address placeholder, never as a committed date.
 
@@ -92,9 +101,13 @@ margin applied.
 | Key | Default | Meaning |
 |---|---|---|
 | `noncontig_enabled` | `false` | Master switch for rated destinations |
-| `noncontig_margin_pct` | `15` | Margin on the UPS rate (handling, packaging, rate drift) |
-| `noncontig_min_charge` | `25` | Floor, so a tiny parcel still covers handling |
-| `noncontig_classes` | `AK,HI,PR,VI,GU,MP` | Which destinations are rated vs quote-only |
+| `noncontig_quote_email` | (admin) | Where "contact us for a shipping quote" requests land |
+
+**No margin knob by owner decision** — the UPS rate is passed through at
+cost. Note the consequence: UPS rate drift between quote and label is absorbed
+by the shop, and the quote is only as fresh as the 30-day cache. If that
+proves painful, the fix is shortening the cache for rated destinations, not
+quietly reintroducing a markup.
 
 ### 5. Failure posture
 
@@ -137,5 +150,5 @@ promise, which narrows the exposure while the work is scheduled.
 2. Cheapest-serving-rate selection, days and price from one rate object.
 3. Rated cost into the engine's `shipping` object, inside the Grand Total.
 4. Transit-days override for rated destinations; conservative map placeholders.
-5. Quote-only path for unservable lanes.
+5. Foreign path for unservable lanes.
 6. Matrix destination slice.
