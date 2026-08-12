@@ -294,6 +294,30 @@ function pps_presets_render_edit_form( $preset ) {
         $defaults_json = wp_json_encode( $preset['defaults'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
     }
 
+    // "Mint Preset" handoff from a calculator's debug panel (?new=1&prefill_defaults=...
+    // &prefill_calc=...&prefill_price=...). Only ever consulted on the blank "new preset"
+    // form — never overrides a saved preset's own defaults on the edit form.
+    $prefill_calc  = '';
+    $prefill_price = null;
+    if ( $is_new ) {
+        if ( ! empty( $_GET['prefill_defaults'] ) ) {
+            $decoded = json_decode( wp_unslash( $_GET['prefill_defaults'] ), true );
+            if ( is_array( $decoded ) && function_exists( 'pps_sanitize_defaults_blob' ) ) {
+                $clean = pps_sanitize_defaults_blob( $decoded );
+                if ( $clean ) {
+                    $defaults_json = wp_json_encode( $clean, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+                }
+            }
+        }
+        if ( ! empty( $_GET['prefill_calc'] ) ) {
+            $prefill_calc = sanitize_key( wp_unslash( $_GET['prefill_calc'] ) );
+        }
+        if ( isset( $_GET['prefill_price'] ) && is_numeric( $_GET['prefill_price'] ) ) {
+            $pp = (float) $_GET['prefill_price'];
+            if ( $pp >= 0 && $pp < 1000000 ) $prefill_price = $pp;
+        }
+    }
+
     $calcs = array(
         'saddle'        => 'Saddle Stitch Booklet',
         'perfect-bound' => 'Perfect Bound Booklet',
@@ -323,7 +347,7 @@ function pps_presets_render_edit_form( $preset ) {
     echo '<div class="pps-preset-field">';
     echo '<label for="preset_calc">Calculator <span class="req">*</span></label>';
     echo '<select id="preset_calc" name="preset_calc" required>';
-    $current_calc = $preset['calc'] ?? '';
+    $current_calc = $is_new && $prefill_calc !== '' ? $prefill_calc : ( $preset['calc'] ?? '' );
     echo '<option value="">— select —</option>';
     foreach ( $calcs as $key => $label ) {
         $sel = ( $key === $current_calc ) ? ' selected' : '';
@@ -356,7 +380,9 @@ function pps_presets_render_edit_form( $preset ) {
     // Price from
     echo '<div class="pps-preset-field">';
     echo '<label for="preset_price_from">Price from</label>';
-    $price_val = ( isset( $preset['price_from'] ) && $preset['price_from'] !== null ) ? (float) $preset['price_from'] : '';
+    $price_val = ( isset( $preset['price_from'] ) && $preset['price_from'] !== null )
+        ? (float) $preset['price_from']
+        : ( $is_new && $prefill_price !== null ? $prefill_price : '' );
     echo '<input id="preset_price_from" type="number" name="preset_price_from" value="' . esc_attr( $price_val ) . '" min="0" step="0.01">';
     echo '<span class="hint">Used as Offer.lowPrice. Leave blank to omit Offer entirely.</span>';
     echo '</div>';
