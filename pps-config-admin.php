@@ -130,6 +130,7 @@ function pps_default_config() {
             'perfectbound_cover_maximummarkup'  => 6.0,
             'perfectbound_cover_minimummarkup'  => 1.8,
             'perfectbound_cover_markup_coef'    => 0.38,
+            'perfectbound_binder_throat_in'     => 13,      // binder clamp width; 2 spines gang into one bindQty pass only when 2×bindEdge fits this (2026-08-12)
             // Coupon book markup — saddle/PB-mirrored single-axis (2026-05-28)
             'couponbook_maximummarkup'          => 3.6,
             'couponbook_minimummarkup'          => 1.45,
@@ -1350,6 +1351,7 @@ function pps_config_tab_production( $cfg ) {
         'Machine Speeds' => array(
             'press_printsperhour'               => array( 'Press', '/hr' ),
             'bindery_morgana_impressionperhour'  => array( 'Morgana', '/hr' ),
+            'perfectbound_binder_throat_in'      => array( 'Perfect Binder Throat', 'in' ),
             'cutter_sheetsperhour'               => array( 'Cutter', '/hr' ),
             'horizonspf20_sheetsperhour'         => array( 'Stitcher', '/hr' ),
             'uvcoaterimpressionsperhour'         => array( 'UV Coater', '/hr' ),

@@ -1158,3 +1158,71 @@ imply two days when only one is charged.
 `calc-letterhead`, `calc-postcard`, `calc-sticker`, `calc-greeting-card`. The flat
 calcs compute `artDays` separately from `proofDays`; the same two predicates and
 the same after-the-clamp placement apply.
+
+---
+
+## Perfect bound `bindQty` — binder throat is not press `imp` (2026-08-12)
+
+**Bug:** `bindQty` (drives `P.perfectBind`, the perfect-binding labor cost) was
+computed as `imp>=2 ? tQ/2 : tQ` — halving the binder labor quantity whenever the
+*press* imposed 2-up. This conflates two unrelated machines: `imp` describes how
+many books fit on an 18.5×12.5 **press sheet** (paper/print cost), while gang-binding
+(clamping 2 spines in one perfect-binder pass) is limited by the **binder's clamp
+throat**, a fixed physical width unrelated to press-sheet geometry.
+
+Owner-confirmed against real equipment (13″ throat): only the three smallest
+presets (3.5×5.5, 4×6, 4.25×5.5 — `bindEdge` 5.5–6″, `imp:8`) actually gang two
+spines per pass. Every other preset in the catalog — including 5.5×8.5 (`imp:4`,
+the "efficient" size) and 8.5×11 (`imp:2`) — has `2×bindEdge > 13″` and must be
+clamped one spine at a time, yet the old formula halved `bindQty` (and therefore
+binding labor cost) for all of them, since it only checked `imp>=2`.
+
+**Verified case:** 8.5×11, 80pcs. `bindEdge=11`; `2×11=22 > 13`. Old: `bindQty=40`
+(wrong — implies 40 clamp passes for 80 books). New: `bindQty=80` (one spine per
+pass, correct).
+
+**Fix:** new PCF scalar `perfectbound_binder_throat_in` (default `13`, `Machine
+Speeds` group). Gate changed from press `imp` to an explicit throat check:
+
+```js
+// OLD:
+const bindQty = imp>=2 ? tQ/2 : tQ;
+
+// NEW:
+const bindGangs = 2*sz.bindEdge <= PCF.perfectbound_binder_throat_in;
+const bindQty = bindGangs ? tQ/2 : tQ;
+```
+
+`sz.bindEdge` (from `resolveSize()`) already carries the correct spine length for
+both preset and custom sizes, so no new size math was needed — only the gate
+condition changed.
+
+**Debug panel:** `bindMode` (press imp, "2-up"/"1-up") is unchanged and still
+correct — it describes press-sheet imposition, not bindery ganging. To stop that
+ambiguity from recurring, the row is now labeled "Press imposition" instead of
+"Binding mode", a new "Binder ganged 2-up" Yes/No row exposes `bindGangs`
+directly, and "Bind quantity" is now labeled "Binder passes" (same `bindQty`
+value — the old label read like a unit count, which is exactly what caused the
+confusion that surfaced this bug).
+
+**Not touched:** the perforation section's `bindDirMult = imp>=2 ? 2.0 : 0.9`
+(GW-machine die-pass multiplier) looks similar but is a press-sheet-level
+consideration, not a bindery-clamp one — left as-is pending a separate check.
+
+**Files:** `calc-perfect-bound.html` and `calc-coupon-book.html` (PCF default,
+`bindQty` formula, debug return object + panel labels — identical bug and fix
+in both; `calc-coupon-book.html` has the extra `isOpenFace` `*0.5` multiplier
+downstream of `bindQty`, untouched since it applies after the gang-check either
+way), `pps-config-admin.php` (`pps_default_config()` PCF default, `Machine
+Speeds` admin field — one shared `perfectbound_binder_throat_in` key covers
+both calcs, same as the existing shared `perfect_binding_speedperhr` /
+`labor_perf_bind_hr` / `labor_perf_bind_setup` keys, since it's one physical
+binder, not a per-product setting).
+
+**Pre-existing gap (not fixed here):** `perfect_binding_speedperhr`,
+`labor_perf_bind_hr`, and `labor_perf_bind_setup` — all referenced in both
+calcs' `calculate()` — are absent from `pps-config-admin.php` entirely, so
+they're not admin-configurable; each calc just falls back to its hardcoded
+default silently. `perfectbound_binder_throat_in` was wired through the admin
+properly (Pattern A, 4-file edit) despite its siblings not being; if the
+missing three are ever wired up, do them together.
