@@ -213,3 +213,132 @@ duplicates, and only then writes. Idempotency keys make a re-run safe.
 4. **Wave:** the Make account carries Wave scenarios too — is Wave still
    live, and does it need the same pipe, or is QuickBooks now the only
    money system?
+
+---
+
+# The outbound leg — high-value orders route to a QuickBooks invoice
+
+**Requirement (owner, 2026-08-11):** an order placed on the site above a
+threshold (~$1,500) should not be charged by card at checkout. It should be
+invoiced through QuickBooks, with a quick-pay link emailed to the customer.
+
+This is the same loop running the other way, and it closes it: order born in
+Woo → invoice in QuickBooks → payment in QuickBooks → payment state written
+back to Woo. Woo still holds the order and the specs; QuickBooks still holds
+the money.
+
+## First: check whether you already have most of this
+
+Production checkout currently offers **Card and US bank account** — Stripe
+ACH is already live. If the motivation for this feature is **card fees**,
+the comparison on a $3,000 order is:
+
+| Method | Cost | Machinery needed |
+|---|---|---|
+| Stripe card | ~2.9% + 30¢ ≈ **$87** | none (today) |
+| Stripe ACH | 0.8% capped at **$5** | none (today — already enabled) |
+| QuickBooks ACH quick-pay | **$0–1%** | the whole pipeline below |
+
+If fees are the driver, **defaulting high-value checkouts to the US bank
+account option already at checkout** captures nearly all of the saving for
+roughly none of the work — a checkout-side nudge, not an integration.
+
+The QuickBooks path is the right answer for a **different** need: customers
+who require an *invoice document* to pay — nonprofits, school districts,
+university chapters, anyone cutting a check against a PO or working on net
+terms. Several of the shop's customers look exactly like that. Those buyers
+cannot use a card checkout at all, regardless of fees.
+
+**Decide which need is driving this**, because it changes the build. They
+are not exclusive — the honest answer may be "ACH nudge for everyone above
+$1,500, invoice path on request or for known institutional buyers."
+
+## Checkout routing
+
+A `woocommerce_available_payment_gateways` filter keyed on the order total:
+
+- **Below threshold** — unchanged.
+- **At or above** — expose the invoice method. Two postures, owner's call:
+  - **Mandatory** (card hidden): guarantees the routing, but a customer who
+    wanted to pay now and go can no longer self-serve — some will bounce.
+  - **Preferred** (invoice pre-selected, card still available): no lost
+    orders, most large orders still land on the cheap rail.
+
+Threshold lives in Central Config (`invoice_threshold`, default 1500) and
+is evaluated against the **order total the customer would be charged** —
+including shipping and rush, since that is the number the fee is taken on.
+
+**Rush is the exception worth carving out.** A $2,000 order needed in three
+days cannot wait on an invoice-and-check cycle. Recommended: orders carrying
+a rush charge stay on card regardless of total, or the checkout says plainly
+that production starts when payment is received.
+
+## The two traps
+
+### 1. The delivery date becomes a lie
+
+The calculator quotes "Estimated Delivery: Aug 27" from production starting
+*now*. An invoiced order may sit four days awaiting a check or an ACH
+settlement. The quoted date is then wrong by exactly that delay, and the
+customer holds a screenshot of it.
+
+Fix both ends: at checkout, invoiced orders show **"Delivery calculated from
+the date payment is received"** instead of a hard date; on payment, the
+delivery date is **recomputed** from the payment date and written to the
+order (the machinery already exists — `pps_quoted_delivery_date` and the
+production-start meta). Without this, every large order becomes a support
+ticket.
+
+### 2. WooCommerce will cancel the order out from under you
+
+Unpaid Woo orders sit `pending`, and WooCommerce's stock-hold setting
+auto-cancels `pending` orders after N minutes. An invoiced order waiting a
+week must be exempt — use `on-hold` (which is not auto-cancelled) rather
+than `pending`, and confirm the hold-stock minutes setting.
+
+## Flow
+
+1. Checkout above threshold → order created **`on-hold`**, payment method
+   "Invoice — QuickBooks", `_pps_payment_route = invoice`.
+2. Artwork still uploads to Drive; PPS-Spec still written; production queue
+   shows it as **awaiting payment**.
+3. Order → Make → QuickBooks: create invoice against the matched customer,
+   with the PPS spec summary in the line description and the Woo order
+   number in the memo.
+4. **Let QuickBooks send its own invoice email.** It carries the native
+   pay-now button, handles reminders, and keeps the payment experience in
+   the system that will record it. The site's "order received" email says
+   *"your invoice is on its way"* — never *"thanks for your payment."*
+5. QuickBooks payment → Make → `POST /pps/v1/orders/payment` → order moves
+   to `processing`, delivery date recomputed, production start stamped,
+   customer gets the normal "in production" notice.
+
+## The loop guard stops being hypothetical
+
+This design creates QuickBooks invoices *from* Woo orders while the ingest
+design creates Woo orders *from* QuickBooks invoices. Without a guard, one
+$1,500 order becomes an invoice becomes a second order, forever.
+
+The rule, enforced on both sides:
+
+- An invoice created from a Woo order carries the Woo order number in a
+  field the ingest scenario reads. **Ingest skips any invoice that has one.**
+- A Woo order created by ingest carries `_pps_external_key`. **The invoice
+  scenario skips any order that has one.**
+
+Both directions must ship together, or neither. This is the single most
+important line in this document.
+
+## Config knobs
+
+| Key | Default | Meaning |
+|---|---|---|
+| `invoice_threshold` | 1500 | Order total at/above which invoicing engages |
+| `invoice_posture` | `preferred` | `preferred` \| `mandatory` |
+| `invoice_rush_bypass` | `true` | Rush orders stay on card |
+| `invoice_production_start` | `on_payment` | `on_payment` \| `on_order` (credit risk) |
+
+`invoice_production_start` is a **business decision, not a setting to
+default blindly**: starting production before payment on a $1,500+ job
+extends credit to a customer who has not paid. Safe default is
+`on_payment`; known institutional accounts are the argument for the other.
