@@ -4348,7 +4348,21 @@ function pps_save_preset( $slug, $data ) {
  *  - Arrays → recursed
  *  - Objects / closures / resources → dropped (json_decode never produces these,
  *    but defense in depth)
- *  - Keys → sanitize_key
+ *  - Keys → charset-restricted, CASE PRESERVED
+ *
+ * Keys must keep their case. This used to run sanitize_key(), which
+ * lowercases — so every camelCase default saved through the Presets admin
+ * form silently became unreadable: `sizeLabel` stored as `sizelabel`,
+ * `insidePaperType` as `insidepapertype`. The calculator JS reads
+ * PPS_CONFIG.defaults by exact key, so those presets loaded with an empty
+ * form and no error anywhere. (The one live preset row, `letterhead`, kept
+ * its camelCase only because it was written straight to the option rather
+ * than through the form.) Fixed 2026-08-12.
+ *
+ * The charset restriction is what actually provides the safety here — these
+ * keys are emitted into a JSON blob, never into SQL or markup — so
+ * [A-Za-z0-9_-] with everything else stripped is both safe and lossless for
+ * every real field name.
  *
  * Cap: 200 keys total at any depth to prevent admin-side DoS.
  */
@@ -4358,7 +4372,8 @@ function pps_sanitize_defaults_blob( $data, &$key_count = null ) {
     $out = array();
     foreach ( $data as $k => $v ) {
         if ( $key_count++ > 200 ) break;
-        $clean_key = is_int( $k ) ? $k : sanitize_key( (string) $k );
+        $clean_key = is_int( $k ) ? $k : preg_replace( '/[^A-Za-z0-9_\-]/', '', (string) $k );
+        if ( $clean_key === '' ) continue;  // key sanitised to nothing — drop, don't store under ''
         if ( is_array( $v ) ) {
             $out[ $clean_key ] = pps_sanitize_defaults_blob( $v, $key_count );
         } elseif ( is_string( $v ) ) {

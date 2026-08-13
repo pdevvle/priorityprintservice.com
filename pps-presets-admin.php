@@ -408,7 +408,7 @@ function pps_presets_render_edit_form( $preset ) {
     // Defaults JSON
     echo '<div class="pps-preset-field pps-preset-wide" style="margin-top:8px">';
     echo '<label for="preset_defaults_json">Defaults (JSON)</label>';
-    echo '<textarea id="preset_defaults_json" name="preset_defaults_json" rows="10" placeholder=\'{"qty": 250, "pages": 16, "size": "5.5x8.5", ...}\'>' . esc_textarea( $defaults_json ) . '</textarea>';
+    echo '<textarea id="preset_defaults_json" name="preset_defaults_json" rows="10" placeholder=\'{"sizeLabel": "5.5×8.5", "qty": 250, "pages": 16, "insidePaperType": "100lb Gloss Text"}\'>' . esc_textarea( $defaults_json ) . '</textarea>';
     echo '<span class="hint">Same shape as a calculator\'s _pps_defaults postmeta. Pre-fills the form on the preset URL. JSON only — strings/numbers/booleans/arrays/null. Recursively sanitized on save (string fields capped at 1000 chars; max 200 keys total).</span>';
     echo '</div>';
 

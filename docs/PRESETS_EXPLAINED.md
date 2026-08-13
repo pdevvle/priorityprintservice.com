@@ -210,6 +210,74 @@ landing pages rather than duplicate product pages.
   rather than redirecting, so a deleted preset stops ranking instead of
   silently bouncing traffic.
 
+## 8b. Three traps found in the admin path (2026-08-12)
+
+Found by source review before anyone pasted a real preset into the form.
+Two were code bugs and are **fixed**; the third is a content gap that is
+still open.
+
+### Fixed — the defaults form silently lowercased every key
+
+`pps_sanitize_defaults_blob()` ran WordPress's `sanitize_key()` over the
+**keys** of the defaults blob. `sanitize_key()` lowercases. So anything saved
+through the Presets admin form came back mangled:
+
+| You type | It stored | Calculator reads |
+|---|---|---|
+| `sizeLabel` | `sizelabel` | nothing |
+| `insidePaperType` | `insidepapertype` | nothing |
+| `coverPaper` | `coverpaper` | nothing |
+
+The calculator reads `PPS_CONFIG.defaults` by **exact key**, so the preset
+loaded with an empty form and **no error anywhere** — not in the admin, not
+in the console, not in the page source. The failure was completely silent.
+
+The one live row, `letterhead`, escaped this only because it was written
+straight to the option rather than through the form — which is also why
+nobody hit it. The moment presets get created the intended way, every
+camelCase field would have gone dead.
+
+**Fix:** keys are now charset-restricted (`[A-Za-z0-9_-]`, everything else
+stripped) with **case preserved**, and a key that sanitises to nothing is
+dropped instead of being stored under `''`. The charset restriction is what
+provides the safety — these keys are emitted into a JSON blob, never into SQL
+or markup — so lowercasing was never buying anything.
+
+Verified against a realistic blob: camelCase preserved, `×` (U+00D7)
+preserved in values, nested `sets[]` intact, junk keys stripped, empty key
+dropped.
+
+### Fixed — the admin placeholder taught the wrong field name
+
+The defaults textarea suggested `{"qty": 250, "pages": 16, "size": "5.5x8.5"}`,
+which is wrong twice: the field is **`sizeLabel`**, not `size`, and the value
+must be the **exact label including the `×` multiplication sign (U+00D7)**,
+not a lowercase `x`. Anyone following the placeholder produced a preset that
+silently ignored the size.
+
+Now reads:
+`{"sizeLabel": "5.5×8.5", "qty": 250, "pages": 16, "insidePaperType": "100lb Gloss Text"}`
+
+Canonical field names, from the PPS Defaults product meta box (same shape):
+`productType`, `sizeLabel`, `foldType`, `qty`, `pages`, `bindDir`,
+`insideColor`, `coverColor`, `insidePaperType`, `coverMode`.
+
+### Open — only saddle has default FAQs
+
+`pps_default_faqs()` ships **7 FAQs for `saddle` and zero for the other
+seven calc types** (`perfect-bound`, `brochure`, `coupon`, `letterhead`,
+`postcard`, `sticker`, `greeting-card`).
+
+That is deliberate in the sense that emitting saddle's FAQs on a sticker page
+would be worse — the resolver correctly emits **no FAQ block at all** rather
+than the wrong one. But the practical effect is that **every non-saddle
+preset and product page ships with no FAQ schema** unless someone supplies
+FAQs per preset or fills `wp_options['pps_faqs']` for that calc type in the
+SEO admin tab.
+
+This is a content task, not a bug: seven sets of FAQ copy. Until it is done,
+expect no FAQ rich results on anything but saddle stitch.
+
 ## 9. If you're adding presets (the practical path)
 
 1. wp-admin → PPS Calculators → Presets → add a row: slug, calc, title,
