@@ -152,6 +152,72 @@ production content before production code.
 
 ---
 
+## "Can we push only the plugin files, not the database?"
+
+Reasonable instinct, and the half of it about your edits is correct: a
+files-only push does **not** touch `wp_options`, posts, terms or orders, so
+your content and config edits on production are safe from it.
+
+But it is still the wrong tool here, for two reasons.
+
+### 1. You already have something strictly better
+
+`pps_plugin_download_url` pulls **one named file, from one pinned commit,
+onto one named site**, and touches nothing else. That is more surgical than
+any push Cloudways offers: file-level rather than tree-level, reviewable
+(the bytes are pinned to a reviewable SHA), and the rollback is the same call
+with an older SHA.
+
+A files push is the blunt version of a thing you can already do precisely.
+For PPS's own plugins, there is no scenario where the push is the better
+choice.
+
+### 2. The landmine: `wp-content/uploads/` is production-critical data
+
+A files push copies the file tree. On this site that tree contains, under
+uploads:
+
+| Path | What it holds |
+|---|---|
+| `uploads/pps-artwork/` | **every customer's uploaded artwork** |
+| `uploads/pps-calculators/` | the deployed calculator HTML for that site |
+| `uploads/pps-calculators/js/` | compiled app bundles, hashed per deploy |
+| `uploads/…` (rest) | the WordPress media library |
+
+Staging's copy of those is stale by definition. A files push that includes
+uploads would overwrite production's artwork directory with staging's —
+**destroying the artwork for every order placed since the last refresh.**
+That is the same class of damage as the database push, just to a different
+asset. It would surface as orders whose Drive/press files are simply gone.
+
+If Cloudways' push lets you **scope to `wp-content/plugins/` only**, the
+hazard goes away — but verify that in the panel before relying on it, and
+treat "files push" as unsafe until you have confirmed the scope. Do not
+assume it is limited to plugins because that is what you intended.
+
+### Third-party plugins: don't file-push those either
+
+WooCommerce, Astra, Rank Math and friends should be updated with **each
+site's own updater**, not by copying files between sites. Plugin updates run
+activation hooks and database migrations; copying the new files alone leaves
+new code running against an old schema. WooCommerce in particular runs a
+database update step after a major version bump — let it run, per site.
+
+So the answer to "test on staging, then move it to production" for a plugin
+update is: **update on staging, exercise it, then run the same update on
+production through wp-admin.** Same version, same migrations, no file sync.
+
+### Summary
+
+| You want to move | Use | Not |
+|---|---|---|
+| A PPS plugin file / calculator | `pps_plugin_download_url` @ pinned SHA | Cloudways files push |
+| A third-party plugin update | Each site's own wp-admin updater | Any file copy |
+| A preset / tooltip / FAQ set | `wp_get_option` → `wp_update_option`, one key | Any push |
+| Content | Author on production | Any push |
+
+Nothing in that table needs a Cloudways push, files-only or otherwise.
+
 ## Keeping staging useful
 
 Staging drifts. Once it diverges from production it stops predicting anything,
