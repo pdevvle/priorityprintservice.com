@@ -248,6 +248,36 @@ PPS React calculators and the legacy WCPA plugin run side-by-side on the same Wo
 
 **Every product assigned a PPS calculator MUST be a WooCommerce *virtual* product** (`_virtual` = `yes`, owner rule 2026-07-19). The calculator collects the shipping address itself and PPS owns shipping/turnaround; marking the product virtual keeps WooCommerce's own shipping machinery (and coexisting addon/shipping plugins) out of the cart/checkout for these items. Flipping `_virtual` is part of the registry-migration checklist — set it in the same change that adds the product ID to `pps_get_registry()`. All 34 registry products were flipped on staging 2026-07-19.
 
+## Update pipeline (read this before changing anything on a live site)
+
+**`docs/UPDATE_PIPELINE.md` is the operating model post-go-live.** The short
+version, because it overturns the assumption the go-live left behind:
+
+> Git is the source of truth for code. **Production** is the source of truth
+> for content, config, orders and money. **Staging is a disposable test bed
+> that refreshes downward from production.**
+
+**The Cloudways staging→production push is retired for routine work.** It
+replaces production's database wholesale and silently destroys every order
+placed since the last pull (Gate 3, `docs/GO_LIVE_RUNBOOK.md`). It is a
+rebuild tool, not a deploy tool.
+
+Four lanes, four mechanisms:
+
+- **Code** (plugin PHP, calculators) → git, deployed pull-based by pinned SHA
+  to staging, verified, then the same SHA to production.
+- **Content** (pages, term descriptions, product copy) → authored directly on
+  production. Reversible, no build step, cannot break the cart.
+- **DB config** (`pps_presets`, `pps_tooltips`, `pps_faqs`) → authored on
+  production, or promoted **one option at a time** with
+  `wp_get_option` → `wp_update_option`. **Never bulk-copy `pps_calc_config`
+  between sites — it carries live credentials.**
+- **Plugin/core updates** → staging first, then production. This is what
+  staging is actually for.
+
+Sequencing across lanes: **code before the content that depends on it**
+(an unregistered shortcode renders as literal text on your homepage).
+
 ## Branch & Deploy
 
 - **Pages source branch:** `pps-pricing-config` — GitHub Pages serves directly from the root of this branch. All calculator changes must be pushed here. No separate deploy step.
