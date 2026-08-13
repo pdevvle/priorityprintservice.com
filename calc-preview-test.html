@@ -3201,7 +3201,7 @@ update();
             img.src = page.dataUrl;
           });
         }
-        if (!srcCanvas) continue;
+        if (!srcCanvas) throw new Error("Page "+(i+1)+" of "+totalPages+" could not be rendered — the file may be damaged, password-protected, or in a format this browser cannot read. Nothing was approved.");
 
         const c = document.createElement("canvas");
         c.width = canvasW; c.height = canvasH;
@@ -5998,6 +5998,23 @@ function App(){
     return qs ? base + "?" + qs : base;
   };
 
+  // Debug-gated (%3414): mint the current configuration as a preset — opens the
+  // Preset Builder's new-preset form pre-filled with defaults JSON, calc type
+  // and the quoted price (PHP side: pps-presets-admin.php prefill_* params).
+  const mintPreset = () => {
+    const d = { sizeLabel, customLong, customShort, bindDir, insideColor, coverColor, insidePaperType, coverMode, coverPaperType, twoStaple: !!twoStaple, vividPrint: !!vividPrint, coating, bundling, roundCorner, shipState, qty: sets[0].qty, pages: sets[0].pages, artwork, artEditPages, bleed, proof, canvaLink: canvaLink || "" };
+    if (insidePaper && insidePaper.val != null) d.insidePaper = insidePaper.val;
+    if (coverPaper && coverPaper.val != null) d.coverPaper = coverPaper.val;
+    const json = JSON.stringify(d, null, 2);
+    try { navigator.clipboard && navigator.clipboard.writeText(json); } catch (e) {}
+    const price = r && typeof r.total === "number" ? r.total.toFixed(2) : "";
+    const qp = new URLSearchParams();
+    qp.set("page", "pps-presets"); qp.set("new", "1"); qp.set("prefill_calc", "saddle");
+    if (price) qp.set("prefill_price", price);
+    qp.set("prefill_defaults", json);
+    window.open(location.origin + "/wp-admin/admin.php?" + qp.toString(), "_blank");
+  };
+
   // Standalone fallback only — on a product page PHP injects PPS_CONFIG.switchTargets.
   // Swap whatever the trailing filename is rather than a specific one: this used to
   // hardcode calc-preview-test.html, so on any other filename (calc-modern-draft.html)
@@ -6748,6 +6765,7 @@ function App(){
           {debugUnlocked&&<button type="button" onClick={()=>setShowDebug(p=>!p)} style={{width:"100%",marginTop:8,padding:"6px",borderRadius:4,border:`1px solid ${showDebug?"#555":"#ddd"}`,background:showDebug?"#1a1a1a":"#fafafa",color:showDebug?"#888":"#bbb",fontSize:10,fontWeight:600,letterSpacing:".5px",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
             {showDebug?"▼ Hide":"▶ Show"} Debug Panel
           </button>}
+          {debugUnlocked && <button type="button" onClick={mintPreset} title="Copies the current configuration as preset Defaults JSON and opens the Preset Builder with it pre-filled." style={{ width:"100%", marginTop:6, padding:"6px", borderRadius:4, border:"1px solid #6d28d9", background:"#f5f3ff", color:"#6d28d9", fontSize:10, fontWeight:600, letterSpacing:".5px", textTransform:"uppercase", cursor:"pointer", fontFamily:"inherit", transition:"all .2s" }} onMouseOver={e=>{e.currentTarget.style.background="#ede9fe";}} onMouseOut={e=>{e.currentTarget.style.background="#f5f3ff";}}>⚡ Mint Preset</button>}
           {debugUnlocked&&r.shipping&&r.shipping.estWeightLb>0&&(()=>{queueShipCost(shipZip,shipState,r.shipping.estWeightLb);const _sc=getShipCostEst(shipZip,r.shipping.estWeightLb);return(
             <div style={{marginTop:8,padding:"7px 10px",background:"#1a1a1a",color:"#9fe870",borderRadius:5,fontSize:10.5,fontFamily:"monospace",lineHeight:1.5}}>
               SHIP EST (internal) · ~{r.shipping.estWeightLb} lb · {r.shipping.estCartons} carton{r.shipping.estCartons>1?"s":""}

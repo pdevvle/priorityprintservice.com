@@ -480,6 +480,7 @@ const PCF = Object.assign({
   perfect_binding_speedperhr:200,     // books per hour on binder
   labor_perf_bind_hr:50,              // perfect binder operator hourly rate
   labor_perf_bind_setup:35,           // setup fee per run
+  perfectbound_binder_throat_in:13, // binder clamp width — 2 spines gang per pass only when 2×bindEdge fits (2026-08-12)
   perfboundunitsperday:2500,          // daily capacity for turnaround calc
   cutter_stackheight_inches:3.5,      // max stack height for finishing cuts
   cutter_cyclesperhour:120,           // cutter cycles per hour (for finishing cuts)
@@ -995,7 +996,8 @@ function calculate(c) {
   P.scoreInsides=csInside?(((tS*(imp/2))-tQ)/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
 
   // ── Binding — conditional on bind style ──
-  const bindQty = imp >= 2 ? tQ / 2 : tQ;
+  const bindGangs = 2 * sz.bindEdge <= PCF.perfectbound_binder_throat_in; // binder clamp, not press imp
+  const bindQty = bindGangs ? tQ / 2 : tQ;
   const isOpenFace = bindStyle === "openface";
   // Open-faced pads: glue/pad binding is simpler (half the binding cost)
   // Wraparound cover: full perfect binding
@@ -1274,6 +1276,7 @@ function calculate(c) {
     lowYieldPaper: lowYield ? `oversize pricing (inside: $${iPaper}, cover: $${cPaper})` : "standard pricing",
     // Perfect binding
     bindMode: imp >= 2 ? "2-up" : "1-up",
+    bindGangs,
     bindQty,
     perfBindTurnaround,
     outfoldLabel: outfold.label,
@@ -1894,8 +1897,9 @@ function DebugPanel({debug}){
 
         <Hdr>Size & Binding</Hdr>
         <Row label="Binding edge" value={d.bindingEdge} unit="inches"/>
-        <Row label="Binding mode" value={d.bindMode || "perfect bound"}/>
-        <Row label="Bind quantity" value={d.bindQty} unit="units"/>
+        <Row label="Press imposition" value={d.bindMode || "perfect bound"}/>
+        <Row label="Binder ganged 2-up" value={d.bindGangs ? "Yes (throat fits 2×bind edge)" : "No (spine too wide for one clamp pass)"}/>
+        <Row label="Binder passes" value={d.bindQty} unit="units"/>
         {d.outfoldLabel && d.outfoldLabel !== "No Outfold" && <Row label="Outfold" value={d.outfoldLabel}/>}
         {d.perforationLabel && d.perforationLabel !== "No Perforation" && <Row label="Perforation" value={d.perforationLabel}/>}
         <div style={{padding:"4px 0",display:"flex",flexWrap:"wrap"}}>
@@ -3018,7 +3022,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
             img.src = page.dataUrl;
           });
         }
-        if (!srcCanvas) continue;
+        if (!srcCanvas) throw new Error("Page "+(i+1)+" of "+totalPages+" could not be rendered — the file may be damaged, password-protected, or in a format this browser cannot read. Nothing was approved.");
 
         // Draw onto print-ready canvas with fit mode
         const c = document.createElement("canvas");
@@ -3765,8 +3769,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
   // Fit toggle (light theme for inline)
   const FitToggle = ({ dark }) => (
-    <div style={{ display: "flex", alignItems:"center", gap: 6 }}>
-      <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
+    <div style={{ display: "flex", alignItems:"center", gap: 6, flexWrap:"wrap" }}>
+      <div style={{ display:"flex", flexWrap:"wrap", maxWidth:"100%", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
         {[{ v: "crop", l: "Crop" }, { v: "cover", l: "Fill" }, { v: "contain", l: "Fit" }, { v: "stretch", l: "Stretch" }, { v: "scale", l: "Scale" }].map(o => (
           <button type="button" key={o.v} onClick={() => { setFitMode(o.v); if (o.v === "scale") setArtScale(100); }} style={{
             padding:"6px 14px", fontSize:11, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",

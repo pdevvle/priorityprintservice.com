@@ -1603,7 +1603,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
           img.onerror = () => resolve(null);
           img.src = page.dataUrl;
         });
-        if (!srcCanvas) continue;
+        if (!srcCanvas) throw new Error("Page "+(i+1)+" of "+totalPages+" could not be rendered — the file may be damaged, password-protected, or in a format this browser cannot read. Nothing was approved.");
 
         const c = document.createElement("canvas");
         c.width = canvasW; c.height = canvasH;

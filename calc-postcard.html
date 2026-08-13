@@ -2753,7 +2753,7 @@ generate();
           img.onerror = () => resolve(null);
           img.src = page.dataUrl;
         });
-        if (!srcCanvas) continue;
+        if (!srcCanvas) throw new Error("Page "+(i+1)+" of "+totalPages+" could not be rendered — the file may be damaged, password-protected, or in a format this browser cannot read. Nothing was approved.");
 
         const c = document.createElement("canvas");
         c.width = canvasW; c.height = canvasH;
