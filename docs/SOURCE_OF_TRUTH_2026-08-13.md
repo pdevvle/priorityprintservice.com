@@ -61,7 +61,16 @@ every commit in every branch:
   WooCommerce.com would wipe every customization. Decide: fork into a repo,
   or accept the risk knowingly.
 
-## Compiled-only fixes — MUST be ported to calculator source
+## Compiled-only fixes — ported to source 2026-08-13 (gap CLOSED)
+
+> **Update 11:30 UTC:** all five edit-sets below were ported into the
+> source-form calculators and pushed to `claude/optimistic-wozniak-11ql3y`
+> @ `e3a57c6`, verified by compiling with `tools-compile-calcs.mjs`
+> (all 8 clean; dist output carries every marker). The next
+> compile-and-sync will now PRESERVE these fixes. Original porting
+> list kept below for reference.
+
+### Original porting list (now applied)
 
 This session's five calculator edit-sets were applied to the **compiled**
 files (deployed to production 2026-08-13, on `pps-pricing-config` after this
