@@ -350,3 +350,56 @@ catalogue card and the Product schema's `lowPrice` (previously a hardcoded
 `pps_price`, so a stale or wrong figure here can never overcharge a customer —
 it can only misadvertise, which is why an explicitly typed value always wins
 over one carried in a link.
+
+
+## Correction + a live bug found while extending this (2026-08-13)
+
+**All eight calculators already have the share button.** An earlier note here
+said the five flat calculators had no "Copy link" — wrong. Every calculator
+renders the same control, labelled **"Save configuration"** (with a mobile 🔗
+variant), wired to `handleShareLink()` → `buildShareUrl()`. The grep that
+produced the wrong claim was looking for the string "Copy link".
+
+Checking that turned up something worse, and it is **customer-facing, not an
+admin-workflow gap**:
+
+| Calculator | Emits share params | **Reads them back** | Honours PPS Defaults |
+|---|---|---|---|
+| saddle / perfect-bound / coupon | yes | **yes** | 24–30 keys |
+| brochure / postcard | yes (20) | **no** | 3 keys |
+| greeting card | yes | **no** | 0 |
+| letterhead | yes (13) | **no** | 0 |
+| sticker | yes (9) | **no** | 0 |
+
+On **five of eight**, "Save configuration" hands the customer a link that the
+calculator cannot read back. They save it, return, and land on plain defaults
+— their configuration silently gone, with a URL in the address bar that looks
+like it should have worked.
+
+The same root cause means **PPS Defaults set on a letterhead, sticker or
+greeting-card product does nothing at all**, and brochure/postcard honour
+only `foldType`, `qty`, `sizeLabel`. That matters well beyond this feature:
+it constrains the SEO landing-page programme to the booklet family until
+fixed.
+
+### The fix (not yet done)
+
+Per flat calculator, one small addition and one careful one:
+
+```js
+// merge URL params over injected defaults, then consume as today
+const _PD = Object.assign({}, (window.PPS_CONFIG||{}).defaults||{}, _ppsUrlDefaults());
+```
+
+`_ppsUrlDefaults()` maps the params that calculator already *emits* back to
+defaults keys — the map is simply the inverse of its own `buildShareUrl()`.
+Once `_PD` carries them, every existing `_PD.x` consumption site works for
+free. The careful part is **extending consumption to the remaining priced
+fields**, because those are state-init sites in the pricing path — do it per
+calculator, verify against `docs/PRICING_MATRIX.md`, and do not batch all
+five blind.
+
+Done so far: all eight share links now carry `&q=<total>`, and
+`pps_defaults_param_map()` covers the flat vocabulary (`sizemode`, `fold`,
+`folddir`, `sides`, `coatsides`, `perfdir`, `perfpos`), so a pasted flat link
+maps correctly on the admin side the moment the read-back lands.

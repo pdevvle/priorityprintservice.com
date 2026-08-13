@@ -70,6 +70,18 @@ function pps_defaults_param_map() {
         'canva'      => array( 'canvaLink',       'str'   ),
         // Destination
         'state'      => array( 'shipState',       'str'   ),
+
+        // ── Flat family (brochure / postcard / letterhead / greeting card /
+        // sticker). Their share builders emit these; note `size` and `long`/
+        // `short` are shared with the booklets above, and `sizemode` decides
+        // which the calculator honours.
+        'sizemode'   => array( 'sizeMode',        'str'   ),
+        'fold'       => array( 'foldType',        'str'   ),
+        'folddir'    => array( 'foldDir',         'str'   ),
+        'sides'      => array( 'sides',           'str'   ),
+        'coatsides'  => array( 'coatSides',       'str'   ),
+        'perfdir'    => array( 'perfDir',         'str'   ),
+        'perfpos'    => array( 'perfPositions',   'str'   ),
     ) );
 }
 

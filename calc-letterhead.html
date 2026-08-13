@@ -3664,6 +3664,10 @@ function App() {
     if (perfDir !== "length") p.set("perfdir", perfDir);
     if (perfPositions.length && perfCount > 0) p.set("perfpos", perfPositions.slice(0, perfCount).join(","));
     if (shipState !== "AZ") p.set("state", shipState);
+    // Carry the quoted total so an admin pasting this link into a product's
+    // PPS Defaults gets the price too. Display/"from" figure only — the
+    // charged price is always recomputed at add-to-cart.
+    if (result && !result.error?.length && result.total > 0) p.set("q", result.total.toFixed(2));
     const base = window.location.origin + window.location.pathname;
     const qs = p.toString();
     return qs ? base + "?" + qs : base;
