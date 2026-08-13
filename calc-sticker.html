@@ -298,6 +298,48 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 // PRIORITY PRINT SERVICE — Sticker Calculator v1
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
+
+// ── Per-product defaults, with share-link params merged over them ──────
+// The calculator emits its configuration as a query string ("Save
+// configuration" -> buildShareUrl) but never read those params back, so a
+// customer who saved a link returned to plain defaults with their setup
+// silently gone. This inverts the same map: URL params win over injected
+// PPS Defaults, and every _PD.x consumption site picks them up.
+const _PD = (function () {
+  const base = Object.assign({}, (window.PPS_CONFIG || {}).defaults || {});
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const I = v => { const n = parseInt(v, 10); return isNaN(n) ? undefined : n; };
+    const F = v => { const n = parseFloat(v);   return isNaN(n) ? undefined : n; };
+    const S = (k, v) => { if (v !== undefined && v !== null && v !== "") base[k] = v; };
+    if (p.has("qty"))       S("qty",       I(p.get("qty")));
+    if (p.has("sizemode"))  S("sizeMode",  p.get("sizemode"));
+    if (p.has("size"))      S("sizeLabel", p.get("size"));
+    if (p.has("long"))    { S("longEdge",  F(p.get("long")));  S("customLong",  F(p.get("long"))); }
+    if (p.has("short"))   { S("shortEdge", F(p.get("short"))); S("customShort", F(p.get("short"))); }
+    if (p.has("color"))     S("frontColor", p.get("color"));
+    if (p.has("paperval"))  S("paperVal",   p.get("paperval"));
+    if (p.has("coating"))   S("coating",    F(p.get("coating")));
+    if (p.has("state"))     S("shipState",  p.get("state"));
+  } catch (e) {}
+  return base;
+})();
+
+// Pick a value from _PD only when usable, else keep the built-in default.
+// `ok` guards a stale or hand-edited link naming an option that no longer exists.
+const _pd = (key, fallback, ok) => {
+  const v = _PD[key];
+  if (v === undefined || v === null || v === "") return fallback;
+  if (typeof ok === "function" && !ok(v)) return fallback;
+  return v;
+};
+const _pdNum = (key, fallback, ok) => {
+  const v = parseFloat(_PD[key]);
+  if (!isFinite(v)) return fallback;
+  if (typeof ok === "function" && !ok(v)) return fallback;
+  return v;
+};
+
 // ── Defensive DOM guard ────────────────────────────────────────
 // Third-party scripts (translate widgets, chat bubbles) mutate our DOM and
 // make React's removeChild/insertBefore throw. Guarding keeps a foreign
@@ -2828,14 +2870,14 @@ function App() {
   if (typeof window !== "undefined") window.__ppsTipEdit = debugUnlocked;
 
   // State — sticker supports preset or custom sizes
-  const [qty, setQty] = useState(250);
-  const [sizeMode, setSizeMode] = useState("preset"); // "preset" or "custom"
-  const [sizeLabel, setSizeLabel] = useState(SIZE_PRESETS[0] ? SIZE_PRESETS[0].label : "4×6");
+  const [qty, setQty] = useState(_pdNum("qty", 250, v => v > 0));
+  const [sizeMode, setSizeMode] = useState(_pd("sizeMode", "preset", v => v === "preset" || v === "custom")); // "preset" or "custom"
+  const [sizeLabel, setSizeLabel] = useState(_pd("sizeLabel", SIZE_PRESETS[0] ? SIZE_PRESETS[0].label : "4×6", v => SIZE_PRESETS.some(s => s.label === v)));
   const [longEdge, setLongEdge] = useState(SIZE_PRESETS[0] ? SIZE_PRESETS[0].long : 6);
   const [shortEdge, setShortEdge] = useState(SIZE_PRESETS[0] ? SIZE_PRESETS[0].short : 4);
-  const [frontColor, setFrontColor] = useState("color");
-  const [paper, setPaper] = useState(PAPERS[0]);
-  const [coating, setCoating] = useState(0);
+  const [frontColor, setFrontColor] = useState(_pd("frontColor", "color", v => v === "color" || v === "bw"));
+  const [paper, setPaper] = useState(() => { const v = _PD.paperVal ?? _PD.insidePaper ?? _PD.paper; const all = PAPERS; const hit = (v !== undefined && v !== null && v !== "") ? all.find(x => String(x.val) === String(v)) : null; return hit || PAPERS[0]; });
+  const [coating, setCoating] = useState(_pdNum("coating", 0));
   const [artwork, setArtwork] = useState(0.01);
   const [artEditPages, setArtEditPages] = useState(0);
   const [bleed, setBleed] = useState(0);
@@ -2867,7 +2909,7 @@ function App() {
   const [referenceFiles, setReferenceFiles] = useState([]);
   // Empty until the customer picks one: pre-filling AZ made every quote read as an
   // Arizona delivery promise and hid that a destination was still needed (hasDest).
-  const [shipState, setShipState] = useState("");
+  const [shipState, setShipState] = useState(_pd("shipState", ""));
   const [shipAddr, setShipAddr] = useState({ name: "", company: "", street1: "", street2: "", city: "", zip: "" });
   const [needByDate, setNeedByDate] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
@@ -3323,7 +3365,7 @@ function App() {
     if (sizeMode === "preset" && sizeLabel !== SIZE_PRESETS[0].label) p.set("size", sizeLabel);
     if (sizeMode === "custom") { p.set("long", activeLongEdge); p.set("short", activeShortEdge); }
     if (frontColor !== "color") p.set("color", frontColor);
-    if (paper.val !== PAPERS[0]?.val) p.set("paper", paper.val);
+    if (paper.val !== PAPERS[0]?.val) p.set("paperval", paper.val);
     if (coating > 0) p.set("coating", coating);
     if (shipState) p.set("state", shipState);
     // Carry the quoted total so an admin pasting this link into a product's

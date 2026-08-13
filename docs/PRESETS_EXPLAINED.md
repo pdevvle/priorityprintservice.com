@@ -382,7 +382,7 @@ only `foldType`, `qty`, `sizeLabel`. That matters well beyond this feature:
 it constrains the SEO landing-page programme to the booklet family until
 fixed.
 
-### The fix (not yet done)
+### The fix — DONE 2026-08-13, all five
 
 Per flat calculator, one small addition and one careful one:
 
@@ -399,7 +399,34 @@ fields**, because those are state-init sites in the pricing path — do it per
 calculator, verify against `docs/PRICING_MATRIX.md`, and do not batch all
 five blind.
 
-Done so far: all eight share links now carry `&q=<total>`, and
-`pps_defaults_param_map()` covers the flat vocabulary (`sizemode`, `fold`,
-`folddir`, `sides`, `coatsides`, `perfdir`, `perfpos`), so a pasted flat link
-maps correctly on the admin side the moment the read-back lands.
+**Shipped.** Each flat calculator now defines `_PD` as its injected defaults
+with share-link params merged over them, plus two guarded pickers:
+
+```js
+const _pd    = (key, fallback, ok) => …   // strings/enums
+const _pdNum = (key, fallback, ok) => …   // numbers
+```
+
+`ok` is a validity predicate, so a stale or hand-edited link naming an option
+that no longer exists falls back to the built-in default rather than putting
+the calculator into an impossible state. Paper is resolved by looking the
+value up across that calculator's paper lists and falling back if absent.
+
+**66 state initialisers wired** — brochure 16, postcard 16, greeting card 18,
+letterhead 9, sticker 7. Three calculators (`greeting-card`, `letterhead`,
+`sticker`) had no `_PD` at all and now honour PPS Defaults for the first time.
+
+**One namespace fix:** the flats emitted `paper=<value>` while the booklets
+emit `paper=<type>` + `paperval=<value>`. Same param, two meanings. The flats
+now emit `paperval`, matching the booklets, so the shared vocabulary is
+unambiguous. Nothing read those links back, so there was no compatibility to
+preserve.
+
+### Verified
+
+- **Round-trip, real browser, all five**: load clean → load with a share URL →
+  every setting applied, price recalculated, zero console errors. 5/5.
+- **Pricing regression, all eight**: default configuration compared against the
+  previously published build (`57e161f`) — quantity-tier tables and displayed
+  totals **byte-identical on all eight**, zero errors. The read-back changes
+  nothing for a visitor who arrives without params.

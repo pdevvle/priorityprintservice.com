@@ -298,6 +298,51 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 // PRIORITY PRINT SERVICE — Letterhead Calculator v1
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
+
+// ── Per-product defaults, with share-link params merged over them ──────
+// The calculator emits its configuration as a query string ("Save
+// configuration" -> buildShareUrl) but never read those params back, so a
+// customer who saved a link returned to plain defaults with their setup
+// silently gone. This inverts the same map: URL params win over injected
+// PPS Defaults, and every _PD.x consumption site picks them up.
+const _PD = (function () {
+  const base = Object.assign({}, (window.PPS_CONFIG || {}).defaults || {});
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const I = v => { const n = parseInt(v, 10); return isNaN(n) ? undefined : n; };
+    const F = v => { const n = parseFloat(v);   return isNaN(n) ? undefined : n; };
+    const S = (k, v) => { if (v !== undefined && v !== null && v !== "") base[k] = v; };
+    if (p.has("qty"))       S("qty",           I(p.get("qty")));
+    if (p.has("size"))      S("sizeLabel",     p.get("size"));
+    if (p.has("long"))    { S("longEdge",      F(p.get("long")));  S("customLong",  F(p.get("long"))); }
+    if (p.has("short"))   { S("shortEdge",     F(p.get("short"))); S("customShort", F(p.get("short"))); }
+    if (p.has("color"))     S("frontColor",    p.get("color"));
+    if (p.has("backcolor")) S("backColor",     p.get("backcolor"));
+    if (p.has("sides"))     S("sides",         I(p.get("sides")));
+    if (p.has("paperval"))  S("paperVal",      p.get("paperval"));
+    if (p.has("perf"))      S("perforation",   F(p.get("perf")));
+    if (p.has("perfdir"))   S("perfDir",       p.get("perfdir"));
+    if (p.has("perfpos"))   S("perfPositions", p.get("perfpos"));
+    if (p.has("state"))     S("shipState",     p.get("state"));
+  } catch (e) {}
+  return base;
+})();
+
+// Pick a value from _PD only when usable, else keep the built-in default.
+// `ok` guards a stale or hand-edited link naming an option that no longer exists.
+const _pd = (key, fallback, ok) => {
+  const v = _PD[key];
+  if (v === undefined || v === null || v === "") return fallback;
+  if (typeof ok === "function" && !ok(v)) return fallback;
+  return v;
+};
+const _pdNum = (key, fallback, ok) => {
+  const v = parseFloat(_PD[key]);
+  if (!isFinite(v)) return fallback;
+  if (typeof ok === "function" && !ok(v)) return fallback;
+  return v;
+};
+
 // ── Defensive DOM guard ────────────────────────────────────────
 // Third-party scripts (translate widgets, chat bubbles) mutate our DOM and
 // make React's removeChild/insertBefore throw. Guarding keeps a foreign
@@ -3108,17 +3153,17 @@ function App() {
   // state, so the sidebar preview and template downloads can never drift out of
   // sync with the selected size (a possible desync brochure's custom-size mode
   // has to guard against).
-  const [qty, setQty] = useState(250);
-  const [sizeLabel, setSizeLabel] = useState(SIZE_PRESETS[0] ? SIZE_PRESETS[0].label : "8.5×11");
+  const [qty, setQty] = useState(_pdNum("qty", 250, v => v > 0));
+  const [sizeLabel, setSizeLabel] = useState(_pd("sizeLabel", SIZE_PRESETS[0] ? SIZE_PRESETS[0].label : "8.5×11", v => SIZE_PRESETS.some(s => s.label === v)));
   const [sizeMode, setSizeMode] = useState("preset");
   const [customLong, setCustomLong] = useState(11);
   const [customShort, setCustomShort] = useState(8.5);
-  const [frontColor, setFrontColor] = useState("color");
-  const [backColor, setBackColor] = useState("color");
-  const [sides, setSides] = useState(1); // letterhead defaults to front only
-  const [paper, setPaper] = useState(PAPERS_NC[0]);
-  const [perforation, setPerforation] = useState(0);
-  const [perfDir, setPerfDir] = useState("length");
+  const [frontColor, setFrontColor] = useState(_pd("frontColor", "color", v => v === "color" || v === "bw"));
+  const [backColor, setBackColor] = useState(_pd("backColor", "color", v => v === "color" || v === "bw"));
+  const [sides, setSides] = useState(_pdNum("sides", 1, v => v === 1 || v === 2)); // letterhead defaults to front only
+  const [paper, setPaper] = useState(() => { const v = _PD.paperVal ?? _PD.insidePaper ?? _PD.paper; const all = PAPERS_NC.concat(typeof PAPERS_CS !== "undefined" ? PAPERS_CS : []); const hit = (v !== undefined && v !== null && v !== "") ? all.find(x => String(x.val) === String(v)) : null; return hit || PAPERS_NC[0]; });
+  const [perforation, setPerforation] = useState(_pdNum("perforation", 0));
+  const [perfDir, setPerfDir] = useState(_pd("perfDir", "length"));
   const [perfPositions, setPerfPositions] = useState([50]);
   const [artwork, setArtwork] = useState(0.01);
   const [artEditPages, setArtEditPages] = useState(0);
@@ -3151,7 +3196,7 @@ function App() {
   const [referenceFiles, setReferenceFiles] = useState([]);
   // Empty until the customer picks one: pre-filling AZ made every quote read as an
   // Arizona delivery promise and hid that a destination was still needed (hasDest).
-  const [shipState, setShipState] = useState("");
+  const [shipState, setShipState] = useState(_pd("shipState", ""));
   const [shipAddr, setShipAddr] = useState({ name: "", company: "", street1: "", street2: "", city: "", zip: "" });
   const [needByDate, setNeedByDate] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
@@ -3659,7 +3704,7 @@ function App() {
     if (frontColor !== "color") p.set("color", frontColor);
     if (backColor !== "color") p.set("backcolor", backColor);
     if (sides !== 2) p.set("sides", sides);
-    if (paper.val !== PAPERS_NC[0]?.val) p.set("paper", paper.val);
+    if (paper.val !== PAPERS_NC[0]?.val) p.set("paperval", paper.val);
     if (perforation !== 0) p.set("perf", perforation);
     if (perfDir !== "length") p.set("perfdir", perfDir);
     if (perfPositions.length && perfCount > 0) p.set("perfpos", perfPositions.slice(0, perfCount).join(","));

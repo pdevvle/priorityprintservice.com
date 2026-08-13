@@ -305,6 +305,59 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 // PRIORITY PRINT SERVICE — Brochure & Flat Printing Calculator v1
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
+
+// ── Per-product defaults, with share-link params merged over them ──────
+// The calculator emits its configuration as a query string ("Save
+// configuration" -> buildShareUrl) but never read those params back, so a
+// customer who saved a link returned to plain defaults with their setup
+// silently gone. This inverts the same map: URL params win over injected
+// PPS Defaults, and every _PD.x consumption site picks them up.
+const _PD = (function () {
+  const base = Object.assign({}, (window.PPS_CONFIG || {}).defaults || {});
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const I = v => { const n = parseInt(v, 10); return isNaN(n) ? undefined : n; };
+    const F = v => { const n = parseFloat(v);   return isNaN(n) ? undefined : n; };
+    const S = (k, v) => { if (v !== undefined && v !== null && v !== "") base[k] = v; };
+    if (p.has("qty"))       S("qty",           I(p.get("qty")));
+    if (p.has("sizemode"))  S("sizeMode",      p.get("sizemode"));
+    if (p.has("size"))      S("sizeLabel",     p.get("size"));
+    if (p.has("long"))    { S("longEdge",      F(p.get("long")));  S("customLong",  F(p.get("long"))); }
+    if (p.has("short"))   { S("shortEdge",     F(p.get("short"))); S("customShort", F(p.get("short"))); }
+    if (p.has("fold"))      S("foldType",      p.get("fold"));
+    if (p.has("folddir"))   S("foldDir",       p.get("folddir"));
+    if (p.has("color"))     S("frontColor",    p.get("color"));
+    if (p.has("backcolor")) S("backColor",     p.get("backcolor"));
+    if (p.has("sides"))     S("sides",         I(p.get("sides")));
+    if (p.has("paperval"))  S("paperVal",      p.get("paperval"));
+    if (p.has("vivid"))     base.vivid       = p.get("vivid") === "true";
+    if (p.has("coating"))   S("coating",       F(p.get("coating")));
+    if (p.has("coatsides")) S("coatSides",     I(p.get("coatsides")));
+    if (p.has("bundling"))  S("bundling",      F(p.get("bundling")));
+    if (p.has("perf"))      S("perforation",   F(p.get("perf")));
+    if (p.has("perfdir"))   S("perfDir",       p.get("perfdir"));
+    if (p.has("perfpos"))   S("perfPositions", p.get("perfpos"));
+    if (p.has("corner"))    S("roundCorner",   F(p.get("corner")));
+    if (p.has("state"))     S("shipState",     p.get("state"));
+  } catch (e) {}
+  return base;
+})();
+
+// Pick a value from _PD only when usable, else keep the built-in default.
+// `ok` guards a stale or hand-edited link naming an option that no longer exists.
+const _pd = (key, fallback, ok) => {
+  const v = _PD[key];
+  if (v === undefined || v === null || v === "") return fallback;
+  if (typeof ok === "function" && !ok(v)) return fallback;
+  return v;
+};
+const _pdNum = (key, fallback, ok) => {
+  const v = parseFloat(_PD[key]);
+  if (!isFinite(v)) return fallback;
+  if (typeof ok === "function" && !ok(v)) return fallback;
+  return v;
+};
+
 // ── Defensive DOM guard ────────────────────────────────────────
 // Third-party scripts (translate widgets, chat bubbles) mutate our DOM and
 // make React's removeChild/insertBefore throw. Guarding keeps a foreign
@@ -4359,25 +4412,25 @@ function App() {
   if (typeof window !== "undefined") window.__ppsTipEdit = debugUnlocked;
 
   // State
-  const [qty, setQty] = useState(250);
-  const [sizeMode, setSizeMode] = useState("preset");
-  const [sizeLabel, setSizeLabel] = useState("A7 · 5×7");
-  const [longEdge, setLongEdge] = useState(10);
-  const [shortEdge, setShortEdge] = useState(7);
+  const [qty, setQty] = useState(_pdNum("qty", 250, v => v > 0));
+  const [sizeMode, setSizeMode] = useState(_pd("sizeMode", "preset", v => v === "preset" || v === "custom"));
+  const [sizeLabel, setSizeLabel] = useState(_pd("sizeLabel", "A7 · 5×7"));
+  const [longEdge, setLongEdge] = useState(_pdNum("longEdge", 10, v => v > 0 && v <= 30));
+  const [shortEdge, setShortEdge] = useState(_pdNum("shortEdge", 7, v => v > 0 && v <= 30));
   const [foldType, setFoldType] = useState(_DR.forceFold || "bifold");
-  const [foldDir, setFoldDir] = useState("long");
-  const [frontColor, setFrontColor] = useState("color");
-  const [backColor, setBackColor] = useState("color");
-  const [sides, setSides] = useState(2);
-  const [paper, setPaper] = useState(PAPERS_NC[0]);
-  const [vivid, setVivid] = useState(false);
-  const [coating, setCoating] = useState(0);
-  const [coatSides, setCoatSides] = useState(1);
-  const [bundling, setBundling] = useState(0);
-  const [perforation, setPerforation] = useState(0);
-  const [perfDir, setPerfDir] = useState("length");
+  const [foldDir, setFoldDir] = useState(_pd("foldDir", "long"));
+  const [frontColor, setFrontColor] = useState(_pd("frontColor", "color", v => v === "color" || v === "bw"));
+  const [backColor, setBackColor] = useState(_pd("backColor", "color", v => v === "color" || v === "bw"));
+  const [sides, setSides] = useState(_pdNum("sides", 2, v => v === 1 || v === 2));
+  const [paper, setPaper] = useState(() => { const v = _PD.paperVal ?? _PD.insidePaper ?? _PD.paper; const all = PAPERS_NC.concat(typeof PAPERS_CS !== "undefined" ? PAPERS_CS : []); const hit = (v !== undefined && v !== null && v !== "") ? all.find(x => String(x.val) === String(v)) : null; return hit || PAPERS_NC[0]; });
+  const [vivid, setVivid] = useState(_PD.vivid === true || _PD.vivid === "true");
+  const [coating, setCoating] = useState(_pdNum("coating", 0));
+  const [coatSides, setCoatSides] = useState(_pdNum("coatSides", 1, v => v === 1 || v === 2));
+  const [bundling, setBundling] = useState(_pdNum("bundling", 0));
+  const [perforation, setPerforation] = useState(_pdNum("perforation", 0));
+  const [perfDir, setPerfDir] = useState(_pd("perfDir", "length"));
   const [perfPositions, setPerfPositions] = useState([50]);
-  const [roundCorner, setRoundCorner] = useState(0);
+  const [roundCorner, setRoundCorner] = useState(_pdNum("roundCorner", 0));
   const [envelopes, setEnvelopes] = useState(0);
   const [scoreFold, setScoreFold] = useState("scorefold");
   const [artwork, setArtwork] = useState(0.01);
@@ -4411,7 +4464,7 @@ function App() {
   const [referenceFiles, setReferenceFiles] = useState([]);
   // Empty until the customer picks one: pre-filling AZ made every quote read as an
   // Arizona delivery promise and hid that a destination was still needed (hasDest).
-  const [shipState, setShipState] = useState("");
+  const [shipState, setShipState] = useState(_pd("shipState", ""));
   const [shipAddr, setShipAddr] = useState({ name: "", company: "", street1: "", street2: "", city: "", zip: "" });
   const [needByDate, setNeedByDate] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
@@ -4978,7 +5031,7 @@ function App() {
     p.set("color", frontColor);
     p.set("backcolor", backColor);
     p.set("sides", sides);
-    p.set("paper", paper.val);
+    p.set("paperval", paper.val);
     p.set("vivid", vivid ? "true" : "false");
     p.set("coating", coating);
     p.set("coatsides", coatSides);
