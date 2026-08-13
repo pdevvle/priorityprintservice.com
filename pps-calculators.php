@@ -129,6 +129,11 @@ if ( file_exists( PPS_CALC_DIR . 'pps-featured-cards.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-featured-cards.php';
 }
 
+// Shared quote link → defaults blob (product + preset admin).
+if ( file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-defaults-url.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
@@ -3157,6 +3162,22 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
 // ═══════════════════════════════════════════════════════════════
 
 /**
+ * The schema lowPrice for the product currently being viewed: the quoted price
+ * at its own defaults when set, else the fallback.
+ *
+ * Kept as a formatted string because schema.org offers want a string and the
+ * surrounding array is built with literals.
+ */
+function pps_product_defaults_low_price( $fallback = '50' ) {
+    $pid = function_exists( 'get_queried_object_id' ) ? get_queried_object_id() : 0;
+    if ( ! $pid ) return $fallback;
+    $p = get_post_meta( $pid, '_pps_defaults_price', true );
+    if ( $p === '' || $p === null ) return $fallback;
+    $p = floatval( $p );
+    return ( $p > 0 && $p < 1000000 ) ? number_format( $p, 2, '.', '' ) : $fallback;
+}
+
+/**
  * Add a "PPS Defaults" tab to the WooCommerce product data panel.
  * Lets you set default calculator values per product (size, qty, paper, etc.)
  * so different product URLs start with different configurations.
@@ -3177,6 +3198,27 @@ add_action( 'woocommerce_product_data_panels', function() {
     ?>
     <div id="pps_defaults_data" class="panel woocommerce_options_panel" style="padding:12px 20px">
         <p style="color:#666;font-size:12px">Set default calculator values for this product. Leave blank to use the global defaults. URL parameters override these.</p>
+
+        <?php
+        // ── Apply-from-quote-link ──────────────────────────────────────
+        // Configure the job in the calculator, hit "Copy link", paste here.
+        // Beats hand-writing JSON: the calculator guarantees the exact paper
+        // values, the × in size labels and the enum spellings.
+        $last_src = get_post_meta( $post->ID, '_pps_defaults_source', true );
+        ?>
+        <p class="form-field" style="border-top:1px solid #eee;padding-top:12px">
+            <label for="pps_defaults_url">Apply from quote link</label>
+            <input type="url" id="pps_defaults_url" name="pps_defaults_url" value=""
+                   placeholder="https://priorityprintservice.com/product/…?size=5.5×8.5&amp;qty=100&amp;pages=8…"
+                   style="width:100%;max-width:640px" />
+            <span class="description" style="display:block;margin-left:0">
+                Configure the job in the calculator, click <strong>Copy link</strong>, paste it here and save.
+                Applied once on save, then cleared. Fields below override anything the link sets.
+                <?php if ( $last_src ) : ?>
+                    <br><em style="color:#777">Last applied: <?php echo esc_html( wp_trim_words( $last_src, 14, '…' ) ); ?></em>
+                <?php endif; ?>
+            </span>
+        </p>
         <?php
         $fields = array(
             'productType'     => array( 'label' => 'Product Type', 'placeholder' => 'letterhead (derivative calc mode)' ),
@@ -3197,6 +3239,42 @@ add_action( 'woocommerce_product_data_panels', function() {
             echo '<p class="form-field"><label for="pps_d_' . $key . '">' . esc_html( $f['label'] ) . '</label>';
             echo '<input type="' . $type . '" id="pps_d_' . $key . '" name="pps_defaults[' . $key . ']" value="' . esc_attr( $val ) . '" placeholder="' . esc_attr( $f['placeholder'] ) . '" style="width:300px" /></p>';
         }
+
+        // ── Advanced: anything the eleven fields above can't express ──
+        // The runtime has always accepted arbitrary keys (the reader
+        // json_decodes a string value); only this form was the ceiling.
+        $known    = array_keys( $fields );
+        $extra    = array_diff_key( is_array( $defaults ) ? $defaults : array(), array_flip( $known ) );
+        $extra_js = $extra ? wp_json_encode( $extra, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) : '';
+        ?>
+        <p class="form-field" style="border-top:1px solid #eee;padding-top:12px">
+            <label for="pps_defaults_extra">Advanced defaults (JSON)</label>
+            <textarea id="pps_defaults_extra" name="pps_defaults_extra" rows="5" style="width:100%;max-width:640px;font-family:monospace"
+                      placeholder='{"vividPrint": true, "bundling": 750, "customLong": 8.5, "customShort": 5.5}'><?php echo esc_textarea( $extra_js ); ?></textarea>
+            <span class="description" style="display:block;margin-left:0">
+                Any calculator default the fields above don't cover. Keys are case-sensitive
+                (<code>sizeLabel</code>, not <code>sizelabel</code>). Fields above win on conflict.
+            </span>
+        </p>
+        <?php
+        // ── Display price at these defaults ──
+        // Woo's own price field drives shop cards and Product schema. What the
+        // customer is actually charged is always recomputed at add-to-cart from
+        // pps_price, so this is a display/"from" figure and can never overcharge.
+        $quoted = get_post_meta( $post->ID, '_pps_defaults_price', true );
+        ?>
+        <p class="form-field">
+            <label for="pps_defaults_price">Price at these defaults</label>
+            <input type="number" step="0.01" min="0" id="pps_defaults_price" name="pps_defaults_price"
+                   value="<?php echo esc_attr( $quoted ); ?>" placeholder="109.04" style="width:300px" />
+            <span class="description" style="display:block;margin-left:0">
+                Sets the product's regular price, so the catalogue card and Product schema quote
+                the configuration this page actually lands on. Filled automatically if the pasted
+                quote link carries a total. <strong>Display only</strong> — the charged price is
+                always recalculated at add-to-cart.
+            </span>
+        </p>
+        <?php
         ?>
     </div>
     <?php
@@ -3205,14 +3283,80 @@ add_action( 'woocommerce_product_data_panels', function() {
 add_action( 'woocommerce_process_product_meta', function( $post_id ) {
     if ( ! current_user_can( 'edit_products' ) ) return;
     if ( ! isset( $_POST['pps_defaults'] ) ) return;
-    $raw = array_map( 'sanitize_text_field', $_POST['pps_defaults'] );
-    // Strip empty values so they fall through to global defaults
-    $clean = array_filter( $raw, function( $v ) { return $v !== ''; } );
-    if ( ! empty( $clean ) ) {
-        update_post_meta( $post_id, '_pps_defaults', $clean );
+
+    // Three sources, increasing precedence, so what you can see always wins
+    // over what you can't:
+    //   1. a pasted quote link   (bulk, from the calculator)
+    //   2. the advanced JSON box (anything the named fields can't express)
+    //   3. the named fields      (visible in the form)
+    $merged     = array();
+    $notice     = '';
+    $source_url = '';
+    $url_price  = null;
+
+    if ( ! empty( $_POST['pps_defaults_url'] ) && function_exists( 'pps_defaults_from_url' ) ) {
+        $source_url = esc_url_raw( wp_unslash( $_POST['pps_defaults_url'] ) );
+        $parsed     = pps_defaults_from_url( $source_url );
+        if ( ! empty( $parsed['defaults'] ) ) $merged = $parsed['defaults'];
+        if ( $parsed['price'] !== null )      $url_price = $parsed['price'];
+        $notice = pps_defaults_url_summary( $parsed );
+    }
+
+    if ( ! empty( $_POST['pps_defaults_extra'] ) ) {
+        $extra = json_decode( trim( wp_unslash( $_POST['pps_defaults_extra'] ) ), true );
+        if ( is_array( $extra ) ) {
+            if ( function_exists( 'pps_sanitize_defaults_blob' ) ) $extra = pps_sanitize_defaults_blob( $extra );
+            $merged = array_merge( $merged, $extra );
+        } elseif ( $notice === '' ) {
+            $notice = 'Advanced defaults ignored — that JSON did not parse.';
+        }
+    }
+
+    $named = array_filter(
+        array_map( 'sanitize_text_field', (array) $_POST['pps_defaults'] ),
+        function( $v ) { return $v !== ''; }
+    );
+    $merged = array_merge( $merged, $named );
+
+    if ( ! empty( $merged ) ) {
+        update_post_meta( $post_id, '_pps_defaults', $merged );
     } else {
         delete_post_meta( $post_id, '_pps_defaults' );
     }
+
+    // Keep the link that produced this, for the audit trail the DB otherwise
+    // has no record of. Not re-applied on later saves — the field is one-shot.
+    if ( $source_url ) update_post_meta( $post_id, '_pps_defaults_source', $source_url );
+    if ( $notice )     set_transient( 'pps_defaults_notice_' . $post_id, $notice, 60 );
+
+    // Display price. An explicitly typed value wins over one carried in the
+    // link, so the operator can always correct it.
+    $typed = isset( $_POST['pps_defaults_price'] ) ? trim( wp_unslash( $_POST['pps_defaults_price'] ) ) : '';
+    $price = $typed !== '' ? floatval( $typed ) : ( $url_price !== null ? $url_price : null );
+    if ( $price !== null && $price > 0 && $price < 1000000 ) {
+        $price = round( $price, 2 );
+        update_post_meta( $post_id, '_pps_defaults_price', $price );
+        // Woo's own fields — these drive the catalogue card and Product schema.
+        // Harmless to the cart: pps_price overrides at add-to-cart every time.
+        update_post_meta( $post_id, '_regular_price', $price );
+        update_post_meta( $post_id, '_price', $price );
+    } elseif ( $typed === '' && $url_price === null ) {
+        delete_post_meta( $post_id, '_pps_defaults_price' );
+    }
+} );
+
+/**
+ * Surface what a pasted quote link actually applied, so the operator sees the
+ * result rather than having to diff the form against the calculator.
+ */
+add_action( 'admin_notices', function() {
+    global $post;
+    if ( ! $post || ! isset( $post->ID ) ) return;
+    $notice = get_transient( 'pps_defaults_notice_' . $post->ID );
+    if ( ! $notice ) return;
+    delete_transient( 'pps_defaults_notice_' . $post->ID );
+    echo '<div class="notice notice-info is-dismissible"><p><strong>PPS Defaults:</strong> '
+       . esc_html( $notice ) . '</p></div>';
 } );
 
 // ═══════════════════════════════════════════════════════════════
@@ -5557,7 +5701,11 @@ add_action( 'wp_head', function() {
         'offers'      => array(
             '@type'           => 'AggregateOffer',
             'priceCurrency'   => get_woocommerce_currency(),
-            'lowPrice'        => '50',
+            // Quote the configuration this page actually lands on when the
+            // product carries one ("Price at these defaults" in the PPS
+            // Defaults tab). The 50 fallback is a placeholder from before
+            // per-product defaults existed and understates most products.
+            'lowPrice'        => pps_product_defaults_low_price( '50' ),
             'highPrice'       => '5000',
             'offerCount'      => '1',
             'availability'    => 'https://schema.org/InStock',

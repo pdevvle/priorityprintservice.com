@@ -290,3 +290,63 @@ expect no FAQ rich results on anything but saddle stitch.
 5. Only reach for Tier 1 overrides if the derived values are wrong, and Tiers
    2–3 only when a whole block needs replacing.
 6. Check `/pps-presets-sitemap.xml` lists it.
+
+
+---
+
+# Defaults from a shared quote link (2026-08-13)
+
+`pps-defaults-url.php` turns a calculator "Copy link" URL into a defaults
+blob, so you build a landing state by clicking rather than by hand-writing
+JSON.
+
+**Workflow:** configure the job in the calculator → **Copy link** → paste into
+the product's **PPS Defaults → Apply from quote link** → Save. The calculator
+guarantees the exact paper values, the `×` in size labels and the enum
+spellings, so the whole class of "I typed `x` instead of `×` and the size
+silently didn't apply" disappears.
+
+## The reader
+
+`pps_defaults_from_url( $url )` returns `defaults`, `price`, `unknown`,
+`error`. It accepts a full URL, a bare query string, or a `?a=b` fragment.
+
+**`pps_defaults_param_map()` is the whitelist** — 27 params covering the
+booklet family, each with the cast the calculator itself applies (`qty` int,
+`vividPrint` bool, `bundling` float, `insidePaper` deliberately left a string
+because the calculator matches it loosely against config rows). Anything not
+in the map is ignored and reported back, so a pasted URL cannot inject
+arbitrary keys. UTM/gclid/fbclid are skipped silently.
+
+Only the three booklet calculators emit a share link today. The five flat
+calculators have no "Copy link" yet — when they get one, add their params to
+the map and this reader serves them with no other change.
+
+## Precedence on save
+
+Three sources, increasing precedence, so what you can see always beats what
+you can't:
+
+1. the pasted quote link (bulk, one-shot — applied then cleared)
+2. the **Advanced defaults (JSON)** box (anything the named fields can't express)
+3. the eleven named fields (visible in the form)
+
+The pasted URL is kept in `_pps_defaults_source` as an audit trail, since a
+DB-only config change otherwise leaves no record. An admin notice after save
+reports what actually landed.
+
+**The 11-field ceiling was never a runtime limit** — the defaults reader has
+always `json_decode`d a string value, so arbitrary keys already flowed
+through to `PPS_CONFIG.defaults`. Only the form was the constraint.
+
+## Price at these defaults
+
+The share link now carries `&q=<total>`, and pasting it fills **Price at these
+defaults**, which writes `_regular_price` / `_price`. That drives the
+catalogue card and the Product schema's `lowPrice` (previously a hardcoded
+`50`, which understated most products).
+
+**Display only.** The charged price is always recomputed at add-to-cart from
+`pps_price`, so a stale or wrong figure here can never overcharge a customer —
+it can only misadvertise, which is why an explicitly typed value always wins
+over one carried in a link.
