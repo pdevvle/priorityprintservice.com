@@ -198,6 +198,7 @@ function pps_impose_pick_artwork( $files ) {
         $name = $f['name'] ?? '';
         if ( ! preg_match( '/\.pdf$/i', $name ) ) continue;
         if ( pps_impose_is_output_name( $name ) ) continue;
+        if ( preg_match( '/^CLEAN[_\s-]/i', $name ) ) continue; // sanitized copies are outputs, not artwork
         if ( preg_match( '/_preview/i', $name ) ) continue;
         if ( preg_match( '/_print-ready\.pdf$/i', $name ) ) {
             $print_ready = $f;
@@ -360,9 +361,11 @@ add_action( 'wp_ajax_pps_impose_upload', function() {
     if ( empty( $_FILES['file'] ) || ! is_uploaded_file( $_FILES['file']['tmp_name'] ) ) {
         wp_send_json_error( array( 'message' => 'No file received' ) );
     }
+    // IMPOSED_ = press-ready sheet layout; CLEAN_ = 1:1 sanitized copy of the
+    // customer file (active content stripped) — safe for staff to open.
     $filename = sanitize_file_name( $_POST['filename'] ?? '' );
-    if ( ! $filename || ! preg_match( '/^IMPOSED_.*\.pdf$/', $filename ) ) {
-        wp_send_json_error( array( 'message' => 'Filename must be IMPOSED_*.pdf' ) );
+    if ( ! $filename || ! preg_match( '/^(IMPOSED|CLEAN)_.*\.pdf$/', $filename ) ) {
+        wp_send_json_error( array( 'message' => 'Filename must be IMPOSED_*.pdf or CLEAN_*.pdf' ) );
     }
     // Cheap validity check: PDF magic bytes
     $fh    = fopen( $_FILES['file']['tmp_name'], 'rb' );
@@ -378,8 +381,9 @@ add_action( 'wp_ajax_pps_impose_upload', function() {
     $file_id = pps_gdrive_upload_file( $_FILES['file']['tmp_name'], $filename, $folder_id );
     if ( ! $file_id ) wp_send_json_error( array( 'message' => 'Drive upload failed — see error log' ) );
 
-    delete_transient( 'pps_impose_ls_' . md5( $folder_id ) ); // listing changed — new IMPOSED file
-    $order->add_order_note( 'Imposed press-ready PDF filed to Drive: ' . $filename );
+    delete_transient( 'pps_impose_ls_' . md5( $folder_id ) ); // listing changed — new output file
+    $is_clean = ( stripos( $filename, 'CLEAN_' ) === 0 );
+    $order->add_order_note( ( $is_clean ? 'Sanitized (CLEAN) copy filed to Drive: ' : 'Imposed press-ready PDF filed to Drive: ' ) . $filename );
 
     wp_send_json_success( array(
         'file_id' => $file_id,
