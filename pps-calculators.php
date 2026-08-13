@@ -708,6 +708,34 @@ function pps_enqueue_calc_app_file( $filepath, $app_code ) {
 }
 
 /**
+ * Exempt the calculator script stack from Cloudflare Rocket Loader.
+ *
+ * Production sits behind Cloudflare (staging does not), and Rocket Loader
+ * re-orders/re-executes scripts, which breaks the React → ReactDOM → app
+ * dependency chain the external-file enqueue exists to guarantee. Observed
+ * live 2026-08-13 as a commit-phase removeChild NotFoundError on proof
+ * approval (coupon calculator, production only). data-cfasync="false" is
+ * honored by Rocket Loader wherever the zone is managed, so this needs no
+ * Cloudflare dashboard access and leaves Rocket Loader on for the rest of
+ * the site. The WP Rocket exclusions elsewhere in this file are a different
+ * product and do NOT cover this.
+ */
+add_filter( 'script_loader_tag', function ( $tag, $handle ) {
+    static $pps_handles = array(
+        'pps-react'     => 1,
+        'pps-react-dom' => 1,
+        'pps-pdfjs'     => 1,
+        'pps-jspdf'     => 1,
+        'pps-babel'     => 1,
+        'pps-calc-app'  => 1,
+    );
+    if ( isset( $pps_handles[ $handle ] ) && false === strpos( $tag, 'data-cfasync' ) ) {
+        $tag = str_replace( '<script ', '<script data-cfasync="false" ', $tag );
+    }
+    return $tag;
+}, 10, 2 );
+
+/**
  * Compiled-ness of the calculator serving the CURRENT request (product page
  * or preset URL) — used to skip the Babel Standalone enqueue, ~3MB of decoded
  * JS that compiled pages never execute.
@@ -1124,7 +1152,7 @@ add_action( 'wp', function() {
         }
 
         // ── Config ──
-        echo '<script>window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+        echo '<script data-cfasync="false">window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
 
         // ── Edit mode banner + button text override ──
         if ( ! empty( $config['editMode'] ) ) {
@@ -1133,7 +1161,7 @@ add_action( 'wp', function() {
                 <span><strong>Edit Mode</strong> — Update your specs below, then click the button to save changes.</span>
                 <a href="' . esc_url( wc_get_cart_url() ) . '" style="margin-left:auto;color:#fff;opacity:0.8;font-size:12px;text-decoration:underline">Cancel</a>
             </div>';
-            echo '<script>
+            echo '<script data-cfasync="false">
             (function(){
                 // The calculators say "Add to Order", not "Add to cart", so this matched
                 // nothing and the button kept its append-sounding label through the whole
@@ -1179,9 +1207,9 @@ add_action( 'wp', function() {
         // ahead of the footer-loaded React (round-4 QA blocker).
         if ( $parts['app_code'] ) {
             if ( empty( $parts['compiled'] ) ) {
-                echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+                echo '<script data-cfasync="false" type="text/babel">' . $parts['app_code'] . '</script>';
             } elseif ( ! pps_enqueue_calc_app_file( $filepath, $parts['app_code'] ) ) {
-                echo '<script>document.addEventListener("DOMContentLoaded",function(){' . $parts['app_code'] . "\n});</script>";
+                echo '<script data-cfasync="false">document.addEventListener("DOMContentLoaded",function(){' . $parts['app_code'] . "\n});</script>";
             }
         }
     }, 25 );
@@ -4616,7 +4644,7 @@ function pps_render_preset_calculator( $preset ) {
     // Build output buffer — we have to return a string, not echo.
     ob_start();
 
-    echo '<script>window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+    echo '<script data-cfasync="false">window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
 
     // Scoped styles (mirror existing logic at line ~537)
     if ( $parts['styles'] ) {
@@ -4638,9 +4666,9 @@ function pps_render_preset_calculator( $preset ) {
     // DOMContentLoaded-wrapped inline as the write-failure fallback.
     if ( $parts['app_code'] ) {
         if ( empty( $parts['compiled'] ) ) {
-            echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+            echo '<script data-cfasync="false" type="text/babel">' . $parts['app_code'] . '</script>';
         } elseif ( ! pps_enqueue_calc_app_file( $filepath, $parts['app_code'] ) ) {
-            echo '<script>document.addEventListener("DOMContentLoaded",function(){' . $parts['app_code'] . "\n});</script>";
+            echo '<script data-cfasync="false">document.addEventListener("DOMContentLoaded",function(){' . $parts['app_code'] . "\n});</script>";
         }
     }
 
