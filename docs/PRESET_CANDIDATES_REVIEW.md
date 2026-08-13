@@ -88,6 +88,104 @@ for 6–8 weeks, then decide.
 
 ---
 
+---
+
+## Deep dive — the saddle-stitch cluster (#1 and #2)
+
+This is the biggest thing on the table and the one I'd treat most carefully.
+Combined with the variants Chrome folded in, the cluster is:
+
+| Phrase | Vol | Avg pos |
+|---|---|---|
+| saddle stitch booklet printing | 1,281 | **52.0** |
+| stapled booklet printing | 723 | **44.4** |
+| saddle stapled booklet | 406 | 39.6 |
+| printing saddle stitch booklet | 380 | **18.1** |
+| **Cluster total** | **2,790** | — |
+
+That is larger than #4 + #6 + #7 combined (1,708). It deserves more than a
+row in a table.
+
+### The tell: 18.1 versus 52.0 on the same four words
+
+"printing saddle stitch booklet" ranks **18.1**. "saddle stitch booklet
+printing" ranks **52.0**. Same words, different order, **34 positions apart**.
+
+Position 18 does not happen by accident — **something on this site already
+has real saddle-stitch relevance.** So the framing "no page targets it" needs
+one more question: *no page exists*, or *no page ranks in the top 20 for the
+exact phrase while a page ranks 18th for a variant*? Those call for opposite
+responses.
+
+A 34-position spread across word-order variants is the classic signature of
+**keyword cannibalisation**: several pages each partially matching the topic,
+none owning it, Google picking a different one per variant and trusting none
+of them. If that is what is happening, **adding an 11th partially-matching
+page makes it worse, not better.**
+
+### Diagnose before building (≈15 minutes, and it decides everything)
+
+In Search Console → Performance, filter to each of the four phrases and open
+the **Pages** tab. Record which URL ranks for each.
+
+- **Same URL for all four** → you have one page with the relevance and not
+  enough strength. Fix that page. 18 → 10 on an existing URL with existing
+  authority roughly triples clicks and is a far better bet than launching a
+  new URL at zero, which typically takes 6+ months to reach the same place.
+- **Different URLs across the four** → cannibalisation is confirmed. Consolidate
+  first: pick the winner, strengthen it, and de-optimise or redirect the
+  others. Only then consider new URLs.
+- **Nothing above ~40 for any of them, and no page whose primary topic is
+  saddle stitch** → a genuine content gap, and a preset is justified — but
+  see the head-term warning below.
+
+### Do not build #1 and #2 as two presets
+
+"Stapled booklet printing" is the layperson's phrasing for the identical
+product. Google resolves that synonym well on commercial product queries, and
+two thin pages competing for one intent is exactly the cannibalisation the
+data may already be showing. **If a page is built, build one**, and use both
+phrasings naturally in its copy.
+
+There is also a specific problem with #2's proposed default. **`twoStaple` is
+the wrong differentiator.** Two-staple is a binding option for taller books,
+not what "stapled booklet" means — a searcher using that phrase wants an
+ordinary saddle-stitched booklet. Setting `twoStaple` gives them an unusual
+configuration, possibly at a higher price than the generic page, which hurts
+conversion on arrival. The differentiation between #1 and #2 is a synonym, and
+synonyms belong in copy, not in `defaults`.
+
+### If you do build the head term, body copy is the whole ballgame
+
+"Saddle stitch booklet printing" at 1,281/month is a **commercial head term**.
+The competition is trade printers with 800-word pages, pricing tables, spec
+detail and FAQ blocks.
+
+A preset page today renders a `<title>`, a meta description, schema, and a
+React calculator — **no prose at all**. That page will not outrank an
+established printer's content page, however good the calculator is. For the
+long-tail rows (#4, #6, #7) thin-but-exact-match can still win. For a head
+term it cannot.
+
+So the ordering is strict: **body-copy field first, then this preset.** Never
+this preset on the current row shape.
+
+### My call on the cluster
+
+1. Run the Search Console diagnostic. It is fifteen minutes and it determines
+   whether the answer is "strengthen" or "build".
+2. Most likely outcome, given 18.1 exists: **strengthen the incumbent** —
+   exact-match title/H1, both phrasings in the copy, the saddle FAQ block
+   (saddle already has 7 defaults, so this is free), internal links from the
+   booklets category and homepage.
+3. Hold #1 and #2 out of the first preset batch entirely. Ship #4, #6, #7,
+   learn whether presets move position at all on this domain, and come back to
+   the head term with evidence and a body-copy field.
+
+Losing patience with the head term and shipping a thin page for it is the
+most likely way to spend the effort and get nothing — or to damage the page
+currently sitting at 18.
+
 ## Calibrate the expected outcome
 
 Positions 27–64 mean pages 3–7. **Zero clicks there is normal regardless of
