@@ -206,3 +206,70 @@ the client-side fix (Section 4, primary). If the Section 4 (phase 2)
 server-side backstop is added later, that's a `pps-calculators.php`
 change and follows the "repo first, then deploy" rule in `CLAUDE.md`
 ("Server-side patches must come home the same session").
+
+---
+
+## Addendum 2026-08-13 — silent page-skip found and fixed (all 8 calculators)
+
+Found while investigating a production mobile screenshot of the coupon-book
+proof modal that read **"TEST DOWNLOAD — APPROVAL PACKAGE (0 previews,
+print-ready generated)"** on a 10-page job (1 real page + 9 auto-blanks).
+
+### The bug
+
+Inside `generateApprovalPackage()`, every calculator carried:
+
+```js
+if (!srcCanvas) continue;   // page failed to rasterize → silently dropped
+```
+
+Blank pages are handled earlier (`if(page.isBlank){previewBlobs.push(null);continue;}`),
+so reaching this line always means **a real page failed to rasterize** — a
+damaged/password-protected PDF, an unreadable format, or a browser-side
+canvas failure. The `continue` then:
+
+- pushed **nothing** to `previewBlobs` for that page,
+- still ran `printReadyBlob = pdf.output("blob")` afterwards,
+- surfaced **no error** — the customer saw "✓ Artwork approved — we'll print
+  exactly what you see" and the manifest was written as if all was well.
+
+Net effect: an approved, shipped "print-ready" PDF **missing a page**, with
+no signal to customer or staff. Same outcome class as #87003 (art silently
+not making it to production), different mechanism.
+
+The screenshot is the exact fingerprint: 1 real page skipped → nothing
+pushed; 9 blanks → 9 nulls; `previewBlobs.filter(Boolean).length === 0`
+while `printReadyBlob` is truthy → *"0 previews, print-ready generated"*.
+
+### The fix (applied)
+
+Replaced in all 8 calculators with a thrown error naming the page:
+
+```js
+if (!srcCanvas) throw new Error("Page "+(i+1)+" of "+totalPages+
+  " could not be rendered — the file may be damaged, password-protected, "+
+  "or in a format this browser cannot read. Nothing was approved.");
+```
+
+The existing `try/catch` around the Approve handler already alerts on throw
+and leaves `approved` false, so this degrades to "approval failed, tell the
+customer" instead of "approval succeeded, quietly ship a gap".
+
+**Safe to ship ahead of the gate:** with no gate in place today, a failed
+approval still lets the customer check out with the raw file — staff sorts
+it out, exactly as before. It removes a silent-corruption path without
+introducing the stranding risk Correction 3 warns about.
+
+### Why this matters for the gate
+
+It makes **the manifest a materially stronger approval marker.** Previously a
+manifest could be written for a run where a page was silently dropped — so a
+manifest-keyed gate would have passed a job with a missing page. Now the
+throw prevents the manifest from ever being written for such a run, so
+"manifest present" more nearly means "every page actually rasterized and was
+approved."
+
+`previewBlobs.filter(Boolean).length === 0` on a job with ≥1 non-blank page
+remains a useful staff-side smoke signal — the manifest records it as
+`3. Screen previews: N page images`, so a `0` there on a real job is worth
+investigating even after this fix.
