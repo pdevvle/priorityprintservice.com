@@ -4548,10 +4548,22 @@ function buildSummary(config, result) {
 
   // Size & quantity
   const summarySpp = config.sidesPrinted === "single" ? 1 : 2;
+  // A custom trim stored sizeLabel as the literal "Custom Size", so the summary
+  // — and the PPS-Spec built from it — reached production with no dimensions at
+  // all (order #87005). Name the inches; keep the word Custom because a custom
+  // trim takes a different imposition path.
+  const _sizeStr = (function () {
+    if (String(config.sizeLabel || "").toLowerCase().indexOf("custom") === -1) return config.sizeLabel;
+    const a = parseFloat(config.customShort), b = parseFloat(config.customLong);
+    if (!isFinite(a) || !isFinite(b)) return config.sizeLabel;
+    const n = v => String(Math.round(v * 100) / 100);
+    return `Custom ${n(Math.min(a, b))}\u00d7${n(Math.max(a, b))}"`;
+  })();
+
   const setsStr = config.sets.map(s =>
     `${s.qty.toLocaleString()} qty × ${s.pages / summarySpp} sheets` + (s.name ? ` "${s.name}"` : "")
   ).join(", ");
-  lines.push(`${config.sizeLabel} · ${setsStr}`);
+  lines.push(`${_sizeStr} · ${setsStr}`);
 
   // Paper
   const colorName = v => v === "color" ? "Full Color" : "Black & White";

@@ -2689,7 +2689,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         $sets     = is_array( $full['sets'] ?? null ) ? $full['sets'] : array();
         $totalQty = array_sum( array_column( $sets, 'qty' ) );
         $totalPg  = array_sum( array_column( $sets, 'pages' ) );
-        $size     = $full['sizeLabel'] ?? 'Unknown';
+        $size     = pps_spec_size_label( $full );
         $iPaper   = is_array( $full['insidePaper'] ?? null ) ? ( $full['insidePaper']['label'] ?? '' ) : '';
         $iColor   = ( $full['insideColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
         $proof    = ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' );
@@ -3156,6 +3156,37 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
     $hidden[] = '_pps_artwork_files';
     return $hidden;
 });
+
+/**
+ * The size as production needs to read it.
+ *
+ * A custom trim stored `sizeLabel` as the literal string "Custom Size", and both
+ * the Order Summary and PPS-Spec printed exactly that — so order #87005 reached
+ * the shop as "Custom Size | 800qty | 12pg" with no dimensions anywhere on the
+ * ticket. Unmakeable. Name the inches instead, keeping the word Custom because a
+ * custom trim takes a different imposition path and production needs to know.
+ *
+ * Handles both vocabularies: booklets store customLong/customShort, flats store
+ * longEdge/shortEdge.
+ */
+function pps_spec_size_label( array $full ) {
+    $label = trim( (string) ( $full['sizeLabel'] ?? '' ) );
+    $is_custom = ( stripos( $label, 'custom' ) !== false )
+              || ( ( $full['sizeMode'] ?? '' ) === 'custom' );
+    if ( ! $is_custom ) return $label !== '' ? $label : 'Unknown';
+
+    $a = $full['customShort'] ?? $full['shortEdge'] ?? null;
+    $b = $full['customLong']  ?? $full['longEdge']  ?? null;
+    if ( ! is_numeric( $a ) || ! is_numeric( $b ) ) {
+        return $label !== '' ? $label : 'Unknown';
+    }
+    $w = min( (float) $a, (float) $b );
+    $h = max( (float) $a, (float) $b );
+    $fmt = static function( $n ) {
+        return rtrim( rtrim( number_format( (float) $n, 2, '.', '' ), '0' ), '.' );
+    };
+    return 'Custom ' . $fmt( $w ) . '×' . $fmt( $h ) . '"';
+}
 
 // ═══════════════════════════════════════════════════════════════
 // PER-PRODUCT DEFAULTS (WooCommerce Product Editor)
