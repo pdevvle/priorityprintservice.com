@@ -69,11 +69,14 @@ requested."
   / `pps_impose_item_artwork()` in `pps-imposition.php`, both gated on
   `preg_match('/\.pdf$/i', $name)`), so it correctly found the folder but
   matched nothing, and rendered "none found" / a "NO ART" badge.
-- The 7-hour gap and file-type both point at the same explanation: the
-  customer uploaded, never opened/completed the proof modal, and checked
-  out — the PDF pipeline never ran. (The JPG's timestamp likely reflects
-  a later manual recovery step by staff, not the calculator's own
-  synchronous upload.)
+- **Timestamp correction (2026-08-13):** the "7-hour gap" was a timezone
+  artifact — the order tool reports order times in Phoenix local time
+  mislabeled as UTC (verified against order #87007, whose Drive files
+  landed 4 minutes after its true order time). #87003's JPG actually hit
+  Drive ~1 minute after checkout: the calculator's own synchronous upload
+  working normally. The conclusion is unchanged and simpler — the customer
+  uploaded, never opened/completed the proof modal, and checked out; the
+  PDF pipeline never ran. No staff recovery step was involved.
 
 ## 3. Scope — confirmed present in all 8 calculators
 
@@ -136,6 +139,26 @@ and approve your artwork" message when `proofOpen && !currentArt` — reuse
 that string/placement) so the customer understands why nothing happened
 when they click "Add to Order," matching how `missingDest` already
 scrolls/focuses the shipping section rather than failing silently.
+
+### Approval must be invalidated on geometry changes (NEW — order #87007)
+
+A second live incident (2026-08-13, order #87007, $235.92) exposed a gap
+the gate alone does not close: **an approval survives changing the size.**
+The brochure calculator resets `approved` on art transforms (`txHash`
+watcher), new uploads, clears, and manual un-approve — but NOT when
+`longEdge`/`shortEdge`/fold/sides change. The customer approved four items
+at 12×12 (manifests generated 19:04–19:08), switched the size to 6×6 in
+the final two minutes, and checked out at 19:10 — an order priced at 6×6
+carrying approved 12.25″ print-ready PDFs (~4× the material priced).
+
+Fix is small: the invalidation `useEffect` watching `txHash` already
+exists — extend it with a geometry hash (size, fold type, sides) so any
+such change clears `approved` + `approvalPkg` and the gate re-blocks
+checkout until re-approval. Port to all 8 (source form first).
+
+Consequence for the phase-2 backstop: comparing "manifest present" is not
+enough — the backstop should also compare the manifest's trim size against
+the ordered spec and flag mismatches for prepress review.
 
 ### Server-side backstop (optional hardening, phase 2)
 
