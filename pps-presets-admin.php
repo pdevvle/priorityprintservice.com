@@ -39,11 +39,65 @@ function pps_presets_render_page() {
 
     // Handle save BEFORE we render so notices reflect the save outcome
     $notice = '';
+    $repost = null; // set below if a save attempt fails, so the form can be repopulated verbatim
     if ( isset( $_POST['pps_preset_save'] ) ) {
         check_admin_referer( 'pps_preset_save' );
 
         $slug    = isset( $_POST['preset_slug'] ) ? sanitize_key( wp_unslash( $_POST['preset_slug'] ) ) : '';
         $orig    = isset( $_POST['preset_orig_slug'] ) ? sanitize_key( wp_unslash( $_POST['preset_orig_slug'] ) ) : '';
+
+        // Computed unconditionally (not just on the happy path) so a repost snapshot
+        // can be built regardless of where validation fails below.
+        $overrides = array();
+        if ( isset( $_POST['preset_overrides'] ) && is_array( $_POST['preset_overrides'] ) ) {
+            $overrides = wp_unslash( $_POST['preset_overrides'] );
+        }
+        $schema_overrides = array();
+        if ( isset( $_POST['preset_schema_overrides'] ) && is_array( $_POST['preset_schema_overrides'] ) ) {
+            $schema_overrides = wp_unslash( $_POST['preset_schema_overrides'] );
+        }
+        $schema_extras = array();
+        if ( isset( $_POST['preset_schema_extras'] ) && is_array( $_POST['preset_schema_extras'] ) ) {
+            foreach ( wp_unslash( $_POST['preset_schema_extras'] ) as $extra_raw ) {
+                if ( is_string( $extra_raw ) && trim( $extra_raw ) !== '' ) {
+                    $schema_extras[] = $extra_raw;
+                }
+            }
+        }
+        $faqs_arr = array();
+        if ( ! empty( $_POST['preset_faqs_json'] ) ) {
+            $faqs_raw = wp_unslash( $_POST['preset_faqs_json'] );
+            if ( strlen( $faqs_raw ) <= 524288 ) {
+                $faqs_dec = json_decode( $faqs_raw, true );
+                if ( is_array( $faqs_dec ) ) $faqs_arr = $faqs_dec;
+            }
+        }
+        $categories_arr = array();
+        if ( isset( $_POST['preset_categories'] ) && is_array( $_POST['preset_categories'] ) ) {
+            $categories_arr = array_map( 'sanitize_key', wp_unslash( $_POST['preset_categories'] ) );
+        }
+
+        // Snapshot of everything the operator just typed, keyed the same as a saved
+        // preset row plus 'orig_slug' + the raw (possibly invalid) defaults text.
+        // Used to repopulate the form on validation failure — see below.
+        $repost = array(
+            'slug'               => $slug,
+            'orig_slug'          => $orig,
+            'calc'               => isset( $_POST['preset_calc'] )              ? wp_unslash( $_POST['preset_calc'] )              : '',
+            'title'              => isset( $_POST['preset_title'] )             ? wp_unslash( $_POST['preset_title'] )             : '',
+            'description'        => isset( $_POST['preset_description'] )       ? wp_unslash( $_POST['preset_description'] )       : '',
+            'image'              => isset( $_POST['preset_image'] )             ? wp_unslash( $_POST['preset_image'] )             : '',
+            'price_from'         => isset( $_POST['preset_price_from'] )        ? wp_unslash( $_POST['preset_price_from'] )        : '',
+            'currency'           => isset( $_POST['preset_currency'] )          ? wp_unslash( $_POST['preset_currency'] )          : 'USD',
+            'sale_discount_pct'  => isset( $_POST['preset_sale_discount_pct'] ) ? wp_unslash( $_POST['preset_sale_discount_pct'] ) : '',
+            'sale_label'         => isset( $_POST['preset_sale_label'] )        ? wp_unslash( $_POST['preset_sale_label'] )        : '',
+            'categories'         => $categories_arr,
+            'overrides'          => $overrides,
+            'schema_overrides'   => $schema_overrides,
+            'schema_extras'      => $schema_extras,
+            'faqs'               => $faqs_arr,
+            '_defaults_json_raw' => isset( $_POST['preset_defaults_json'] ) ? wp_unslash( $_POST['preset_defaults_json'] ) : '',
+        );
 
         // Decode defaults JSON (textarea field)
         $defaults_arr = array();
@@ -64,43 +118,6 @@ function pps_presets_render_page() {
         }
 
         if ( $notice === '' ) {
-            // Tier 1: simple field overrides
-            $overrides = array();
-            if ( isset( $_POST['preset_overrides'] ) && is_array( $_POST['preset_overrides'] ) ) {
-                $overrides = wp_unslash( $_POST['preset_overrides'] );
-            }
-
-            // Tier 2: per-block JSON-LD overrides (raw textareas)
-            $schema_overrides = array();
-            if ( isset( $_POST['preset_schema_overrides'] ) && is_array( $_POST['preset_schema_overrides'] ) ) {
-                $schema_overrides = wp_unslash( $_POST['preset_schema_overrides'] );
-            }
-
-            // Tier 3: extra schema blocks (array of textareas)
-            $schema_extras = array();
-            if ( isset( $_POST['preset_schema_extras'] ) && is_array( $_POST['preset_schema_extras'] ) ) {
-                foreach ( wp_unslash( $_POST['preset_schema_extras'] ) as $extra_raw ) {
-                    if ( is_string( $extra_raw ) && trim( $extra_raw ) !== '' ) {
-                        $schema_extras[] = $extra_raw;
-                    }
-                }
-            }
-
-            // Per-preset FAQ override (hidden JSON serialized by JS)
-            $faqs_arr = array();
-            if ( ! empty( $_POST['preset_faqs_json'] ) ) {
-                $faqs_raw = wp_unslash( $_POST['preset_faqs_json'] );
-                if ( strlen( $faqs_raw ) <= 524288 ) {
-                    $faqs_dec = json_decode( $faqs_raw, true );
-                    if ( is_array( $faqs_dec ) ) $faqs_arr = $faqs_dec;
-                }
-            }
-
-            $categories_arr = array();
-            if ( isset( $_POST['preset_categories'] ) && is_array( $_POST['preset_categories'] ) ) {
-                $categories_arr = array_map( 'sanitize_key', wp_unslash( $_POST['preset_categories'] ) );
-            }
-
             $data = array(
                 'calc'              => isset( $_POST['preset_calc'] )              ? wp_unslash( $_POST['preset_calc'] )              : '',
                 'title'             => isset( $_POST['preset_title'] )             ? wp_unslash( $_POST['preset_title'] )             : '',
@@ -172,8 +189,11 @@ function pps_presets_render_page() {
 
     // Read query vars
     $msg  = isset( $_GET['msg'] ) ? sanitize_key( $_GET['msg'] ) : '';
-    if ( $msg === 'saved' )   $notice = pps_presets_notice( 'success', 'Preset saved.' );
-    if ( $msg === 'deleted' ) $notice = pps_presets_notice( 'success', 'Preset deleted.' );
+    // Guarded on $notice === '' so a stale ?msg=saved left over in the URL from a
+    // prior successful save (the save form posts back to the current URL, query
+    // string included) can never mask a fresh error notice from a failed resubmit.
+    if ( $notice === '' && $msg === 'saved' )   $notice = pps_presets_notice( 'success', 'Preset saved.' );
+    if ( $notice === '' && $msg === 'deleted' ) $notice = pps_presets_notice( 'success', 'Preset deleted.' );
 
     $editing_slug = isset( $_GET['edit'] ) ? sanitize_key( $_GET['edit'] ) : '';
     $is_new       = ! empty( $_GET['new'] );
@@ -205,7 +225,12 @@ function pps_presets_render_page() {
     }
     echo '</div>';
 
-    if ( $is_new ) {
+    if ( $repost !== null ) {
+        // A save attempt above failed validation — repopulate the form with
+        // exactly what was typed instead of falling through to a blank/stale
+        // GET-based render, which used to silently discard it.
+        pps_presets_render_edit_form( $repost, $repost['orig_slug'] === '' );
+    } elseif ( $is_new ) {
         pps_presets_render_edit_form( null );
     } elseif ( $editing_slug !== '' ) {
         $preset = pps_get_preset( $editing_slug );
@@ -285,14 +310,50 @@ function pps_presets_render_list() {
 // EDIT FORM
 // ═══════════════════════════════════════════════════════════════
 
-function pps_presets_render_edit_form( $preset ) {
-    $is_new   = ( $preset === null );
-    $slug     = $is_new ? '' : ( $preset['slug'] ?? '' );
-    $orig     = $slug;
+function pps_presets_render_edit_form( $preset, $is_new = null ) {
+    // $preset may also be a "repost" snapshot built from a just-failed POST
+    // (see pps_presets_render_page()) — same array shape as a saved preset,
+    // plus an 'orig_slug' key and a '_defaults_json_raw' key carrying the
+    // operator's exact (possibly invalid) Defaults JSON text verbatim, so a
+    // failed save never wipes what they typed.
+    if ( $is_new === null ) $is_new = ( $preset === null );
+    if ( $preset === null ) $preset = array();
+    $is_repost = array_key_exists( '_defaults_json_raw', $preset );
+    $slug      = $preset['slug'] ?? '';
+    $orig      = array_key_exists( 'orig_slug', $preset ) ? $preset['orig_slug'] : $slug;
 
     $defaults_json = '';
-    if ( ! $is_new && ! empty( $preset['defaults'] ) && is_array( $preset['defaults'] ) ) {
+    if ( $is_repost ) {
+        $defaults_json = (string) $preset['_defaults_json_raw'];
+    } elseif ( ! $is_new && ! empty( $preset['defaults'] ) && is_array( $preset['defaults'] ) ) {
         $defaults_json = wp_json_encode( $preset['defaults'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+    }
+
+    // "Mint Preset" handoff from a calculator's debug panel (?new=1&prefill_defaults=...
+    // &prefill_calc=...&prefill_price=...). Only ever consulted on the blank "new preset"
+    // form — never overrides a saved preset's own defaults on the edit form, and never
+    // overrides a just-failed repost (whose form submits back to the same URL, so a
+    // stale prefill_defaults from the original Mint Preset handoff can still be sitting
+    // in the query string even after the operator edited the textarea).
+    $prefill_calc  = '';
+    $prefill_price = null;
+    if ( $is_new && ! $is_repost ) {
+        if ( ! empty( $_GET['prefill_defaults'] ) ) {
+            $decoded = json_decode( wp_unslash( $_GET['prefill_defaults'] ), true );
+            if ( is_array( $decoded ) && function_exists( 'pps_sanitize_defaults_blob' ) ) {
+                $clean = pps_sanitize_defaults_blob( $decoded );
+                if ( $clean ) {
+                    $defaults_json = wp_json_encode( $clean, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+                }
+            }
+        }
+        if ( ! empty( $_GET['prefill_calc'] ) ) {
+            $prefill_calc = sanitize_key( wp_unslash( $_GET['prefill_calc'] ) );
+        }
+        if ( isset( $_GET['prefill_price'] ) && is_numeric( $_GET['prefill_price'] ) ) {
+            $pp = (float) $_GET['prefill_price'];
+            if ( $pp >= 0 && $pp < 1000000 ) $prefill_price = $pp;
+        }
     }
 
     $calcs = array(
@@ -324,7 +385,7 @@ function pps_presets_render_edit_form( $preset ) {
     echo '<div class="pps-preset-field">';
     echo '<label for="preset_calc">Calculator <span class="req">*</span></label>';
     echo '<select id="preset_calc" name="preset_calc" required>';
-    $current_calc = $preset['calc'] ?? '';
+    $current_calc = $is_new && $prefill_calc !== '' ? $prefill_calc : ( $preset['calc'] ?? '' );
     echo '<option value="">— select —</option>';
     foreach ( $calcs as $key => $label ) {
         $sel = ( $key === $current_calc ) ? ' selected' : '';
@@ -357,7 +418,9 @@ function pps_presets_render_edit_form( $preset ) {
     // Price from
     echo '<div class="pps-preset-field">';
     echo '<label for="preset_price_from">Price from</label>';
-    $price_val = ( isset( $preset['price_from'] ) && $preset['price_from'] !== null ) ? (float) $preset['price_from'] : '';
+    $price_val = ( isset( $preset['price_from'] ) && $preset['price_from'] !== null )
+        ? (float) $preset['price_from']
+        : ( $is_new && $prefill_price !== null ? $prefill_price : '' );
     echo '<input id="preset_price_from" type="number" name="preset_price_from" value="' . esc_attr( $price_val ) . '" min="0" step="0.01">';
     echo '<span class="hint">Used as Offer.lowPrice. Leave blank to omit Offer entirely.</span>';
     echo '</div>';
