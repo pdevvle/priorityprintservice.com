@@ -140,25 +140,32 @@ that string/placement) so the customer understands why nothing happened
 when they click "Add to Order," matching how `missingDest` already
 scrolls/focuses the shipping section rather than failing silently.
 
-### Approval must be invalidated on geometry changes (NEW — order #87007)
+### Geometry desync + approval invalidation (order #87007, corrected)
 
-A second live incident (2026-08-13, order #87007, $235.92) exposed a gap
-the gate alone does not close: **an approval survives changing the size.**
-The brochure calculator resets `approved` on art transforms (`txHash`
-watcher), new uploads, clears, and manual un-approve — but NOT when
-`longEdge`/`shortEdge`/fold/sides change. The customer approved four items
-at 12×12 (manifests generated 19:04–19:08), switched the size to 6×6 in
-the final two minutes, and checked out at 19:10 — an order priced at 6×6
-carrying approved 12.25″ print-ready PDFs (~4× the material priced).
+Order #87007 (2026-08-13, 4× Square Flyers, $235.92) initially looked like
+a stale-approval incident but is actually a **spec-string desync**: pricing,
+the approved artwork, and all four manifests agree at 12×12 — the customer
+paid the 12×12 price and gets 12×12 prints. Only the order summary /
+PPS-Spec say "6×6", because the summary prints `sizeLabel` (a stale preset
+label) while pricing and `generateApprovalPackage()` both read
+`longEdge`/`shortEdge` (the real dimensions). Nothing was mispriced or
+misproduced; the recorded spec strings were simply wrong. The sibling
+session's "Custom trims show dimensions in the summary" commit (`6886450`
+compiled / `f945ada` source) addresses this class; pending deploy.
 
-Fix is small: the invalidation `useEffect` watching `txHash` already
-exists — extend it with a geometry hash (size, fold type, sides) so any
-such change clears `approved` + `approvalPkg` and the gate re-blocks
-checkout until re-approval. Port to all 8 (source form first).
+Two durable lessons for the gate work:
 
-Consequence for the phase-2 backstop: comparing "manifest present" is not
-enough — the backstop should also compare the manifest's trim size against
-the ordered spec and flag mismatches for prepress review.
+1. **The code-level gap is still real but was not exercised here:** the
+   brochure calculator resets `approved` on art transforms (`txHash`
+   watcher), uploads, clears, and manual un-approve — but NOT on
+   `longEdge`/`shortEdge`/fold/sides changes. A customer genuinely changing
+   size after approving would carry a stale package to checkout. Fix stays
+   as speced: extend the existing `txHash` invalidation effect with a
+   geometry hash. (No live incident has demonstrated this yet.)
+2. **Spec strings must derive from the same fields pricing uses**
+   (`longEdge`/`shortEdge`), never from `sizeLabel` — and the phase-2
+   backstop should compare the manifest's trim size against those
+   dimensions, not against the label.
 
 ### Server-side backstop (optional hardening, phase 2)
 
