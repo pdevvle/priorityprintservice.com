@@ -3242,10 +3242,83 @@ function pps_spec_size_label( array $full ) {
 function pps_product_defaults_low_price( $fallback = '50' ) {
     $pid = function_exists( 'get_queried_object_id' ) ? get_queried_object_id() : 0;
     if ( ! $pid ) return $fallback;
-    $p = get_post_meta( $pid, '_pps_defaults_price', true );
-    if ( $p === '' || $p === null ) return $fallback;
-    $p = floatval( $p );
-    return ( $p > 0 && $p < 1000000 ) ? number_format( $p, 2, '.', '' ) : $fallback;
+    $f = pps_product_price_facts( $pid );
+    return $f['effective'] !== null ? number_format( $f['effective'], 2, '.', '' ) : $fallback;
+}
+
+/**
+ * The single price answer for a product. Both the Product schema and the
+ * Merchant Center feed call this, so the two cannot disagree.
+ *
+ * ── Why this function exists ──
+ *
+ * Google does not fill in the calculator to discover a price. It reads the
+ * page's structured data. So the comparison Merchant Center actually performs
+ * is *feed vs. your own Product schema* — not feed vs. the number a human sees.
+ *
+ * That makes it dangerously easy to publish a mismatch: the schema reads
+ * _pps_defaults_price while WooCommerce's price element reads _price, and
+ * nothing kept the two in step. A product whose Woo price was edited by hand
+ * after its defaults were quoted would advertise one number and mark up
+ * another, and the first anyone would hear of it is an item disapproval.
+ *
+ * Three numbers, deliberately kept distinct:
+ *
+ *   quoted     _pps_defaults_price — what the calculator quotes for this
+ *              product's own default configuration. The number that means
+ *              something; set from a share link.
+ *   regular    _regular_price — the list price WooCommerce renders.
+ *   sale       An active sale price, or null. get_price() collapses this into
+ *              regular, which is why it cannot be used on its own.
+ *
+ * `effective` is what a customer pays today, and is what both the schema and
+ * the feed's advertised price must reflect.
+ *
+ * `publishable` is false when quoted and regular disagree. Drift is a data
+ * error, and the right response is to advertise neither number rather than
+ * guess which one is intended.
+ *
+ * @param int $product_id
+ * @return array{quoted:?float,regular:?float,sale:?float,effective:?float,agrees:bool,publishable:bool}
+ */
+function pps_product_price_facts( $product_id ) {
+    $out = array(
+        'quoted' => null, 'regular' => null, 'sale' => null,
+        'effective' => null, 'agrees' => false, 'publishable' => false,
+    );
+
+    $product_id = (int) $product_id;
+    if ( ! $product_id ) return $out;
+
+    $q = get_post_meta( $product_id, '_pps_defaults_price', true );
+    if ( $q !== '' && $q !== null ) {
+        $q = (float) $q;
+        if ( $q > 0 && $q < 1000000 ) $out['quoted'] = round( $q, 2 );
+    }
+
+    if ( function_exists( 'wc_get_product' ) ) {
+        $product = wc_get_product( $product_id );
+        if ( $product ) {
+            $r = $product->get_regular_price();
+            if ( $r !== '' && $r !== null && (float) $r > 0 ) $out['regular'] = round( (float) $r, 2 );
+
+            // is_on_sale() is the only reliable test — a sale price can be set
+            // but scheduled for a window that is not open yet.
+            if ( $product->is_on_sale() ) {
+                $s = $product->get_sale_price();
+                if ( $s !== '' && $s !== null && (float) $s > 0 ) $out['sale'] = round( (float) $s, 2 );
+            }
+        }
+    }
+
+    $out['effective'] = $out['sale'] !== null ? $out['sale'] : $out['regular'];
+
+    $out['agrees'] = ( $out['quoted'] !== null && $out['regular'] !== null
+                       && abs( $out['quoted'] - $out['regular'] ) < 0.01 );
+
+    $out['publishable'] = ( $out['agrees'] && $out['effective'] !== null && $out['effective'] > 0 );
+
+    return $out;
 }
 
 /**

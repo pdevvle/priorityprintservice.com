@@ -47,24 +47,28 @@ function pps_catalog_registry_map() {
  *
  * ── On price, which is the whole reason this function is careful ──
  *
- * Two different questions get confused with each other:
+ * The intuition that Merchant Center somehow drives the calculator to find a
+ * price is wrong, and getting it wrong produces exactly the bug it is trying
+ * to avoid. Google reads the landing page's **structured data**. So the check
+ * that actually runs is:
  *
- *   Parity        Does the number we publish match the number on the page?
- *                 Merchant Center crawls the landing page and disapproves the
- *                 item when they differ. Satisfied by construction: we publish
- *                 $product->get_price(), which IS what the page renders.
+ *      feed g:price   ==   the Product schema's offer price
  *
- *   Meaningfulness Does that number correspond to the configuration the
- *                 calculator actually opens on? Only true when somebody set
- *                 _pps_defaults_price, which is written from a quote link and
- *                 therefore reflects a real quote for the real defaults.
+ * and the schema's price comes from pps_product_defaults_low_price(), which
+ * reads _pps_defaults_price — not WooCommerce's price element. Publishing
+ * $product->get_price() therefore does NOT give parity; it gives parity with
+ * the number a human sees while silently contradicting the number the crawler
+ * reads.
  *
- * A product can pass the first and fail the second: a legacy _regular_price
- * left over from before the calculator owned the product renders on the page
- * and matches the feed, while quoting a figure no customer configuring the
- * defaults will ever see. That is not a Merchant Center violation, but it is a
- * bad listing, so `price_ok` requires both and the two values are reported
- * separately when they disagree.
+ * Hence pps_product_price_facts(): one resolver, called by both the schema and
+ * the feed, so they cannot diverge. It also separates the list price from an
+ * active sale price, which get_price() collapses.
+ *
+ * When the quote behind the defaults and the WooCommerce price disagree,
+ * `price_ok` is false and the product is withheld. Drift is a data error, and
+ * picking a side would advertise a number the other half of the site
+ * contradicts. `price_drift` stays true on the row so the operator can be told
+ * precisely what to fix.
  *
  * @param int    $id
  * @param string $filename Registry key that claimed this ID.
@@ -88,20 +92,15 @@ function pps_catalog_row( $id, $filename ) {
         return array( 'skip' => 'product could not be loaded' );
     }
 
-    // What the page shows. Publishing anything else breaks parity.
-    $page_price = $product->get_price();
-    $page_price = ( $page_price === '' || $page_price === null ) ? null : (float) $page_price;
+    // One resolver, shared with the Product schema — see
+    // pps_product_price_facts() for why publishing anything else is a
+    // disapproval waiting to happen.
+    $pf = pps_product_price_facts( $id );
 
-    // What somebody deliberately quoted for this product's own defaults.
-    $quoted_raw   = get_post_meta( $id, '_pps_defaults_price', true );
-    $quoted_price = ( $quoted_raw === '' || $quoted_raw === null ) ? null : (float) $quoted_raw;
-
-    $price_ok = ( $page_price !== null && $page_price > 0 && $quoted_price !== null && $quoted_price > 0 );
-
-    // Drift is worth surfacing even when both are present: it means the
-    // defaults were re-quoted and the product price was not updated, or the
-    // price was edited by hand afterwards.
-    $price_drift = ( $price_ok && abs( $page_price - $quoted_price ) >= 0.01 );
+    // Drift means the quote behind the defaults and the price WooCommerce
+    // renders disagree. Publishing either one advertises a number the other
+    // half of the site contradicts, so the product is withheld instead.
+    $price_drift = ( $pf['quoted'] !== null && $pf['regular'] !== null && ! $pf['agrees'] );
 
     $defaults = get_post_meta( $id, '_pps_defaults', true );
     if ( ! is_array( $defaults ) ) $defaults = array();
@@ -137,9 +136,11 @@ function pps_catalog_row( $id, $filename ) {
         'url'         => (string) get_permalink( $id ),
         'description' => $description,
         'short'       => $short,
-        'price'       => $page_price,      // publish this one — parity
-        'quoted'      => $quoted_price,    // what the defaults were quoted at
-        'price_ok'    => $price_ok,
+        'price'       => $pf['effective'],  // what a customer pays today
+        'regular'     => $pf['regular'],
+        'sale'        => $pf['sale'],       // null unless a sale is live
+        'quoted'      => $pf['quoted'],     // what the defaults were quoted at
+        'price_ok'    => $pf['publishable'],
         'price_drift' => $price_drift,
         'virtual'     => $product->is_virtual(),
         'image'       => $image,
@@ -192,11 +193,23 @@ function pps_catalog_report( array $args = array() ) {
             }
 
             if ( $args['require_price'] && ! $row['price_ok'] ) {
+                if ( $row['price_drift'] ) {
+                    // The dangerous case. Both numbers exist and disagree, so
+                    // the schema advertises one and WooCommerce renders the
+                    // other. Publishing either is a guaranteed mismatch.
+                    $reason = sprintf(
+                        'price conflict — quoted at $%s for its defaults but the product price is $%s; '
+                        . 'the Product schema publishes one and the page the other. Re-paste the quote link, '
+                        . 'or set the product price to match.',
+                        number_format( $row['quoted'], 2 ), number_format( $row['regular'], 2 ) );
+                } elseif ( $row['quoted'] === null ) {
+                    $reason = 'no "Price at these defaults" set — nothing to advertise, '
+                            . 'and the Product schema is falling back to its $50 placeholder';
+                } else {
+                    $reason = 'no price on the product';
+                }
                 $skipped[] = array(
-                    'id' => $id, 'file' => $filename, 'title' => $row['title'],
-                    'reason' => $row['price'] === null || $row['price'] <= 0
-                        ? 'no price on the product'
-                        : 'no "Price at these defaults" set — page price would be published without a quote behind it',
+                    'id' => $id, 'file' => $filename, 'title' => $row['title'], 'reason' => $reason,
                 );
                 continue;
             }

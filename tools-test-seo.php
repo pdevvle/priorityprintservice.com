@@ -108,13 +108,49 @@ function pps_get_config() { return $GLOBALS['_opts'][ PPS_CONFIG_OPTION ] ?? arr
 
 // ── Fixture helpers ──
 class FakeProduct {
-    public $id, $price, $virtual, $gallery;
-    public function __construct( $id, $price, $virtual = true, $gallery = array() ) {
-        $this->id = $id; $this->price = $price; $this->virtual = $virtual; $this->gallery = $gallery;
+    public $id, $price, $virtual, $gallery, $sale;
+    public function __construct( $id, $price, $virtual = true, $gallery = array(), $sale = '' ) {
+        $this->id = $id; $this->price = $price; $this->virtual = $virtual;
+        $this->gallery = $gallery; $this->sale = $sale;
     }
-    public function get_price() { return $this->price; }
+    public function get_price() { return $this->sale !== '' ? $this->sale : $this->price; }
+    public function get_regular_price() { return $this->price; }
+    public function get_sale_price() { return $this->sale; }
+    public function is_on_sale() { return $this->sale !== '' && (float) $this->sale > 0; }
     public function is_virtual() { return $this->virtual; }
     public function get_gallery_image_ids() { return $this->gallery; }
+}
+
+/**
+ * Declared in pps-calculators.php — the single price answer shared by the
+ * Product schema and the feed. Mirrored here because the tests exercise
+ * pps-catalog.php without loading the whole plugin.
+ */
+function pps_product_price_facts( $product_id ) {
+    $out = array( 'quoted' => null, 'regular' => null, 'sale' => null,
+                  'effective' => null, 'agrees' => false, 'publishable' => false );
+    $product_id = (int) $product_id;
+    if ( ! $product_id ) return $out;
+
+    $q = get_post_meta( $product_id, '_pps_defaults_price', true );
+    if ( $q !== '' && $q !== null ) {
+        $q = (float) $q;
+        if ( $q > 0 && $q < 1000000 ) $out['quoted'] = round( $q, 2 );
+    }
+    $product = wc_get_product( $product_id );
+    if ( $product ) {
+        $r = $product->get_regular_price();
+        if ( $r !== '' && $r !== null && (float) $r > 0 ) $out['regular'] = round( (float) $r, 2 );
+        if ( $product->is_on_sale() ) {
+            $sp = $product->get_sale_price();
+            if ( $sp !== '' && $sp !== null && (float) $sp > 0 ) $out['sale'] = round( (float) $sp, 2 );
+        }
+    }
+    $out['effective']   = $out['sale'] !== null ? $out['sale'] : $out['regular'];
+    $out['agrees']      = ( $out['quoted'] !== null && $out['regular'] !== null
+                            && abs( $out['quoted'] - $out['regular'] ) < 0.01 );
+    $out['publishable'] = ( $out['agrees'] && $out['effective'] !== null && $out['effective'] > 0 );
+    return $out;
 }
 $GLOBALS['_products'] = array();
 function wc_get_product( $id ) { return $GLOBALS['_products'][ $id ] ?? false; }
@@ -123,7 +159,7 @@ function mkproduct( $id, $args = array() ) {
     $a = array_merge( array(
         'title' => 'Product ' . $id, 'status' => 'publish', 'price' => '100.00',
         'quoted' => '100.00', 'virtual' => true, 'thumb' => 'https://cdn.test/t' . $id . '.jpg',
-        'content' => 'Body copy.', 'excerpt' => '', 'gallery' => array(), 'defaults' => array(),
+        'content' => 'Body copy.', 'excerpt' => '', 'gallery' => array(), 'defaults' => array(), 'sale' => '',
         'cats' => array( 'Booklets' ),
     ), $args );
 
@@ -133,7 +169,7 @@ function mkproduct( $id, $args = array() ) {
     $p->post_excerpt = $a['excerpt']; $p->post_modified_gmt = '2026-08-14 00:00:00';
     $GLOBALS['_posts'][ $id ] = $p;
 
-    $GLOBALS['_products'][ $id ] = new FakeProduct( $id, $a['price'], $a['virtual'], $a['gallery'] );
+    $GLOBALS['_products'][ $id ] = new FakeProduct( $id, $a['price'], $a['virtual'], $a['gallery'], $a['sale'] );
     $GLOBALS['_meta'][ $id ] = array(
         '_pps_defaults_price' => $a['quoted'],
         '_pps_defaults'       => $a['defaults'],
@@ -193,7 +229,7 @@ $reasons = array();
 foreach ( $rep['skipped'] as $s ) $reasons[ $s['id'] ] = $s['reason'];
 
 ok( isset( $rep['rows'][101] ), '101 included' );
-ok( isset( $rep['rows'][106] ), '106 included despite drift (parity still holds)' );
+ok( ! isset( $rep['rows'][106] ), '106 excluded — its quote and its product price disagree' );
 ok( ! isset( $rep['rows'][102] ), '102 excluded — no quoted price' );
 ok( strpos( $reasons[102] ?? '', 'Price at these defaults' ) !== false, '  ...with an actionable reason', $reasons[102] ?? '' );
 ok( ( $reasons[103] ?? '' ) === 'no featured image', '103 excluded — no image', $reasons[103] ?? '' );
@@ -201,22 +237,53 @@ ok( strpos( $reasons[104] ?? '', 'not published' ) !== false, '104 excluded — 
 ok( strpos( $reasons[105] ?? '', 'virtual' ) !== false, '105 excluded — not virtual', $reasons[105] ?? '' );
 ok( strpos( $reasons[107] ?? '', 'stale registry' ) !== false, '107 excluded — stale registry entry', $reasons[107] ?? '' );
 ok( count( $rep['collisions'] ) === 1 && $rep['collisions'][0]['id'] === 101, 'collision detected for 101' );
-ok( $rep['rows'][106]['price_drift'] === true, 'drift flagged on 106' );
-ok( $rep['rows'][101]['price_drift'] === false, 'no false drift on 101' );
+// The drift flag itself is visible on the unfiltered catalog, where the row
+// survives so the operator can be told what is wrong with it.
+$rep_all = pps_catalog_report();
+ok( $rep_all['rows'][106]['price_drift'] === true, 'drift flagged on 106 in the unfiltered catalog' );
+ok( $rep_all['rows'][106]['price_ok'] === false, '  ...and it is not publishable' );
+ok( $rep_all['rows'][101]['price_drift'] === false, 'no false drift on 101' );
 ok( $rep['rows'][101]['calc'] === 'saddle', 'calc type resolved' );
 
-echo "\n── 3. THE parity rule: feed price == page price ───────\n";
+echo "\n── 3. THE parity rule: feed must agree with the SCHEMA ─\n";
+// Google does not fill in the calculator. It reads the page's structured data,
+// so the comparison is feed vs. Product schema — and the schema's price comes
+// from pps_product_defaults_low_price(), i.e. _pps_defaults_price, NOT from
+// WooCommerce's price element. A product where those two disagree cannot be
+// published safely under either number.
 $xml = pps_product_feed_render();
-ok( strpos( $xml, '<g:price>109.04 USD</g:price>' ) !== false, '101 publishes the page price' );
-ok( strpos( $xml, '<g:price>80.00 USD</g:price>' ) !== false, '106 publishes 80.00 (page), NOT 109.04 (quote)' );
-ok( strpos( $xml, '109.04 USD</g:price>' ) !== false && substr_count( $xml, '<g:price>' ) === 2,
-    'exactly 2 items priced', substr_count( $xml, '<g:price>' ) . ' found' );
+ok( strpos( $xml, '<g:price>109.04 USD</g:price>' ) !== false, '101 publishes 109.04, matching its schema' );
+ok( strpos( $xml, '<g:id>106</g:id>' ) === false,
+    '106 WITHHELD — quoted 109.04, product priced 80.00; publishing either would mismatch' );
+ok( substr_count( $xml, '<g:price>' ) === 1, 'exactly 1 item priced', substr_count( $xml, '<g:price>' ) . ' found' );
 ok( strpos( $xml, '<g:id>102</g:id>' ) === false, 'priceless product never reaches the XML' );
+
+$dreason = '';
+foreach ( $rep['skipped'] as $sk ) if ( $sk['id'] === 106 ) $dreason = $sk['reason'];
+ok( strpos( $dreason, 'price conflict' ) !== false, '  ...and the drift reason names the conflict', $dreason );
+ok( strpos( $dreason, '109.04' ) !== false && strpos( $dreason, '80.00' ) !== false,
+    '  ...quoting both numbers so it is actionable', $dreason );
+
+echo "\n── 3b. Sale prices ────────────────────────────────────\n";
+mkproduct( 110, array( 'title' => 'On Sale', 'price' => '200.00', 'quoted' => '200.00', 'sale' => '150.00' ) );
+$keep = $GLOBALS['_opts'][ PPS_CALC_OPTION ];
+$GLOBALS['_opts'][ PPS_CALC_OPTION ] = array( 'calc-preview-test.html' => array( 'products' => '110' ) );
+$xs = pps_product_feed_render();
+ok( strpos( $xs, '<g:price>200.00 USD</g:price>' ) !== false, 'g:price carries the LIST price' );
+ok( strpos( $xs, '<g:sale_price>150.00 USD</g:sale_price>' ) !== false, 'g:sale_price carries the discount' );
+$pf110 = pps_product_price_facts( 110 );
+ok( $pf110['effective'] === 150.0, 'effective price is the sale price — what the schema will publish' );
+ok( $pf110['publishable'] === true, 'a sale does not make the product unpublishable' );
+$GLOBALS['_opts'][ PPS_CALC_OPTION ] = $keep;
+$xml = pps_product_feed_render();
 
 echo "\n── 4. Feed correctness ────────────────────────────────\n";
 ok( strpos( $xml, 'xmlns:g="http://base.google.com/ns/1.0"' ) !== false, 'g: namespace declared' );
-ok( substr_count( $xml, '<g:identifier_exists>no</g:identifier_exists>' ) === 2, 'identifier_exists on every item' );
-ok( substr_count( $xml, '<g:availability>in_stock</g:availability>' ) === 2, 'availability on every item' );
+$items = substr_count( $xml, '<item>' );
+ok( $items > 0 && substr_count( $xml, '<g:identifier_exists>no</g:identifier_exists>' ) === $items,
+    'identifier_exists on every item', "$items item(s)" );
+ok( $items > 0 && substr_count( $xml, '<g:availability>in_stock</g:availability>' ) === $items,
+    'availability on every item', "$items item(s)" );
 ok( strpos( $xml, '<g:custom_label_0>saddle</g:custom_label_0>' ) !== false, 'calc type as custom label' );
 ok( strpos( $xml, '<g:google_product_category>' ) === false, 'GPC omitted when unset (no wrong guess)' );
 $prev = libxml_use_internal_errors( true );

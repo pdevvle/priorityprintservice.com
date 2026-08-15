@@ -14,12 +14,16 @@
  *
  * ── The rule that protects the Merchant Center account ──
  *
- * Google crawls the landing page and compares its price to the feed's. A
- * mismatch disapproves the item; a pattern of them warns the account. So the
- * feed publishes $product->get_price() — literally the number the page renders
- * — and refuses to invent one. A product without a meaningful price is left
- * OUT of the feed rather than sent with a guess: an omitted product loses one
- * listing, a mismatched one costs account standing.
+ * Google does not fill in the calculator to find a price. It reads the landing
+ * page's structured data. So the check Merchant Center actually runs is
+ * *feed vs. our own Product schema* — and the schema's price comes from
+ * pps_product_defaults_low_price(), not from WooCommerce's price element.
+ *
+ * Both sides therefore go through pps_product_price_facts(), which is the
+ * single answer to "what does this product cost". A product whose quote and
+ * whose WooCommerce price disagree is withheld from the feed entirely rather
+ * than published with whichever number we happened to reach for: an omitted
+ * product loses one listing, a mismatched one costs account standing.
  *
  * Every omission is explained at /pps-product-feed.xml?debug=1 (admins only),
  * because a silent exclusion turns "why isn't my product in Shopping?" into a
@@ -156,7 +160,18 @@ function pps_product_feed_item( array $row, array $s ) {
     }
 
     $out .= "    <g:availability>in_stock</g:availability>\n";
-    $out .= '    <g:price>' . number_format( $row['price'], 2, '.', '' ) . ' ' . pps_feed_x( $s['currency'] ) . "</g:price>\n";
+
+    // g:price is the LIST price and g:sale_price the discounted one — never
+    // the effective price in g:price alone. Google compares the landing page's
+    // structured data against the sale price when one is present, and against
+    // g:price when one is not, so collapsing the two would mismatch every
+    // product that happens to be on sale.
+    $list = $row['regular'] !== null ? $row['regular'] : $row['price'];
+    $out .= '    <g:price>' . number_format( $list, 2, '.', '' ) . ' ' . pps_feed_x( $s['currency'] ) . "</g:price>\n";
+    if ( $row['sale'] !== null && $row['sale'] < $list ) {
+        $out .= '    <g:sale_price>' . number_format( $row['sale'], 2, '.', '' ) . ' ' . pps_feed_x( $s['currency'] ) . "</g:sale_price>\n";
+    }
+
     $out .= "    <g:condition>new</g:condition>\n";
     $out .= '    <g:brand>' . pps_feed_x( $s['brand'] ) . "</g:brand>\n";
 
@@ -240,12 +255,9 @@ function pps_product_feed_render_debug() {
 
     echo 'IN THE FEED (' . count( $report['rows'] ) . ")\n" . str_repeat( '-', 60 ) . "\n";
     foreach ( $report['rows'] as $row ) {
-        printf( "  #%-7d %-46s %10s\n", $row['id'], pps_feed_clip( $row['title'], 44 ),
-                number_format( $row['price'], 2 ) );
-        if ( $row['price_drift'] ) {
-            printf( "           ⚠ page price %s but defaults were quoted at %s — re-check the product\n",
-                    number_format( $row['price'], 2 ), number_format( $row['quoted'], 2 ) );
-        }
+        $note = ( $row['sale'] !== null ) ? '  (on sale from ' . number_format( $row['regular'], 2 ) . ')' : '';
+        printf( "  #%-7d %-46s %10s%s\n", $row['id'], pps_feed_clip( $row['title'], 44 ),
+                number_format( $row['price'], 2 ), $note );
     }
     if ( ! $report['rows'] ) echo "  (none)\n";
 
