@@ -28,13 +28,17 @@ window where the loader points at a file that is not there yet.
 
 ### Before overwriting, check first
 
-Standing rule, CLAUDE.md. Current production sizes should be
-`pps-calculators.php` 322,038 and `pps-config-admin.php` 116,234-ish. **A size
-matching no commit means someone edited in place — stop and read it.** In
-particular `pps-config-admin.php` on production came from
-`claude/woocommerce-domain-search-ly4vff`; the copy here is that version plus
-the new fields, so it is a superset and safe — but confirm the byte count
-before assuming.
+Standing rule, CLAUDE.md. Production should currently read
+**`pps-calculators.php` 322,038** and **`pps-config-admin.php` 111,697**.
+**A size matching no commit means someone edited in place — stop and read it
+before overwriting.**
+
+`pps-config-admin.php` deserves a second look: production's copy came from
+`claude/woocommerce-domain-search-ly4vff` (111,697), not from this branch. The
+116,490 here is exactly that file plus the new SEO fields — a strict superset,
+verified by a clean three-way merge — so deploying it loses nothing. That
+branch was still at `9d859b2` as of 2026-08-15; if it has moved since, re-check
+before overwriting.
 
 ## Then, in order
 
