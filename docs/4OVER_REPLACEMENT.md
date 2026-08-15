@@ -162,17 +162,76 @@ The proofer is the biggest single thing carried over, and it carries over
 whole — it operates on the customer's uploaded file and the trim size, neither
 of which cares where the price came from.
 
-### Markup: one variable, never shown to the customer
+### Markup: 100.10%, plus shipping at cost
 
-The customer sees a price. Staff see the decomposition.
+Owner, 2026-08-15:
 
-A single percentage is the right starting shape — global, with a per-product
-override for anything where 4over's own margin is unusual. Put the cost, the
-markup and the resulting price in the **debug panel**, which is already
-staff-only, so a quote can always be reconciled against what 4over will invoice.
+```
+retail = 4over cost x 2.0010  +  ship(cost)
+```
+
+Read as a **markup of** 100.10%, not a retail equal to 100.10% of cost — the
+latter is a 0.1% margin and self-evidently not the intent ($7.56 cost → $7.57
+retail). The trailing `.10` is worth keeping but is not doing much work: against
+a flat 2.0000 it is 23¢ on the largest order in the Circle matrix.
+
+Applied to Circle Business Cards (UV):
+
+| Run | Cost | Marked up | Ship | **Retail** | Per card | Gross $ | Margin |
+|---|---|---|---|---|---|---|---|
+| 250 | 7.56 | 15.13 | 10.00 | **25.13** | 0.1005 | 7.57 | 30.1% |
+| 500 | 15.12 | 30.26 | 15.12 | **45.38** | 0.0908 | 15.14 | 33.4% |
+| 1,000 | 19.65 | 39.32 | 19.65 | **58.97** | 0.0590 | 19.67 | 33.4% |
+| 2,500 | 42.35 | 84.74 | 20.00 | **104.74** | 0.0419 | 42.39 | 40.5% |
+| 5,000 | 58.97 | 118.00 | 20.00 | **138.00** | 0.0276 | 59.03 | 42.8% |
+| 10,000 | 96.78 | 193.66 | 20.00 | **213.66** | 0.0214 | 96.88 | 45.3% |
+| 15,000 | 140.64 | 281.42 | 21.10 | **302.52** | 0.0202 | 140.78 | 46.5% |
+| 20,000 | 186.00 | 372.19 | 27.90 | **400.09** | 0.0200 | 186.19 | 46.5% |
+| 25,000 | 231.37 | 462.97 | 34.71 | **497.68** | 0.0199 | 231.60 | 46.5% |
+
+Retail is a **delivered** price — shipping is inside it, so there is no separate
+charge at checkout. Worth being deliberate about downstream: in the Merchant
+Center feed that means `g:price` is the all-in figure and `g:shipping` is zero,
+which is consistent and common, but it has to be set that way rather than
+inherited.
+
+### Two consequences of "+ shipping" being outside the markup
+
+**1. Margin is lowest on your smallest orders — 30.1% at 250 against 46.5% at
+25,000.** Shipping passes through at cost, and it is a much larger share of a
+small order's retail, so it dilutes the margin exactly where the order is
+smallest. That is the opposite of the usual instinct, and the opposite of what
+per-order handling effort would suggest. It may well be what you want as a
+loss-leader shape; it is worth having chosen rather than inherited. Marking
+shipping up too, or a small-order handling fee, would flatten it.
+
+**2. Nothing cushions a shipping under-estimate.** Every dollar the estimate is
+short comes straight off profit. And the exposure has two different shapes at
+the two ends:
+
+| | Gross profit | Ship est | What a $10 miss costs |
+|---|---|---|---|
+| 250 | $7.57 | $10.00 | **132% of the margin — the order goes negative** |
+| 1,000 | $19.67 | $19.65 | 51% |
+| 10,000 | $96.88 | $20.00 | 10% |
+| 25,000 | $231.60 | $34.71 | 4% |
+
+So the **bottom of the range is fragile** — shipping is 132% of gross profit at
+250, so a modest miss wipes the order out — while the **top is exposed**, where
+the misses are large in absolute dollars but land against a fat margin.
+
+That is not a reason to change the formula. It is the reason the Shippo
+validation in the next section is worth doing at *both* ends rather than only
+the tail, which is what I said before this markup was known.
+
+### Never show the cost
+
+The customer sees a price. Staff see the decomposition — cost, markup, shipping
+— in the **debug panel**, which is already staff-only, so a quote can always be
+reconciled against what 4over will invoice.
 
 Never render the cost anywhere a customer can reach, including in `pps_metadata`
-on the order — that is visible in enough places that it will eventually leak.
+on the order; that is visible in enough places that it will eventually leak.
 
 ### Turnaround: settled, and simpler than the in-house engine
 
