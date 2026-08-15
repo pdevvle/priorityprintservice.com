@@ -106,6 +106,7 @@ function pps_get_calc_type_for_filename( $f ) {
     return $m[ $f ] ?? '';
 }
 function pps_get_config() { return $GLOBALS['_opts'][ PPS_CONFIG_OPTION ] ?? array(); }
+function pps_sanitize_defaults_blob( $a ) { return $a; }
 
 // ── Fixture helpers ──
 class FakeProduct {
@@ -190,12 +191,55 @@ function pps_registry_product_ids( $products_str ) {
     return array_values( array_unique( $ids ) );
 }
 
+// ── spawner surface ──
+$GLOBALS['_inserted'] = 0;
+$GLOBALS['_thumbs']   = array();
+$GLOBALS['_objterms'] = array();
+function wp_insert_post( $a, $werr = false ) {
+    $id = 900 + ( ++$GLOBALS['_inserted'] );
+    $p = new stdClass();
+    $p->ID = $id; $p->post_type = $a['post_type']; $p->post_status = $a['post_status'];
+    $p->post_title = $a['post_title']; $p->post_content = $a['post_content'] ?? '';
+    $p->post_excerpt = $a['post_excerpt'] ?? ''; $p->post_modified_gmt = '2026-08-15 00:00:00';
+    $GLOBALS['_posts'][ $id ] = $p;
+    $GLOBALS['_meta'][ $id ] = array();
+    $GLOBALS['_products'][ $id ] = new FakeProduct( $id, '', true );
+    return $id;
+}
+function update_post_meta( $id, $k, $v ) {
+    $GLOBALS['_meta'][ $id ][ $k ] = $v;
+    if ( $k === '_regular_price' && isset( $GLOBALS['_products'][ $id ] ) ) {
+        $GLOBALS['_products'][ $id ]->price = $v;
+    }
+    return true;
+}
+function sanitize_title( $s ) { return strtolower( preg_replace( '/[^a-z0-9]+/i', '-', trim( (string) $s ) ) ); }
+function get_post_thumbnail_id( $id ) { return $GLOBALS['_thumbs'][ $id ] ?? 0; }
+function set_post_thumbnail( $id, $t ) { $GLOBALS['_thumbs'][ $id ] = $t; return true; }
+function wp_get_object_terms( $id, $tax, $a = array() ) { return $GLOBALS['_objterms'][ $id ][ $tax ] ?? array(); }
+function wp_set_object_terms( $id, $terms, $tax ) { $GLOBALS['_objterms'][ $id ][ $tax ] = $terms; return true; }
+function url_to_postid( $u ) { return 0; }
+function get_edit_post_link( $id, $ctx = '' ) { return 'https://example.test/edit?post=' . $id; }
+function add_submenu_page( ...$a ) {}
+function submit_button( ...$a ) {}
+function wp_nonce_field( ...$a ) {}
+function woocommerce_wp_select( $a ) {}
+function pps_save_registry( $r ) { $GLOBALS['_opts'][ PPS_CALC_OPTION ] = $r; }
+function pps_get_calculator_for_product( $pid ) {
+    foreach ( pps_get_registry() as $f => $m ) {
+        if ( in_array( (int) $pid, pps_registry_product_ids( $m['products'] ?? '' ), true ) ) return $f;
+    }
+    return false;
+}
+
 // ─────────────────────────── tests ───────────────────────────
 
 $ROOT = __DIR__ . '/';
 require $ROOT . 'pps-catalog.php';
 require $ROOT . 'pps-product-feed.php';
 require $ROOT . 'pps-gbp-sync.php';
+require $ROOT . 'pps-defaults-url.php';
+require $ROOT . 'pps-spawn-product.php';
 
 
 $pass = 0; $fail = 0;
@@ -401,6 +445,83 @@ $GLOBALS['_opts'][ PPS_CONFIG_OPTION ] = array( 'seo' => array(
 $GLOBALS['_http'] = array( 'response' => array( 'code' => 200 ), 'body' => '{"rating":7.5,"userRatingCount":10}' );
 pps_gbp_sync_rating();
 ok( $GLOBALS['_opts'][ PPS_CONFIG_OPTION ]['seo']['gbp_rating_value'] === 4.9, 'out-of-range rating rejected' );
+
+echo "\n── 9. Spawner ─────────────────────────────────────────\n";
+
+// A template to clone from, and a registry that does not yet know product 901.
+mkproduct( 300, array( 'title' => 'Saddle Booklets', 'content' => 'Long description here.',
+                       'excerpt' => 'Short summary.', 'cats' => array( 'Booklets' ) ) );
+$GLOBALS['_thumbs'][300]   = 55;
+$GLOBALS['_meta'][300]['_product_image_gallery'] = '61,62';
+$GLOBALS['_objterms'][300] = array( 'product_cat' => array( 7 ), 'product_tag' => array( 9 ) );
+$GLOBALS['_opts'][ PPS_CALC_OPTION ] = array(
+    'calc-preview-test.html' => array( 'products' => '300' ),
+);
+
+$link = 'https://priorityprintservice.com/product/x/?size=5.5%C3%978.5&qty=250&pages=24'
+      . '&color=color&paper=noncardstock&paperval=0.003&staple=true&q=284.50&bogus=1';
+
+$r = pps_spawn_product( array(
+    'url' => $link, 'title' => 'Mini Catalog Printing',
+    'calc' => 'calc-preview-test.html', 'template' => 300,
+) );
+
+ok( ! is_wp_error( $r ), 'spawn succeeds', is_wp_error( $r ) ? $r->get_error_message() : '' );
+$nid = $r['id'];
+
+echo "  -- the two silent failures, which are the whole point --\n";
+ok( $GLOBALS['_meta'][ $nid ]['_virtual'] === 'yes', '_virtual forced on (never a checkbox)' );
+$bound = pps_get_calculator_for_product( $nid );
+ok( $bound === 'calc-preview-test.html', 'added to the calculator registry', var_export( $bound, true ) );
+ok( in_array( 300, pps_registry_product_ids(
+        $GLOBALS['_opts'][ PPS_CALC_OPTION ]['calc-preview-test.html']['products'] ), true ),
+    '  ...without dropping the product already registered' );
+
+echo "  -- defaults and price out of the link --\n";
+ok( $GLOBALS['_meta'][ $nid ]['_pps_defaults']['qty'] === 250, 'qty from the link' );
+ok( $GLOBALS['_meta'][ $nid ]['_pps_defaults']['pages'] === 24, 'pages from the link' );
+ok( $GLOBALS['_meta'][ $nid ]['_pps_defaults']['twoStaple'] === true, 'booleans cast, not strings' );
+ok( $GLOBALS['_meta'][ $nid ]['_pps_defaults']['sizeLabel'] === '5.5×8.5', 'the × survives the URL round trip' );
+ok( ! isset( $GLOBALS['_meta'][ $nid ]['_pps_defaults']['bogus'] ), 'unknown param not stored' );
+ok( in_array( 'bogus', $r['unknown'], true ), '  ...and reported back' );
+ok( (float) $GLOBALS['_meta'][ $nid ]['_regular_price'] === 284.50, 'price set from &q=' );
+ok( (float) $GLOBALS['_meta'][ $nid ]['_pps_defaults_price'] === 284.50, '  ...and stored as the quote' );
+ok( $GLOBALS['_meta'][ $nid ]['_pps_defaults_source'] === $link, 'source link kept for provenance' );
+
+echo "  -- cloned from the template --\n";
+ok( $GLOBALS['_posts'][ $nid ]->post_content === 'Long description here.', 'description cloned' );
+ok( $GLOBALS['_posts'][ $nid ]->post_excerpt === 'Short summary.', 'short description cloned' );
+ok( $GLOBALS['_thumbs'][ $nid ] === 55, 'featured image cloned' );
+ok( $GLOBALS['_meta'][ $nid ]['_product_image_gallery'] === '61,62', 'gallery cloned' );
+ok( $GLOBALS['_objterms'][ $nid ]['product_cat'] === array( 7 ), 'categories cloned' );
+ok( $GLOBALS['_posts'][ $nid ]->post_status === 'draft', 'created as a DRAFT, never published blind' );
+
+echo "  -- refusals --\n";
+$e = pps_spawn_product( array( 'url' => $link, 'title' => '', 'calc' => 'calc-preview-test.html' ) );
+ok( is_wp_error( $e ), 'no title refused' );
+$e = pps_spawn_product( array( 'url' => $link, 'title' => 'X', 'calc' => '' ) );
+ok( is_wp_error( $e ), 'no calculator refused' );
+$e = pps_spawn_product( array( 'url' => 'https://example.com/no-params', 'title' => 'X',
+                               'calc' => 'calc-preview-test.html' ) );
+ok( is_wp_error( $e ), 'a link with no settings refused, not silently emptied' );
+
+echo "  -- calculator detection --\n";
+ok( pps_spawn_detect_calc( 'https://pdevvle.github.io/x/calc-brochure.html?qty=100' ) === 'calc-brochure.html',
+    'preview URL names the file' );
+ok( pps_spawn_detect_calc( 'https://priorityprintservice.com/product/x/?qty=1' ) === '',
+    'unresolvable link returns empty rather than guessing' );
+
+echo "  -- feed interaction --\n";
+$GLOBALS['_meta'][ $nid ]['_thumb'] = 'https://cdn.test/new.jpg';
+$draft_row = pps_catalog_row( $nid, 'calc-preview-test.html' );
+ok( isset( $draft_row['skip'] ) && strpos( $draft_row['skip'], 'not published' ) !== false,
+    'while a draft, it stays OUT of the feed', $draft_row['skip'] ?? 'no skip' );
+
+$GLOBALS['_posts'][ $nid ]->post_status = 'publish';   // operator hits Publish
+$row = pps_catalog_row( $nid, 'calc-preview-test.html' );
+ok( ! isset( $row['skip'] ), 'once published it resolves' , $row['skip'] ?? '' );
+ok( $row['price_ok'] === true && $row['virtual'] === true && $row['image'] !== '',
+    '  ...and is feed-ready with no further edits' );
 
 echo "\n" . str_repeat( '─', 56 ) . "\n";
 printf( "  %d passed, %d failed\n\n", $pass, $fail );

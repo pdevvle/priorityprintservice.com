@@ -1,5 +1,10 @@
 # Fast product creation — spec
 
+> **Built 2026-08-15** in `pps-spawn-product.php`, covered by 27 assertions in
+> `tools-test-seo.php` §9. §3 and §4 below describe what now exists; §0, §5 and
+> §6 (the preset dead end, bulk mode's limits, and the preset migration) are
+> still open. Not yet deployed — see `docs/DEPLOY_FEED_2026-08-15.md`.
+
 **The instinct was right: presets were the wrong shape.** Not because they look
 different from the rest of the site — because they cannot take money.
 

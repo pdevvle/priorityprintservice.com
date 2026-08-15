@@ -153,6 +153,13 @@ if ( file_exists( PPS_CALC_DIR . 'pps-gbp-sync.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-gbp-sync.php';
 }
 
+// One-screen product creation from a quote link, plus the calculator-binding
+// dropdown on the product editor. Needs the URL parser.
+if ( file_exists( PPS_CALC_DIR . 'pps-spawn-product.php' )
+     && file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-spawn-product.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
