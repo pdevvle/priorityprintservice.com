@@ -299,18 +299,87 @@ with — they are dense, so they carry the most weight per dollar of any format
 4over sells. An estimator that holds for cards holds for posters and brochures;
 one validated on brochures will under-collect on cards.
 
+### Weight is computable for cards — which settles the question cheaply
+
+Owner, 2026-08-15: for business cards the weight and package count are easy to
+work out. That is the missing input, and it means the bands can be checked
+without touching 4over's checkout at all.
+
+Anchoring on a standard 3.5×2″ card at 14PT C2S ≈ 2.27 g (500 ≈ 2.5 lb) and
+scaling by area, a 2″ round on the same stock is **≈ 1.02 g**. One constant, and
+it is corrected by weighing a single real box.
+
+| Run | Cards | + packaging | Boxes | Ship est | Estimate per lb |
+|---|---|---|---|---|---|
+| 250 | 0.56 lb | 1.2 lb | 1 | 15.12 | 12.30 |
+| 500 | 1.12 lb | 1.9 lb | 1 | 20.00 | 10.77 |
+| 1,000 | 2.25 lb | 3.1 lb | 1 | 20.00 | 6.42 |
+| 2,500 | 5.62 lb | 6.9 lb | 1 | 20.00 | 2.90 |
+| 5,000 | 11.23 lb | 13.2 lb | 1 | 20.00 | 1.52 |
+| 10,000 | 22.46 lb | 25.8 lb | 1 | 20.00 | **0.78** |
+| 15,000 | 33.69 lb | 38.9 lb | 2 | 21.10 | **0.54** |
+| 20,000 | 44.92 lb | 51.5 lb | 2 | 27.90 | **0.54** |
+| 25,000 | 56.15 lb | 64.1 lb | 3 | 34.71 | **0.54** |
+
+*(12% packaging, ~0.6 lb per carton, cartons assumed ~30 lb — all easy to
+correct with one real shipment.)*
+
+The last column is the whole story. **The estimate is collecting 54¢ per pound
+at the top of the range**, on a shipment that by then is three separate parcels
+— each of which carries its own base charge before a single pound is priced.
+
+Note also that the per-pound figure flattens at $0.54 from 15,000 up. That is
+the 15% band being *proportional to cost*, while cost per unit has already gone
+flat ($0.0093 at 15,000, 20,000 and 25,000). Once 4over stops discounting, a
+percentage-of-cost estimator stops growing too — but the parcel keeps getting
+heavier.
+
+### Settle it in Shippo, not at 4over's checkout
+
+You already have Shippo and now you have weights. Quote a CA origin to a few
+representative destinations:
+
+| Quote | Against |
+|---|---|
+| ~1.2 lb, 1 parcel | $15.12 |
+| ~13.2 lb, 1 parcel | $20.00 |
+| ~25.8 lb, 1 parcel | $20.00 |
+| ~64 lb, 3 parcels | $34.71 |
+
+Four quotes, no orders placed, and it uses infrastructure that is already built.
+This replaces the "three probes through 4over's checkout" suggestion above —
+same answer, cheaper.
+
+### If the top is short, the fix has an obvious shape
+
+Keep the price bands where they are safe, and hand over to weight where price
+stops tracking it:
+
+```
+ship(C, W) = C <= cap-threshold  ?  max(10, min(2C, 20))     // price bands, low volume
+                                 :  max(20, weight_rate(W))  // weight, high volume
+```
+
+The handover lands exactly where the flat $20 cap ends, which is also where the
+data above says the estimate starts thinning. Below it the bands over-collect
+comfortably and their simplicity is worth keeping; above it, price has stopped
+being a proxy for weight and only weight will do.
+
+**Weight belongs in the capture, not at quote time.** Compute it per cell when
+the matrix is built — stock caliper and trim size are already on the page — and
+store it beside the cost. Then it is available for a gate as well: any cell
+where the band estimate falls below a weight-derived floor gets flagged at
+ingest, alongside the monotonicity and magnitude checks in
+`docs/4OVER_PIPELINE.md` §6. That keeps quoting a pure lookup with no runtime
+carrier call, and still catches the one failure mode the bands have.
+
 ### Outlying states and territories → Shippo
 
 AK, HI, PR, GU, VI, AS, MP fall out of the band formula and use the existing
-Shippo integration as the estimator, which is already built and already quotes
-real rates.
+Shippo integration, which is already built and already quotes real rates.
 
-One wrinkle worth naming: **Shippo will quote from whatever origin its config
-names, which is PPS.** On a drop-ship the parcel actually leaves 4over's
-facility, which is somewhere else. For the lower 48 that hardly matters; for
-Hawaii and Alaska the origin can move the rate. Worth checking whether Shippo's
-origin should be overridden to 4over's nearest facility for these products, or
-whether the difference is small enough to ignore.
+Origin is not a concern: 4over would ship these out of California, and CA vs
+PPS's own origin does not move an AK/HI rate meaningfully (owner, 2026-08-15).
 
 ### The one genuinely new problem: these are costs, not prices
 
