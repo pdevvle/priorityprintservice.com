@@ -239,18 +239,18 @@ shipping):
 | Band | Rule |
 |---|---|
 | Floor | never below **$10** |
-| Low | **2 × C**, while that is under $20 |
+| Low | **1 × C**, while that is under $20 |
 | Mid | flat **$20** |
 | High | **15% of C**, once 15% exceeds $20 (i.e. `C > $133.33`) |
 
 **It reduces to one line, with no branches:**
 
 ```
-ship(C) = max( 10, min( 2C, 20 ), 0.15C )
+ship(C) = max( 10, min( C, 20 ), 0.15C )
 ```
 
 Verified identical to the piecewise reading at every cent from $0.01 to $1,000,
-and **continuous at all three boundaries** — $5, $10 and $133.33 each hand over
+and **continuous at all three boundaries** — $10, $20 and $133.33 each hand over
 without a jump, so there is no quantity at which a customer sees shipping lurch.
 That is a good property and it was not accidental.
 
@@ -258,9 +258,9 @@ Applied to Circle Business Cards (UV):
 
 | Run | 4over cost | Ship est | Landed | Band |
 |---|---|---|---|---|
-| 250 | 7.56 | 15.12 | 22.68 | 2 × cost |
-| 500 | 15.12 | 20.00 | 35.12 | cap |
-| 1,000 | 19.65 | 20.00 | 39.65 | cap |
+| 250 | 7.56 | 10.00 | 17.56 | **floor** |
+| 500 | 15.12 | 15.12 | 30.24 | 1 × cost |
+| 1,000 | 19.65 | 19.65 | 39.30 | 1 × cost |
 | 2,500 | 42.35 | 20.00 | 62.35 | cap |
 | 5,000 | 58.97 | 20.00 | 78.97 | cap |
 | 10,000 | 96.78 | 20.00 | 116.78 | cap |
@@ -268,8 +268,14 @@ Applied to Circle Business Cards (UV):
 | 20,000 | 186.00 | 27.90 | 213.90 | 15% |
 | 25,000 | 231.37 | 34.71 | 266.08 | 15% |
 
-The **$10 floor never binds on this product** — the cheapest cell is $7.56 and
-2× that is already $15.12. It will bind on cheaper products, if any exist.
+The multiplier was corrected from 2× to 1× on 2026-08-15. **Only the bottom
+three runs moved** — 250 by −$5.12, 500 by −$4.88, 1,000 by −$0.35 — because
+the $20 cap and the 15% band never involved the multiplier at all. Every run of
+2,500 and up is unchanged.
+
+**The $10 floor now binds at 250**, where before it never did on this product.
+That matters: at ~1.2 lb the floor is close to a real ground rate rather than a
+cushion over it, so it is doing genuine work rather than sitting unused.
 
 ### The one thing to validate, and it is the top of the range
 
@@ -311,9 +317,9 @@ it is corrected by weighing a single real box.
 
 | Run | Cards | + packaging | Boxes | Ship est | Estimate per lb |
 |---|---|---|---|---|---|
-| 250 | 0.56 lb | 1.2 lb | 1 | 15.12 | 12.30 |
-| 500 | 1.12 lb | 1.9 lb | 1 | 20.00 | 10.77 |
-| 1,000 | 2.25 lb | 3.1 lb | 1 | 20.00 | 6.42 |
+| 250 | 0.56 lb | 1.2 lb | 1 | 10.00 | 8.14 |
+| 500 | 1.12 lb | 1.9 lb | 1 | 15.12 | 8.14 |
+| 1,000 | 2.25 lb | 3.1 lb | 1 | 19.65 | 6.31 |
 | 2,500 | 5.62 lb | 6.9 lb | 1 | 20.00 | 2.90 |
 | 5,000 | 11.23 lb | 13.2 lb | 1 | 20.00 | 1.52 |
 | 10,000 | 22.46 lb | 25.8 lb | 1 | 20.00 | **0.78** |
@@ -341,7 +347,7 @@ representative destinations:
 
 | Quote | Against |
 |---|---|
-| ~1.2 lb, 1 parcel | $15.12 |
+| ~1.2 lb, 1 parcel | $10.00 |
 | ~13.2 lb, 1 parcel | $20.00 |
 | ~25.8 lb, 1 parcel | $20.00 |
 | ~64 lb, 3 parcels | $34.71 |
@@ -361,9 +367,13 @@ ship(C, W) = C <= cap-threshold  ?  max(10, min(2C, 20))     // price bands, low
 ```
 
 The handover lands exactly where the flat $20 cap ends, which is also where the
-data above says the estimate starts thinning. Below it the bands over-collect
-comfortably and their simplicity is worth keeping; above it, price has stopped
+data above says the estimate starts thinning. Below it the bands still cover
+their weight and their simplicity is worth keeping; above it, price has stopped
 being a proxy for weight and only weight will do.
+
+Note the 1× correction did not touch the thinning — the top six runs are
+identical either way. What it did remove is the cushion at the bottom, so the
+low end is now roughly at cost rather than comfortably over it.
 
 **Weight belongs in the capture, not at quote time.** Compute it per cell when
 the matrix is built — stock caliper and trim size are already on the page — and
