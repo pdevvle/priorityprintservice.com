@@ -121,10 +121,76 @@ date and the option set it was captured against. Nothing reads a matrix without
 also seeing how old it is.
 
 **Serve** is a ninth calculator sharing the existing chrome — `Sel`, `Pil`,
-`Panel`, `RichTip`, the shipping/rush engine, the artwork and proof flow. From
-the customer's side it is indistinguishable from the in-house ones. From the
-code's side its `calculate()` is a lookup plus markup instead of a press-sheet
-model.
+`Panel`, `RichTip`, the artwork and proof flow. From the customer's side it is
+indistinguishable from the in-house ones. From the code's side its `calculate()`
+is a lookup plus markup instead of a press-sheet model.
+
+### The matrix defines the form — so there is exactly one new calculator file
+
+This is the consequence of "it acts as the matrix acts", and it is worth being
+deliberate about because it decides how much work every future product costs.
+
+The eight in-house calculators each hardcode their own option lists, because
+each models a different press process. A matrix-driven calculator does not need
+to: **the form is generated from the matrix's own dimensions.** A matrix with
+three coatings and nine run sizes renders three coating pills and nine run
+buttons, because those are the values that exist.
+
+So:
+
+- **One file** — `calc-4over.html` — serves every 4over product.
+- A product differs from its neighbours only by which matrix it points at, which
+  is already exactly how `_pps_defaults` and the registry work.
+- **Adding a 4over product later costs no code at all**: capture a matrix, spawn
+  a product (`docs/CREATING_A_PRODUCT.md`), point it at the matrix.
+
+It also makes an impossible quote impossible. A lookup cannot return a
+configuration 4over does not sell, because there is no cell for it — no
+validation rules to write, no combination to forget.
+
+### What comes free, and what is actually new
+
+| Inherited unchanged from the in-house calculators | Genuinely new |
+|---|---|
+| `Sel` / `Pil` / `Sec` form controls and all the styling | `calculate()` → a matrix lookup |
+| `Panel`, the quantity ladder, the debug panel | The markup variable |
+| The proof / preview modal, `FitToggle`, approval package | Rendering controls from matrix dimensions |
+| Artwork upload to Drive, the whole prepress flow | Matrix storage, ingest and staleness |
+| Add-to-cart, `pps_metadata`, PPS-Spec, reorder | |
+
+The proofer is the biggest single thing carried over, and it carries over
+whole — it operates on the customer's uploaded file and the trim size, neither
+of which cares where the price came from.
+
+### Markup: one variable, never shown to the customer
+
+The customer sees a price. Staff see the decomposition.
+
+A single percentage is the right starting shape — global, with a per-product
+override for anything where 4over's own margin is unusual. Put the cost, the
+markup and the resulting price in the **debug panel**, which is already
+staff-only, so a quote can always be reconciled against what 4over will invoice.
+
+Never render the cost anywhere a customer can reach, including in `pps_metadata`
+on the order — that is visible in enough places that it will eventually leak.
+
+### One thing this does not answer: turnaround and shipping
+
+The in-house calculators own a full shipping and rush engine because PPS controls
+the press schedule. A 4over job does not work that way — 4over prints it, and
+their turnaround is theirs.
+
+Two possibilities with different consequences, and I do not know which applies:
+
+- **4over ships direct to the customer.** Then the delivery date is 4over's
+  production time plus their transit, and the existing rush engine is wrong here
+  rather than merely unnecessary.
+- **It comes to you first, then ships.** Then it is 4over's time plus your
+  handling plus your shipping — the existing engine applies, offset by 4over's
+  production days.
+
+Worth settling before the `Panel` is wired, because it decides whether the
+delivery date shown is computed or simply stated.
 
 ### The one genuinely new problem: these are costs, not prices
 
