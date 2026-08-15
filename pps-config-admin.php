@@ -306,6 +306,14 @@ function pps_default_config() {
             'gbp_url'           => '',
             'gbp_rating_value' => 0,
             'gbp_review_count'  => 0,
+            // Daily rating refresh (pps-gbp-sync.php). Empty = manual entry,
+            // which is the pre-existing behaviour.
+            'places_api_key'    => '',
+            'place_id'          => '',
+            // Merchant Center feed (pps-product-feed.php). Empty is a valid
+            // setting: Google infers a category when none is given, and a
+            // wrong guess is worse than no value.
+            'google_product_category' => '',
         ),
     );
 }
@@ -682,6 +690,24 @@ function pps_config_render_page() {
                 if ( $rc < 0 ) $rc = 0;
                 if ( $rc > 10000000 ) $rc = 10000000;
                 $seo_curr['gbp_review_count'] = $rc;
+            }
+            // Places API credentials for the daily rating refresh
+            // (pps-gbp-sync.php). Charset-restricted rather than free text:
+            // both are opaque Google identifiers, and anything outside this
+            // set is a paste accident.
+            if ( isset( $seo_in['places_api_key'] ) ) {
+                $seo_curr['places_api_key'] = substr(
+                    preg_replace( '/[^A-Za-z0-9_\-]/', '', (string) $seo_in['places_api_key'] ), 0, 120 );
+            }
+            if ( isset( $seo_in['place_id'] ) ) {
+                $seo_curr['place_id'] = substr(
+                    preg_replace( '/[^A-Za-z0-9_\-]/', '', (string) $seo_in['place_id'] ), 0, 200 );
+            }
+            // Google product taxonomy value for the Merchant Center feed.
+            // Free text — the taxonomy uses ">" separators and spaces.
+            if ( isset( $seo_in['google_product_category'] ) ) {
+                $seo_curr['google_product_category'] = substr(
+                    sanitize_text_field( (string) $seo_in['google_product_category'] ), 0, 200 );
             }
             $cfg['seo'] = $seo_curr;
         }
@@ -1806,7 +1832,47 @@ function pps_config_tab_seo( $cfg ) {
     echo '</div>';
 
     echo '</div>';
-    echo '<p style="font-size:11px;color:#888;margin:0 0 18px">aggregateRating is only emitted when both rating &gt; 0 and review count &gt; 0. Schema.org policy: ratings must be from real users — these mirror your live Google Business Profile, do not fabricate.</p>';
+
+    // ── Automatic refresh (pps-gbp-sync.php) ──
+    // The two numbers above used to be hand-copied, so they were right on the
+    // day someone remembered and drifting every day after. With a Places API
+    // key and a Place ID they refresh daily. A failed fetch never overwrites
+    // them — see pps-gbp-sync.php for why that matters.
+    if ( function_exists( 'pps_gbp_sync_status_html' ) ) {
+        echo '<div class="pps-seo-grid">';
+
+        echo '<div class="pps-seo-field">';
+        echo '<label for="pps-places-key">Places API key</label>';
+        echo '<input id="pps-places-key" type="password" autocomplete="off" name="seo[places_api_key]" value="' . esc_attr( $seo['places_api_key'] ?? '' ) . '" placeholder="AIza…">';
+        echo '<span class="hint">Google Cloud &rarr; Places API (New). Restrict it to that API and this server&rsquo;s IP.</span>';
+        echo '</div>';
+
+        echo '<div class="pps-seo-field">';
+        echo '<label for="pps-place-id">Place ID</label>';
+        echo '<input id="pps-place-id" type="text" name="seo[place_id]" value="' . esc_attr( $seo['place_id'] ?? '' ) . '" placeholder="ChIJ…">';
+        echo '<span class="hint">One-time lookup with Google&rsquo;s Place ID Finder.</span>';
+        echo '</div>';
+
+        echo '</div>';
+        echo pps_gbp_sync_status_html(); // phpcs:ignore WordPress.Security.EscapeOutput -- builds its own escaped markup
+    }
+
+    echo '<p style="font-size:11px;color:#888;margin:8px 0 18px">aggregateRating is only emitted when both rating &gt; 0 and review count &gt; 0. Schema.org policy: ratings must be from real users — these mirror your live Google Business Profile, do not fabricate. Note that Google&rsquo;s own guidance treats aggregateRating on LocalBusiness as reviews <em>you</em> collected; mirroring your Google score is a known rich-result risk. Reviews collected on your product pages carry no such caveat and can also feed Merchant Center.</p>';
+
+    // ── Google Merchant Center feed ──
+    if ( defined( 'PPS_PRODUCT_FEED_SLUG' ) ) {
+        $feed_url = home_url( '/' . PPS_PRODUCT_FEED_SLUG );
+        echo '<div class="pps-ss-section">Google Merchant Center feed <span class="pps-ss-hint">Shopping tab and free product listings</span></div>';
+        echo '<div class="pps-seo-grid">';
+        echo '<div class="pps-seo-field">';
+        echo '<label for="pps-gpc">Google product category</label>';
+        echo '<input id="pps-gpc" type="text" name="seo[google_product_category]" value="' . esc_attr( $seo['google_product_category'] ?? '' ) . '" placeholder="Office Supplies &gt; Paper Products">';
+        echo '<span class="hint">A value from Google&rsquo;s published product taxonomy. Leave blank and Google infers one — better than a wrong guess.</span>';
+        echo '</div>';
+        echo '</div>';
+        echo '<p style="font-size:11px;color:#888;margin:0 0 6px">Feed URL: <code>' . esc_html( $feed_url ) . '</code> &mdash; point Merchant Center at it with Products &rarr; Feeds &rarr; Add &rarr; <em>Scheduled fetch</em>, daily.</p>';
+        echo '<p style="font-size:11px;margin:0 0 18px"><a href="' . esc_url( $feed_url ) . '" target="_blank">View feed</a> &middot; <a href="' . esc_url( add_query_arg( 'debug', '1', $feed_url ) ) . '" target="_blank">Why were products left out?</a> &mdash; a product is only included when it has a featured image and a &ldquo;Price at these defaults&rdquo;, because the feed price must match the page price exactly.</p>';
+    }
 
     // ── FAQs per calc type ──
     echo '<div class="pps-ss-section">FAQ Schema (per calculator type) <span class="pps-ss-hint">emitted as FAQPage JSON-LD on calculator product pages</span></div>';

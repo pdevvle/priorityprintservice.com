@@ -134,6 +134,25 @@ if ( file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-defaults-url.php';
 }
 
+// "Which products do the calculators own?" — answered once, for the Merchant
+// Center feed, llms.txt and the admin diagnostics. Retires the registry-ID
+// parse that used to be copy-pasted at :242, :448 and :1102.
+if ( file_exists( PPS_CALC_DIR . 'pps-catalog.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-catalog.php';
+}
+
+// /pps-product-feed.xml for Google Merchant Center. Depends on pps-catalog.php.
+if ( file_exists( PPS_CALC_DIR . 'pps-product-feed.php' )
+     && file_exists( PPS_CALC_DIR . 'pps-catalog.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-product-feed.php';
+}
+
+// Daily Places API refresh of the Business Profile rating the LocalBusiness
+// schema mirrors. Inert until a key and Place ID are configured.
+if ( file_exists( PPS_CALC_DIR . 'pps-gbp-sync.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-gbp-sync.php';
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UPLOAD DIRECTORY
 // ═══════════════════════════════════════════════════════════════
@@ -190,6 +209,27 @@ function pps_save_registry( $reg ) {
 }
 
 /**
+ * Parse a registry row's product-ID string.
+ *
+ * The registry stores IDs as a free-form comma/space separated string because
+ * it is edited by hand in a textarea, so every reader has to tolerate stray
+ * whitespace, trailing commas and duplicates. This used to be re-implemented
+ * inline at each call site, with each copy quietly disagreeing about
+ * duplicates and zeros.
+ *
+ * Lives here rather than in pps-catalog.php because callers below are core and
+ * that file is loaded behind a file_exists guard.
+ *
+ * @param string $products_str
+ * @return int[] Unique, positive, in the order first seen.
+ */
+function pps_registry_product_ids( $products_str ) {
+    $ids = array_map( 'intval', preg_split( '/[\s,]+/', (string) $products_str ) );
+    $ids = array_filter( $ids, function ( $id ) { return $id > 0; } );
+    return array_values( array_unique( $ids ) );
+}
+
+/**
  * The delivery date the customer was actually shown, formatted for display.
  *
  * The cart and the order item both used to recompute this as "now + N business days",
@@ -239,7 +279,7 @@ function pps_quoted_delivery_date( $metadata_json, $biz_days ) {
 function pps_get_calculator_for_product( $product_id ) {
     $reg = pps_get_registry();
     foreach ( $reg as $filename => $meta ) {
-        $ids = array_map( 'intval', array_filter( preg_split( '/[\s,]+/', $meta['products'] ?? '' ) ) );
+        $ids = pps_registry_product_ids( $meta['products'] ?? '' );
         if ( in_array( (int) $product_id, $ids, true ) ) {
             return $filename;
         }
@@ -445,7 +485,7 @@ function pps_admin_page() {
                 $filepath     = trailingslashit( $dir ) . $filename;
                 $filesize     = file_exists( $filepath ) ? size_format( filesize( $filepath ) ) : '—';
                 $has_products = ! empty( trim( $products_str ) );
-                $product_ids  = array_filter( array_map( 'intval', preg_split( '/[\s,]+/', $products_str ) ) );
+                $product_ids  = pps_registry_product_ids( $products_str );
             ?>
                 <div class="pps-card">
                     <div class="pps-card-head">
@@ -1099,7 +1139,7 @@ add_action( 'wp', function() {
                 if ( ! $bt_file ) continue;
                 $bt_reg = pps_get_registry();
                 if ( ! isset( $bt_reg[ $bt_file ]['products'] ) ) continue;
-                $bt_ids = array_map( 'intval', array_filter( preg_split( '/[\s,]+/', $bt_reg[ $bt_file ]['products'] ) ) );
+                $bt_ids = pps_registry_product_ids( $bt_reg[ $bt_file ]['products'] );
                 if ( empty( $bt_ids ) ) continue;
                 $bt_url = get_permalink( $bt_ids[0] );
                 if ( $bt_url ) {
@@ -6287,9 +6327,37 @@ add_action( 'template_redirect', function() {
     header( 'Cache-Control: public, max-age=86400' );
 
     echo "# {$name}\n";
-    echo "> Full-service commercial print shop in Phoenix, AZ specializing in custom saddle-stitch booklet printing with online instant pricing.\n\n";
+    echo "> Full-service commercial print shop in Phoenix, AZ. Booklets, brochures, postcards, letterhead, greeting cards, stickers and coupon books, all priced instantly online.\n\n";
+
+    // ── Services ──
+    // Driven off the registry rather than hardcoded. The previous version
+    // named only saddle stitch, so the other seven calculators were invisible
+    // to every answer engine — and it would have gone stale again the next
+    // time a product family was added.
     echo "## Services\n";
-    echo "- Custom saddle-stitch (stapled) booklet printing\n";
+    $svc_labels = array(
+        'saddle'        => 'Saddle-stitch (stapled) booklet printing',
+        'perfect-bound' => 'Perfect bound book printing (square spine)',
+        'coupon'        => 'Coupon book printing with numbered, perforated tear-out coupons',
+        'brochure'      => 'Brochure and flat printing with 9 fold styles',
+        'postcard'      => 'Postcard printing',
+        'letterhead'    => 'Letterhead printing, including linen stocks',
+        'greeting-card' => 'Greeting card printing',
+        'sticker'       => 'Sticker and label printing',
+    );
+    $svc_seen = array();
+    if ( function_exists( 'pps_catalog' ) ) {
+        foreach ( pps_catalog() as $row ) {
+            if ( $row['calc'] !== '' ) $svc_seen[ $row['calc'] ] = true;
+        }
+    }
+    // If the catalog could not be resolved at all (WooCommerce not loaded,
+    // empty registry), fall back to listing everything rather than emitting a
+    // Services section with no services in it — a silently empty list is worse
+    // than the hardcoded one this replaced.
+    foreach ( $svc_labels as $slug => $label ) {
+        if ( ! $svc_seen || isset( $svc_seen[ $slug ] ) ) echo "- {$label}\n";
+    }
     echo "- Full color and greyscale digital printing\n";
     echo "- Paper stocks: text weight (70lb-100lb) and cardstock (80lb-18pt)\n";
     echo "- UV Gloss and UV Matte cover coating\n";
@@ -6305,6 +6373,32 @@ add_action( 'template_redirect', function() {
     echo "## Contact\n";
     echo "- Website: {$url}\n";
     echo "- Email: {$email}\n";
+
+    // ── Products ──
+    // The from-price is the point. "What does a print shop charge for X" is
+    // the question an answer engine is usually trying to resolve, and being
+    // the source that states it plainly is most of how you get cited.
+    if ( function_exists( 'pps_catalog' ) ) {
+        $catalog = pps_catalog();
+        if ( ! empty( $catalog ) ) {
+            echo "\n## Products\n";
+            uasort( $catalog, function ( $a, $b ) { return strcasecmp( $a['title'], $b['title'] ); } );
+            foreach ( $catalog as $row ) {
+                echo "\n### {$row['title']}\n";
+                echo "- URL: {$row['url']}\n";
+                if ( $row['price_ok'] ) {
+                    echo '- From: $' . number_format( $row['price'], 2 ) . "\n";
+                }
+                $spec = pps_catalog_spec_line( $row['defaults'] );
+                if ( $spec !== '' ) echo "- Configured by default as: {$spec}\n";
+                $blurb = $row['short'] !== '' ? $row['short'] : $row['description'];
+                if ( $blurb !== '' ) {
+                    echo '- ' . ( function_exists( 'mb_substr' ) ? mb_substr( $blurb, 0, 300 ) : substr( $blurb, 0, 300 ) ) . "\n";
+                }
+                echo "- Instant online pricing, no quote request required\n";
+            }
+        }
+    }
 
     // Presets section — explicit catalog of preset URLs so AI search engines
     // have a structured list. Each entry: ## title, URL, description.
