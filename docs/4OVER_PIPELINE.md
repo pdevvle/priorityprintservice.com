@@ -161,13 +161,27 @@ catch.
 
 ---
 
-## 8 · Still unanswered, and still the highest-leverage question
+## 8 · No API — so this pipeline is the plan
 
-**Does 4over expose a pricing API to resellers?**
+Confirmed 2026-08-15: 4over does not offer resellers a pricing API. Everything
+above is therefore the build, not a workaround pending something better.
 
-If it does, sections 1 through 7 mostly disappear: no capture, no drop location,
-no ingest gates, no staleness, no spot-check. Costs get queried at quote time
-and are correct by construction.
+That raises the stakes on §5 and §6 rather than changing them. With no
+authoritative source to reconcile against, the captured matrix *is* the only
+record of what a job costs, and the ingest gates are the only thing standing
+between a bad capture and quoting below cost.
 
-Everything in this document is the right way to build a workaround for not having
-that. It is worth five minutes with your 4over rep before building any of it.
+Two additions that follow from having no API:
+
+**Capture the production turnaround as a field.** Delivery is now
+`production + 1 + 3` business days (see `docs/4OVER_REPLACEMENT.md`), so the
+production figure is part of the product's data and has to come off the same
+page as the prices. A turnaround that changes without the matrix changing would
+otherwise go unnoticed — add it to the four spot-check probes as a fifth check.
+
+**Reconcile against a real invoice, periodically.** Since nothing can be
+verified programmatically, the only ground truth is what 4over actually bills.
+Worth comparing one live order against its quoted cost each month — it is the
+only check that catches a whole-catalogue drift the gates would pass, because
+the gates only compare a capture against the previous capture, never against
+reality.

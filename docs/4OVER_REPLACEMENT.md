@@ -174,23 +174,61 @@ staff-only, so a quote can always be reconciled against what 4over will invoice.
 Never render the cost anywhere a customer can reach, including in `pps_metadata`
 on the order — that is visible in enough places that it will eventually leak.
 
-### One thing this does not answer: turnaround and shipping
+### Turnaround: settled, and simpler than the in-house engine
 
-The in-house calculators own a full shipping and rush engine because PPS controls
-the press schedule. A 4over job does not work that way — 4over prints it, and
-their turnaround is theirs.
+4over drop-ships. The delivery date is **stated, not computed** (owner, 2026-08-15):
 
-Two possibilities with different consequences, and I do not know which applies:
+```
+delivery = production turnaround        (captured, per product — e.g. 4 business days)
+         + 1 business day               (PPS handling)
+         + 3 business days              (4over's maximum transit)
+```
 
-- **4over ships direct to the customer.** Then the delivery date is 4over's
-  production time plus their transit, and the existing rush engine is wrong here
-  rather than merely unnecessary.
-- **It comes to you first, then ships.** Then it is 4over's time plus your
-  handling plus your shipping — the existing engine applies, offset by 4over's
-  production days.
+Circle Business Cards → 4 + 1 + 3 = **8 business days**.
 
-Worth settling before the `Panel` is wired, because it decides whether the
-delivery date shown is computed or simply stated.
+Three consequences, all of them simplifications:
+
+- **The zone map and UPS transit lookup are not used.** Delivery does not depend
+  on destination, so none of that machinery applies here.
+- **The rush engine does not apply either.** You cannot compress 4over's
+  schedule from our side. If they sell a faster turnaround it is a *captured
+  axis with its own prices*, never a multiplier over a base — same reasoning as
+  coating in §1.
+- **Production turnaround becomes a captured field**, per product. The Circle
+  capture already found it (4 Business Days) and flagged that a 7-day option
+  appears in the Specs tab with no control — see §3, still worth resolving,
+  because if 7-day is selectable elsewhere it is an axis and every price
+  captured so far is the 4-day price.
+
+Reuse `pps_add_business_days()` and the existing 2pm cutoff rather than counting
+days independently, so a 4over product's date behaves like every other date on
+the site.
+
+### The open money question: does the captured price include freight?
+
+This is the one thing left that can lose money quietly.
+
+4over is a wholesale printer; their product pages quote **product cost**, and
+freight is normally calculated at checkout against the destination. If that
+holds, every number in the captured matrix excludes shipping — and at low run
+sizes freight will *exceed* the product cost. The 250-unit cell is $7.56.
+Ground freight on a small parcel is plausibly twice that.
+
+So a markup applied to product cost alone would price below landed cost on every
+small order, and the shortfall would be largest on the cheapest, most numerous
+jobs. Exactly the shape of error nobody notices for months.
+
+Three ways out, and the choice is a business one:
+
+| | How it works | Risk |
+|---|---|---|
+| **Flat freight per order** | Add a fixed figure to the cost side before markup | Wrong on outliers; simple; matches the "3 business days maximum" framing already chosen |
+| **Capture 4over's freight table** | Another matrix, keyed by destination | Destination-dependent, so much bigger and far more fragile |
+| **Absorb it in the markup** | Markup high enough to cover average freight | Loses money on small orders, over-charges large ones — the worst of the three |
+
+**Verify before choosing.** Put one real order through 4over's checkout to the
+point where freight is shown, and compare against the captured cell. That single
+observation decides this, and it costs nothing.
 
 ### The one genuinely new problem: these are costs, not prices
 
