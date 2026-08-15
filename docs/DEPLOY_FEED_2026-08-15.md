@@ -1,5 +1,10 @@
 # Deploy card — the Merchant Center feed has never been on production
 
+> **DONE.** Executed 2026-08-15 04:21 UTC by another session; all five files
+> verified on production at the byte counts below. Remaining work moved to
+> `docs/ROLLOUT_SPAWNER.md` — two files, plus the permalink flush this card
+> called for, which still needs confirming.
+
 Merchant Center says **"File not found."** That is literal:
 `/pps-product-feed.xml` does not exist on the live site, because none of the
 code that serves it has ever been deployed. It was all written in a session
