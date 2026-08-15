@@ -149,7 +149,7 @@ function pps_product_price_facts( $product_id ) {
     $out['effective']   = $out['sale'] !== null ? $out['sale'] : $out['regular'];
     $out['agrees']      = ( $out['quoted'] !== null && $out['regular'] !== null
                             && abs( $out['quoted'] - $out['regular'] ) < 0.01 );
-    $out['publishable'] = ( $out['agrees'] && $out['effective'] !== null && $out['effective'] > 0 );
+    $out['publishable'] = ( $out['effective'] !== null && $out['effective'] > 0 );
     return $out;
 }
 $GLOBALS['_products'] = array();
@@ -229,40 +229,41 @@ $reasons = array();
 foreach ( $rep['skipped'] as $s ) $reasons[ $s['id'] ] = $s['reason'];
 
 ok( isset( $rep['rows'][101] ), '101 included' );
-ok( ! isset( $rep['rows'][106] ), '106 excluded — its quote and its product price disagree' );
-ok( ! isset( $rep['rows'][102] ), '102 excluded — no quoted price' );
-ok( strpos( $reasons[102] ?? '', 'Price at these defaults' ) !== false, '  ...with an actionable reason', $reasons[102] ?? '' );
-ok( ( $reasons[103] ?? '' ) === 'no featured image', '103 excluded — no image', $reasons[103] ?? '' );
+ok( isset( $rep['rows'][106] ), '106 INCLUDED — drift is a note, not a veto' );
+ok( isset( $rep['rows'][102] ), '102 INCLUDED — it has a product price, that is enough' );
+ok( strpos( $reasons[103] ?? '', 'no featured image' ) === 0, '103 excluded — no image', $reasons[103] ?? '' );
 ok( strpos( $reasons[104] ?? '', 'not published' ) !== false, '104 excluded — draft', $reasons[104] ?? '' );
-ok( strpos( $reasons[105] ?? '', 'virtual' ) !== false, '105 excluded — not virtual', $reasons[105] ?? '' );
+ok( isset( $rep['rows'][105] ), '105 INCLUDED — not-virtual is a warning, not a veto' );
+$vwarn = '';
+foreach ( $rep['warnings'] as $w ) if ( $w['id'] === 105 ) $vwarn = $w['note'];
+ok( strpos( $vwarn, 'virtual' ) !== false, '  ...but it is reported as a warning', $vwarn );
 ok( strpos( $reasons[107] ?? '', 'stale registry' ) !== false, '107 excluded — stale registry entry', $reasons[107] ?? '' );
 ok( count( $rep['collisions'] ) === 1 && $rep['collisions'][0]['id'] === 101, 'collision detected for 101' );
 // The drift flag itself is visible on the unfiltered catalog, where the row
 // survives so the operator can be told what is wrong with it.
 $rep_all = pps_catalog_report();
-ok( $rep_all['rows'][106]['price_drift'] === true, 'drift flagged on 106 in the unfiltered catalog' );
-ok( $rep_all['rows'][106]['price_ok'] === false, '  ...and it is not publishable' );
+ok( $rep_all['rows'][106]['price_drift'] === true, 'drift still flagged on 106' );
+ok( $rep_all['rows'][106]['price_ok'] === true, '  ...and it is still publishable' );
 ok( $rep_all['rows'][101]['price_drift'] === false, 'no false drift on 101' );
 ok( $rep['rows'][101]['calc'] === 'saddle', 'calc type resolved' );
 
-echo "\n── 3. THE parity rule: feed must agree with the SCHEMA ─\n";
-// Google does not fill in the calculator. It reads the page's structured data,
-// so the comparison is feed vs. Product schema — and the schema's price comes
-// from pps_product_defaults_low_price(), i.e. _pps_defaults_price, NOT from
-// WooCommerce's price element. A product where those two disagree cannot be
-// published safely under either number.
+echo "\n── 3. Publish the product's own price, whatever it is ─\n";
+// Google reads the page's structured data, not the calculator. Both the schema
+// and the feed now go through pps_product_price_facts(), so they cannot
+// contradict each other. With that solved at the source, the feed publishes
+// every product that has a price and an image — no judgement about the number.
 $xml = pps_product_feed_render();
 ok( strpos( $xml, '<g:price>109.04 USD</g:price>' ) !== false, '101 publishes 109.04, matching its schema' );
-ok( strpos( $xml, '<g:id>106</g:id>' ) === false,
-    '106 WITHHELD — quoted 109.04, product priced 80.00; publishing either would mismatch' );
-ok( substr_count( $xml, '<g:price>' ) === 1, 'exactly 1 item priced', substr_count( $xml, '<g:price>' ) . ' found' );
-ok( strpos( $xml, '<g:id>102</g:id>' ) === false, 'priceless product never reaches the XML' );
+ok( strpos( $xml, '<g:price>80.00 USD</g:price>' ) !== false,
+    '106 PUBLISHED at its product price of 80.00 — where it lands it lands' );
+ok( strpos( $xml, '<g:id>102</g:id>' ) !== false, '102 published too — it has a price' );
+ok( strpos( $xml, '<g:id>103</g:id>' ) === false, '103 held back — no image, Google would reject it' );
+ok( strpos( $xml, '<g:id>104</g:id>' ) === false, '104 held back — draft' );
 
-$dreason = '';
-foreach ( $rep['skipped'] as $sk ) if ( $sk['id'] === 106 ) $dreason = $sk['reason'];
-ok( strpos( $dreason, 'price conflict' ) !== false, '  ...and the drift reason names the conflict', $dreason );
-ok( strpos( $dreason, '109.04' ) !== false && strpos( $dreason, '80.00' ) !== false,
-    '  ...quoting both numbers so it is actionable', $dreason );
+$dnote = '';
+foreach ( $rep['warnings'] as $w ) if ( $w['id'] === 106 ) $dnote = $w['note'];
+ok( strpos( $dnote, '80.00' ) !== false && strpos( $dnote, '109.04' ) !== false,
+    '  ...with drift reported as a note naming both numbers', $dnote );
 
 echo "\n── 3b. Sale prices ────────────────────────────────────\n";
 mkproduct( 110, array( 'title' => 'On Sale', 'price' => '200.00', 'quoted' => '200.00', 'sale' => '150.00' ) );

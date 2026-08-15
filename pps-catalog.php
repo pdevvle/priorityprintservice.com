@@ -9,8 +9,9 @@
  * answer — the Merchant Center feed, llms.txt, and the admin diagnostics — so
  * it lives here once.
  *
- * The interesting part is not the enumeration; it is `price_ok`. See
- * pps_catalog_row() for why parity and meaningfulness are two different tests.
+ * The interesting part is not the enumeration; it is the price. See
+ * pps_catalog_row() for what Google actually compares, and why that turns out
+ * to need one shared resolver rather than a pile of rules.
  *
  * Loaded by pps-calculators.php (file_exists-guarded require).
  */
@@ -64,11 +65,10 @@ function pps_catalog_registry_map() {
  * the feed, so they cannot diverge. It also separates the list price from an
  * active sale price, which get_price() collapses.
  *
- * When the quote behind the defaults and the WooCommerce price disagree,
- * `price_ok` is false and the product is withheld. Drift is a data error, and
- * picking a side would advertise a number the other half of the site
- * contradicts. `price_drift` stays true on the row so the operator can be told
- * precisely what to fix.
+ * With that in place the consistency problem is solved at the source, and
+ * `price_ok` reduces to "is there a price". The product's own price goes out,
+ * high or low — owner's call, 2026-08-15. `price_drift` is still computed, but
+ * it is a housekeeping note for the operator, not a veto.
  *
  * @param int    $id
  * @param string $filename Registry key that claimed this ID.
@@ -161,9 +161,10 @@ function pps_catalog_row( $id, $filename ) {
  * @param array $args {
  *   @type bool $require_price  Drop rows without a usable, meaningful price.
  *   @type bool $require_image  Drop rows without a featured image.
- *   @type bool $require_virtual Drop rows not marked virtual (owner rule 2026-07-19).
+ *   @type bool $require_virtual Report rows not marked virtual as a warning
+ *                                (owner rule 2026-07-19). Does not drop them.
  * }
- * @return array{rows:array,skipped:array,collisions:array}
+ * @return array{rows:array,skipped:array,warnings:array,collisions:array}
  */
 function pps_catalog_report( array $args = array() ) {
     $args = array_merge( array(
@@ -174,6 +175,7 @@ function pps_catalog_report( array $args = array() ) {
 
     $rows = array();
     $skipped = array();
+    $warnings = array();
     $collisions = array();
     $seen = array();
 
@@ -192,47 +194,49 @@ function pps_catalog_report( array $args = array() ) {
                 continue;
             }
 
+            // Only two things keep a product out, and both are things Google
+            // itself rejects outright: no price, and no image. Everything else
+            // is a note, not a veto — a sellable product goes to Shopping with
+            // whatever price it carries.
             if ( $args['require_price'] && ! $row['price_ok'] ) {
-                if ( $row['price_drift'] ) {
-                    // The dangerous case. Both numbers exist and disagree, so
-                    // the schema advertises one and WooCommerce renders the
-                    // other. Publishing either is a guaranteed mismatch.
-                    $reason = sprintf(
-                        'price conflict — quoted at $%s for its defaults but the product price is $%s; '
-                        . 'the Product schema publishes one and the page the other. Re-paste the quote link, '
-                        . 'or set the product price to match.',
-                        number_format( $row['quoted'], 2 ), number_format( $row['regular'], 2 ) );
-                } elseif ( $row['quoted'] === null ) {
-                    $reason = 'no "Price at these defaults" set — nothing to advertise, '
-                            . 'and the Product schema is falling back to its $50 placeholder';
-                } else {
-                    $reason = 'no price on the product';
-                }
                 $skipped[] = array(
-                    'id' => $id, 'file' => $filename, 'title' => $row['title'], 'reason' => $reason,
+                    'id' => $id, 'file' => $filename, 'title' => $row['title'],
+                    'reason' => 'no price set on the product',
                 );
                 continue;
             }
             if ( $args['require_image'] && $row['image'] === '' ) {
                 $skipped[] = array(
                     'id' => $id, 'file' => $filename, 'title' => $row['title'],
-                    'reason' => 'no featured image',
+                    'reason' => 'no featured image — Google will not list a product without one',
                 );
                 continue;
             }
-            if ( $args['require_virtual'] && ! $row['virtual'] ) {
-                $skipped[] = array(
-                    'id' => $id, 'file' => $filename, 'title' => $row['title'],
-                    'reason' => 'not marked virtual — PPS owns shipping, so this must be a virtual product',
+
+            // Worth an operator's attention, never a reason to withhold.
+            if ( $row['price_drift'] ) {
+                $warnings[] = array(
+                    'id' => $id, 'title' => $row['title'],
+                    'note' => sprintf( 'publishing $%s; its saved quote says $%s. Not a problem for Google — '
+                                     . 'both the feed and the schema publish the product price — but one of '
+                                     . 'the two is out of date.',
+                                       number_format( $row['price'], 2 ), number_format( $row['quoted'], 2 ) ),
                 );
-                continue;
+            }
+            if ( $args['require_virtual'] && ! $row['virtual'] ) {
+                $warnings[] = array(
+                    'id' => $id, 'title' => $row['title'],
+                    'note' => 'not marked virtual. Harmless for Shopping, but PPS owns shipping and '
+                            . 'WooCommerce will try to charge its own on this one.',
+                );
             }
 
             $rows[ $id ] = apply_filters( 'pps_catalog_row', $row, $id, $filename );
         }
     }
 
-    return array( 'rows' => $rows, 'skipped' => $skipped, 'collisions' => $collisions );
+    return array( 'rows' => $rows, 'skipped' => $skipped,
+                  'warnings' => $warnings, 'collisions' => $collisions );
 }
 
 /**

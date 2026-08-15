@@ -20,10 +20,14 @@
  * pps_product_defaults_low_price(), not from WooCommerce's price element.
  *
  * Both sides therefore go through pps_product_price_facts(), which is the
- * single answer to "what does this product cost". A product whose quote and
- * whose WooCommerce price disagree is withheld from the feed entirely rather
- * than published with whichever number we happened to reach for: an omitted
- * product loses one listing, a mismatched one costs account standing.
+ * single answer to "what does this product cost". Because the schema and the
+ * feed read the same resolver, they cannot contradict each other — which is
+ * the whole of what Google checks.
+ *
+ * That done, the feed is deliberately ungated: a product goes to Shopping with
+ * whatever price it carries, high or low (owner's call, 2026-08-15). Only two
+ * things keep a product out, and both are things Google rejects outright —
+ * no price, and no image. Everything else is reported as a note.
  *
  * Every omission is explained at /pps-product-feed.xml?debug=1 (admins only),
  * because a silent exclusion turns "why isn't my product in Shopping?" into a
@@ -204,6 +208,8 @@ function pps_product_feed_item( array $row, array $s ) {
  */
 function pps_product_feed_render() {
     $s = pps_product_feed_settings();
+    // require_virtual reports rather than excludes — a product missing the flag
+    // is a WooCommerce shipping problem, not a Shopping one.
     $report = pps_catalog_report( array(
         'require_price'   => true,
         'require_image'   => true,
@@ -226,8 +232,8 @@ function pps_product_feed_render() {
     // A trailer the operator can see without leaving the browser, and which
     // Merchant Center ignores.
     $out .= '<!-- ' . count( $report['rows'] ) . ' item(s); '
-          . count( $report['skipped'] ) . ' skipped. '
-          . 'Add ?debug=1 as an admin to see why. -->' . "\n";
+          . count( $report['skipped'] ) . ' without a price or an image. '
+          . 'Add ?debug=1 as an admin for the detail. -->' . "\n";
 
     return $out;
 }
@@ -283,11 +289,21 @@ function pps_product_feed_render_debug() {
     if ( ! $report['rows'] ) echo "  (none)\n";
 
     echo "\nLEFT OUT (" . count( $report['skipped'] ) . ")\n" . str_repeat( '-', 60 ) . "\n";
+    echo "Only two things keep a product out: no price, or no image. Google will\n";
+    echo "not list a product missing either.\n\n";
     foreach ( $report['skipped'] as $sk ) {
         printf( "  #%-7d %-40s %s\n", $sk['id'],
                 pps_feed_clip( $sk['title'] ?? '(unresolved)', 38 ), $sk['reason'] );
     }
     if ( ! $report['skipped'] ) echo "  (none)\n";
+
+    if ( ! empty( $report['warnings'] ) ) {
+        echo "\nWORTH A LOOK (" . count( $report['warnings'] ) . ") — these ARE in the feed\n"
+           . str_repeat( '-', 60 ) . "\n";
+        foreach ( $report['warnings'] as $w ) {
+            printf( "  #%-7d %-30s %s\n", $w['id'], pps_feed_clip( $w['title'] ?? '', 28 ), $w['note'] );
+        }
+    }
 
     if ( $report['collisions'] ) {
         echo "\nASSIGNED TO TWO CALCULATORS — configuration error\n" . str_repeat( '-', 60 ) . "\n";
@@ -296,8 +312,9 @@ function pps_product_feed_render_debug() {
         }
     }
 
-    echo "\nMost omissions are fixed on the product's PPS Defaults tab by\n";
-    echo "pasting a quote link, which sets both the defaults and the price.\n";
+    echo "\nA missing price is fixed on the product's PPS Defaults tab by pasting a\n";
+    echo "quote link, which sets the defaults and the price together — or just by\n";
+    echo "typing a price into WooCommerce's own field.\n";
 }
 
 /* ─────────────────────────────────────────────────────────────

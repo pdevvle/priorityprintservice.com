@@ -3272,11 +3272,18 @@ function pps_product_defaults_low_price( $fallback = '50' ) {
  *              regular, which is why it cannot be used on its own.
  *
  * `effective` is what a customer pays today, and is what both the schema and
- * the feed's advertised price must reflect.
+ * the feed's advertised price reflect. Because both read it from here, they
+ * cannot disagree with each other — which is the only consistency Google
+ * actually checks.
  *
- * `publishable` is false when quoted and regular disagree. Drift is a data
- * error, and the right response is to advertise neither number rather than
- * guess which one is intended.
+ * `publishable` therefore asks one question: is there a price at all? Whether
+ * that price is high or low, and whether it matches the stored quote, is not
+ * this function's business — the owner's instruction is that the product's own
+ * price goes out and where it lands it lands.
+ *
+ * `agrees` is kept as information only. A product whose stored quote and whose
+ * WooCommerce price differ is worth a look, but it is a housekeeping note, not
+ * a reason to withhold a sellable product.
  *
  * @param int $product_id
  * @return array{quoted:?float,regular:?float,sale:?float,effective:?float,agrees:bool,publishable:bool}
@@ -3316,7 +3323,8 @@ function pps_product_price_facts( $product_id ) {
     $out['agrees'] = ( $out['quoted'] !== null && $out['regular'] !== null
                        && abs( $out['quoted'] - $out['regular'] ) < 0.01 );
 
-    $out['publishable'] = ( $out['agrees'] && $out['effective'] !== null && $out['effective'] > 0 );
+    // One question: is there a price? Nothing here judges the number.
+    $out['publishable'] = ( $out['effective'] !== null && $out['effective'] > 0 );
 
     return $out;
 }
