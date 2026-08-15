@@ -4,3 +4,10 @@ package.json
 
 # Plugin zips built by tools-plugin-zip.sh — artifacts, rebuilt on demand
 dist/
+
+# Measured price floors — real pricing figures. The repo is public (CLAUDE.md:
+# "treat every branch as public: don't commit pricing figures, strategy, or
+# credentials"). Sweep output stays local and goes into wp_options, not git.
+docs/min-prices.json
+min-prices.json
+.minprice-*.html

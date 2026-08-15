@@ -6459,8 +6459,16 @@ add_action( 'template_redirect', function() {
             foreach ( $catalog as $row ) {
                 echo "\n### {$row['title']}\n";
                 echo "- URL: {$row['url']}\n";
+                // Two different numbers, labelled as such. The defaults price is
+                // what this page quotes on arrival; the floor is the cheapest
+                // the calculator can be driven to. Calling the first one "from"
+                // would be wrong in both directions.
+                $floor = function_exists( 'pps_calc_min_price' ) ? pps_calc_min_price( $row['file'] ) : null;
+                if ( $floor !== null ) {
+                    echo '- From: $' . number_format( $floor, 2 ) . " (lowest configuration)\n";
+                }
                 if ( $row['price_ok'] ) {
-                    echo '- From: $' . number_format( $row['price'], 2 ) . "\n";
+                    echo '- This page as configured: $' . number_format( $row['price'], 2 ) . "\n";
                 }
                 $spec = pps_catalog_spec_line( $row['defaults'] );
                 if ( $spec !== '' ) echo "- Configured by default as: {$spec}\n";

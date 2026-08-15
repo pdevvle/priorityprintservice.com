@@ -253,6 +253,27 @@ function pps_product_feed_render_debug() {
     echo 'Currency:  ' . $s['currency'] . "\n";
     echo 'Google product category: ' . ( $s['gpc'] !== '' ? $s['gpc'] : '(not set — Google will infer)' ) . "\n\n";
 
+    // The measured floor, shown for contrast only. It is deliberately NOT what
+    // g:price carries: Google requires the advertised price to be the price of
+    // the item as the landing page presents it, and a customer who clicks a
+    // floor price and arrives at the defaults price has been misled — which is
+    // a disapproval and a policy problem, not just a bad number.
+    if ( function_exists( 'pps_min_prices' ) ) {
+        $mp = pps_min_prices();
+        if ( empty( $mp['calculators'] ) ) {
+            echo "Measured price floors: none imported. Run tools-min-price.mjs --config <live>.\n\n";
+        } elseif ( pps_min_prices_are_stale() ) {
+            echo "Measured price floors: STALE — pricing config has changed since the sweep of "
+               . ( $mp['imported_at'] ?? 'unknown' ) . ". Re-run tools-min-price.mjs.\n\n";
+        } else {
+            echo 'Measured price floors (imported ' . ( $mp['imported_at'] ?? '?' ) . "):\n";
+            foreach ( $mp['calculators'] as $k => $row ) {
+                printf( "  %-24s from %8s\n", $k, '$' . number_format( (float) ( $row['min_total'] ?? 0 ), 2 ) );
+            }
+            echo "  (marketing 'from' figures only — g:price stays pinned to each page's own price)\n\n";
+        }
+    }
+
     echo 'IN THE FEED (' . count( $report['rows'] ) . ")\n" . str_repeat( '-', 60 ) . "\n";
     foreach ( $report['rows'] as $row ) {
         $note = ( $row['sale'] !== null ) ? '  (on sale from ' . number_format( $row['regular'], 2 ) . ')' : '';

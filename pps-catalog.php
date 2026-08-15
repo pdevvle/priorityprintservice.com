@@ -246,6 +246,88 @@ function pps_catalog( array $args = array() ) {
     return $r['rows'];
 }
 
+/* ─────────────────────────────────────────────────────────────
+ * Lowest achievable price, measured by tools-min-price.mjs
+ * ───────────────────────────────────────────────────────────── */
+
+/**
+ * Fingerprint of the pricing constants currently in play.
+ *
+ * Computed on the PHP side at both import and read time, so the comparison is
+ * always PHP-to-PHP — never against the tool's own hash, which would differ on
+ * key order and escaping alone and report every sweep as stale.
+ */
+function pps_pricing_fingerprint() {
+    if ( ! function_exists( 'pps_get_public_config' ) ) return '';
+    return md5( (string) wp_json_encode( pps_get_public_config() ) );
+}
+
+/**
+ * The stored sweep: what tools-min-price.mjs measured, plus the fingerprint of
+ * the pricing config it was measured against.
+ */
+function pps_min_prices() {
+    $v = get_option( 'pps_min_prices', array() );
+    if ( is_string( $v ) ) {
+        $d = json_decode( $v, true );
+        $v = is_array( $d ) ? $d : array();
+    }
+    return is_array( $v ) ? $v : array();
+}
+
+/**
+ * Store a sweep, stamping it with the pricing config it describes.
+ *
+ * @param array $calculators  filename => ['min_total' => float, 'at_qty' => int, ...]
+ */
+function pps_save_min_prices( array $calculators ) {
+    update_option( 'pps_min_prices', array(
+        'calculators'  => $calculators,
+        'fingerprint'  => pps_pricing_fingerprint(),
+        'imported_at'  => current_time( 'mysql' ),
+    ), false );
+}
+
+/**
+ * Has pricing changed since the sweep ran?
+ *
+ * This is the guard that keeps a "from $X" honest. Central Config edits change
+ * what the calculators quote, and a stored minimum has no way of noticing —
+ * it would go on advertising a price the engine no longer produces. When this
+ * returns true, callers publish nothing rather than publish a stale number.
+ */
+function pps_min_prices_are_stale() {
+    $m = pps_min_prices();
+    if ( empty( $m['fingerprint'] ) ) return true;
+    $now = pps_pricing_fingerprint();
+    if ( $now === '' ) return true;          // cannot verify ⇒ do not trust
+    return ! hash_equals( (string) $m['fingerprint'], $now );
+}
+
+/**
+ * Lowest price a calculator can quote, or null when unknown or stale.
+ *
+ * Deliberately per-calculator rather than per-product: PPS_CONFIG.defaults
+ * pre-fills the form, it does not restrict it, so a customer on any product
+ * page can configure down to the same floor.
+ *
+ * NOT for g:price or the Product schema's offer — see pps_product_price_facts().
+ * This is the "from $X" figure for marketing surfaces that carry no
+ * price-match obligation: category cards, llms.txt, ad copy.
+ *
+ * @param string $filename Calculator HTML filename.
+ * @return float|null
+ */
+function pps_calc_min_price( $filename ) {
+    if ( pps_min_prices_are_stale() ) return null;
+    $m = pps_min_prices();
+    $key = preg_replace( '/\.html$/', '', (string) $filename );
+    $row = $m['calculators'][ $key ] ?? $m['calculators'][ $filename ] ?? null;
+    if ( ! is_array( $row ) ) return null;
+    $p = isset( $row['min_total'] ) ? (float) $row['min_total'] : 0;
+    return ( $p > 0 && $p < 1000000 ) ? round( $p, 2 ) : null;
+}
+
 /**
  * A one-line spec string built from a product's calculator defaults.
  *
