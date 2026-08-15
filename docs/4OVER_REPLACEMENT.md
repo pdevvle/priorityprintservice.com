@@ -230,6 +230,88 @@ Three ways out, and the choice is a business one:
 point where freight is shown, and compare against the captured cell. That single
 observation decides this, and it costs nothing.
 
+### Settled: a shipping floor, not a captured freight table
+
+Owner, 2026-08-15. Stated as bands, on the **4over cost** `C` (not the retail
+price — using retail would make shipping depend on markup which depends on
+shipping):
+
+| Band | Rule |
+|---|---|
+| Floor | never below **$10** |
+| Low | **2 × C**, while that is under $20 |
+| Mid | flat **$20** |
+| High | **15% of C**, once 15% exceeds $20 (i.e. `C > $133.33`) |
+
+**It reduces to one line, with no branches:**
+
+```
+ship(C) = max( 10, min( 2C, 20 ), 0.15C )
+```
+
+Verified identical to the piecewise reading at every cent from $0.01 to $1,000,
+and **continuous at all three boundaries** — $5, $10 and $133.33 each hand over
+without a jump, so there is no quantity at which a customer sees shipping lurch.
+That is a good property and it was not accidental.
+
+Applied to Circle Business Cards (UV):
+
+| Run | 4over cost | Ship est | Landed | Band |
+|---|---|---|---|---|
+| 250 | 7.56 | 15.12 | 22.68 | 2 × cost |
+| 500 | 15.12 | 20.00 | 35.12 | cap |
+| 1,000 | 19.65 | 20.00 | 39.65 | cap |
+| 2,500 | 42.35 | 20.00 | 62.35 | cap |
+| 5,000 | 58.97 | 20.00 | 78.97 | cap |
+| 10,000 | 96.78 | 20.00 | 116.78 | cap |
+| 15,000 | 140.64 | 21.10 | 161.74 | 15% |
+| 20,000 | 186.00 | 27.90 | 213.90 | 15% |
+| 25,000 | 231.37 | 34.71 | 266.08 | 15% |
+
+The **$10 floor never binds on this product** — the cheapest cell is $7.56 and
+2× that is already $15.12. It will bind on cheaper products, if any exist.
+
+### The one thing to validate, and it is the top of the range
+
+Freight is a function of **weight**. This estimator is a function of **price**.
+Those move together only as long as price tracks weight — and a volume discount
+is precisely the thing that breaks that.
+
+From your own numbers, 250 → 25,000:
+
+- quantity ×100, so **weight ×100**
+- cost ×30.6, because 4over discounts the unit from $0.0302 to $0.0093
+- so the estimate per 1,000 units falls from **$60.48 to $1.39** — a 44× drop,
+  while the parcel gets 100× heavier
+
+The carrier discounts nothing. So the estimator necessarily over-collects at the
+bottom and thins toward the top, and the 15% band — the one covering your
+largest orders — is where a shortfall would land.
+
+I have no freight data, so I am not claiming it *is* short; I am saying that is
+the only place it structurally can be. **Three probes settle it:** take a 250, a
+5,000 and a 25,000 through 4over's checkout far enough to see the freight
+figure, and compare against the table above. If the top is short, the fix is a
+steeper high band rather than anything structural.
+
+Business cards are the worst case for this and therefore the right thing to test
+with — they are dense, so they carry the most weight per dollar of any format
+4over sells. An estimator that holds for cards holds for posters and brochures;
+one validated on brochures will under-collect on cards.
+
+### Outlying states and territories → Shippo
+
+AK, HI, PR, GU, VI, AS, MP fall out of the band formula and use the existing
+Shippo integration as the estimator, which is already built and already quotes
+real rates.
+
+One wrinkle worth naming: **Shippo will quote from whatever origin its config
+names, which is PPS.** On a drop-ship the parcel actually leaves 4over's
+facility, which is somewhere else. For the lower 48 that hardly matters; for
+Hawaii and Alaska the origin can move the rate. Worth checking whether Shippo's
+origin should be overridden to 4over's nearest facility for these products, or
+whether the difference is small enough to ignore.
+
 ### The one genuinely new problem: these are costs, not prices
 
 Every number above is what *you pay 4over*. The in-house calculators compute
