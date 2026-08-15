@@ -66,6 +66,7 @@ function wp_strip_all_tags( $s, $br = false ) { return trim( strip_tags( (string
 function strip_shortcodes( $s ) { return preg_replace( '/\[[^\]]*\]/', '', (string) $s ); }
 function wp_unslash( $v ) { return $v; }
 function size_format( $b ) { return $b . 'B'; }
+function wp_parse_url( $u, $c = -1 ) { return $c === -1 ? parse_url( $u ) : parse_url( $u, $c ); }
 
 function get_option( $k, $d = false ) { return $GLOBALS['_opts'][ $k ] ?? $d; }
 function update_option( $k, $v, $a = null ) { $GLOBALS['_opts'][ $k ] = $v; return true; }
@@ -118,6 +119,7 @@ class FakeProduct {
     public function get_sale_price() { return $this->sale; }
     public function is_on_sale() { return $this->sale !== '' && (float) $this->sale > 0; }
     public function is_virtual() { return $this->virtual; }
+    public function get_sku() { return 'SKU-' . $this->id; }
     public function get_gallery_image_ids() { return $this->gallery; }
 }
 
@@ -281,8 +283,15 @@ $xml = pps_product_feed_render();
 echo "\n── 4. Feed correctness ────────────────────────────────\n";
 ok( strpos( $xml, 'xmlns:g="http://base.google.com/ns/1.0"' ) !== false, 'g: namespace declared' );
 $items = substr_count( $xml, '<item>' );
-ok( $items > 0 && substr_count( $xml, '<g:identifier_exists>no</g:identifier_exists>' ) === $items,
-    'identifier_exists on every item', "$items item(s)" );
+// identifier_exists=no beside a brand is self-contradictory — that value means
+// no GTIN, no MPN AND no brand. Google reads the pair as a malformed identifier.
+// Custom print has no GTIN but does have a brand, so brand+mpn is the correct
+// complete identifier.
+ok( strpos( $xml, '<g:identifier_exists>' ) === false,
+    'identifier_exists gone — it contradicted g:brand' );
+ok( $items > 0 && substr_count( $xml, '<g:mpn>' ) === $items, 'mpn on every item', "$items item(s)" );
+ok( strpos( $xml, '<g:mpn>SKU-101</g:mpn>' ) !== false, 'mpn uses the product SKU' );
+ok( $items > 0 && substr_count( $xml, '<g:brand>' ) === $items, 'brand on every item' );
 ok( $items > 0 && substr_count( $xml, '<g:availability>in_stock</g:availability>' ) === $items,
     'availability on every item', "$items item(s)" );
 ok( strpos( $xml, '<g:custom_label_0>saddle</g:custom_label_0>' ) !== false, 'calc type as custom label' );
@@ -291,6 +300,30 @@ $prev = libxml_use_internal_errors( true );
 $doc = simplexml_load_string( preg_replace( '/<!--.*?-->/s', '', $xml ) );
 ok( $doc !== false, 'output is well-formed XML', implode( '; ', array_map( function ( $e ) { return trim( $e->message ); }, libxml_get_errors() ) ) );
 libxml_clear_errors(); libxml_use_internal_errors( $prev );
+
+echo "\n── 4b. Lint catches what Google rejects on ────────────\n";
+$fs = pps_product_feed_settings();
+mkproduct( 120, array( 'title' => 'Thin', 'price' => '10.00', 'quoted' => '10.00', 'content' => 'Hi' ) );
+$thin = pps_catalog_row( 120, 'calc-preview-test.html' );
+$probs = pps_product_feed_lint( $thin, $fs );
+ok( count( array_filter( $probs, fn( $x ) => strpos( $x, 'description' ) !== false ) ) === 1,
+    'flags a near-empty description', implode( '; ', $probs ) );
+
+mkproduct( 121, array( 'title' => 'Proper Product', 'price' => '50.00', 'quoted' => '50.00',
+    'content' => 'Saddle-stitched booklets printed to order on gloss text with a coated cover.' ) );
+$good = pps_catalog_row( 121, 'calc-preview-test.html' );
+ok( pps_product_feed_lint( $good, $fs ) === array(), 'a properly described item lints clean',
+    implode( '; ', pps_product_feed_lint( $good, $fs ) ) );
+
+echo "\n── 4c. Shipping in the feed ───────────────────────────\n";
+ok( strpos( $xml, '<g:shipping>' ) === false, 'no g:shipping when unset (account-level wins)' );
+$GLOBALS['_opts'][ PPS_CONFIG_OPTION ] = array( 'seo' => array(
+    'feed_shipping_price' => '12.50', 'feed_shipping_country' => 'US' ) );
+$xship = pps_product_feed_render();
+ok( strpos( $xship, '<g:shipping>' ) !== false, 'g:shipping emitted when configured' );
+ok( strpos( $xship, '<g:price>12.50 USD</g:price>' ) !== false, '  ...carrying the configured rate' );
+ok( strpos( $xship, '<g:country>US</g:country>' ) !== false, '  ...and the country' );
+$GLOBALS['_opts'][ PPS_CONFIG_OPTION ] = array();
 
 echo "\n── 5. XML escaping (a title with & and <) ─────────────\n";
 mkproduct( 108, array( 'title' => 'Booklets & <Flyers> "quoted"', 'price' => '10.00', 'quoted' => '10.00' ) );

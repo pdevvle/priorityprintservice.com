@@ -133,7 +133,61 @@ function pps_product_feed_settings() {
         // one is worse than omitting it, and Google will infer when it is absent.
         // Set seo.google_product_category once from the current taxonomy list.
         'gpc'      => (string) ( $seo['google_product_category'] ?? '' ),
+        // Flat shipping estimate for the feed. Blank means "configured at the
+        // Merchant Center account level instead", which is the better place for
+        // it — PPS quotes real shipping at checkout, so anything here is only a
+        // figure for Google's listing.
+        'shipping_price'   => (string) ( $seo['feed_shipping_price'] ?? '' ),
+        'shipping_country' => (string) ( $seo['feed_shipping_country'] ?? 'US' ),
     ) );
+}
+
+/**
+ * Server-side check of one item against the things Google rejects on.
+ *
+ * Merchant Center's own message is famously unhelpful ("The product details in
+ * your file don't meet Google requirements") and the per-item reason lives
+ * several clicks deep. This catches the mechanical faults here, where the fix
+ * is, rather than after a fetch-and-review round trip that costs a day.
+ *
+ * It cannot see everything — whether Google can actually download an image,
+ * and whether shipping and tax are configured on the account, are only knowable
+ * from Google's side.
+ *
+ * @return string[] Human-readable problems; empty means nothing obvious wrong.
+ */
+function pps_product_feed_lint( array $row, array $s ) {
+    $p = array();
+    $home = wp_parse_url( home_url( '/' ), PHP_URL_HOST );
+
+    if ( trim( $row['title'] ) === '' ) $p[] = 'no title';
+
+    $desc = $row['short'] !== '' ? $row['short'] : $row['description'];
+    if ( strlen( trim( $desc ) ) < 20 ) {
+        $p[] = 'description is very short — Google treats near-empty descriptions as poor quality';
+    }
+
+    foreach ( array( 'link' => $row['url'], 'image_link' => $row['image'] ) as $label => $u ) {
+        if ( $u === '' ) { $p[] = "no {$label}"; continue; }
+        $parts = wp_parse_url( $u );
+        if ( empty( $parts['scheme'] ) || $parts['scheme'] !== 'https' ) {
+            $p[] = "{$label} is not https — Google requires it";
+        }
+        if ( $label === 'link' && ! empty( $parts['host'] ) && $parts['host'] !== $home ) {
+            $p[] = "link points at {$parts['host']}, not the site's own domain — "
+                 . 'it must be the domain claimed in Merchant Center';
+        }
+    }
+
+    if ( $row['price'] === null || $row['price'] <= 0 ) $p[] = 'no price';
+
+    // The specific contradiction that got every item rejected in the first
+    // Merchant Center run: identifier_exists=no cannot sit beside a brand.
+    if ( $s['brand'] === '' ) {
+        $p[] = 'no brand set — with no GTIN either, Google has no way to identify the product';
+    }
+
+    return $p;
 }
 
 /**
@@ -179,10 +233,28 @@ function pps_product_feed_item( array $row, array $s ) {
     $out .= "    <g:condition>new</g:condition>\n";
     $out .= '    <g:brand>' . pps_feed_x( $s['brand'] ) . "</g:brand>\n";
 
-    // Custom-printed goods carry no GTIN and no MPN worth inventing. Saying so
-    // explicitly is required; omitting the field reads to Google as an
-    // oversight and gets the item disapproved.
-    $out .= "    <g:identifier_exists>no</g:identifier_exists>\n";
+    // ── Product identifiers ──
+    //
+    // This previously sent identifier_exists=no alongside a brand, which is
+    // self-contradictory: that value means the product has no GTIN, no MPN AND
+    // no brand. Google reads the pair as a malformed identifier and disapproves.
+    //
+    // Custom print has no GTIN — nobody assigns barcodes to a booklet you
+    // designed this morning — but it does have a brand and it can have a
+    // manufacturer part number, which is exactly what a SKU is. brand + mpn is
+    // a complete identifier in Google's terms, so that is what goes out.
+    $mpn = $row['sku'] !== '' ? $row['sku'] : 'PPS-' . $row['id'];
+    $out .= '    <g:mpn>' . pps_feed_x( $mpn ) . "</g:mpn>\n";
+
+    // Shipping. Optional here: if a shipping service is configured at the
+    // Merchant Center account level, that wins and this can stay unset. With
+    // neither, every item fails on "Missing value: shipping".
+    if ( $s['shipping_price'] !== '' ) {
+        $out .= "    <g:shipping>\n";
+        $out .= '      <g:country>' . pps_feed_x( $s['shipping_country'] ) . "</g:country>\n";
+        $out .= '      <g:price>' . pps_feed_x( $s['shipping_price'] ) . ' ' . pps_feed_x( $s['currency'] ) . "</g:price>\n";
+        $out .= "    </g:shipping>\n";
+    }
 
     if ( $row['categories'] ) {
         $out .= '    <g:product_type>' . pps_feed_x( implode( ' &gt; ', $row['categories'] ) ) . "</g:product_type>\n";
@@ -281,10 +353,15 @@ function pps_product_feed_render_debug() {
     }
 
     echo 'IN THE FEED (' . count( $report['rows'] ) . ")\n" . str_repeat( '-', 60 ) . "\n";
+    $lint_hits = 0;
     foreach ( $report['rows'] as $row ) {
         $note = ( $row['sale'] !== null ) ? '  (on sale from ' . number_format( $row['regular'], 2 ) . ')' : '';
         printf( "  #%-7d %-46s %10s%s\n", $row['id'], pps_feed_clip( $row['title'], 44 ),
                 number_format( $row['price'], 2 ), $note );
+        foreach ( pps_product_feed_lint( $row, $s ) as $problem ) {
+            $lint_hits++;
+            echo "           ! " . $problem . "\n";
+        }
     }
     if ( ! $report['rows'] ) echo "  (none)\n";
 
@@ -311,6 +388,23 @@ function pps_product_feed_render_debug() {
             printf( "  #%-7d %s\n", $c['id'], implode( ' + ', $c['files'] ) );
         }
     }
+
+    if ( $lint_hits ) {
+        echo "\n" . $lint_hits . " item-level problem(s) marked ! above. Those are the ones Google\n";
+        echo "rejects on, and they are fixable here rather than in Merchant Center.\n";
+    }
+
+    echo "\nTHINGS THIS PAGE CANNOT SEE\n" . str_repeat( '-', 60 ) . "\n";
+    echo "  - whether Google can download the images (hotlink protection, Cloudflare)\n";
+    echo "  - whether SHIPPING is configured in Merchant Center. With neither an\n";
+    echo "    account-level shipping service nor a feed value, every item fails on\n";
+    echo "    \"Missing value: shipping\". Set one in Merchant Center, or fill in\n";
+    echo "    seo.feed_shipping_price to put a flat figure in the feed.\n";
+    echo "  - whether TAX is configured (US accounts need it at account level)\n";
+    echo "  - whether the domain is verified and claimed\n";
+    echo "  Feed shipping value: "
+       . ( $s['shipping_price'] !== '' ? '$' . $s['shipping_price'] . ' ' . $s['shipping_country']
+                                       : '(not set — relying on Merchant Center account settings)' ) . "\n";
 
     echo "\nA missing price is fixed on the product's PPS Defaults tab by pasting a\n";
     echo "quote link, which sets the defaults and the price together — or just by\n";

@@ -142,6 +142,7 @@ function pps_catalog_row( $id, $filename ) {
         'quoted'      => $pf['quoted'],     // what the defaults were quoted at
         'price_ok'    => $pf['publishable'],
         'price_drift' => $price_drift,
+        'sku'         => (string) $product->get_sku(),
         'virtual'     => $product->is_virtual(),
         'image'       => $image,
         'gallery'     => $gallery,
