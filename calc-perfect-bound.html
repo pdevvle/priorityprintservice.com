@@ -679,11 +679,12 @@ function toYMD(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
-// Perfect bound: even page counts. PAGE_LIMITS is the single source for the
+// Perfect bound: even page counts, 8 minimum — a thinner glued spine is not a
+// product we sell. PAGE_LIMITS is the single source for the
 // clamp — the page fields below read it, and pps-featured-cards.php parses it
 // so the marketing pills quote what this calculator actually accepts.
-const PAGE_LIMITS = _CFG.page_limits || { min: 4, max: 350 };
-const PAGE_COUNTS = _CFG.page_counts || (() => { const a = []; for (let i = 4; i <= 100; i += 2) a.push(i); for (let i = 120; i <= 200; i += 20) a.push(i); for (let i = 250; i <= 350; i += 50) a.push(i); return a; })();
+const PAGE_LIMITS = _CFG.page_limits || { min: 8, max: 350 };
+const PAGE_COUNTS = _CFG.page_counts || (() => { const a = []; for (let i = PAGE_LIMITS.min; i <= 100; i += 2) a.push(i); for (let i = 120; i <= 200; i += 20) a.push(i); for (let i = 250; i <= 350; i += 50) a.push(i); return a; })();
 
 // bindEdge = dimension that stays constant when opened (spine/staple edge)
 const SIZE_PRESETS = _CFG.size_presets || [
