@@ -1,6 +1,6 @@
 # BRIEF — take the 4over calculator from draft to shippable
 
-`calc-4over.html` exists at **`1649982`**, 1,061 lines, and works: it renders,
+`calc-4over.html` exists at **`809ab6e`**, 1,061 lines, and works: it renders,
 prices, switches between products, and its numbers were verified in headless
 Chromium against the real Circle Business Cards capture before the sample was
 swapped for a synthetic one.
@@ -14,8 +14,12 @@ It is a **draft**. About 60% of what it needs to be a real calculator is present
 and about 90% of the *decisions* are made. This brief says which is which, so
 you build the missing parts rather than relitigating the settled ones.
 
-Read `docs/4OVER_REPLACEMENT.md` and `docs/4OVER_PIPELINE.md` first — they carry
-the analysis this file assumes.
+Read `docs/4OVER_REPLACEMENT.md`, `docs/4OVER_MATRIX_SCHEMA.md` and
+`docs/4OVER_PIPELINE.md` first — they carry the analysis this file assumes.
+`docs/HANDOFF_4OVER.md` is the execution order; this file is the reference it
+points at.
+
+**Live preview:** https://pdevvle.github.io/priorityprintservice.com/calc-4over.html
 
 ---
 
