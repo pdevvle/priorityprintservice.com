@@ -291,7 +291,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · MODERN</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-15 · MODERN</div>
 <div id="pps-calculator-root"></div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
@@ -3126,16 +3126,16 @@ generate();
           position:fixed in its stacking context. The dark full-bleed surface is
           deliberate — it is an art-review stage, like the fold viewport. */}
       {proofOpen && currentArt && (<Float>
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.85)", display: "flex", flexDirection: "column" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.94)", display: "flex", flexDirection: "column" }}>
           {/* Header */}
-          <div style={{ padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
+          <div style={{ padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,.1)", background: "#12151a", position: "relative", zIndex: 2, flexShrink: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px 12px" }}>
+              <div style={{ minWidth: 0, flex: "1 1 190px" }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Artwork Proof — {side === "front" ? fLabel : bLabel}</div>
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}</div>
                 {window.ppsPdfRisks().length > 0 && <div style={{ fontSize: 11, color: "#fbbf24", fontWeight: 600, marginTop: 3, maxWidth: 520 }}>⚠ Uses {window.ppsPdfRisks().join(", ")} — effects a browser preview can render imperfectly. If anything differs from the file you exported, contact us before approving.</div>}
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", rowGap: 6, marginLeft: "auto" }}>
                 {canFlip && (
                   <button type="button" onClick={() => setFoldFlipped(f => !f)} style={{
                     padding: "5px 12px", fontSize: 11, fontWeight: 600, border: "1px solid rgba(255,255,255,.2)",
@@ -3518,9 +3518,9 @@ generate();
       {previewOpen && (<Float>
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", background: "linear-gradient(135deg,#1a1d23,#2a2e36)" }}>
           {/* Header bar */}
-          <div style={{ padding: "10px 20px", background: "rgba(0,0,0,.3)", borderBottom: "1px solid rgba(255,255,255,.06)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Book Preview</div>
+          <div style={{ padding: "10px 16px", background: "rgba(0,0,0,.3)", borderBottom: "1px solid rgba(255,255,255,.06)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexShrink: 0 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Fold Preview</div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
                 {longEdge}" × {shortEdge}" {panels > 1 ? `· ${panels} panels` : "flat"}
                 {frontArt && !backArt && <span style={{ color: "#f59e0b", marginLeft: 6 }}>(back side blank)</span>}
@@ -3555,14 +3555,14 @@ generate();
             return (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
                 {/* View step buttons */}
-                <div style={{ display: "flex", gap: 6, justifyContent: "center", padding: "10px 12px", flexWrap: "wrap", overflowX: "auto" }}>
+                <div style={{ display: "flex", gap: 6, justifyContent: "center", padding: "10px 12px", flexWrap: "wrap", flexShrink: 0 }}>
                   {foldCfg.views.map((v, i) => (
                     <button key={i} type="button" onClick={() => setPreviewAngle(i)} style={{
-                      padding: "7px 16px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600,
+                      padding: "7px 13px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600,
                       letterSpacing: ".03em", transition: "all .3s",
-                      background: previewAngle === i ? CK.cyan : "rgba(255,255,255,.06)",
-                      border: `1px solid ${previewAngle === i ? CK.cyan : "rgba(255,255,255,.1)"}`,
-                      color: previewAngle === i ? "#000" : "rgba(255,255,255,.45)",
+                      background: previewAngle === i ? CK.cyan : "rgba(255,255,255,.10)",
+                      border: `1px solid ${previewAngle === i ? CK.cyan : "rgba(255,255,255,.22)"}`,
+                      color: previewAngle === i ? "#000" : "rgba(255,255,255,.78)",
                       boxShadow: previewAngle === i ? "0 2px 12px rgba(0,174,239,.25)" : "none",
                     }}>{v.label}</button>
                   ))}
