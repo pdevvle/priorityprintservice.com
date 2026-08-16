@@ -339,7 +339,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · MODERN</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-15 · MODERN</div>
 <div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">MODERN DRAFT · 2026-08-04 · PDFJS4</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
@@ -4951,7 +4951,7 @@ update();
               {/* ── Grid proof view ── */}
               {proofView === "grid" && (
                 <div style={{ padding:"16px 20px" }}>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12, flexWrap:"wrap" }}>
                     <span style={{ fontSize:12, color:"var(--bp-dim)", fontWeight:500 }}>All Pages — click to inspect</span>
                     <div className="bp-seg" style={{ marginLeft:8 }}>
                       {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (

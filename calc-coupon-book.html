@@ -348,7 +348,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
 </head>
 <body>
 <div id="pps-calculator-root"></div>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-09 · MODERN</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-15 · MODERN</div>
 <script type="text/babel">
 /* pps-sealed */ (function(){ "use strict";
 
@@ -4244,7 +4244,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                 return (
                   <div style={{ padding:"16px 20px" }}>
                     {/* Page nav with view toggle */}
-                    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12 }}>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12, flexWrap:"wrap" }}>
                       <button type="button" disabled={proofIdx<=0} onClick={() => setProofIdx(i => { let n=i-1; while(n>=0 && displayPages[n]?.isBlank) n--; return n>=0?n:i; })} style={{
                         padding:"8px 16px", borderRadius:6, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit",
                         display:"flex", alignItems:"center", gap:4, transition:"all .2s",
@@ -4438,7 +4438,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               {/* ── Grid proof view ── */}
               {proofView === "grid" && (
                 <div style={{ padding:"16px 20px" }}>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:12, gap:12, flexWrap:"wrap" }}>
                     <span style={{ fontSize:12, color:"rgba(255,255,255,.5)", fontWeight:500 }}>All Pages — click to inspect</span>
                     <div style={{ marginLeft:8, display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid rgba(255,255,255,.12)" }}>
                       {[{v:"single",l:"📄"},{v:"grid",l:"▦"}].map(o => (
