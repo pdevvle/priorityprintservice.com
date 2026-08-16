@@ -45,6 +45,7 @@ const FILES = [
   'calc-brochure.html', 'calc-coupon-book.html', 'calc-greeting-card.html',
   'calc-letterhead.html', 'calc-perfect-bound.html', 'calc-postcard.html',
   'calc-preview-test.html', 'calc-sticker.html',
+  'calc-4over.html',
 ];
 
 const OPEN = '<script type="text/babel">';
