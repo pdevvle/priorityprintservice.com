@@ -1,5 +1,9 @@
 # HANDOFF — build out the 4over trade-product system
 
+**Where this lives:** `docs/HANDOFF_4OVER.md` on branch
+`claude/optimistic-wozniak-11ql3y`. Everything it references is committed on
+that branch.
+
 You are the executing session. The design is settled and a working draft
 calculator exists. Your job is to build the parts that do not exist yet, in the
 order below. **Do not redesign the settled decisions** — they were reasoned
@@ -8,8 +12,10 @@ docs.
 
 ## Preconditions
 
-- Branch **`claude/optimistic-wozniak-11ql3y`**. Source HEAD when this was
-  written: **`809ab6e`**.
+- Branch **`claude/optimistic-wozniak-11ql3y`**. Source HEAD when this was last
+  revised: **`511a149`**. Expect it to have moved — a second session is active
+  on the same branch — so `git fetch` and read the log before assuming anything
+  about the current state.
 - A **second session works this branch concurrently.** Rebase before every push,
   and **never publish a `dist/` built before your last rebase** — the compiled
   output goes stale the moment someone else's calculator change lands.
