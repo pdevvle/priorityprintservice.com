@@ -80,6 +80,17 @@ type `fourover`.
 
 ### 3 · `pps-4over-ingest.php` — the Drive pull
 
+**Where the folder ID lives:** `pps_calc_config → fourover_drive_folder_ids`,
+an array. It is deliberately not in the repo — if the folder is link-shared the
+ID is effectively the password to every supplier cost in it, and this repo is
+public. Ask the owner for it, or read it from config on the server; do not
+commit it. The first folder was supplied on 2026-08-15 and should already be
+there.
+
+Take a list rather than a single ID: the owner may keep one folder per family
+or one for everything, and since `family` comes from inside each file the
+ingest can just merge whatever it finds across all configured folders.
+
 Model it on **`pps-gbp-sync.php`**, which is built and tested, and inherit its
 central rule verbatim:
 

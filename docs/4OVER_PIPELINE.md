@@ -52,17 +52,44 @@ ingest becomes incremental so one failure does not hold back the rest, Drive's
 revision history becomes per-product, and concurrent captures cannot collide.
 
 ```
-PPS 4over Pricing/            ← one flat folder
+<a Drive folder>              ← one flat folder per family, or one for everything
   manifest.json               ← written by the PLUGIN: the work list
   round-business-cards.json   ← written by CHROME: one per product
   standard-business-cards.json
   _rejected/                  ← ingest moves gate failures here, with a reason
 ```
 
-Flat rather than nested by family: the plugin lists one folder rather than
-walking a tree. Family grouping comes from inside each file, and **the filename
-is a convenience, never an identity** — `family` and `key` in the file are
-authoritative, so a rename cannot break anything.
+Flat rather than nested: the plugin lists folders rather than walking a tree.
+**Family grouping comes from inside each file**, so whether you keep one folder
+for everything or one per family is a filing preference, not a design decision —
+config takes a *list* of folder IDs and the ingest merges what it finds.
+
+**The filename is a convenience, never an identity.** `family` and `key` in the
+file are authoritative, so a rename cannot break anything.
+
+### ⚠ The folder ID does not go in this repo
+
+The first folder was supplied on 2026-08-15 as a `drive.google.com/drive/folders/…`
+link. **That ID is not recorded here, deliberately.**
+
+If the folder is shared as "anyone with the link", then the ID *is* the
+credential — publishing it in a public repo publishes every supplier cost in it,
+which is the exact exposure that put this data on Drive instead of in git in the
+first place.
+
+So it lives where the Shippo token and the Drive OAuth already live:
+
+```
+pps_calc_config → fourover_drive_folder_ids   (array of IDs, or one)
+```
+
+`pps_calc_config` is never bulk-copied between sites and is never read raw into
+a session (CLAUDE.md). The repo carries the mechanism; `wp_options` carries the
+values.
+
+**Worth checking regardless of this:** open the folder's sharing settings and
+confirm it is *not* "anyone with the link". These are your supplier costs, and a
+link-shared folder is one forwarded email away from a competitor.
 
 The plugin rewrites `manifest.json` with every product it serves, its 4over URL,
 its matrix ages and its last-verified date. Chrome reads it to know what to
