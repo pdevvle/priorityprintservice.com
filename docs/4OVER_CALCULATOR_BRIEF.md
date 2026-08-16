@@ -100,6 +100,11 @@ Nothing server-side has been written. Needed, roughly in this order:
 
 **`pps-4over-matrix.php`** — storage and reader.
 
+- **One stored matrix per product**, keyed `family/key`. The Drive folder holds
+  one JSON file each; `docs/4OVER_MATRIX_SCHEMA.md` is the field-by-field
+  contract and is the thing to implement against, not this summary.
+- `rows` in the file → a flat `"40|UV|250"` cell map at ingest. The file stays
+  capture-shaped; the runtime gets the lookup shape.
 - `pps_4over_catalog( $family )` from `wp_options`, returning `{family, products:[…]}`
 - injection into `PPS_CONFIG.catalog` on a 4over product page, parallel to how
   `pps-calculators.php:1113` injects `PPS_CONFIG.defaults`. The product a page

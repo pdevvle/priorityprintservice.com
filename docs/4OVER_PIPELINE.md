@@ -43,15 +43,36 @@ and it should inherit that file's central discipline verbatim:
 A network blip must never blank a price matrix, because a blanked matrix is a
 product that cannot be quoted — or worse, one that quotes zero.
 
-## 3 · Close the loop: the plugin publishes the work list
+## 3 · One file per product, and the plugin publishes the work list
 
-Rather than maintaining a URL list by hand in the Chrome task, have the plugin
-write `manifest.json` into the same Drive folder — every product it serves, its
-4over URL, its current matrix age, and its last verified date.
+**One 4over product page → one JSON file → one matrix** (owner, 2026-08-15).
+Not one catalogue file, and the difference is not tidiness: a session that dies
+at product 30 of 40 corrupts one product rather than the whole catalogue,
+ingest becomes incremental so one failure does not hold back the rest, Drive's
+revision history becomes per-product, and concurrent captures cannot collide.
 
-Chrome reads the manifest to know what to check; it writes results back beside
-it. Adding a product then becomes one action in wp-admin rather than two edits
-in two places that can drift.
+```
+PPS 4over Pricing/            ← one flat folder
+  manifest.json               ← written by the PLUGIN: the work list
+  round-business-cards.json   ← written by CHROME: one per product
+  standard-business-cards.json
+  _rejected/                  ← ingest moves gate failures here, with a reason
+```
+
+Flat rather than nested by family: the plugin lists one folder rather than
+walking a tree. Family grouping comes from inside each file, and **the filename
+is a convenience, never an identity** — `family` and `key` in the file are
+authoritative, so a rename cannot break anything.
+
+The plugin rewrites `manifest.json` with every product it serves, its 4over URL,
+its matrix ages and its last-verified date. Chrome reads it to know what to
+check and writes results back beside it, so adding a product is one action in
+wp-admin rather than two edits in two places that can drift.
+
+**A file disappearing from Drive does not delete a stored matrix.** Removing a
+product is a deliberate act in wp-admin, never a side effect of a failed sync.
+
+The full field-by-field contract is `docs/4OVER_MATRIX_SCHEMA.md`.
 
 ---
 
@@ -125,6 +146,7 @@ ingest is the last place to catch that, so it gates before publishing:
 | **Monotonicity** | unit price rising with quantity — physically wrong, and the signature of a stale read |
 | **Magnitude** | any cell moved more than a configured threshold since the last accepted version |
 | **Freshness** | `captured_at` older than the file it would replace |
+| **Capture quality** | `capture.verify_mismatches` non-zero — the second pass disagreed with the first, which is a systematic timing error and not something to partially trust |
 
 The monotonicity gate is worth the effort specifically: the test capture passes
 it cleanly in all three coatings, which is good evidence the capture method
