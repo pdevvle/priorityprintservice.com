@@ -1,8 +1,14 @@
 # BRIEF — take the 4over calculator from draft to shippable
 
-`calc-4over.html` exists at **`797b49f`**, 861 lines, and works: it renders,
-prices, and its numbers were verified in headless Chromium against the real
-Circle Business Cards capture before the sample was swapped for a synthetic one.
+`calc-4over.html` exists at **`1649982`**, 1,061 lines, and works: it renders,
+prices, switches between products, and its numbers were verified in headless
+Chromium against the real Circle Business Cards capture before the sample was
+swapped for a synthetic one.
+
+**It is a catalogue, not a single product.** One page holds every 4over product
+— Round / Standard / Square / Fold-over business cards in the sample — selected
+from a dropdown, each with its own dimensions, options, run ladder, production
+days and staleness.
 
 It is a **draft**. About 60% of what it needs to be a real calculator is present
 and about 90% of the *decisions* are made. This brief says which is which, so
@@ -45,7 +51,10 @@ the draft is in this session's transcript; rebuilding it is ten lines.
 
 | Decision | Why |
 |---|---|
-| **The matrix defines the form** | Controls are generated from `MATRIX.dimensions`, so one file serves every 4over product and adding one costs no code |
+| **The matrix defines the form** | Controls are generated from the selected product's `dimensions`, so one file serves every 4over product and adding one costs no code |
+| **One page, many products** | `PPS_CONFIG.catalog` holds them all; the selector only renders when there is more than one |
+| **Defaults preselect the product, never restrict it** | `/round-business-cards/` opens on Round and a customer can still switch — so you keep one WooCommerce product per shape for SEO and Shopping while one file serves them all |
+| **Switching remaps, never resets** | See `remapSelection()` — this is the part most likely to be "simplified" into a bug |
 | **Quantity is a grid of the matrix's tiers**, not free entry | You cannot order 1,750 from 4over; offering it means eating the 2,500 cost or intervening by hand every time |
 | **`ship(C) = max(floor, min(mult×C, cap), pct×C)`** | Reduces the owner's four bands to one branchless expression, continuous at every handover |
 | **Retail is delivered** — shipping inside the price | Owner's markup formula is `cost × 2.0010 + ship(cost)` |
@@ -91,9 +100,13 @@ Nothing server-side has been written. Needed, roughly in this order:
 
 **`pps-4over-matrix.php`** — storage and reader.
 
-- `pps_4over_matrices()` / `pps_4over_matrix( $key )` from `wp_options`
-- injection into `PPS_CONFIG.matrix` on a 4over product page, parallel to how
-  `pps-calculators.php:1113` injects `PPS_CONFIG.defaults`
+- `pps_4over_catalog( $family )` from `wp_options`, returning `{family, products:[…]}`
+- injection into `PPS_CONFIG.catalog` on a 4over product page, parallel to how
+  `pps-calculators.php:1113` injects `PPS_CONFIG.defaults`. The product a page
+  opens on comes from `_pps_defaults.product`
+- **which catalogue a product page gets is a per-product setting.** A business
+  card page should not offer postcards. Expect a `_pps_4over_family` meta beside
+  `_pps_defaults`
 - age helpers so both the calculator and the admin see the same number
 - an admin screen listing every matrix with `captured_at`, `verified_at`, age,
   and a staleness flag
@@ -120,7 +133,21 @@ fetched. Wire the existing Shippo integration for `AK, HI, PR, GU, VI, AS, MP`.
 Origin is not a concern — 4over ships those from California and the owner has
 confirmed that does not meaningfully move the rate versus PPS's own origin.
 
-### 3.4 Smaller gaps
+### 3.4 The catalogue's own gaps
+
+- **Grouping is one level.** `product.group` renders as `<optgroup>`. Once the
+  catalogue spans families — business cards *and* postcards *and* flyers — a flat
+  list of forty gets unusable and it wants a family → product two-step.
+- **No per-product imagery.** The header shows the product name and its fixed
+  spec chips; a shape thumbnail beside each option would make the selector read
+  much faster.
+- **`remapSelection()` is silent.** Switching from Round at 25,000 to Square
+  lands on 10,000 because Square's ladder stops there — correct, but the
+  customer is not told their quantity moved. A one-line notice under the
+  quantity grid would fix it, and the same pattern already exists in `TxtNum`
+  ("Adjusted to N — allowed range is…").
+
+### 3.5 Smaller gaps
 
 | Gap | Note |
 |---|---|
@@ -146,6 +173,11 @@ What was asserted, and what any change must keep passing:
 - colorspec changes **nothing**
 - delivery lands exactly `production + 1 + 3` business days out
 - the debug panel's decomposition adds up to the displayed total
+- each of the four products renders **its own** colorspecs, coatings and ladder
+  (9 / 8 / 6 / 5 tiers) and its own production days (4 / 3 / 4 / 5)
+- **the remap test:** Round at UVFR / 25,000 → switch to Square → lands on
+  UV / 10,000 with no error and a correct price. Square has no UVFR and its
+  ladder stops at 10,000. If a change breaks one assertion, make it this one.
 
 Worth adding: a matrix with `captured_at` well in the past must refuse to quote,
 and a run size absent from the matrix must be unreachable in the UI.
