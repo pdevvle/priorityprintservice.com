@@ -22,9 +22,9 @@ the analysis this file assumes.
 ## 0 · Rules that are not negotiable
 
 - **Never put real 4over costs in this repo.** The repo is public and CLAUDE.md
-  forbids committing pricing figures. The embedded `SAMPLE_MATRIX` is synthetic
-  and must stay synthetic. Real costs arrive at runtime as `PPS_CONFIG.matrix`
-  and live only in `wp_options`.
+  forbids committing pricing figures. The embedded `SAMPLE_CATALOG` is synthetic
+  and must stay synthetic — all four products in it. Real costs arrive at
+  runtime as `PPS_CONFIG.catalog` and live only in `wp_options`.
 - **Never render cost, markup or the shipping split anywhere a customer can
   reach** — including `pps_metadata`, which reaches the order screen, the
   customer email and the Missive spec. Staff see it in the debug panel only.
