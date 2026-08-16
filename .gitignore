@@ -11,3 +11,8 @@ dist/
 docs/min-prices.json
 min-prices.json
 .minprice-*.html
+# Scratch calculator builds written by the headless test harnesses — a copy of a
+# calculator with its CDN scripts swapped for ./node_modules paths. Regenerated
+# on every run, and committing one would put a stale duplicate of a calculator
+# in the tree.
+.t4o*.html
