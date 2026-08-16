@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>4over Trade Products Calculator · draft 2026-08-15</title>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; padding: 0; }
+  button:focus-visible,[role="button"]:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid #1d6fe0 !important;outline-offset:2px;border-radius:3px;}
+
+  /* Modal chrome tokens — same names the brochure uses, so the proof modal reads
+     as the same system. */
+  :root{
+    --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
+    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#94a3b8;
+    --bp-btn:#f1f4f8; --bp-scrim:rgba(15,23,42,.55);
+  }
+  :root[data-pps-theme="dark"]{
+    --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
+    --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
+    --bp-btn:#0f151d; --bp-scrim:rgba(2,6,12,.66);
+  }
+  .bp-seg{display:flex;gap:3px;padding:3px;border-radius:10px;border:1px solid var(--bp-line);
+    background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
+  .bp-seg-btn{padding:6px 14px;border:none;border-radius:7px;background:transparent;color:var(--bp-dim);
+    font-size:11.5px;font-weight:500;font-family:inherit;cursor:pointer;transition:all .18s cubic-bezier(.4,0,.2,1);
+    display:flex;align-items:center;justify-content:center;gap:5px}
+  .bp-seg-btn:hover:not(.on){color:#007eff}
+  .bp-seg-btn.on{background:#007eff;color:#fff;font-weight:600;box-shadow:0 1px 2px rgba(0,126,255,.35)}
+  .bp-prooflabel{font-size:10px;font-weight:700;color:var(--bp-dim);letter-spacing:.08em;
+    text-transform:uppercase;flex-shrink:0}
+  .bp-checker{
+    background-color:#3a3e46;
+    background-image:
+      linear-gradient(45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(-45deg,#2a2e36 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#2a2e36 75%),
+      linear-gradient(-45deg,transparent 75%,#2a2e36 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0;
+  }
+  [data-pps-cta]:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06);box-shadow:0 7px 20px rgba(0,126,255,.48) !important}
+  [data-pps-cta]:active:not(:disabled){transform:translateY(0);box-shadow:0 3px 10px rgba(0,126,255,.4) !important}
+
+  :root{
+    --pps-display:'Montserrat','Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --pps-sans:'Work Sans','Segoe UI','Helvetica Neue',Arial,sans-serif;
+  }
+  body{font-family:var(--pps-sans);background:#f6f7f9}
+  @keyframes pps-pop-0{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
+  @keyframes pps-pop-1{0%{transform:scale(1)}38%{transform:scale(1.022)}100%{transform:scale(1)}}
+  html[data-pps-theme="dark"] body{background:#0d1117;color:#e6edf6}
+  html[data-pps-theme="dark"] option{background:#161b22;color:#e6edf6}
+  html[data-pps-theme="dark"] input::placeholder,html[data-pps-theme="dark"] textarea::placeholder{color:#5b6b83}
+  html[data-pps-theme="dark"] input,html[data-pps-theme="dark"] select,html[data-pps-theme="dark"] textarea{color-scheme:dark}
+  input:hover:not(:focus), select:hover:not(:focus){border-color:#cbd5e1 !important}
+  input:focus, select:focus, textarea:focus{
+    border-color:#007eff !important;
+    box-shadow:0 0 0 3px rgba(0,126,255,.14) !important;
+  }
+  button{transition:filter .15s ease, transform .06s ease}
+  button:active{transform:translateY(.5px)}
+  h1,h2{letter-spacing:-.02em}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px;border:3px solid transparent;background-clip:content-box}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+/* ═══════════════════════════════════════════════════════════════════════════
+   4over trade-product calculator — DRAFT
+
+   Unlike the eight in-house calculators, this one does no pricing maths. 4over
+   publishes a price table and we resell it, so `calculate()` is a lookup in a
+   captured cost matrix plus a markup and a shipping estimate.
+
+   The consequence that shapes the whole file: THE MATRIX DEFINES THE FORM.
+   Controls are generated from the matrix's own dimensions rather than hardcoded,
+   so this single file serves every 4over product — a product differs only by
+   which matrix PHP injects. Adding a product later costs no code.
+
+   It also makes an impossible quote impossible: a lookup cannot return a
+   configuration 4over does not sell, because there is no cell for it.
+
+   See docs/4OVER_REPLACEMENT.md and docs/4OVER_PIPELINE.md.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const {useState,useEffect,useRef,useMemo,useCallback} = React;
+
+/* ── Design tokens, lifted from calc-brochure.html so this reads as the same
+      product. Keep them in step: a divergence here is visible to customers. ── */
+const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",
+  cyanLight:"#e8f4ff",yellowLight:"#fef5e0",rushLight:"#f0fdf4",rush:"#6b8f2b",magentaLight:"#fdf2f8"};
+const PALETTES = {
+  light: { dark:"#0f172a", mid:"#475569", light:"#94a3b8", bg:"#f6f7f9", white:"#fff",
+           border:"#e3e8ef", red:"#dc2626", track:"#f1f4f8", errBg:"#fef2f2", errBorder:"#fecaca",
+           heroBg:"#0f172a", rowHi:"#f0f9ff", tint:"#eff6ff", tintBorder:"#cfe6ff" },
+  dark:  { dark:"#e6edf6", mid:"#9fb0c6", light:"#7183a0", bg:"#0d1117", white:"#161b22",
+           border:"#2a3340", red:"#f87171", track:"#0f151d", errBg:"#2a1416", errBorder:"#5b2b2f",
+           heroBg:"#1e2a38", rowHi:"#17263a", tint:"#12243a", tintBorder:"#24405e" },
+};
+const CC = { primary:CK.cyan, accent:CK.magenta, warm:CK.yellow, ...PALETTES.light };
+
+function buildST(){ return {
+  f:{marginTop:18},
+  lbl:{display:"block",fontSize:14,fontWeight:600,color:CC.mid,marginBottom:7,letterSpacing:".005em"},
+  sel:{width:"100%",padding:"20px 34px 20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:CC.white,fontSize:15,color:CC.dark,fontFamily:"inherit",appearance:"none",cursor:"pointer",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)",transition:"border-color .15s ease, box-shadow .15s ease"},
+  selA:{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:CC.light,pointerEvents:"none"},
+  inp:{width:"100%",padding:"20px 14px",borderRadius:9,border:`1px solid ${CC.border}`,background:CC.white,fontSize:15,color:CC.dark,fontFamily:"inherit",outline:"none",boxShadow:"0 1px 2px rgba(16,24,40,.04)"},
+  pills:{display:"flex",borderRadius:10,border:`1px solid ${CC.border}`,overflow:"hidden",background:CC.track,padding:3,gap:3,boxShadow:"inset 0 1px 2px rgba(16,24,40,.04)"},
+  pill:{flex:1,padding:"17px 10px",fontSize:14,fontWeight:500,fontFamily:"inherit",border:"none",borderRadius:7,background:"transparent",color:CC.mid,cursor:"pointer",transition:"all .18s cubic-bezier(.4,0,.2,1)",display:"flex",alignItems:"center",justifyContent:"center"},
+  pillOn:{background:CK.cyan,color:"#fff",fontWeight:600,boxShadow:"0 1px 2px rgba(0,126,255,.35)"},
+  row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18},
+  hr:{height:1,background:CC.border,margin:"16px 0 4px"},
+  err:{color:CC.red,fontSize:13,margin:"10px 0 0",padding:"10px 12px",background:CC.errBg,borderRadius:9,border:`1px solid ${CC.errBorder}`},
+  note:{fontSize:12,color:CC.light,margin:"5px 0 0"},
+  card:{background:CC.white,borderRadius:14,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(16,24,40,.04), 0 2px 6px rgba(16,24,40,.03)"},
+  cardH:{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"15px 18px",background:CC.white,border:"none",borderBottom:`1px solid ${CC.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:15},
+  pnl:{background:CC.white,borderRadius:14,border:`1px solid ${CC.border}`,overflow:"hidden",boxShadow:"0 1px 2px rgba(16,24,40,.04), 0 6px 16px rgba(16,24,40,.05)"},
+  secSub:{margin:"3px 0 0",fontSize:11.5,fontWeight:400,color:CC.light,lineHeight:1.4,textTransform:"none",letterSpacing:0},
+  specCard:{background:CC.dark,color:"#e2e8f0",borderRadius:12,padding:"16px 18px",marginTop:16,fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"},
+  specEye:{fontSize:10,letterSpacing:".14em",opacity:.55,marginBottom:10},
+  specGrid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px 14px",fontSize:12},
+}; }
+let ST = buildST();
+let CHIP = {fontSize:11,fontWeight:600,color:CC.mid,background:CC.track,border:`1px solid ${CC.border}`,padding:"5px 9px",borderRadius:99,whiteSpace:"nowrap",display:"inline-block",lineHeight:1.3};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE MATRIX
+
+   This embedded copy is the Circle Business Cards capture of 2026-08-15 and
+   exists so the file works standalone for design review. In production PHP
+   injects PPS_CONFIG.matrix and this is ignored entirely — exactly how the zone
+   map works in the other calculators.
+
+   THE NUMBERS BELOW ARE SYNTHETIC. They are not 4over's prices and must never be
+   replaced with real ones: the repo is public, and CLAUDE.md forbids committing
+   pricing figures anywhere in it. Publishing supplier costs would let a competitor
+   compute the margin on every resold product.
+
+   They do preserve every structural property of the real capture, so the draft
+   still exercises what matters: colorspec never moves the price, coating is free
+   below 2,500, and unit price falls monotonically in all three coatings. Real
+   costs arrive at runtime via PPS_CONFIG.matrix and live only in wp_options.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const SAMPLE_MATRIX = {
+  product: "Circle Business Cards",
+  captured_at: "2026-08-15",   // synthetic sample, not a real capture
+  verified_at: "2026-08-15",
+  max_age_days: 45,
+  production_days: 4,
+  fixed: { size:'2" x 2"', shape:"Round", stock:"14PT C2S" },
+  trim: { w: 2, h: 2, shape: "round" },
+  unit_weight_g: 1.02,
+  sku_pattern: "14PT-BCR{COATING}-2X2-{COLOR}-ROUND",
+  // Order matters: it is the order the controls render in.
+  dimensions: [
+    { key:"colorspec", label:"Printed sides", control:"select",
+      options:[
+        {v:"40", t:"4/0 — full colour front only"},
+        {v:"44", t:"4/4 — full colour both sides"},
+        {v:"41", t:"4/1 — full colour front, black back"},
+      ]},
+    { key:"coating", label:"Coating", control:"pill",
+      options:[
+        {v:"UV",   t:"UV (print side)"},
+        {v:"UVFR", t:"UV front only"},
+        {v:"AQ",   t:"Aqueous"},
+      ]},
+    { key:"run_size", label:"Quantity", control:"qty",
+      options:[250,500,1000,2500,5000,10000,15000,20000,25000] },
+  ],
+  // Cells keyed "colorspec|coating|run_size". colorspec does not move the price
+  // on this product, but the key keeps its slot so a product where it DOES move
+  // the price needs no schema change.
+  cells: (function(){
+    // Synthetic. See the header — never put real supplier costs in this file.
+    const price = {
+      "UV":   {250:9.00,500:18.00,1000:23.50,2500:50.00,5000:70.00,10000:115.00,15000:168.00,20000:222.00,25000:276.00},
+      "UVFR": {250:9.00,500:18.00,1000:23.50,2500:53.50,5000:70.00,10000:118.60,15000:175.20,20000:229.20,25000:283.20},
+      "AQ":   {250:9.00,500:18.00,1000:23.50,2500:50.00,5000:68.20,10000:111.40,15000:166.20,20000:218.40,25000:265.20},
+    };
+    const out = {};
+    ["40","44","41"].forEach(cs => {
+      Object.keys(price).forEach(co => {
+        Object.keys(price[co]).forEach(q => { out[`${cs}|${co}|${q}`] = price[co][q]; });
+      });
+    });
+    return out;
+  })(),
+  add_ons: [
+    { key:"samples", label:"Job samples",   note:"A sample of the completed job", price:9.99 },
+    { key:"proofs",  label:"Digital proof", note:"PDF proof before production",   price:5.00 },
+  ],
+};
+
+const _CFG   = (window.PPS_CONFIG || {}).calc || {};
+const MATRIX = (window.PPS_CONFIG || {}).matrix || SAMPLE_MATRIX;
+const PPS    = window.PPS_CONFIG || {};
+
+/* ── Commercial policy, all overridable from Central Config ────────────────
+   Markup and the shipping bands are business decisions and belong in config,
+   not in this file. The values here are the 2026-08-15 policy and act as the
+   fallback when PHP injects nothing. */
+const POLICY = {
+  // retail = cost x markup + shipping.  100.10% markup => 2.0010.
+  markup:            Number(_CFG.fourover_markup ?? 2.0010),
+  ship_floor:        Number(_CFG.fourover_ship_floor ?? 10),
+  ship_multiple:     Number(_CFG.fourover_ship_multiple ?? 1),
+  ship_cap:          Number(_CFG.fourover_ship_cap ?? 20),
+  ship_pct:          Number(_CFG.fourover_ship_pct ?? 0.15),
+  handling_days:     Number(_CFG.fourover_handling_days ?? 1),
+  transit_days:      Number(_CFG.fourover_transit_days ?? 3),
+  // States and territories where the band formula is replaced by a real Shippo
+  // quote. See docs/4OVER_REPLACEMENT.md.
+  shippo_states:     (_CFG.fourover_shippo_states || "AK,HI,PR,GU,VI,AS,MP").split(","),
+};
+
+/**
+ * The shipping estimate.
+ *
+ *   ship(C) = max( floor, min( multiple x C, cap ), pct x C )
+ *
+ * Reduces the owner's four bands to one expression with no branches, and is
+ * continuous at every handover ($10, $20, $133.33 with the 2026-08-15 values),
+ * so no quantity makes shipping lurch.
+ */
+function shipEstimate(cost){
+  return Math.max(
+    POLICY.ship_floor,
+    Math.min(POLICY.ship_multiple * cost, POLICY.ship_cap),
+    POLICY.ship_pct * cost
+  );
+}
+
+/* ── Business days, matching the rest of the fleet ───────────────────────── */
+function addBusinessDays(from, n){
+  const d = new Date(from.getTime());
+  let left = Math.max(0, Math.round(n));
+  while(left > 0){
+    d.setDate(d.getDate() + 1);
+    const wd = d.getDay();
+    if(wd !== 0 && wd !== 6) left--;
+  }
+  return d;
+}
+const fmtDate = d => d.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric",year:"numeric"});
+const money   = n => "$" + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRICING — a lookup, not a model
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function matrixDimensions(){ return MATRIX.dimensions || []; }
+function cellKey(sel){ return matrixDimensions().map(d => sel[d.key]).join("|"); }
+
+function matrixAgeDays(){
+  const stamp = MATRIX.verified_at || MATRIX.captured_at;
+  if(!stamp) return null;
+  const then = Date.parse(stamp + "T00:00:00Z");
+  if(isNaN(then)) return null;
+  return Math.floor((Date.now() - then) / 86400000);
+}
+
+function calculate(sel, addOns, shipState){
+  const errs = [];
+
+  // Staleness is checked before anything else. A matrix older than its policy
+  // is not a price we are willing to stand behind — 4over can move their table
+  // at any time and we have no API to reconcile against, so quoting from a
+  // stale capture risks selling below cost on every order until someone
+  // notices. Refusing to quote is loud; quoting stale is silent.
+  const age = matrixAgeDays();
+  const maxAge = Number(MATRIX.max_age_days || 45);
+  if(age !== null && age > maxAge){
+    errs.push(`Pricing for this product was last verified ${age} days ago and needs refreshing before we can quote it. Please contact us for a current price.`);
+  }
+
+  const key  = cellKey(sel);
+  const cost = MATRIX.cells ? MATRIX.cells[key] : undefined;
+  if(cost === undefined && !errs.length){
+    // Only reachable if a matrix is internally inconsistent — the controls are
+    // generated from the same dimensions, so every selectable combination has
+    // a cell by construction.
+    errs.push("That combination isn't available for this product.");
+  }
+  if(errs.length) return { error: errs };
+
+  const addOnTotal = (MATRIX.add_ons || [])
+    .filter(a => addOns[a.key])
+    .reduce((s,a) => s + Number(a.price || 0), 0);
+
+  const marked = cost * POLICY.markup;
+
+  // Outlying states leave the band formula and want a real Shippo rate. Until
+  // that call is wired the band value is used and the quote is flagged, so an
+  // Alaska order can never quietly ship at a lower-48 estimate.
+  const needsShippo = POLICY.shippo_states.includes(String(shipState || "").toUpperCase());
+  const ship = shipEstimate(cost);
+
+  const total = marked + ship + addOnTotal;
+  const qty   = Number(sel.run_size) || 0;
+
+  const prodDays  = Number(MATRIX.production_days || 4);
+  const totalDays = prodDays + POLICY.handling_days + POLICY.transit_days;
+  const delivery  = addBusinessDays(new Date(), totalDays);
+
+  return {
+    total: Math.round(total * 100) / 100,
+    perUnit: qty ? Math.round((total / qty) * 10000) / 10000 : 0,
+    qty,
+    delivery, totalDays, prodDays,
+    needsShippo,
+    // Staff-only decomposition. Never rendered outside the debug panel — see
+    // the Panel component and docs/4OVER_REPLACEMENT.md.
+    _cost: cost, _marked: marked, _ship: ship, _addOns: addOnTotal, _age: age,
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SHARED COMPONENTS — same shapes as calc-brochure.html
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function useIsMobile(){
+  const [m,setM] = useState(() => typeof window !== "undefined" && window.innerWidth < 860);
+  useEffect(() => {
+    const on = () => setM(window.innerWidth < 860);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return m;
+}
+
+const Chev = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+    <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+function Sel({label,value,onChange,children,disabled,note,badge,name,selectId}){
+  const m = useIsMobile();
+  const [pop,setPop] = useState(0);
+  return <div style={ST.f}>
+    {label && <label style={ST.lbl}>{label}{badge}</label>}
+    <div style={{position:"relative",animation:pop?`pps-pop-${pop%2} .28s ease`:undefined}}>
+      <select id={selectId} name={name} value={value}
+        onChange={e=>{setPop(n=>n+1);onChange(e.target.value);}}
+        style={{...ST.sel,fontSize:m?16:15,padding:m?"20px 32px 20px 13px":"20px 34px 20px 14px",
+                ...(disabled?{opacity:.4,pointerEvents:"none"}:{})}} disabled={disabled}>{children}</select>
+      <span style={ST.selA}><Chev/></span>
+    </div>
+    {note && <p style={ST.note}>{note}</p>}
+  </div>;
+}
+
+function Pil({label,options,value,onChange,disabled,badge}){
+  const m = useIsMobile();
+  return <div style={ST.f}>
+    {label && <label style={ST.lbl}>{label}{badge}</label>}
+    <div style={ST.pills}>{options.map(o =>
+      <button type="button" aria-pressed={value===o.v} key={String(o.v)}
+        onClick={()=>!disabled&&onChange(o.v)}
+        style={{...ST.pill,padding:m?"18px 10px":"17px 10px",
+                ...(value===o.v?ST.pillOn:{}),...(disabled?{opacity:.4,cursor:"default"}:{})}}>{o.t}</button>
+    )}</div>
+  </div>;
+}
+
+/**
+ * Quantity as a grid of the matrix's own run sizes.
+ *
+ * Deliberately not a free-entry number field, which is what every in-house
+ * calculator uses. You cannot order 1,750 from 4over, so offering 1,750 means
+ * either eating the 2,500 cost or a manual intervention on every order. The
+ * tiers are the product.
+ */
+function QtyGrid({label,options,value,onChange,perUnitFor}){
+  return <div style={ST.f}>
+    <label style={ST.lbl}>{label}</label>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(96px,1fr))",gap:8}}>
+      {options.map(q => {
+        const on = String(value) === String(q);
+        const pu = perUnitFor ? perUnitFor(q) : null;
+        return <button type="button" key={q} aria-pressed={on} onClick={()=>onChange(q)}
+          style={{padding:"13px 8px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",
+                  border:`1px solid ${on?CK.cyan:CC.border}`,
+                  background:on?CK.cyan:CC.white,color:on?"#fff":CC.dark,
+                  boxShadow:on?"0 1px 2px rgba(0,126,255,.35)":"0 1px 2px rgba(16,24,40,.04)",
+                  transition:"all .18s cubic-bezier(.4,0,.2,1)",display:"flex",
+                  flexDirection:"column",alignItems:"center",gap:3}}>
+          <span style={{fontSize:15,fontWeight:on?700:600}}>{Number(q).toLocaleString()}</span>
+          {pu !== null && <span style={{fontSize:10.5,opacity:on?.85:.6,fontWeight:500}}>
+            {"$" + pu.toFixed(pu < 0.1 ? 4 : 3)}/ea
+          </span>}
+        </button>;
+      })}
+    </div>
+  </div>;
+}
+
+function Sec({title,open,onToggle,children,subtitle,step,summary}){
+  return <div style={{...ST.card,marginBottom:14}}>
+    <button type="button" style={ST.cardH} onClick={onToggle} aria-expanded={open}>
+      <span style={{display:"flex",alignItems:"center",gap:11,textAlign:"left"}}>
+        {step && <span style={{width:24,height:24,borderRadius:99,background:open?CK.cyan:CC.track,
+          color:open?"#fff":CC.mid,fontSize:12,fontWeight:700,display:"grid",placeItems:"center",flexShrink:0}}>{step}</span>}
+        <span>
+          <span style={{fontWeight:700,color:CC.dark,fontFamily:"var(--pps-display)"}}>{title}</span>
+          {subtitle && <p style={ST.secSub}>{subtitle}</p>}
+        </span>
+      </span>
+      <span style={{display:"flex",alignItems:"center",gap:8}}>
+        {!open && summary && summary.slice(0,3).map((s,i)=><span key={i} style={CHIP}>{s}</span>)}
+        <span style={{color:CC.light,transform:open?"rotate(180deg)":"none",transition:"transform .2s"}}><Chev/></span>
+      </span>
+    </button>
+    {open && <div style={{padding:"4px 18px 20px"}}>{children}</div>}
+  </div>;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FLAT PROOFER
+
+   A single unfolded sheet with bleed / trim / safety guides. No fold lines and
+   no 3D preview — a business card has no panels, and carrying the brochure's
+   fold renderer over would be dead weight plus a whole class of bugs that
+   cannot apply here.
+
+   Round trims get a circular safety guide, because a square safety box on a
+   die-cut round is misleading in the one direction that costs money: art in
+   the corners looks safe and gets cut away.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const BLEED_IN  = 0.125;
+const SAFETY_IN = 0.125;
+
+function FlatProof({trim, side, art, guides}){
+  const wrapRef = useRef(null);
+  const [scale,setScale] = useState(1);
+
+  const bw = trim.w + BLEED_IN*2;
+  const bh = trim.h + BLEED_IN*2;
+
+  useEffect(() => {
+    const fit = () => {
+      const el = wrapRef.current; if(!el) return;
+      const pad = 48;
+      const s = Math.min((el.clientWidth - pad) / bw, (el.clientHeight - pad) / bh);
+      setScale(Math.max(20, s));
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [bw,bh]);
+
+  const px = inches => inches * scale;
+  const isRound = (trim.shape || "").toLowerCase() === "round";
+
+  return <div ref={wrapRef} className="bp-checker" style={{position:"relative",width:"100%",
+    minHeight:380,display:"grid",placeItems:"center",borderRadius:10,overflow:"hidden"}}>
+    <div style={{position:"relative",width:px(bw),height:px(bh),background:"#fff",
+      boxShadow:"0 10px 40px rgba(0,0,0,.45)"}}>
+
+      {/* Customer art, filling the bleed box */}
+      {art && <img src={art} alt="" style={{position:"absolute",inset:0,width:"100%",height:"100%",
+        objectFit:"cover",display:"block"}}/>}
+
+      {/* Bleed edge — the outer boundary. Everything outside the trim is cut. */}
+      {guides.bleed && <div style={{position:"absolute",inset:0,
+        outline:`1px dashed rgba(236,0,140,.9)`,outlineOffset:-1,pointerEvents:"none"}}/>}
+
+      {/* Trim — where the blade actually falls */}
+      {guides.trim && (isRound
+        ? <div style={{position:"absolute",left:px(BLEED_IN),top:px(BLEED_IN),
+            width:px(trim.w),height:px(trim.h),border:"1px solid rgba(0,126,255,.95)",
+            borderRadius:"50%",pointerEvents:"none"}}/>
+        : <div style={{position:"absolute",left:px(BLEED_IN),top:px(BLEED_IN),
+            width:px(trim.w),height:px(trim.h),border:"1px solid rgba(0,126,255,.95)",
+            pointerEvents:"none"}}/>)}
+
+      {/* Safety — keep live matter inside this */}
+      {guides.safety && (isRound
+        ? <div style={{position:"absolute",left:px(BLEED_IN+SAFETY_IN),top:px(BLEED_IN+SAFETY_IN),
+            width:px(trim.w-SAFETY_IN*2),height:px(trim.h-SAFETY_IN*2),
+            border:"1px dashed rgba(34,197,94,.95)",borderRadius:"50%",pointerEvents:"none"}}/>
+        : <div style={{position:"absolute",left:px(BLEED_IN+SAFETY_IN),top:px(BLEED_IN+SAFETY_IN),
+            width:px(trim.w-SAFETY_IN*2),height:px(trim.h-SAFETY_IN*2),
+            border:"1px dashed rgba(34,197,94,.95)",pointerEvents:"none"}}/>)}
+
+      {!art && <div style={{position:"absolute",inset:0,display:"grid",placeItems:"center",
+        color:"#94a3b8",fontSize:12,fontWeight:600,letterSpacing:".04em",textAlign:"center",padding:12}}>
+        {side === "back" ? "No back artwork yet" : "No artwork yet"}
+      </div>}
+    </div>
+
+    <div style={{position:"absolute",bottom:10,left:12,display:"flex",gap:12,fontSize:10,
+      color:"#cbd5e1",fontWeight:600,letterSpacing:".04em"}}>
+      <span><span style={{color:"#ec008c"}}>▬</span> Bleed</span>
+      <span><span style={{color:"#007eff"}}>▬</span> Trim</span>
+      <span><span style={{color:"#22c55e"}}>▬</span> Safety</span>
+    </div>
+  </div>;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PANEL — price, delivery, add to order
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function Panel({result, debugUnlocked, onAdd, busy, artReady}){
+  if(result.error){
+    return <div style={ST.pnl}>
+      <div style={{padding:20}}>
+        {result.error.map((e,i)=><p key={i} style={ST.err}>{e}</p>)}
+      </div>
+    </div>;
+  }
+
+  return <div style={ST.pnl}>
+    <div style={{padding:"20px 20px 6px"}}>
+      <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",
+        color:CC.light,marginBottom:6}}>Grand Total</div>
+      <div style={{fontSize:38,fontWeight:800,color:CC.dark,lineHeight:1,
+        fontFamily:"var(--pps-display)"}}>{money(result.total)}</div>
+      <div style={{fontSize:12.5,color:CC.mid,marginTop:7}}>
+        {result.qty.toLocaleString()} pieces · ${result.perUnit.toFixed(4)} each
+      </div>
+      <div style={{fontSize:11.5,color:CC.light,marginTop:4}}>
+        Delivered price — shipping included. Sales tax if applicable.
+      </div>
+    </div>
+
+    <div style={{padding:"12px 20px",margin:"12px 0 0",background:CC.track,
+      borderTop:`1px solid ${CC.border}`,borderBottom:`1px solid ${CC.border}`}}>
+      <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.2px",
+        color:CC.light,marginBottom:5}}>Estimated delivery</div>
+      <div style={{fontSize:14.5,fontWeight:700,color:CC.dark}}>{fmtDate(result.delivery)}</div>
+      <div style={{fontSize:11,color:CC.light,marginTop:4}}>
+        {result.prodDays} business days production · +{POLICY.handling_days} handling · +{POLICY.transit_days} transit
+      </div>
+      {result.needsShippo && <div style={{fontSize:11,color:"#b45309",marginTop:6,lineHeight:1.4}}>
+        Shipping to your state is quoted individually — we'll confirm the exact rate before production.
+      </div>}
+    </div>
+
+    <div style={{padding:20}}>
+      <button type="button" data-pps-cta disabled={busy||!artReady} onClick={onAdd}
+        style={{width:"100%",padding:"17px",border:"none",borderRadius:11,cursor:busy||!artReady?"default":"pointer",
+          background:busy||!artReady?"#94a3b8":CK.cyan,color:"#fff",fontSize:15,fontWeight:800,
+          letterSpacing:".05em",textTransform:"uppercase",fontFamily:"inherit",
+          boxShadow:"0 3px 14px rgba(0,126,255,.4)"}}>
+        {busy ? "Adding…" : artReady ? "Add to Order" : "Add artwork to continue"}
+      </button>
+    </div>
+
+    {debugUnlocked && <div style={{margin:"0 20px 20px"}}>
+      <div style={ST.specCard}>
+        <div style={ST.specEye}>STAFF ONLY · COST BREAKDOWN</div>
+        <div style={ST.specGrid}>
+          <span style={{opacity:.6}}>4over cost</span><span>{money(result._cost)}</span>
+          <span style={{opacity:.6}}>× markup {POLICY.markup}</span><span>{money(result._marked)}</span>
+          <span style={{opacity:.6}}>+ shipping est</span><span>{money(result._ship)}</span>
+          {result._addOns > 0 && <><span style={{opacity:.6}}>+ add-ons</span><span>{money(result._addOns)}</span></>}
+          <span style={{opacity:.6}}>= retail</span><span style={{fontWeight:700}}>{money(result.total)}</span>
+          <span style={{opacity:.6}}>gross margin</span>
+          <span>{money(result.total - result._cost - result._ship - result._addOns)} ({(((result.total - result._cost - result._ship - result._addOns)/result.total)*100).toFixed(1)}%)</span>
+          <span style={{opacity:.6}}>matrix age</span>
+          <span>{result._age === null ? "unknown" : result._age + (result._age === 1 ? " day" : " days")}</span>
+        </div>
+      </div>
+    </div>}
+  </div>;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   APP
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Per-product defaults injected by PHP, with share-link params merged over them
+   — same precedence the other calculators use. */
+const _PD = (function(){
+  const base = Object.assign({}, PPS.defaults || {});
+  try {
+    const p = new URLSearchParams(window.location.search);
+    matrixDimensions().forEach(d => { if(p.has(d.key)) base[d.key] = p.get(d.key); });
+    if(p.has("state")) base.shipState = p.get("state");
+  } catch(e){}
+  return base;
+})();
+
+function initialSelection(){
+  const sel = {};
+  matrixDimensions().forEach(d => {
+    const opts = d.control === "qty" ? d.options : d.options.map(o => o.v);
+    const want = _PD[d.key];
+    sel[d.key] = (want !== undefined && opts.map(String).includes(String(want)))
+      ? (d.control === "qty" ? Number(want) : String(want))
+      : (d.control === "qty" ? opts[0] : String(opts[0]));
+  });
+  return sel;
+}
+
+function App(){
+  const mobile = useIsMobile();
+  const [sel,setSel]       = useState(initialSelection);
+  const [addOns,setAddOns] = useState({});
+  const [shipState,setShipState] = useState(_PD.shipState || "AZ");
+  const [open,setOpen]     = useState({ spec:true, art:true });
+  const [front,setFront]   = useState(null);
+  const [back,setBack]     = useState(null);
+  const [proofSide,setProofSide] = useState("front");
+  const [guides,setGuides] = useState({bleed:true,trim:true,safety:true});
+  const [busy,setBusy]     = useState(false);
+  const [debug,setDebug]   = useState(false);
+
+  useEffect(() => {
+    try { if(new URLSearchParams(window.location.search).get("debug") === "1") setDebug(true); } catch(e){}
+  }, []);
+
+  const result = useMemo(() => calculate(sel, addOns, shipState), [sel, addOns, shipState]);
+
+  // Per-unit for the quantity grid: the same lookup at each tier, so the grid
+  // shows real prices rather than an interpolation.
+  const perUnitFor = useCallback(q => {
+    const r = calculate({...sel, run_size:q}, addOns, shipState);
+    return r.error ? null : r.perUnit;
+  }, [sel, addOns, shipState]);
+
+  const setDim = (key,v) => setSel(s => ({...s, [key]: v}));
+
+  const needsBack = String(sel.colorspec || "") !== "40";
+  const artReady  = Boolean(front) && (!needsBack || Boolean(back));
+
+  const readFile = (file, setter) => {
+    if(!file) return;
+    const fr = new FileReader();
+    fr.onload  = () => setter(fr.result);
+    fr.onerror = () => setter(null);
+    fr.readAsDataURL(file);
+  };
+
+  function buildShareUrl(){
+    const p = new URLSearchParams();
+    matrixDimensions().forEach(d => p.set(d.key, String(sel[d.key])));
+    p.set("state", shipState);
+    Object.keys(addOns).filter(k=>addOns[k]).forEach(k => p.append("addon", k));
+    if(!result.error && result.total > 0) p.set("q", result.total.toFixed(2));
+    return window.location.origin + window.location.pathname + "?" + p.toString();
+  }
+
+  function summary(){
+    return matrixDimensions().map(d => {
+      const v = sel[d.key];
+      if(d.control === "qty") return Number(v).toLocaleString() + " pcs";
+      const o = d.options.find(o => String(o.v) === String(v));
+      return o ? o.t.split("—")[0].trim() : String(v);
+    });
+  }
+
+  async function handleAdd(){
+    if(result.error || !artReady) return;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("action", "pps_add_to_cart");
+      fd.append("nonce", PPS.cartNonce || "");
+      fd.append("product_id", PPS.productId);
+      fd.append("pps_price", String(result.total));
+      fd.append("pps_biz_days", String(result.totalDays));
+      fd.append("pps_summary", summary().join(" · "));
+      fd.append("pps_metadata", JSON.stringify({
+        source: "4over",
+        product: MATRIX.product,
+        ...sel,
+        addOns: Object.keys(addOns).filter(k=>addOns[k]),
+        shipState,
+        estimatedDeliveryDate: result.delivery.toISOString().slice(0,10),
+        // NOTE: cost, markup and the shipping split are deliberately absent.
+        // pps_metadata reaches the order screen, the customer email and the
+        // Missive spec — it leaks. See docs/4OVER_REPLACEMENT.md.
+      }));
+      const r = await fetch(PPS.ajaxUrl, { method:"POST", body:fd, credentials:"same-origin" });
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      if(j && j.success) window.location.href = PPS.cartUrl || "/cart/";
+      else throw new Error((j && j.data) || "Could not add to order");
+    } catch(e){
+      alert("Sorry — " + (e.message || "could not add that to your order."));
+    } finally { setBusy(false); }
+  }
+
+  const trim = MATRIX.trim || {w:2,h:2,shape:"rect"};
+
+  return <div style={{maxWidth:1180,margin:"0 auto",padding:mobile?"14px":"22px"}}>
+
+    <header style={{marginBottom:18}}>
+      <h1 style={{margin:0,fontSize:mobile?23:29,fontWeight:800,color:CC.dark,
+        fontFamily:"var(--pps-display)"}}>{MATRIX.product}</h1>
+      <div style={{display:"flex",gap:7,marginTop:9,flexWrap:"wrap"}}>
+        {Object.entries(MATRIX.fixed || {}).map(([k,v]) =>
+          <span key={k} style={CHIP}>{v}</span>)}
+      </div>
+    </header>
+
+    <div style={{display:"grid",gridTemplateColumns:mobile?"1fr":"1fr 370px",gap:20,alignItems:"start"}}>
+
+      <div>
+        <Sec step="1" title="Specification" open={open.spec}
+          onToggle={()=>setOpen(o=>({...o,spec:!o.spec}))}
+          subtitle="Every option here is one 4over sells — nothing else can be configured."
+          summary={summary()}>
+
+          {matrixDimensions().map(d => {
+            if(d.control === "qty"){
+              return <QtyGrid key={d.key} label={d.label} options={d.options}
+                value={sel[d.key]} onChange={v=>setDim(d.key,v)} perUnitFor={perUnitFor}/>;
+            }
+            if(d.control === "pill"){
+              return <Pil key={d.key} label={d.label} options={d.options}
+                value={String(sel[d.key])} onChange={v=>setDim(d.key,v)}/>;
+            }
+            return <Sel key={d.key} label={d.label} value={String(sel[d.key])}
+              onChange={v=>setDim(d.key,v)} selectId={"dim-"+d.key}>
+              {d.options.map(o => <option key={o.v} value={o.v}>{o.t}</option>)}
+            </Sel>;
+          })}
+
+          {(MATRIX.add_ons || []).length > 0 && <>
+            <div style={ST.hr}/>
+            <label style={{...ST.lbl,marginTop:14}}>Add-ons</label>
+            {MATRIX.add_ons.map(a =>
+              <label key={a.key} style={{display:"flex",alignItems:"center",gap:11,padding:"12px 13px",
+                marginTop:8,borderRadius:10,border:`1px solid ${addOns[a.key]?CK.cyan:CC.border}`,
+                background:addOns[a.key]?CK.cyanLight:CC.white,cursor:"pointer"}}>
+                <input type="checkbox" checked={!!addOns[a.key]}
+                  onChange={e=>setAddOns(s=>({...s,[a.key]:e.target.checked}))}
+                  style={{width:17,height:17,accentColor:CK.cyan,cursor:"pointer"}}/>
+                <span style={{flex:1}}>
+                  <span style={{fontSize:14,fontWeight:600,color:CC.dark}}>{a.label}</span>
+                  <span style={{display:"block",fontSize:11.5,color:CC.light,marginTop:2}}>{a.note}</span>
+                </span>
+                <span style={{fontSize:13.5,fontWeight:700,color:CC.dark}}>+{money(a.price)}</span>
+              </label>
+            )}
+          </>}
+
+          <div style={ST.hr}/>
+          <Sel label="Ship to state" value={shipState} onChange={setShipState} selectId="ship-state"
+            note={POLICY.shippo_states.includes(shipState)
+              ? "We'll quote shipping to this state individually."
+              : undefined}>
+            {["AZ","CA","TX","NY","FL","IL","WA","CO","NV","OR","AK","HI","PR"].map(s =>
+              <option key={s} value={s}>{s}</option>)}
+          </Sel>
+        </Sec>
+
+        <Sec step="2" title="Artwork" open={open.art}
+          onToggle={()=>setOpen(o=>({...o,art:!o.art}))}
+          subtitle={needsBack ? "Front and back required for this print option."
+                              : "Front artwork required."}>
+
+          <div style={mobile?{}:ST.row2}>
+            <div style={ST.f}>
+              <label style={ST.lbl}>Front artwork</label>
+              <input type="file" accept="image/*,.pdf"
+                onChange={e=>readFile(e.target.files && e.target.files[0], setFront)}
+                style={{...ST.inp,padding:"14px",cursor:"pointer"}}/>
+            </div>
+            {needsBack && <div style={ST.f}>
+              <label style={ST.lbl}>Back artwork</label>
+              <input type="file" accept="image/*,.pdf"
+                onChange={e=>readFile(e.target.files && e.target.files[0], setBack)}
+                style={{...ST.inp,padding:"14px",cursor:"pointer"}}/>
+            </div>}
+          </div>
+
+          <div style={{marginTop:18,display:"flex",alignItems:"center",justifyContent:"space-between",
+            gap:10,flexWrap:"wrap"}}>
+            <span className="bp-prooflabel">Proof preview</span>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {needsBack && <div className="bp-seg">
+                {["front","back"].map(s =>
+                  <button key={s} type="button" className={"bp-seg-btn"+(proofSide===s?" on":"")}
+                    onClick={()=>setProofSide(s)}>{s === "front" ? "Front" : "Back"}</button>)}
+              </div>}
+              <div className="bp-seg">
+                {[["bleed","Bleed"],["trim","Trim"],["safety","Safety"]].map(([k,t]) =>
+                  <button key={k} type="button" className={"bp-seg-btn"+(guides[k]?" on":"")}
+                    onClick={()=>setGuides(g=>({...g,[k]:!g[k]}))}>{t}</button>)}
+              </div>
+            </div>
+          </div>
+
+          <div style={{marginTop:10}}>
+            <FlatProof trim={trim} side={proofSide}
+              art={proofSide === "back" ? back : front} guides={guides}/>
+          </div>
+
+          <p style={{...ST.note,marginTop:10,lineHeight:1.5}}>
+            Keep anything you can't afford to lose inside the green safety line — the
+            blade moves, and on a {String(trim.shape).toLowerCase() === "round" ? "die-cut round" : "trimmed edge"} it
+            moves more than you'd think. Background art should run all the way to the
+            pink bleed edge.
+          </p>
+        </Sec>
+
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:20}}>
+          <button type="button" onClick={()=>{
+            const u = buildShareUrl();
+            if(navigator.clipboard) navigator.clipboard.writeText(u);
+            window.history.replaceState(null,"",u);
+          }} style={{padding:"12px 16px",borderRadius:10,border:`1px solid ${CC.border}`,
+            background:CC.white,color:CC.mid,fontSize:13,fontWeight:600,cursor:"pointer",
+            fontFamily:"inherit"}}>Save configuration</button>
+        </div>
+      </div>
+
+      <div style={{position:mobile?"static":"sticky",top:18}}>
+        <Panel result={result} debugUnlocked={debug} onAdd={handleAdd}
+          busy={busy} artReady={artReady}/>
+      </div>
+    </div>
+
+    <div style={{marginTop:26,fontSize:11,color:CC.light,textAlign:"center"}}>
+      4over draft · build 2026-08-15 ·
+      matrix {MATRIX.captured_at || "?"}{matrixAgeDays()!==null ? ` (${matrixAgeDays()}d)` : ""}
+    </div>
+  </div>;
+}
+
+/* Same defensive mount the rest of the fleet uses: a throw during render must
+   degrade to a reload prompt, not a blank page. */
+class ErrorBoundary extends React.Component {
+  constructor(p){ super(p); this.state = {err:null}; }
+  static getDerivedStateFromError(err){ return {err}; }
+  componentDidCatch(err,info){ console.error("[PPS 4over]", err, info); }
+  render(){
+    if(this.state.err) return <div style={{padding:28,fontFamily:"var(--pps-sans)"}}>
+      <h2 style={{fontFamily:"var(--pps-display)"}}>Something went wrong</h2>
+      <p style={{color:"#475569"}}>Please reload the page. If it keeps happening, contact us and we'll price this by hand.</p>
+      <button type="button" onClick={()=>window.location.reload()}
+        style={{padding:"12px 18px",borderRadius:10,border:"none",background:"#007eff",
+          color:"#fff",fontWeight:700,cursor:"pointer"}}>Reload</button>
+    </div>;
+    return this.props.children;
+  }
+}
+
+const rootEl = document.getElementById("root");
+if(rootEl) ReactDOM.createRoot(rootEl).render(<ErrorBoundary><App/></ErrorBoundary>);
+</script>
+</body>
+</html>
