@@ -12,12 +12,22 @@
  *   [pps_featured_cards]                       — the full homepage card grid
  *   [pps_calc_fact calc="saddle" key="page_max"] — one fact inline, for prose
  *
- * The numbers here were verified against the calculators on 2026-08-11:
- * saddle page select 8–64 (docs/PRICING_MATRIX.md sweep), perfect bound page
- * field clamps at 300, brochure's largest size is 11×25.5, coupon has
- * collation but no numbering. When a calculator's limits change, update the
- * matching number HERE in the same commit — this table is the one the
- * customer-facing cards quote.
+ * Numbers are no longer hand-maintained. pps_calc_live_facts() reads them out
+ * of the deployed calculators themselves — the same constants the calculator
+ * uses to clamp its own inputs — so a pill cannot drift from what the product
+ * actually sells. Hand-maintenance is what put "40–300 pages" on the perfect
+ * bound card while the calculator accepted 4–350.
+ *
+ * The scalars in pps_calc_facts() below are now only a fallback, used when a
+ * calculator has not been deployed yet or its constants cannot be parsed.
+ * Nothing breaks if parsing fails; the card just quotes the last known values.
+ *
+ * The contract, per family — a calculator constant of the form
+ * `_CFG.<key> || <literal>`, which is both what the calculator reads at runtime
+ * (so an admin override in pps_calc_config wins) and what this file parses:
+ *   saddle / perfect  page_counts, page_limits  → page_min, page_max
+ *   brochure          fold_types, size table    → fold_types, max_edge_in
+ * Change a limit in the calculator and the card follows on the next deploy.
  *
  * Loaded by pps-calculators.php (file_exists-guarded require).
  */
@@ -69,7 +79,131 @@ function pps_calc_facts() {
             'pills' => array( 'Perforated', 'Collated', 'Pad or book' ),
         ),
     );
+    foreach ( pps_calc_live_facts() as $family => $live ) {
+        if ( isset( $facts[ $family ] ) ) {
+            $facts[ $family ] = array_merge( $facts[ $family ], $live );
+        }
+    }
+
     return apply_filters( 'pps_calc_facts', $facts );
+}
+
+/** Deployed calculator file per family, or '' when it has never been deployed. */
+function pps_calc_family_file( $family ) {
+    $map = array(
+        'saddle'   => 'calc-preview-test.html',
+        'perfect'  => 'calc-perfect-bound.html',
+        'brochure' => 'calc-brochure.html',
+        'coupon'   => 'calc-coupon-book.html',
+    );
+    if ( ! isset( $map[ $family ] ) || ! function_exists( 'pps_upload_dir' ) ) return '';
+    $path = trailingslashit( pps_upload_dir() ) . $map[ $family ];
+    return is_readable( $path ) ? $path : '';
+}
+
+/**
+ * Pull each family's customer-facing limits out of the deployed calculator.
+ *
+ * Cached per file identity (mtime + size), so a calculator deploy invalidates
+ * it by construction and a normal page view never re-parses 500KB.
+ */
+function pps_calc_live_facts() {
+    $out = array();
+
+    foreach ( array( 'saddle', 'perfect', 'brochure' ) as $family ) {
+        $path = pps_calc_family_file( $family );
+        if ( ! $path ) continue;
+
+        $stat = @stat( $path );
+        $key  = 'pps_facts_' . $family . '_' . ( $stat ? $stat['mtime'] . '_' . $stat['size'] : '0' );
+
+        $cached = get_transient( $key );
+        if ( is_array( $cached ) ) { $out[ $family ] = $cached; continue; }
+
+        $src = @file_get_contents( $path );
+        if ( false === $src || '' === $src ) continue;
+
+        $facts = pps_calc_parse_facts( $family, $src );
+        unset( $src );
+        if ( empty( $facts ) ) continue;
+
+        set_transient( $key, $facts, MONTH_IN_SECONDS );
+        $out[ $family ] = $facts;
+    }
+
+    // An admin override in pps_calc_config is what the customer actually gets,
+    // so it outranks the file's own default.
+    if ( function_exists( 'pps_get_public_config' ) ) {
+        $cfg = pps_get_public_config();
+        $ov  = ( isset( $cfg['calc'] ) && is_array( $cfg['calc'] ) ) ? $cfg['calc'] : array();
+
+        if ( ! empty( $ov['page_counts'] ) && is_array( $ov['page_counts'] ) ) {
+            $n = array_values( array_filter( array_map( 'intval', $ov['page_counts'] ) ) );
+            if ( $n ) {
+                foreach ( array( 'saddle', 'perfect' ) as $f ) {
+                    $out[ $f ]['page_min'] = min( $n );
+                    $out[ $f ]['page_max'] = max( $n );
+                }
+            }
+        }
+        if ( isset( $ov['page_limits']['min'], $ov['page_limits']['max'] ) ) {
+            $out['perfect']['page_min'] = (int) $ov['page_limits']['min'];
+            $out['perfect']['page_max'] = (int) $ov['page_limits']['max'];
+        }
+        if ( ! empty( $ov['fold_types'] ) && is_array( $ov['fold_types'] ) ) {
+            $folds = 0;
+            foreach ( $ov['fold_types'] as $ft ) {
+                if ( isset( $ft['val'] ) && 'flat' === $ft['val'] ) continue;
+                $folds++;
+            }
+            if ( $folds ) $out['brochure']['fold_types'] = $folds;
+        }
+    }
+
+    return $out;
+}
+
+/**
+ * Parse one calculator's constants. Every branch is optional: a miss leaves the
+ * fallback scalar in place rather than emitting a wrong or empty pill.
+ */
+function pps_calc_parse_facts( $family, $src ) {
+    $facts = array();
+
+    if ( 'saddle' === $family || 'perfect' === $family ) {
+        // `_CFG.page_limits || { min: 4, max: 350 }` — an explicit clamp.
+        if ( preg_match( '/page_limits\s*\|\|\s*\{\s*min\s*:\s*(\d+)\s*,\s*max\s*:\s*(\d+)/', $src, $m ) ) {
+            $facts['page_min'] = (int) $m[1];
+            $facts['page_max'] = (int) $m[2];
+        // `_CFG.page_counts || [8,12,...,64]` — an explicit list of choices.
+        } elseif ( preg_match( '/page_counts\s*\|\|\s*\[([0-9,\s]+)\]/', $src, $m ) ) {
+            $n = array_values( array_filter( array_map( 'intval', explode( ',', $m[1] ) ) ) );
+            if ( $n ) {
+                $facts['page_min'] = min( $n );
+                $facts['page_max'] = max( $n );
+            }
+        }
+    }
+
+    if ( 'brochure' === $family ) {
+        // Count real folds. "flat" is the absence of a fold and must not inflate
+        // the claim; every other entry counts, including trifold_xbifold, which
+        // is only offered at some sizes but is still a fold we sell.
+        if ( preg_match( '/fold_types\s*\|\|\s*\[(.*?)\n\s*\];/s', $src, $m )
+          || preg_match( '/fold_types\s*\|\|\s*\[(.*?)\];/s', $src, $m ) ) {
+            if ( preg_match_all( '/val\s*:\s*"([a-z0-9_]+)"/i', $m[1], $v ) ) {
+                $folds = array_diff( $v[1], array( 'flat' ) );
+                if ( $folds ) $facts['fold_types'] = count( $folds );
+            }
+        }
+        // Largest orderable edge across the size table.
+        if ( preg_match_all( '/long\s*:\s*([0-9]+(?:\.[0-9]+)?)/', $src, $m ) ) {
+            $edges = array_map( 'floatval', $m[1] );
+            if ( $edges ) $facts['max_edge_in'] = (float) max( $edges );
+        }
+    }
+
+    return $facts;
 }
 
 /** Replace {key} tokens with the family's scalar facts. */

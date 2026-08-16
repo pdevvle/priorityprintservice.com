@@ -679,7 +679,10 @@ function toYMD(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
-// Perfect bound: even page counts, min 4, max 350
+// Perfect bound: even page counts. PAGE_LIMITS is the single source for the
+// clamp — the page fields below read it, and pps-featured-cards.php parses it
+// so the marketing pills quote what this calculator actually accepts.
+const PAGE_LIMITS = _CFG.page_limits || { min: 4, max: 350 };
 const PAGE_COUNTS = _CFG.page_counts || (() => { const a = []; for (let i = 4; i <= 100; i += 2) a.push(i); for (let i = 120; i <= 200; i += 20) a.push(i); for (let i = 250; i <= 350; i += 50) a.push(i); return a; })();
 
 // bindEdge = dimension that stays constant when opened (spine/staple edge)
@@ -6173,18 +6176,18 @@ function App(){
             {sets[0].colorMode === "mixed" ? (
               <>
               <div style={{...r2, marginTop:6}}>
-                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350} confirm unit="pages" adjustHint="page count must be even, minimum 4"/>
+                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(PAGE_LIMITS.min,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(PAGE_LIMITS.max,pg)});}} min={PAGE_LIMITS.min} max={PAGE_LIMITS.max} confirm unit="pages" adjustHint={`page count must be even, minimum ${PAGE_LIMITS.min}`}/>
                 <Pil label={<Tip k="inside_print">Inside Print Color</Tip>} value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}},{t:"Mixed",v:"mixed",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #888 100%)",color:"#fff",fontWeight:600}}]}/>
               </div>
               <div style={{...r3, marginTop:6}}>
-                <TxtNum label={<Tip k="color_pages">Color Pages</Tip>} value={sets[0].colorPages} onChange={v=>upSet(0,{colorPages:Math.max(0,Math.round(v))})} min={0} max={350}/>
-                <TxtNum label={<Tip k="bw_pages">B&W Pages</Tip>} value={sets[0].bwPages} onChange={v=>upSet(0,{bwPages:Math.max(0,Math.round(v))})} min={0} max={350}/>
+                <TxtNum label={<Tip k="color_pages">Color Pages</Tip>} value={sets[0].colorPages} onChange={v=>upSet(0,{colorPages:Math.max(0,Math.round(v))})} min={0} max={PAGE_LIMITS.max}/>
+                <TxtNum label={<Tip k="bw_pages">B&W Pages</Tip>} value={sets[0].bwPages} onChange={v=>upSet(0,{bwPages:Math.max(0,Math.round(v))})} min={0} max={PAGE_LIMITS.max}/>
                 <div style={{...ST.f, justifyContent:"center"}}><span style={{fontSize:11,color:CC.mid,fontWeight:600}}>{sets[0].colorPages+sets[0].bwPages} total pages</span></div>
               </div>
               </>
             ) : (
               <div style={{...r2, marginTop:6}}>
-                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(4,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(350,pg)});}} min={4} max={350} confirm unit="pages" adjustHint="page count must be even, minimum 4"/>
+                <TxtNum label={<Tip k="page_count">Total Pages (incl. cover)</Tip>} value={sets[0].pages} onChange={v=>{let pg=Math.max(PAGE_LIMITS.min,Math.round(v)); if(pg%2!==0) pg++; upSet(0,{pages:Math.min(PAGE_LIMITS.max,pg)});}} min={PAGE_LIMITS.min} max={PAGE_LIMITS.max} confirm unit="pages" adjustHint={`page count must be even, minimum ${PAGE_LIMITS.min}`}/>
                 <Pil label={<Tip k="inside_print">Inside Print Color</Tip>} value={sets[0].colorMode} onChange={v=>upSet(0,{colorMode:v})} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}},{t:"Mixed",v:"mixed",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #888 100%)",color:"#fff",fontWeight:600}}]}/>
               </div>
             )}
