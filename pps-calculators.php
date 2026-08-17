@@ -915,6 +915,26 @@ add_action( 'wp', function() {
     // callback. We emit our own .pps-gallery markup at the same hook so the
     // calc still renders directly below. Anyone hooked into the WC gallery
     // classes finds nothing to enhance.
+    // ── Bound the parallax ──
+    // .pps-gallery is position:sticky. Its containing block used to be the whole
+    // product container, so it stayed pinned at top:0 for the entire page and
+    // showed through every block below that lacked an opaque background — the
+    // photo reappearing in strips behind the trust badges and the description.
+    // The 2026-08-12 pass treated that by listing containers to paint white,
+    // but the list was Astra-era and pps-theme's wrappers are not in it, so the
+    // leak came back the moment the theme changed.
+    //
+    // A sticky element cannot escape its parent's box. Wrapping the gallery and
+    // the calculator in one stage ends the pinning exactly where the calculator
+    // ends, which is the only place the parallax was ever meant to reach. No
+    // class list to keep in sync with whatever theme is installed.
+    add_action( 'woocommerce_before_single_product_summary', function() {
+        echo '<div class="pps-stage">';
+    }, 19 );
+    add_action( 'woocommerce_before_single_product_summary', function() {
+        echo '</div>';
+    }, 26 );
+
     remove_action( 'woocommerce_before_single_product_summary', 'woocommerce_show_product_images', 20 );
     add_action( 'woocommerce_before_single_product_summary', function() use ( $product_id ) {
         $product = wc_get_product( $product_id );
@@ -965,6 +985,11 @@ add_action( 'wp', function() {
         .single-product .entry-content,
         .single-product main { overflow: visible !important; }
 
+        /* The stage is the sticky gallery's containing block: the parallax runs
+           from the top of the gallery to the bottom of the calculator and stops
+           there, because a sticky child cannot be pushed past its parent. */
+        .pps-stage { position: relative; overflow: visible; }
+
         .pps-gallery {
             position: sticky;
             top: 0;
@@ -993,6 +1018,27 @@ add_action( 'wp', function() {
             position: relative;
             z-index: 1;
             background: #fff;
+        }
+
+        /* The description tab is full-bleed, so on a wide monitor the copy runs
+           the entire viewport — 200+ characters a line, which nobody reads.
+           Cap it at the same 1200px the rest of the site's content uses, and
+           hold the prose itself to a normal measure inside that. */
+        .single-product .woocommerce-Tabs-panel,
+        .single-product .woocommerce-tabs .panel,
+        .single-product .wc-tab {
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+            padding-left: 24px;
+            padding-right: 24px;
+            box-sizing: border-box;
+        }
+        .single-product .woocommerce-Tabs-panel p,
+        .single-product .woocommerce-Tabs-panel li,
+        .single-product .woocommerce-tabs .panel p,
+        .single-product .woocommerce-tabs .panel li {
+            max-width: 80ch;
         }
 
         /* Parallax overlay — the calc wrap slides up over the sticky gallery. */
