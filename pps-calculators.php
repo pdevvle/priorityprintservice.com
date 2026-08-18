@@ -3802,6 +3802,13 @@ add_action( 'rest_api_init', function() {
         'methods'             => 'GET',
         'permission_callback' => '__return_true',
         'callback'            => function () {
+            // Never let this response be cached. A nonce is bound to the
+            // caller's identity, so a cached copy would hand one user another
+            // user's token — which verifies as a mismatch and fails exactly
+            // the way the baked-in nonce already does. That would make the
+            // retry path useless for the case it exists to fix: a customer
+            // who logged in after the page was rendered.
+            nocache_headers();
             return array(
                 'cart'   => wp_create_nonce( 'pps_add_to_cart' ),
                 'upload' => wp_create_nonce( 'pps_upload_artwork' ),
