@@ -1126,6 +1126,11 @@ add_action( 'wp', function() {
             'cartUrl'     => wc_get_cart_url(),
             'cartNonce'   => wp_create_nonce( 'pps_add_to_cart' ),
             'uploadNonce' => wp_create_nonce( 'pps_upload_artwork' ),
+            // What PHP will actually accept in one POST. Without it the
+            // calculator cannot tell an oversized file from a stale nonce:
+            // both arrive as admin-ajax's bare "-1", which is what produced
+            // the "Artwork upload failed: Unknown error" report.
+            'maxUpload'   => (int) wp_max_upload_size(),
             'productId'   => $product_id,
         );
 
@@ -4938,6 +4943,7 @@ function pps_render_preset_calculator( $preset ) {
         'cartUrl'     => function_exists( 'wc_get_cart_url' ) ? wc_get_cart_url() : home_url( '/cart/' ),
         'cartNonce'   => wp_create_nonce( 'pps_add_to_cart' ),
         'uploadNonce' => wp_create_nonce( 'pps_upload_artwork' ),
+        'maxUpload'   => (int) wp_max_upload_size(),
         // No productId — preset render does not target a single WC product.
         // The cart layer should fall back to a calc-type → product map; that
         // mapping is wired in a follow-up PR alongside per-line preset slug

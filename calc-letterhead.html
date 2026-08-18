@@ -2923,8 +2923,25 @@ function uploadWithProgress(url, formData, onProgress) {
       if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
     };
     xhr.onload = () => {
-      try { resolve(JSON.parse(xhr.responseText)); }
-      catch (err) { reject(new Error("Invalid server response")); }
+      // The status code used to be ignored. admin-ajax answers a rejected nonce
+      // with HTTP 403 and a bare "-1", and a POST larger than PHP's
+      // post_max_size never reaches our handler at all — PHP discards $_POST,
+      // so the nonce check fails and returns that same "-1". Both JSON.parse
+      // cleanly to a number, so the caller read `.data` off it, found nothing,
+      // and told the customer "Unknown error". Classify them instead.
+      let body = null, parsed = true;
+      try { body = JSON.parse(xhr.responseText); } catch (e) { parsed = false; }
+      if (xhr.status === 413) {
+        resolve({ success: false, data: "PPS_TOO_LARGE", ppsCode: "size" });
+      } else if (body === -1 || body === 0 || xhr.status === 403) {
+        resolve({ success: false, data: "PPS_STALE_NONCE", ppsCode: "nonce" });
+      } else if (!parsed) {
+        reject(new Error("Invalid server response (HTTP " + xhr.status + ")"));
+      } else if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error("Server error (HTTP " + xhr.status + ")"));
+      } else {
+        resolve(body);
+      }
     };
     xhr.onerror = () => reject(new Error("Network error during upload"));
     xhr.send(formData);
@@ -2988,19 +3005,48 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
       // block checkout.
       const isPrimary = fi === 0;
       try {
-        const fd = new FormData();
-        fd.append("action", "pps_upload_artwork");
-        fd.append("nonce", PPS.uploadNonce);
-        fd.append("artwork", file, file.name);
+        // Refuse a file the server physically cannot accept, naming the real
+        // limit, rather than letting PHP drop the POST and reporting nothing.
+        const _mb = (n) => (n / 1048576).toFixed(1) + "MB";
+        if (PPS.maxUpload && file.size > PPS.maxUpload) {
+          if (isPrimary) {
+            alert("That file is " + _mb(file.size) + ", and this site accepts up to " + _mb(PPS.maxUpload) + " per upload.\n\nPlease compress the PDF, or send it to us and we'll attach it to your order.");
+            return;
+          }
+          try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — ${_mb(file.size)} exceeds the ${_mb(PPS.maxUpload)} server limit.`); } catch (e) {}
+          continue;
+        }
+        const sendOnce = () => {
+          const fd = new FormData();
+          fd.append("action", "pps_upload_artwork");
+          fd.append("nonce", PPS.uploadNonce);
+          fd.append("artwork", file, file.name);
+          return uploadWithProgress(PPS.ajaxUrl, fd, (pct) => {
+            if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct });
+          });
+        };
         if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct: 0 });
-        const data = await uploadWithProgress(PPS.ajaxUrl, fd, (pct) => {
-          if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct });
-        });
+        let data = await sendOnce();
+        // A rejected nonce is recoverable: the page was simply open longer than
+        // the nonce tick, or served from a cache older than it. Mint a fresh one
+        // and send again before bothering the customer.
+        if (data && data.ppsCode === "nonce") {
+          try {
+            const _nroot = (PPS.ajaxUrl || "").replace(/wp-admin\/admin-ajax\.php.*$/, "");
+            const _nr = await fetch((_nroot || "/") + "wp-json/pps/v1/nonces", { credentials: "same-origin", cache: "no-store" });
+            if (_nr.ok) {
+              const _nj = await _nr.json();
+              if (_nj && _nj.upload) { PPS.uploadNonce = _nj.upload; data = await sendOnce(); }
+            }
+          } catch (_e) {}
+        }
         if (data.success && data.data && data.data.path) {
           if (!artworkPath) artworkPath = data.data.path;
           uploadedFiles.push({ path: data.data.path, name: file.name });
         } else {
-          const reason = (data && data.data) || "Unknown error";
+          let reason = (data && data.data) || "the server gave no reason";
+          if (reason === "PPS_STALE_NONCE") reason = "this page was open longer than the session allows, and refreshing it did not help. Please reload the page and try again.";
+          else if (reason === "PPS_TOO_LARGE") reason = "the file is larger than this site accepts in a single upload. Please compress the PDF, or send it to us and we'll attach it.";
           if (isPrimary) {
             alert("Artwork upload failed: " + reason + "\nPlease try again.");
             return;
