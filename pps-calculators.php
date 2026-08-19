@@ -2949,7 +2949,32 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     // started putting the calculator's address on the order before this runs, that
     // "already has an address" branch became the common case, silently taking the
     // packing figures with it.
-    $keep_existing_address = trim( (string) $order->get_shipping_address_1() ) !== '';
+    // Why this is not simply "the order already has an address":
+    //
+    // Every calculator product is virtual, deliberately, so WooCommerce's own
+    // shipping machinery stays out of the cart. But a virtual cart renders no
+    // shipping section at checkout, so the customer is never shown those fields
+    // — and WC_Checkout fills the order's shipping address by copying billing.
+    // That copy is not a destination anybody chose; it is the cardholder's
+    // address wearing the shipping fields. Treating it as authoritative is what
+    // sent order 87032's Denver job to the buyer's house in Texas.
+    //
+    // So defer only to an address that could actually have been typed at
+    // checkout: one belonging to a genuinely shippable, non-calculator item.
+    // On a calculator-only order the address the customer entered in the
+    // calculator is the only destination they were ever offered, and it wins.
+    $has_shippable_non_calc_item = false;
+    foreach ( $order->get_items() as $probe_item ) {
+        if ( $probe_item->get_meta( '_pps_metadata' ) ) continue;   // calculator line
+        $probe_product = $probe_item->get_product();
+        if ( $probe_product && ! $probe_product->is_virtual() ) {
+            $has_shippable_non_calc_item = true;
+            break;
+        }
+    }
+
+    $keep_existing_address = $has_shippable_non_calc_item
+        && trim( (string) $order->get_shipping_address_1() ) !== '';
 
     $addr = null;
     $quote_ctx = array();
