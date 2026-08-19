@@ -1927,7 +1927,18 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const [hiResProof, setHiResProof] = useState(null);
 
   // Per-side transform helpers
-  const DEFAULT_TX = { fitMode: "crop", artScale: 100, rotateSteps: 0 };
+  const DEFAULT_TX = { fitMode: "crop", artScale: 100, rotateSteps: 0, posX: 50, posY: 50 };
+
+  // Where the art sits inside the sheet when it is bigger (or smaller) than the
+  // trim. Percentages, read exactly as CSS object-position does: 50 is centred,
+  // 0 is flush left/top, 100 is flush right/bottom. The proof preview sets
+  // objectPosition from the same two numbers and the canvas renderers call this,
+  // so what the customer frames is what the press gets — the two cannot drift.
+  const artPos = (avail, drawn, pct) => {
+    const n = Number(pct);
+    const p = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 50;
+    return (avail - drawn) * (p / 100);
+  };
   const getTx = (idx) => pageTransforms[idx] || DEFAULT_TX;
   const [txHistory, setTxHistory] = useState([]);
   const pushTxHistory = (idx) => {
@@ -1958,9 +1969,24 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const fitMode = currentTx.fitMode;
   const artScale = currentTx.artScale;
   const rotateSteps = currentTx.rotateSteps;
+  // ?? 50 rather than a plain default: a transform restored from a reorder or an
+  // older saved config predates these fields and must still land dead centre.
+  const posX = currentTx.posX ?? 50;
+  const posY = currentTx.posY ?? 50;
   const setFitMode = (v) => { pushTxHistory(side); setTx(side, { fitMode: v }); };
   const setArtScale = (v) => { pushTxHistory(side); setTx(side, { artScale: v }); };
   const setRotateSteps = (v) => { pushTxHistory(side); setTx(side, { rotateSteps: v }); };
+  // Drag streams dozens of updates a second; pushing each onto the undo stack
+  // would make Undo useless. History is pushed once, on pointer-down.
+  const setArtPosRaw = (x, y) => setTx(side, {
+    posX: Math.max(0, Math.min(100, x)),
+    posY: Math.max(0, Math.min(100, y)),
+  });
+  const artDrag = useRef(null);
+  const setArtPos = (x, y) => { pushTxHistory(side); setTx(side, {
+    posX: Math.max(0, Math.min(100, x)),
+    posY: Math.max(0, Math.min(100, y)),
+  }); };
   const undoTx = () => {
     setTxHistory(h => {
       if (!h.length) return h;
@@ -2105,13 +2131,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
         const nativeW = (ed.wIn / bleedW) * mult;
         const nativeH = (ed.hIn / bleedH) * mult;
         const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
-        ctx.drawImage(img, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+        ctx.drawImage(img, artPos(canvasW, drawW, tx.posX), artPos(canvasH, drawH, tx.posY), drawW, drawH);
       } else if (tx.fitMode === "cover") {
         const sc = Math.max(canvasW / srcW, canvasH / srcH);
-        ctx.drawImage(img, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+        ctx.drawImage(img, artPos(canvasW, srcW * sc, tx.posX), artPos(canvasH, srcH * sc, tx.posY), srcW * sc, srcH * sc);
       } else {
         const sc = Math.min(canvasW / srcW, canvasH / srcH);
-        ctx.drawImage(img, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+        ctx.drawImage(img, artPos(canvasW, srcW * sc, tx.posX), artPos(canvasH, srcH * sc, tx.posY), srcW * sc, srcH * sc);
       }
 
       const tc = document.createElement("canvas");
@@ -2154,6 +2180,17 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
           color: txHistory.length ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.2)",
         }}>↶ Undo</button>
       </div>
+      {(fitMode === "crop" || fitMode === "scale") && (
+        (posX !== 50 || posY !== 50)
+          ? <button type="button" onClick={() => setArtPos(50, 50)} style={{
+              padding: "6px 10px", fontSize: 10, fontWeight: 600, borderRadius: 6, cursor: "pointer",
+              fontFamily: "inherit", border: "1px solid rgba(255,255,255,.25)",
+              background: "rgba(255,255,255,.10)", color: "rgba(255,255,255,.75)",
+            }}>⌖ Re-centre</button>
+          : <span style={{ fontSize: 10, color: "rgba(255,255,255,.45)", fontStyle: "italic" }}>
+              drag the artwork to reframe it
+            </span>
+      )}
       {fitMode === "scale" && (
         <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
           <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,.12)" }}>
@@ -2727,7 +2764,8 @@ generate();
     const totalPages = pageSources.length;
 
     // "No transforms" skip — currently brochure always rasterizes, but keep the flag for manifest
-    const noTransforms = pageSources.every(p => p.tx.fitMode === "crop" && p.tx.rotateSteps === 0 && p.tx.artScale === 100);
+    const noTransforms = pageSources.every(p => p.tx.fitMode === "crop" && p.tx.rotateSteps === 0 && p.tx.artScale === 100
+      && (p.tx.posX ?? 50) === 50 && (p.tx.posY ?? 50) === 50);
     const isSourcePdf = false; // brochure doesn't preserve pdfDoc; always rasterize
 
     let printReadyBlob = null;
@@ -2776,13 +2814,13 @@ generate();
           const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
           const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
           const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
-          ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+          ctx.drawImage(srcCanvas, artPos(canvasW, drawW, tx.posX), artPos(canvasH, drawH, tx.posY), drawW, drawH);
         } else if (tx.fitMode === "cover") {
           const sc = Math.max(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+          ctx.drawImage(srcCanvas, artPos(canvasW, srcW * sc, tx.posX), artPos(canvasH, srcH * sc, tx.posY), srcW * sc, srcH * sc);
         } else {
           const sc = Math.min(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+          ctx.drawImage(srcCanvas, artPos(canvasW, srcW * sc, tx.posX), artPos(canvasH, srcH * sc, tx.posY), srcW * sc, srcH * sc);
         }
 
         pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, bleedW, bleedH);
@@ -2817,6 +2855,16 @@ generate();
     const txSummaryFit = sameFit ? fitLabel(pageSources[0].tx.fitMode, pageSources[0].tx.artScale) : "mixed (see Per-Side Detail)";
     const txSummaryRot = sameRot ? `${pageSources[0].tx.rotateSteps * 90}° clockwise${pageSources[0].tx.rotateSteps === 0 ? " (none)" : ""}` : "mixed (see Per-Side Detail)";
     const txSummaryScale = sameScale ? `${pageSources[0].tx.artScale}%` : "mixed (see Per-Side Detail)";
+    // Framing is part of what the customer approved: with art larger than the
+    // sheet it decides which edge gets trimmed off. A manifest that omitted it
+    // could not explain why the plate differs from the file it names.
+    const fmtPos = (t) => {
+      const x = t.posX ?? 50, y = t.posY ?? 50;
+      return ( x === 50 && y === 50 ) ? "centred" : `${Math.round(x)}% across, ${Math.round(y)}% down (0 = left/top)`;
+    };
+    const samePos = pageSources.every(p => (p.tx.posX ?? 50) === (pageSources[0].tx.posX ?? 50)
+                                        && (p.tx.posY ?? 50) === (pageSources[0].tx.posY ?? 50));
+    const txSummaryPos = samePos ? fmtPos(pageSources[0].tx) : "mixed (see Per-Side Detail)";
 
     const manifestLines = [
       "ARTWORK MANIPULATION MANIFEST",
@@ -2838,6 +2886,7 @@ generate();
       `Fit mode: ${txSummaryFit}`,
       `Rotation: ${txSummaryRot}`,
       `Scale: ${txSummaryScale}`,
+      `Framing: ${txSummaryPos}`,
       "",
       "── Deliverables ──",
       `1. Raw file: ${fileName || "original upload"} (unmodified customer upload)`,
@@ -3297,21 +3346,61 @@ generate();
                 const ed = effectiveDims;
                 const artSrc = rotatedUrl || currentArt.dataUrl;
                 const nativeW = ed ? ed.w / bleedW : 1;
+                const nativeH = ed ? ed.h / bleedH : 1;
+                // Positioned exactly the way the canvas renderers position it: the art is
+                // laid out at its true size relative to the sheet, and posX/posY choose
+                // where it sits in whatever space is left over. Sizing height from the
+                // art's own dimensions rather than "auto" is what makes this preview and
+                // the printed sheet the same picture.
                 const cropStyle = (mult) => ({
-                  width: `${nativeW * mult * 100}%`, height: "auto",
-                  position: "absolute", top: "50%", left: "50%",
-                  transform: "translate(-50%, -50%)", display: "block",
+                  width: `${nativeW * mult * 100}%`, height: `${nativeH * mult * 100}%`,
+                  position: "absolute",
+                  left: `${(100 - nativeW * mult * 100) * (posX / 100)}%`,
+                  top: `${(100 - nativeH * mult * 100) * (posY / 100)}%`,
+                  display: "block",
                 });
                 const sideColor = side === "front" ? frontColor : backColor;
                 const grayFilter = sideColor === "bw" ? "grayscale(1)" : "none";
                 return (
-                  <div className="bp-checker" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-                    <img src={artSrc} style={{
+                  <div className="bp-checker"
+                    onPointerDown={(e) => {
+                      if (fitMode !== "crop" && fitMode !== "scale") return;
+                      const el = e.currentTarget;
+                      try { el.setPointerCapture(e.pointerId); } catch (_e) {}
+                      const r = el.getBoundingClientRect();
+                      const mult = fitMode === "scale" ? artScale / 100 : 1;
+                      pushTxHistory(side);
+                      // Free space is the exact inverse of the CSS above: left =
+                      // (100 - drawn%) * pos/100, so a pixel of drag is that many
+                      // percent. Negative when the art overflows the sheet, which is
+                      // the normal case here — and the sign works out, because moving
+                      // the art right then means showing more of its left edge.
+                      artDrag.current = {
+                        x: e.clientX, y: e.clientY, posX, posY,
+                        freeW: r.width * (1 - nativeW * mult),
+                        freeH: r.height * (1 - nativeH * mult),
+                      };
+                    }}
+                    onPointerMove={(e) => {
+                      const d = artDrag.current;
+                      if (!d) return;
+                      const nx = Math.abs(d.freeW) < 1 ? d.posX : d.posX + ((e.clientX - d.x) / d.freeW) * 100;
+                      const ny = Math.abs(d.freeH) < 1 ? d.posY : d.posY + ((e.clientY - d.y) / d.freeH) * 100;
+                      setArtPosRaw(nx, ny);
+                    }}
+                    onPointerUp={() => { artDrag.current = null; }}
+                    onPointerCancel={() => { artDrag.current = null; }}
+                    style={{
+                      position: "absolute", inset: 0, overflow: "hidden",
+                      touchAction: "none",
+                      cursor: (fitMode === "crop" || fitMode === "scale") ? "grab" : "default",
+                    }}>
+                    <img src={artSrc} draggable={false} style={{
                       filter: grayFilter,
                       ...(fitMode === "crop" ? cropStyle(1)
                         : fitMode === "scale" ? cropStyle(artScale / 100)
                         : fitMode === "stretch" ? { display: "block", width: "100%", height: "100%", objectFit: "fill", position: "absolute", inset: 0 }
-                        : { display: "block", width: "100%", height: "100%", objectFit: fitMode === "contain" ? "contain" : "cover" }
+                        : { display: "block", width: "100%", height: "100%", objectFit: fitMode === "contain" ? "contain" : "cover", objectPosition: `${posX}% ${posY}%` }
                       )
                     }} />
                   </div>
@@ -3452,10 +3541,18 @@ generate();
                 const grayFilter = sideColor === "bw" ? "grayscale(1)" : "none";
                 const ed = effectiveDims;
                 const nativeW = ed ? ed.w / bleedW : 1;
+                const nativeH = ed ? ed.h / bleedH : 1;
+                // Positioned exactly the way the canvas renderers position it: the art is
+                // laid out at its true size relative to the sheet, and posX/posY choose
+                // where it sits in whatever space is left over. Sizing height from the
+                // art's own dimensions rather than "auto" is what makes this preview and
+                // the printed sheet the same picture.
                 const cropStyle = (mult) => ({
-                  width: `${nativeW * mult * 100}%`, height: "auto",
-                  position: "absolute", top: "50%", left: "50%",
-                  transform: "translate(-50%, -50%)", display: "block",
+                  width: `${nativeW * mult * 100}%`, height: `${nativeH * mult * 100}%`,
+                  position: "absolute",
+                  left: `${(100 - nativeW * mult * 100) * (posX / 100)}%`,
+                  top: `${(100 - nativeH * mult * 100) * (posY / 100)}%`,
+                  display: "block",
                 });
                 return (
                   <div style={{ position: "absolute", left: lensX, top: lensY, width: lensSize, height: lensSize, borderRadius: "50%", overflow: "hidden", border: "2px solid rgba(255,255,255,.8)", boxShadow: "0 4px 20px rgba(0,0,0,.6)", pointerEvents: "none", zIndex: 10 }}>
@@ -3466,7 +3563,7 @@ generate();
                         ...(fitMode === "crop" ? cropStyle(1)
                           : fitMode === "scale" ? cropStyle(artScale / 100)
                           : fitMode === "stretch" ? { display: "block", width: "100%", height: "100%", objectFit: "fill", position: "absolute", inset: 0 }
-                          : { display: "block", width: "100%", height: "100%", objectFit: fitMode === "contain" ? "contain" : "cover" }
+                          : { display: "block", width: "100%", height: "100%", objectFit: fitMode === "contain" ? "contain" : "cover", objectPosition: `${posX}% ${posY}%` }
                         )
                       }} />
                       {showGuides && <>
