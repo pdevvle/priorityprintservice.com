@@ -1532,8 +1532,8 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
       {fitMode === "scale" && (
         <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
           <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,.12)" }}>
-            <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 1))} style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>−</button>
-            <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 1))} style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>+</button>
+            <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 5))} style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>−</button>
+            <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 5))} style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>+</button>
           </div>
           <span style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,.4)", minWidth: 32, textAlign: "center" }}>{artScale}%</span>
         </div>

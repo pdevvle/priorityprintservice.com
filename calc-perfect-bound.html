@@ -4079,11 +4079,11 @@ update();
       {fitMode === "scale" && (
         <div style={{ display:"flex", alignItems:"center", gap:3 }}>
           <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
-            <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 1))} style={{
+            <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 5))} style={{
               padding:"6px 10px", fontSize:12, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
               background:"var(--bp-btn)", color:"var(--bp-faint)",
             }}>−</button>
-            <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 1))} style={{
+            <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 5))} style={{
               padding:"6px 10px", fontSize:12, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
               background:"var(--bp-btn)", color:"var(--bp-faint)",
             }}>+</button>

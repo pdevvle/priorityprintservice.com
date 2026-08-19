@@ -4145,11 +4145,11 @@ update();
       {fitMode === "scale" && (
         <div style={{ display:"flex", alignItems:"center", gap:3 }}>
           <div style={{ display:"flex", borderRadius:10, overflow:"hidden", border:"1px solid var(--bp-line)" }}>
-            <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 1))} title="Decrease" style={{
+            <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 5))} title="Decrease" style={{
               padding:"6px 10px", fontSize:12, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit",
               background:"var(--bp-btn)", color:"var(--bp-dim)",
             }}>&minus;</button>
-            <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 1))} title="Increase" style={{
+            <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 5))} title="Increase" style={{
               padding:"6px 10px", fontSize:12, fontWeight:600, border:"none", borderLeft:"1px solid var(--bp-line)", cursor:"pointer", fontFamily:"inherit",
               background:"var(--bp-btn)", color:"var(--bp-dim)",
             }}>+</button>
