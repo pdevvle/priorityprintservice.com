@@ -194,7 +194,6 @@ function gapArrays(layout) {
   return { cg, rg };
 }
 function sum(a) { return a.reduce((x, y) => x + y, 0); }
-function round4(x) { return Math.round(x * 1e4) / 1e4; }
 
 
 function fits(n, dim, g, usable) { return n * dim + (n - 1) * g <= usable + EPS; }
@@ -446,40 +445,7 @@ function computeSaddleLayout(pw, ph, opts) {
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : [0];
   let grid = null, colGaps = null, rowGaps = null, fillSheet = false;
 
-  // ── Small-book fill rules (Fiery-style; default on, fully overridable) ──
-  // Small saddle books are hand-cut on a guillotine (too small for the inline
-  // face trimmer), so they gang across the FULL press sheet — deliberately
-  // spilling past the imageable area — for easy registration in the cutter.
-  //   • spine (bound edge = book height) < 5.5″ → 2″ vertical gutter, stacking
-  //     rows to fill the sheet height.
-  //   • narrow page (< 7″ wide) → fill the sheet width in even multiples
-  //     (19″ ÷ N, e.g. 9.5″ pitch when 2-up); horizontal gutter = pitch − spread.
-  const wantFill = opts && opts.saddleFill !== false && !(opts && opts.efficient)
-                   && imp >= 2 && (pw < 7 || ph < 5.5);
-  if (wantFill) {
-    const fSheet = SHEETS["13x19"];
-    const across = Math.max(1, Math.floor(fSheet.long / spreadW));
-    const pitchX = fSheet.long / across;
-    const vGut = ph < 5.5 ? 2 : 0;
-    const down = ph < 5.5 ? Math.max(1, Math.floor((fSheet.short + vGut) / (spreadH + vGut))) : 1;
-    // Only engage fill when it genuinely multiplies on an axis — otherwise a
-    // book like 5.5×8.5 (spread 11″, 1-up on 19″) would pointlessly become a
-    // 1-up full-sheet layout. Non-multiplying books fall through to the normal
-    // rotated layout.
-    if (across > 1 || down > 1) {
-      sheet = fSheet;
-      grid = { a: across, d: down, rotated: spreadW < spreadH, g: 0 };
-      colGaps = Array(across - 1).fill(round4(pitchX - spreadW));
-      rowGaps = Array(down - 1).fill(vGut);
-      fillSheet = true;
-      warnings.push(`Small-book fill: ${across}×${down} signature copies on the full ${fSheet.label} sheet for guillotine cutting` +
-        (across > 1 ? `, ${pitchX.toFixed(2)}″ horizontal pitch (${round4(pitchX - spreadW).toFixed(3)}″ gutter)` : "") +
-        (vGut ? `, ${vGut}″ vertical gutter (spine ${ph}″ < 5.5″)` : "") +
-        " — fills past the imageable area by design.");
-    }
-  }
-
-  // Efficient mode (explicit oversize 13×27.5) — superseded by fill when both apply.
+  // Efficient mode (explicit oversize 13×27.5).
   if (!grid && opts && opts.efficient) {
     const effGrid = bestPhysicalGrid(spL, spS, SHEETS["13x27.5"], gutters);
     if (effGrid && effGrid.a * effGrid.d > target) {
@@ -1274,9 +1240,7 @@ function layoutOpts(spec) {
     manualPattern: spec.manualPattern || null,
     forceRotated: spec.forceRotated || "auto",
     bleed: isFinite(spec.bleed) && spec.bleed !== null && spec.bleed !== "" ? +spec.bleed : null,
-    // Saddle signature gutters (Fiery-style): small-book fill rules on by
-    // default; manual per-gap overrides + full-sheet flag from the editor.
-    saddleFill: spec.saddleFill !== false,
+    // Saddle signature gutters: manual per-gap overrides + full-sheet flag.
     saddleColGaps: Array.isArray(spec.saddleColGaps) ? spec.saddleColGaps : null,
     saddleRowGaps: Array.isArray(spec.saddleRowGaps) ? spec.saddleRowGaps : null,
     saddleFillSheet: spec.saddleFillSheet == null ? null : !!spec.saddleFillSheet,
@@ -1794,10 +1758,9 @@ function App() {
   const [allowBestFit, setAllowBestFit] = useState(false);
   const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
   const [gutterMode, setGutterMode] = useState("auto");   // "auto" | fixed inches
-  const [saddleFill, setSaddleFill] = useState(true);     // small-book fill rules on by default
-  const [sigColGaps, setSigColGaps] = useState(null);     // manual saddle column gaps (in), null = rules
-  const [sigRowGaps, setSigRowGaps] = useState(null);     // manual saddle row gaps (in), null = rules
-  const [sigFillSheet, setSigFillSheet] = useState(null); // force full-sheet bound, null = follow rules
+  const [sigColGaps, setSigColGaps] = useState(null);     // manual saddle column gaps (in), null = uniform/butt
+  const [sigRowGaps, setSigRowGaps] = useState(null);     // manual saddle row gaps (in), null = uniform/butt
+  const [sigFillSheet, setSigFillSheet] = useState(null); // manually place past the imageable area
   const [offsetMode, setOffsetMode] = useState("jog");    // jog lower-right 0.5″ | center | custom
   const [offsetRight, setOffsetRight] = useState(0.5);
   const [offsetBottom, setOffsetBottom] = useState(0.5);
@@ -1854,10 +1817,10 @@ function App() {
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
     bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps,
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
-    saddleFill, saddleColGaps: sigColGaps, saddleRowGaps: sigRowGaps, saddleFillSheet: sigFillSheet,
+    saddleColGaps: sigColGaps, saddleRowGaps: sigRowGaps, saddleFillSheet: sigFillSheet,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, addBleedPages,
-       saddleFill, sigColGaps, sigRowGaps, sigFillSheet]);
+       sigColGaps, sigRowGaps, sigFillSheet]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -2434,10 +2397,9 @@ function App() {
                       block {tw.toFixed(2)}×{th.toFixed(2)}″ / sheet {lay.sheet.long}×{lay.sheet.short}″{over ? " — OVERFLOW" : ""}
                     </span>
                   </div>
-                  <label style={{ fontSize: 12.5, display: "flex", gap: 7, alignItems: "flex-start", cursor: "pointer", marginBottom: 7 }}>
-                    <input type="checkbox" checked={saddleFill} onChange={e => { setSaddleFill(e.target.checked); setSigColGaps(null); setSigRowGaps(null); }} style={{ width: "auto", marginTop: 2 }} />
-                    <span>Small-book fill rules <span style={{ color: "rgba(255,255,255,.4)" }}>— spine &lt; 5.5″ → 2″ vertical gutter · page &lt; 7″ → fill sheet width in multiples (guillotine-cut, fills past the imageable area)</span></span>
-                  </label>
+                  <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginBottom: 7 }}>
+                    Set the gutter between each signature column/row independently. Turn on “fill full sheet” to allow gutters that push the layout past the imageable area (guillotine cutting).
+                  </div>
                   {(nc > 0 || nr > 0) ? (
                     <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
                       {nc > 0 && (
@@ -2506,7 +2468,7 @@ function App() {
                       {lay.efficient
                         ? <span className="imp-badge ok">13×27.5 EFFICIENT — PRICED {lay.pricedImp}/SIDE</span>
                         : lay.fillSheet
-                        ? <span className="imp-badge warn">SMALL-BOOK FILL {lay.across}×{lay.down} — FULL SHEET, GUILLOTINE CUT</span>
+                        ? <span className="imp-badge warn">FULL-SHEET FILL {lay.across}×{lay.down} — PAST IMAGEABLE AREA</span>
                         : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}/SIDE`}</span>}
                     </div>
                   ) : (

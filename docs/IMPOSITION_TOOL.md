@@ -115,26 +115,18 @@ download the imposed PDF. Useful for testing and one-off jobs.
   priced 13×19 layout (otherwise it says so and stays on 13×19); duplex
   registration on the wide sheet is verified by the physical simulator on
   both flip edges.
-- **Saddle signature gutters** (Fiery-style; small books): the gutters
-  between signature copies are editable on **both axes, per gap**, with an
-  auto-default ruleset (on by default, fully overridable):
-  - **spine (bound edge = book height) < 5.5″ → 2″ vertical gutter**,
-    stacking rows to fill the 13″ sheet height.
-  - **page width < 7″ → fill the sheet width in even multiples** (19″ ÷ N,
-    e.g. 9.5″ pitch when 2-up); the horizontal gutter is `pitch − spread`.
-  - Either rule makes the layout **fill the full 13×19 sheet edge-to-edge**,
-    deliberately spilling past the 18.5×12.5 imageable area, because small
-    books are hand-cut on a guillotine (too small for the inline face
-    trimmer), and the full sheet is easier to register in the cutter.
-  - **Guard:** fill only engages when it actually multiplies on an axis, so a
-    5.5×8.5 book (spread 11″, 1-up on 19″) stays on the normal rotated layout.
-  - **Manual override:** per-column and per-row gap fields (sized to the live
-    `across×down` grid), a "fill full sheet" toggle, and "reset to rules";
-    any gap is editable regardless of the rules. A footprint that exceeds the
-    physical sheet is refused. Internally `buildCells`/`blockOrigin` use
-    `colGaps[]`/`rowGaps[]` arrays — uniform fill is byte-identical to the
-    prior fixed-stride output (pixel-verified), and the physical duplex
-    simulator confirms registration on both flip edges for every fill layout.
+- **Saddle signature gutters** (manual, Fiery-style): the gutter between
+  signature copies is editable **per gap on both axes** from a "Signature
+  gutters" panel — one field per column gap and per row gap, sized to the
+  live `across×down` grid. A **"fill full sheet"** toggle lets the operator
+  place gutters that push the layout past the 18.5×12.5 imageable area onto
+  the full 13×19 sheet (for guillotine cutting); a footprint that exceeds the
+  physical sheet is refused. Internally `buildCells`/`blockOrigin` use
+  `colGaps[]`/`rowGaps[]` arrays — uniform gaps are byte-identical to the
+  prior fixed-stride output (pixel-verified), and the physical duplex
+  simulator confirms registration on both flip edges with asymmetric gutters.
+  (An automatic small-book default ruleset is planned but not yet wired —
+  gutters are operator-set for now.)
 - **Piece patterns** (flats & stickers): Straight / **Head-to-head** (row
   pairs, heads meeting at the shared cut) / **Foot-to-foot** (phase-shifted
   complement) / **Reversal** (alternate columns 180°) / **Reversal
