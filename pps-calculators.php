@@ -2977,6 +2977,7 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
         && trim( (string) $order->get_shipping_address_1() ) !== '';
 
     $addr = null;
+    $all_dests = array();
     $quote_ctx = array();
     $weight = 0.0;
     $cartons = 0;
@@ -2991,8 +2992,6 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
         // two booklet lines ship as one consignment, not two.
         $weight  += (float) ( $meta['estWeightLb'] ?? 0 );
         $cartons += (int) ( $meta['estCartons'] ?? 0 );
-
-        if ( $addr !== null ) continue;   // first usable address wins
 
         $a = isset( $meta['shipAddr'] ) && is_array( $meta['shipAddr'] ) ? $meta['shipAddr'] : array();
         // State lives alongside shipAddr rather than inside it — the calculator collects
@@ -3009,6 +3008,24 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
 
         // Kept for the mismatch note: what the customer was quoted, and against
         // which destination, so the operator can judge the cost/date impact.
+        // Record EVERY line's destination, not only the first. A WooCommerce order
+        // carries exactly one shipping address, so two lines bound for two places
+        // cannot both be honoured — and until this was recorded, the second one
+        // was dropped without trace while its weight was still added to the
+        // consignment. Detected after the loop and flagged for a human, because
+        // splitting an order into two shipments is an operator's decision.
+        $dest_key = strtoupper( preg_replace( '/[^A-Za-z0-9]/', '', $street . $city . $state ) )
+                  . '|' . substr( preg_replace( '/[^0-9]/', '', $zip ), 0, 5 );
+        if ( ! isset( $all_dests[ $dest_key ] ) ) {
+            $all_dests[ $dest_key ] = trim(
+                trim( (string) ( $a['name'] ?? '' ) . ' ' . (string) ( $a['company'] ?? '' ) )
+                . ' — ' . $street . ', ' . $city . ', ' . $state . ' ' . $zip
+                . '  [' . $item->get_name() . ']'
+            );
+        }
+
+        if ( $addr !== null ) continue;   // first usable address wins
+
         $quote_ctx = array(
             'transitDays' => isset( $meta['transitDays'] ) ? (int) $meta['transitDays'] : null,
             'rushCost'    => isset( $meta['rushCost'] ) ? (float) $meta['rushCost'] : null,
@@ -3036,6 +3053,21 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     // consignment rather than two.
     if ( $weight > 0 )  $order->update_meta_data( '_pps_est_weight_lb', round( $weight, 2 ) );
     if ( $cartons > 0 ) $order->update_meta_data( '_pps_est_cartons', $cartons );
+
+    // One order, one shipping address — so if the lines disagree about where they
+    // are going, no address choice below can be right for all of them.
+    if ( count( $all_dests ) > 1 && ! $order->get_meta( '_pps_multi_destination' ) ) {
+        $order->add_order_note( wp_strip_all_tags(
+            "⚠ THIS ORDER HAS " . count( $all_dests ) . " DIFFERENT DELIVERY ADDRESSES — it cannot ship as one.\n\n"
+            . implode( "\n", array_map( function ( $d ) { return '  • ' . $d; }, array_values( $all_dests ) ) )
+            . "\n\nA WooCommerce order holds one shipping address, so only the first is on the order; "
+            . "the rest are recorded here and nowhere else. The packing weight and carton count are the "
+            . "SUM of all lines, so they describe one consignment that does not exist. "
+            . "Split this into separate shipments before rating or labelling."
+        ) );
+        $order->update_meta_data( '_pps_multi_destination', count( $all_dests ) );
+        $order->save();
+    }
 
     if ( $addr === null || $keep_existing_address ) {
         // Order 87032 shipped this bug into daylight: a customer buying for a
