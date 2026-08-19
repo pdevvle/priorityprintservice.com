@@ -3277,6 +3277,15 @@ function pps_order_meta_box( $post_or_order ) {
         ? wc_get_order( $post_or_order->ID )
         : $post_or_order;
 
+    if ( $order && $order->get_meta( '_pps_multi_destination' ) ) {
+        echo '<div style="margin:0 0 10px;padding:8px 10px;border-left:4px solid #d63638;background:#fcf0f1">'
+           . '<strong>⚠ ' . esc_html( (string) $order->get_meta( '_pps_multi_destination' ) )
+           . ' different delivery addresses on this order.</strong><br>'
+           . 'The order header carries only the first. Check each line\'s "Ship to" below and split the '
+           . 'shipment before rating or labelling — the header address is wrong for at least one line.'
+           . '</div>';
+    }
+
     if ( ! $order ) { echo '<p>Order not found.</p>'; return; }
 
     $has_pps = false;
@@ -3312,6 +3321,28 @@ function pps_order_meta_box( $post_or_order ) {
                . esc_html( number_format( $w, 2 ) ) . ' lb · '
                . esc_html( $c ) . ' carton' . ( $c === 1 ? '' : 's' )
                . ' <span style="color:#666;font-weight:400">— calculated, not weighed</span></p>';
+        }
+
+        // Where THIS line is going. The order carries one shipping address, so on a
+        // multi-destination order it is right for one line and wrong for the others —
+        // and the packer had no way to see that. Printed against the line's own
+        // shipment estimate, which is the figure it actually belongs to.
+        if ( is_array( $ship_meta ) ) {
+            $sa = isset( $ship_meta['shipAddr'] ) && is_array( $ship_meta['shipAddr'] ) ? $ship_meta['shipAddr'] : array();
+            $line_street = trim( (string) ( $sa['street1'] ?? '' ) );
+            $line_city   = trim( (string) ( $sa['city'] ?? '' ) );
+            $line_state  = trim( (string) ( $sa['state'] ?? $ship_meta['shipState'] ?? '' ) );
+            $line_zip    = trim( (string) ( $sa['zip'] ?? $ship_meta['shipZip'] ?? '' ) );
+            if ( $line_street !== '' && $line_city !== '' ) {
+                $who = trim( trim( (string) ( $sa['name'] ?? '' ) ) . ( ! empty( $sa['company'] ) ? ' · ' . $sa['company'] : '' ) );
+                $line_two = trim( (string) ( $sa['street2'] ?? '' ) );
+                echo '<p style="margin:0 0 6px"><strong>Ship to:</strong> '
+                   . ( $who !== '' ? esc_html( $who ) . ' — ' : '' )
+                   . esc_html( $line_street )
+                   . ( $line_two !== '' ? ', ' . esc_html( $line_two ) : '' )
+                   . ', ' . esc_html( $line_city ) . ', ' . esc_html( $line_state ) . ' ' . esc_html( $line_zip )
+                   . '</p>';
+            }
         }
 
         // Artwork: Drive-aware renderer if available, else local fallback
