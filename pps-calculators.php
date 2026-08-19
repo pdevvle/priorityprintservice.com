@@ -2952,6 +2952,7 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     $keep_existing_address = trim( (string) $order->get_shipping_address_1() ) !== '';
 
     $addr = null;
+    $quote_ctx = array();
     $weight = 0.0;
     $cartons = 0;
 
@@ -2981,6 +2982,15 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
         // whereas empty fields fall back to billing, which is at least a whole address.
         if ( $street === '' || $city === '' || $state === '' || $zip === '' ) continue;
 
+        // Kept for the mismatch note: what the customer was quoted, and against
+        // which destination, so the operator can judge the cost/date impact.
+        $quote_ctx = array(
+            'transitDays' => isset( $meta['transitDays'] ) ? (int) $meta['transitDays'] : null,
+            'rushCost'    => isset( $meta['rushCost'] ) ? (float) $meta['rushCost'] : null,
+            'delivery'    => trim( (string) ( $meta['estimatedDeliveryDate'] ?? '' ) ),
+            'needBy'      => trim( (string) ( $meta['needByDate'] ?? '' ) ),
+        );
+
         $addr = array(
             'street1' => $street,
             'street2' => trim( (string) ( $a['street2'] ?? '' ) ),
@@ -3003,6 +3013,53 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     if ( $cartons > 0 ) $order->update_meta_data( '_pps_est_cartons', $cartons );
 
     if ( $addr === null || $keep_existing_address ) {
+        // Order 87032 shipped this bug into daylight: a customer buying for a
+        // colleague entered the real ship-to in the calculator, then checkout's
+        // "ship to same address as billing" default overwrote it with their own.
+        // The correct destination survived only in _pps_metadata, where nobody
+        // looks until a parcel goes to the wrong person.
+        //
+        // Until the address flow itself is fixed, refuse to discard it silently:
+        // when the two disagree on where the parcel is going, say so on the order.
+        if ( $addr !== null && $keep_existing_address && ! $order->get_meta( '_pps_ship_mismatch' ) ) {
+            $norm_zip = function ( $z ) { return substr( preg_replace( '/[^0-9]/', '', (string) $z ), 0, 5 ); };
+            $same = $norm_zip( $addr['zip'] ) === $norm_zip( $order->get_shipping_postcode() )
+                 && strtoupper( $addr['state'] ) === strtoupper( (string) $order->get_shipping_state() );
+
+            if ( ! $same ) {
+                $calc_line = trim( $addr['name'] . ( $addr['company'] !== '' ? ' · ' . $addr['company'] : '' ) )
+                    . ' — ' . $addr['street1']
+                    . ( $addr['street2'] !== '' ? ', ' . $addr['street2'] : '' )
+                    . ', ' . $addr['city'] . ', ' . $addr['state'] . ' ' . $addr['zip'];
+
+                $order_line = trim( $order->get_shipping_first_name() . ' ' . $order->get_shipping_last_name() )
+                    . ' — ' . $order->get_shipping_address_1()
+                    . ', ' . $order->get_shipping_city()
+                    . ', ' . $order->get_shipping_state() . ' ' . $order->get_shipping_postcode();
+
+                $note = "⚠ SHIPPING ADDRESS MISMATCH — confirm before this ships.\n\n"
+                      . "Ships to (WooCommerce / Shippo):\n  " . $order_line . "\n\n"
+                      . "Destination entered in the calculator:\n  " . $calc_line . "\n\n"
+                      . "WooCommerce defaults to \"ship to same address as billing\", so a customer "
+                      . "ordering for someone else can have their own address silently replace the "
+                      . "destination they entered. The calculator's copy is above; it was not applied.";
+
+                if ( ! empty( $quote_ctx['transitDays'] ) || ! empty( $quote_ctx['rushCost'] ) ) {
+                    $note .= "\n\nQuoted against the calculator's destination:"
+                          . ( $quote_ctx['transitDays'] !== null ? " transit " . $quote_ctx['transitDays'] . " day(s);" : '' )
+                          . ( $quote_ctx['rushCost'] ? " rush " . wc_price( $quote_ctx['rushCost'] ) . ";" : '' )
+                          . ( $quote_ctx['delivery'] !== '' ? " estimated delivery " . $quote_ctx['delivery'] . ";" : '' )
+                          . ( $quote_ctx['needBy'] !== '' ? " need-by " . $quote_ctx['needBy'] . ";" : '' )
+                          . " Shipping cost and dates were calculated for that address, not the one above.";
+                }
+
+                $order->add_order_note( wp_strip_all_tags( $note ) );
+                $order->update_meta_data( '_pps_ship_mismatch', $calc_line );
+                $order->save();
+                return false;
+            }
+        }
+
         if ( $weight > 0 || $cartons > 0 ) $order->save();
         return false;
     }
