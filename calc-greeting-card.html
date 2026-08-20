@@ -2243,6 +2243,19 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     setLoading(false);
   }
 
+  // Swap which page is the outside. A 2-page PDF lands page 1 = front
+  // (outside) by default — right for most exports, backwards for some. The
+  // per-side transforms travel with their art or a front crop would land on
+  // the back; approval resets because the proof changed; transform history is
+  // cleared because its entries are keyed by side and Undo would cross over.
+  function handleSwapSides() {
+    if (!frontArt || !backArt) return;
+    const f = frontArt, b = backArt;
+    setFrontArt(b); setBackArt(f);
+    setPageTransforms(p => ({ ...p, front: p.back || DEFAULT_TX, back: p.front || DEFAULT_TX }));
+    setTxHistory([]);
+    setApproved(false);
+  }
   function handleClear() {
     setFrontArt(null); setBackArt(null); setFileName(""); setApproved(false);
     setPageTransforms({}); setTxHistory([]);
@@ -2991,7 +3004,7 @@ generate();
             {loading ? "Processing..." : "Drop your artwork here or click to upload"}
           </div>
           <div style={{ fontSize: 11, color: CC.light, marginTop: 4 }}>
-            PDF, JPG, PNG or TIFF · up to 200 MB — PDF: page 1 = front, page 2 = back
+            PDF, JPG, PNG or TIFF · up to 200 MB — PDF: page 1 = front, page 2 = back (swappable after upload)
           </div>
         </div>
       ) : (
@@ -3002,10 +3015,18 @@ generate();
               <strong>{fileName}</strong>
               {frontArt?.dims && <span style={{ color: CC.light, marginLeft: 6 }}>{frontArt.dims.w.toFixed(1)}" × {frontArt.dims.h.toFixed(1)}"</span>}
             </div>
+            <div style={{ display: "flex", gap: 6 }}>
+            {frontArt && backArt && (
+              <button type="button" onClick={handleSwapSides} title="Swap which page is the outside" style={{
+                padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                border: `1px solid ${CC.border}`, background: "#fff", color: CC.mid,
+              }}>⇄ Swap front/back</button>
+            )}
             <button type="button" onClick={handleClear} style={{
               padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
               border: `1px solid ${CC.border}`, background: "#fff", color: CC.light,
             }}>Remove uploads</button>
+          </div>
           </div>
 
           {/* Proof button + info — gentle red box when proof not yet approved */}
