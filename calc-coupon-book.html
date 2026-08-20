@@ -309,7 +309,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
   html[data-pps-theme="dark"] [style*="rgb(250, 250, 250)"]{background:#1a212b !important}
   /* Status tints (error / warning / success banners) are pale by construction and
      stay bright on a dark page. Their ink lives on child spans with its own inline
-     colour, so each family remaps the container AND its descendants. Matching on the
+     color, so each family remaps the container AND its descendants. Matching on the
      rgb() React emits catches every site, including ones not enumerated by hand. */
   html[data-pps-theme="dark"] [style*="rgb(254, 242, 242)"],
   html[data-pps-theme="dark"] [style*="rgb(254, 226, 226)"]{background:#2a1416 !important;border-color:#5b2b2f !important}
@@ -1791,7 +1791,7 @@ function Panel({result,compact,debugUnlocked,expanded,onToggleExpand,coupon,tota
       <div ref={totalRef} style={{height:1,marginBottom:-1}} aria-hidden="true"/>
       {/* Ink price card, not brand cyan: cyan is reserved for the CTA and active
           states so the Add to Order button stays the loudest thing in the rail.
-          Rush keeps its own colour — that's a state signal, not decoration. */}
+          Rush keeps its own color — that's a state signal, not decoration. */}
       <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:CC.heroBg,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
         <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol,marginBottom:6}}>{hasRush?"Rush · Grand Total":"Grand Total"}</div>
         <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
@@ -3172,19 +3172,19 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     const cacheKey = `rot${rotSig}_${rawPages.length}_${rawPages[0]?.dataUrl?.length || 0}`;
     if (rotatedCache.key === cacheKey) return;
 
-    let cancelled = false;
+    let canceled = false;
     (async () => {
       const rotated = [];
       for (let i = 0; i < rawPages.length; i++) {
-        if (cancelled) return;
+        if (canceled) return;
         const p = rawPages[i];
         const steps = getTx(i).rotateSteps;
         const rotUrl = steps > 0 ? await rotateImageBySteps(p.dataUrl, steps) : p.dataUrl;
         rotated.push({ ...p, dataUrl: rotUrl });
       }
-      if (!cancelled) setRotatedCache({ key: cacheKey, pages: rotated });
+      if (!canceled) setRotatedCache({ key: cacheKey, pages: rotated });
     })();
-    return () => { cancelled = true; };
+    return () => { canceled = true; };
   }, [txHash, rawPages]);
 
   // The pages we actually use for preview — rotated (mixed) or raw (all 0°)
@@ -3197,7 +3197,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // For images: uses the raw dataUrl (already at native resolution).
   useEffect(() => {
     if (!rawPages.length || rawPages[0].isBlank) { setEdgeHasMargins(null); return; }
-    let cancelled = false;
+    let canceled = false;
 
     // Shared: given a canvas with image data, sample edges and classify
     function analyzeEdges(c) {
@@ -3215,7 +3215,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         if (isLight(px(2, fy))) lightCount++; total++;
         if (isLight(px(w-3, fy))) lightCount++; total++;
       }
-      if (!cancelled) setEdgeHasMargins(lightCount / total > 0.85);
+      if (!canceled) setEdgeHasMargins(lightCount / total > 0.85);
     }
 
     // PDF source: render page 1 directly to a small canvas — clean vector render, no JPEG artifacts
@@ -3231,10 +3231,10 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
           const c = document.createElement("canvas");
           c.width = Math.round(vp.width); c.height = Math.round(vp.height);
           await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
-          if (!cancelled) analyzeEdges(c);
+          if (!canceled) analyzeEdges(c);
         } catch (e) { console.warn("Bleed detection render failed:", e); }
       })();
-      return () => { cancelled = true; };
+      return () => { canceled = true; };
     }
 
     // Image source: load the dataUrl (already at full native resolution)
@@ -3248,9 +3248,9 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       c.getContext("2d").drawImage(img, 0, 0, w, h);
       analyzeEdges(c);
     };
-    img.onerror = () => { if (!cancelled) setEdgeHasMargins(null); };
+    img.onerror = () => { if (!canceled) setEdgeHasMargins(null); };
     img.src = rawPages[0].dataUrl;
-    return () => { cancelled = true; };
+    return () => { canceled = true; };
   }, [rawPages, artDims]);
 
   // ── Preflight checks ──
@@ -3356,7 +3356,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       `Standard print bleed is 0.125″.`,
       "0.125"
     );
-    if (input === null) return; // cancelled
+    if (input === null) return; // canceled
     const bleedVal = parseFloat(input);
     if (isNaN(bleedVal) || bleedVal < 0 || bleedVal >= Math.min(artW, artH) / 2) {
       alert("Invalid bleed value.");
@@ -3416,7 +3416,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       setTrimmedPages(prev => prev.length ? [] : prev);
       return;
     }
-    let cancelled = false;
+    let canceled = false;
     (async () => {
       const BLEED = 0.125;
       const bleedW = dims.w + BLEED * 2;
@@ -3445,7 +3445,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
       const results = [];
       for (let i = 0; i < displayPages.length; i++) {
-        if (cancelled) return;
+        if (canceled) return;
         // Yield periodically so a long book can still paint and so the cancel
         // flag gets a chance to land mid-pass instead of locking the tab.
         if (i > 0 && i % 8 === 0) await new Promise(r => setTimeout(r, 0));
@@ -3491,12 +3491,12 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         tc.getContext("2d").drawImage(c, trimPxX, trimPxY, outW, outH, 0, 0, outW, outH);
         results.push({ ...page, dataUrl: tc.toDataURL("image/jpeg", 0.85) });
       }
-      if (!cancelled) {
+      if (!canceled) {
         setTrimmedPages(results);
         if (onCoverArt && results[0] && !results[0].isBlank) onCoverArt(results[0].dataUrl);
       }
     })();
-    return () => { cancelled = true; };
+    return () => { canceled = true; };
   }, [displayPages, artDims, dims.w, dims.h, txHash]);
 
   // Pixel dimensions
@@ -3519,7 +3519,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     if (hiResProof && hiResProof.idx === proofIdx && hiResProof.rotated === rotateSteps) return;
     // For PDF source — re-render from PDF at 300 DPI
     if (pdfDocRef.current && artDims?.source === "pdf") {
-      let cancelled = false;
+      let canceled = false;
       const pdfPageNum = proofIdx + 1; // pdf.js pages are 1-indexed
       if (pdfPageNum > pdfDocRef.current.numPages) return;
       (async () => {
@@ -3546,10 +3546,10 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
           } else {
             outUrl = canvas.toDataURL("image/jpeg", 0.92);
           }
-          if (!cancelled) setHiResProof({ idx: proofIdx, rotated: rotateSteps, dataUrl: outUrl });
+          if (!canceled) setHiResProof({ idx: proofIdx, rotated: rotateSteps, dataUrl: outUrl });
         } catch(e) { console.error("Hi-res render error:", e); }
       })();
-      return () => { cancelled = true; };
+      return () => { canceled = true; };
     }
     // For image source — displayPages already has the rotated version
     setHiResProof({ idx: proofIdx, rotated: rotateSteps, dataUrl: page.dataUrl });
@@ -5576,7 +5576,7 @@ function App(){
       </thead>
       <tbody>
         {(()=>{
-          // Collapsed, the table is a window centred on the selected quantity —
+          // Collapsed, the table is a window centered on the selected quantity —
           // two rows either side, held at five rows even when the selection sits
           // at one end, so the neighbours a customer wants to compare are the
           // ones on screen. Expanded shows every tier.
@@ -5852,7 +5852,7 @@ function App(){
                       transition:"background .8s cubic-bezier(.4,0,.2,1) .25s"}}>
                       {/* Straight slide: a quarter-second beat after the click, then the knob
                           travels for .8s. Symmetric easing, no overshoot and no flip, so it
-                          reads as the control moving rather than performing. The track colour
+                          reads as the control moving rather than performing. The track color
                           runs on the same delay and duration so the two move as one. */}
                       <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,borderRadius:99,
                         background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",

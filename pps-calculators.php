@@ -1456,7 +1456,7 @@ function pps_ajax_upload_artwork() {
 // manifest is a plain-text file; some security plugins (e.g. AIOS) strip
 // text/plain from the allowed-mime list, which would make wp_check_filetype()
 // return an empty type (and any wp_handle_upload/media path reject the file).
-// Registering it guarantees .txt is recognised as text/plain site-wide.
+// Registering it guarantees .txt is recognized as text/plain site-wide.
 add_filter( 'upload_mimes', function( $mimes ) {
     if ( empty( $mimes['txt'] ) ) {
         $mimes['txt'] = 'text/plain';
@@ -1795,7 +1795,7 @@ function pps_ajax_quote_question() {
  * docs/MASTER_PRICING_LOGIC.md.
  *
  * Fails OPEN by design: any input it cannot resolve authoritatively (custom trim,
- * unknown stock, unrecognised calculator) returns null and the check is skipped. A
+ * unknown stock, unrecognized calculator) returns null and the check is skipped. A
  * false rejection at add-to-cart costs a real sale; a missed check costs margin.
  *
  * @return float|null Floor in dollars, or null when it cannot be determined.
@@ -2286,18 +2286,18 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
     if ( ! isset( $cart_item['pps_summary'] ) ) return $data;
 
     // buildSummary() emits one line per chosen option, and rendering them verbatim turned
-    // a cart row into a dozen table rows — six of them labelled "Configuration", because
+    // a cart row into a dozen table rows — six of them labeled "Configuration", because
     // a line with no colon had nothing to split on and fell back to that word. Group them
     // instead: the headline spec, the two paper facts, and one row carrying every
     // finishing choice. Same information, a third of the height, no repeated labels.
     $headline = '';
-    $labelled = array();
+    $labeled = array();
     $options  = array();
 
     foreach ( array_filter( array_map( 'trim', explode( "\n", $cart_item['pps_summary'] ) ) ) as $line ) {
         $parts = explode( ':', $line, 2 );
         if ( count( $parts ) === 2 ) {
-            $labelled[ trim( $parts[0] ) ] = trim( $parts[1] );
+            $labeled[ trim( $parts[0] ) ] = trim( $parts[1] );
         } elseif ( $headline === '' ) {
             $headline = $line;   // size · quantity · pages · job name — always first
         } else {
@@ -2310,16 +2310,16 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
     }
     // Paper first, because it is what a customer double-checks on a print order.
     foreach ( array( 'Inside', 'Cover' ) as $paper_key ) {
-        if ( isset( $labelled[ $paper_key ] ) ) {
-            $data[] = array( 'key' => $paper_key, 'value' => $labelled[ $paper_key ] );
-            unset( $labelled[ $paper_key ] );
+        if ( isset( $labeled[ $paper_key ] ) ) {
+            $data[] = array( 'key' => $paper_key, 'value' => $labeled[ $paper_key ] );
+            unset( $labeled[ $paper_key ] );
         }
     }
     if ( $options ) {
         $data[] = array( 'key' => 'Finishing', 'value' => implode( ' · ', $options ) );
     }
     // Whatever else carried its own label — Rush, Ship to, Standard delivery.
-    foreach ( $labelled as $label => $value ) {
+    foreach ( $labeled as $label => $value ) {
         $data[] = array( 'key' => $label, 'value' => $value );
     }
 
@@ -2795,7 +2795,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         $days     = intval( $full['days'] ?? $biz_days );
         $sets_ct  = count( $sets );
 
-        // Cover stock and colour are priced and printed separately from the inside, so a
+        // Cover stock and color are priced and printed separately from the inside, so a
         // spec that names only the inside paper is a spec production cannot work from.
         $cPaper = is_array( $full['coverPaper'] ?? null ) ? ( $full['coverPaper']['label'] ?? '' ) : '';
         $cColor = ( $full['coverColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
@@ -2806,7 +2806,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         // Finishing choices live in the metadata as numeric config values, not labels —
         // coating 750 means nothing on a job ticket. buildSummary() has already resolved
         // every one of them to the words the customer chose, so take them from there:
-        // the labelled lines are facts we already have, the rest are the add-ons.
+        // the labeled lines are facts we already have, the rest are the add-ons.
         $addons = array();
         $seen_headline = false;
         foreach ( array_filter( array_map( 'trim', explode( "\n", (string) ( $values['pps_summary'] ?? '' ) ) ) ) as $line ) {
@@ -3010,7 +3010,7 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
         // which destination, so the operator can judge the cost/date impact.
         // Record EVERY line's destination, not only the first. A WooCommerce order
         // carries exactly one shipping address, so two lines bound for two places
-        // cannot both be honoured — and until this was recorded, the second one
+        // cannot both be honored — and until this was recorded, the second one
         // was dropped without trace while its weight was still added to the
         // consignment. Detected after the loop and flagged for a human, because
         // splitting an order into two shipments is an operator's decision.
@@ -6678,7 +6678,7 @@ add_action( 'template_redirect', function() {
             foreach ( $catalog as $row ) {
                 echo "\n### {$row['title']}\n";
                 echo "- URL: {$row['url']}\n";
-                // Two different numbers, labelled as such. The defaults price is
+                // Two different numbers, labeled as such. The defaults price is
                 // what this page quotes on arrival; the floor is the cheapest
                 // the calculator can be driven to. Calling the first one "from"
                 // would be wrong in both directions.

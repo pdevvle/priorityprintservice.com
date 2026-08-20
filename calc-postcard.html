@@ -257,7 +257,7 @@ window.ppsAnalyzePdfRisks = async function (doc) {
   html[data-pps-theme="dark"] [style*="rgb(248, 249, 250)"]{background:#1a212b !important}
   /* Status tints (error / warning / success banners) are pale by construction and
      stay bright on a dark page. Their ink lives on child spans with its own inline
-     colour, so each family remaps the container AND its descendants. Matching on the
+     color, so each family remaps the container AND its descendants. Matching on the
      rgb() React emits catches every site, including ones not enumerated by hand. */
   html[data-pps-theme="dark"] [style*="rgb(254, 242, 242)"],
   html[data-pps-theme="dark"] [style*="rgb(254, 226, 226)"]{background:#2a1416 !important;border-color:#5b2b2f !important}
@@ -2048,9 +2048,9 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   useEffect(() => {
     if (!currentArtRaw?.dataUrl) { setRotatedUrl(null); return; }
     if (rotateSteps === 0) { setRotatedUrl(currentArtRaw.dataUrl); return; }
-    let cancelled = false;
-    rotateImageBySteps(currentArtRaw.dataUrl, rotateSteps).then(url => { if (!cancelled) setRotatedUrl(url); });
-    return () => { cancelled = true; };
+    let canceled = false;
+    rotateImageBySteps(currentArtRaw.dataUrl, rotateSteps).then(url => { if (!canceled) setRotatedUrl(url); });
+    return () => { canceled = true; };
   }, [currentArtRaw?.dataUrl, rotateSteps]);
 
   // Trimmed front/back for 3D fold preview — per-side transforms applied, bleed cropped.
@@ -2058,7 +2058,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const [trimmedFrontUrl, setTrimmedFrontUrl] = useState(null);
   const [trimmedBackUrl, setTrimmedBackUrl] = useState(null);
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     async function renderTrimmed(art, tx) {
       if (!art?.dataUrl) return null;
       const BLEED = 0.125;
@@ -2117,11 +2117,11 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
         renderTrimmed(frontArt, getTx("front")),
         renderTrimmed(backArt, getTx("back")),
       ]);
-      if (cancelled) return;
+      if (canceled) return;
       setTrimmedFrontUrl(f);
       setTrimmedBackUrl(b);
     })();
-    return () => { cancelled = true; };
+    return () => { canceled = true; };
   }, [frontArt?.dataUrl, backArt?.dataUrl, longEdge, shortEdge, txHash]);
 
   // FitToggle component
@@ -2253,7 +2253,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     // flip card for that case.
     // FOLD configurations — copied verbatim from calc-postcard FOLDS_3D so the
     // standalone matches the in-calc preview view-for-view (Folded Back included,
-    // swap honoured, double-parallel mode supported).
+    // swap honored, double-parallel mode supported).
     const PREVIEWER_FOLDS = {
       "half-fold": { n:2, mode:"nested", swap:true, views:[
         {label:"Inside (Open)",sc:[8,-6,0,0],f:[0]},
@@ -3710,7 +3710,7 @@ function Panel({ result, compact, debugUnlocked, expanded, onToggleExpand, coupo
       <div ref={totalRef} style={{height:1,marginBottom:-1}} aria-hidden="true"/>
       {/* Ink price card, not brand cyan: cyan is reserved for the CTA and active
           states so the Add to Order button stays the loudest thing in the rail.
-          Rush keeps its own colour — that's a state signal, not decoration. */}
+          Rush keeps its own color — that's a state signal, not decoration. */}
       <div style={{padding:"22px 20px 18px",background:hasRush?`linear-gradient(135deg, ${CK.rush} 0%, ${CK.rush}dd 100%)`:CC.heroBg,color:hasRush?"#333":"#fff",pointerEvents:"none"}}>
         <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",color:eyeCol,marginBottom:6}}>{hasRush?"Rush · Grand Total":"Grand Total"}</div>
         <div style={{lineHeight:1,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
@@ -4916,7 +4916,7 @@ function App() {
       </thead>
       <tbody>
         {(()=>{
-          // Collapsed, the table is a window centred on the selected quantity —
+          // Collapsed, the table is a window centered on the selected quantity —
           // two rows either side, held at five rows even when the selection sits
           // at one end, so the neighbours a customer wants to compare are the
           // ones on screen. Expanded shows every tier.
@@ -5221,7 +5221,7 @@ function App() {
                       transition:"background .8s cubic-bezier(.4,0,.2,1) .25s"}}>
                       {/* Straight slide: a quarter-second beat after the click, then the knob
                           travels for .8s. Symmetric easing, no overshoot and no flip, so it
-                          reads as the control moving rather than performing. The track colour
+                          reads as the control moving rather than performing. The track color
                           runs on the same delay and duration so the two move as one. */}
                       <span style={{position:"absolute",top:2,left:o.on?16:2,width:16,height:16,borderRadius:99,
                         background:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.35)",

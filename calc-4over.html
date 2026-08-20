@@ -166,9 +166,9 @@ const SAMPLE_CATALOG = {
       unit_weight_g:1.02,
       dimensions:[
         { key:"colorspec", label:"Printed sides", control:"select", options:[
-            {v:"40",t:"4/0 — full colour front only"},
-            {v:"44",t:"4/4 — full colour both sides"},
-            {v:"41",t:"4/1 — full colour front, black back"}]},
+            {v:"40",t:"4/0 — full color front only"},
+            {v:"44",t:"4/4 — full color both sides"},
+            {v:"41",t:"4/1 — full color front, black back"}]},
         { key:"coating", label:"Coating", control:"pill", options:[
             {v:"UV",t:"UV (print side)"},{v:"UVFR",t:"UV front only"},{v:"AQ",t:"Aqueous"}]},
         { key:"run_size", label:"Quantity", control:"qty",
@@ -275,8 +275,8 @@ const SAMPLE_CATALOG = {
       unit_weight_g:1.85,
       dimensions:[
         { key:"colorspec", label:"Printed sides", control:"select", options:[
-            {v:"40",t:"4/0 — full colour front only"},
-            {v:"44",t:"4/4 — full colour both sides"}]},
+            {v:"40",t:"4/0 — full color front only"},
+            {v:"44",t:"4/4 — full color both sides"}]},
         { key:"coating", label:"Finish", control:"pill", options:[
             {v:"GLOSS",t:"Gloss"},{v:"MATTE",t:"Matte"},{v:"SOFT",t:"Soft touch"},{v:"NONE",t:"Uncoated"}]},
         { key:"run_size", label:"Quantity", control:"qty",
@@ -363,8 +363,8 @@ const SAMPLE_CATALOG = {
       unit_weight_g:1.60,
       dimensions:[
         { key:"colorspec", label:"Printed sides", control:"select", options:[
-            {v:"40",t:"4/0 — full colour front only"},
-            {v:"44",t:"4/4 — full colour both sides"}]},
+            {v:"40",t:"4/0 — full color front only"},
+            {v:"44",t:"4/4 — full color both sides"}]},
         { key:"coating", label:"Coating", control:"pill", options:[
             {v:"UV",t:"UV (print side)"},{v:"AQ",t:"Aqueous"}]},
         { key:"run_size", label:"Quantity", control:"qty",
@@ -411,7 +411,7 @@ const SAMPLE_CATALOG = {
       unit_weight_g:3.70,
       dimensions:[
         { key:"colorspec", label:"Printed sides", control:"select", options:[
-            {v:"44",t:"4/4 — full colour inside and out"},
+            {v:"44",t:"4/4 — full color inside and out"},
             {v:"40",t:"4/0 — outside only"}]},
         { key:"coating", label:"Coating", control:"pill", options:[
             {v:"UV",t:"UV (outside)"},{v:"AQ",t:"Aqueous"}]},
@@ -556,7 +556,7 @@ function isStale(m){
  * cell — the lookup misses and the customer sees an error for something they
  * never chose.
  *
- * So: keep every value the new product still recognises, and fall back to its
+ * So: keep every value the new product still recognizes, and fall back to its
  * first option for everything else. Quantity gets special treatment — falling
  * back to the smallest run when someone had picked 25,000 would quietly shrink
  * their order, so it snaps to the NEAREST available tier instead.
@@ -918,7 +918,7 @@ const _PD = (function(){
 })();
 
 /* Which product the page opens on. `_pps_defaults.product` (or ?product=) picks
-   it; anything unrecognised falls back to the first, so a stale link cannot
+   it; anything unrecognized falls back to the first, so a stale link cannot
    land on a blank page. Defaults PRESELECT — they never restrict, so a customer
    can still switch to any other product in the catalogue. */
 function initialProductKey(){
