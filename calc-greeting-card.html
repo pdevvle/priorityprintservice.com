@@ -1434,8 +1434,11 @@ const FOLDS_3D = {
     {label:"Inside (Open)",sc:[8,-4,0,0],f:[0,0,0],tzf:[0,0,0]},
     {label:"Panel 3 Tucks",sc:[20,-30,80,0],f:[0,0,-179],tzf:[0,0,0.02]},
     {label:"Panel 2+3 Fold",sc:[20,-30,90,0],f:[0,-178,-179],tzf:[0,0.05,0.02]},
-    {label:"Folded (Front)",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
-    {label:"Folded (Back)",sc:[20,150,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+    // Camera angles swapped relative to the other nested folds: rolling the
+    // panels inward leaves the cover on the face the ry:150 view looks at, so
+    // the -30 view was showing the back while claiming to be the front.
+    {label:"Folded (Front)",sc:[20,150,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
+    {label:"Folded (Back)",sc:[20,-30,100,0],f:[-176,-178,-179],tzf:[0.1,0.05,0.02]},
     {label:"Outside (Open)",sc:[8,174,0,0],f:[0,0,0],tzf:[0,0,0]}]},
   // Double parallel: bifold, then bifold of the bifold. Final 1/4 size, 4
   // layers. Uses dedicated "dparallel" mode with a bifurcated DOM: P3 is
@@ -3535,7 +3538,7 @@ generate();
 
       {/* Preview Modal — matches booklet previewer style; portalled like the proof */}
       {previewOpen && (<Float>
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", background: "linear-gradient(135deg,#1a1d23,#2a2e36)" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", backgroundColor: "#1a1d23", background: "linear-gradient(135deg,#1a1d23,#2a2e36)" }}>
           {/* Header bar */}
           <div style={{ padding: "10px 16px", background: "rgba(0,0,0,.3)", borderBottom: "1px solid rgba(255,255,255,.06)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexShrink: 0 }}>
             <div style={{ minWidth: 0 }}>
@@ -3579,9 +3582,15 @@ generate();
                     <button key={i} type="button" onClick={() => setPreviewAngle(i)} style={{
                       padding: "7px 13px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600,
                       letterSpacing: ".03em", transition: "all .3s",
-                      background: previewAngle === i ? CK.cyan : "rgba(255,255,255,.10)",
-                      border: `1px solid ${previewAngle === i ? CK.cyan : "rgba(255,255,255,.22)"}`,
-                      color: previewAngle === i ? "#000" : "rgba(255,255,255,.78)",
+                      // Opaque colors and no native appearance: these buttons live in a
+                      // portal outside #pps-calculator-wrap, so the calculator's scoped
+                      // resets never reach them — translucent whites composited over
+                      // whatever the host page provides is how they rendered
+                      // white-on-white in production.
+                      WebkitAppearance: "none", appearance: "none",
+                      background: previewAngle === i ? CK.cyan : "#262b33",
+                      border: `1px solid ${previewAngle === i ? CK.cyan : "#454c58"}`,
+                      color: previewAngle === i ? "#000" : "#e2e6ec",
                       boxShadow: previewAngle === i ? "0 2px 12px rgba(0,174,239,.25)" : "none",
                     }}>{v.label}</button>
                   ))}
