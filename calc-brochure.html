@@ -2128,8 +2128,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
         ctx.drawImage(img, 0, 0, canvasW, canvasH);
       } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
         const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
-        const nativeW = (ed.wIn / bleedW) * mult;
-        const nativeH = (ed.hIn / bleedH) * mult;
+        const nativeW = (ed && ed.wIn > 0 ? ed.wIn / bleedW : 1) * mult;
+        const nativeH = (ed && ed.hIn > 0 ? ed.hIn / bleedH : 1) * mult;
         const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
         ctx.drawImage(img, artPos(canvasW, drawW, tx.posX), artPos(canvasH, drawH, tx.posY), drawW, drawH);
       } else if (tx.fitMode === "cover") {
@@ -2811,8 +2811,8 @@ generate();
           ctx.drawImage(srcCanvas, 0, 0, canvasW, canvasH);
         } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
           const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
-          const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
-          const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
+          const nativeW = (ed && ed.wIn > 0 ? ed.wIn / bleedW : 1) * mult;
+          const nativeH = (ed && ed.hIn > 0 ? ed.hIn / bleedH : 1) * mult;
           const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
           ctx.drawImage(srcCanvas, artPos(canvasW, drawW, tx.posX), artPos(canvasH, drawH, tx.posY), drawW, drawH);
         } else if (tx.fitMode === "cover") {
@@ -3181,7 +3181,14 @@ generate();
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px 12px" }}>
               <div style={{ minWidth: 0, flex: "1 1 190px" }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Artwork Proof — {side === "front" ? fLabel : bLabel}</div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}
+                  {effectiveDims && effectiveDims.w > 0 && effectiveDims.h > 0
+                    ? <span style={{ marginLeft: 8, color: "rgba(255,255,255,.75)" }}>
+                        · your file: {(+effectiveDims.w).toFixed(2)}" × {(+effectiveDims.h).toFixed(2)}" (shown at actual size)
+                      </span>
+                    : <span style={{ marginLeft: 8, color: "#fbbf24", fontWeight: 600 }}>
+                        · couldn't read this file's size — it is being shown fitted to the sheet, not at actual size. Check it before approving.
+                      </span>}</div>
                 {window.ppsPdfRisks().length > 0 && <div style={{ fontSize: 11, color: "#fbbf24", fontWeight: 600, marginTop: 3, maxWidth: 520 }}>⚠ Uses {window.ppsPdfRisks().join(", ")} — effects a browser preview can render imperfectly. If anything differs from the file you exported, contact us before approving.</div>}
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", rowGap: 6, marginLeft: "auto" }}>
@@ -3345,8 +3352,12 @@ generate();
               {(() => {
                 const ed = effectiveDims;
                 const artSrc = rotatedUrl || currentArt.dataUrl;
-                const nativeW = ed ? ed.w / bleedW : 1;
-                const nativeH = ed ? ed.h / bleedH : 1;
+                // Zero dims are "unknown", not "zero inches": treating them literally drew the
+                // art at 0% and it vanished. Unknown falls back to sheet size, which the
+                // header now says out loud rather than passing it off as actual size.
+                const edOK = ed && ed.w > 0 && ed.h > 0;
+                const nativeW = edOK ? ed.w / bleedW : 1;
+                const nativeH = edOK ? ed.h / bleedH : 1;
                 // Positioned exactly the way the canvas renderers position it: the art is
                 // laid out at its true size relative to the sheet, and posX/posY choose
                 // where it sits in whatever space is left over. Sizing height from the
@@ -3540,8 +3551,12 @@ generate();
                 const sideColor = side === "front" ? frontColor : backColor;
                 const grayFilter = sideColor === "bw" ? "grayscale(1)" : "none";
                 const ed = effectiveDims;
-                const nativeW = ed ? ed.w / bleedW : 1;
-                const nativeH = ed ? ed.h / bleedH : 1;
+                // Zero dims are "unknown", not "zero inches": treating them literally drew the
+                // art at 0% and it vanished. Unknown falls back to sheet size, which the
+                // header now says out loud rather than passing it off as actual size.
+                const edOK = ed && ed.w > 0 && ed.h > 0;
+                const nativeW = edOK ? ed.w / bleedW : 1;
+                const nativeH = edOK ? ed.h / bleedH : 1;
                 // Positioned exactly the way the canvas renderers position it: the art is
                 // laid out at its true size relative to the sheet, and posX/posY choose
                 // where it sits in whatever space is left over. Sizing height from the
