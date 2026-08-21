@@ -4516,11 +4516,14 @@ update();
                               // order upload — it is a staff-only download (debug-gated, art modal only).
                               // Attaching it broke the add-to-cart / order upload flow.
                               files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
-                              onArtwork({ type: "files", list: files });
+                              onArtwork({ type: "files", list: files, approved: true });
                             }
                           } catch (err) {
                             console.error("Approval package generation failed:", err);
-                            alert("Failed to generate print-ready package: " + (err.message || err));
+                            alert("Failed to generate print-ready package: " + (err.message || err)
+                              + "\n\nApproval is what releases the job to production, so we can't take the "
+                              + "order until this succeeds. Try again, or send us the file and we'll proof it "
+                              + "for you.");
                           } finally {
                             setGeneratingPdf(false);
                             setGenProgress(null);
@@ -6199,6 +6202,25 @@ function App(){
   const handleAddToOrder = async () => {
     if (!result || result.error?.length || submitting) return;
     if (missingDest) { openShipping(); return; }
+    // Artwork must be approved before it can be ordered. Until now nothing
+    // enforced this: `approved` lives inside the artwork component and the only
+    // thing crossing to the parent was {type, list}, so an order placed without
+    // ever opening the proof was indistinguishable from an approved one. It
+    // also meant no approval package — no print-ready PDF, no preview, and no
+    // manifest recording the customer's crop, scale or reframe — reached Drive,
+    // leaving production with the raw upload and no record of what was agreed.
+    // Orders 87042 and 87045 are both that shape.
+    //
+    // Only files awaiting approval are blocked: "existing" is artwork already
+    // approved on a previous order (reorder), and "none" is a customer sending
+    // art later, neither of which has a proof to approve here.
+    if (artFiles && artFiles.type === "files" && !artFiles.approved) {
+      alert("Please approve your artwork proof before ordering.\n\n"
+        + "Open the proof in Artwork & Proofing, check your artwork against the bleed, "
+        + "trim and safety guides, then click APPROVE NOW.\n\n"
+        + "This is what we print from, so we need your sign-off on it.");
+      return;
+    }
     // Artwork integrity guard: pageTransforms must be a real object before we
     // serialize order metadata. An empty {} is fine (customer didn't open the
     // proof transform UI); undefined/non-object means something is wrong with

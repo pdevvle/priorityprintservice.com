@@ -76,6 +76,13 @@ for (const f of FILES) {
       comments: false,
       babelrc: false,
       configFile: false,
+      // Escape non-ASCII in string literals. Babel 7 did this by default;
+      // Babel 8 flipped the default, so an unpinned build silently emits
+      // literal — where every published calculator has \u2014 — identical at
+      // runtime, but it buries a real one-line diff under thousands of
+      // cosmetic ones and makes "is this byte-for-byte what shipped?"
+      // unanswerable. Pin it so the two Babel majors agree.
+      generatorOpts: { jsescOption: { minimal: false } },
     }).code;
   } catch (e) {
     console.error(`FAIL ${f}: babel error — ${String(e.message).split('\n')[0]}`);
