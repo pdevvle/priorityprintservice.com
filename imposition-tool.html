@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-01 · IMPOSE-V1.6</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-01 · IMPOSE-V1.7</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -176,6 +176,26 @@ function printableRect(sheet) {
   return { x0: mx, y0: my, x1: sheet.long - mx, y1: sheet.short - my };
 }
 
+// The full sheet edge (0,0)-(long,short). Used only when layout.fillSheet is
+// set — small saddle books that gang across the whole sheet for guillotine
+// cutting deliberately spill past the imageable area (see computeSaddleLayout).
+function fullSheetRect(sheet) { return { x0: 0, y0: 0, x1: sheet.long, y1: sheet.short }; }
+
+// The bound the block is placed/clamped within: printable image area normally,
+// full sheet in fill mode.
+function boundRect(layout) { return layout.fillSheet ? fullSheetRect(layout.sheet) : printableRect(layout.sheet); }
+
+// Per-gap gutter arrays for a layout: explicit layout.colGaps/rowGaps when set
+// (individual gutters), otherwise the uniform scalar layout.gutter filled in.
+// Uniform fill reproduces the pre-array behavior exactly.
+function gapArrays(layout) {
+  const cg = layout.colGaps || Array(Math.max(0, layout.across - 1)).fill(layout.gutter || 0);
+  const rg = layout.rowGaps || Array(Math.max(0, layout.down - 1)).fill(layout.gutter || 0);
+  return { cg, rg };
+}
+function sum(a) { return a.reduce((x, y) => x + y, 0); }
+
+
 function fits(n, dim, g, usable) { return n * dim + (n - 1) * g <= usable + EPS; }
 
 // allowedRot: which grid orientations to consider — [false, true] normally,
@@ -212,10 +232,12 @@ function bestGridForCount(target, pieceLong, pieceShort, sheet, gutters, allowed
 // Always clamped so the TRIM stays inside the printable image area.
 function blockOrigin(layout, offset, warnings) {
   const s = layout.sheet;
-  const totalW = layout.across * layout.cellW + (layout.across - 1) * layout.gutter;
-  const totalH = layout.down * layout.cellH + (layout.down - 1) * layout.gutter;
-  const P = printableRect(s);
-  const mode = (offset && offset.mode) || "jog";
+  const { cg, rg } = gapArrays(layout);
+  const totalW = layout.across * layout.cellW + sum(cg);
+  const totalH = layout.down * layout.cellH + sum(rg);
+  const P = boundRect(layout);
+  // fill-sheet layouts always centre on the full sheet (even outer margins).
+  const mode = layout.fillSheet ? "center" : (offset && offset.mode) || "jog";
   let x, y;
   if (mode === "center") {
     x = (s.long - totalW) / 2; y = (s.short - totalH) / 2;
@@ -230,13 +252,17 @@ function blockOrigin(layout, offset, warnings) {
   if (mode !== "center" && (Math.abs(cx - x) > EPS || Math.abs(cy - y) > EPS)) {
     warnings.push(`Layout offset clamped to keep the trim inside the printable area (${s.usableLong}×${s.usableShort}″).`);
   }
-  const clipped = [];
-  const b = layout.bleed;
-  if (cx - b < P.x0 - EPS) clipped.push("left");
-  if (cx + totalW + b > P.x1 + EPS) clipped.push("right");
-  if (cy - b < P.y0 - EPS) clipped.push("bottom");
-  if (cy + totalH + b > P.y1 + EPS) clipped.push("top");
-  if (clipped.length) warnings.push(`Outer bleed falls outside the printable area on the ${clipped.join("/")} edge(s) and will not image — cuts there may show paper white.`);
+  // In fill mode the spill past the imageable area is intentional (guillotine
+  // cutting), so the "bleed falls outside" warning is suppressed.
+  if (!layout.fillSheet) {
+    const clipped = [];
+    const b = layout.bleed;
+    if (cx - b < P.x0 - EPS) clipped.push("left");
+    if (cx + totalW + b > P.x1 + EPS) clipped.push("right");
+    if (cy - b < P.y0 - EPS) clipped.push("bottom");
+    if (cy + totalH + b > P.y1 + EPS) clipped.push("top");
+    if (clipped.length) warnings.push(`Outer bleed falls outside the printable area on the ${clipped.join("/")} edge(s) and will not image — cuts there may show paper white.`);
+  }
   return { x0: cx, y0: cy };
 }
 
@@ -257,28 +283,32 @@ function patternRot(pattern, manual, col, row, across) {
 }
 
 function buildCells(layout, opts) {
-  // Interior clip extends min(BLEED, gutter/2) toward a neighbour (butt-cut
-  // when gutter=0); perimeter clip always gets full BLEED.
-  const s = layout.sheet, w = layout.cellW, h = layout.cellH, g = layout.gutter;
+  // Per-gap gutters: cumulative column/row offsets, and each interior clip
+  // extends min(BLEED, thatGap/2) toward its neighbour (butt-cut when the gap
+  // is 0); perimeter clip always gets full BLEED. Uniform gutters reproduce
+  // the previous fixed-stride behaviour exactly.
+  const w = layout.cellW, h = layout.cellH;
+  const { cg, rg } = gapArrays(layout);
   const { x0, y0 } = blockOrigin(layout, opts && opts.offset, layout.warnings);
   const pattern = (opts && opts.pattern) || "straight";
   const manual = opts && opts.manualPattern;
   const b = layout.bleed;
-  const inner = Math.min(b, g / 2);
+  const colX = [0]; for (let c = 1; c < layout.across; c++) colX[c] = colX[c - 1] + w + cg[c - 1];
+  const rowY = [0]; for (let r = 1; r < layout.down; r++) rowY[r] = rowY[r - 1] + h + rg[r - 1];
+  const half = g => Math.min(b, g / 2);
   layout.cells = [];
   for (let row = 0; row < layout.down; row++) {
     for (let col = 0; col < layout.across; col++) {
-      const x = x0 + col * (w + g), y = y0 + row * (h + g);
+      const x = x0 + colX[col], y = y0 + rowY[row];
+      const left  = col === 0 ? b : half(cg[col - 1]);
+      const right = col === layout.across - 1 ? b : half(cg[col]);
+      const bot   = row === 0 ? b : half(rg[row - 1]);
+      const top   = row === layout.down - 1 ? b : half(rg[row]);
       layout.cells.push({
         col, row,
         patRot: patternRot(pattern, manual, col, row, layout.across),
         trim: { x, y, w, h },
-        clip: {
-          x: x - (col === 0 ? b : inner),
-          y: y - (row === 0 ? b : inner),
-          w: w + (col === 0 ? b : inner) + (col === layout.across - 1 ? b : inner),
-          h: h + (row === 0 ? b : inner) + (row === layout.down - 1 ? b : inner),
-        },
+        clip: { x: x - left, y: y - bot, w: w + left + right, h: h + bot + top },
       });
     }
   }
@@ -413,14 +443,10 @@ function computeSaddleLayout(pw, ph, opts) {
   // bleed never manufactures a gutter the operator didn't ask for. The
   // Gutter override still spaces spreads out explicitly when wanted.
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : [0];
-  let grid = null;
-  // Efficient mode: lay the signature out on the 13×27.5 oversize sheet and
-  // step-and-repeat as many identical signature copies as physically fit —
-  // fewer press passes for the same books. Each cell is a full copy of the
-  // signature (like the flats version, but the "piece" is a printer spread).
-  // Pricing basis stays the priced pages/side; only fires when 27.5 actually
-  // holds MORE copies than the priced 13×19 layout.
-  if (opts && opts.efficient) {
+  let grid = null, colGaps = null, rowGaps = null, fillSheet = false;
+
+  // Efficient mode (explicit oversize 13×27.5).
+  if (!grid && opts && opts.efficient) {
     const effGrid = bestPhysicalGrid(spL, spS, SHEETS["13x27.5"], gutters);
     if (effGrid && effGrid.a * effGrid.d > target) {
       sheet = SHEETS["13x27.5"]; grid = effGrid; efficient = true;
@@ -440,18 +466,38 @@ function computeSaddleLayout(pw, ph, opts) {
     mismatch = true;
     warnings.push(`MISMATCH: placing ${grid.a * grid.d} spread(s)/side but pricing assumed ${target}. Review before printing.`);
   }
-  if (grid.a * grid.d > 1) warnings.push(grid.g === 0
+
+  const pieceLong = Math.max(spreadW, spreadH), pieceShort = Math.min(spreadW, spreadH);
+  const cellW = grid.rotated ? pieceShort : pieceLong;
+  const cellH = grid.rotated ? pieceLong : pieceShort;
+
+  // ── Manual per-gap gutter override (from the signature-gutter editor) ──
+  // Sized to the current across×down grid; replaces the rule/uniform gaps.
+  const mCol = opts && Array.isArray(opts.saddleColGaps) ? opts.saddleColGaps : null;
+  const mRow = opts && Array.isArray(opts.saddleRowGaps) ? opts.saddleRowGaps : null;
+  if (mCol && mCol.length === grid.a - 1) colGaps = mCol.map(v => Math.max(0, +v || 0));
+  if (mRow && mRow.length === grid.d - 1) rowGaps = mRow.map(v => Math.max(0, +v || 0));
+  if (opts && opts.saddleFillSheet != null) fillSheet = !!opts.saddleFillSheet;
+
+  // Footprint must fit the physical sheet.
+  const cgA = colGaps || Array(Math.max(0, grid.a - 1)).fill(grid.g);
+  const rgA = rowGaps || Array(Math.max(0, grid.d - 1)).fill(grid.g);
+  const totalW = grid.a * cellW + sum(cgA), totalH = grid.d * cellH + sum(rgA);
+  if (totalW > sheet.long + EPS || totalH > sheet.short + EPS)
+    throw new Error(`Gutters make the ${grid.a}×${grid.d} layout ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ — larger than the ${sheet.label} sheet. Reduce gutters or copies.`);
+
+  if (!colGaps && !rowGaps && grid.a * grid.d > 1) warnings.push(grid.g === 0
     ? "Spreads butt (default) — one cut line between signatures, interior bleed cropped at it. Set a Gutter to space them instead."
     : `${grid.g}″ gutter between spreads.`);
-  const pieceLong = Math.max(spreadW, spreadH), pieceShort = Math.min(spreadW, spreadH);
+
   const layout = {
     sheet, calc: "saddle", pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
+    colGaps, rowGaps, fillSheet,
     imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
     pricedImp: imp,                 // pages per side the calculator priced
     mismatch, efficient, warnings,
-    cellW: grid.rotated ? pieceShort : pieceLong,
-    cellH: grid.rotated ? pieceLong : pieceShort,
+    cellW, cellH,
     booklet: {
       pw, ph, spreadW, spreadH,
       spreadsPerSide: grid.a * grid.d,
@@ -912,7 +958,7 @@ function freeRun(x, y, dx, dy, maxLen, P, obstacles) {
 }
 
 function drawMarks(page, layout, cells) {
-  const P = printableRect(layout.sheet);
+  const P = boundRect(layout);
   const obstacles = cells.map(c => c.clip);
   const black = PL.rgb(0, 0, 0);
   const gap = layout.bleed;
@@ -938,7 +984,7 @@ function drawMarks(page, layout, cells) {
 // (with the default lower-right jog that's the strip above the block).
 // Returns false when no band has room, so the caller can warn.
 function drawSlug(page, layout, font, info, cells) {
-  const P = printableRect(layout.sheet);
+  const P = boundRect(layout);
   const b = {
     x0: Math.min(...cells.map(c => c.clip.x)),
     y0: Math.min(...cells.map(c => c.clip.y)),
@@ -960,8 +1006,10 @@ function drawSlug(page, layout, font, info, cells) {
     info.jobName ? String(info.jobName).replace(/[^\x20-\x7E]/g, "?") : null,
     layout.booklet ? `pages ${layout.booklet.pw}x${layout.booklet.ph}in` : `${layout.pieceLong}x${layout.pieceShort}in`,
     layout.mismatch ? `MISMATCH ${layout.imp}-up placed vs ${layout.pricedImp}-up priced` : `${layout.imp}-up on ${layout.sheet.key}`,
-    layout.efficient ? `EFFICIENT 13x27.5 (priced ${layout.pricedImp}-up/13x19)` : null,
-    layout.gutter !== 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
+    layout.efficient ? `EFFICIENT 13x27.5 (priced ${layout.pricedImp}-up/13x19)`
+      : layout.fillSheet ? `FILL ${layout.across}x${layout.down} full-sheet (priced ${layout.pricedImp}-up)` : null,
+    (layout.colGaps || layout.rowGaps) ? "custom gutters"
+      : layout.gutter !== 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
     Math.abs(layout.bleed - BLEED) > EPS ? `bleed ${layout.bleed}in` : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
     info.date,
@@ -1016,7 +1064,7 @@ function bookletSlots(layout) {
 // the crop marks: they extend from just outside the spread's bleed box into
 // whatever clear space exists.
 function drawFoldMarks(page, layout, cells) {
-  const P = printableRect(layout.sheet);
+  const P = boundRect(layout);
   const obstacles = cells.map(c => c.clip);
   const mark = (x, y, dx, dy) => {
     const len = freeRun(x, y, dx, dy, MARK_LEN, P, obstacles);
@@ -1165,7 +1213,7 @@ async function imposeSaddle(artBytes, spec, layout) {
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
     if (i === 0) { const th = inspectPdfThreats(check); if (th.length) issues.push(`output carries active content: ${th.join("; ")}`); }
   });
-  if (!layout.mismatch && !layout.efficient && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
+  if (!layout.mismatch && !layout.efficient && !layout.fillSheet && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
     issues.push(`placed ${layout.imp} pages/side ≠ priced ${layout.pricedImp}`);
   // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that down
   if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && layout.sheet.key === "13x27.5"))
@@ -1192,6 +1240,10 @@ function layoutOpts(spec) {
     manualPattern: spec.manualPattern || null,
     forceRotated: spec.forceRotated || "auto",
     bleed: isFinite(spec.bleed) && spec.bleed !== null && spec.bleed !== "" ? +spec.bleed : null,
+    // Saddle signature gutters: manual per-gap overrides + full-sheet flag.
+    saddleColGaps: Array.isArray(spec.saddleColGaps) ? spec.saddleColGaps : null,
+    saddleRowGaps: Array.isArray(spec.saddleRowGaps) ? spec.saddleRowGaps : null,
+    saddleFillSheet: spec.saddleFillSheet == null ? null : !!spec.saddleFillSheet,
   };
 }
 
@@ -1706,6 +1758,9 @@ function App() {
   const [allowBestFit, setAllowBestFit] = useState(false);
   const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
   const [gutterMode, setGutterMode] = useState("auto");   // "auto" | fixed inches
+  const [sigColGaps, setSigColGaps] = useState(null);     // manual saddle column gaps (in), null = uniform/butt
+  const [sigRowGaps, setSigRowGaps] = useState(null);     // manual saddle row gaps (in), null = uniform/butt
+  const [sigFillSheet, setSigFillSheet] = useState(null); // manually place past the imageable area
   const [offsetMode, setOffsetMode] = useState("jog");    // jog lower-right 0.5″ | center | custom
   const [offsetRight, setOffsetRight] = useState(0.5);
   const [offsetBottom, setOffsetBottom] = useState(0.5);
@@ -1762,8 +1817,10 @@ function App() {
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
     bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps,
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
+    saddleColGaps: sigColGaps, saddleRowGaps: sigRowGaps, saddleFillSheet: sigFillSheet,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, addBleedPages]);
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, addBleedPages,
+       sigColGaps, sigRowGaps, sigFillSheet]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -1991,7 +2048,7 @@ function App() {
   const pendingCount = (rows || []).filter(rowPending).length;
 
   const lay = layoutInfo.layout;
-  const parityOk = lay && !lay.mismatch && !lay.efficient && (lay.booklet
+  const parityOk = lay && !lay.mismatch && !lay.efficient && !lay.fillSheet && (lay.booklet
     ? (lay.pricedImp < 2 || lay.imp === lay.pricedImp)   // imp:1 presets legitimately move to the 27.5 sheet
     : lay.imp === Math.round(lay.pricedImp));
 
@@ -2322,6 +2379,69 @@ function App() {
                 <span>Lay out on 13×27.5 (efficient mode) <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "more signature copies per sheet" : "multiple expands to fill the 27″ axis"}</span></span>
               </label>
             )}
+            {isSaddle && lay && lay.booklet && (() => {
+              const nc = Math.max(0, lay.across - 1), nr = Math.max(0, lay.down - 1);
+              const effCol = (sigColGaps && sigColGaps.length === nc) ? sigColGaps : (lay.colGaps || Array(nc).fill(lay.gutter || 0));
+              const effRow = (sigRowGaps && sigRowGaps.length === nr) ? sigRowGaps : (lay.rowGaps || Array(nr).fill(lay.gutter || 0));
+              const setCol = (i, v) => { const a = effCol.slice(); a[i] = v === "" ? 0 : +v; setSigColGaps(a); };
+              const setRow = (i, v) => { const a = effRow.slice(); a[i] = v === "" ? 0 : +v; setSigRowGaps(a); };
+              const custom = sigColGaps || sigRowGaps || sigFillSheet != null;
+              const tw = lay.across * lay.cellW + effCol.reduce((x, y) => x + y, 0);
+              const th = lay.down * lay.cellH + effRow.reduce((x, y) => x + y, 0);
+              const over = tw > lay.sheet.long + 1e-6 || th > lay.sheet.short + 1e-6;
+              return (
+                <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 8, background: "rgba(255,255,255,.02)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span className="lbl" style={{ margin: 0 }}>Signature gutters</span>
+                    <span style={{ fontSize: 11, color: over ? "#f87171" : "rgba(255,255,255,.4)" }}>
+                      block {tw.toFixed(2)}×{th.toFixed(2)}″ / sheet {lay.sheet.long}×{lay.sheet.short}″{over ? " — OVERFLOW" : ""}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginBottom: 7 }}>
+                    Set the gutter between each signature column/row independently. Turn on “fill full sheet” to allow gutters that push the layout past the imageable area (guillotine cutting).
+                  </div>
+                  {(nc > 0 || nr > 0) ? (
+                    <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
+                      {nc > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Column gaps (between spreads, in)</div>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                            {effCol.map((g, i) => (
+                              <input key={i} type="number" step="0.0625" min="0" value={g} style={{ width: 62, fontSize: 12 }}
+                                     onChange={e => setCol(i, e.target.value)} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {nr > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Row gaps (between rows, in)</div>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                            {effRow.map((g, i) => (
+                              <input key={i} type="number" step="0.0625" min="0" value={g} style={{ width: 62, fontSize: 12 }}
+                                     onChange={e => setRow(i, e.target.value)} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)" }}>Single spread per side — no inter-signature gutters to set. Raise copies (fill rules / efficient) to gang more.</div>
+                  )}
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
+                    <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                      <input type="checkbox" checked={sigFillSheet == null ? !!lay.fillSheet : sigFillSheet}
+                             onChange={e => setSigFillSheet(e.target.checked)} style={{ width: "auto" }} />
+                      Fill full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>(place past the imageable area)</span>
+                    </label>
+                    {custom && (
+                      <button type="button" className="imp-btn sec" style={{ padding: "3px 10px", fontSize: 12 }}
+                              onClick={() => { setSigColGaps(null); setSigRowGaps(null); setSigFillSheet(null); }}>Reset to rules</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
             <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
               <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
               Crop marks + slug (inside printable area, as space allows)
@@ -2345,7 +2465,11 @@ function App() {
                   <div>Press sheet: <b>{lay.sheet.label}</b></div>
                   {lay.booklet ? (
                     <div>Spreads: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.booklet.spreadsPerSide}/side</b> ({lay.imp} pages/side){" "}
-                      <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}/SIDE`}</span>
+                      {lay.efficient
+                        ? <span className="imp-badge ok">13×27.5 EFFICIENT — PRICED {lay.pricedImp}/SIDE</span>
+                        : lay.fillSheet
+                        ? <span className="imp-badge warn">FULL-SHEET FILL {lay.across}×{lay.down} — PAST IMAGEABLE AREA</span>
+                        : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}/SIDE`}</span>}
                     </div>
                   ) : (
                     <div>Grid: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.imp}-up</b>{" "}
