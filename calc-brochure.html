@@ -3244,7 +3244,21 @@ generate();
                     if (onArtwork) {
                       const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                       const files = [];
-                      if (rawFileRef.current) files.push(rawFileRef.current);
+                      // Every pristine original the customer gave us, byte-identical.
+                      // rawFileRef only remembers the last file the main drop zone
+                      // processed: art uploaded through the per-side slots never set it,
+                      // so a front+back order could reach production with one side's
+                      // source file missing — or, slot-only, with no original at all.
+                      const _seenOrig = new Set();
+                      const _pushOrig = (f) => {
+                        if (!f) return;
+                        const k = f.name + "|" + f.size;
+                        if (_seenOrig.has(k)) return;
+                        _seenOrig.add(k); files.push(f);
+                      };
+                      _pushOrig(rawFileRef.current);
+                      _pushOrig(frontArt && frontArt.file);
+                      _pushOrig(backArt && backArt.file);
                       if (pkg.printReadyBlob) files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
                       const sideNames = ["front", "back"];
                       pkg.previewBlobs.forEach((b, i) => {

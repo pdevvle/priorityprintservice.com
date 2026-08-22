@@ -2773,6 +2773,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const pdfDocRef = useRef(null); // holds the pdf.js document for hi-res re-rendering
   const slotFilesRef = useRef({}); // { slotIndex: File } — original files for per-slot uploads
   const rawFileRef = useRef(null); // holds the original uploaded File for the raw deliverable
+  const rawFilesRef = useRef([]); // all originals from a multi-file select — rawFileRef alone forgets files 2..N
   const fileInputRef = useRef(null);
   const dragRef = useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
   const [approvalPkg, setApprovalPkg] = useState(null); // { printReadyBlob, previewBlobs[], manifestBlob, skippedGeneration }
@@ -3859,6 +3860,7 @@ update();
       }
       // Store raw file for the 4-deliverable package
       rawFileRef.current = fileList[0];
+      rawFilesRef.current = Array.from(fileList);
       if (onArtwork) onArtwork({ type: "files", list: [fileList[0]] });
       setSlotsOpen(true);
       setArtApproved(false); setApprovalPkg(null);
@@ -3885,6 +3887,7 @@ update();
     pdfDocRef.current = null;
     slotFilesRef.current = {};
     rawFileRef.current = null;
+    rawFilesRef.current = [];
     if (onArtwork) onArtwork({ type: "none" });
     if (onCoverArt) onCoverArt(null);
   }
@@ -4350,7 +4353,23 @@ update();
                           if (onArtwork) {
                             const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
                             const files = [];
-                            if (rawFileRef.current) files.push(rawFileRef.current);
+                            // Every pristine original the customer gave us, byte-identical. Until now
+                            // only rawFileRef (the FIRST file of a bulk select) survived: files 2..N
+                            // of a multi-image upload, and every per-slot upload, reached production
+                            // only as re-encoded compositions with no source file behind them.
+                            const _seenOrig = new Set();
+                            const _pushOrig = (f) => {
+                              if (!f) return;
+                              const k = f.name + "|" + f.size;
+                              if (_seenOrig.has(k)) return;
+                              _seenOrig.add(k); files.push(f);
+                            };
+                            _pushOrig(rawFileRef.current);
+                            (rawFilesRef.current || []).forEach(_pushOrig);
+                            Object.keys(slotFilesRef.current || {}).sort((a, b) => a - b).forEach(sk => {
+                              const sf = slotFilesRef.current[sk];
+                              if (sf) _pushOrig(new File([sf], `page_${String(Number(sk) + 1).padStart(3, "0")}_${sf.name}`, { type: sf.type }));
+                            });
                             if (!pkg.skippedGeneration && pkg.printReadyBlob) {
                               files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
                             }
