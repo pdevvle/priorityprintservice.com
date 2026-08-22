@@ -150,13 +150,15 @@ window.ppsAnalyzePdfRisks = async function (doc) {
      Set here rather than from CC so plain CSS rules can reach them too. */
   :root{
     --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
-    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#94a3b8;
+    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#64748b;
     --bp-btn:#f1f4f8; --bp-scrim:rgba(15,23,42,.55);
+    --bp-warn:#92400e; --bp-info:#1d4ed8; --bp-on-dark:rgba(255,255,255,.72);
   }
   :root[data-pps-theme="dark"]{
     --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
     --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
     --bp-btn:#0f151d; --bp-scrim:rgba(2,6,12,.66);
+    --bp-warn:#f0a830; --bp-info:#60a5fa; --bp-on-dark:rgba(255,255,255,.72);
   }
   /* The coupon's modal contents are authored in the dark design (hardcoded
      white text/controls). Pin the modal's token scope to the dark palette in
@@ -1361,8 +1363,8 @@ const PPS_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEwAAABMCAIAAABI
 // place (pps_applyTheme) — components read CC/ST at render time, so a re-render picks
 // the new values up without threading a theme prop through every component.
 const PALETTES = {
-  light: { dark:"#0f172a", mid:"#475569", light:"#94a3b8", bg:"#f6f7f9", white:"#fff",
-           border:"#e3e8ef", red:"#dc2626", track:"#f1f4f8", errBg:"#fef2f2", errBorder:"#fecaca",
+  light: { dark:"#0f172a", mid:"#475569", light:"#64748b", bg:"#f6f7f9", white:"#fff",
+           border:"#e3e8ef", red:"#b91c1c", track:"#f1f4f8", errBg:"#fef2f2", errBorder:"#fecaca",
            heroBg:"#0f172a", rowHi:"#f0f9ff", tint:"#eff6ff", tintBorder:"#cfe6ff" },
   dark:  { dark:"#e6edf6", mid:"#9fb0c6", light:"#7183a0", bg:"#0d1117", white:"#161b22",
            border:"#2a3340", red:"#f87171", track:"#0f151d", errBg:"#2a1416", errBorder:"#5b2b2f",
@@ -1487,7 +1489,7 @@ function Sec({title,open,onToggle,children,badge,subtitle,step,summary,headerFie
           take the slack and sit right beside it, reading as a continuation of the
           heading. Fixed-width fields overflowed narrow phones. */}
       <button type="button" onClick={onToggle} aria-expanded={open} style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:_hf?"0 0 auto":1,minWidth:0,textAlign:"left",padding:`${_pad}px 0 ${_pad}px ${_padX}px`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
-        {step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}
+        {step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?"#0060cc":CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}
         <div style={{flex:_hf?"0 0 auto":1,minWidth:0}}><div style={{fontFamily:"var(--pps-display)",fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div>
       </button>
       {_hf&&<div style={{flex:"1 1 auto",minWidth:40,padding:m?"0 4px 0 8px":"0 8px 0 10px",marginTop:subtitle?1:0}}>{headerField}</div>}
@@ -2306,7 +2308,7 @@ function InfoTip({ children, text, dark }) {
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <span style={{ display: "inline-flex", alignItems: "center" }}>
         {children}
-        <button ref={qRef} type="button" aria-label="More information" aria-expanded={open} onClick={() => setOpen(o => !o)} style={{ marginLeft: 4, width: 14, height: 14, border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, background: dark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.08)", color: dark ? "rgba(255,255,255,.5)" : "rgba(0,0,0,.4)", flexShrink: 0 }}>?</button>
+        <button ref={qRef} type="button" aria-label="More information" aria-expanded={open} onClick={() => setOpen(o => !o)} style={{ marginLeft: 4, width: 14, height: 14, border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, background: dark ? "rgba(255,255,255,.16)" : "rgba(0,0,0,.08)", color: dark ? "rgba(255,255,255,.78)" : "rgba(0,0,0,.66)", flexShrink: 0 }}>?</button>
       </span>
       {open && (
         <div style={{
@@ -2392,7 +2394,7 @@ function RichTip({ children, tipKey, title, content, dark, media }) {
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <span style={{ display: "inline-flex", alignItems: "center" }}>
         {children}
-        <button type="button" aria-label="More information" aria-expanded={open} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }} style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: "inherit", background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : CK.cyan, flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</button>
+        <button type="button" aria-label="More information" aria-expanded={open} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }} style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: "inherit", background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : "#0060cc", flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</button>
       </span>
       {open && <Float>
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 99999 }} />
@@ -3809,7 +3811,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               background:"rgba(255,255,255,.06)", color:"rgba(255,255,255,.5)",
             }}>+</button>
           </div>
-          <span style={{ fontSize:10, fontWeight:600, color:"rgba(255,255,255,.4)", minWidth:32, textAlign:"center" }}>{artScale}%</span>
+          <span style={{ fontSize:10, fontWeight:600, color:"rgba(255,255,255,.58)", minWidth:32, textAlign:"center" }}>{artScale}%</span>
         </div>
       )}
       {fitMode === "stretch" && (
@@ -3960,7 +3962,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   </button>
                 </div>
                 {needsApproval && (
-                  <div style={{ fontSize: 11, color: "#b91c1c", lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 11, color: CC.red, lineHeight: 1.4 }}>
                     Open proof to review bleed, trim, safety and approve artwork
                   </div>
                 )}
@@ -4040,13 +4042,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               <div style={{ flex:1, minWidth:180, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <div>
                   <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>Artwork Proof</div>
-                  <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
+                  <div style={{ fontSize:11, color:"rgba(255,255,255,.58)" }}>
                     {dims.w}″ × {dims.h}″ · {displayPages.length} pages
-                    {shouldRotate && <span style={{ color:"#60a5fa", marginLeft:6 }}>(auto-rotated)</span>}
+                    {shouldRotate && <span style={{ color:"#93c5fd", marginLeft:6 }}>(auto-rotated)</span>}
                     {window.ppsPdfRisks().length > 0 && <div style={{ color:"#fbbf24", fontWeight:600, marginTop:3, maxWidth:520 }}>⚠ Uses {window.ppsPdfRisks().join(", ")} — effects a browser preview can render imperfectly. If anything differs from the file you exported, contact us before approving.</div>}
                   </div>
                 </div>
-                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.5)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
+                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"#262b33", border:"1px solid #454c58", color:"#e2e6ec", WebkitAppearance:"none", appearance:"none", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
               </div>
               {/* Proof approval + fit controls row */}
               <div style={{ width:"100%", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
@@ -4342,7 +4344,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                           <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"rgba(255,255,255,.5)", background:"rgba(0,0,0,.5)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>Rendering 300 DPI…</div>
                         )}
                         {!proofPage.isBlank && hiResValid && (
-                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"rgba(255,255,255,.4)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>300 DPI</div>
+                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"rgba(255,255,255,.58)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:3, zIndex:2 }}>300 DPI</div>
                         )}
                         {/* Guide overlays — togglable */}
                         {showGuides && !proofPage.isBlank && (
@@ -4430,7 +4432,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                       {displayPages.map((p, i) => (
                         <div key={i} className="bp-thumb" style={{ cursor:"pointer", outline: i===proofIdx ? `2px solid ${CK.cyan}` : "none", borderRadius:3 }} onClick={() => !p.isBlank && setProofIdx(i)}>
                           <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.3 : i===proofIdx ? 1 : 0.7, border: p.isBlank ? "1px dashed rgba(255,255,255,.2)" : undefined }} />
-                          <span style={{ color: i===proofIdx ? CK.cyan : p.isBlank ? CK.yellow : "rgba(255,255,255,.4)" }}>{p.label}</span>
+                          <span style={{ color: i===proofIdx ? CK.cyan : p.isBlank ? "#fbbf24" : "rgba(255,255,255,.6)" }}>{p.label}</span>
                         </div>
                       ))}
                     </div>
@@ -4483,12 +4485,12 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
               <div style={{ flex:1, minWidth:180, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <div>
                   <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>Book Preview</div>
-                  <div style={{ fontSize:11, color:"rgba(255,255,255,.4)" }}>
+                  <div style={{ fontSize:11, color:"rgba(255,255,255,.58)" }}>
                     {dims.w}″ × {dims.h}″ · {displayPages.length} pages · Coupon Book
-                    {reconcileInfo?.type === "padded" && <InfoTip dark text={`Coupon books are filled to your ordered page count. Your file has ${reconcileInfo.raw} pages, so ${reconcileInfo.count} blank page${reconcileInfo.count > 1 ? "s are" : " is"} added to reach ${reconcileInfo.target}.`}><span style={{ color: CK.yellow, marginLeft: 6 }}>({reconcileInfo.count} blank{reconcileInfo.count > 1 ? "s" : ""} added)</span></InfoTip>}
+                    {reconcileInfo?.type === "padded" && <InfoTip text={`Coupon books are filled to your ordered page count. Your file has ${reconcileInfo.raw} pages, so ${reconcileInfo.count} blank page${reconcileInfo.count > 1 ? "s are" : " is"} added to reach ${reconcileInfo.target}.`}><span style={{ color: "var(--bp-warn)", marginLeft: 6 }}>({reconcileInfo.count} blank{reconcileInfo.count > 1 ? "s" : ""} added)</span></InfoTip>}
                   </div>
                 </div>
-                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"none", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.5)", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+                <button type="button" onClick={() => setActiveModal(null)} style={{ background:"#262b33", border:"1px solid #454c58", color:"#e2e6ec", WebkitAppearance:"none", appearance:"none", width:32, height:32, borderRadius:8, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
               </div>
               {/* Cover / Pages toggle */}
               <div style={{ width:"100%", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", borderTop:"1px solid rgba(255,255,255,.06)", paddingTop:10 }}>
@@ -4510,7 +4512,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                   ? <BookClosed3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spineW={spineW} rotateX={rot.x} rotateY={rot.y} scale={exScale} fitMode="stretch" />
                   : <BookOpen3D pages={trimmedPages.length ? trimmedPages : displayPages} bookW={exBookW} bookH={exBookH} spread={spread} scale={exScale} rotateX={-5} rotateY={0} fitMode="stretch" />
                 }
-                {previewMode === "closed" && <div style={{ position:"absolute", bottom:10, left:"50%", transform:"translateX(-50%)", fontSize:10, color:"rgba(255,255,255,.3)", letterSpacing:".08em" }}>↔ Drag to rotate</div>}
+                {previewMode === "closed" && <div style={{ position:"absolute", bottom:10, left:"50%", transform:"translateX(-50%)", fontSize:10, color:"rgba(255,255,255,.55)", letterSpacing:".08em" }}>↔ Drag to rotate</div>}
               </div>
 
               {previewMode === "open" && (
@@ -4528,7 +4530,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                 {displayPages.map((p, i) => (
                   <div key={i} className="bp-thumb">
                     <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.5 : 1, border: p.isBlank ? "1px dashed rgba(255,255,255,.2)" : undefined }} />
-                    <span style={{ color: p.isBlank ? CK.yellow : "rgba(255,255,255,.4)" }}>{p.label}</span>
+                    <span style={{ color: p.isBlank ? "#fbbf24" : "rgba(255,255,255,.6)" }}>{p.label}</span>
                   </div>
                 ))}
               </div>
@@ -6304,7 +6306,7 @@ function App(){
             <div><Panel result={result} debugUnlocked={debugUnlocked} coupon={coupon} totalRef={setTotalEl}/></div>
           </div>
           {/* CTA directly under the panel; the old duplicate below the table is gone. */}
-          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",marginTop:16,padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
+          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{width:"100%",marginTop:16,padding:"17px 18px",borderRadius:10,border:"none",background:(result?.error?.length||submitting)?CC.mid:CK.cyan,color:"#fff",fontSize:16.5,fontWeight:750,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",letterSpacing:".01em",boxShadow:(result?.error?.length||submitting)?"none":"0 4px 14px rgba(0,126,255,.38)",transition:"transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s"}} disabled={!!result?.error?.length||submitting}>{submitting&&uploadProgress?<div><div style={{fontSize:12}}>{uploadProgress.phase==="upload"?`Uploading… ${uploadProgress.pct}%`:"Adding…"}</div><div style={{width:"100%",height:3,borderRadius:2,background:"rgba(255,255,255,.2)",overflow:"hidden",marginTop:4}}><div style={{height:"100%",borderRadius:2,background:"#fff",transition:"width .15s",width:uploadProgress.phase==="upload"?`${((uploadProgress.fileIdx/uploadProgress.fileCount)+(uploadProgress.pct/100/uploadProgress.fileCount))*100}%`:"100%"}}/></div></div>:submitting?"Uploading…":"Add to Order"}</button>
           {/* Shipping is required to place the order, but the CTA keeps its own label —
               a button that renames itself to describe a missing field reads as broken.
               Pressing it jumps to the shipping section. */}
@@ -6320,7 +6322,7 @@ function App(){
             {shareCopied ? "✓ Link copied to clipboard" : "Save configuration"}
           </button>
           {switchTargets.length > 0 && <div style={{display:"flex",gap:6,marginTop:8}}>
-            {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} target="_blank" rel="noopener" style={{flex:1,display:"block",padding:"8px 6px",borderRadius:9,border:`1px solid ${CC.tintBorder}`,background:CC.tint,color:CK.cyan,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}>
+            {switchTargets.map(t => <a key={t.type} href={buildSwitchUrl(t.url)} target="_blank" rel="noopener" style={{flex:1,display:"block",padding:"8px 6px",borderRadius:9,border:`1px solid ${CC.tintBorder}`,background:CC.tint,color:"#0060cc",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",transition:"all .2s"}}>
               Try as {t.label} →
             </a>)}
           </div>}
@@ -6413,9 +6415,9 @@ function App(){
             </div>}
           </div>
           <button type="button" onClick={handleAddToOrder} disabled={submitting}
-            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.light:CK.cyan,
+            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.mid:CK.cyan,
               color:"#fff",fontSize:14,fontWeight:750,cursor:submitting?"default":"pointer",fontFamily:"inherit",
-              opacity:submitting?.5:1,whiteSpace:"nowrap"}}>
+              whiteSpace:"nowrap"}}>
             {submitting?"Adding…":"Add to Order"}
           </button>
         </div></Float>;
@@ -6451,7 +6453,7 @@ function App(){
             <Panel result={result} compact debugUnlocked={debugUnlocked} coupon={coupon} expanded={mobExpanded} onToggleExpand={()=>setMobExpanded(p=>!p)}/>
             {debugUnlocked&&<div style={{fontSize:8,textAlign:"center",color:showDebug?CK.cyan:CC.light,marginTop:2,letterSpacing:".5px",textTransform:"uppercase",fontWeight:600,cursor:"pointer"}} onClick={()=>setShowDebug(p=>!p)}>{showDebug?"▼ Hide Debug":"▲ Debug"}</div>}
           </div>
-          <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.light:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",opacity:(result?.error?.length||submitting)?.5:1,whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined,width:mobExpanded?"100%":undefined}}
+          <button type="button" onClick={handleAddToOrder} style={{flexShrink:0,padding:"12px 18px",borderRadius:6,border:"none",background:(result?.error?.length||submitting)?CC.mid:CK.cyan,color:"#fff",fontSize:14,fontWeight:700,cursor:(result?.error?.length||submitting)?"default":"pointer",fontFamily:"inherit",whiteSpace:"nowrap",minWidth:submitting&&uploadProgress?140:undefined,width:mobExpanded?"100%":undefined}}
             disabled={!!result?.error?.length||submitting}>
             {submitting && uploadProgress ? (
               <div>

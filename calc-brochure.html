@@ -111,13 +111,15 @@ window.ppsAnalyzePdfRisks = async function (doc) {
      these tokens serve the shared chrome pieces (.bp-prooflabel etc.). */
   :root{
     --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
-    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#94a3b8;
+    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#64748b;
     --bp-btn:#f1f4f8; --bp-scrim:rgba(15,23,42,.55);
+    --bp-warn:#92400e; --bp-info:#1d4ed8; --bp-on-dark:rgba(255,255,255,.72);
   }
   :root[data-pps-theme="dark"]{
     --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
     --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
     --bp-btn:#0f151d; --bp-scrim:rgba(2,6,12,.66);
+    --bp-warn:#f0a830; --bp-info:#60a5fa; --bp-on-dark:rgba(255,255,255,.72);
   }
   /* Segmented control, matching the form's Pil: inset track with a rounded thumb
      rather than butted-together buttons, so the modals read as the same system. */
@@ -369,8 +371,8 @@ const CK={cyan:"#007eff",magenta:"#ec008c",yellow:"#f5a623",key:"#0f172a",cyanLi
 // place (pps_applyTheme) — components read CC/ST at render time, so a re-render picks
 // the new values up without threading a theme prop through every component.
 const PALETTES = {
-  light: { dark:"#0f172a", mid:"#475569", light:"#94a3b8", bg:"#f6f7f9", white:"#fff",
-           border:"#e3e8ef", red:"#dc2626", track:"#f1f4f8", errBg:"#fef2f2", errBorder:"#fecaca",
+  light: { dark:"#0f172a", mid:"#475569", light:"#64748b", bg:"#f6f7f9", white:"#fff",
+           border:"#e3e8ef", red:"#b91c1c", track:"#f1f4f8", errBg:"#fef2f2", errBorder:"#fecaca",
            heroBg:"#0f172a", rowHi:"#f0f9ff", tint:"#eff6ff", tintBorder:"#cfe6ff" },
   dark:  { dark:"#e6edf6", mid:"#9fb0c6", light:"#7183a0", bg:"#0d1117", white:"#161b22",
            border:"#2a3340", red:"#f87171", track:"#0f151d", errBg:"#2a1416", errBorder:"#5b2b2f",
@@ -1696,7 +1698,7 @@ function FoldRenderer({ foldKey, frontSrc, backSrc, frontDims, backDims, longEdg
     foldApplyView(sceneRef.current, foldKey, viewIdx || 0, flipped ? -1 : 1);
   }, [viewIdx, foldDir, flipped]);
 
-  if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.4)" }}>Flat — no fold preview</div>;
+  if (!fold) return <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,.58)" }}>Flat — no fold preview</div>;
 
   return (
     <div className="fold-viewport" style={{ minHeight: mob ? 220 : 350, position: "relative" }}>
@@ -2180,7 +2182,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
         <button type="button" onClick={undoTx} disabled={txHistory.length === 0} title={txHistory.length ? `Undo last art change (${txHistory.length} step${txHistory.length === 1 ? "" : "s"} available)` : "No changes to undo"} style={{
           padding: "6px 12px", fontSize: 10, fontWeight: 600, border: "none", borderLeft: "1px solid rgba(255,255,255,.08)", cursor: txHistory.length ? "pointer" : "default", fontFamily: "inherit",
           background: "rgba(255,255,255,.06)",
-          color: txHistory.length ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.2)",
+          color: txHistory.length ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.42)",
         }}>↶ Undo</button>
       </div>
       {(fitMode === "crop" || fitMode === "scale") && (
@@ -2200,7 +2202,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
             <button type="button" onClick={() => setArtScale(s => Math.max(10, s - 5))} style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>−</button>
             <button type="button" onClick={() => setArtScale(s => Math.min(300, s + 5))} style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit", background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>+</button>
           </div>
-          <span style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,.4)", minWidth: 32, textAlign: "center" }}>{artScale}%</span>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,.58)", minWidth: 32, textAlign: "center" }}>{artScale}%</span>
         </div>
       )}
     </div>
@@ -3105,7 +3107,7 @@ generate();
             const tooSmall2 = panelSize2 < 2;
             const throatExceeded2 = foldDir === "short" && longEdge > 13;
             return <>
-              <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall2 || throatExceeded2 ? "#fef2f2" : CC.tint, borderRadius: 9, fontSize: 11, color: tooSmall2 || throatExceeded2 ? "#dc2626" : CC.mid, border: tooSmall2 || throatExceeded2 ? "1px solid #f5cccc" : "none" }}>
+              <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall2 || throatExceeded2 ? "#fef2f2" : CC.tint, borderRadius: 9, fontSize: 11, color: tooSmall2 || throatExceeded2 ? "#b91c1c" : CC.mid, border: tooSmall2 || throatExceeded2 ? "1px solid #f5cccc" : "none" }}>
                 Folded size: <strong>{fmtInch(staticDim2)}" × {fmtInch(panelSize2)}"</strong> ({panels} panels)
                 {tooSmall2 && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
                 {throatExceeded2 && <span style={{marginLeft:8,fontWeight:700}}>— Cannot fold, unfolded edge exceeds 13 inches</span>}
@@ -3205,7 +3207,7 @@ generate();
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px 12px" }}>
               <div style={{ minWidth: 0, flex: "1 1 190px" }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Artwork Proof — {side === "front" ? fLabel : bLabel}</div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.58)" }}>{longEdge}" × {shortEdge}" flat{panels > 1 ? ` · ${panels} panels (${foldType})` : ""}
                   {effectiveDims && effectiveDims.w > 0 && effectiveDims.h > 0
                     ? <span style={{ marginLeft: 8, color: "rgba(255,255,255,.75)" }}>
                         · your file: {(+effectiveDims.w).toFixed(2)}" × {(+effectiveDims.h).toFixed(2)}" (shown at actual size)
@@ -3275,10 +3277,10 @@ generate();
                 }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
                 {/* Viewport zoom controls */}
                 <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.04)" }}>
-                  <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>−</button>
+                  <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"rgba(255,255,255,.42)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>−</button>
                   <span style={{ fontSize:10.5, fontWeight:600, color:"rgba(255,255,255,.65)", minWidth:38, textAlign:"center", letterSpacing:".02em" }}>{Math.round(vpScale*100)}%</span>
-                  <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"rgba(255,255,255,.2)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>+</button>
-                  <button type="button" onClick={vpReset} disabled={vpScale===VP_FIT && vpX===0 && vpY===0} title="Fit page" style={{padding:"4px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid rgba(255,255,255,.12)",marginLeft:2,borderRadius:0,cursor:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"rgba(255,255,255,.2)":"rgba(255,255,255,.55)",fontFamily:"inherit"}}>⛶</button>
+                  <button type="button" onClick={() => vpZoomBy(VP_STEP)} disabled={vpScale>=VP_MAX} title="Zoom in" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale>=VP_MAX?"default":"pointer",background:"transparent",color:vpScale>=VP_MAX?"rgba(255,255,255,.42)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>+</button>
+                  <button type="button" onClick={vpReset} disabled={vpScale===VP_FIT && vpX===0 && vpY===0} title="Fit page" style={{padding:"4px 8px",fontSize:11,lineHeight:1,fontWeight:600,border:"none",borderLeft:"1px solid rgba(255,255,255,.12)",marginLeft:2,borderRadius:0,cursor:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"default":"pointer",background:"transparent",color:(vpScale===VP_FIT&&vpX===0&&vpY===0)?"rgba(255,255,255,.42)":"rgba(255,255,255,.55)",fontFamily:"inherit"}}>⛶</button>
                 </div>
                 <button type="button" onClick={() => { setShowMagnifier(m => !m); if (showMagnifier) setMagPos(null); }} title="Magnifier loupe" style={{
                   padding: "5px 10px", fontSize: 12, border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
@@ -3302,7 +3304,7 @@ generate();
                   padding: "5px 10px", fontSize: 11, fontWeight: 700, border: "1px solid rgba(251,191,36,.4)", borderRadius: 4, cursor: generatingPdf ? "wait" : "pointer", fontFamily: "inherit",
                   background: "rgba(251,191,36,.12)", color: "#fbbf24",
                 }}>🔧 {generatingPdf ? "Generating…" : "Generate"}</button>}
-                <button type="button" onClick={() => setProofOpen(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,.15)", color: "rgba(255,255,255,.5)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                <button type="button" onClick={() => setProofOpen(false)} style={{ background: "#262b33", border: "1px solid #454c58", color: "#e2e6ec", WebkitAppearance: "none", appearance: "none", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
               </div>
             </div>
             {/* Transform controls */}
@@ -3670,12 +3672,12 @@ generate();
           <div style={{ padding: "10px 16px", background: "rgba(0,0,0,.3)", borderBottom: "1px solid rgba(255,255,255,.06)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexShrink: 0 }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Fold Preview</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.58)" }}>
                 {longEdge}" × {shortEdge}" {panels > 1 ? `· ${panels} panels` : "flat"}
                 {frontArt && !backArt && <span style={{ color: "#f59e0b", marginLeft: 6 }}>(back side blank)</span>}
               </div>
             </div>
-            <button type="button" onClick={() => setPreviewOpen(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,.15)", color: "rgba(255,255,255,.5)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
+            <button type="button" onClick={() => setPreviewOpen(false)} style={{ background: "#262b33", border: "1px solid #454c58", color: "#e2e6ec", WebkitAppearance: "none", appearance: "none", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
           </div>
 
           {(() => {
@@ -4004,7 +4006,7 @@ function Sec({title,open,onToggle,children,badge,subtitle,step,summary,headerFie
           take the slack and sit right beside it, reading as a continuation of the
           heading. Fixed-width fields overflowed narrow phones. */}
       <button type="button" onClick={onToggle} aria-expanded={open} style={{display:"flex",alignItems:subtitle?"flex-start":"center",gap:m?10:12,flex:_hf?"0 0 auto":1,minWidth:0,textAlign:"left",padding:`${_pad}px 0 ${_pad}px ${_padX}px`,background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"inherit"}}>
-        {step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?CK.cyan:CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}
+        {step&&<span style={{flex:"none",width:22,height:22,borderRadius:99,background:open?"#0060cc":CC.track,border:open?"none":`1px solid ${CC.border}`,color:open?"#fff":CC.mid,fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"background .18s ease, color .18s ease",marginTop:subtitle?1:0}}>{step}</span>}
         <div style={{flex:_hf?"0 0 auto":1,minWidth:0}}><div style={{fontFamily:"var(--pps-display)",fontWeight:650,color:CC.dark,fontSize:"inherit",letterSpacing:"-0.01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{title}</div>{subtitle&&<div style={ST.secSub}>{subtitle}</div>}</div>
       </button>
       {_hf&&<div style={{flex:"1 1 auto",minWidth:40,padding:m?"0 4px 0 8px":"0 8px 0 10px",marginTop:subtitle?1:0}}>{headerField}</div>}
@@ -4144,7 +4146,7 @@ function RichTip({ children, tipKey, title, content, dark }) {
     <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <span style={{ display: "inline-flex", alignItems: "center" }}>
         {children}
-        <button type="button" aria-label="More information" aria-expanded={open} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }} style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: "inherit", background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : CK.cyan, flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</button>
+        <button type="button" aria-label="More information" aria-expanded={open} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }} style={{ marginLeft: 4, width: 16, height: 16, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: "inherit", background: dark ? "rgba(255,255,255,.15)" : CK.cyan+"22", color: dark ? "rgba(255,255,255,.6)" : "#0060cc", flexShrink: 0, border: `1px solid ${dark ? "rgba(255,255,255,.1)" : CK.cyan+"44"}` }}>?</button>
       </span>
       {open && <Float>
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 99999 }} />
@@ -5482,7 +5484,7 @@ function App() {
               const tooSmall = panelSize < 2;
               const throatExceeded = foldDir === "short" && dimLong > 13;
               return <>
-                <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall || throatExceeded ? "#fef2f2" : CC.tint, borderRadius: 9, fontSize: 11, color: tooSmall || throatExceeded ? "#dc2626" : CC.mid, border: tooSmall || throatExceeded ? "1px solid #f5cccc" : "none" }}>
+                <div style={{ marginTop: 8, padding: "8px 12px", background: tooSmall || throatExceeded ? "#fef2f2" : CC.tint, borderRadius: 9, fontSize: 11, color: tooSmall || throatExceeded ? "#b91c1c" : CC.mid, border: tooSmall || throatExceeded ? "1px solid #f5cccc" : "none" }}>
                   Folded size: <strong>{fmtInch(staticDim)}" × {fmtInch(panelSize)}"</strong> ({fold.panels} panels)
                   {tooSmall && <span style={{marginLeft:8,fontWeight:700}}>— Panel too small (min 2")</span>}
                   {throatExceeded && <span style={{marginLeft:8,fontWeight:700}}>— Cannot fold, unfolded edge exceeds 13 inches</span>}
@@ -5805,7 +5807,7 @@ function App() {
             <div><Panel result={result} debugUnlocked={debugUnlocked} coupon={coupon} totalRef={setTotalEl}/></div>
           </div>
           {/* CTA directly under the panel; the old duplicate below the table is gone. */}
-          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{ width: "100%", marginTop: 16, padding: "17px 18px", borderRadius: 10, border: "none", background: (result?.error?.length || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 16.5, fontWeight: 750, cursor: (result?.error?.length || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error?.length || submitting) ? .5 : 1, letterSpacing: ".01em", boxShadow: (result?.error?.length || submitting) ? "none" : "0 4px 14px rgba(0,126,255,.38)", transition: "transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s" }} disabled={!!result?.error?.length || submitting}>
+          <button type="button" data-pps-cta onClick={handleAddToOrder} style={{ width: "100%", marginTop: 16, padding: "17px 18px", borderRadius: 10, border: "none", background: (result?.error?.length || submitting) ? CC.mid : CK.cyan, color: "#fff", fontSize: 16.5, fontWeight: 750, cursor: (result?.error?.length || submitting) ? "default" : "pointer", fontFamily: "inherit", letterSpacing: ".01em", boxShadow: (result?.error?.length || submitting) ? "none" : "0 4px 14px rgba(0,126,255,.38)", transition: "transform .15s ease, box-shadow .15s ease, filter .15s ease, opacity .15s" }} disabled={!!result?.error?.length || submitting}>
             {submitting && uploadProgress ? (
               <div>
                 <div style={{ fontSize: 12 }}>{uploadProgress.phase === "upload" ? `Uploading file(s)… ${uploadProgress.pct}%` : "Adding…"}</div>
@@ -5832,7 +5834,7 @@ function App() {
               the pricing table, which is where it used to sit. */}
           <button type="button" onClick={()=>{setQOpen(true);setQStatus("idle");setQErrorMsg("");}}
             style={{width:"100%",marginTop:9,padding:"11px 10px",borderRadius:9,border:`1px solid ${CK.cyan}55`,
-              background:CC.tint,color:CK.cyan,fontSize:13,fontWeight:650,cursor:"pointer",fontFamily:"inherit",
+              background:CC.tint,color:"#0060cc",fontSize:13,fontWeight:650,cursor:"pointer",fontFamily:"inherit",
               transition:"all .2s"}}>
             Ask a question about this quote →
           </button>
@@ -5896,9 +5898,9 @@ function App() {
             </div>}
           </div>
           <button type="button" onClick={handleAddToOrder} disabled={submitting}
-            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.light:CK.cyan,
+            style={{flexShrink:0,padding:"11px 16px",borderRadius:8,border:"none",background:submitting?CC.mid:CK.cyan,
               color:"#fff",fontSize:14,fontWeight:750,cursor:submitting?"default":"pointer",fontFamily:"inherit",
-              opacity:submitting?.5:1,whiteSpace:"nowrap"}}>
+              whiteSpace:"nowrap"}}>
             {submitting?"Adding…":"Add to Order"}
           </button>
         </div></Float>;
@@ -5935,7 +5937,7 @@ function App() {
             {!mobExpanded && <button type="button" onClick={handleShareLink} style={{ flexShrink: 0, padding: "10px", borderRadius: 8, border: `1px solid ${shareCopied ? "#86efac" : CC.border}`, background: shareCopied ? "#f0fdf4" : CC.track, color: shareCopied ? "#16a34a" : CC.mid, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .2s", lineHeight: 1 }} title="Save configuration">
               {shareCopied ? "✓" : "🔗"}
             </button>}
-            <button type="button" onClick={handleAddToOrder} style={{ flexShrink: 0, padding: "12px 18px", borderRadius: 8, border: "none", background: (result?.error?.length || submitting) ? CC.light : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error?.length || submitting) ? "default" : "pointer", fontFamily: "inherit", opacity: (result?.error?.length || submitting) ? .5 : 1, whiteSpace: "nowrap", minWidth: submitting && uploadProgress ? 140 : undefined, width: mobExpanded ? "100%" : undefined }}
+            <button type="button" onClick={handleAddToOrder} style={{ flexShrink: 0, padding: "12px 18px", borderRadius: 8, border: "none", background: (result?.error?.length || submitting) ? CC.mid : CK.cyan, color: "#fff", fontSize: 14, fontWeight: 700, cursor: (result?.error?.length || submitting) ? "default" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", minWidth: submitting && uploadProgress ? 140 : undefined, width: mobExpanded ? "100%" : undefined }}
               disabled={!!result?.error?.length || submitting}>
               {submitting && uploadProgress ? (
                 <div>
@@ -5995,7 +5997,7 @@ function App() {
                 )}
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
                   <button type="button" onClick={resetQuestionForm} style={{ padding: "9px 16px", borderRadius: 5, border: `1px solid ${CC.border}`, background: "#f8fafc", color: CC.dark, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }} disabled={qStatus === "sending"}>Cancel</button>
-                  <button type="submit" disabled={qStatus === "sending"} style={{ padding: "9px 18px", borderRadius: 5, border: "none", background: qStatus === "sending" ? CC.light : CK.cyan, color: "#fff", fontSize: 13, fontWeight: 700, cursor: qStatus === "sending" ? "wait" : "pointer", fontFamily: "inherit" }}>{qStatus === "sending" ? "Sending…" : "Send question"}</button>
+                  <button type="submit" disabled={qStatus === "sending"} style={{ padding: "9px 18px", borderRadius: 5, border: "none", background: qStatus === "sending" ? CC.mid : CK.cyan, color: "#fff", fontSize: 13, fontWeight: 700, cursor: qStatus === "sending" ? "wait" : "pointer", fontFamily: "inherit" }}>{qStatus === "sending" ? "Sending…" : "Send question"}</button>
                 </div>
               </form>
             )}
