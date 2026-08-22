@@ -2021,6 +2021,15 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
                 const nativeW = ed ? ed.w / bleedW : 1;
                 const cropStyle = (mult) => ({
                   width: `${nativeW * mult * 100}%`, height: "auto",
+                            // The theme's reset (img { max-width: 100% }) clamps this
+                            // back to the sheet width whenever the art is larger than the
+                            // page, so the proof showed the WHOLE image fitted while the
+                            // print-ready PDF cropped to the centre at native size. Order
+                            // 87032 shipped that way: 6.667" art on a 3.75" page kept 32%
+                            // of the image, and the customer had approved a proof showing
+                            // all of it. Must be inline — a stylesheet rule loses to a
+                            // theme swap. height stays auto, so aspect cannot stretch.
+                            maxWidth: "none", maxHeight: "none",
                   position: "absolute", top: "50%", left: "50%",
                   transform: "translate(-50%, -50%)", display: "block",
                 });
@@ -2066,6 +2075,15 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
                 const nativeW = ed ? ed.w / bleedW : 1;
                 const cropStyle = (mult) => ({
                   width: `${nativeW * mult * 100}%`, height: "auto",
+                            // The theme's reset (img { max-width: 100% }) clamps this
+                            // back to the sheet width whenever the art is larger than the
+                            // page, so the proof showed the WHOLE image fitted while the
+                            // print-ready PDF cropped to the centre at native size. Order
+                            // 87032 shipped that way: 6.667" art on a 3.75" page kept 32%
+                            // of the image, and the customer had approved a proof showing
+                            // all of it. Must be inline — a stylesheet rule loses to a
+                            // theme swap. height stays auto, so aspect cannot stretch.
+                            maxWidth: "none", maxHeight: "none",
                   position: "absolute", top: "50%", left: "50%",
                   transform: "translate(-50%, -50%)", display: "block",
                 });
