@@ -129,6 +129,13 @@ if ( file_exists( PPS_CALC_DIR . 'pps-featured-cards.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-featured-cards.php';
 }
 
+// Offline / phone order logging — creates real WooCommerce orders so walk-in
+// and phone transactions appear in the /reorders lookup like any web order.
+// Guarded so this file deploys safely ahead of (or without) that one.
+if ( file_exists( PPS_CALC_DIR . 'pps-offline-order.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-offline-order.php';
+}
+
 // Shared quote link → defaults blob (product + preset admin).
 if ( file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-defaults-url.php';
