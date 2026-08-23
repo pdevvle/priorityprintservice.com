@@ -188,6 +188,20 @@ function pps_job_invoice_unpaid( $limit = 25 ) {
     return $out;
 }
 
+/**
+ * The repeating QTY/PRICE rows, as posted by either surface. Empty rows are
+ * normal — the form ships a few blanks so there is always one to type into.
+ */
+function pps_job_console_posted_tiers() {
+    $qs = isset( $_POST['q_qty'] ) ? (array) wp_unslash( $_POST['q_qty'] ) : array();
+    $ps = isset( $_POST['q_price'] ) ? (array) wp_unslash( $_POST['q_price'] ) : array();
+    $out = array();
+    foreach ( $qs as $i => $qv ) {
+        $out[] = array( 'qty' => $qv, 'price' => isset( $ps[ $i ] ) ? $ps[ $i ] : 0 );
+    }
+    return $out;
+}
+
 /* ─────────────────────────────────────────────────────────────
  * Console authentication (public page, no WordPress login)
  * ───────────────────────────────────────────────────────────── */
@@ -285,6 +299,23 @@ function pps_job_console_shortcode() {
 
     // ── authenticated actions ──
     $created = null;
+    $quote   = null;
+    if ( isset( $_POST['pps_console_quote'] ) && check_admin_referer( 'pps_console_action', 'pps_console_nonce' )
+         && function_exists( 'pps_quote_create' ) ) {
+        $res = pps_quote_create( array(
+            'product'    => isset( $_POST['q_product'] ) ? $_POST['q_product'] : 0,
+            'specs'      => isset( $_POST['q_specs'] ) ? wp_unslash( $_POST['q_specs'] ) : '',
+            'tiers'      => pps_job_console_posted_tiers(),
+            'allow_date' => ! empty( $_POST['q_allow_date'] ),
+            'min_days'   => isset( $_POST['q_min_days'] ) ? $_POST['q_min_days'] : 0,
+            'pay_source' => isset( $_POST['q_pay_source'] ) ? wp_unslash( $_POST['q_pay_source'] ) : 'site',
+            'pay_link'   => isset( $_POST['q_pay_link'] ) ? wp_unslash( $_POST['q_pay_link'] ) : '',
+            'note'       => isset( $_POST['q_note'] ) ? wp_unslash( $_POST['q_note'] ) : '',
+            'by'         => 'console',
+        ) );
+        if ( is_wp_error( $res ) ) $error = $res->get_error_message();
+        else $quote = $res;
+    }
     if ( isset( $_POST['pps_console_create'] ) && check_admin_referer( 'pps_console_action', 'pps_console_nonce' ) ) {
         $res = pps_job_invoice_create( array(
             'first'        => isset( $_POST['inv_first'] ) ? wp_unslash( $_POST['inv_first'] ) : '',
@@ -314,7 +345,7 @@ function pps_job_console_shortcode() {
         }
     }
 
-    return pps_job_console_body( $created, $notice, $error );
+    return pps_job_console_body( $created, $notice, $error, $quote );
 }
 
 function pps_job_console_login_form( $error ) {
@@ -336,7 +367,7 @@ function pps_job_console_login_form( $error ) {
     <?php return ob_get_clean();
 }
 
-function pps_job_console_body( $created, $notice, $error ) {
+function pps_job_console_body( $created, $notice, $error, $quote = null ) {
     $products = wc_get_products( array( 'limit' => 200, 'status' => 'publish', 'orderby' => 'title', 'order' => 'ASC' ) );
     $unpaid   = pps_job_invoice_unpaid( 25 );
     ob_start(); ?>
@@ -369,48 +400,82 @@ function pps_job_console_body( $created, $notice, $error ) {
             </div>
         <?php endif; ?>
 
+        <?php if ( $quote && function_exists( 'pps_quote_url' ) ) :
+            $qurl = pps_quote_url( get_post_meta( $quote, '_q_token', true ) ); ?>
+            <div class="con-done">
+                <div class="con-done-head">Quote link ready</div>
+                <div class="con-copy">
+                    <input type="text" id="con-qlink" readonly value="<?php echo esc_attr( $qurl ); ?>" onfocus="this.select()">
+                    <button type="button" class="btn btn-primary" data-copy="con-qlink">Copy</button>
+                </div>
+                <p class="con-hint">Send this to the customer. They choose a quantity, enter their own
+                billing and shipping, and pay — the order appears below only once they submit.</p>
+            </div>
+        <?php endif; ?>
+
         <form method="post" class="form con-form">
             <?php wp_nonce_field( 'pps_console_action', 'pps_console_nonce' ); ?>
-            <h3 class="con-h">New invoice</h3>
-            <div class="con-row">
-                <div class="field"><label for="c-first">First name</label><input type="text" id="c-first" name="inv_first"></div>
-                <div class="field"><label for="c-last">Last name</label><input type="text" id="c-last" name="inv_last"></div>
-            </div>
-            <div class="field"><label for="c-email">Email <span class="req">*</span></label>
-                <input type="email" id="c-email" name="inv_email" required>
-                <span class="field-hint">Where the invoice goes, and the key the reorder lookup searches on.</span></div>
-            <div class="field"><label for="c-phone">Phone</label><input type="text" id="c-phone" name="inv_phone"></div>
-            <div class="field"><label for="c-product">Product <span class="req">*</span></label>
-                <select id="c-product" name="inv_product" required>
+            <h3 class="con-h">New quote link</h3>
+            <p class="form-intro" style="margin-bottom:14px">The job only — no customer details.
+            They fill those in themselves when they open the link.</p>
+
+            <div class="field"><label for="q-product">Product <span class="req">*</span></label>
+                <select id="q-product" name="q_product" required>
                     <option value="">— choose —</option>
                     <?php foreach ( $products as $p ) : ?>
                         <option value="<?php echo esc_attr( $p->get_id() ); ?>"><?php echo esc_html( $p->get_name() ); ?></option>
                     <?php endforeach; ?>
                 </select></div>
-            <div class="con-row">
-                <div class="field"><label for="c-qty">Quantity</label><input type="number" id="c-qty" name="inv_qty" value="1" min="1"></div>
-                <div class="field"><label for="c-total">Price quoted ($) <span class="req">*</span></label>
-                    <input type="number" id="c-total" name="inv_total" step="0.01" min="0.01" required></div>
+
+            <div class="field"><label for="q-specs">Specs</label>
+                <textarea id="q-specs" name="q_specs" rows="3" placeholder="e.g. 3.5×5 saddle booklet, 8pp, 100lb gloss text"></textarea>
+                <span class="field-hint">Shown on the quote page and kept on the order.</span></div>
+
+            <div class="field">
+                <label>Quantity &amp; price <span class="req">*</span></label>
+                <div class="tier-rows">
+                    <div class="tier-row">
+                        <input type="number" name="q_qty[]" min="1" placeholder="Qty" required>
+                        <input type="number" name="q_price[]" step="0.01" min="0.01" placeholder="Price $" required>
+                    </div>
+                </div>
+                <label class="con-radio" style="margin-top:6px"><input type="checkbox" id="q-addqty"> Offer additional quantities</label>
+                <div id="q-extra" hidden>
+                    <div class="tier-rows">
+                        <?php for ( $i = 0; $i < 3; $i++ ) : ?>
+                            <div class="tier-row">
+                                <input type="number" name="q_qty[]" min="1" placeholder="Qty">
+                                <input type="number" name="q_price[]" step="0.01" min="0.01" placeholder="Price $">
+                            </div>
+                        <?php endfor; ?>
+                    </div>
+                    <span class="field-hint">Extra tiers let the customer pick a different quantity now,
+                    and are offered again on any future reorder. Leave blank rows empty.</span>
+                </div>
             </div>
-            <div class="field"><label for="c-specs">Specs</label>
-                <textarea id="c-specs" name="inv_specs" rows="3" placeholder="e.g. 3.5×5 saddle booklet, 8pp, 100lb gloss text"></textarea></div>
+
+            <div class="field">
+                <label class="con-radio"><input type="checkbox" name="q_allow_date" value="1" id="q-allowdate"> Let the customer choose a delivery date</label>
+                <div id="q-mindays" hidden style="margin-top:6px">
+                    <label for="q-min">Minimum production days</label>
+                    <input type="number" id="q-min" name="q_min_days" min="0" value="5" style="max-width:120px">
+                    <span class="field-hint">Working days. Their date picker will not accept anything sooner.</span>
+                </div>
+            </div>
 
             <div class="field">
                 <label>Payment</label>
-                <label class="con-radio"><input type="radio" name="inv_pay_source" value="site" checked> Card — website checkout</label>
-                <label class="con-radio"><input type="radio" name="inv_pay_source" value="quickbooks"> QuickBooks payment link</label>
+                <label class="con-radio"><input type="radio" name="q_pay_source" value="site" checked> Card — website checkout</label>
+                <label class="con-radio"><input type="radio" name="q_pay_source" value="quickbooks"> QuickBooks payment link</label>
             </div>
             <div class="field con-qbo" hidden>
-                <label for="c-paylink">QuickBooks link</label>
-                <input type="url" id="c-paylink" name="inv_pay_link" placeholder="https://connect.intuit.com/pay/...">
-                <span class="field-hint">Create the payment link in QuickBooks, paste it here. The order stays unpaid until you press Mark paid.</span>
+                <label for="q-paylink">QuickBooks link</label>
+                <input type="url" id="q-paylink" name="q_pay_link" placeholder="https://connect.intuit.com/pay/...">
+                <span class="field-hint">The order stays unpaid until you press Mark paid.</span>
             </div>
-            <div class="field con-site">
-                <label class="con-radio"><input type="checkbox" name="inv_send_invoice" value="1" checked> Email the customer WooCommerce's invoice now</label>
-                <span class="field-hint">Not available for QuickBooks jobs — that email carries the website checkout link.</span>
-            </div>
-            <div class="field"><label for="c-note">Private note</label><textarea id="c-note" name="inv_note" rows="2"></textarea></div>
-            <button type="submit" name="pps_console_create" value="1" class="btn btn-primary btn-submit">Create order &amp; payment link</button>
+
+            <div class="field"><label for="q-note">Private note</label><textarea id="q-note" name="q_note" rows="2"></textarea></div>
+            <button type="submit" name="pps_console_quote" value="1" class="btn btn-primary btn-submit">Create quote link</button>
         </form>
 
         <h3 class="con-h" style="margin-top:26px">Awaiting payment (<?php echo count( $unpaid ); ?>)</h3>
@@ -462,15 +527,19 @@ function pps_job_console_body( $created, $notice, $error ) {
         });
         // The QuickBooks link field and WooCommerce's invoice email are mutually
         // exclusive: that email would carry the site checkout link.
-        var qbo = document.querySelector('.con-qbo'), site = document.querySelector('.con-site');
+        var qbo = document.querySelector('.con-qbo');
         function sync(){
-            var isQ = document.querySelector('input[name=inv_pay_source][value=quickbooks]').checked;
+            var r = document.querySelector('input[name=q_pay_source][value=quickbooks]');
+            var isQ = r && r.checked;
             if (qbo) qbo.hidden = !isQ;
-            if (site) site.hidden = isQ;
-            var f = document.getElementById('c-paylink');
-            if (f) f.required = isQ;
+            var f = document.getElementById('q-paylink');
+            if (f) f.required = !!isQ;
         }
-        document.querySelectorAll('input[name=inv_pay_source]').forEach(function(r){ r.addEventListener('change', sync); });
+        document.querySelectorAll('input[name=q_pay_source]').forEach(function(r){ r.addEventListener('change', sync); });
+        var add = document.getElementById('q-addqty'), extra = document.getElementById('q-extra');
+        if (add) { add.addEventListener('change', function(){ extra.hidden = !add.checked; }); }
+        var ad = document.getElementById('q-allowdate'), md = document.getElementById('q-mindays');
+        if (ad) { ad.addEventListener('change', function(){ md.hidden = !ad.checked; }); }
         sync();
     })();
     </script>
@@ -502,6 +571,10 @@ function pps_job_console_css() {
 }
 .pps-acct .con-form select:focus,
 .pps-acct .con-form textarea:focus { border-color: var(--process-cyan); box-shadow: 0 0 0 3px rgba(0,126,255,0.18); outline: none; }
+.pps-acct .tier-rows { display: flex; flex-direction: column; gap: 6px; }
+.pps-acct .tier-row { display: flex; gap: 8px; }
+.pps-acct .tier-row input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px; font-family: var(--font-ui); }
+.pps-acct .tier-row input:focus { border-color: var(--process-cyan); box-shadow: 0 0 0 3px rgba(0,126,255,0.18); outline: none; }
 .pps-acct .con-radio { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--key); margin: 2px 0; }
 .pps-acct .con-radio input { width: auto; }
 .pps-acct .con-copy { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
@@ -589,6 +662,17 @@ add_action( 'admin_post_pps_job_invoice_key', function () {
     // session because the cookie signature is derived from it.
     update_option( 'pps_console_key', password_hash( $pw, PASSWORD_DEFAULT ), false );
     wp_safe_redirect( add_query_arg( 'key_done', '1', $back ) ); exit;
+} );
+
+add_action( 'admin_post_pps_job_multiplier', function () {
+    if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
+    check_admin_referer( 'pps_job_multiplier' );
+    $m = isset( $_POST['multiplier'] ) ? (float) wp_unslash( $_POST['multiplier'] ) : 1.0;
+    // The reader clamps to 0.5–3.0 too; storing the clamped value keeps the
+    // field honest about what is actually in force.
+    $m = max( 0.5, min( 3.0, $m > 0 ? $m : 1.0 ) );
+    update_option( 'pps_past_order_multiplier', $m, false );
+    wp_safe_redirect( add_query_arg( 'mult_done', '1', admin_url( 'admin.php?page=pps-job-invoice' ) ) ); exit;
 } );
 
 add_action( 'admin_post_pps_job_invoice_paid', function () {
@@ -747,6 +831,22 @@ function pps_job_invoice_render_page() {
                 </tbody>
             </table>
         <?php endif; ?>
+
+        <hr style="margin:26px 0">
+        <h2>Past order price multiple</h2>
+        <?php $mult = function_exists( 'pps_past_order_multiplier' ) ? pps_past_order_multiplier() : 1.0; ?>
+        <p style="color:#50575e;max-width:56em">What a historical price is worth today. Every reorder —
+        the quantity tiers on a quote, and the frozen "same as before" price on any past order — is
+        multiplied by this at the moment of reorder. <strong>1.00 changes nothing.</strong> 1.05 quietly
+        adds 5% to everything reordered from here on. Clamped to 0.50–3.00, because a typo here
+        re-prices every reorder on the site.</p>
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+            <?php wp_nonce_field( 'pps_job_multiplier' ); ?>
+            <input type="hidden" name="action" value="pps_job_multiplier">
+            <input type="number" name="multiplier" step="0.01" min="0.5" max="3" value="<?php echo esc_attr( number_format( $mult, 2, '.', '' ) ); ?>" style="width:110px">
+            <?php submit_button( 'Save Multiple', 'secondary', 'submit', false ); ?>
+            <?php if ( isset( $_GET['mult_done'] ) ) : ?><span style="color:#3c6b28;margin-left:10px">Saved.</span><?php endif; ?>
+        </form>
 
         <hr style="margin:26px 0">
         <h2>Console password</h2>

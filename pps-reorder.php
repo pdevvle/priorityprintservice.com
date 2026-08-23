@@ -104,10 +104,15 @@ function pps_build_single_item_reorder_url( $order, $item ) {
     $product = wc_get_product( $item->get_product_id() );
     if ( ! $product || ! $product->exists() ) return '';
 
-    $url = add_query_arg( array(
+    $args = array(
         'pps_reorder_order' => $order->get_id(),
         'pps_reorder_item'  => $item->get_id(),
-    ), wc_get_cart_url() );
+    );
+    // Placeholder the JS rewrites when a quantity tier is chosen. Kept inside
+    // the nonce'd URL so swapping it cannot smuggle in anything else: the
+    // handler treats it as an index into the order's own stored tiers.
+    $args['pps_reorder_tier'] = 0;
+    $url = add_query_arg( $args, wc_get_cart_url() );
 
     return wp_nonce_url( $url, 'pps_reorder_item_' . $order->get_id() . '_' . $item->get_id() );
 }
@@ -167,6 +172,15 @@ function pps_render_pps_item_card( $item, $order ) {
     $rush            = $is_pps ? (float) $item->get_meta( '_pps_rush' ) : 0;
     $reorder         = $is_pps ? pps_build_reorder_url( $item ) : '';
     $legacy_reorder  = ( $is_pps || $product_gone ) ? '' : pps_build_single_item_reorder_url( $order, $item );
+
+    // Quantity tiers quoted at the time. Offering them again is the point of
+    // storing them — a customer who bought 250 can reorder 500 without asking.
+    // Prices are historical, so they are shown through the past-order
+    // multiplier rather than at the original figure.
+    $tiers = array();
+    if ( ! $product_gone && function_exists( 'pps_quote_normalise_tiers' ) ) {
+        $tiers = pps_quote_normalise_tiers( (array) $order->get_meta( '_pps_qty_tiers' ) );
+    }
     // Pass '_' to filter underscore-prefixed (internal) meta keys per WP/WC
     // convention. Empty string previously disabled the filter and exposed
     // internal keys like _pi_item_min_preparation_days to the customer.
@@ -290,6 +304,20 @@ function pps_render_pps_item_card( $item, $order ) {
                 <button type="button" class="btn btn-ghost" disabled style="opacity:.6;cursor:not-allowed">Reorder unavailable</button>
             <?php elseif ( $reorder ) : ?>
                 <a href="<?php echo esc_url( $reorder ); ?>" class="btn btn-primary">Reorder</a>
+            <?php elseif ( $legacy_reorder && count( $tiers ) > 1 ) : ?>
+                <div class="oc-tier">
+                    <label class="oc-tier-lbl" for="tier-<?php echo esc_attr( $item->get_id() ); ?>">Quantity</label>
+                    <select id="tier-<?php echo esc_attr( $item->get_id() ); ?>" class="oc-tier-sel"
+                            data-base="<?php echo esc_attr( $legacy_reorder ); ?>">
+                        <?php foreach ( $tiers as $i => $t ) :
+                            $shown = pps_apply_past_multiplier( $t['price'] ); ?>
+                            <option value="<?php echo esc_attr( $i ); ?>"<?php selected( (int) $t['qty'], (int) $item->get_quantity() ); ?>>
+                                <?php echo esc_html( number_format_i18n( $t['qty'] ) ); ?> — <?php echo esc_html( wp_strip_all_tags( wc_price( $shown ) ) ); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <a href="<?php echo esc_url( $legacy_reorder ); ?>" class="btn btn-primary oc-tier-go">Reorder</a>
             <?php elseif ( $legacy_reorder ) : ?>
                 <a href="<?php echo esc_url( $legacy_reorder ); ?>" class="btn btn-primary">Reorder (same as before)</a>
             <?php elseif ( $product_gone ) : ?>
@@ -683,6 +711,21 @@ function pps_order_lookup_render_orders( $email, $contact_sent = false ) {
             sync();
         }
 
+        // Quantity tiers: point the Reorder button at the chosen one. The nonce
+        // signs the action, not the query string, so rewriting this parameter is
+        // safe — and the handler only accepts an index into that order's own
+        // stored tiers, so it cannot be pushed anywhere it was not quoted.
+        document.querySelectorAll('.oc-tier-sel').forEach(function (sel) {
+            var go = sel.closest('.oc-actions').querySelector('.oc-tier-go');
+            if (!go) return;
+            var base = sel.getAttribute('data-base');
+            function apply() {
+                go.href = base.replace(/([?&]pps_reorder_tier=)\d+/, '$1' + sel.value);
+            }
+            sel.addEventListener('change', apply);
+            apply();
+        });
+
         var modal = document.getElementById('pps-contact-modal');
         if (!modal) return;
         var backdrop = modal.querySelector('.contact-modal-backdrop');
@@ -802,8 +845,28 @@ function pps_handle_single_item_reorder() {
     // Let WCPA (and any other add-ons) restore their cart item data from the line item
     $cart_item_data = apply_filters( 'woocommerce_order_again_cart_item_data', array(), $item, $order );
 
-    // Preserve the original unit price so totals don't drift from the historical order
-    $unit_price = $quantity > 0 ? ( (float) $item->get_subtotal() / $quantity ) : (float) $item->get_subtotal();
+    // A quote-born order carries the quantity tiers it was sold with, so a
+    // reorder can switch to one of them instead of repeating the exact figure.
+    $tiers = function_exists( 'pps_quote_normalise_tiers' )
+        ? pps_quote_normalise_tiers( (array) $order->get_meta( '_pps_qty_tiers' ) )
+        : array();
+    $line_total = (float) $item->get_subtotal();
+    if ( $tiers && isset( $_GET['pps_reorder_tier'] ) ) {
+        $ti = absint( $_GET['pps_reorder_tier'] );
+        if ( isset( $tiers[ $ti ] ) ) {
+            $quantity   = max( 1, (int) $tiers[ $ti ]['qty'] );
+            $line_total = (float) $tiers[ $ti ]['price'];
+        }
+    }
+
+    // Preserve the original unit price so totals don't drift from the historical
+    // order — then float it by the past-order multiplier, which is 1.00 until
+    // deliberately changed. This is the one lever that lets years-old prices
+    // rise with costs instead of being honoured forever at the original figure.
+    $unit_price = $quantity > 0 ? ( $line_total / $quantity ) : $line_total;
+    if ( function_exists( 'pps_apply_past_multiplier' ) ) {
+        $unit_price = pps_apply_past_multiplier( $unit_price );
+    }
     $cart_item_data['pps_legacy_unit_price'] = $unit_price;
     $cart_item_data['pps_legacy_source']     = array(
         'order_id' => $order_id,
@@ -977,6 +1040,15 @@ function pps_acct_ui_css() {
 .pps-acct .oc-legend .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; vertical-align: -1px; margin-right: 5px; }
 .pps-acct .oc-legend .sw-ongoing { background: var(--process-yellow); }
 .pps-acct .oc-legend .sw-past { background: var(--process-cyan); }
+
+.pps-acct .oc-tier { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; }
+.pps-acct .oc-tier-lbl { font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--mid); }
+.pps-acct .oc-tier-sel {
+  padding: 7px 9px; border: 1px solid var(--border); border-radius: 4px;
+  font-size: 13px; font-family: var(--font-ui); background: var(--white); color: var(--key); max-width: 190px;
+}
+.pps-acct .oc-tier-sel:focus { border-color: var(--process-cyan); box-shadow: 0 0 0 3px rgba(0,126,255,0.18); outline: none; }
+.pps-acct .oc-carousel:not(.single) .oc-tier { align-items: flex-start; }
 
 /* Payment link for a job invoiced by email and not yet paid. */
 .pps-acct .btn-pay { background: var(--process-yellow); color: #3d2a06; border-color: var(--process-yellow); }

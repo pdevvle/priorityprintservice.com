@@ -136,6 +136,12 @@ if ( file_exists( PPS_CALC_DIR . 'pps-job-invoice.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-job-invoice.php';
 }
 
+// Quote links: the job without the customer, filled in by whoever opens it.
+// Loaded after the invoice module, whose helpers it uses.
+if ( file_exists( PPS_CALC_DIR . 'pps-job-quote.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-job-quote.php';
+}
+
 // Shared quote link → defaults blob (product + preset admin).
 if ( file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-defaults-url.php';
