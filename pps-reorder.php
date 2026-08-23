@@ -186,8 +186,14 @@ function pps_render_pps_item_card( $item, $order ) {
     // A job invoiced by email sits pending until the customer pays. Offer the
     // payment link here rather than a Reorder button they cannot use yet — a
     // customer who lost the invoice email can still settle it from this page.
-    $needs_payment = $order->needs_payment();
-    $pay_url       = $needs_payment ? $order->get_checkout_payment_url() : '';
+    // A QuickBooks-invoiced job carries its own external link; offering the
+    // site checkout alongside it would give the customer two live ways to pay
+    // the same invoice. pps_job_invoice_pay_link() picks the right one.
+    if ( function_exists( 'pps_job_invoice_pay_link' ) ) {
+        $pay_url = pps_job_invoice_pay_link( $order );
+    } else {
+        $pay_url = $order->needs_payment() ? $order->get_checkout_payment_url() : '';
+    }
 
     $delivery_pretty = '';
     if ( $delivery && ! $is_inactive ) {
