@@ -177,6 +177,18 @@ function pps_render_pps_item_card( $item, $order ) {
     $pill_kind   = pps_status_to_pill_kind( $status );
     $status_lbl  = wc_get_order_status_name( $status );
 
+    // Live work vs finished work, which the carousel colours on: yellow for a
+    // job still moving through the shop, blue for one that is done. Cancelled
+    // and refunded keep their own muted treatment and are neither.
+    $is_ongoing  = ! $is_inactive && in_array( $status, array( 'pending', 'on-hold', 'processing' ), true );
+    $is_past     = ! $is_inactive && ! $is_ongoing;
+
+    // A job invoiced by email sits pending until the customer pays. Offer the
+    // payment link here rather than a Reorder button they cannot use yet — a
+    // customer who lost the invoice email can still settle it from this page.
+    $needs_payment = $order->needs_payment();
+    $pay_url       = $needs_payment ? $order->get_checkout_payment_url() : '';
+
     $delivery_pretty = '';
     if ( $delivery && ! $is_inactive ) {
         try {
@@ -203,22 +215,23 @@ function pps_render_pps_item_card( $item, $order ) {
     $date_created = $order->get_date_created();
     $date_str = $date_created ? wc_format_datetime( $date_created, get_option( 'date_format' ) ) : '';
 
+    $has_thumb = ( $is_pps && $thumb_url );
     $card_classes = 'order-card';
+    if ( ! $has_thumb ) $card_classes .= ' no-thumb';
     if ( $is_inactive ) {
         $card_classes .= ' cancelled';
-    } elseif ( ! $is_pps ) {
-        $card_classes .= ' legacy';
+    } else {
+        $card_classes .= $is_ongoing ? ' ongoing' : ' past';
+        if ( ! $is_pps ) $card_classes .= ' legacy';
     }
 
     ob_start();
     ?>
     <article class="<?php echo esc_attr( $card_classes ); ?>">
-        <?php if ( $is_pps && $thumb_url ) : ?>
+        <?php if ( $has_thumb ) : ?>
             <div class="oc-thumb">
                 <img src="<?php echo esc_url( $thumb_url ); ?>" alt="" loading="lazy" />
             </div>
-        <?php else : ?>
-            <div class="oc-thumb-empty" aria-hidden="true"></div>
         <?php endif; ?>
 
         <div class="oc-body">
@@ -265,7 +278,9 @@ function pps_render_pps_item_card( $item, $order ) {
         </div>
 
         <div class="oc-actions">
-            <?php if ( $is_inactive ) : ?>
+            <?php if ( $pay_url ) : ?>
+                <a href="<?php echo esc_url( $pay_url ); ?>" class="btn btn-pay">Pay now</a>
+            <?php elseif ( $is_inactive ) : ?>
                 <button type="button" class="btn btn-ghost" disabled style="opacity:.6;cursor:not-allowed">Reorder unavailable</button>
             <?php elseif ( $reorder ) : ?>
                 <a href="<?php echo esc_url( $reorder ); ?>" class="btn btn-primary">Reorder</a>
@@ -530,17 +545,23 @@ function pps_order_lookup_render_orders( $email, $contact_sent = false ) {
         'status'        => array_keys( wc_get_order_statuses() ),
     ) );
 
-    $buffer = '';
-    $rendered = 0;
+    // Live work leads. Orders arrive newest-first; this is a stable partition
+    // on top of that, so within each group the date order is untouched — a job
+    // still in the shop is what someone opening this page came to check on.
+    $live_cards = array();
+    $done_cards = array();
     foreach ( $orders as $order ) {
+        $st      = $order->get_status();
+        $is_live = ! in_array( $st, array( 'cancelled', 'refunded', 'failed', 'completed' ), true );
         foreach ( $order->get_items() as $item ) {
             $card = pps_render_pps_item_card( $item, $order );
-            if ( $card ) {
-                $buffer .= $card;
-                $rendered++;
-            }
+            if ( ! $card ) continue;
+            if ( $is_live ) $live_cards[] = $card; else $done_cards[] = $card;
         }
     }
+    $cards    = array_merge( $live_cards, $done_cards );
+    $rendered = count( $cards );
+    $buffer   = implode( '', $cards );
 
     $signin_url = wc_get_page_permalink( 'myaccount' );
     ?>
@@ -567,7 +588,18 @@ function pps_order_lookup_render_orders( $email, $contact_sent = false ) {
             <?php if ( $rendered === 0 ) : ?>
                 <div class="empty"><span>No print orders found for this email.</span></div>
             <?php else : ?>
-                <?php echo $buffer; // already-escaped per-card ?>
+                <div class="oc-carousel<?php echo $rendered > 1 ? '' : ' single'; ?>">
+                    <button type="button" class="oc-nav oc-prev" aria-label="Previous order" hidden>&lsaquo;</button>
+                    <div class="oc-track" tabindex="0" role="region"
+                         aria-label="Your orders — <?php echo esc_attr( $rendered ); ?> total, scroll sideways">
+                        <?php echo $buffer; // already-escaped per-card ?>
+                    </div>
+                    <button type="button" class="oc-nav oc-next" aria-label="Next order" hidden>&rsaquo;</button>
+                </div>
+                <div class="oc-legend" aria-hidden="true">
+                    <span><i class="sw sw-ongoing"></i> In progress</span>
+                    <span><i class="sw sw-past"></i> Completed</span>
+                </div>
                 <?php if ( $signin_url ) : ?>
                     <p class="results-foot">Want to edit a pending order? <a href="<?php echo esc_url( $signin_url ); ?>">Sign in to your account.</a></p>
                 <?php endif; ?>
@@ -615,6 +647,36 @@ function pps_order_lookup_render_orders( $email, $contact_sent = false ) {
     </div>
     <script>
     (function(){
+        // Carousel nav. The track scrolls natively (scroll-snap does the
+        // alignment and touch already works), so this only drives the arrows
+        // and keeps them hidden at the ends — with no JS the track is still a
+        // perfectly usable horizontal scroller.
+        var car = document.querySelector('.oc-carousel');
+        if (car) {
+            var track = car.querySelector('.oc-track');
+            var prev  = car.querySelector('.oc-prev');
+            var next  = car.querySelector('.oc-next');
+            var step  = function () {
+                var card = track.querySelector('.order-card');
+                return card ? card.getBoundingClientRect().width + 14 : track.clientWidth * 0.9;
+            };
+            var sync = function () {
+                var max = track.scrollWidth - track.clientWidth - 1;
+                var can = max > 0;
+                prev.hidden = !can || track.scrollLeft <= 0;
+                next.hidden = !can || track.scrollLeft >= max;
+            };
+            prev.addEventListener('click', function () { track.scrollBy({ left: -step(), behavior: 'smooth' }); });
+            next.addEventListener('click', function () { track.scrollBy({ left:  step(), behavior: 'smooth' }); });
+            track.addEventListener('scroll', sync, { passive: true });
+            window.addEventListener('resize', sync);
+            track.addEventListener('keydown', function (e) {
+                if (e.key === 'ArrowRight') { e.preventDefault(); track.scrollBy({ left:  step(), behavior: 'smooth' }); }
+                if (e.key === 'ArrowLeft')  { e.preventDefault(); track.scrollBy({ left: -step(), behavior: 'smooth' }); }
+            });
+            sync();
+        }
+
         var modal = document.getElementById('pps-contact-modal');
         if (!modal) return;
         var backdrop = modal.querySelector('.contact-modal-backdrop');
@@ -842,8 +904,78 @@ function pps_acct_ui_css() {
   margin-bottom: 14px;
   align-items: start;
 }
-.pps-acct .order-card.legacy { background: var(--white); border-color: var(--border); }
+.pps-acct .order-card.no-thumb { grid-template-columns: 1fr auto; }
+.pps-acct .order-card.legacy { background: var(--white); }
 .pps-acct .order-card.cancelled { background: var(--white); border-color: var(--border); opacity: 0.65; }
+
+/* Status outline: yellow while the job is live, blue once it is finished.
+   2px so the colour reads as a deliberate outline rather than a hairline, and
+   a matching top rule so the state is still legible to anyone who cannot
+   separate the two hues. Cancelled keeps its own muted grey above. */
+.pps-acct .order-card.ongoing {
+  border: 2px solid var(--process-yellow);
+  background: var(--process-yellow-light);
+  box-shadow: inset 0 3px 0 var(--process-yellow);
+}
+.pps-acct .order-card.past {
+  border: 2px solid var(--process-cyan);
+  background: var(--card-bg);
+  box-shadow: inset 0 3px 0 var(--process-cyan);
+}
+.pps-acct .order-card.ongoing .oc-specs { background: rgba(255,255,255,0.72); }
+
+/* ── Carousel ───────────────────────────────────────────────────────────
+   One horizontal track with scroll-snap. Native scrolling means touch and
+   trackpads work with no JS at all; the arrows are progressive enhancement
+   and hide themselves at the ends. */
+.pps-acct .oc-carousel { position: relative; margin: 0 0 6px; }
+.pps-acct .oc-track {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 0 4px;
+  padding: 4px 4px 14px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.pps-acct .oc-track:focus-visible { outline: 3px solid rgba(0,126,255,0.32); outline-offset: 2px; border-radius: 8px; }
+.pps-acct .oc-track .order-card {
+  flex: 0 0 min(560px, 86vw);
+  scroll-snap-align: start;
+  margin-bottom: 0;
+}
+/* A lone card should look like a card, not a stranded carousel item. */
+.pps-acct .oc-carousel.single .oc-track { overflow-x: visible; }
+.pps-acct .oc-carousel.single .oc-track .order-card { flex: 1 1 auto; }
+
+.pps-acct .oc-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  z-index: 2;
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--white); color: var(--key);
+  font-size: 20px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.14);
+}
+.pps-acct .oc-nav:hover { border-color: var(--process-cyan); color: var(--process-cyan); }
+.pps-acct .oc-nav:focus-visible { outline: 3px solid rgba(0,126,255,0.32); outline-offset: 2px; }
+.pps-acct .oc-nav[hidden] { display: none; }
+.pps-acct .oc-prev { left: -14px; }
+.pps-acct .oc-next { right: -14px; }
+
+.pps-acct .oc-legend {
+  display: flex; gap: 16px; align-items: center;
+  font-size: 12px; color: var(--mid); padding: 0 4px 4px;
+}
+.pps-acct .oc-legend .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; vertical-align: -1px; margin-right: 5px; }
+.pps-acct .oc-legend .sw-ongoing { background: var(--process-yellow); }
+.pps-acct .oc-legend .sw-past { background: var(--process-cyan); }
+
+/* Payment link for a job invoiced by email and not yet paid. */
+.pps-acct .btn-pay { background: var(--process-yellow); color: #3d2a06; border-color: var(--process-yellow); }
+.pps-acct .btn-pay:hover { background: #d8951f; color: #3d2a06; }
+.pps-acct .btn-pay:focus-visible { outline: 3px solid rgba(240,168,48,0.42); outline-offset: 1px; }
 
 .pps-acct .oc-thumb {
   width: 140px; height: 140px;
@@ -1017,8 +1149,26 @@ function pps_acct_ui_css() {
 .pps-acct .contact-form .field textarea:focus { border-color: var(--process-cyan); box-shadow: 0 0 0 3px rgba(0,126,255,0.18); }
 .pps-acct .contact-form .field input[disabled] { background: var(--bg); color: var(--mid); cursor: not-allowed; }
 
+/* A carousel card is narrow by definition, so it uses the stacked layout the
+   full-width card only falls back to on phones: thumb + body side by side,
+   actions on their own row. A single card keeps the roomy 3-column form. */
+.pps-acct .oc-carousel:not(.single) .order-card { grid-template-columns: 120px 1fr; }
+.pps-acct .oc-carousel:not(.single) .order-card.no-thumb { grid-template-columns: 1fr; }
+.pps-acct .oc-carousel:not(.single) .oc-thumb,
+.pps-acct .oc-carousel:not(.single) .oc-thumb-empty { width: 120px; height: 120px; }
+.pps-acct .oc-carousel:not(.single) .oc-actions {
+  grid-column: 1 / -1;
+  flex-direction: row; align-items: center; justify-content: flex-start;
+  min-width: 0; gap: 10px; flex-wrap: wrap;
+}
+.pps-acct .oc-carousel:not(.single) .oc-caveat { max-width: none; text-align: left; }
+
 @media (max-width: 639px) {
+  /* Touch scrolls the track directly; the arrows would only cover content. */
+  .pps-acct .oc-nav { display: none; }
+  .pps-acct .oc-track .order-card { flex-basis: 88vw; }
   .pps-acct .order-card { grid-template-columns: 96px 1fr; padding: 14px; gap: 14px; }
+  .pps-acct .order-card.no-thumb { grid-template-columns: 1fr; }
   .pps-acct .oc-thumb,
   .pps-acct .oc-thumb-empty { width: 96px; height: 96px; }
   .pps-acct .oc-actions { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; min-width: 0; gap: 12px; }
