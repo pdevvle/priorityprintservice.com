@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-01 · IMPOSE-V1.7</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-23 · IMPOSE-V1.8</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -167,6 +167,9 @@ function resolveSaddleImp(pw, ph) {
 // gutter (0.25″), squeeze to 0.125″ then butt-cut 0 only when the priced
 // count can't fit otherwise. Deterministic and reported.
 const GUTTERS = [0.25, 0.125, 0];
+// Sanity cap on an operator-dictated grid (a fat-fingered "90 across" would
+// otherwise build tens of thousands of cells before failing to fit).
+const MANUAL_GRID_MAX = 400;
 
 // The press images only the usable area (18.5×12.5 on 13×19; 27×12.5 on
 // 13×27.5; 17.5×11.5 on 12×18) — everything placed, including marks, must
@@ -330,6 +333,37 @@ function bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot) {
   return best;
 }
 
+// Manual grid: the operator dictates columns × rows outright (e.g. a 2×4
+// coupon run 9 across × 3 down) instead of the count being derived from the
+// priced imp. Tries each candidate sheet, then each allowed orientation, then
+// the gutter ladder, and returns the first combination that physically fits —
+// explicit per-gap gutters are used as-is when their length matches the grid.
+// Never derives the count: it places exactly what was asked for, or fails and
+// hands back the tightest near-miss so the caller can report the footprint.
+function fitManualGrid(a, d, pieceLong, pieceShort, sheets, gutters, allowedRot, colGaps, rowGaps, fillSheet) {
+  const cgOK = colGaps && colGaps.length === a - 1 ? colGaps : null;
+  const rgOK = rowGaps && rowGaps.length === d - 1 ? rowGaps : null;
+  let best = null;
+  for (const sh of sheets) {
+    const bw = fillSheet ? sh.long : sh.usableLong;
+    const bh = fillSheet ? sh.short : sh.usableShort;
+    for (const rotated of (allowedRot || [false, true])) {
+      const w = rotated ? pieceShort : pieceLong, h = rotated ? pieceLong : pieceShort;
+      for (const g of (gutters || GUTTERS)) {
+        const cg = cgOK || Array(Math.max(0, a - 1)).fill(g);
+        const rg = rgOK || Array(Math.max(0, d - 1)).fill(g);
+        const W = a * w + sum(cg), H = d * h + sum(rg);
+        const cand = { sheet: sh, grid: { a, d, rotated, g }, W, H, bw, bh };
+        if (W <= bw + EPS && H <= bh + EPS) return { ok: cand };
+        const over = q => Math.max(0, q.W - q.bw) + Math.max(0, q.H - q.bh);
+        if (!best || over(cand) < over(best)) best = cand;
+        if (cgOK && rgOK) break; // the gutter ladder changes nothing when both axes are explicit
+      }
+    }
+  }
+  return { ok: null, best };
+}
+
 function computeLayout(calc, trimA, trimB, opts) {
   if (calc === "saddle") return computeSaddleLayout(trimA, trimB, opts); // trimA = page WIDTH, trimB = page HEIGHT (not normalized — spine is the height edge)
   const pieceLong = Math.max(trimA, trimB), pieceShort = Math.min(trimA, trimB);
@@ -349,11 +383,51 @@ function computeLayout(calc, trimA, trimB, opts) {
   // long axis only; "yes" = rotated 90° only; anything else = auto.
   const allowedRot = opts && opts.forceRotated === "yes" ? [true]
                    : opts && opts.forceRotated === "no" ? [false] : [false, true];
-  let sheet, priced, grid, efficient = false;
+  // ── Manual grid + per-gap gutters (operator dictates the layout) ──
+  // Columns × rows set outright, and optionally each individual gutter, the
+  // press sheet, and whether the block may run past the imageable area.
+  // Pricing parity is NOT assumed here: the placed count is always reported
+  // against the priced imp on the badge, in the warnings, and on the slug.
+  const rawCol = opts && Array.isArray(opts.colGaps) ? opts.colGaps.map(v => Math.max(0, +v || 0)) : null;
+  const rawRow = opts && Array.isArray(opts.rowGaps) ? opts.rowGaps.map(v => Math.max(0, +v || 0)) : null;
+  const fillSheet = !!(opts && opts.fillSheet);
+  const mgIn = opts && opts.manualGrid;
+  const manual = mgIn && +mgIn.across >= 1 && +mgIn.down >= 1
+    ? { a: Math.floor(+mgIn.across), d: Math.floor(+mgIn.down) } : null;
+  if (manual && manual.a * manual.d > MANUAL_GRID_MAX)
+    throw new Error(`Manual grid ${manual.a}×${manual.d} = ${manual.a * manual.d} pieces exceeds the ${MANUAL_GRID_MAX}-cell limit.`);
+
+  // Priced imp + default press sheet per calc type (verbatim pricing ports).
+  let sheet, priced, grid, efficient = false, manualGrid = false;
   if (calc === "sticker") {
     priced = stickerImp(pieceLong, pieceShort);
     if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not fit the 12×18 sticker sheet`);
     sheet = SHEETS["12x18"];
+  } else if (FLAT_CALCS.includes(calc)) {
+    priced = flatImp(pieceLong, pieceShort);
+    sheet = SHEETS["13x19"];
+    if (priced < 1) { priced = flatImp(pieceLong, pieceShort, 27); sheet = SHEETS["13x27.5"]; } // calculators' two-sheet rule
+    if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not image on any press sheet`);
+  } else {
+    throw new Error(`Unknown calc type "${calc}"`);
+  }
+
+  if (manual) {
+    const cands = opts && opts.manualSheet && SHEETS[opts.manualSheet] ? [SHEETS[opts.manualSheet]]
+                : calc === "sticker" ? [SHEETS["12x18"]] : [SHEETS["13x19"], SHEETS["13x27.5"]];
+    const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
+    if (!res.ok) {
+      const b = res.best;
+      throw new Error(`Manual ${manual.a}×${manual.d} grid of ${pieceLong}×${pieceShort}″ needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} ${fillSheet ? "sheet" : "printable area"} is ${b.bw}×${b.bh}″. Reduce columns/rows or gutters${fillSheet ? "" : ", or tick “fill full sheet” to use the whole sheet"}.`);
+    }
+    sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
+    const placed = grid.a * grid.d;
+    warnings.push(`Manual grid: ${grid.a} across × ${grid.d} down = ${placed}-up on ${sheet.label}${grid.rotated ? " (pieces rotated 90°)" : ""}${placed === Math.round(priced) ? "" : ` — pricing assumed ${priced}-up, so sheet count and cost per piece will differ`}.`);
+    if (calc === "sticker") warnings.push(`Manual grid overrides the 12×18 crack-n-peel ${STICKER.pitch}″ pitch — confirm the liner/die matches before printing.`);
+    if (!rawCol && !rawRow && grid.g < gutters[0] && gutters.length > 1) warnings.push(grid.g === 0
+      ? "Butt-cut layout (no gutter) needed to fit the manual grid — adjacent pieces share cut lines, no inter-piece bleed."
+      : `Gutter squeezed to ${grid.g}″ to fit the manual grid.`);
+  } else if (calc === "sticker") {
     if (opts && isFinite(opts.gutter) && opts.gutter !== null && Math.abs(+opts.gutter - STICKER.pitch) > EPS) {
       warnings.push(`Sticker pitch is fixed at ${STICKER.pitch}″ by the 12×18 crack-n-peel spec — gutter override ignored.`);
     }
@@ -365,11 +439,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     if (gg.a * gg.d < priced) { mismatch = true; warnings.push(`MISMATCH: forced orientation fits ${gg.a * gg.d}-up but pricing assumed ${priced}-up.`); }
     if (gg.a * gg.d < 1) throw new Error("Forced orientation does not fit the sticker sheet.");
     grid = { a: gg.a, d: gg.d, rotated, g: STICKER.pitch };
-  } else if (FLAT_CALCS.includes(calc)) {
-    priced = flatImp(pieceLong, pieceShort);
-    sheet = SHEETS["13x19"];
-    if (priced < 1) { priced = flatImp(pieceLong, pieceShort, 27); sheet = SHEETS["13x27.5"]; } // calculators' two-sheet rule
-    if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not image on any press sheet`);
+  } else {
     if (opts && opts.efficient && sheet.key === "13x19" && priced >= 2) {
       // Efficient mode: same piece laid out on the 13×27.5 sheet, the
       // multiple expanding to whatever physically fits the 27″ usable axis.
@@ -399,15 +469,35 @@ function computeLayout(calc, trimA, trimB, opts) {
         ? `Butt-cut layout (no gutter) needed to honour the priced ${priced}-up — adjacent pieces share cut lines, no inter-piece bleed.`
         : `Gutter squeezed to ${grid.g}″ to honour the priced ${priced}-up.`);
     }
-  } else {
-    throw new Error(`Unknown calc type "${calc}"`);
   }
+
+  const cellW = grid.rotated ? pieceShort : pieceLong;
+  const cellH = grid.rotated ? pieceLong : pieceShort;
+
+  // ── Explicit per-gap gutters, validated against the final grid ──
+  // Arrays sized to a different grid (the operator changed columns/rows after
+  // editing gutters) fall back to the uniform gutter rather than mis-space.
+  const colGaps = rawCol && rawCol.length === grid.a - 1 ? rawCol : null;
+  const rowGaps = rawRow && rawRow.length === grid.d - 1 ? rawRow : null;
+  if ((rawCol && rawCol.length && !colGaps) || (rawRow && rawRow.length && !rowGaps))
+    warnings.push(`Custom gutters were set for a different grid — reset to the uniform ${grid.g}″ gutter for this ${grid.a}×${grid.d} layout.`);
+
+  // Footprint must fit the physical sheet; past the imageable area is allowed
+  // only as a deliberate full-sheet fill (guillotine cutting).
+  const cgA = colGaps || Array(Math.max(0, grid.a - 1)).fill(grid.g);
+  const rgA = rowGaps || Array(Math.max(0, grid.d - 1)).fill(grid.g);
+  const totalW = grid.a * cellW + sum(cgA), totalH = grid.d * cellH + sum(rgA);
+  if (totalW > sheet.long + EPS || totalH > sheet.short + EPS)
+    throw new Error(`Gutters make the ${grid.a}×${grid.d} layout ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ — larger than the ${sheet.label} sheet. Reduce gutters or pieces.`);
+  if (!fillSheet && (totalW > sheet.usableLong + EPS || totalH > sheet.usableShort + EPS))
+    warnings.push(`Block ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ is larger than the printable area (${sheet.usableLong}×${sheet.usableShort}″) — the outer edges will not image. Tick “fill full sheet” only if this sheet is being guillotine-cut.`);
+
   const layout = {
     sheet, calc, pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    imp: grid.a * grid.d, pricedImp: priced, mismatch, efficient, warnings,
-    cellW: grid.rotated ? pieceShort : pieceLong,
-    cellH: grid.rotated ? pieceLong : pieceShort,
+    colGaps, rowGaps, fillSheet,
+    imp: grid.a * grid.d, pricedImp: priced, mismatch, efficient, manualGrid, warnings,
+    cellW, cellH,
   };
   buildCells(layout, opts);
   return layout;
@@ -473,11 +563,17 @@ function computeSaddleLayout(pw, ph, opts) {
 
   // ── Manual per-gap gutter override (from the signature-gutter editor) ──
   // Sized to the current across×down grid; replaces the rule/uniform gaps.
-  const mCol = opts && Array.isArray(opts.saddleColGaps) ? opts.saddleColGaps : null;
-  const mRow = opts && Array.isArray(opts.saddleRowGaps) ? opts.saddleRowGaps : null;
+  // (saddle* names are the original opts; the generic colGaps/rowGaps/fillSheet
+  // are the shared editor's — either is accepted so both callers work.)
+  const mCol = opts && Array.isArray(opts.saddleColGaps) ? opts.saddleColGaps
+             : opts && Array.isArray(opts.colGaps) ? opts.colGaps : null;
+  const mRow = opts && Array.isArray(opts.saddleRowGaps) ? opts.saddleRowGaps
+             : opts && Array.isArray(opts.rowGaps) ? opts.rowGaps : null;
   if (mCol && mCol.length === grid.a - 1) colGaps = mCol.map(v => Math.max(0, +v || 0));
   if (mRow && mRow.length === grid.d - 1) rowGaps = mRow.map(v => Math.max(0, +v || 0));
-  if (opts && opts.saddleFillSheet != null) fillSheet = !!opts.saddleFillSheet;
+  const mFill = opts && opts.saddleFillSheet != null ? opts.saddleFillSheet
+              : opts && opts.fillSheet != null ? opts.fillSheet : null;
+  if (mFill != null) fillSheet = !!mFill;
 
   // Footprint must fit the physical sheet.
   const cgA = colGaps || Array(Math.max(0, grid.a - 1)).fill(grid.g);
@@ -1006,6 +1102,7 @@ function drawSlug(page, layout, font, info, cells) {
     info.jobName ? String(info.jobName).replace(/[^\x20-\x7E]/g, "?") : null,
     layout.booklet ? `pages ${layout.booklet.pw}x${layout.booklet.ph}in` : `${layout.pieceLong}x${layout.pieceShort}in`,
     layout.mismatch ? `MISMATCH ${layout.imp}-up placed vs ${layout.pricedImp}-up priced` : `${layout.imp}-up on ${layout.sheet.key}`,
+    layout.manualGrid ? `MANUAL GRID ${layout.across}x${layout.down} (priced ${layout.pricedImp}-up)` : null,
     layout.efficient ? `EFFICIENT 13x27.5 (priced ${layout.pricedImp}-up/13x19)`
       : layout.fillSheet ? `FILL ${layout.across}x${layout.down} full-sheet (priced ${layout.pricedImp}-up)` : null,
     (layout.colGaps || layout.rowGaps) ? "custom gutters"
@@ -1244,60 +1341,18 @@ function layoutOpts(spec) {
     saddleColGaps: Array.isArray(spec.saddleColGaps) ? spec.saddleColGaps : null,
     saddleRowGaps: Array.isArray(spec.saddleRowGaps) ? spec.saddleRowGaps : null,
     saddleFillSheet: spec.saddleFillSheet == null ? null : !!spec.saddleFillSheet,
+    // Manual grid (flats/stickers): operator-set columns × rows, optional press
+    // sheet, plus the shared per-gap gutter arrays / full-sheet flag.
+    manualGrid: isFinite(+spec.gridAcross) && +spec.gridAcross >= 1 && isFinite(+spec.gridDown) && +spec.gridDown >= 1
+      ? { across: +spec.gridAcross, down: +spec.gridDown } : null,
+    manualSheet: spec.gridSheet || null,
+    colGaps: Array.isArray(spec.colGaps) ? spec.colGaps : null,
+    rowGaps: Array.isArray(spec.rowGaps) ? spec.rowGaps : null,
+    fillSheet: spec.fillSheet == null ? null : !!spec.fillSheet,
   };
 }
 
-// ── Raster artwork ──────────────────────────────────────────────────────────
-// The storefront accepts jpg/png/tiff, the engine only ever spoke PDF, and the
-// gap was invisible: a customer's JPG reached Drive fine and then simply did
-// not appear as artwork (order 87045). Rather than teach step-and-repeat about
-// bitmaps — the imp functions are verbatim ports of the calculators' and must
-// stay that way — a raster is wrapped into a single-page PDF here, at the
-// boundary. Everything downstream, including the pdf.js ink detection, then
-// genuinely receives a PDF and behaves identically.
-//
-// Physical size comes from pixels at 300 DPI, the same assumption the
-// calculators use to size a raster upload, so the imposed sheet matches the
-// proof the customer approved rather than inventing a second convention.
-const PPS_RASTER_DPI = 300;
-function ppsSniff(bytes) {
-  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  if (b.length > 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return "pdf";
-  if (b.length > 3 && b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return "jpg";
-  if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return "png";
-  if (b.length > 4 && ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2A) || (b[0] === 0x4D && b[1] === 0x4D && b[3] === 0x2A))) return "tiff";
-  return "unknown";
-}
-async function ppsToPdfBytes(bytes, label) {
-  if (!bytes) return bytes;
-  const kind = ppsSniff(bytes);
-  if (kind === "pdf") return bytes;
-  if (kind === "tiff") {
-    throw new Error("The " + label + " artwork is a TIFF, which cannot be imposed directly. "
-      + "Save it as PDF, JPEG or PNG and re-upload it to the order folder.");
-  }
-  if (kind !== "jpg" && kind !== "png") {
-    throw new Error("The " + label + " artwork is not a PDF, JPEG or PNG and cannot be imposed.");
-  }
-  const doc = await PL.PDFDocument.create();
-  const img = kind === "jpg" ? await doc.embedJpg(bytes) : await doc.embedPng(bytes);
-  const wPt = (img.width / PPS_RASTER_DPI) * 72;
-  const hPt = (img.height / PPS_RASTER_DPI) * 72;
-  const page = doc.addPage([wPt, hPt]);
-  page.drawImage(img, { x: 0, y: 0, width: wPt, height: hPt });
-  return await doc.save();
-}
-
 async function imposePdf(artBytes, backBytes, spec, gangFiles) {
-  // Normalize before anything reads a page box, so every path below — flats,
-  // stickers, saddle, gang, ink detection — sees a PDF and nothing else changes.
-  artBytes = await ppsToPdfBytes(artBytes, "front");
-  if (backBytes) backBytes = await ppsToPdfBytes(backBytes, "back");
-  if (Array.isArray(gangFiles)) {
-    for (const g of gangFiles) {
-      if (g && g.bytes) g.bytes = await ppsToPdfBytes(g.bytes, g.name || "gang");
-    }
-  }
   // Gang combo: ≥2 uploaded design files share one sheet (same trim), each
   // taking a share of the cells. Ignores multiMode; qty = press sheets.
   const gang = Array.isArray(gangFiles) && gangFiles.filter(g => g && g.bytes).length >= 2
@@ -1530,7 +1585,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
     if (i === 0) { const th = inspectPdfThreats(check); if (th.length) issues.push(`output carries active content: ${th.join("; ")}`); }
   });
-  if (!layout.mismatch && !layout.efficient && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
+  if (!layout.mismatch && !layout.efficient && !layout.manualGrid && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
   return { bytes, layout, warnings, sheets, sideReports, pageLabels, pieces: pieces.length, sheetsPerSet: D };
@@ -1808,9 +1863,15 @@ function App() {
   const [allowBestFit, setAllowBestFit] = useState(false);
   const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
   const [gutterMode, setGutterMode] = useState("auto");   // "auto" | fixed inches
-  const [sigColGaps, setSigColGaps] = useState(null);     // manual saddle column gaps (in), null = uniform/butt
-  const [sigRowGaps, setSigRowGaps] = useState(null);     // manual saddle row gaps (in), null = uniform/butt
-  const [sigFillSheet, setSigFillSheet] = useState(null); // manually place past the imageable area
+  // Shared per-gap gutter editor (saddle signatures + flat/sticker grids).
+  const [gapCols, setGapCols] = useState(null);           // manual column gaps (in), null = uniform/butt
+  const [gapRows, setGapRows] = useState(null);           // manual row gaps (in), null = uniform/butt
+  const [gapFill, setGapFill] = useState(null);           // manually place past the imageable area
+  // Manual grid (flats/stickers): operator-set columns × rows + press sheet.
+  const [gridOn, setGridOn] = useState(false);
+  const [gridAcross, setGridAcross] = useState(1);
+  const [gridDown, setGridDown] = useState(1);
+  const [gridSheet, setGridSheet] = useState("auto");
   const [offsetMode, setOffsetMode] = useState("jog");    // jog lower-right 0.5″ | center | custom
   const [offsetRight, setOffsetRight] = useState(0.5);
   const [offsetBottom, setOffsetBottom] = useState(0.5);
@@ -1867,10 +1928,14 @@ function App() {
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
     bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps,
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
-    saddleColGaps: sigColGaps, saddleRowGaps: sigRowGaps, saddleFillSheet: sigFillSheet,
+    saddleColGaps: gapCols, saddleRowGaps: gapRows, saddleFillSheet: gapFill,
+    colGaps: gapCols, rowGaps: gapRows, fillSheet: gapFill,
+    gridAcross: !isSaddle && gridOn ? +gridAcross || 0 : null,
+    gridDown: !isSaddle && gridOn ? +gridDown || 0 : null,
+    gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, addBleedPages,
-       sigColGaps, sigRowGaps, sigFillSheet]);
+       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -2098,7 +2163,7 @@ function App() {
   const pendingCount = (rows || []).filter(rowPending).length;
 
   const lay = layoutInfo.layout;
-  const parityOk = lay && !lay.mismatch && !lay.efficient && !lay.fillSheet && (lay.booklet
+  const parityOk = lay && !lay.mismatch && !lay.efficient && !lay.fillSheet && !lay.manualGrid && (lay.booklet
     ? (lay.pricedImp < 2 || lay.imp === lay.pricedImp)   // imp:1 presets legitimately move to the 27.5 sheet
     : lay.imp === Math.round(lay.pricedImp));
 
@@ -2429,32 +2494,79 @@ function App() {
                 <span>Lay out on 13×27.5 (efficient mode) <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "more signature copies per sheet" : "multiple expands to fill the 27″ axis"}</span></span>
               </label>
             )}
-            {isSaddle && lay && lay.booklet && (() => {
+            {lay && (isSaddle ? !!lay.booklet : true) && (() => {
               const nc = Math.max(0, lay.across - 1), nr = Math.max(0, lay.down - 1);
-              const effCol = (sigColGaps && sigColGaps.length === nc) ? sigColGaps : (lay.colGaps || Array(nc).fill(lay.gutter || 0));
-              const effRow = (sigRowGaps && sigRowGaps.length === nr) ? sigRowGaps : (lay.rowGaps || Array(nr).fill(lay.gutter || 0));
-              const setCol = (i, v) => { const a = effCol.slice(); a[i] = v === "" ? 0 : +v; setSigColGaps(a); };
-              const setRow = (i, v) => { const a = effRow.slice(); a[i] = v === "" ? 0 : +v; setSigRowGaps(a); };
-              const custom = sigColGaps || sigRowGaps || sigFillSheet != null;
+              const effCol = (gapCols && gapCols.length === nc) ? gapCols : (lay.colGaps || Array(nc).fill(lay.gutter || 0));
+              const effRow = (gapRows && gapRows.length === nr) ? gapRows : (lay.rowGaps || Array(nr).fill(lay.gutter || 0));
+              const setCol = (i, v) => { const a = effCol.slice(); a[i] = v === "" ? 0 : +v; setGapCols(a); };
+              const setRow = (i, v) => { const a = effRow.slice(); a[i] = v === "" ? 0 : +v; setGapRows(a); };
+              const custom = gapCols || gapRows || gapFill != null;
               const tw = lay.across * lay.cellW + effCol.reduce((x, y) => x + y, 0);
               const th = lay.down * lay.cellH + effRow.reduce((x, y) => x + y, 0);
               const over = tw > lay.sheet.long + 1e-6 || th > lay.sheet.short + 1e-6;
+              // Changing the grid invalidates gap arrays sized to the old one.
+              const setAcross = v => { setGridAcross(v); setGapCols(null); };
+              const setDown = v => { setGridDown(v); setGapRows(null); };
+              const manualCount = (Math.floor(+gridAcross) || 0) * (Math.floor(+gridDown) || 0);
               return (
                 <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 8, background: "rgba(255,255,255,.02)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span className="lbl" style={{ margin: 0 }}>Signature gutters</span>
+                    <span className="lbl" style={{ margin: 0 }}>{isSaddle ? "Signature gutters" : "Manual grid & gutters"}</span>
                     <span style={{ fontSize: 11, color: over ? "#f87171" : "rgba(255,255,255,.4)" }}>
                       block {tw.toFixed(2)}×{th.toFixed(2)}″ / sheet {lay.sheet.long}×{lay.sheet.short}″{over ? " — OVERFLOW" : ""}
                     </span>
                   </div>
+                  {!isSaddle && (
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                        <input type="checkbox" checked={gridOn} style={{ width: "auto" }}
+                               onChange={e => {
+                                 const on = e.target.checked;
+                                 if (on) { setGridAcross(lay.across); setGridDown(lay.down); } // seed from the current layout
+                                 setGapCols(null); setGapRows(null);
+                                 setGridOn(on);
+                               }} />
+                        <span>Set columns × rows manually <span style={{ color: "rgba(255,255,255,.4)" }}>— places exactly this many; the count is flagged against the priced imp</span></span>
+                      </label>
+                      {gridOn && (
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Columns (across)</div>
+                            <input type="number" min="1" step="1" value={gridAcross} style={{ width: 74, fontSize: 12 }}
+                                   onChange={e => setAcross(e.target.value)} />
+                          </div>
+                          <span style={{ fontSize: 13, paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Rows (down)</div>
+                            <input type="number" min="1" step="1" value={gridDown} style={{ width: 74, fontSize: 12 }}
+                                   onChange={e => setDown(e.target.value)} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Press sheet</div>
+                            <select value={gridSheet} onChange={e => setGridSheet(e.target.value)} style={{ fontSize: 12, width: 168 }}>
+                              <option value="auto">Auto (fit)</option>
+                              <option value="13x19">13×19</option>
+                              <option value="13x27.5">13×27.5 (oversize)</option>
+                              <option value="12x18">12×18 crack-n-peel</option>
+                            </select>
+                          </div>
+                          <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
+                            = <b>{manualCount}</b>-up{lay.pricedImp ? <span style={{ color: manualCount === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}-up)</span> : null}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginBottom: 7 }}>
-                    Set the gutter between each signature column/row independently. Turn on “fill full sheet” to allow gutters that push the layout past the imageable area (guillotine cutting).
+                    {isSaddle
+                      ? "Set the gutter between each signature column/row independently. Turn on “fill full sheet” to allow gutters that push the layout past the imageable area (guillotine cutting)."
+                      : "Set the gutter between each column/row independently. Turn on “fill full sheet” to allow a block that runs past the imageable area (guillotine cutting) — it centres on the sheet instead of jogging."}
                   </div>
                   {(nc > 0 || nr > 0) ? (
                     <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
                       {nc > 0 && (
                         <div>
-                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Column gaps (between spreads, in)</div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Column gaps (between {isSaddle ? "spreads" : "columns"}, in)</div>
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                             {effCol.map((g, i) => (
                               <input key={i} type="number" step="0.0625" min="0" value={g} style={{ width: 62, fontSize: 12 }}
@@ -2476,17 +2588,21 @@ function App() {
                       )}
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)" }}>Single spread per side — no inter-signature gutters to set. Raise copies (fill rules / efficient) to gang more.</div>
+                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)" }}>
+                      {isSaddle
+                        ? "Single spread per side — no inter-signature gutters to set. Raise copies (efficient mode) to gang more."
+                        : "Single piece per sheet — no gutters to set. Raise columns/rows above to gang more."}
+                    </div>
                   )}
                   <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
                     <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                      <input type="checkbox" checked={sigFillSheet == null ? !!lay.fillSheet : sigFillSheet}
-                             onChange={e => setSigFillSheet(e.target.checked)} style={{ width: "auto" }} />
+                      <input type="checkbox" checked={gapFill == null ? !!lay.fillSheet : gapFill}
+                             onChange={e => setGapFill(e.target.checked)} style={{ width: "auto" }} />
                       Fill full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>(place past the imageable area)</span>
                     </label>
                     {custom && (
                       <button type="button" className="imp-btn sec" style={{ padding: "3px 10px", fontSize: 12 }}
-                              onClick={() => { setSigColGaps(null); setSigRowGaps(null); setSigFillSheet(null); }}>Reset to rules</button>
+                              onClick={() => { setGapCols(null); setGapRows(null); setGapFill(null); }}>Reset gutters</button>
                     )}
                   </div>
                 </div>
@@ -2523,9 +2639,12 @@ function App() {
                     </div>
                   ) : (
                     <div>Grid: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.imp}-up</b>{" "}
-                      {lay.efficient
+                      {lay.manualGrid
+                        ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>MANUAL GRID {lay.across}×{lay.down} — PRICED {lay.pricedImp}-UP</span>
+                        : lay.efficient
                         ? <span className={"imp-badge " + (lay.imp >= lay.pricedImp ? "ok" : "warn")}>13×27.5 EFFICIENT — PRICED {lay.pricedImp}-UP/13×19</span>
                         : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}-UP`}</span>}
+                      {lay.fillSheet && <span className="imp-badge warn" style={{ marginLeft: 6 }}>FULL-SHEET FILL — PAST IMAGEABLE AREA</span>}
                     </div>
                   )}
                   <div>Gutter: <b>{lay.gutter}″</b>{lay.gutter === 0 ? " (butt-cut)" : ""}</div>
