@@ -477,12 +477,8 @@ function pps_job_console_body( $created, $notice, $error ) {
     <?php return ob_get_clean();
 }
 
-/* Console styling rides on the same sheet as the lookup. */
-add_filter( 'pps_acct_styles_shortcodes', function( $codes ) {
-    $codes[] = 'pps_job_console';
-    return $codes;
-} );
-
+/* Console styling rides on the same sheet as the lookup, enqueued under the
+   same handle — the two pages never both match, so it registers once. */
 add_action( 'wp_enqueue_scripts', function() {
     if ( ! is_singular() ) return;
     $post = get_post();
