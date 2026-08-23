@@ -115,6 +115,30 @@ download the imposed PDF. Useful for testing and one-off jobs.
   priced 13×19 layout (otherwise it says so and stays on 13×19); duplex
   registration on the wide sheet is verified by the physical simulator on
   both flip edges.
+- **Manual grid** (flats & stickers, Fiery-style): the operator can set the
+  **columns × rows outright** instead of taking the count derived from the
+  priced imp — a 2×4 coupon can be run 9 across × 3 down, 8×2, 4×5, whatever
+  the job calls for. A **press-sheet** selector (Auto / 13×19 / 13×27.5 /
+  12×18) sits beside it; Auto tries the calc's normal sheet first and only
+  promotes to the oversize sheet when the grid won't fit. Orientation follows
+  the existing grid-orientation override, else whichever way fits (unrotated
+  preferred), and the gutter ladder (2×bleed → bleed → butt) squeezes as
+  needed to honour the requested count — reported when it does.
+  **Pricing parity is deliberately not assumed here**: the layout is tagged
+  `manualGrid`, the badge reads `MANUAL GRID a×b — PRICED n-UP` (amber when
+  the counts differ), a warning spells out that sheet count and cost per piece
+  will differ, and the slug carries `MANUAL GRID axb (priced n-up)`. It is
+  excluded from the parity preflight for that reason — this is the one path
+  where placing ≠ priced is intentional rather than a fault. A grid that
+  cannot physically fit is refused with its footprint vs the sheet, and
+  `MANUAL_GRID_MAX` (400 cells) backstops a fat-fingered entry.
+- **Per-gap gutters everywhere**: the same per-gap editor now serves flats and
+  stickers as well as saddle — one field per column gap and per row gap, sized
+  to the live grid, honoured exactly (verified to 4 decimal places), with the
+  full-sheet-fill toggle alongside. Gap arrays left over from a different grid
+  are ignored in favour of the uniform gutter and the operator is told. A
+  footprint larger than the physical sheet is refused; one larger than the
+  imageable area warns unless "fill full sheet" is ticked.
 - **Saddle signature gutters** (manual, Fiery-style): the gutter between
   signature copies is editable **per gap on both axes** from a "Signature
   gutters" panel — one field per column gap and per row gap, sized to the
