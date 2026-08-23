@@ -1352,7 +1352,57 @@ function layoutOpts(spec) {
   };
 }
 
+// ── Raster artwork ──────────────────────────────────────────────────────────
+// The storefront accepts jpg/png/tiff, the engine only ever spoke PDF, and the
+// gap was invisible: a customer's JPG reached Drive fine and then simply did
+// not appear as artwork (order 87045). Rather than teach step-and-repeat about
+// bitmaps — the imp functions are verbatim ports of the calculators' and must
+// stay that way — a raster is wrapped into a single-page PDF here, at the
+// boundary. Everything downstream, including the pdf.js ink detection, then
+// genuinely receives a PDF and behaves identically.
+//
+// Physical size comes from pixels at 300 DPI, the same assumption the
+// calculators use to size a raster upload, so the imposed sheet matches the
+// proof the customer approved rather than inventing a second convention.
+const PPS_RASTER_DPI = 300;
+function ppsSniff(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (b.length > 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return "pdf";
+  if (b.length > 3 && b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return "jpg";
+  if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return "png";
+  if (b.length > 4 && ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2A) || (b[0] === 0x4D && b[1] === 0x4D && b[3] === 0x2A))) return "tiff";
+  return "unknown";
+}
+async function ppsToPdfBytes(bytes, label) {
+  if (!bytes) return bytes;
+  const kind = ppsSniff(bytes);
+  if (kind === "pdf") return bytes;
+  if (kind === "tiff") {
+    throw new Error("The " + label + " artwork is a TIFF, which cannot be imposed directly. "
+      + "Save it as PDF, JPEG or PNG and re-upload it to the order folder.");
+  }
+  if (kind !== "jpg" && kind !== "png") {
+    throw new Error("The " + label + " artwork is not a PDF, JPEG or PNG and cannot be imposed.");
+  }
+  const doc = await PL.PDFDocument.create();
+  const img = kind === "jpg" ? await doc.embedJpg(bytes) : await doc.embedPng(bytes);
+  const wPt = (img.width / PPS_RASTER_DPI) * 72;
+  const hPt = (img.height / PPS_RASTER_DPI) * 72;
+  const page = doc.addPage([wPt, hPt]);
+  page.drawImage(img, { x: 0, y: 0, width: wPt, height: hPt });
+  return await doc.save();
+}
+
 async function imposePdf(artBytes, backBytes, spec, gangFiles) {
+  // Normalize before anything reads a page box, so every path below — flats,
+  // stickers, saddle, gang, ink detection — sees a PDF and nothing else changes.
+  artBytes = await ppsToPdfBytes(artBytes, "front");
+  if (backBytes) backBytes = await ppsToPdfBytes(backBytes, "back");
+  if (Array.isArray(gangFiles)) {
+    for (const g of gangFiles) {
+      if (g && g.bytes) g.bytes = await ppsToPdfBytes(g.bytes, g.name || "gang");
+    }
+  }
   // Gang combo: ≥2 uploaded design files share one sheet (same trim), each
   // taking a share of the cells. Ignores multiMode; qty = press sheets.
   const gang = Array.isArray(gangFiles) && gangFiles.filter(g => g && g.bytes).length >= 2
