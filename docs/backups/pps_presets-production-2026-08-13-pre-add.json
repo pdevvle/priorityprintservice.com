@@ -1,0 +1,21 @@
+{
+    "letterhead": {
+        "slug": "letterhead",
+        "calc": "letterhead",
+        "title": "Letterhead Printing",
+        "description": "Custom letterhead printing on premium papers including linen. Available in 8.5×11 and 8.5×14 sizes with optional coating.",
+        "image": "",
+        "price_from": "",
+        "currency": "USD",
+        "sale_discount_pct": "",
+        "sale_label": "",
+        "defaults": {
+            "productType": "letterhead"
+        },
+        "categories": [],
+        "overrides": [],
+        "schema_overrides": [],
+        "schema_extras": [],
+        "faqs": []
+    }
+}

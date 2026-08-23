@@ -29,17 +29,53 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 // SHARED: PPS ORDER VIEW HELPERS
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Every customer-chosen field that a reorder or an Edit Specs round-trip must carry.
+ *
+ * A whitelist rather than the whole metadata blob, because the blob also holds derived
+ * figures — totals, transit days, weights, the debug block — and restoring those would
+ * pin a new quote to an old calculation.
+ *
+ * It was written against the saddle-stitch calculator and never extended when the flat
+ * ones shipped, so it listed bindDir, sets, insideColor and coverColor while omitting
+ * every field a brochure, postcard, letterhead, greeting card or sticker actually
+ * prices on. Editing a single-sided brochure therefore reloaded it as double-sided —
+ * `sides` simply was not in the payload — and re-quoted $107.72 as $141.85, silently.
+ * The calculators were never the problem: their restore handlers already read all of
+ * these.
+ *
+ * When adding a pricing input to any calculator, add it here in the same change. The
+ * test is simple: if changing it changes the price, it belongs in this list.
+ */
 function pps_reorder_field_whitelist() {
     return array(
-        'sizeLabel', 'customLong', 'customShort', 'bindDir',
-        'sets',
-        'insideColor', 'coverColor',
+        // Identity
+        'jobName', 'qty',
+        // Size — presets and custom, both families
+        'sizeMode', 'sizeLabel', 'customLong', 'customShort', 'longEdge', 'shortEdge',
+        // Booklets
+        'bindDir', 'sets', 'insideColor', 'coverColor',
         'insidePaper', 'insidePaperType',
         'coverMode', 'coverPaper', 'coverPaperType',
-        'twoStaple', 'vividPrint',
-        'coating', 'bundling', 'roundCorner',
+        'twoStaple', 'outfold',
+        // Coupon books
+        'bindStyle', 'sidesPrinted', 'magnetBacker',
+        // Flats
+        'foldType', 'foldDir', 'frontColor', 'backColor', 'sides', 'paper', 'paperType',
+        // Finishing — vividPrint is the booklet spelling, vivid the flat one
+        'vividPrint', 'vivid', 'coating', 'coatSides', 'bundling', 'roundCorner',
+        'perforation', 'perfDir', 'perfPositions',
+        // Artwork & proofing
         'artwork', 'artEditPages', 'bleed', 'proof',
-        'shipState',
+        'proofAddrSame', 'proofAddr', 'canvaLink', 'canvaInstructions',
+        // Destination. The date is deliberately absent: a delivery date is a promise
+        // about a specific day, so it is re-quoted rather than restored.
+        // shipAddr (name/company/street/city) is deliberately absent: these
+        // payloads travel in URL query strings (cart Edit-Specs links, reorder
+        // links), which land in access logs, browser history, and Referer
+        // headers to third parties. State+ZIP stay — they are quote inputs.
+        // The full address re-enters the checkout session at add-to-cart.
+        'shipState', 'shipZip',
     );
 }
 
@@ -115,13 +151,13 @@ function pps_render_pps_item_card( $item, $order ) {
     $metadata_json = $item->get_meta( '_pps_metadata' );
     $is_pps = (bool) $metadata_json;
 
-    // Legacy (WCPA-era) fallback: skip cards for items whose product is gone
-    if ( ! $is_pps ) {
-        $product = wc_get_product( $item->get_product_id() );
-        if ( ! $product || ! $product->exists() ) return '';
-    } else {
-        $product = wc_get_product( $item->get_product_id() );
-    }
+    // Legacy (WCPA-era) items may point at a product retired in the 3.0
+    // catalog. Render the card anyway — silently skipping it made a
+    // customer's whole history "yield nothing" — but withhold the one-click
+    // reorder and route them to Contact Us, which already carries the
+    // order/item/specs payload for a manual re-quote.
+    $product      = wc_get_product( $item->get_product_id() );
+    $product_gone = ( ! $product || ! $product->exists() );
 
     $product_url = ( $product && $product->exists() ) ? $product->get_permalink() : '';
 
@@ -130,7 +166,7 @@ function pps_render_pps_item_card( $item, $order ) {
     $thumb_name      = $is_pps ? (string) $item->get_meta( '_pps_artwork_thumb' ) : '';
     $rush            = $is_pps ? (float) $item->get_meta( '_pps_rush' ) : 0;
     $reorder         = $is_pps ? pps_build_reorder_url( $item ) : '';
-    $legacy_reorder  = $is_pps ? '' : pps_build_single_item_reorder_url( $order, $item );
+    $legacy_reorder  = ( $is_pps || $product_gone ) ? '' : pps_build_single_item_reorder_url( $order, $item );
     // Pass '_' to filter underscore-prefixed (internal) meta keys per WP/WC
     // convention. Empty string previously disabled the filter and exposed
     // internal keys like _pi_item_min_preparation_days to the customer.
@@ -235,6 +271,8 @@ function pps_render_pps_item_card( $item, $order ) {
                 <a href="<?php echo esc_url( $reorder ); ?>" class="btn btn-primary">Reorder</a>
             <?php elseif ( $legacy_reorder ) : ?>
                 <a href="<?php echo esc_url( $legacy_reorder ); ?>" class="btn btn-primary">Reorder (same as before)</a>
+            <?php elseif ( $product_gone ) : ?>
+                <button type="button" class="btn btn-ghost" disabled style="opacity:.6;cursor:not-allowed" title="This product was retired from the online catalog — use Contact Us and we'll re-quote it.">No longer sold online</button>
             <?php endif; ?>
             <?php
             $contact_data = array(
@@ -704,7 +742,13 @@ function pps_handle_single_item_reorder() {
         'item_id'  => $item_id,
     );
 
+    // A reorder carries its own price authority in pps_legacy_unit_price, so it is a
+    // legitimate add even for a product the calculator owns. Without this flag the
+    // spec-less-line guard in pps-calculators.php would refuse it as if it were someone
+    // pressing WooCommerce's Add to cart button on a placeholder-priced product.
+    $GLOBALS['pps_internal_add_to_cart'] = true;
     $cart_key = WC()->cart->add_to_cart( $product_id, $quantity, $variation_id, $variations, $cart_item_data );
+    unset( $GLOBALS['pps_internal_add_to_cart'] );
 
     if ( ! $cart_key ) {
         wc_add_notice( 'Could not add that item to your cart.', 'error' );

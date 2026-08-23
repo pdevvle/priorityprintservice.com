@@ -192,21 +192,33 @@ function pps_impose_calc_type( $meta, $item ) {
  * else any other PDF that isn't one of our outputs or a preview deliverable.
  */
 function pps_impose_pick_artwork( $files ) {
+    // PDF wins when present, but a raster is artwork too. The engine wraps
+    // jpg/png into a single-page PDF at load, so anything here can be imposed.
+    // Order 87045 is why: the customer's two JPGs sat in Drive, correct and
+    // complete, while the queue reported no artwork at all — the filter below
+    // used to require .pdf and silently skipped everything else.
     $print_ready = null;
     $raw         = null;
+    $raster      = null;
     foreach ( $files as $f ) {
         $name = $f['name'] ?? '';
-        if ( ! preg_match( '/\.pdf$/i', $name ) ) continue;
+        $is_pdf    = (bool) preg_match( '/\.pdf$/i', $name );
+        $is_raster = (bool) preg_match( '/\.(jpe?g|png)$/i', $name );
+        if ( ! $is_pdf && ! $is_raster ) continue;   // tiff/eps/ai/indd: not impose-able here
         if ( pps_impose_is_output_name( $name ) ) continue;
         if ( preg_match( '/^CLEAN[_\s-]/i', $name ) ) continue; // sanitized copies are outputs, not artwork
         if ( preg_match( '/_preview/i', $name ) ) continue;
+        if ( $is_raster ) {
+            if ( ! $raster ) $raster = $f;
+            continue;
+        }
         if ( preg_match( '/_print-ready\.pdf$/i', $name ) ) {
             $print_ready = $f;
         } elseif ( ! $raw ) {
             $raw = $f;
         }
     }
-    return $print_ready ?: $raw;
+    return $print_ready ?: ( $raw ?: $raster );
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -157,7 +157,7 @@ add_filter( 'woocommerce_product_add_to_cart_text', function() {
 }, 10, 2 );
 
 add_action( 'wp_head', function() {
-    if ( ! is_product_category() && ! is_product_taxonomy() ) return;
+    if ( ! is_product_category() && ! is_product_taxonomy() && ! is_shop() ) return;
     ?>
 <style id="pps-cat-shortcode-css">
 /* ── Page-level resets ── */
@@ -188,6 +188,18 @@ ul.products{max-width:var(--pps-max-w,1200px)!important;margin-left:auto!importa
 .term-description ul{list-style:none;padding:0;margin:14px 0}
 .term-description ul li{padding:6px 0 6px 22px;position:relative;font-size:15px;color:#475569;line-height:1.6}
 .term-description ul li::before{content:"\25B8";position:absolute;left:0;color:#007eff;font-weight:700}
+
+/* ── Attribute section (echoed after the product grid, so outside .term-description) ── */
+.pps-cat-attributes{border-top:1px solid #e2e8f0;padding-top:28px}
+.pps-cat-attributes h2{font-size:20px;font-weight:700;color:#0f172a;margin:32px 0 12px;padding:0 0 0 14px;border-left:3px solid #007eff;border-bottom:none;line-height:1.3}
+.pps-cat-attributes h2:first-child{margin-top:0}
+.pps-cat-attributes h3{font-size:15px;font-weight:600;color:#1e293b;margin:18px 0 8px}
+
+/* ── Inventory dot + legend (papers: cards, wizard steps) ── */
+.pps-inv-dot{width:8px;height:8px;border-radius:50%;background:#007eff;display:inline-block;flex-shrink:0;vertical-align:middle}
+.pps-inv-legend{font-size:11px;color:#94a3b8;display:flex;align-items:center;gap:5px;margin:2px 0 18px}
+.pps-cat-card-desc{font-size:12px;color:#64748b;line-height:1.45;margin:2px 0 4px}
+.pps-cat-badge--stock .pps-inv-dot{width:6px;height:6px;margin-right:4px}
 
 /* ── Features list (papers, coatings, add-ons) ── */
 .pps-cat-features{list-style:none;padding:0;margin:14px 0 24px;columns:2;column-gap:32px}
@@ -266,6 +278,12 @@ ul.products li.product img{border-radius:8px}
 .pps-preset-card-price{font-size:14px;font-weight:700;color:#007eff}
 .pps-preset-card-cta{font-size:12px;font-weight:600;color:#fff;background:#007eff;padding:7px 16px;border-radius:6px;text-transform:none;letter-spacing:.3px;transition:background .15s;white-space:nowrap}
 .pps-preset-card:hover .pps-preset-card-cta{background:#0070e6}
+
+/* ── Shop archive (/shop/): reuse the category modern styling + tidy the WooCommerce controls ── */
+.woocommerce-result-count{color:#64748b;font-size:13px;margin:0 0 8px}
+.woocommerce-ordering{margin-bottom:14px}
+.woocommerce-ordering select{border:1px solid #e2e8f0;border-radius:8px;padding:9px 12px;font-size:13px;color:#334155;background:#fff;font-family:inherit;transition:border-color .15s,box-shadow .15s}
+.woocommerce-ordering select:focus{outline:none;border-color:#60a5fa;box-shadow:0 0 0 2px rgba(0,126,255,.15)}
 
 /* ── Responsive ── */
 @media(max-width:768px){
@@ -396,7 +414,7 @@ add_action( 'wp_footer', function() {
 
 add_action( 'wp_footer', function() {
     if ( ! is_product_category() && ! is_product_taxonomy() ) return;
-    $tips = get_option( 'pps_tooltips', array() );
+    $tips = pps_get_tooltips();
     if ( empty( $tips ) || ! is_array( $tips ) ) return;
 
     $tip_json = wp_json_encode( $tips, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE );
@@ -511,9 +529,56 @@ add_action( 'woocommerce_after_shop_loop', function() {
 }, 15 );
 
 
+// ── Shop archive masthead: mirror the category hero so /shop/ matches the modern look ──
+
+add_action( 'woocommerce_before_main_content', function() {
+    if ( ! is_shop() ) return;
+    $shop_id = function_exists( 'wc_get_page_id' ) ? wc_get_page_id( 'shop' ) : 0;
+    $title   = $shop_id > 0 ? get_the_title( $shop_id ) : '';
+    if ( $title === '' ) $title = 'Shop All Products';
+    $sub = $shop_id > 0 ? (string) get_post_meta( $shop_id, '_pps_shop_subtitle', true ) : '';
+    if ( $sub === '' ) $sub = 'Every product we print. Pick a category or product to configure options, see live pricing, and upload your artwork.';
+    echo '<div class="pps-cat-hero pps-shop-hero">';
+    echo '<h1 class="pps-cat-hero-title">' . esc_html( $title ) . '</h1>';
+    echo '<p class="pps-cat-hero-sub">' . esc_html( $sub ) . '</p>';
+    echo '</div>';
+}, 5 );
+
+// The masthead already shows the title, so suppress WooCommerce's duplicate shop <h1>.
+add_filter( 'woocommerce_show_page_title', function( $show ) {
+    return is_shop() ? false : $show;
+} );
+
+
+// ── Attribute blocks ──────────────────────────────────────────────────────────
+//
+// Each block is a named render function so it can be emitted from two places:
+// the individual [pps_cat_*] shortcodes, and the deferred attributes section
+// that [pps_cat_attributes] queues up for after the product grid.
+
+// Stock badge + inventory legend, shared by the attribute cards and the wizard.
+// The inventory rule lives in pps_paper_is_inventoried() (pps-config-admin.php);
+// rows arrive here already stamped with desc/days/'inv' by pps_paper_enrich(),
+// so every surface — calculator pickers, wizard steps, these cards — shows the
+// same names, designations, and copy from the one config source.
+
+function pps_paper_stock_badge( $p ) {
+    $days = isset( $p['days'] ) ? intval( $p['days'] ) : 0;
+    $inv  = isset( $p['inv'] ) ? ! empty( $p['inv'] ) : ( empty( $p['factory'] ) && $days < 1 );
+    if ( $inv ) {
+        return '<span class="pps-cat-badge pps-cat-badge--stock"><span class="pps-inv-dot"></span>In Stock</span>';
+    }
+    $word = empty( $p['factory'] ) ? 'Special Order' : 'Factory Order';
+    return '<span class="pps-cat-badge pps-cat-badge--factory">' . $word . ( $days > 0 ? ' +' . $days . 'd' : '' ) . '</span>';
+}
+
+function pps_paper_inv_legend() {
+    return '<div class="pps-inv-legend"><span class="pps-inv-dot"></span>In stock &mdash; best for quick turnaround, small quantity, and hardcopy proofs</div>';
+}
+
 // ── [pps_cat_papers type="text|cover|all" factory="yes|no"] ──
 
-add_shortcode( 'pps_cat_papers', function( $atts ) {
+function pps_cat_render_papers( $atts = array() ) {
     if ( ! function_exists( 'pps_get_config' ) ) return '';
     $a   = shortcode_atts( array( 'type' => 'all', 'factory' => 'yes', 'link' => '' ), $atts );
     $cfg = pps_get_config();
@@ -536,7 +601,7 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
     }
     if ( empty( $papers ) ) return '';
 
-    $tips      = get_option( 'pps_tooltips', array() );
+    $tips      = pps_get_tooltips();
     $base_link = trim( $a['link'] );
 
     $out = '<ul class="pps-cat-features">';
@@ -544,14 +609,14 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
         $label   = esc_html( $p['label'] );
         $tip_key = $p['_tip'] ?? '';
         $has_tip = $tip_key && isset( $tips[ $tip_key ] ) && ! empty( $tips[ $tip_key ]['title'] );
-        $stock = empty( $p['factory'] )
-            ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
-            : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+        $stock = pps_paper_stock_badge( $p );
         $coat  = ! empty( $p['coatable'] )
             ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
             : '';
         $tip_btn = $has_tip ? '<span class="pps-cat-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>' : '';
+        $dsc   = ! empty( $p['desc'] ) ? '<div class="pps-cat-card-desc">' . esc_html( $p['desc'] ) . '</div>' : '';
         $inner = '<div class="pps-cat-card-name">' . $label . $tip_btn . '</div>'
+               . $dsc
                . '<div class="pps-cat-card-meta">' . $stock . $coat . '</div>';
 
         if ( $base_link ) {
@@ -565,12 +630,15 @@ add_shortcode( 'pps_cat_papers', function( $atts ) {
         }
     }
     $out .= '</ul>';
+    $out .= pps_paper_inv_legend();
     return $out;
-} );
+}
+
+add_shortcode( 'pps_cat_papers', 'pps_cat_render_papers' );
 
 // ── [pps_cat_turnaround] ──
 
-add_shortcode( 'pps_cat_turnaround', function() {
+function pps_cat_render_turnaround() {
     if ( ! function_exists( 'pps_get_config' ) ) return '';
     $cfg  = pps_get_config();
     $days = isset( $cfg['pcf']['minimum_turnaround_days'] ) ? intval( $cfg['pcf']['minimum_turnaround_days'] ) : 3;
@@ -582,18 +650,20 @@ add_shortcode( 'pps_cat_turnaround', function() {
          . 'Our pricing calculator shows real-time delivery dates based on your ZIP code &mdash; '
          . 'you&#8217;ll see an accurate eta before the order is placed.'
          . '</p></div>';
-} );
+}
+
+add_shortcode( 'pps_cat_turnaround', 'pps_cat_render_turnaround' );
 
 // ── [pps_cat_coatings] ──
 
-add_shortcode( 'pps_cat_coatings', function() {
+function pps_cat_render_coatings() {
     if ( ! function_exists( 'pps_get_config' ) ) return '';
     $cfg      = pps_get_config();
     $coatings = isset( $cfg['coatings'] ) ? $cfg['coatings'] : array();
     $coatings = array_filter( $coatings, function( $c ) { return ! empty( $c['val'] ); } );
     if ( empty( $coatings ) ) return '';
 
-    $tips    = get_option( 'pps_tooltips', array() );
+    $tips    = pps_get_tooltips();
     $has_tip = isset( $tips['coating'] ) && ! empty( $tips['coating']['title'] );
 
     $out = '<div class="pps-cat-chips">';
@@ -604,11 +674,13 @@ add_shortcode( 'pps_cat_coatings', function() {
     }
     $out .= '</div>';
     return $out;
-} );
+}
+
+add_shortcode( 'pps_cat_coatings', 'pps_cat_render_coatings' );
 
 // ── [pps_cat_addons calc="brochure"] ──
 
-add_shortcode( 'pps_cat_addons', function( $atts ) {
+function pps_cat_render_addons( $atts = array() ) {
     if ( ! function_exists( 'pps_get_addons_visibility' ) ) return '';
     $a    = shortcode_atts( array( 'calc' => '' ), $atts );
     $calc = $a['calc'];
@@ -629,7 +701,7 @@ add_shortcode( 'pps_cat_addons', function( $atts ) {
         'rc' => 'round_cornering', 'two_staple' => 'saddle_stitch',
         'perforation' => 'perforation', 'outfold' => 'outfold',
     );
-    $tips = get_option( 'pps_tooltips', array() );
+    $tips = pps_get_tooltips();
 
     $out = '<div class="pps-cat-addon-grid">';
     foreach ( $items as $item ) {
@@ -643,7 +715,168 @@ add_shortcode( 'pps_cat_addons', function( $atts ) {
     }
     $out .= '</div>';
     return $out;
+}
+
+add_shortcode( 'pps_cat_addons', 'pps_cat_render_addons' );
+
+
+// ── [pps_cat_attributes] — the spec blocks, rendered after the product links ───
+//
+// A category page is assembled from three sources: the hand-authored term
+// description (printed before the product loop), the WooCommerce product loop,
+// and the plugin hooks below it. The attribute blocks used to be written into
+// the term description, which forced them *above* the product grid. This
+// shortcode is a marker: on a product-category archive it prints nothing where
+// it sits, records what to render, and the flush below emits it after the grid
+// and the preset lineup — so the page reads
+//
+//     masthead → wizard → prose → product links → attributes → footer.
+//
+// Anywhere else (a page, a widget) it renders inline like a normal shortcode,
+// and the individual [pps_cat_*] shortcodes are still registered above for
+// authors who want a single block in a specific spot.
+//
+// Headings live here rather than in the term description precisely because the
+// section moves: markup echoed from a hook is outside .term-description, so it
+// would not pick up that scoped heading styling.
+
+/**
+ * True when attribute blocks should be deferred to after the product loop.
+ *
+ * The defer test and the flush guard must agree, or a deferred block is
+ * recorded and never printed — so both go through this one predicate.
+ */
+function pps_cat_defer_attributes() {
+    if ( is_admin() || ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() ) ) return false;
+    if ( ! function_exists( 'is_product_category' ) ) return false;
+    return is_product_category() || is_product_taxonomy();
+}
+
+/**
+ * Holds the attribute sections queued during the term description render.
+ *
+ * @param string $op   'push' to queue $args, 'take' to drain the queue.
+ * @param array  $args Shortcode atts, when pushing.
+ * @return array Queued att sets, when taking.
+ */
+function pps_cat_attributes_store( $op, $args = array() ) {
+    static $queue   = array();
+    static $flushed = false;
+
+    if ( $op === 'push' ) {
+        // Keyed, not appended: SEO plugins run the term description through
+        // do_shortcode a second time to build a meta description, which would
+        // otherwise queue the same section twice.
+        $queue[ md5( (string) wp_json_encode( $args ) ) ] = $args;
+        return array();
+    }
+
+    if ( $op === 'take' ) {
+        // Only latch once something was actually rendered, so a later hook can
+        // still print a section that was queued after the first flush point.
+        if ( $flushed || empty( $queue ) ) return array();
+        $flushed = true;
+        $out     = $queue;
+        $queue   = array();
+        return $out;
+    }
+
+    return array();
+}
+
+function pps_cat_render_attributes( $atts = array() ) {
+    $a = shortcode_atts( array(
+        'turnaround'       => 'yes',
+        'papers'           => '',   // comma list of text|cover; empty = no paper block
+        'papers_heading'   => 'Paper Options',
+        'text_label'       => 'Text Weight',
+        'cover_label'      => 'Cardstock',
+        'coatings'         => 'no',
+        'coatings_heading' => 'Coatings',
+        'addons'           => '',   // calc slug for the add-on grid; empty = none
+        'addons_heading'   => 'Finishing Add-ons',
+        'factory'          => 'yes',
+        'link'             => '',
+    ), $atts );
+
+    // Intersect against the known list so the order is always text-then-cover
+    // regardless of how the atts were written, and junk values are dropped.
+    $types = array_map( 'trim', explode( ',', strtolower( $a['papers'] ) ) );
+    $types = array_values( array_intersect( array( 'text', 'cover' ), $types ) );
+
+    $blocks = '';
+
+    if ( $a['turnaround'] === 'yes' ) {
+        $blocks .= pps_cat_render_turnaround();
+    }
+
+    if ( ! empty( $types ) ) {
+        $papers = '';
+        // A single stock reads fine under the section heading alone.
+        $sub = count( $types ) > 1;
+        foreach ( $types as $type ) {
+            $body = pps_cat_render_papers( array(
+                'type'    => $type,
+                'factory' => $a['factory'],
+                'link'    => $a['link'],
+            ) );
+            if ( $body === '' ) continue;
+            if ( $sub ) {
+                $label   = $type === 'text' ? $a['text_label'] : $a['cover_label'];
+                $papers .= '<h3>' . esc_html( $label ) . '</h3>';
+            }
+            $papers .= $body;
+        }
+        if ( $papers !== '' ) {
+            $blocks .= '<h2>' . esc_html( $a['papers_heading'] ) . '</h2>' . $papers;
+        }
+    }
+
+    if ( $a['coatings'] === 'yes' ) {
+        $body = pps_cat_render_coatings();
+        if ( $body !== '' ) {
+            $blocks .= '<h2>' . esc_html( $a['coatings_heading'] ) . '</h2>' . $body;
+        }
+    }
+
+    if ( $a['addons'] !== '' ) {
+        $body = pps_cat_render_addons( array( 'calc' => $a['addons'] ) );
+        if ( $body !== '' ) {
+            $blocks .= '<h2>' . esc_html( $a['addons_heading'] ) . '</h2>' . $body;
+        }
+    }
+
+    if ( $blocks === '' ) return '';
+
+    return '<div class="pps-cat-body pps-cat-attributes">' . $blocks . '</div>';
+}
+
+add_shortcode( 'pps_cat_attributes', function( $atts ) {
+    $atts = is_array( $atts ) ? $atts : array();
+
+    if ( pps_cat_defer_attributes() ) {
+        pps_cat_attributes_store( 'push', $atts );
+        return '';
+    }
+
+    return pps_cat_render_attributes( $atts );
 } );
+
+function pps_cat_flush_attributes() {
+    if ( ! pps_cat_defer_attributes() ) return;
+
+    foreach ( pps_cat_attributes_store( 'take' ) as $atts ) {
+        echo pps_cat_render_attributes( $atts ); // escaped as it is assembled
+    }
+}
+
+// After the preset lineup (priority 15) when the category has products, after
+// the empty-archive notice when it has none, and a backstop for templates that
+// fire neither. The store latches on the first flush that prints something.
+add_action( 'woocommerce_after_shop_loop',    'pps_cat_flush_attributes', 20 );
+add_action( 'woocommerce_no_products_found',  'pps_cat_flush_attributes', 20 );
+add_action( 'woocommerce_after_main_content', 'pps_cat_flush_attributes', 5 );
+
 
 // ── Dynamic business-card wizard config from WooCommerce products ──
 
@@ -1276,7 +1509,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $id = 'pps-wiz-' . wp_unique_id();
 
     // Load tooltips for "?" triggers on wizard options
-    $wiz_tips = get_option( 'pps_tooltips', array() );
+    $wiz_tips = pps_get_tooltips();
     $wiz_tip_icon = function( $tip_key ) use ( $wiz_tips ) {
         if ( empty( $tip_key ) || ! isset( $wiz_tips[ $tip_key ] ) ) return '';
         return ' <span class="pps-cat-tip pps-wiz-tip" data-tip="' . esc_attr( $tip_key ) . '">?</span>';
@@ -1299,20 +1532,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     unset( $_p );
     $papers = array_merge( $nc, $cs );
 
-    $paper_hints = array(
-        '70lb Uncoated Opaque Text'  => 'Lightweight, natural feel — inserts & newsletters',
-        '80lb Matte Text'            => 'Smooth matte — versatile for brochures & catalogs',
-        '100lb Gloss Text'           => 'Glossy, vibrant — premium marketing materials',
-        '60lb Offset Smooth Opaque'  => 'Economy weight — budget-friendly for large runs',
-        '80lb Offset Smooth Opaque'  => 'Mid-weight offset — solid quality at great value',
-        '80lb Gloss Factory Coated'  => 'Pre-coated gloss — vivid colors out of the box',
-        '100lb Matte Factory Coated' => 'Pre-coated matte — rich feel, great ink holdout',
-        '80lb Opaque Uncoated'       => 'Sturdy uncoated cardstock — professional feel',
-        '80lb Matte Cardstock'       => 'Smooth matte cardstock — elegant & substantial',
-        '100lb Gloss Cardstock'      => 'Glossy cardstock — bold colors, sharp images',
-        '14pt Gloss C1S'             => 'Thick, coated one side — postcards & covers',
-        '16pt Coated C2S'            => 'Premium double-coated — maximum durability',
-    );
+    // Per-stock hints come from the enriched config rows themselves ($p['desc'],
+    // filled by pps_paper_enrich from pps_paper_meta_defaults) — the same copy
+    // the calculators show. No wizard-local paper copy to drift.
 
     if ( $is_booklet ) {
         $size_groups = isset( $cfg['size_presets'] ) ? $cfg['size_presets'] : array();
@@ -1346,22 +1568,63 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
         $folds = array();
         foreach ( $fold_groups as $fg ) { foreach ( $fg['items'] as $fi ) { $folds[] = $fi; } }
 
-        $size_groups = array(
-            array( 'group' => 'Standard', 'items' => array(
-                array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5', 'desc' => 'Half letter — compact' ),
-                array( 'val' => '6x9',     'label' => '6 × 9',      'desc' => 'Common mailer size' ),
-                array( 'val' => '8.5x11',  'label' => '8.5 × 11',   'desc' => 'Letter — the standard' ),
-            )),
-            array( 'group' => 'Large', 'items' => array(
-                array( 'val' => '8.5x14', 'label' => '8.5 × 14', 'desc' => 'Legal — extra room' ),
-                array( 'val' => '9x12',   'label' => '9 × 12',    'desc' => 'Fits inside folders' ),
-                array( 'val' => '11x17',  'label' => '11 × 17',   'desc' => 'Tabloid — large format' ),
-            )),
-            array( 'group' => 'Oversized', 'items' => array(
-                array( 'val' => '12x18',   'label' => '12 × 18',   'desc' => 'Oversized tabloid' ),
-                array( 'val' => '11x25.5', 'label' => '11 × 25.5', 'desc' => 'Extra-long mailer' ),
-            )),
+        // Sizes mirror the brochure calculator's own list (config key
+        // brochure_sizes, the same rows injected as PPS_CONFIG.calc): change
+        // the calculator's sizes and the wizard follows. Hints are cosmetic
+        // and keyed by val; unknown sizes simply render without one.
+        $size_hints = array(
+            '4.25x5.5' => 'Quarter sheet — handouts & inserts',
+            '4x6'      => 'Postcard size',
+            '5.5x8.5'  => 'Half letter — compact',
+            '6x9'      => 'Common mailer size',
+            '8.5x11'   => 'Letter — the standard',
+            '8.5x14'   => 'Legal — extra room',
+            '9x12'     => 'Fits inside folders',
+            '11x17'    => 'Tabloid — large format',
+            '12x18'    => 'Oversized tabloid',
+            '11x25.5'  => 'Extra-long mailer',
         );
+        $bs = isset( $cfg['brochure_sizes'] ) && is_array( $cfg['brochure_sizes'] ) ? $cfg['brochure_sizes'] : array();
+        $size_groups = array();
+        if ( ! empty( $bs ) ) {
+            $buckets = array( 'Standard' => array(), 'Large' => array(), 'Oversized' => array(), 'Square' => array() );
+            foreach ( $bs as $bsz ) {
+                if ( ! is_array( $bsz ) || empty( $bsz['label'] ) ) continue;
+                $long  = isset( $bsz['long'] ) ? floatval( $bsz['long'] ) : 0;
+                $short = isset( $bsz['short'] ) ? floatval( $bsz['short'] ) : 0;
+                $val   = str_replace( array( '×', ' ' ), array( 'x', '' ), $bsz['label'] );
+                $lbl   = str_replace( '×', ' × ', $bsz['label'] );
+                $g     = ( $long > 0 && $long === $short ) ? 'Square'
+                       : ( $long <= 11 ? 'Standard' : ( $long <= 17 ? 'Large' : 'Oversized' ) );
+                $buckets[ $g ][] = array(
+                    'val'   => $val,
+                    'label' => $lbl,
+                    'desc'  => isset( $size_hints[ $val ] ) ? $size_hints[ $val ] : '',
+                );
+            }
+            foreach ( $buckets as $gname => $items ) {
+                if ( ! empty( $items ) ) $size_groups[] = array( 'group' => $gname, 'items' => $items );
+            }
+        }
+        if ( empty( $size_groups ) ) {
+            // Fallback when config carries no brochure_sizes rows.
+            $size_groups = array(
+                array( 'group' => 'Standard', 'items' => array(
+                    array( 'val' => '5.5x8.5', 'label' => '5.5 × 8.5', 'desc' => 'Half letter — compact' ),
+                    array( 'val' => '6x9',     'label' => '6 × 9',      'desc' => 'Common mailer size' ),
+                    array( 'val' => '8.5x11',  'label' => '8.5 × 11',   'desc' => 'Letter — the standard' ),
+                )),
+                array( 'group' => 'Large', 'items' => array(
+                    array( 'val' => '8.5x14', 'label' => '8.5 × 14', 'desc' => 'Legal — extra room' ),
+                    array( 'val' => '9x12',   'label' => '9 × 12',    'desc' => 'Fits inside folders' ),
+                    array( 'val' => '11x17',  'label' => '11 × 17',   'desc' => 'Tabloid — large format' ),
+                )),
+                array( 'group' => 'Oversized', 'items' => array(
+                    array( 'val' => '12x18',   'label' => '12 × 18',   'desc' => 'Oversized tabloid' ),
+                    array( 'val' => '11x25.5', 'label' => '11 × 25.5', 'desc' => 'Extra-long mailer' ),
+                )),
+            );
+        }
         $sizes = array();
         foreach ( $size_groups as $sg ) { foreach ( $sg['items'] as $si ) { $sizes[] = $si; } }
         $page_counts = array();
@@ -1439,6 +1702,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
             'Standard'          => 'Common formats &mdash; half letter, mailer &amp; letter size',
             'Large'             => 'Legal, folder-fit &amp; tabloid',
             'Oversized'         => 'Extra-large for maximum impact',
+            'Square'            => 'Equal-sided &mdash; modern, social-style layouts',
         );
         $out .= '<div class="pps-wiz-step is-active" data-step="sizetype">';
         $out .= '<div class="pps-wiz-prompt">What type of size do you need? <span class="pps-wiz-clear">&times; clear</span></div>';
@@ -1493,12 +1757,16 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     if ( $is_booklet ) {
         // Step 2: Page Count
         $out .= '<div class="pps-wiz-step" data-step="pages">';
-        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — how many pages? ' . $wiz_tip_icon( 'page_count' ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
+        // Coupon books are quoted in sheets (leaves, 2 pages each); the calculator's
+        // URL param stays in pages, so only the display text converts.
+        $is_coupon_wiz = ( $calc === 'coupon' );
+        $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="size"></span> — how many ' . ( $is_coupon_wiz ? 'sheets' : 'pages' ) . '? ' . $wiz_tip_icon( 'page_count' ) . ' <span class="pps-wiz-clear">&times; clear</span></div>';
         $out .= '<div class="pps-wiz-grid">';
         foreach ( $page_counts as $pc ) {
-            $pc = intval( $pc );
-            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . $pc . '" data-label="' . $pc . ' pages">'
-                  . '<div class="pps-wiz-opt-name">' . $pc . ' Pages</div>'
+            $pc   = intval( $pc );
+            $disp = $is_coupon_wiz ? ( intdiv( $pc, 2 ) . ' Sheets' ) : ( $pc . ' Pages' );
+            $out .= '<button type="button" class="pps-wiz-opt" data-val="' . $pc . '" data-label="' . esc_attr( strtolower( $disp ) ) . '">'
+                  . '<div class="pps-wiz-opt-name">' . esc_html( $disp ) . '</div>'
                   . '</button>';
         }
         $out .= '</div></div>';
@@ -1549,11 +1817,9 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     $out .= '<div class="pps-wiz-prompt"><span class="pps-wiz-prev" data-show="papertype"></span> — pick your paper stock: <span class="pps-wiz-clear">&times; clear</span></div>';
     $out .= '<div class="pps-wiz-grid">';
     foreach ( $papers as $p ) {
-        $hint  = isset( $paper_hints[ $p['label'] ] ) ? $paper_hints[ $p['label'] ] : '';
+        $hint  = isset( $p['desc'] ) ? $p['desc'] : '';
         $ptype = ! empty( $p['_cs'] ) ? 'cs' : 'text';
-        $stock = empty( $p['factory'] )
-            ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
-            : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+        $stock = pps_paper_stock_badge( $p );
         $coat  = ! empty( $p['coatable'] )
             ? '<span class="pps-cat-badge pps-cat-badge--coat">UV Coatable</span>'
             : '';
@@ -1564,7 +1830,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
               . '<div class="pps-wiz-opt-badges">' . $stock . $coat . '</div>'
               . '</button>';
     }
-    $out .= '</div></div>';
+    $out .= '</div>' . pps_paper_inv_legend() . '</div>';
 
     // Step 5 (booklets only): Cover stock
     if ( $is_booklet ) {
@@ -1576,16 +1842,16 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
               . '<div class="pps-wiz-opt-desc">Use the same paper stock for the cover</div>'
               . '</button>';
         foreach ( $cs as $p ) {
-            $stock = empty( $p['factory'] )
-                ? '<span class="pps-cat-badge pps-cat-badge--stock">In Stock</span>'
-                : '<span class="pps-cat-badge pps-cat-badge--factory">Factory Order</span>';
+            $stock = pps_paper_stock_badge( $p );
+            $chint = isset( $p['desc'] ) ? $p['desc'] : '';
             $ctk   = $paper_tip_key( $p['label'], true );
             $out .= '<button type="button" class="pps-wiz-opt" data-val="' . esc_attr( $p['val'] ) . '" data-label="' . esc_attr( $p['label'] ) . '">'
                   . '<div class="pps-wiz-opt-name">' . esc_html( $p['label'] ) . $wiz_tip_icon( $ctk ) . '</div>'
+                  . ( $chint ? '<div class="pps-wiz-opt-desc">' . esc_html( $chint ) . '</div>' : '' )
                   . '<div class="pps-wiz-opt-badges">' . $stock . '</div>'
                   . '</button>';
         }
-        $out .= '</div></div>';
+        $out .= '</div>' . pps_paper_inv_legend() . '</div>';
     }
 
     // Coating (optional)
@@ -1622,9 +1888,10 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
     } // end PPS calculator steps else
 
     // Floating action bar
-    $nonce    = wp_create_nonce( 'pps_wizard_email' );
+    // No nonce attribute: see pps_wizard_email_handler() for why a cached category page
+    // makes one actively harmful here.
     $ajax_url = admin_url( 'admin-ajax.php' );
-    $out .= '<div class="pps-wiz-actions" data-nonce="' . esc_attr( $nonce ) . '" data-ajax="' . esc_url( $ajax_url ) . '">';
+    $out .= '<div class="pps-wiz-actions" data-ajax="' . esc_url( $ajax_url ) . '">';
     $out .= '<div class="pps-wiz-summary"></div>';
     $out .= '<div class="pps-wiz-actions-btns">';
     $out .= '<a class="pps-wiz-act-pricing" href="' . esc_url( $link ) . '">Proceed to Pricing &rarr;</a>';
@@ -1659,7 +1926,16 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           . '(function(){'
           . 'var w=document.getElementById(' . wp_json_encode( $id ) . ');'
           . 'if(!w)return;'
-          . 'var steps=[];w.querySelectorAll(".pps-wiz-step").forEach(function(el){steps.push(el.dataset.step)});'
+          // Read the step order at click time, not once at script time. Captured up
+          // front it is whatever the DOM held the instant this inline script ran, and on
+          // staging that was evidently not the finished markup: every step was present
+          // and correct afterwards, no exception was thrown, yet nothing advanced and
+          // the action bar never appeared -- which is what an empty steps array produces,
+          // since indexOf returns -1 and `si < steps.length-1` is then -1 < -1, false.
+          // A page builder, a lazy-render, or a cache plugin relocating inline scripts
+          // all cause it, and none of them are ours to control. Querying live cannot go
+          // stale, and the cost is one querySelectorAll per click.
+          . 'function stepList(){var a=[];w.querySelectorAll(".pps-wiz-step").forEach(function(el){a.push(el.dataset.step)});return a}'
           . 'var state={},base=w.dataset.link;'
           . 'var bar=w.querySelector(".pps-wiz-actions");'
           . 'var wizFiles=[];'
@@ -1729,10 +2005,20 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'if(selOpt&&selOpt.dataset.url)state[step].url=selOpt.dataset.url;'
           .   'var opts=w.querySelectorAll(\'[data-step="\'+step+\'"] .pps-wiz-opt\');'
           .   'opts.forEach(function(o){o.classList.toggle("is-selected",o.dataset.val===val)});'
-          .   'var si=steps.indexOf(step);'
+          .   'var steps=stepList();var si=steps.indexOf(step);'
+          // A step whose data-step is not in the steps array means the markup and this
+          // script disagree. Without this guard si is -1, which hides every step from
+          // index 1 and then re-shows step 0 -- the wizard highlights your choice and
+          // then refuses to advance, forever. Bail instead of dismantling the page.
+          .   'if(si<0){updatePrev();updateActions();return}'
           .   'for(var i=si+2;i<steps.length;i++){hide(steps[i]);delete state[steps[i]]}'
-          .   'if(step==="papertype")filterPapers(val);'
-          .   'if(step==="sizetype")filterSizes(val);'
+          // The step immediately after keeps its DOM so it can be re-shown, and the loop
+          // above deliberately skips it -- but the filters below strip its highlight. Its
+          // state has to go with the highlight, or the summary bar and the quote URL
+          // carry a size nothing on screen shows as chosen. Named rather than
+          // steps[si+1], so this stays correct if the step order ever changes.
+          .   'if(step==="papertype"){delete state.paper;filterPapers(val)}'
+          .   'if(step==="sizetype"){delete state.size;filterSizes(val)}'
           .   'if(si<steps.length-1)setTimeout(function(){show(steps[si+1])},150);'
           .   'updatePrev();updateActions();'
           . '}'
@@ -1745,7 +2031,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'var parts=[];'
           .   'var productUrl="";'
           .   'if(w.dataset.lead){'
-          .     'steps.forEach(function(s){if(state[s]){parts.push(state[s].label);if(state[s].url)productUrl=state[s].url}});'
+          .     'stepList().forEach(function(s){if(state[s]){parts.push(state[s].label);if(state[s].url)productUrl=state[s].url}});'
           .     'var a=w.querySelector(".pps-wiz-act-pricing");'
           .     'if(a){a.href=productUrl||base;if(productUrl){a.textContent="View Product \\u2192";a.style.display=""}else if(!base){a.style.display="none"}else{a.textContent="Proceed to Pricing \\u2192"}}'
           .   '}else{'
@@ -1764,7 +2050,7 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'bar.classList.toggle("is-visible",parts.length>0);'
           . '}'
           . 'function clearStep(step){'
-          .   'var si=steps.indexOf(step);if(si<0)return;'
+          .   'var steps=stepList();var si=steps.indexOf(step);if(si<0)return;'
           .   'delete state[step];'
           .   'var el=w.querySelector(\'[data-step="\'+step+\'"]\');'
           .   'if(el)el.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");if(o.dataset.ptype||o.dataset.stype)o.style.display=""});'
@@ -1802,11 +2088,11 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .   'if(e.target.closest(".pps-wiz-reset")){'
           .     'state={};'
           .     'w.querySelectorAll(".pps-wiz-opt").forEach(function(o){o.classList.remove("is-selected","is-toggled");o.style.display=""});'
-          .     'steps.forEach(function(s,i){if(i>0)hide(s)});'
+          .     'stepList().forEach(function(s,i){if(i>0)hide(s)});'
           .     'bar.classList.remove("is-visible");'
           .     'var ef=w.querySelector(".pps-wiz-email-form");if(ef)ef.style.display="none";'
           .     'wizFiles=[];renderFiles();'
-          .     'var firstStep=w.querySelector(\'[data-step="\'+steps[0]+\'"]\');'
+          .     'var _s0=stepList()[0];var firstStep=_s0?w.querySelector(\'[data-step="\'+_s0+\'"]\'):null;'
           .     'if(firstStep)firstStep.scrollIntoView({behavior:"smooth",block:"nearest"});'
           .     'return;'
           .   '}'
@@ -1827,7 +2113,6 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
           .     'var digits=phone.replace(/\\D/g,"");if(digits.length<7||digits.length>15){statusEl.className="pps-wiz-email-status is-err";statusEl.textContent="Please enter a valid phone number.";return}'
           .     'var fd=new FormData();'
           .     'fd.append("action","pps_wizard_email");'
-          .     'fd.append("nonce",bar.dataset.nonce);'
           .     'fd.append("name",name);fd.append("email",email);fd.append("phone",phone);'
           .     'fd.append("calc",calc);'
           .     'if(hp)fd.append("website",hp.value);'
@@ -1858,14 +2143,32 @@ add_shortcode( 'pps_cat_wizard', function( $atts ) {
 add_action( 'wp_ajax_pps_wizard_email',        'pps_wizard_email_handler' );
 add_action( 'wp_ajax_nopriv_pps_wizard_email', 'pps_wizard_email_handler' );
 function pps_wizard_email_handler() {
-    check_ajax_referer( 'pps_wizard_email', 'nonce' );
+    // NO NONCE. The wizard renders on product CATEGORY archives, which WP Rocket caches, so
+    // the nonce printed into that HTML outlives its 12-24h window and then every quote
+    // request from that page fails — with a retry reloading the same cached page and the
+    // same dead nonce. That is a silent lead leak on the pages closest to a sale. For a
+    // logged-out visitor the uid-0 nonce is shared and published in the markup anyway, so
+    // it was never authentication. Honeypot and the shared per-IP rate limit below are.
     if ( ! empty( $_POST['website'] ) ) wp_send_json_error( 'Invalid submission.' );
+
+    // Everything past this point is the shared intake pipeline: one recipient, one email
+    // format, one Calc Questions record, one customer confirmation. Previously this handler
+    // had its own copy of all four, and its own hardcoded admin_email.
+    if ( ! function_exists( 'pps_intake_record' ) ) {
+        error_log( '[pps-wizard] PPS Intake not loaded — quote request refused rather than lost' );
+        wp_send_json_error( 'We could not send that just now. Please email us and we will pick it up.' );
+    }
+
+    if ( (int) get_transient( pps_intake_rate_key() ) >= 5 ) {
+        wp_send_json_error( 'Too many submissions from your connection. Please try again in a few minutes.' );
+    }
+    set_transient( pps_intake_rate_key(), (int) get_transient( pps_intake_rate_key() ) + 1, 15 * MINUTE_IN_SECONDS );
 
     $name     = sanitize_text_field( wp_unslash( $_POST['name'] ?? '' ) );
     $email    = sanitize_email( wp_unslash( $_POST['email'] ?? '' ) );
     $phone    = sanitize_text_field( wp_unslash( $_POST['phone'] ?? '' ) );
     $callback = ! empty( $_POST['callback'] );
-    $specs    = sanitize_text_field( wp_unslash( $_POST['specs'] ?? '' ) );
+    $specs    = sanitize_textarea_field( wp_unslash( $_POST['specs'] ?? '' ) );
     $url      = esc_url_raw( wp_unslash( $_POST['url'] ?? '' ) );
     $msg      = sanitize_textarea_field( wp_unslash( $_POST['message'] ?? '' ) );
 
@@ -1877,110 +2180,53 @@ function pps_wizard_email_handler() {
         wp_send_json_error( 'Please provide a valid phone number.' );
     }
 
-    $admin = get_option( 'admin_email' );
-    $subj  = $callback ? 'Quote + Callback Request from ' . $name : 'Quote Request from ' . $name;
-    $body  = "Name: {$name}\nEmail: {$email}\nPhone: {$phone}";
-    if ( $callback ) $body .= "\n*** CALLBACK REQUESTED ***";
-    $body .= "\n\nSelected Specs:\n{$specs}\n\nCalculator Link:\n{$url}";
-    if ( $msg ) $body .= "\n\nMessage:\n{$msg}";
-
-    $headers     = array( 'Reply-To: ' . $name . ' <' . $email . '>' );
-    $attachments = array();
-    $cleanup     = array();
-    $upload_urls = array();
-
-    $allowed_ext = array( 'pdf', 'png', 'jpg', 'jpeg', 'tiff', 'tif', 'ai', 'psd', 'eps' );
-    $max_per_file = 20 * 1024 * 1024; // 20 MB
-    $max_email    = 20 * 1024 * 1024;
-
-    if ( ! empty( $_FILES['files'] ) && is_array( $_FILES['files']['name'] ) ) {
-        $count = count( $_FILES['files']['name'] );
-        $total = 0;
-        $valid = array();
-
-        for ( $i = 0; $i < $count; $i++ ) {
-            if ( $_FILES['files']['error'][ $i ] !== UPLOAD_ERR_OK ) continue;
-            $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
-            $ext  = strtolower( pathinfo( $orig, PATHINFO_EXTENSION ) );
-            if ( ! in_array( $ext, $allowed_ext, true ) ) continue;
-            if ( $_FILES['files']['size'][ $i ] > $max_per_file ) continue;
-            $total += $_FILES['files']['size'][ $i ];
-            $valid[] = $i;
-        }
-
-        if ( $total <= $max_email ) {
-            $tmp_dir = get_temp_dir() . 'pps-quote-' . wp_generate_password( 8, false );
-            wp_mkdir_p( $tmp_dir );
-            foreach ( $valid as $i ) {
-                $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
-                $dest = $tmp_dir . '/' . $orig;
-                if ( move_uploaded_file( $_FILES['files']['tmp_name'][ $i ], $dest ) ) {
-                    $attachments[] = $dest;
-                }
-            }
-            $cleanup[] = $tmp_dir;
-        } else {
-            $token   = wp_generate_password( 16, false );
-            $upl_dir = wp_upload_dir();
-            $quote_dir = $upl_dir['basedir'] . '/pps-quotes/' . $token;
-            wp_mkdir_p( $quote_dir );
-            $htaccess = $quote_dir . '/.htaccess';
-            if ( ! file_exists( $htaccess ) ) {
-                file_put_contents( $htaccess, "Options -Indexes\n" );
-            }
-            foreach ( $valid as $i ) {
-                $orig = sanitize_file_name( $_FILES['files']['name'][ $i ] );
-                $dest = $quote_dir . '/' . $orig;
-                if ( move_uploaded_file( $_FILES['files']['tmp_name'][ $i ], $dest ) ) {
-                    $upload_urls[] = $upl_dir['baseurl'] . '/pps-quotes/' . $token . '/' . $orig;
-                }
-            }
-            if ( $upload_urls ) {
-                $body .= "\n\nUploaded Files (too large for email attachment):\n" . implode( "\n", $upload_urls );
-            }
-        }
+    // The re-open URL goes in an email; keep it on our own host so it cannot be used as an
+    // open redirector, exactly as pps_ajax_quote_question() does.
+    if ( $url ) {
+        $u_host = wp_parse_url( $url, PHP_URL_HOST );
+        if ( ! $u_host || strcasecmp( $u_host, (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) !== 0 ) $url = '';
     }
 
-    $calc_type  = sanitize_key( wp_unslash( $_POST['calc'] ?? '' ) );
-    $calc_label = ucwords( str_replace( array( '-', '_' ), ' ', $calc_type ) );
-    if ( $calc_label === '' ) $calc_label = 'Category Wizard';
-    $is_lead = ( strpos( $url, 'product' ) === false );
+    $calc       = sanitize_key( wp_unslash( $_POST['calc'] ?? '' ) );
+    $calc_label = $calc !== '' ? ucwords( str_replace( array( '-', '_' ), ' ', $calc ) ) : 'Category Wizard';
+    // A lead wizard runs where no calculator exists, so there is no pricing page to point at.
+    $is_lead    = ( $url === '' || strpos( $url, 'product' ) === false );
 
-    $post_title = sprintf( '%s — %s', $name, $calc_label );
-    if ( $callback ) $post_title .= ' (callback)';
-    $post_id = wp_insert_post( array(
-        'post_type'   => 'pps_question',
-        'post_status' => 'publish',
-        'post_title'  => wp_strip_all_tags( $post_title ),
-        'post_content' => $msg !== '' ? $msg : '(no message)',
-    ), true );
-    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
-        update_post_meta( $post_id, '_pps_q_name',        $name );
-        update_post_meta( $post_id, '_pps_q_email',       $email );
-        update_post_meta( $post_id, '_pps_q_phone',       $phone );
-        update_post_meta( $post_id, '_pps_q_calc_type',   $calc_type );
-        update_post_meta( $post_id, '_pps_q_calc_label',  ( $is_lead ? 'Lead: ' : 'Wizard: ' ) . $calc_label );
-        update_post_meta( $post_id, '_pps_q_summary',     $specs );
-        update_post_meta( $post_id, '_pps_q_reorder_url', $url );
-        update_post_meta( $post_id, '_pps_q_user_ip',     isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '' );
-        if ( $callback ) update_post_meta( $post_id, '_pps_q_callback', 1 );
-        if ( $upload_urls ) update_post_meta( $post_id, '_pps_q_files', $upload_urls );
+    $forms = pps_intake_forms();
+    $form  = $is_lead ? $forms['lead'] : $forms['wizard'];
+    $form['title'] = ( $is_lead ? 'Lead: ' : 'Wizard: ' ) . $calc_label;
+
+    $values = array(
+        'name'     => $name,
+        'email'    => $email,
+        'phone'    => $phone,
+        'callback' => $callback ? '1' : '',
+        'message'  => $msg,
+    );
+
+    // Shared upload handling: the narrower allowlist, the per-file and per-submission caps,
+    // and the inner-dot flattening that stops shell.php.jpg being stored executable. The
+    // copy that lived here had none of the last one.
+    $uploads = pps_intake_take_uploads();
+    if ( $uploads['error'] !== '' ) {
+        wp_send_json_error( pps_intake_error_text( $form, $uploads['error'], '' ) );
     }
 
-    $sent = wp_mail( $admin, $subj, $body, $headers, $attachments );
+    $extra_meta = array(
+        '_pps_q_calc_type'   => $calc,
+        '_pps_q_summary'     => $specs,
+        '_pps_q_reorder_url' => $url,
+    );
+    $extra_lines = array();
+    if ( $specs ) { $extra_lines[] = 'Selected specs:'; $extra_lines[] = $specs; }
+    if ( $url )   { $extra_lines[] = ''; $extra_lines[] = 'Open this in the calculator:'; $extra_lines[] = $url; }
 
-    if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
-        update_post_meta( $post_id, '_pps_q_email_sent', $sent ? 1 : 0 );
-    }
+    $post_id = pps_intake_record( $is_lead ? 'lead' : 'wizard', $form, $values, $uploads['urls'], $extra_meta );
+    pps_intake_notify( $is_lead ? 'lead' : 'wizard', $form, $values, $uploads['urls'], $post_id, $extra_lines );
 
-    foreach ( $cleanup as $dir ) {
-        $files_in = glob( $dir . '/*' );
-        if ( $files_in ) array_map( 'unlink', $files_in );
-        @rmdir( $dir );
-    }
-
-    if ( $sent ) wp_send_json_success( 'Your quote request has been sent! We\'ll be in touch shortly.' );
-    else         wp_send_json_error( 'Could not send email. Please try again or call us directly.' );
+    // Recorded, so say so. Previously this reported failure whenever wp_mail() returned
+    // false, telling a customer their request had not gone through when it had.
+    wp_send_json_success( 'Your quote request has been sent! We\'ll be in touch shortly.' );
 }
 
 // ── Purge quote uploads older than 60 days ──

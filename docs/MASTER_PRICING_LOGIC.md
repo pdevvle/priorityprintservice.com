@@ -39,7 +39,12 @@ calculate(c) → reads PCF.* and the option arrays
 
 **Key insight:** the hardcoded defaults in each HTML file are **only fallbacks** for standalone preview/testing. In production (inside WordPress), the `pps_calc_config` `wp_options` row always overrides them. Admins edit values via **WP Admin → PPS Config** (tabs: Production, Papers, Finishing, Artwork, Sizes, Shipping, SEO).
 
-The PHP plugin contains **no pricing math**. It loads calculator HTMLs from `wp_upload_dir()/pps-calculators/` and injects `PPS_CONFIG`. Pricing logic lives only in the HTML files — by deliberate architecture, not by accident. Do not look for parallel PHP pricing logic; there isn't any.
+The PHP plugin contains **no pricing math**, with exactly one exception (below). It loads calculator HTMLs from `wp_upload_dir()/pps-calculators/` and injects `PPS_CONFIG`. Pricing logic lives only in the HTML files — by deliberate architecture, not by accident.
+
+> **The one exception:** `pps_materials_price_floor()` in `pps-calculators.php` computes a
+> materials lower bound to reject tampered cart prices. It is a security check, never a
+> quote, and it must not be used to price anything. See *Materials price floor* at the end
+> of this document.
 
 ---
 
@@ -152,50 +157,175 @@ A single markup curve can't compress both into a tight band above Vistaprint. Be
 
 ---
 
+## Captured price matrix
+
+`docs/PRICING_MATRIX.md` (readable) and `docs/pricing-matrix.json` (1,816 points) record
+what every calculator actually quotes across size, paper and — where exposed as a select
+— page count, read out of the rendered quantity table rather than computed from the
+constants below. Regenerate with `tools-pricing-matrix.mjs` after any pricing change.
+
+Keep both: the values in this file describe the *model*, the matrix describes the
+*output*. When they disagree, the matrix is right and this file has drifted — which has
+happened before (see the correction table at the end of the next section).
+
 ## Currently applied values (per calculator)
 
-### Brochure (`calc-brochure.html`)
+**Extracted from the calculator sources 2026-08-01**, with comments stripped so that
+commented-out `ROLLBACK:` values are not mistaken for live ones. Every figure below is a
+*file default* — `pps_get_config()` resolves as `array_merge($defaults['pcf'], $saved['pcf'])`,
+so anything stored in `wp_options['pps_calc_config']` wins over these. Where the two
+diverge today, it is called out.
+
+### Flat products — brochure, greeting card, letterhead, postcard, sticker
+
+All five share one curve and one set of knobs:
 
 ```
-backend_maximummarkup: 15.2
-backend_minimummarkup: 3.5
-easydiscount_max:      0
-markup curve:          dL = 1.85 * ln(tS) - 0.5
-print markup:          uniform (applied to all print costs)
-baseCost:              removed ($35 was always added)
+backend_maximummarkup:  13
+backend_minimummarkup:  1.5
+backend_markup_coef_tS: 1.75
+backend_base_rate:      10
+easydiscount_max:       0
+markup curve:           dL = 1.75 * ln(pressSheets)
+surcharge:              none — these carry no surcharge term at all
 ```
 
-Expected positioning: +1% to +12% above Vistaprint.
+Note the curve runs on `pressSheets`, not `tS` as the booklet family does.
 
-### Saddle stitch booklet (`calc-preview-test.html`)
-
-```
-booklet_maximummarkup: 8
-booklet_minimummarkup: 1.5
-booklet_size_discount: 0.15  (15% off for imp<4 sizes)
-easydiscount_max:      0
-common_discount_max:   0
-markup curve:          dL = 0.80 * ln(tS)
-print markup:          uniform
-```
-
-Expected positioning:
-- 5.5×8.5: +3-53% (tighter for thicker books, hot for 8pp at high qty)
-- 8.5×11: +1-49% with size discount
-
-### Perfect bound (`calc-perfect-bound.html`) — tuned 2026-04-14
+### Saddle stitch booklet — `calc-preview-test.html`, `calc-modern-draft.html`
 
 ```
-perfectbound_maximummarkup: 8
-perfectbound_minimummarkup: 1.5
-perfectbound_size_discount: 0.15  (15% off for imp<4 sizes)
-easydiscount_max:      0
-common_discount_max:   0
-markup curve:          dL = 0.80 * ln(tS)     // was two-branch: quadratic<1000, linear≥1000
-print markup:          uniform                // was asymmetric (mk only on BW inside)
+booklet_maximummarkup:       3.6
+booklet_minimummarkup:       1.45
+booklet_markup_coef_tS:      0.295
+booklet_cover_maximummarkup: 6.0
+booklet_cover_minimummarkup: 1.8
+booklet_cover_markup_coef:   0.38
+booklet_size_discount:       0
+booklet_8up_markup_bonus:    0.15
+booklet_surcharge:           0.40
+bw_discount_rate:            0.3
+easy_discount_rate:          0.05
+easydiscount_max:            0
+common_discount_max:         1500      (any value > 0 enables the discount; legacy name, not a $ cap)
+markup curve:                dL = 0.295 * ln(tS)
 ```
 
-Mirrors the saddle-stitch architecture: dedicated `perfectbound_*` PCF keys so it can be tuned independently of brochure (previously shared `backend_*`). Old two-branch curve and asymmetric print markup are preserved inline as commented-out `// ROLLBACK:` blocks for quick revert without a git operation.
+These two files also declare `backend_maximummarkup: 15.2` / `backend_minimummarkup: 3.5`,
+which the saved option overrides to `13` / `1.5`. The booklet engine prices off the
+`booklet_*` keys, so the `backend_*` pair is vestigial here — do not tune it expecting an
+effect on booklets.
+
+### Perfect bound — `calc-perfect-bound.html`
+
+```
+perfectbound_maximummarkup:       3.6
+perfectbound_minimummarkup:       1.45
+perfectbound_markup_coef_tS:      0.275
+perfectbound_cover_maximummarkup: 6.0
+perfectbound_cover_minimummarkup: 1.8
+perfectbound_cover_markup_coef:   0.38
+perfectbound_size_discount:       0
+perfectbound_surcharge:           0.40
+bw_discount_rate:                 0.3
+easy_discount_rate_1:             0.07
+easy_discount_rate_2:             0.05
+easydiscount_max:                 0
+common_discount_max:              0        (disabled)
+backend_maximummarkup:            9        (vestigial, as above)
+markup curve:                     dL = 0.275 * ln(tS)
+```
+
+### Coupon book — `calc-coupon-book.html`
+
+```
+couponbook_maximummarkup:  3.6
+couponbook_minimummarkup:  1.45
+couponbook_markup_coef_tS: 0.275
+couponbook_size_discount:  0
+couponbook_surcharge:      0.40
+bw_discount_rate:          0.3
+easy_discount_rate_1:      0.07
+easy_discount_rate_2:      0.05
+easydiscount_max:          0
+common_discount_max:       0        (disabled)
+backend_maximummarkup:     9        (vestigial, as above)
+markup curve:              dL = 0.275 * ln(tS)
+```
+
+### What changed in this correction (2026-08-01)
+
+The previous version of this section had drifted badly from the code and should not be
+trusted in any older copy of this file:
+
+| Claimed | Actual |
+|---|---|
+| Brochure `backend_max/min: 15.2 / 3.5` | `13 / 1.5` — the 15.2/3.5 pair lives in the *booklet* files, and is vestigial there |
+| Brochure `dL = 1.85*ln(tS) - 0.5` | `dL = 1.75 * ln(pressSheets)` |
+| Brochure "baseCost removed" | `backend_base_rate: 10` is present and applied |
+| Saddle `booklet_max/min: 8 / 1.5` | `3.6 / 1.45` |
+| Saddle `booklet_size_discount: 0.15` | `0` |
+| Saddle `common_discount_max: 0` | `1500` (enabled) |
+| Saddle/PB `dL = 0.80*ln(tS)` | `0.295` and `0.275` respectively |
+| Perfect bound `max/min: 8 / 1.5` | `3.6 / 1.45` |
+| Coupon book | absent entirely |
+| The four flat calculators | absent entirely |
+| The surcharge | absent entirely, despite being one of the largest single levers |
+
+The lesson worth keeping: this section is hand-maintained and drifted through at least
+two retunes without being updated. Re-extract from source before trusting it, and treat
+any pricing decision made against a stale copy as suspect.
+
+### Pricing surcharge (booklet family) — raised 0.30 → 0.40, 2026-08-01
+
+```
+booklet_surcharge:      0.40   (calc-preview-test.html, calc-modern-draft.html)
+perfectbound_surcharge: 0.40   (calc-perfect-bound.html)
+couponbook_surcharge:   0.40   (calc-coupon-book.html)
+```
+
+Applied as `P.surcharge = subBeforeSurcharge * rate`, where `subBeforeSurcharge` is the
+running sum of **every** line item at that point — materials, print, all labor, add-ons,
+fees, and every discount already taken (`discBW`, `discEasy`, `discCommon`, `discSize`).
+It lands after all discounts and before the site-wide sale discount, and shows in the
+debug breakdown as the `fee`-group line item "Pricing Surcharge".
+
+Two consequences worth remembering before tuning it:
+
+- **It scales the discounts too.** Because it multiplies the post-discount subtotal,
+  raising it makes every discount you grant proportionally smaller in absolute terms.
+  The same applies to fees — the `$35` `non_inventory_fee` is inflated by this rate.
+- **Measured effect of 0.30 → 0.40 is a uniform +7.69%** (= 1.40/1.30 − 1) across the
+  entire quantity curve on all three calculators, verified end-to-end through the
+  rendered quantity-pricing table:
+
+  | qty | saddle 0.30 → 0.40 | perfect bound | coupon book |
+  |---|---|---|---|
+  | 100 | $164.03 → $176.65 | $219.86 → $236.77 | $254.09 → $273.64 |
+  | 1000 | $575.32 → $619.58 | $763.71 → $822.46 | $988.77 → $1064.83 |
+  | 5000 | $2539.76 → $2735.12 | $2820.10 → $3037.04 | $4006.77 → $4314.99 |
+
+**ROLLBACK 2026-08-01:** previous value was `0.30` on all three keys. Revert in the four
+HTML files and the three `pps-config-admin.php` defaults, *and* in the saved option — see
+the deployment note below.
+
+**DEPLOYMENT — the code change alone does not move live pricing.** `pps_get_config()`
+resolves as `array_merge($defaults['pcf'], $saved['pcf'])`, so a value stored in
+`wp_options['pps_calc_config']` wins over the default in `pps-config-admin.php`. Staging
+had all three stored at `0.3` when this change was made. To take effect on a live site,
+the three fields must also be changed in **PPS Calculators → Config → Production**.
+Changing them there is preferred over rewriting the option programmatically: the stored
+array has already lost type fidelity once (`sale_label` and `question_recipient_email` are
+persisted as `0` rather than strings — harmless today only because the calculators read
+them as `PCF.sale_label || "Sale"`), which is what a full round-trip through the API does
+to it.
+
+### The five flat calculators have no surcharge
+
+Brochure, greeting card, letterhead, postcard and sticker carry no surcharge term at all —
+their entire margin comes from the `backend_*` markup curve. This is a real asymmetry in
+the catalogue, not an oversight to fix blindly: adding a 40% term to a flat product is a
+40% price rise, so model it before changing anything.
 
 ### WordPress admin (`pps-config-admin.php`)
 
@@ -216,9 +346,18 @@ Defaults updated to match all calculators:
 The 13×19 + 13×27.5 two-sheet rule (below) was rolled out from saddle stitch to **perfect bound**, **coupon book**, and **brochure**. Same rule everywhere: **yield/`imp` is computed on 13×19; if `imp < 1` the piece images on the 13×27.5 sheet**, and the non-inventory fee applies unless the paper(s) are stocked at 13×27.5 (`LARGE_SHEET_VALS`, default `[0.003, 0.03]` = 100lb Gloss Text / 100lb Gloss Cardstock — identical paper vals across all four calcs).
 
 - **Perfect bound & coupon book** — structural twins of saddle: `calcCustomImp` gained the `sheetLong` arg; `resolveSize` switches to 27″ when `imp<1` (`sheet`/`needsLargeSheet`); `calculate()` fee requires both inside+cover to be 13×27.5 papers on oversized jobs. Also picked up the same `COVER_INV` text-weight fix (`…INV_NC,…INV_CS`). The throwaway `calcSaddle` comparison helper was left as-is.
-- **Brochure** — flat/single-paper, its own `calcBrochureImp` (the long axis divisor is now parameterized 18.5→27). After imp is resolved (preset or custom), `imp<1` re-images on 27″ and sets `needsLargeSheet`; the single-paper `nonInv` then checks `LARGE_SHEET_VALS` instead of `INV_VALS`. Note the `11×25.5` preset (`imp:0.5`) now correctly routes to the 13×27.5 sheet.
+- **Brochure** — flat/single-paper, its own `calcBrochureImp` (the long axis divisor is now parameterized 18.5→27). After imp is resolved (preset or custom), `imp<1` re-images on 27″ and sets `needsLargeSheet`; the single-paper `nonInv` then checks `LARGE_SHEET_VALS` instead of `INV_VALS`. Note the `11×25.5` preset (`imp:0.5`) routes to the 13×27.5 sheet. **(Superseded 2026-07-11 for flats — see "Oversized flats keep their sub-1 yield" below: brochure/postcard/greeting-card/letterhead now KEEP `imp 0.5` instead of recomputing to 1, so oversized size-costs ≈2×.)**
 
 Presets with `imp ≥ 1` and normal custom sizes are unchanged in all four calcs (default `sheetLong` keeps the 13×19 math byte-identical).
+
+### Oversized flats keep their sub-1 yield — charge the oversized premium (2026-07-11)
+
+**Reverses the flat-calc half of the two-sheet rollout above** (per operator). For the flat calculators — **brochure, postcard, greeting-card, letterhead** — an oversized piece (`imp < 1` on 13×19) no longer has its `imp` recomputed up to the 13×27.5 yield. It **keeps the sub-1 13×19 yield** (e.g. the `11×25.5` preset stays `imp 0.5`), so `pressSheets = qty / imp` roughly **doubles** and every size-scaled line — paper, front/back print, press labor, coating — scales with it (≈2× at `imp 0.5`; the `ln(pressSheets)` volume-discount curve gives a small offset, hence "essentially" double). The 13×27.5 sheet flag + `non_inventory_fee` still apply.
+
+- **Change:** in each flat `calculate()`, the `imp < 1` block sets `needsLargeSheet` / `pressSheet="13x27.5"` but only re-images (`imp = calc*Imp(longE, shortE, 27)`) when **`imp === 0`** — i.e. only when a piece won't fit even 0.5-up on 13×19 (keeps `pressSheets` finite for very large customs). Applies to the `11×25.5` preset **and** any custom size in the half-yield range.
+- **Verified:** brochure debug at 11×25.5 now shows `imp 0.5000` (was 1); `pressSheets` doubles (e.g. qty 500 → 1000).
+- **Not applied to the booklets** (saddle / perfect bound / coupon) — they keep the efficient-sheet routing from the 2026-06-17 rollout below. Extend on request.
+- **Rationale:** an oversized flat consumes ~2× the press resources of a standard piece; the shop charges that premium rather than discounting it onto the big sheet.
 
 ### Saddle stitch: two-sheet inventory model (13×19 + 13×27.5) (2026-06-17)
 
@@ -236,7 +375,7 @@ Net effect: oversized custom jobs are now priced on their real (larger, more-eff
 
 ### Saddle stitch: in-stock text-weight covers exempt from non-inventory fee (2026-06-17)
 
-The `$35` `non_inventory_fee` is meant for genuinely non-stock papers. But the cover-inventory set was `COVER_INV = [COVER_SAME.val, ...INV_CS]` — it only recognized "Same as Inside" plus in-stock **cardstocks** as stocked covers. A text-weight sheet that is in-stock for *interiors* (e.g. 100lb Gloss Text, `val 0.003`, which is in `INV_NC`) was therefore tagged non-inventory the moment it was chosen as a *separate cover*, adding `$35` (further inflated by the 30% `booklet_surcharge`). Net effect: a pricier 80lb cardstock cover could come out cheaper than a 100lb Gloss Text cover.
+The `$35` `non_inventory_fee` is meant for genuinely non-stock papers. But the cover-inventory set was `COVER_INV = [COVER_SAME.val, ...INV_CS]` — it only recognized "Same as Inside" plus in-stock **cardstocks** as stocked covers. A text-weight sheet that is in-stock for *interiors* (e.g. 100lb Gloss Text, `val 0.003`, which is in `INV_NC`) was therefore tagged non-inventory the moment it was chosen as a *separate cover*, adding `$35` (further inflated by the `booklet_surcharge`, 0.40 since 2026-08-01). Net effect: a pricier 80lb cardstock cover could come out cheaper than a 100lb Gloss Text cover.
 
 Fix (calc-preview-test.html, `COVER_INV` definition): include the in-stock text weights too.
 
@@ -439,7 +578,7 @@ function calculate(c) {
   // 1. Validation errors → early return { error: [...] }
   // 2. Derive basic values: qty, pressSheets, sides, tP (total pages), etc.
   // 3. Markup: mk = max(backend_maximummarkup - discount, backend_minimummarkup)
-  //    (perfect bound and saddle now use 0.80*ln(tS); brochure uses 1.85*ln(tS)-0.5)
+  //    (saddle 0.295*ln(tS); perfect bound + coupon 0.275*ln(tS); flats 1.75*ln(pressSheets))
   // 4. Per-line-item costs (write to P object):
   //    P.paper, P.frontPrint, P.backPrint, P.cutting, P.folding, P.binding,
   //    P.coat, P.bundle, P.rc (round corner), P.perforation, P.outfold,
@@ -581,7 +720,7 @@ The shapes differ slightly — brochure's edit cost is flat `PCF.art_edit_rate`,
 2. **Cutting formula has a quirk.** `(labor_cutting_hr + mk)` rather than `labor_cutting_hr * mk`. Left as-is to match the brochure calculator's pattern. Not fixed.
 3. **Simulation vs reality gap.** The sim underestimates real calculator output. Real positioning is likely tighter than my estimates suggest.
 4. **Estimates, not real quotes.** Already documented above — everything is tuned to industry-knowledge estimates.
-5. **Perfect bound** has its own two-branch logarithmic discount curve (now superseded by the simple `0.80*ln(tS)` curve, but the old branched form is preserved as a `// ROLLBACK:` comment block in `calc-perfect-bound.html`). Worth understanding before touching its markup math.
+5. **Perfect bound** has its own two-branch logarithmic discount curve (now superseded by the simple `0.275*ln(tS)` curve, but the old branched form is preserved as a `// ROLLBACK:` comment block in `calc-perfect-bound.html`). Worth understanding before touching its markup math.
 6. **Saddle stitch** has a "sets" system (mothballed UI but code preserved) that multiplies several costs by N. The artwork upload-tier fee is deliberately NOT multiplied by N — review similar patterns before assuming a knob should scale by sets.
 7. **Roll fold / bifold / accordion-4** 3D previewer fixes are still iterative — the user reported the last few fixes weren't fully correct. The 3D preview is orthogonal to pricing and can be worked on separately.
 
@@ -824,6 +963,47 @@ Add-on turnaround (paper days, vivid, coating, bundling, perforation, etc.) stil
 
 `PCF.minimum_turnaround_days` still enforced as the floor.
 
+### Material lead times STACK, they don't accumulate (2026-07-24)
+
+**Rule:** when a job needs more than one supplier-ordered material, those lead times run
+**concurrently** — the wait is the **longest** one, not their sum. They are ordered from the
+supplier at the same time and arrive in parallel.
+
+```
+materialDays = MAX(inside paper, cover paper, envelopes)     // NOT the sum
+days = max(minimum_turnaround_days,
+           baseDays + materialDays + addonDays + artDays + proofDays)
+```
+
+Materials still **precede** production, so `materialDays` is *added* to `baseDays` rather than
+maxed against it — you cannot print on paper that has not arrived. Only the several material
+leads overlap **each other**.
+
+**In-house finishing stays additive.** Coating, bundling, perforating, round-cornering, vivid
+second pass and artwork/proof days run sequentially on the floor, so they continue to sum.
+
+Effect of the change: a job's schedule shortens by `min(lead₁, lead₂)`.
+
+| Calculator | Combined leads | Before | After |
+|---|---|---|---|
+| Saddle stitch | inside 2d + cover 2d | 4 paper days | 2 |
+| Perfect bound | inside 4d + cover 4d | 8 paper days | 4 |
+| Greeting card | paper 4d + envelopes 5d | 9 material days | 5 |
+
+**Where implemented** (`pT` = the material stack):
+- `calc-preview-test.html` — `pT = MAX(floor(insidePaper.val), floor(cover.val))`; integer part
+  of `val` is the lead days (`2.002` → 2d factory order, `0.001` → in stock)
+- `calc-perfect-bound.html`, `calc-coupon-book.html` — `pT = MAX(inside.days ?? floor(val), cover.days ?? floor(val))`
+- `calc-greeting-card.html` — `materialDays = MAX(paperDays, envDays)`; the `ti.envelopes` UI
+  badge shows the **marginal** impact `max(0, envDays − paperDays)` so the badge total still
+  equals the real schedule
+- `calc-brochure.html`, `calc-letterhead.html`, `calc-postcard.html`, `calc-sticker.html` —
+  **unchanged**: each has exactly one material lead (`paperDays`), so `MAX` of one value is a
+  no-op. If a second material lead is ever added to these, it must join the same `MAX`.
+
+**ROLLBACK:** restore the summed forms — `pT = insideDays + coverDays` in the three booklet
+calcs, and `+ envDays` back into the greeting-card `days` expression (dropping `materialDays`).
+
 `PCF.sheetsturnaround` is no longer used for base production days but remains referenced by some addon turnaround estimates (e.g., vivid second-pass time).
 
 ### >100,000 sheet cap
@@ -833,3 +1013,148 @@ When `sheetsToDays()` returns `null`, `calculate()` early-returns `{error: ["...
 ### Files touched
 
 - `calc-preview-test.html`, `calc-perfect-bound.html`, `calc-brochure.html`, `calc-coupon-book.html` — `sheetsToDays()` function added before `calculate()`; early return for >100k; `days` formula updated.
+
+## Materials price floor — server-side validation bound (2026-07-27)
+
+**This is the only pricing arithmetic that lives in PHP, and it is not a quote.** It is a
+security bound on `pps_ajax_add_to_cart`, and must never be used to price anything.
+
+### Why it exists
+
+`pps_price` is computed client-side and posted to the cart, where
+`woocommerce_before_calculate_totals` applies it verbatim as the line-item price. The only
+prior defence was a flat floor — `max($5, 50% x regular_price)` — which does not scale with
+the job. With `regular_price` set to $50 on a registry product, a $900 booklet order could be
+checked out for $25.
+
+### Rule (owner, 2026-07-27)
+
+Nothing sells below the minimum markup on materials, excluding labour and add-ons:
+
+```
+floor = ( (sheet cost + print cost) x total sheets ) x booklet_minimummarkup
+```
+
+Implemented in `pps_materials_price_floor()`, mirroring the engine's four material lines:
+
+```
+inside_sheets = SUM(qty x pages) / 4 / (imp / 2)
+cover_sheets  = SUM(qty) / imp
+inside_print  = bw ? black*2 : black*2 + fullcolor*2
+cover_print   = bw ? black*2 : fullcolor*2
+materials     = (inside_paper + inside_print) x inside_sheets
+              + (cover_paper  + cover_print ) x cover_sheets
+floor         = materials x booklet_minimummarkup x (1 - sale_discount_pct)
+```
+
+### Why these inputs can be trusted
+
+Every input is either server-side config (paper prices, click costs, imposition, markup,
+sale) or a customer selection that is **self-enforcing** — qty, pages, trim size and stock
+all flow into `PPS-Spec`, so understating one to depress the floor also shrinks the job that
+gets produced. The `debug` block in `pps_metadata` is deliberately **not** used: it has no
+downstream effect, so lying about it would be free.
+
+### Deliberate design choices
+
+- **Fails open.** Custom trims, unknown stock, unrecognised calculators and malformed
+  metadata all return `null` and skip the check. A false rejection costs a real sale; a
+  missed check costs margin.
+- **Self-cover uses the `cover_same` stub price (~$0.01), not the inside stock.** Those
+  sheets are already counted in the inside total. Using the real price here inflates the
+  floor several-fold on the commonest configuration.
+- **Cover's own minimum markup (1.8) is ignored** in favour of the lower inside figure
+  (1.45), so the bound can never exceed a legitimate quote.
+- **Tracks the sale.** A site-wide sale genuinely lowers the minimum legitimate price.
+- **Booklets only** (saddle / perfect-bound / coupon). Other calc types fail open; extending
+  means porting their sheet math.
+
+### Verification (against the live engine, not by inspection)
+
+3,096 configurations driven through the real `calculate()` — every preset size, 25-5,000 qty,
+8-100 pages, colour and B&W, self-cover and separate cover, cheapest and dearest stock:
+
+| | |
+|---|---|
+| Violations (floor > legitimate price) | **0** |
+| floor / price — median | 0.37 |
+| floor / price — max | 0.895 |
+
+Sale stress test caught a real defect pre-ship: without the `(1 - sale_discount_pct)` term, a
+20% sale falsely rejected 7 configurations (floor reached 1.12x price) and 30% rejected 16.
+With it, the worst ratio holds at 0.895 at every sale level.
+
+### Limits
+
+Worst case is bounded at roughly materials cost, not eliminated — a tampered price between
+the floor and the true total still passes. Tightening further means replicating the markup
+and discount curves in PHP, which would rot as those change. The authoritative fix remains
+porting the engine for a full server-side recompute.
+
+**Knob:** `pcf.pps_floor_enforce` (default 1). Set to 0 to log without rejecting.
+
+## Human-touch day on art & proofing (2026-07-29)
+
+**Status: implemented in `calc-modern-draft.html` ONLY. Noted here so it can be
+applied to the other calculators — it is not in any of them yet.**
+
+### Rule (owner)
+
+Anything that needs a person in the loop before we can print costs **+1 business
+day**. The fully self-serve path stays the fastest route and adds nothing.
+
+| Selection | val | Before | After |
+|---|---|---|---|
+| Upload Art with Order | 0.01 | 0 | **0** — unchanged, deliberately |
+| Email Art After Order | 0.02 | 0 | **+1** |
+| Artwork already discussed | 0.03 | 0 | **+1** |
+| I have a design in Canva | 0.04 | 0 | **+1** |
+| Artwork needs edits | 2.01 | `eT` | unchanged (already has a day term) |
+| Design from scratch | 4.01 | `dT` | unchanged (already has a day term) |
+| Proof & Approve Online | 0 | 0 | **0** — the stated exception |
+| Manual Digital Proof | 0.01 | 0 | **+1** |
+| Hardcopy Proof | 3.01 | `pE` | unchanged (already has a day term) |
+
+`Upload Art with Order` staying at 0 was an explicit owner decision (2026-07-29):
+the literal reading of "all art variables previously 0" would have included it,
+which raises baseline turnaround on essentially every order, since it is the
+default. The self-serve path pairs with online approval as the fastest route.
+
+### Implementation notes
+
+```js
+const humanArt   = (art.val > 0.015 && art.val < 0.045) ? 1 : 0;   // 0.02 / 0.03 / 0.04
+const humanProof = (c.proof > 0 && c.proof < 3) ? 1 : 0;           // 0.01
+const hT = Math.min(1, humanArt + humanProof);
+days = Math.max(PCF.minimum_turnaround_days, Math.floor(base)) + hT;
+```
+
+Three things that are easy to get wrong when porting this:
+
+1. **`hT` must sit OUTSIDE the `minimum_turnaround_days` clamp.** Added inside it,
+   a typical small job floors at the minimum either way and the day disappears —
+   i.e. it would do nothing on exactly the orders it is meant to affect. Verified:
+   with it inside, every combination still read 3 days.
+2. **Capped at one day total, not one per dimension.** The rule is "+1 day to
+   their turnaround", so a Canva link *and* a manual proof together is still +1.
+3. **Ranges, not equality.** These vals arrive from admin config as floats.
+
+The `ti` badges attribute the day to whichever control caused it, with the art
+side taking precedence — since `hT` is capped at one, showing it on both would
+imply two days when only one is charged.
+
+### Verified matrix (saddle, 100 qty / 8pp, in-stock paper)
+
+| Art | Approve Online | Manual Digital | Hardcopy |
+|---|---|---|---|
+| Upload with Order | **3** | 4 | 4 |
+| Email After Order | 4 | 4 | 5 |
+| Already discussed | 4 | 4 | 5 |
+| Canva link | 4 | 4 | 5 |
+
+### To apply elsewhere
+
+`calc-preview-test`, `calc-perfect-bound`, `calc-coupon-book`, `calc-brochure`,
+`calc-letterhead`, `calc-postcard`, `calc-sticker`, `calc-greeting-card`. The flat
+calcs compute `artDays` separately from `proofDays`; the same two predicates and
+the same after-the-clamp placement apply.
