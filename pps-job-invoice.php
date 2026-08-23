@@ -578,7 +578,11 @@ add_action( 'admin_post_pps_job_invoice_key', function () {
     check_admin_referer( 'pps_job_invoice_key' );
     $pw = isset( $_POST['con_pw'] ) ? (string) wp_unslash( $_POST['con_pw'] ) : '';
     $back = admin_url( 'admin.php?page=pps-job-invoice' );
-    if ( strlen( $pw ) < 8 ) {
+    // Deliberately a low floor rather than a policy: the owner picked a short
+    // password knowingly, and a form that refuses to set the password actually
+    // in use is worse than a short one. Brute force is handled by the lockout
+    // (five tries per IP per fifteen minutes), not by length.
+    if ( strlen( $pw ) < 4 ) {
         wp_safe_redirect( add_query_arg( 'key_err', 'short', $back ) ); exit;
     }
     // Only the hash is stored, and changing it invalidates every open console
@@ -653,7 +657,7 @@ function pps_job_invoice_render_page() {
         <?php if ( isset( $_GET['key_done'] ) ) : ?>
             <div class="notice notice-success"><p>Console password saved. Any open console sessions have been signed out.</p></div>
         <?php elseif ( isset( $_GET['key_err'] ) ) : ?>
-            <div class="notice notice-error"><p>Console password must be at least 8 characters.</p></div>
+            <div class="notice notice-error"><p>Console password must be at least 4 characters.</p></div>
         <?php endif; ?>
 
         <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
@@ -748,12 +752,12 @@ function pps_job_invoice_render_page() {
         <h2>Console password</h2>
         <p style="color:#50575e;max-width:56em">Password for the no-login console page
         (the page carrying the <code>[pps_job_console]</code> shortcode). Stored as a hash only.
-        Changing it signs out every open console session.
+        Changing it signs out every open console session. Five wrong attempts lock that IP out for fifteen minutes, which is what actually stops guessing — but a longer password is still worth having.
         <?php echo pps_console_hash() ? '<strong>A password is currently set.</strong>' : '<strong>No password set — the console is closed.</strong>'; ?></p>
         <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
             <?php wp_nonce_field( 'pps_job_invoice_key' ); ?>
             <input type="hidden" name="action" value="pps_job_invoice_key">
-            <input type="password" name="con_pw" class="regular-text" placeholder="New console password" autocomplete="new-password" required minlength="8">
+            <input type="password" name="con_pw" class="regular-text" placeholder="New console password" autocomplete="new-password" required minlength="4">
             <?php submit_button( 'Save Password', 'secondary', 'submit', false ); ?>
         </form>
     </div>
