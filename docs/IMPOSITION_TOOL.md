@@ -115,6 +115,32 @@ download the imposed PDF. Useful for testing and one-off jobs.
   priced 13×19 layout (otherwise it says so and stays on 13×19); duplex
   registration on the wide sheet is verified by the physical simulator on
   both flip edges.
+- **Pull art off trim** (`spec.artInset`, inches): for the recurring case of
+  customer art whose text crowds the cut. Shrinks the placed art about the cell
+  centre so every edge backs away from the trim, then the add-bleed synthesizer
+  fills the ring it opens — from the art's new edge out past the cut to the
+  bleed box. The two settings are one operation: the inset makes the room, the
+  bleed fill makes up the difference (the fill band becomes `inset + bleed`).
+  - Scale is **uniform** — customer art is never distorted — so one factor
+    cannot give the same inset on both axes. It solves for the SHORT axis, so
+    the value is a guaranteed **minimum** on every edge and the long axis pulls
+    in proportionally further (a 0.125″ inset on 4×2 gives 0.125″ down,
+    0.250″ across). The UI shows the resulting factor and both distances.
+  - Works with art that already has bleed: pulling the art in drags its bleed
+    in too, so the ring is filled from wherever the art's outer edge lands.
+    Internally `art.covX/covY` is the signed coverage past the trim after every
+    scale factor (fit-to-trim, shy-art pre-scale, inset); the fill reflects
+    about that edge with band `bleed − cov`, which reduces **exactly** to the
+    previous trim-edge mirror when there is no inset (byte-verified).
+  - **Text-safe detection widens with it** — the reflected band is bigger, so
+    `auto` searches for text within `bleed + inset` of the trim rather than
+    just the bleed.
+  - Refuses rather than print something unusable: combined with **Scale art up
+    to bleed** (the two are opposite operations — scale re-expands to the bleed
+    box and undoes the inset); with **Add bleed off** when the art cannot cover
+    the gap (that band would print paper-white *inside* the trim); or when the
+    inset would shrink the art by more than half.
+  - Recorded on the slug as `PULLED OFF TRIM <n>in`.
 - **Manual grid** (flats & stickers, Fiery-style): the operator can set the
   **columns × rows outright** instead of taking the count derived from the
   priced imp — a 2×4 coupon can be run 9 across × 3 down, 8×2, 4×5, whatever
