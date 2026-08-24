@@ -2706,7 +2706,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const [vpY, setVpY] = useState(0);
   const [vpDragging, setVpDragging] = useState(false);
   const vpDragStart = useRef(null);
-  const [hiResProof, setHiResProof] = useState(null); // {idx, dataUrl} — 300 DPI render of current proof page
+  const [composedProof, setComposedProof] = useState(null); // {idx, sig, quality, dataUrl} — the proof page as composed by the single composition engine (same function that renders the print-ready PDF)
+  const [ackIssues, setAckIssues] = useState(false); // customer ticked "print anyway" over flagged preflight checks
   const pdfDocRef = useRef(null); // holds the pdf.js document for hi-res re-rendering
   const rawFileRef = useRef(null); // holds the original uploaded File for the raw deliverable
   const rawFilesRef = useRef([]); // all originals from a multi-file select — rawFileRef alone forgets files 2..N
@@ -2874,6 +2875,96 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       img.onerror = () => resolve(dataUrl);
       img.src = dataUrl;
     });
+  }
+
+  // ═══ SINGLE COMPOSITION ENGINE ═══════════════════════════════════════════
+  // Every surface that shows or ships a finished page gets its pixels from THIS
+  // function: the proof modal, the magnifier lens, the grid view, the 3D
+  // preview, the print-ready PDF and the preview JPEGs. Screen and print differ
+  // only in the dpi argument. CSS never participates in composition — order
+  // 87032 was approved on a proof whose CSS (the theme's img clamp) disagreed
+  // with the canvas that printed. This function is the structural fix: there is
+  // no second renderer left to disagree with. If composition math ever needs to
+  // change, change it here and nowhere else.
+  // opts.fast: skip the vector re-render and compose from the page's existing
+  // raster (same math, lower source resolution) — for thumbnails/3D preview and
+  // the instant first paint of the proof, which is then upgraded in place.
+  async function composePageCanvas(pageIdx, dpi, opts = {}) {
+    const BLEED = 0.125;
+    const bleedW = dims.w + BLEED * 2;
+    const bleedH = dims.h + BLEED * 2;
+    const canvasW = Math.round(bleedW * dpi);
+    const canvasH = Math.round(bleedH * dpi);
+    const pageSources = opts.pages || displayPages;
+    const page = pageSources[pageIdx];
+    if (!page || page.isBlank) return null;
+
+    const tx = getTx(pageIdx);
+    const ed = effectiveDimsFor(artDims, tx.rotateSteps);
+
+    let srcCanvas = null;
+    if (!opts.fast && pdfDocRef.current && artDims?.source === "pdf") {
+      const pdfPageNum = pageIdx + 1;
+      if (pdfPageNum <= pdfDocRef.current.numPages) {
+        const pg = await pdfDocRef.current.getPage(pdfPageNum);
+        const vp = pg.getViewport({ scale: dpi / 72 });
+        srcCanvas = document.createElement("canvas");
+        srcCanvas.width = Math.round(vp.width);
+        srcCanvas.height = Math.round(vp.height);
+        await pg.render({ canvasContext: srcCanvas.getContext("2d"), viewport: vp }).promise;
+
+        if (tx.rotateSteps > 0) {
+          const s = ((tx.rotateSteps % 4) + 4) % 4;
+          const swap = s % 2 === 1;
+          const rc = document.createElement("canvas");
+          rc.width = swap ? srcCanvas.height : srcCanvas.width;
+          rc.height = swap ? srcCanvas.width : srcCanvas.height;
+          const rctx = rc.getContext("2d");
+          rctx.translate(rc.width / 2, rc.height / 2);
+          rctx.rotate((s * Math.PI) / 2);
+          rctx.drawImage(srcCanvas, -srcCanvas.width / 2, -srcCanvas.height / 2);
+          srcCanvas = rc;
+        }
+      }
+    }
+    if (!srcCanvas) {
+      srcCanvas = await new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          const tc = document.createElement("canvas");
+          tc.width = img.naturalWidth; tc.height = img.naturalHeight;
+          tc.getContext("2d").drawImage(img, 0, 0);
+          resolve(tc);
+        };
+        img.onerror = () => resolve(null);
+        img.src = page.dataUrl;
+      });
+    }
+    if (!srcCanvas) return null;
+
+    const c = document.createElement("canvas");
+    c.width = canvasW; c.height = canvasH;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvasW, canvasH);
+
+    const srcW = srcCanvas.width, srcH = srcCanvas.height;
+    if (tx.fitMode === "stretch") {
+      ctx.drawImage(srcCanvas, 0, 0, canvasW, canvasH);
+    } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
+      const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
+      const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
+      const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
+      const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
+      ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+    } else if (tx.fitMode === "cover") {
+      const sc = Math.max(canvasW / srcW, canvasH / srcH);
+      ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+    } else {
+      const sc = Math.min(canvasW / srcW, canvasH / srcH);
+      ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+    }
+    return c;
   }
 
   // ── Generate 4 deliverables on approval ──
@@ -3162,72 +3253,11 @@ update();
         const page = pageSources[i];
         if (page.isBlank) { previewBlobs.push(null); continue; }
 
-        // Per-page transform
-        const tx = getTx(i);
-        const ed = effectiveDimsFor(artDims, tx.rotateSteps);
-
-        let srcCanvas = null;
-        if (pdfDocRef.current && isSourcePdf) {
-          const pdfPageNum = i + 1;
-          if (pdfPageNum <= pdfDocRef.current.numPages) {
-            const pg = await pdfDocRef.current.getPage(pdfPageNum);
-            const vp = pg.getViewport({ scale: DPI / 72 });
-            srcCanvas = document.createElement("canvas");
-            srcCanvas.width = Math.round(vp.width);
-            srcCanvas.height = Math.round(vp.height);
-            await pg.render({ canvasContext: srcCanvas.getContext("2d"), viewport: vp }).promise;
-
-            if (tx.rotateSteps > 0) {
-              const s = ((tx.rotateSteps % 4) + 4) % 4;
-              const swap = s % 2 === 1;
-              const rc = document.createElement("canvas");
-              rc.width = swap ? srcCanvas.height : srcCanvas.width;
-              rc.height = swap ? srcCanvas.width : srcCanvas.height;
-              const rctx = rc.getContext("2d");
-              rctx.translate(rc.width / 2, rc.height / 2);
-              rctx.rotate((s * Math.PI) / 2);
-              rctx.drawImage(srcCanvas, -srcCanvas.width / 2, -srcCanvas.height / 2);
-              srcCanvas = rc;
-            }
-          }
-        }
-        if (!srcCanvas) {
-          srcCanvas = await new Promise(resolve => {
-            const img = new Image();
-            img.onload = () => {
-              const tc = document.createElement("canvas");
-              tc.width = img.naturalWidth; tc.height = img.naturalHeight;
-              tc.getContext("2d").drawImage(img, 0, 0);
-              resolve(tc);
-            };
-            img.onerror = () => resolve(null);
-            img.src = page.dataUrl;
-          });
-        }
-        if (!srcCanvas) throw new Error("Page "+(i+1)+" of "+totalPages+" could not be rendered — the file may be damaged, password-protected, or in a format this browser cannot read. Nothing was approved.");
-
-        const c = document.createElement("canvas");
-        c.width = canvasW; c.height = canvasH;
-        const ctx = c.getContext("2d");
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, canvasW, canvasH);
-
-        const srcW = srcCanvas.width, srcH = srcCanvas.height;
-        if (tx.fitMode === "stretch") {
-          ctx.drawImage(srcCanvas, 0, 0, canvasW, canvasH);
-        } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
-          const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
-          const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
-          const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
-          const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
-          ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
-        } else if (tx.fitMode === "cover") {
-          const sc = Math.max(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
-        } else {
-          const sc = Math.min(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
-        }
+        // The page the customer approved on screen and the page we print are the
+        // same composePageCanvas() output — the proof modal shows this exact
+        // composition at screen resolution.
+        const c = await composePageCanvas(i, DPI, { pages: pageSources });
+        if (!c) throw new Error("Page "+(i+1)+" of "+totalPages+" could not be rendered — the file may be damaged, password-protected, or in a format this browser cannot read. Nothing was approved.");
 
         pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, bleedW, bleedH);
 
@@ -3245,6 +3275,21 @@ update();
 
       printReadyBlob = pdf.output("blob");
     }
+
+    // ── Approval binding hash ──
+    // SHA-256 of the exact bytes production will impose. The order carries it as
+    // _pps_proof_hash and the imposition tool refuses to impose a file whose
+    // hash differs — approval is a signature over bytes, not a checkbox.
+    // crypto.subtle needs a secure context; on http/file the hash is simply
+    // omitted (it must never block an approval).
+    let proofHash = null;
+    try {
+      if (printReadyBlob && window.crypto && crypto.subtle) {
+        const _buf = await printReadyBlob.arrayBuffer();
+        const _dig = await crypto.subtle.digest("SHA-256", _buf);
+        proofHash = Array.from(new Uint8Array(_dig)).map(b => b.toString(16).padStart(2, "0")).join("");
+      }
+    } catch (e) { proofHash = null; }
 
     // ── Manipulation manifest ──
     setGenProgress({ step: "manifest", page: totalPages, totalPages });
@@ -3297,6 +3342,20 @@ update();
       `3. Screen previews: ${previewBlobs.filter(b => b).length} page images at 150 DPI, JPEG quality 0.85`,
       `4. This manifest`,
       "",
+      "── Approval Binding ──",
+      `Print file SHA-256: ${proofHash || "unavailable (insecure context)"}`,
+      "The customer's approval is recorded against these exact bytes. Production",
+      "imposes only a file whose hash matches; a mismatch means the file is not",
+      "what the customer approved.",
+      "",
+      "── Preflight at Approval ──",
+      ...((preflight && preflight.length)
+        ? preflight.map(ck => `  [${ck.level.toUpperCase()}] ${ck.label}: ${ck.detail}`)
+        : ["  (no checks available)"]),
+      ...((preflight && preflight.some(ck => ck.level === "warn" || ck.level === "fail"))
+        ? ["  Customer explicitly acknowledged the flagged checks above and chose to proceed."]
+        : []),
+      "",
       "── Per-Page Detail ──",
     ];
     pageSources.forEach((p, i) => {
@@ -3339,7 +3398,7 @@ update();
       }
     } catch (e) { previewPdfBlob = null; }
 
-    return { printReadyBlob, previewBlobs, previewPdfBlob, manifestBlob, previewHtmlBlob, skippedGeneration: noTransforms };
+    return { printReadyBlob, previewBlobs, previewPdfBlob, manifestBlob, previewHtmlBlob, proofHash, skippedGeneration: noTransforms };
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -3522,6 +3581,11 @@ update();
   }, [effectiveDims, rawPages, dims, pageCount, shouldRotate, needsRotation, rotateSteps, artDims, edgeHasMargins]);
 
   const preflight = useMemo(() => _preflight?.checks || null, [_preflight]);
+  // Flagged checks the customer must explicitly acknowledge before approving —
+  // the industry-standard "approve through warnings" gate. Any preflight change
+  // (new file, new settings) voids a previous acknowledgment.
+  const preflightFlags = useMemo(() => (preflight || []).filter(c => c.level === "warn" || c.level === "fail"), [preflight]);
+  useEffect(() => { setAckIssues(false); }, [preflight]);
   const detectedBleed = _preflight?.hasBleed || false;
   const bleedCbRef = useRef(onBleedDetected);
   bleedCbRef.current = onBleedDetected;
@@ -3651,37 +3715,10 @@ update();
           results.push({ ...page, dataUrl: bc.toDataURL("image/jpeg", 0.85) });
           continue;
         }
-        const tx = getTx(i);
-        const ed = effectiveDimsFor(artDims, tx.rotateSteps);
-        const img = await new Promise(res => {
-          const im = new Image();
-          im.onload = () => res(im);
-          im.onerror = () => res(null);
-          im.src = page.dataUrl;
-        });
-        if (!img) { results.push(page); continue; }
-
-        const c = document.createElement("canvas");
-        c.width = canvasW; c.height = canvasH;
-        const ctx = c.getContext("2d");
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, canvasW, canvasH);
-        const srcW = img.naturalWidth, srcH = img.naturalHeight;
-        if (tx.fitMode === "stretch") {
-          ctx.drawImage(img, 0, 0, canvasW, canvasH);
-        } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
-          const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
-          const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
-          const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
-          const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
-          ctx.drawImage(img, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
-        } else if (tx.fitMode === "cover") {
-          const sc = Math.max(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(img, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
-        } else {
-          const sc = Math.min(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(img, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
-        }
+        // Same composition engine as the print PDF — fast source is enough for
+        // the 3D preview, and the math is identical by construction.
+        const c = await composePageCanvas(i, DPI, { fast: true, pages: displayPages });
+        if (!c) { results.push(page); continue; }
 
         const tc = document.createElement("canvas");
         tc.width = outW; tc.height = outH;
@@ -3744,50 +3781,31 @@ update();
   };
   const vpOnMouseUp = () => { setVpDragging(false); vpDragStart.current = null; };
 
-  // Render current proof page at 300 DPI on demand
+  // Compose the current proof page through the single composition engine.
+  // Two passes: an instant one from the already-decoded page raster, then a
+  // print-resolution pass (vector re-render for PDF sources) that replaces it
+  // in place. Both passes run the same function that renders the print-ready
+  // PDF — the proof IS the print file at screen DPI, so nothing (no CSS rule,
+  // no theme reset, no object-fit quirk) can make it disagree with the print.
+  const proofTxCur = getTx(proofIdx);
+  const proofSig = [proofIdx, proofTxCur.fitMode, proofTxCur.rotateSteps, proofTxCur.artScale, dims.w, dims.h, displayPages.length].join("|");
   useEffect(() => {
-    if (activeModal !== "proof") { return; }
+    if (activeModal !== "proof") return;
     const page = displayPages[proofIdx];
-    if (!page || page.isBlank) { setHiResProof(null); return; }
-    // Cache hit — already have correct hi-res for this page + rotation state
-    if (hiResProof && hiResProof.idx === proofIdx && hiResProof.rotated === rotateSteps) return;
-    // For PDF source — re-render from PDF at 300 DPI
-    if (pdfDocRef.current && artDims?.source === "pdf") {
-      let canceled = false;
-      const pdfPageNum = proofIdx + 1; // pdf.js pages are 1-indexed
-      if (pdfPageNum > pdfDocRef.current.numPages) return;
-      (async () => {
-        try {
-          const pg = await pdfDocRef.current.getPage(pdfPageNum);
-          const scale300 = 300 / 72; // 72 PDF units per inch → 300 DPI
-          const vp = pg.getViewport({ scale: scale300 });
-          const canvas = document.createElement("canvas");
-          canvas.width = vp.width; canvas.height = vp.height;
-          await pg.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
-          // Apply N-step rotation if needed
-          let outUrl;
-          if (rotateSteps > 0) {
-            const s = rotateSteps % 4;
-            const swap = s % 2 === 1;
-            const rc = document.createElement("canvas");
-            rc.width = swap ? canvas.height : canvas.width;
-            rc.height = swap ? canvas.width : canvas.height;
-            const rctx = rc.getContext("2d");
-            rctx.translate(rc.width / 2, rc.height / 2);
-            rctx.rotate((s * Math.PI) / 2);
-            rctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
-            outUrl = rc.toDataURL("image/jpeg", 0.92);
-          } else {
-            outUrl = canvas.toDataURL("image/jpeg", 0.92);
-          }
-          if (!canceled) setHiResProof({ idx: proofIdx, rotated: rotateSteps, dataUrl: outUrl });
-        } catch(e) { console.error("Hi-res render error:", e); }
-      })();
-      return () => { canceled = true; };
-    }
-    // For image source — displayPages already has the rotated version
-    setHiResProof({ idx: proofIdx, rotated: rotateSteps, dataUrl: page.dataUrl });
-  }, [activeModal, proofIdx, displayPages, artDims, rotateSteps]);
+    if (!page || page.isBlank) { setComposedProof(null); return; }
+    // Cache hit — already composed at print quality for this page + transforms
+    if (composedProof && composedProof.idx === proofIdx && composedProof.sig === proofSig && composedProof.quality === "print") return;
+    let canceled = false;
+    (async () => {
+      try {
+        const fastC = await composePageCanvas(proofIdx, 120, { fast: true });
+        if (!canceled && fastC) setComposedProof({ idx: proofIdx, sig: proofSig, quality: "fast", dataUrl: fastC.toDataURL("image/jpeg", 0.85) });
+        const fullC = await composePageCanvas(proofIdx, 300);
+        if (!canceled && fullC) setComposedProof({ idx: proofIdx, sig: proofSig, quality: "print", dataUrl: fullC.toDataURL("image/jpeg", 0.92) });
+      } catch (e) { console.error("Proof composition error:", e); }
+    })();
+    return () => { canceled = true; };
+  }, [activeModal, proofIdx, proofSig, displayPages, artDims]);
 
   useEffect(() => { if (spread >= totalSpreads) setSpread(Math.max(0, totalSpreads - 1)); }, [totalSpreads]);
 
@@ -3826,7 +3844,7 @@ update();
       setArtDims(extracted.dims);
       setUploadPageCount(extracted.pages.length);
       pdfDocRef.current = extracted.pdfDoc || null;
-      setHiResProof(null);
+      setComposedProof(null);
       setPreviewMode("closed"); setSpread(0); setRot({ x: -15, y: -25 });
       // Full file upload replaces any per-slot files
       slotFilesRef.current = {};
@@ -3885,7 +3903,7 @@ update();
     setRawPages([]); setFileName(""); setUploadPageCount(0);
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
     setRotatedCache({ key: "", pages: [] }); setPageTransforms({}); setTxHistory([]);
-    setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setApprovalPkg(null);
+    setEdgeHasMargins(null); setComposedProof(null); setArtApproved(false); setApprovalPkg(null);
     setVpScale(1); setVpX(0); setVpY(0);
     pdfDocRef.current = null;
     rawFileRef.current = null;
@@ -4496,10 +4514,15 @@ update();
                     {proof === 0 && (artApproved ? (
                       <span className="bp-approved">&#10003; Approved</span>
                     ) : (
-                      <button type="button" disabled={generatingPdf}
-                        className={`bp-approve${generatingPdf ? "" : " nudge"}`}
+                      <button type="button" disabled={generatingPdf || (preflightFlags.length > 0 && !ackIssues)}
+                        className={`bp-approve${generatingPdf || (preflightFlags.length > 0 && !ackIssues) ? "" : " nudge"}`}
+                        title={preflightFlags.length > 0 && !ackIssues ? "Tick the preflight acknowledgment below to enable approval" : undefined}
                         style={mob ? { flex:"1 1 100%", padding:"17px 23px", fontSize:16 } : undefined}
                         onClick={async () => {
+                          if (preflightFlags.length > 0 && !ackIssues) {
+                            alert("Preflight flagged " + preflightFlags.map(c => c.label).join(", ") + ". Tick the acknowledgment box to approve anyway, or fix the file and re-upload.");
+                            return;
+                          }
                           setGeneratingPdf(true);
                           setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
                           try {
@@ -4537,7 +4560,10 @@ update();
                               // order upload — it is a staff-only download (debug-gated, art modal only).
                               // Attaching it broke the add-to-cart / order upload flow.
                               files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
-                              onArtwork({ type: "files", list: files, approved: true });
+                              // proofHash binds this approval to the exact print-file bytes;
+                              // it travels to the order as _pps_proof_hash and the imposition
+                              // tool verifies it before imposing.
+                              onArtwork({ type: "files", list: files, approved: true, proofHash: pkg.proofHash || null });
                             }
                           } catch (err) {
                             console.error("Approval package generation failed:", err);
@@ -4591,6 +4617,22 @@ update();
                 {!artApproved && proof === 0 && (
                   <div style={{ fontSize:10.5, color:"#dc2626", marginTop:4, fontWeight:600 }}>
                     * Proof approval is required before your order can be placed.
+                  </div>
+                )}
+                {/* Approve-through-warnings gate: flagged preflight checks must be
+                    explicitly acknowledged before the Approve button unlocks, and the
+                    acknowledgment is recorded in the manipulation manifest. */}
+                {!artApproved && proof === 0 && preflightFlags.length > 0 && (
+                  <label style={{ display:"flex", gap:8, alignItems:"flex-start", marginTop:8, padding:"8px 10px", borderRadius:10, border:"1px solid rgba(251,191,36,.45)", background:"rgba(251,191,36,.10)", cursor:"pointer" }}>
+                    <input type="checkbox" checked={ackIssues} onChange={e => setAckIssues(e.target.checked)} style={{ marginTop:2, flexShrink:0 }} />
+                    <span style={{ fontSize:10.5, lineHeight:1.45, color:"var(--bp-warn)", fontWeight:600 }}>
+                      Preflight flagged: {preflightFlags.map(c => c.label).join(", ")}. I've reviewed {preflightFlags.length > 1 ? "these warnings" : "this warning"} and want to print anyway.
+                    </span>
+                  </label>
+                )}
+                {!artApproved && proof === 0 && (
+                  <div style={{ fontSize:9.5, color:"var(--bp-faint)", marginTop:6, lineHeight:1.5 }}>
+                    By approving, you accept this proof as final. We print exactly the approved file — errors in approved artwork (spelling, layout, images, color choices) are the customer's responsibility.
                   </div>
                 )}
                 <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", justifyContent:"space-between", marginTop:10 }}>
@@ -4721,7 +4763,8 @@ update();
                 const rcAll4 = rcVal === 108 || rcVal === 107;
                 const rcPct = rcRadius > 0 ? ((rcRadius / artW) * 100).toFixed(2) + "%" : "0";
                 const rcCSS = rcRadius > 0 ? rcAll4 ? rcPct : `0 ${rcPct} ${rcPct} 0` : "0";
-                const hiResValid = hiResProof && hiResProof.idx === proofIdx && hiResProof.rotated === rotateSteps;
+                const composedValid = composedProof && composedProof.idx === proofIdx && composedProof.sig === proofSig;
+                const composedAtPrint = composedValid && composedProof.quality === "print";
                 return (
                   <div style={{ padding:"16px 20px" }}>
                     {/* Page nav with view toggle */}
@@ -4841,45 +4884,28 @@ update();
                         } : undefined}
                         onTouchEnd={showMagnifier ? () => setMagPos(null) : undefined}
                       >
-                        {/* Art image — fills entire bleed container; guides show trim/safety boundaries */}
-                        {(() => {
-                          // Native scale: how wide the art is relative to the bleed-inclusive container
-                          // Trim-sized art (8.5") in bleed container (8.75") = 0.971 → dark bleed band visible
-                          // Bleed-sized art (8.75") = 1.0 → fills to edge
-                          const nativeW = ed ? ed.wIn / bleedW : (dims.w / bleedW);
-                          const cropStyle = (mult) => ({
-                            width: `${nativeW * mult * 100}%`, height: "auto",
-                            // The theme's reset (img { max-width: 100% }) clamps this
-                            // back to the sheet width whenever the art is larger than the
-                            // page, so the proof showed the WHOLE image fitted while the
-                            // print-ready PDF cropped to the centre at native size. Order
-                            // 87032 shipped that way: 6.667" art on a 3.75" page kept 32%
-                            // of the image, and the customer had approved a proof showing
-                            // all of it. Must be inline — a stylesheet rule loses to a
-                            // theme swap. height stays auto, so aspect cannot stretch.
-                            maxWidth: "none", maxHeight: "none",
-                            position: "absolute", top: "50%", left: "50%",
-                            transform: "translate(-50%, -50%)", display: "block", filter: gsFor(proofIdx),
-                          });
-                          return (
-                            <div className="bp-checker" style={{ position:"absolute", inset:0, overflow:"hidden" }}>
-                              {proofPage.isBlank
-                                ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:14 }}>Blank page</div>
-                                : <img src={hiResValid ? hiResProof.dataUrl : proofPage.dataUrl} style={{
-                                    ...(fitMode === "crop" ? cropStyle(1)
-                                      : fitMode === "scale" ? cropStyle(artScale / 100)
-                                      : { display:"block", filter:gsFor(proofIdx), width:"100%", height:"100%", objectFit: fitMode==="contain" ? "contain" : fitMode==="stretch" ? "fill" : "cover" }
-                                    )
-                                  }} />
-                              }
-                            </div>
-                          );
-                        })()}
-                        {!proofPage.isBlank && !hiResValid && artDims?.source === "pdf" && (
-                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"var(--bp-dim)", background:"rgba(0,0,0,.5)", padding:"2px 6px", borderRadius:8, zIndex:2 }}>Rendering 300 DPI…</div>
+                        {/* Art — the composed bitmap from the SAME function that renders the
+                            print-ready PDF, shown 1:1 in the bleed container. No CSS
+                            composition: the bitmap already contains crop/fit/scale/rotate,
+                            so the only thing CSS does here is uniform display scaling
+                            (container and bitmap share the exact bleed aspect ratio).
+                            Order 87032 happened because this used to be a second,
+                            CSS-driven renderer that could disagree with the print. The
+                            grayscale filter is a press simulation only — the print file
+                            keeps color and the press prints it grayscale. */}
+                        <div className="bp-checker" style={{ position:"absolute", inset:0, overflow:"hidden" }}>
+                          {proofPage.isBlank
+                            ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:14 }}>Blank page</div>
+                            : composedValid
+                              ? <img src={composedProof.dataUrl} style={{ position:"absolute", inset:0, width:"100%", height:"100%", maxWidth:"none", maxHeight:"none", display:"block", filter:gsFor(proofIdx) }} />
+                              : <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:12 }}>Composing proof…</div>
+                          }
+                        </div>
+                        {!proofPage.isBlank && !composedAtPrint && (
+                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"var(--bp-dim)", background:"rgba(0,0,0,.5)", padding:"2px 6px", borderRadius:8, zIndex:2 }}>Rendering print resolution…</div>
                         )}
-                        {!proofPage.isBlank && hiResValid && (
-                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"var(--bp-on-dark)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:8, zIndex:2 }}>300 DPI</div>
+                        {!proofPage.isBlank && composedAtPrint && (
+                          <div style={{ position:"absolute", top:8, right:8, fontSize:9, color:"var(--bp-on-dark)", background:"rgba(0,0,0,.4)", padding:"2px 6px", borderRadius:8, zIndex:2 }} title="This preview is rendered from the same composition that generates your print file">300 DPI · print pixels</div>
                         )}
                         {/* Guide overlays — togglable */}
                         {showGuides && !proofPage.isBlank && (
@@ -4902,30 +4928,15 @@ update();
                         {rcRadius > 0 && !proofPage.isBlank && (
                           <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, borderRadius:rcCSS, boxShadow:"0 0 0 200px rgba(0,0,0,0.15)", pointerEvents:"none", zIndex:0 }}/>
                         )}
-                        {/* Magnifier lens */}
-                        {showMagnifier && magPos && !proofPage.isBlank && (() => {
+                        {/* Magnifier lens — a plain zoom over the SAME composed bitmap the
+                            main proof shows. It used to re-implement the fit-mode CSS a
+                            third time; now there is nothing to re-implement, so the lens
+                            cannot show different pixels than the print file. */}
+                        {showMagnifier && magPos && !proofPage.isBlank && composedValid && (() => {
                           const magSize = 160, zoom = 3;
-                          const imgSrc = hiResValid ? hiResProof.dataUrl : proofPage.dataUrl;
                           const bgW = magPos.cw * zoom, bgH = magPos.ch * zoom;
                           const bgX = -(magPos.pctX / 100 * bgW) + magSize / 2;
                           const bgY = -(magPos.pctY / 100 * bgH) + magSize / 2;
-                          const proofTx = getTx(proofIdx);
-                          const ed = effectiveDimsFor(artDims, proofTx.rotateSteps);
-                          const nativeW = ed ? ed.wIn / bleedW : (dims.w / bleedW);
-                          const cropStyle = (mult) => ({
-                            width: `${nativeW * mult * 100}%`, height: "auto",
-                            // The theme's reset (img { max-width: 100% }) clamps this
-                            // back to the sheet width whenever the art is larger than the
-                            // page, so the proof showed the WHOLE image fitted while the
-                            // print-ready PDF cropped to the centre at native size. Order
-                            // 87032 shipped that way: 6.667" art on a 3.75" page kept 32%
-                            // of the image, and the customer had approved a proof showing
-                            // all of it. Must be inline — a stylesheet rule loses to a
-                            // theme swap. height stays auto, so aspect cannot stretch.
-                            maxWidth: "none", maxHeight: "none",
-                            position: "absolute", top: "50%", left: "50%",
-                            transform: "translate(-50%, -50%)", display: "block", filter: gsFor(proofIdx),
-                          });
                           const spineLeft = proofIdx % 2 === 0;
                           return (
                             <div style={{
@@ -4937,13 +4948,7 @@ update();
                             }}>
                               {/* Bleed-zoomed proof viewport — mirrors the main proof container at zoom× scale */}
                               <div className="bp-checker" style={{ position:"absolute", left: bgX, top: bgY, width: bgW, height: bgH, overflow: "hidden" }}>
-                                <img src={imgSrc} style={{
-                                  ...(proofTx.fitMode === "crop" ? cropStyle(1)
-                                    : proofTx.fitMode === "scale" ? cropStyle(proofTx.artScale / 100)
-                                    : proofTx.fitMode === "stretch" ? { display:"block", filter:gsFor(proofIdx), width:"100%", height:"100%", objectFit:"fill", position:"absolute", inset:0 }
-                                    : { display:"block", filter:gsFor(proofIdx), width:"100%", height:"100%", objectFit: proofTx.fitMode === "contain" ? "contain" : "cover" }
-                                  )
-                                }} />
+                                <img src={composedProof.dataUrl} style={{ position:"absolute", inset:0, width:"100%", height:"100%", maxWidth:"none", maxHeight:"none", display:"block", filter:gsFor(proofIdx) }} />
                                 {showGuides && <>
                                   {/* Bleed — red dashed at container edge */}
                                   <div style={{ position:"absolute", inset:0, border:"2px dashed #ef4444", boxSizing:"border-box", opacity:0.8, pointerEvents:"none" }}/>
@@ -4981,7 +4986,8 @@ update();
                     <div className="bp-thumbs" style={{ marginTop:12 }}>
                       {displayPages.map((p, i) => (
                         <div key={i} className="bp-thumb" style={{ cursor:"pointer", outline: i===proofIdx ? `2px solid ${CK.cyan}` : "none", borderRadius:8 }} onClick={() => setProofIdx(i)}>
-                          <img src={p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.5 : i===proofIdx ? 1 : 0.7, border: p.isBlank ? "1px dashed var(--bp-line)" : undefined }} />
+                          {/* Composed thumbnails — same engine as the print file, so even the nav strip can't disagree with it */}
+                          <img src={(trimmedPages.length === displayPages.length && trimmedPages[i]) ? trimmedPages[i].dataUrl : p.dataUrl} alt={p.label} style={{ height:52, opacity: p.isBlank ? 0.5 : i===proofIdx ? 1 : 0.7, border: p.isBlank ? "1px dashed var(--bp-line)" : undefined, filter: p.isBlank ? undefined : gsFor(i) }} />
                           <span style={{ color: i===proofIdx ? CK.cyan : p.isBlank ? "var(--bp-warn)" : "var(--bp-faint)" }}>{p.label}</span>
                         </div>
                       ))}
@@ -5009,7 +5015,10 @@ update();
                         <div className="bp-checker" style={{ position:"relative", width:"100%", aspectRatio:`${dims.w}/${dims.h}`, borderRadius:8, overflow:"hidden", border: i===proofIdx ? `2px solid ${CK.cyan}` : "1px solid var(--bp-line)" }}>
                           {p.isBlank
                             ? <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:10 }}>Blank</div>
-                            : <img src={p.dataUrl} style={{ width:"100%", height:"100%", objectFit: getTx(i).fitMode==="stretch"?"fill":getTx(i).fitMode==="contain"?"contain":"cover", display:"block", filter:gsFor(i) }} />
+                            : trimmedPages.length === displayPages.length && trimmedPages[i]
+                              /* Composed + trimmed by the single composition engine — container aspect matches the trim exactly, so this is pure display scaling */
+                              ? <img src={trimmedPages[i].dataUrl} style={{ width:"100%", height:"100%", maxWidth:"none", maxHeight:"none", display:"block", filter:gsFor(i) }} />
+                              : <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--bp-faint)", fontSize:10 }}>…</div>
                           }
                         </div>
                         <span style={{ fontSize:9, color: p.isBlank ? "var(--bp-faint)" : "var(--bp-dim)", marginTop:3, display:"block" }}>{p.label}</span>
@@ -5412,6 +5421,9 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     fd.append("pps_biz_days", String(parsed.requestedBizDays || parsed.freeDeliveryBizDays || 5));
     if (artworkPath) fd.append("pps_artwork_path", artworkPath);
     if (uploadedFiles.length) fd.append("pps_artwork_files", JSON.stringify(uploadedFiles));
+    // Approval binding: SHA-256 of the print-ready bytes the customer approved.
+    // PHP stores it as _pps_proof_hash; the imposition tool refuses on mismatch.
+    if (artFiles.type === "files" && artFiles.proofHash) fd.append("pps_proof_hash", artFiles.proofHash);
 
     const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: fd });
     const data = await resp.json();

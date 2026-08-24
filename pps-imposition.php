@@ -302,6 +302,11 @@ add_action( 'wp_ajax_pps_impose_list', function() {
                 'folder_url'    => 'https://drive.google.com/drive/folders/' . rawurlencode( $folder_id ),
                 'art_file_id'   => $art['id'] ?? '',
                 'art_file_name' => $art['name'] ?? '',
+                // Approval binding: SHA-256 the calculator computed over the
+                // print-ready bytes at the moment of approval. The tool hashes
+                // the file it downloads and refuses to impose on mismatch.
+                // Empty for pre-hash orders — the tool imposes those as before.
+                'proof_hash'    => (string) $item->get_meta( '_pps_proof_hash' ),
                 'imposed'       => $imposed,
                 'files_listed'  => is_array( $files ),
             );
