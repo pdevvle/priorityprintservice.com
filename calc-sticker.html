@@ -3506,7 +3506,12 @@ function App() {
     // Only files awaiting approval are blocked: "existing" is artwork already
     // approved on a previous order (reorder), and "none" is a customer sending
     // art later, neither of which has a proof to approve here.
-    if (artFiles && artFiles.type === "files" && !artFiles.approved) {
+    // Gate applies ONLY to free online proofing (proof === 0), where the
+    // customer's own on-screen approval is the sign-off. Manual digital and
+    // hardcopy proofs are approved by STAFF after the order — gating those on
+    // an Approve button that never renders made paid-proofing uploads
+    // impossible to order.
+    if (artFiles && artFiles.type === "files" && !artFiles.approved && proof === 0) {
       alert("Please approve your artwork proof before ordering.\n\n"
         + "Open the proof in Artwork & Proofing, check your artwork against the bleed, "
         + "trim and safety guides, then click APPROVE NOW.\n\n"

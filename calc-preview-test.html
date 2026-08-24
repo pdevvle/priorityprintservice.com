@@ -2123,7 +2123,12 @@ async function extractPdfPages(file, onProgress) {
     await pg.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
     const url = canvas.toDataURL("image/jpeg", 0.8);
     let label = pageLabel(i - 1, pdf.numPages);
-    result.push({ dataUrl: url, label });
+    // srcPdfPage records which ORIGINAL PDF page these pixels came from. The
+    // composition engine's vector branch re-renders by this number — never by
+    // display position, which shifts under blank placement, page-count
+    // trimming, and slot replacement. A page without srcPdfPage (slot upload,
+    // blank, split spread) is composed from its raster instead.
+    result.push({ dataUrl: url, label, srcPdfPage: i });
   }
   return { pages: result, dims: { wIn: pdfW, hIn: pdfH, wPx: pxW, hPx: pxH, source: "pdf" }, pdfDoc: pdf };
 }
@@ -2846,14 +2851,43 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   }
   const effectiveDims = useMemo(() => effectiveDimsFor(artDims, rotateSteps), [artDims, rotateSteps]);
 
-  // Clear approval when ANY page's transform changes — forces re-approval
-  const prevTxHash = useRef(txHash);
-  useEffect(() => {
-    if (prevTxHash.current !== txHash) {
-      if (artApproved) { setArtApproved(false); setApprovalPkg(null); }
-      prevTxHash.current = txHash;
+  // ── Approval lifecycle ──────────────────────────────────────────────────
+  // artFiles.approved lives in the PARENT and outlives local resets (the
+  // Review button, a mid-generation change), so every path that voids an
+  // approval must revoke it there, not just flip the local badge. All
+  // artwork-state emissions go through emitArtwork so parentApprovedRef always
+  // mirrors what the parent currently believes.
+  const parentApprovedRef = useRef(false);
+  const emitArtwork = (payload) => {
+    parentApprovedRef.current = !!(payload && payload.approved);
+    if (onArtwork) onArtwork(payload);
+  };
+  const revokeApproval = () => {
+    setArtApproved(false); setApprovalPkg(null);
+    if (parentApprovedRef.current) {
+      emitArtwork({ type: "files", list: rawFileRef.current ? [rawFileRef.current] : [], approved: false });
     }
-  }, [txHash]);
+  };
+
+  // Clear approval when ANY page's transform changes — or when the booklet
+  // spec itself changes shape (trim size, page count, blank placement,
+  // binding edge): the approved print file was composed for the OLD spec and
+  // must not ride into an order for the new one.
+  const specSig = [dims.w, dims.h, pageCount, bindDir, blankPlacement].join("|");
+  // Live signature for the generation-race guard: the approve handler compares
+  // this before and after the (multi-second) package build, so a change made
+  // WHILE generating can never end up approved.
+  const liveSigRef = useRef("");
+  liveSigRef.current = txHash + "::" + specSig;
+  const prevTxHash = useRef(txHash);
+  const prevSpecSig = useRef(specSig);
+  useEffect(() => {
+    if (prevTxHash.current !== txHash || prevSpecSig.current !== specSig) {
+      revokeApproval();
+      prevTxHash.current = txHash;
+      prevSpecSig.current = specSig;
+    }
+  }, [txHash, specSig]);
 
   // Rotate a dataUrl image by N steps of 90° clockwise (1=90°, 2=180°, 3=270°)
   function rotateImageBySteps(dataUrl, steps) {
@@ -2903,10 +2937,16 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     const ed = effectiveDimsFor(artDims, tx.rotateSteps);
 
     let srcCanvas = null;
-    if (!opts.fast && pdfDocRef.current && artDims?.source === "pdf") {
-      const pdfPageNum = pageIdx + 1;
-      if (pdfPageNum <= pdfDocRef.current.numPages) {
-        const pg = await pdfDocRef.current.getPage(pdfPageNum);
+    // Vector re-render ONLY for pages that genuinely came from the uploaded
+    // PDF, addressed by their original page number (page.srcPdfPage). Display
+    // index must never be used here: reconciliation (blank placement, trims)
+    // reorders indices, and slot uploads replace a page's content entirely —
+    // both used to make this branch resurrect the wrong PDF page into the
+    // print file while every raster preview showed the right one.
+    const srcPdfPage = page.srcPdfPage;
+    if (!opts.fast && pdfDocRef.current && artDims?.source === "pdf" && srcPdfPage) {
+      if (srcPdfPage <= pdfDocRef.current.numPages) {
+        const pg = await pdfDocRef.current.getPage(srcPdfPage);
         const vp = pg.getViewport({ scale: dpi / 72 });
         srcCanvas = document.createElement("canvas");
         srcCanvas.width = Math.round(vp.width);
@@ -3212,11 +3252,19 @@ update();
     });
     const noTransforms = everyPageDefault && artMatchesBleed;
     const isSourcePdf = artDims?.source === "pdf";
+    // The raw file may ship as the print file ONLY when it is literally the
+    // approved page set: no transforms, no reconciliation (padding/trimming/
+    // blank placement changed nothing) and no slot-replaced pages. Otherwise
+    // the raw PDF is missing or misordering content the customer approved.
+    const rawIsExactSet = noTransforms && isSourcePdf && !reconcileInfo
+      && Object.keys(slotFilesRef.current || {}).length === 0;
 
     let printReadyBlob = null;
+    let usedRawFile = false; // the branch actually taken — never infer from noTransforms
     const previewBlobs = [];
 
-    if (noTransforms && isSourcePdf && rawFileRef.current) {
+    if (rawIsExactSet && rawFileRef.current) {
+      usedRawFile = true;
       printReadyBlob = rawFileRef.current;
       for (let i = 0; i < totalPages; i++) {
         setGenProgress({ step: "previews", page: i + 1, totalPages });
@@ -3290,6 +3338,14 @@ update();
         proofHash = Array.from(new Uint8Array(_dig)).map(b => b.toString(16).padStart(2, "0")).join("");
       }
     } catch (e) { proofHash = null; }
+    // The exact deliverable filename the hash covers. The submit step only
+    // posts the hash if THIS file actually uploaded — an order must never
+    // carry a hash that no file in its Drive folder can match (the print-ready
+    // upload is a tolerated-failure supplementary, e.g. over the size cap).
+    const _hashBase = (fileName || "artwork").replace(/\.[^.]+$/, "");
+    const proofHashOf = usedRawFile
+      ? ((rawFileRef.current && rawFileRef.current.name) || null)
+      : (_hashBase + "_print-ready.pdf");
 
     // ── Manipulation manifest ──
     setGenProgress({ step: "manifest", page: totalPages, totalPages });
@@ -3336,8 +3392,8 @@ update();
       "",
       "── Deliverables ──",
       `1. Raw file: ${fileName || "original upload"} (unmodified customer upload)`,
-      noTransforms
-        ? `2. Print-ready PDF: SKIPPED — raw file is already print-ready (no transforms applied, art matches bleed size)`
+      usedRawFile
+        ? `2. Print-ready PDF: SKIPPED — raw file is already print-ready (no transforms, no page reconciliation, no replaced pages)`
         : `2. Print-ready PDF: ${totalPages} pages at ${DPI} DPI, ${bleedW}″ × ${bleedH}″, JPEG quality 0.95`,
       `3. Screen previews: ${previewBlobs.filter(b => b).length} page images at 150 DPI, JPEG quality 0.85`,
       `4. This manifest`,
@@ -3366,7 +3422,7 @@ update();
       manifestLines.push(`    fit=${t.fitMode} rotate=${t.rotateSteps * 90}° scale=${t.artScale}%  [${pdims}]`);
     });
     manifestLines.push("", "── Notes ──");
-    if (noTransforms) manifestLines.push("No customer transforms were applied on any page. The raw uploaded file is print-ready as-is — no rasterized print PDF was generated, preserving original vector/quality.");
+    if (usedRawFile) manifestLines.push("No customer transforms were applied on any page. The raw uploaded file is print-ready as-is — no rasterized print PDF was generated, preserving original vector/quality.");
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
@@ -3398,7 +3454,7 @@ update();
       }
     } catch (e) { previewPdfBlob = null; }
 
-    return { printReadyBlob, previewBlobs, previewPdfBlob, manifestBlob, previewHtmlBlob, proofHash, skippedGeneration: noTransforms };
+    return { printReadyBlob, previewBlobs, previewPdfBlob, manifestBlob, previewHtmlBlob, proofHash, proofHashOf, skippedGeneration: usedRawFile };
   }
 
   // Effective pages (rotated if needed) — cached to avoid re-rotating on every render
@@ -3585,7 +3641,12 @@ update();
   // the industry-standard "approve through warnings" gate. Any preflight change
   // (new file, new settings) voids a previous acknowledgment.
   const preflightFlags = useMemo(() => (preflight || []).filter(c => c.level === "warn" || c.level === "fail"), [preflight]);
-  useEffect(() => { setAckIssues(false); }, [preflight]);
+  // Reset the acknowledgment only when the SET of flagged checks changes, not
+  // on every preflight identity churn (per-page rotation aliases recompute it
+  // while flipping proof pages — an already-given acknowledgment must survive
+  // that).
+  const preflightFlagsSig = useMemo(() => preflightFlags.map(c => c.id + ":" + c.level).join("|"), [preflightFlags]);
+  useEffect(() => { setAckIssues(false); }, [preflightFlagsSig]);
   const detectedBleed = _preflight?.hasBleed || false;
   const bleedCbRef = useRef(onBleedDetected);
   bleedCbRef.current = onBleedDetected;
@@ -3788,7 +3849,12 @@ update();
   // PDF — the proof IS the print file at screen DPI, so nothing (no CSS rule,
   // no theme reset, no object-fit quirk) can make it disagree with the print.
   const proofTxCur = getTx(proofIdx);
-  const proofSig = [proofIdx, proofTxCur.fitMode, proofTxCur.rotateSteps, proofTxCur.artScale, dims.w, dims.h, displayPages.length].join("|");
+  // The signature must change whenever the composed pixels would: transforms,
+  // trim size, page count — AND the page's own content (length + tail of its
+  // dataUrl), so replacing a page via a slot upload can never serve the
+  // previous page's cached composition.
+  const _proofPageSrc = (displayPages[proofIdx] && displayPages[proofIdx].dataUrl) || "";
+  const proofSig = [proofIdx, proofTxCur.fitMode, proofTxCur.rotateSteps, proofTxCur.artScale, dims.w, dims.h, displayPages.length, _proofPageSrc.length, _proofPageSrc.slice(-32)].join("|");
   useEffect(() => {
     if (activeModal !== "proof") return;
     const page = displayPages[proofIdx];
@@ -3877,7 +3943,7 @@ update();
         onPagesDetected(pg);
       }
       // Pass raw file up for order submission
-      if (onArtwork) onArtwork({ type: "files", list: [fileList[0]] });
+      emitArtwork({ type: "files", list: [fileList[0]] });
       setSlotsOpen(true);
       setArtApproved(false);
     } catch (err) {
@@ -3909,7 +3975,7 @@ update();
     rawFileRef.current = null;
     rawFilesRef.current = [];
     slotFilesRef.current = {};
-    if (onArtwork) onArtwork({ type: "none" });
+    emitArtwork({ type: "none" });
     if (onCoverArt) onCoverArt(null);
     if (onBackCoverArt) onBackCoverArt(null);
   }
@@ -4009,12 +4075,15 @@ update();
 
     // Track the original File object for this slot (preserves full quality for submission)
     slotFilesRef.current = { ...slotFilesRef.current, [idx]: file };
+    // New page content voids any prior approval (parent is updated via the
+    // onArtwork call below, which carries no approved flag).
+    setArtApproved(false); setApprovalPkg(null);
     // Build ordered file list from slot map and notify parent
-    if (onArtwork) {
+    {
       const list = Object.entries(slotFilesRef.current)
         .sort((a, b) => Number(a[0]) - Number(b[0]))
         .map(([i, f]) => new File([f], `page_${String(i).padStart(3,"0")}_${f.name}`, { type: f.type }));
-      onArtwork({ type: "files", list });
+      emitArtwork({ type: "files", list });
     }
 
     setRawPages(prev => {
@@ -4046,14 +4115,16 @@ update();
     const updated = { ...slotFilesRef.current };
     delete updated[idx];
     slotFilesRef.current = updated;
-    if (onArtwork) {
+    // Removed page content voids any prior approval, same as replacing it.
+    setArtApproved(false); setApprovalPkg(null);
+    {
       const entries = Object.entries(updated);
       if (entries.length > 0) {
         const list = entries.sort((a, b) => Number(a[0]) - Number(b[0]))
           .map(([i, f]) => new File([f], `page_${String(i).padStart(3,"0")}_${f.name}`, { type: f.type }));
-        onArtwork({ type: "files", list });
+        emitArtwork({ type: "files", list });
       } else {
-        onArtwork({ type: "none" });
+        emitArtwork({ type: "none" });
       }
     }
 
@@ -4238,7 +4309,11 @@ update();
               </div>
             </div>
             <div style={{ display:"flex", gap:4 }}>
-              <button type="button" onClick={() => setArtApproved(false)} style={{
+              {/* Un-approving here must revoke the PARENT's approval too — a local-only
+                  reset used to leave artFiles.approved true, so a later transform change
+                  (guarded on local state) never revoked it either, and the order could
+                  ship the old package. revokeApproval covers both. */}
+              <button type="button" onClick={revokeApproval} style={{
                 padding:"3px 10px", fontSize:10, fontWeight:600, borderRadius:8, cursor:"pointer", fontFamily:"inherit",
                 border:"1px solid #86efac", background:"#fff", color:"#16a34a",
               }}>Review</button>
@@ -4526,8 +4601,15 @@ update();
                           setGeneratingPdf(true);
                           setGenProgress({ step: "starting", page: 0, totalPages: (displayPages || effectivePages).length });
                           try {
+                            // Generation takes seconds; a transform or spec change made
+                            // during it must void this approval, not slip under it.
+                            const sigAtStart = liveSigRef.current;
                             const pkg = await generateApprovalPackage();
                             if (!pkg || !pkg.manifestBlob) throw new Error("Package generation returned empty result");
+                            if (liveSigRef.current !== sigAtStart) {
+                              alert("Your artwork or booklet settings changed while the proof package was being generated — nothing was approved. Review the updated proof, then approve again.");
+                              return;
+                            }
                             setApprovalPkg(pkg);
                             setArtApproved(true);
                             if (onArtwork) {
@@ -4562,8 +4644,10 @@ update();
                               files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
                               // proofHash binds this approval to the exact print-file bytes;
                               // it travels to the order as _pps_proof_hash and the imposition
-                              // tool verifies it before imposing.
-                              onArtwork({ type: "files", list: files, approved: true, proofHash: pkg.proofHash || null });
+                              // tool verifies it before imposing. proofHashOf names the
+                              // deliverable it covers — the hash is only posted if that file
+                              // actually uploads.
+                              emitArtwork({ type: "files", list: files, approved: true, proofHash: pkg.proofHash || null, proofHashOf: pkg.proofHashOf || null });
                             }
                           } catch (err) {
                             console.error("Approval package generation failed:", err);
@@ -5423,7 +5507,14 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     if (uploadedFiles.length) fd.append("pps_artwork_files", JSON.stringify(uploadedFiles));
     // Approval binding: SHA-256 of the print-ready bytes the customer approved.
     // PHP stores it as _pps_proof_hash; the imposition tool refuses on mismatch.
-    if (artFiles.type === "files" && artFiles.proofHash) fd.append("pps_proof_hash", artFiles.proofHash);
+    // Posted ONLY if the exact deliverable it covers (proofHashOf) actually
+    // uploaded — the print-ready file is a tolerated-failure supplementary
+    // (size cap, server hiccup), and an order must never carry a hash that no
+    // file in its Drive folder can match.
+    if (artFiles.type === "files" && artFiles.proofHash && artFiles.proofHashOf
+        && uploadedFiles.some(f => f.name === artFiles.proofHashOf)) {
+      fd.append("pps_proof_hash", artFiles.proofHash);
+    }
 
     const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: fd });
     const data = await resp.json();
@@ -5645,6 +5736,13 @@ function App(){
   // Unified artwork file state — one variable, no priority logic
   // { type:"none" } | { type:"files", list:[File,...] } | { type:"existing", path:"/uploads/..." }
   const[artFiles,setArtFiles]=useState({type:"none"});
+  // Switching away from "Upload Art with Order" unmounts the uploader while
+  // artFiles kept the (possibly approved) package — an invisible approval that
+  // would ride into the order unseen. Clear it. "existing" (reorder artwork)
+  // is deliberately kept: it isn't tied to the upload UI.
+  useEffect(() => {
+    if (artwork !== 0.01 && artFiles.type === "files") setArtFiles({ type: "none" });
+  }, [artwork]);
   const[canvaLink,setCanvaLink]=useState(D.canvaLink||"");
   const[canvaInstructions,setCanvaInstructions]=useState("");
   const[referenceFiles,setReferenceFiles]=useState([]);
@@ -6265,7 +6363,13 @@ function App(){
     // Only files awaiting approval are blocked: "existing" is artwork already
     // approved on a previous order (reorder), and "none" is a customer sending
     // art later, neither of which has a proof to approve here.
-    if (artFiles && artFiles.type === "files" && !artFiles.approved) {
+    //
+    // The gate applies ONLY to the free online-proof option (proof === 0),
+    // where the customer's own on-screen approval is the sign-off. Manual
+    // digital (0.01) and hardcopy (>=3) proofing are approved by STAFF after
+    // the order — the Approve button doesn't even render for them, so gating
+    // those orders on it made paid-proofing uploads impossible to order.
+    if (artFiles && artFiles.type === "files" && !artFiles.approved && proof === 0) {
       alert("Please approve your artwork proof before ordering.\n\n"
         + "Open the proof in Artwork & Proofing, check your artwork against the bleed, "
         + "trim and safety guides, then click APPROVE NOW.\n\n"

@@ -2194,9 +2194,24 @@ function App() {
         try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
       }
       catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
+      // Manual drops while a hash-bound order is active go through the same
+      // approval check as queue loads — otherwise dragging in any file was a
+      // silent bypass with a clean output filename.
+      let manualHashState = "unbound";
+      const orderHash = (activeOrder && activeOrder.proof_hash || "").toLowerCase();
+      if (slot !== "back" && /^[0-9a-f]{64}$/.test(orderHash)) {
+        const got = await sha256Hex(bytes);
+        if (!got) manualHashState = "unverifiable";
+        else if (got === orderHash) manualHashState = "verified";
+        else if (allowHashMismatch) manualHashState = "override";
+        else {
+          setError(`APPROVAL MISMATCH: "${f.name}" hashes ${got.slice(0, 12)}… but order #${activeOrder.order_id}'s customer approved ${orderHash.slice(0, 12)}…. This is not the approved file. Tick "impose despite approval mismatch" to stage it anyway (output flagged UNAPPROVED), or clear the active order first.`);
+          continue;
+        }
+      }
       if (slot === "back") setBackArt({ bytes, name: f.name, pageCount, threats });
       else {
-        setArt({ bytes, name: f.name, pageCount, threats });
+        setArt({ bytes, name: f.name, pageCount, threats, hashState: manualHashState });
         setAddBleedPages({}); // per-page overrides belong to the previous file
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
         if (det) {
@@ -2266,7 +2281,13 @@ function App() {
         }
       } catch (e2) { /* best-effort */ }
       setNotice(note);
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      // A failed load (approval mismatch included) must leave NOTHING staged:
+      // the previous order's art was still loaded here, and one "Send to
+      // Drive" click would have filed it as THIS order's press-ready PDF.
+      setArt(null); setBackArt(null); setActiveOrder(null); setResult(null);
+      setError(e.message);
+    }
     finally { setQueueBusy(null); }
   };
 
@@ -2311,7 +2332,10 @@ function App() {
         const expectedHash = (row.proof_hash || "").toLowerCase();
         if (/^[0-9a-f]{64}$/.test(expectedHash)) {
           const got = await sha256Hex(bytes);
-          if (got && got !== expectedHash) throw new Error(`approval mismatch — the file in Drive is not what the customer approved (${got.slice(0, 12)}… vs approved ${expectedHash.slice(0, 12)}…). Load the order individually to inspect.`);
+          // An unverifiable hash (no crypto.subtle — non-HTTPS admin) fails the
+          // row rather than silently imposing a hash-bound order unchecked.
+          if (!got) throw new Error(`cannot verify the approval hash (crypto.subtle unavailable — is wp-admin on HTTPS?). Load the order individually to see the same warning, or fix admin HTTPS.`);
+          if (got !== expectedHash) throw new Error(`approval mismatch — the file in Drive is not what the customer approved (${got.slice(0, 12)}… vs approved ${expectedHash.slice(0, 12)}…). Load the order individually to inspect.`);
         }
         const res = await imposePdf(bytes, null, s);
         const filename = imposedFilename(s, res.layout);
