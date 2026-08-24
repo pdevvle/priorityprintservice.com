@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-23 00:22 UTC · IMPOSE-V1.8</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-24 08:11 UTC · IMPOSE-V1.9</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -796,8 +796,14 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed) {
   }
   const hasBleed = (W - trimRaw.w > 1) || (H - trimRaw.h > 1);
   if (!hasBleed) notes.push("no bleed available — cut lines may show paper white");
+  // How far the art's own content runs past its trim, in PLACED inches — the
+  // smallest of the four sides, so it is safe on every edge and needs no
+  // rotation mapping (a min over all four is rotation-invariant). 0 for
+  // no-bleed art. Used to work out what the pull-off-trim inset leaves behind.
+  const ownBleed = Math.max(0, Math.min(
+    trimRaw.x, W - trimRaw.x - trimRaw.w, trimRaw.y, H - trimRaw.y - trimRaw.h)) * scale / PT;
 
-  return { page, rot, mediaW: W, mediaH: H, trimRaw, cellRotate, scale, hasBleed, notes,
+  return { page, rot, mediaW: W, mediaH: H, trimRaw, cellRotate, scale, hasBleed, ownBleed, notes,
            placedW: cellW, placedH: cellH };
 }
 
@@ -884,10 +890,70 @@ async function detectTextNearEdges(pdfjsDoc, pnoZero, art, bleed) {
 // fixable shortfalls fold into the scale factor so the synth never amplifies
 // a white sliver at the cut. Only applies when the source page genuinely
 // lacks bleed — files with real bleed are never touched.
-function applySynthBleed(art, mode, bleed, gaps, streakEps) {
-  if (!mode || mode === "off" || art.hasBleed) return art;
+// ── Pull art off the trim (safety inset) ────────────────────────────────────
+// Customers routinely push text right up to the cut. This shrinks the placed
+// art about the cell centre so every edge pulls INWARD by at least `inset`,
+// moving that content away from the trim; the add-bleed synthesizer then fills
+// the ring it opens — from the art's new edge out past the trim to the bleed
+// box — so the cut still lands in ink. The two settings are one operation:
+// the inset makes the room, the bleed fill makes up the difference.
+//
+// The scale is UNIFORM (never distort customer art), so a single factor cannot
+// give the same inset on both axes. We solve for the SHORT axis and let the
+// long axis pull in proportionally further — that way `inset` is a guaranteed
+// minimum on every edge, which is the promise the operator needs.
+const INSET_MAX = 0.5;
+function insetOf(spec) {
+  const v = +(spec && spec.artInset) || 0;
+  if (!(v > 0)) return 0;
+  const inset = Math.min(v, INSET_MAX);
+  const modes = [spec.addBleed, ...Object.values(spec.addBleedPages || {})].filter(m => m && m !== "off");
+  if (modes.includes("scale")) {
+    throw new Error(`Pull-off-trim (${inset}″) and "Scale art up to bleed" are opposite operations — scale mode re-expands the art to the bleed box, undoing the inset. Choose Auto (text-safe), Mirror or Streak.`);
+  }
+  return inset;
+}
+function applyArtInset(art, inset) {
+  if (!(inset > 0)) return art;
+  const f = 1 - 2 * inset / Math.min(art.placedW, art.placedH);
+  if (!(f > 0.5)) throw new Error(`Pull-off-trim ${inset}″ is too deep for a ${art.placedW}×${art.placedH}″ piece (it would shrink the art by more than half).`);
+  art.insetF = f;
+  art.insetDx = art.placedW * (1 - f) / 2;   // actual pull-in per edge, x
+  art.insetDy = art.placedH * (1 - f) / 2;   // actual pull-in per edge, y
+  art.notes.push(`pulled off trim by ${art.insetDx.toFixed(3)}″ across × ${art.insetDy.toFixed(3)}″ down (art scaled ×${f.toFixed(4)}) — content that was at the cut now sits that far inside it`);
+  return art;
+}
+
+// Where the art's outer edge ends up relative to the trim, per axis, once every
+// scale factor is in (fit-to-trim, shy-art pre-scale, inset). Positive = the art
+// still covers that far PAST the trim; negative = it now stops that far INSIDE
+// the trim and the fill must reach back in to meet it.
+function finalizeArtCoverage(art, bleed) {
+  const g = (art.synth ? (art.synthScale || 1) : 1) * (art.insetF || 1);
+  const ob = art.ownBleed || 0;
+  art.covX = g * (art.placedW / 2 + ob) - art.placedW / 2;
+  art.covY = g * (art.placedH / 2 + ob) - art.placedH / 2;
+  const b = isFinite(bleed) ? bleed : BLEED;
+  if (!art.synth) {
+    // Nothing is filling the ring, so the art's own coverage has to carry it.
+    if (art.covX < -EPS || art.covY < -EPS) {
+      throw new Error(`Pull-off-trim leaves the art ${Math.abs(Math.min(art.covX, art.covY)).toFixed(3)}″ short of the cut with no bleed fill set — that band would print as paper white INSIDE the trim. Set "Add bleed" to Auto (text-safe), Mirror or Streak.`);
+    }
+    if (art.covX < b - EPS || art.covY < b - EPS) {
+      art.notes.push(`art covers only ${Math.min(art.covX, art.covY).toFixed(3)}″ past the trim (need ${b}″) — cut lines may show paper white`);
+    }
+  }
+  return art;
+}
+
+function applySynthBleed(art, mode, bleed, gaps, streakEps, inset) {
+  // With an inset the ring must be filled even for art that HAS bleed: pulling
+  // the art in drags its bleed in with it, so the coverage falls short.
+  if (!mode || mode === "off" || (art.hasBleed && !(inset > 0))) return art;
   art.streakEps = streakEps || STREAK_EPS;
-  if (gaps && [gaps.left, gaps.right, gaps.top, gaps.bottom].every(g => g > SYNTH_MAXFIX)) {
+  // White-by-design edges normally need no synthesis — but an inset opens a
+  // real gap that still has to be filled, so the skip only applies without one.
+  if (!(inset > 0) && gaps && [gaps.left, gaps.right, gaps.top, gaps.bottom].every(g => g > SYNTH_MAXFIX)) {
     art.notes.push("edges are white by design (no ink near trim) — bleed synthesis skipped");
     return art;
   }
@@ -931,6 +997,7 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
   const drawRot = (((art.cellRotate + (extraRotate || 0) - art.rot) % 360) + 360) % 360; // CCW for pdf-lib degrees()
   let s = art.scale;
   if (art.synth) s *= art.synthScale || 1; // scale-to-bleed and/or shortfall pre-scale
+  if (art.insetF) s *= art.insetF;         // pull-off-trim safety inset
   const C = { x: (targetTrim.x + targetTrim.w / 2) * PT, y: (targetTrim.y + targetTrim.h / 2) * PT };
   const tc = { x: art.trimRaw.x + art.trimRaw.w / 2, y: art.trimRaw.y + art.trimRaw.h / 2 };
   // anchor = C − s·Rot(tc): drawPage maps raw (u,v) → anchor + s·Rot_ccw(u,v)
@@ -961,24 +1028,33 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
     // interior butt cuts and the saddle spine stay untouched.
     const b = art.synthB, T = targetTrim;
     const xL = T.x, xR = T.x + T.w, yB = T.y, yT = T.y + T.h;
-    const K = b / (art.streakEps || STREAK_EPS);
+    // The art's outer edge sits covX/covY past the trim (negative once a
+    // pull-off-trim inset has drawn it back inside). Reflect about THAT edge,
+    // and widen the band to reach from it out to the bleed box — so with no
+    // inset this is exactly the previous trim-edge mirror of width b.
+    const cx = art.covX || 0, cy = art.covY || 0;
+    const bx = b - cx, by = b - cy;                       // band width per axis
+    const eL = xL - cx, eR = xR + cx, eB = yB - cy, eT = yT + cy; // art edges
+    const eps = art.streakEps || STREAK_EPS;
+    const Kx = bx / eps, Ky = by / eps;
     const cyc = ["left", "bottom", "right", "top"]; // CCW edge cycle
     const rawEdge = e => cyc[(((cyc.indexOf(e) - drawRot / 90) % 4) + 4) % 4];
     const streaky = e => art.synth === "streak" || (art.synth === "auto" && art.textNear && art.textNear[rawEdge(e)]);
-    const kx = { left: streaky("left") ? K : 1, right: streaky("right") ? K : 1 };
-    const ky = { bottom: streaky("bottom") ? K : 1, top: streaky("top") ? K : 1 };
+    const kx = { left: streaky("left") ? Kx : 1, right: streaky("right") ? Kx : 1 };
+    const ky = { bottom: streaky("bottom") ? Ky : 1, top: streaky("top") ? Ky : 1 };
     const mX = (E, k) => [-k, 0, 0, 1, E * (1 + k) * PT, 0];   // mirrored map about x=E
     const mY = (F, k) => [1, 0, 0, -k, 0, F * (1 + k) * PT];   // mirrored map about y=F
     const mXY = (E, F, k1, k2) => [-k1, 0, 0, -k2, E * (1 + k1) * PT, F * (1 + k2) * PT];
-    const regions = [
-      { r: { x: xL - b, y: yB, w: b, h: T.h }, m: mX(xL, kx.left) },
-      { r: { x: xR, y: yB, w: b, h: T.h }, m: mX(xR, kx.right) },
-      { r: { x: xL, y: yB - b, w: T.w, h: b }, m: mY(yB, ky.bottom) },
-      { r: { x: xL, y: yT, w: T.w, h: b }, m: mY(yT, ky.top) },
-      { r: { x: xL - b, y: yB - b, w: b, h: b }, m: mXY(xL, yB, kx.left, ky.bottom) },
-      { r: { x: xR, y: yB - b, w: b, h: b }, m: mXY(xR, yB, kx.right, ky.bottom) },
-      { r: { x: xL - b, y: yT, w: b, h: b }, m: mXY(xL, yT, kx.left, ky.top) },
-      { r: { x: xR, y: yT, w: b, h: b }, m: mXY(xR, yT, kx.right, ky.top) },
+    const iw = eR - eL, ih = eT - eB;   // art's own span, for the side bands
+    const regions = bx <= 0 && by <= 0 ? [] : [
+      { r: { x: eL - bx, y: eB, w: bx, h: ih }, m: mX(eL, kx.left) },
+      { r: { x: eR, y: eB, w: bx, h: ih }, m: mX(eR, kx.right) },
+      { r: { x: eL, y: eB - by, w: iw, h: by }, m: mY(eB, ky.bottom) },
+      { r: { x: eL, y: eT, w: iw, h: by }, m: mY(eT, ky.top) },
+      { r: { x: eL - bx, y: eB - by, w: bx, h: by }, m: mXY(eL, eB, kx.left, ky.bottom) },
+      { r: { x: eR, y: eB - by, w: bx, h: by }, m: mXY(eR, eB, kx.right, ky.bottom) },
+      { r: { x: eL - bx, y: eT, w: bx, h: by }, m: mXY(eL, eT, kx.left, ky.top) },
+      { r: { x: eR, y: eT, w: bx, h: by }, m: mXY(eR, eT, kx.right, ky.top) },
     ];
     for (const { r, m } of regions) {
       const ix = Math.max(r.x, cl.x), iy = Math.max(r.y, cl.y);
@@ -1108,6 +1184,7 @@ function drawSlug(page, layout, font, info, cells) {
     (layout.colGaps || layout.rowGaps) ? "custom gutters"
       : layout.gutter !== 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
     Math.abs(layout.bleed - BLEED) > EPS ? `bleed ${layout.bleed}in` : null,
+    info.artInset ? `PULLED OFF TRIM ${info.artInset}in` : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
     info.date,
   ].filter(Boolean);
@@ -1207,6 +1284,7 @@ async function imposeSaddle(artBytes, spec, layout) {
     const m = abPages[i + 1] != null ? abPages[i + 1] : spec.addBleed;
     return m && m !== "off" ? m : null;
   };
+  const inset = insetOf(spec);
   let inkDoc = null;
   const arts = [];
   const artCache = new Map(); // pages with identical geometry share one resolution
@@ -1220,21 +1298,25 @@ async function imposeSaddle(artBytes, spec, layout) {
     let art = artCache.get(key);
     if (!art) {
       art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed);
-      if (abm && !art.hasBleed) {
+      applyArtInset(art, inset);
+      if (abm && (!art.hasBleed || inset > 0)) {
         let gaps = null;
         try {
           if (!inkDoc) inkDoc = await pdfjsLib.getDocument({ data: artBytes.slice(0) }).promise;
           if (spec.addBleedSmart !== false) gaps = await detectInkGaps(inkDoc, i, art);
         } catch (e) { warnings.push(`add-bleed ink detection failed on page ${i + 1} (${e.message}) — synthesized from the page edge instead`); }
         if (abm === "auto") {
-          try { art.textNear = await detectTextNearEdges(inkDoc, i, art, layout.bleed); }
+          // the inset widens the band that gets reflected, so text further in
+          // than the bleed alone can still be duplicated — widen the search.
+          try { art.textNear = await detectTextNearEdges(inkDoc, i, art, layout.bleed + inset); }
           catch (e) {
             art.textNear = { left: true, right: true, top: true, bottom: true };
             warnings.push(`text detection failed on page ${i + 1} (${e.message}) — streak bleed used on all edges`);
           }
         }
-        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec));
+        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec), inset);
       }
+      finalizeArtCoverage(art, layout.bleed);
       artCache.set(key, art);
     }
     arts.push(art);
@@ -1283,7 +1365,7 @@ async function imposeSaddle(artBytes, spec, layout) {
         drawFoldMarks(page, layout, cells);
         const placed = drawSlug(page, layout, font, {
           side: label + (sheetsPerSig ? ` · run ${sheetsPerSig} sheets` : ""),
-          orderRef: spec.orderRef, jobName: spec.jobName,
+          orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
           qty, sheets: totalSheets, date: dateStr,
         }, cells);
         if (!placed && k === 0 && !inner) warnings.push("no clear space inside the printable area for the slug line — omitted");
@@ -1430,6 +1512,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     const m = abPages[pno + 1] != null ? abPages[pno + 1] : spec.addBleed;
     return m && m !== "off" ? m : null;
   };
+  const inset = insetOf(spec);
   const inkDocs = {};
   async function inkDocFor(which) { // lazy pdf.js rasterizer per source file
     if (!inkDocs[which]) {
@@ -1522,7 +1605,8 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed);
       const abm = ref.gi != null || ref.doc === backDoc
         ? (spec.addBleed && spec.addBleed !== "off" ? spec.addBleed : null) : abMode(ref.pno);
-      if (abm && !art.hasBleed) {
+      applyArtInset(art, inset);
+      if (abm && (!art.hasBleed || inset > 0)) {
         const which = ref.gi != null ? "G" + ref.gi : ref.doc === backDoc ? "B" : "F";
         let gaps = null;
         if (spec.addBleedSmart !== false) {
@@ -1530,14 +1614,16 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
           catch (e) { warnings.push(`add-bleed ink detection failed on ${keyOf(ref)} (${e.message}) — synthesized from the page edge instead`); }
         }
         if (abm === "auto") {
-          try { art.textNear = await detectTextNearEdges(await inkDocFor(which), ref.pno, art, layout.bleed); }
+          // the inset widens the reflected band — look for text that far in too
+          try { art.textNear = await detectTextNearEdges(await inkDocFor(which), ref.pno, art, layout.bleed + inset); }
           catch (e) { // can't prove the edges are text-free — streak everywhere
             art.textNear = { left: true, right: true, top: true, bottom: true };
             warnings.push(`text detection failed on ${keyOf(ref)} (${e.message}) — streak bleed used on all edges`);
           }
         }
-        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec));
+        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec), inset);
       }
+      finalizeArtCoverage(art, layout.bleed);
       if (ref.gi != null) art.notes.forEach(n => warnings.push(`${gang[ref.gi].name}${ref.pno ? " (back)" : ""}: ${n}`));
       else if (key === keyOf(pieces[0].front)) art.notes.forEach(n => warnings.push("front: " + n));
       else if (sides === 2 && pieces[0].back && key === keyOf(pieces[0].back)) art.notes.forEach(n => warnings.push("back: " + n));
@@ -1595,7 +1681,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       if (spec.marks !== false) {
         drawMarks(page, layout, cellsForMarks);
         const placed = drawSlug(page, layout, font, {
-          side: label, orderRef: spec.orderRef, jobName: spec.jobName,
+          side: label, orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
           qty: spec.qty, sheets, date: dateStr,
         }, cellsForMarks);
         if (!placed && !slugWarned) { slugWarned = true; warnings.push("no clear space inside the printable area for the slug line — omitted"); }
@@ -1931,6 +2017,7 @@ function App() {
   const [bleedIn, setBleedIn] = useState(0.125);           // per-job bleed override
   const [addBleed, setAddBleed] = useState("off");         // synthesize bleed for no-bleed files: off | mirror | scale
   const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
+  const [artInset, setArtInset] = useState(0);            // pull art off the trim (in), fill makes up the difference
   const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
   const [gangFiles, setGangFiles] = useState([]);          // manual gang combo: [{bytes,name,pageCount,slots}]
   const [cleanBusy, setCleanBusy] = useState(false);       // sanitize-only passthrough in flight
@@ -1976,7 +2063,7 @@ function App() {
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
-    bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps,
+    bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps, artInset: +artInset || 0,
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
     saddleColGaps: gapCols, saddleRowGaps: gapRows, saddleFillSheet: gapFill,
     colGaps: gapCols, rowGaps: gapRows, fillSheet: gapFill,
@@ -1984,7 +2071,7 @@ function App() {
     gridDown: !isSaddle && gridOn ? +gridDown || 0 : null,
     gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, addBleedPages,
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, addBleedPages,
        gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet]);
   const debSpec = useDebounced(spec, 450);
 
@@ -2381,7 +2468,41 @@ function App() {
                   (a mirror would visibly reflect people at the edges).
                 </div>
               )}
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 4, cursor: "pointer" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, flexWrap: "wrap" }}>
+                <b style={{ fontWeight: 600 }}>Pull art off trim:</b>
+                <input type="number" step="0.03125" min="0" max="0.5" value={artInset}
+                       style={{ width: 70, outline: +artInset > 0 && addBleed === "scale" ? "2px solid #e91e63" : undefined }}
+                       onChange={e => setArtInset(e.target.value)} />
+                ″ minimum on every edge
+                {+artInset > 0 && (() => {
+                  const W = Math.max(+trimLong || 0, +trimShort || 0), H = Math.min(+trimLong || 0, +trimShort || 0);
+                  if (!(H > 0)) return null;
+                  const f = 1 - 2 * (+artInset) / H;
+                  return (
+                    <span style={{ color: f > 0.5 ? "rgba(255,255,255,.5)" : "#f87171" }}>
+                      — art ×{f.toFixed(4)} ({(100 - f * 100).toFixed(2)}% smaller): pulls in {(W * (1 - f) / 2).toFixed(3)}″ across, {(H * (1 - f) / 2).toFixed(3)}″ down;
+                      fill band becomes {((W * (1 - f) / 2) + (+bleedIn || 0)).toFixed(3)}″
+                    </span>
+                  );
+                })()}
+              </div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 2 }}>
+                For art whose text crowds the cut. Shrinks the art so content backs away from the trim, then the
+                bleed fill above covers the gap it opens — out from the art's new edge to past the cut. Scale is
+                uniform (art is never distorted), so the value is a guaranteed <i>minimum</i>: the long edge pulls
+                in proportionally further. Needs a fill mode — Auto, Mirror or Streak, not Scale.
+              </div>
+              {+artInset > 0 && addBleed === "scale" && (
+                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
+                  “Scale art up to bleed” re-expands the art to the bleed box, undoing the pull-off. Use Auto, Mirror or Streak.
+                </div>
+              )}
+              {+artInset > 0 && addBleed === "off" && (
+                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
+                  With Add bleed off, the gap the pull-off opens would print as paper white inside the trim. Set a fill mode.
+                </div>
+              )}
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, cursor: "pointer" }}>
                 <input type="checkbox" checked={addBleedSmart} onChange={e => setAddBleedSmart(e.target.checked)} />
                 Smart edge detect — if the art stops just short of trim (≤3/16″), pre-scale so the synthesized
                 bleed never amplifies the white sliver; big white margins are respected as design.
