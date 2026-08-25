@@ -115,6 +115,24 @@ download the imposed PDF. Useful for testing and one-off jobs.
   priced 13×19 layout (otherwise it says so and stays on 13×19); duplex
   registration on the wide sheet is verified by the physical simulator on
   both flip edges.
+- **Parent sheet override** (`spec.sheet`): `auto` (the product's own press
+  sheet) / `13x19` / `13x27.5` / `12x18` / `custom` with `sheetLong`,
+  `sheetShort` and `sheetMargin` (imageable margin per edge, default 0.25″ —
+  what all three stock sheets use). Long/short are normalised, so entering them
+  either way round works. Capped at 60″; a margin that leaves no printable area
+  is refused. It changes only the **physical** sheet — the priced imp stays what
+  the calculator quoted, so a count that no longer fits raises the usual
+  refusal (with `allowBestFit` as the escape hatch) rather than silently
+  changing. Marks, slug and the full-sheet-fill bound all follow the new
+  imageable area, and the output page is the custom size. Efficient mode and
+  the manual grid use the forced sheet when one is set; a sticker job on a
+  non-12×18 parent is laid out by the generic grid search and warned about,
+  since the crack-n-peel pitch no longer applies.
+- **Marks are three independent switches**: `spec.marks` (crop/trim marks),
+  `spec.foldMarks` (saddle fold guides) and `spec.slug` (the slug line). Each
+  can be hidden on its own — e.g. marks off but slug kept, for pre-cut stock or
+  a customer-facing proof. `marks` stays the master for older specs: an explicit
+  `marks:false` with nothing else still silences all three, exactly as before.
 - **Pull art off trim** (`spec.artInset`, inches): for the recurring case of
   customer art whose text crowds the cut. Shrinks the placed art about the cell
   centre so every edge backs away from the trim, then the add-bleed synthesizer
