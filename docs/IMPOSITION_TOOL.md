@@ -131,6 +131,16 @@ download the imposed PDF. Useful for testing and one-off jobs.
   opens a `q` inside the hidden block and closes it after the `EMC`), so
   cutting the block out by hand corrupts the graphics state. If a RIP ignores
   optional content entirely, flatten the layers in the source.
+  - The mapping is a **parallel walk of source and copy by resource name**,
+    matching by ref identity — never by layer NAME, which is per-namespace and
+    routinely duplicated (the motivating file has four OCGs called "Layer 1",
+    two on, two off). Covered shapes: BDC marked content via `/Properties`,
+    `/OC` sitting directly on image/form XObjects, **OCMD membership dicts**
+    (AnyOn default — hidden iff every member is off), nested XObjects with
+    their own `/Properties` namespaces, and pages whose `/Resources` are
+    INHERITED from the Pages tree. `/VE` visibility expressions are not
+    evaluated (treated as visible — the safe direction). An entry with no
+    source counterpart stays visible.
   - Implementation note: `asDict()` exists because a pdf-lib `PDFDict` *also*
     has a `.dict` property — the internal `Map`, not a sub-dictionary — so the
     `.lookup` test must come first or form XObjects silently read as empty.
@@ -138,6 +148,10 @@ download the imposed PDF. Useful for testing and one-off jobs.
     and the copied XObjects do not exist in the context until then.
 - **Parent sheet override** (`spec.sheet`): `auto` (the product's own press
   sheet) / `13x19` / `13x27.5` / `12x18` / `custom` with `sheetLong`,
+  — a custom sheet's key carries its dimensions (`custom17x11`) so the slug
+  and `IMPOSED_` filename stay traceable, and an imp:1 booklet on a forced
+  parent sheet passes preflight (the spread-count expectation is pinned, the
+  sheet identity is the operator's call) —
   `sheetShort` and `sheetMargin` (imageable margin per edge, default 0.25″ —
   what all three stock sheets use). Long/short are normalised, so entering them
   either way round works. Capped at 60″; a margin that leaves no printable area
