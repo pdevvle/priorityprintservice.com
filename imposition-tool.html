@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-24 08:11 UTC · IMPOSE-V1.9</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-25 04:38 UTC · IMPOSE-V1.12</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -67,6 +67,36 @@ const SHEETS = {
   "13x27.5": { key:"13x27.5", label:"13×27.5 (oversize)", long:27.5, short:13, usableLong:27,   usableShort:12.5 },
   "12x18":   { key:"12x18",   label:"12×18 crack-n-peel", long:18,   short:12, usableLong:17.5, usableShort:11.5 },
 };
+
+// Every stock sheet images to 0.25″ inside its edge; a custom parent sheet
+// takes the same default unless the operator knows their press does otherwise.
+const SHEET_MARGIN = 0.25;
+const SHEET_MAX = 60;
+function customSheet(a, b, margin) {
+  const L = Math.max(a, b), S = Math.min(a, b);
+  const m = isFinite(margin) ? Math.max(0, margin) : SHEET_MARGIN;
+  const t = n => (Math.round(n * 1000) / 1000);
+  // key carries the dimensions so the slug and IMPOSED_ filename stay
+  // traceable — "custom17x11", not a bare "custom" that loses the size.
+  return { key: `custom${t(L)}x${t(S)}`, label: `${t(L)}×${t(S)} custom`, long: L, short: S,
+           usableLong: L - 2 * m, usableShort: S - 2 * m, custom: true, margin: m };
+}
+// Operator override of the parent sheet. Returns null for "auto" (the product's
+// own press sheet). NOTE this changes only the PHYSICAL sheet — the priced imp
+// is still whatever the calculator quoted, so any resulting difference is
+// surfaced by the usual mismatch machinery rather than silently absorbed.
+function sheetOverrideOf(spec) {
+  const k = spec && spec.sheet;
+  if (!k || k === "auto") return null;
+  if (k !== "custom") return SHEETS[k] || null;
+  const L = +spec.sheetLong, S = +spec.sheetShort;
+  if (!(L >= 3 && S >= 3)) throw new Error("Custom parent sheet needs both dimensions (minimum 3″).");
+  if (L > SHEET_MAX || S > SHEET_MAX) throw new Error(`Custom parent sheet is capped at ${SHEET_MAX}″.`);
+  const m = spec.sheetMargin === "" || spec.sheetMargin == null ? SHEET_MARGIN : +spec.sheetMargin;
+  if (!(m >= 0)) throw new Error("Imageable margin must be 0″ or more.");
+  if (2 * m >= Math.min(L, S)) throw new Error(`A ${m}″ imageable margin leaves no printable area on a ${L}×${S}″ sheet.`);
+  return customSheet(L, S, m);
+}
 
 const CALC_TYPES = [
   { val:"brochure",      label:"Brochure / Flat" },
@@ -412,8 +442,15 @@ function computeLayout(calc, trimA, trimB, opts) {
     throw new Error(`Unknown calc type "${calc}"`);
   }
 
+  // Operator's parent-sheet override replaces the product's press sheet. The
+  // priced imp above is left alone, so a count that no longer fits surfaces
+  // through the normal mismatch path instead of quietly changing.
+  const ovSheet = (opts && opts.sheetOverride) || null;
+  if (ovSheet) sheet = ovSheet;
+
   if (manual) {
-    const cands = opts && opts.manualSheet && SHEETS[opts.manualSheet] ? [SHEETS[opts.manualSheet]]
+    const cands = ovSheet ? [ovSheet]
+                : opts && opts.manualSheet && SHEETS[opts.manualSheet] ? [SHEETS[opts.manualSheet]]
                 : calc === "sticker" ? [SHEETS["12x18"]] : [SHEETS["13x19"], SHEETS["13x27.5"]];
     const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
     if (!res.ok) {
@@ -427,7 +464,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     if (!rawCol && !rawRow && grid.g < gutters[0] && gutters.length > 1) warnings.push(grid.g === 0
       ? "Butt-cut layout (no gutter) needed to fit the manual grid — adjacent pieces share cut lines, no inter-piece bleed."
       : `Gutter squeezed to ${grid.g}″ to fit the manual grid.`);
-  } else if (calc === "sticker") {
+  } else if (calc === "sticker" && !ovSheet) {
     if (opts && isFinite(opts.gutter) && opts.gutter !== null && Math.abs(+opts.gutter - STICKER.pitch) > EPS) {
       warnings.push(`Sticker pitch is fixed at ${STICKER.pitch}″ by the 12×18 crack-n-peel spec — gutter override ignored.`);
     }
@@ -440,17 +477,21 @@ function computeLayout(calc, trimA, trimB, opts) {
     if (gg.a * gg.d < 1) throw new Error("Forced orientation does not fit the sticker sheet.");
     grid = { a: gg.a, d: gg.d, rotated, g: STICKER.pitch };
   } else {
-    if (opts && opts.efficient && sheet.key === "13x19" && priced >= 2) {
-      // Efficient mode: same piece laid out on the 13×27.5 sheet, the
-      // multiple expanding to whatever physically fits the 27″ usable axis.
-      // Pricing basis stays the 13×19 imp — this is a press-pass saver.
-      sheet = SHEETS["13x27.5"];
+    if (calc === "sticker" && ovSheet) {
+      warnings.push(`Parent sheet overridden to ${sheet.label} — the 12×18 crack-n-peel ${STICKER.pitch}″ pitch no longer applies; confirm the liner/die matches.`);
+    }
+    // Efficient mode: re-lay the piece on the oversize sheet (or on whatever
+    // parent the operator forced) and let the multiple expand to fill it.
+    // The pricing basis stays the product's own imp — this saves press passes.
+    const effSheet = ovSheet || SHEETS["13x27.5"];
+    if (opts && opts.efficient && priced >= 2 && (ovSheet || sheet.key === "13x19")) {
+      sheet = effSheet;
       grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot);
-      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on 13×27.5 with the selected gutter/orientation.`);
+      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on ${sheet.label} with the selected gutter/orientation.`);
       efficient = true;
-      warnings.push(`Efficient mode: ${grid.a * grid.d}-up on 13×27.5 (priced ${priced}-up per 13×19).`);
+      warnings.push(`Efficient mode: ${grid.a * grid.d}-up on ${sheet.label} (priced ${priced}-up).`);
     } else {
-      if (opts && opts.efficient) warnings.push("Efficient 13×27.5 mode applies to sizes imaging ≥2-up on 13×19 — ignored for this size.");
+      if (opts && opts.efficient) warnings.push(`Efficient mode applies to sizes imaging ≥2-up — ignored for this size.`);
       grid = bestGridForCount(Math.round(priced), pieceLong, pieceShort, sheet, gutters, allowedRot);
       if (!grid) {
         // Pricing promised more than physically fits — surface loudly, never
@@ -495,7 +536,7 @@ function computeLayout(calc, trimA, trimB, opts) {
   const layout = {
     sheet, calc, pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    colGaps, rowGaps, fillSheet,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet,
     imp: grid.a * grid.d, pricedImp: priced, mismatch, efficient, manualGrid, warnings,
     cellW, cellH,
   };
@@ -528,6 +569,9 @@ function computeSaddleLayout(pw, ph, opts) {
     target = 1;
     warnings.push("Open spread requires the 13×27.5 oversize sheet (1 spread per side).");
   }
+  // Parent-sheet override: physical sheet only, priced imp untouched.
+  const ovSheet = (opts && opts.sheetOverride) || null;
+  if (ovSheet) sheet = ovSheet;
   // Saddle spreads BUTT by default: signatures share one cut line and the
   // interior bleed is cropped at it (cell clips stop at the shared trim), so
   // bleed never manufactures a gutter the operator didn't ask for. The
@@ -535,13 +579,14 @@ function computeSaddleLayout(pw, ph, opts) {
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : [0];
   let grid = null, colGaps = null, rowGaps = null, fillSheet = false;
 
-  // Efficient mode (explicit oversize 13×27.5).
+  // Efficient mode — the oversize sheet, or whatever parent was forced.
   if (!grid && opts && opts.efficient) {
-    const effGrid = bestPhysicalGrid(spL, spS, SHEETS["13x27.5"], gutters);
+    const effSheet = ovSheet || SHEETS["13x27.5"];
+    const effGrid = bestPhysicalGrid(spL, spS, effSheet, gutters);
     if (effGrid && effGrid.a * effGrid.d > target) {
-      sheet = SHEETS["13x27.5"]; grid = effGrid; efficient = true;
+      sheet = effSheet; grid = effGrid; efficient = true;
       const c = effGrid.a * effGrid.d;
-      warnings.push(`Efficient mode: ${c} signature cop${c === 1 ? "y" : "ies"}/side on 13×27.5 (priced ${target} per 13×19-side).`);
+      warnings.push(`Efficient mode: ${c} signature cop${c === 1 ? "y" : "ies"}/side on ${effSheet.label} (priced ${target} per 13×19-side).`);
     } else {
       warnings.push("Efficient 13×27.5 mode fits no additional signature copies for this booklet size — ignored.");
     }
@@ -589,7 +634,7 @@ function computeSaddleLayout(pw, ph, opts) {
   const layout = {
     sheet, calc: "saddle", pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    colGaps, rowGaps, fillSheet,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet,
     imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
     pricedImp: imp,                 // pages per side the calculator priced
     mismatch, efficient, warnings,
@@ -718,6 +763,14 @@ async function sanitizePdf(bytes) {
   stripActiveContent(src);
   const out = await PL.PDFDocument.create();
   const embeds = await out.embedPdf(src, Array.from({ length: n }, (_, i) => i));
+  // Carry the source's layer visibility onto the copy (see srcHiddenOCGRefs).
+  // embedPdf is lazy — the copied XObjects only exist after flush(), so the
+  // per-page hidden names are noted now and resolved against the copy later.
+  const ocSrc = srcHiddenOCGRefs(src);
+  const ocAcc = { all: new Map(), off: new Map() };
+  const ocPending = ocSrc.any
+    ? embeds.map((e, i) => ({ ref: e.ref, srcRes: pageResources(src.getPage(i).node), hidden: ocSrc.hidden }))
+    : [];
   for (let i = 0; i < n; i++) {
     const sp = src.getPage(i);
     const mb = sp.getMediaBox();
@@ -735,6 +788,11 @@ async function sanitizePdf(bytes) {
   out.setTitle("CLEAN sanitized copy");
   out.setProducer("PPS Auto-Imposition Tool");
   out.setCreator("PPS Auto-Imposition Tool");
+  if (ocPending.length) {
+    await out.flush();
+    collectPendingOC(out, ocPending, ocAcc);
+    writeOCProperties(out, ocAcc);
+  }
   return { bytes: await out.save({ useObjectStreams: false }), pages: n, threats };
 }
 
@@ -989,6 +1047,140 @@ function applySynthBleed(art, mode, bleed, gaps, streakEps, inset) {
     : `no bleed in source — ${art.synthB}″ mirrored-edge bleed synthesized`)
     + (short ? ` · art stopped ${short.toFixed(3)}″ shy of trim — pre-scaled ×${f.toFixed(4)} so ink reaches the cut` : ""));
   return art;
+}
+
+// ── Optional content (PDF layers) ───────────────────────────────────────────
+// pdf-lib copies a page's marked content AND its OCG objects, but NOT the
+// document catalog's /OCProperties — the dictionary that records which layers
+// are switched OFF. Drop it and every layer defaults to visible, so a
+// customer's HIDDEN layer prints. Caught on a real job (Nursing Form,
+// 2026-08-25): an Illustrator "Layer 1" was off in the source and ghosted
+// behind the live artwork on all four cells of the imposed sheet.
+//
+// The fix is to carry that configuration onto the output rather than to cut the
+// content out: marked-content nesting and q/Q nesting are independently legal
+// in PDF (this very file opens a `q` inside the hidden block and closes it
+// after the EMC), so stripping the block by hand corrupts the graphics state.
+// Resolve an object to something with .lookup(): a PDFDict is already one, a
+// PDFStream keeps its dictionary at .dict. NOTE a PDFDict also has a `.dict`
+// property — it is the internal Map, not a sub-dictionary — so the .lookup
+// test has to come first or form XObjects silently read as empty.
+function asDict(o) {
+  if (o && typeof o.lookup === "function") return o;
+  if (o && o.dict && typeof o.dict.lookup === "function") return o.dict;
+  return null;
+}
+function srcHiddenOCGRefs(srcDoc) {
+  const hidden = new Set();
+  let any = false;
+  try {
+    const ocp = asDict(srcDoc.catalog.lookup(PL.PDFName.of("OCProperties")));
+    if (!ocp) return { hidden, any };
+    any = true;
+    const cfg = asDict(ocp.lookup(PL.PDFName.of("D")));
+    if (!cfg) return { hidden, any };
+    const asRefs = v => (v && typeof v.asArray === "function" ? v.asArray() : []);
+    for (const r of asRefs(cfg.lookup(PL.PDFName.of("OFF")))) hidden.add(String(r));
+    // /BaseState /OFF inverts the sense: everything is off but the /ON list.
+    const base = cfg.lookup(PL.PDFName.of("BaseState"));
+    if (base && String(base) === "/OFF") {
+      const on = new Set(asRefs(cfg.lookup(PL.PDFName.of("ON"))).map(String));
+      for (const r of asRefs(ocp.lookup(PL.PDFName.of("OCGs")))) if (!on.has(String(r))) hidden.add(String(r));
+    }
+  } catch (e) { /* no optional content, or an unreadable config */ }
+  return { hidden, any };
+}
+// A page's Resources, honouring INHERITANCE — /Resources may live on an
+// ancestor Pages node rather than the page itself (legal and common), and a
+// raw lookup on the leaf would miss it, silently disabling the whole mapping.
+function pageResources(node) {
+  try { if (typeof node.Resources === "function") { const r = asDict(node.Resources()); if (r) return r; } } catch (e) {}
+  try { if (typeof node.getInheritableAttribute === "function") { const r = asDict(node.getInheritableAttribute(PL.PDFName.of("Resources"))); if (r) return r; } } catch (e) {}
+  try { return asDict(node.lookup(PL.PDFName.of("Resources"))); } catch (e) { return null; }
+}
+// The OCG refs an /OC or /Properties entry stands for. A direct OCG entry is
+// its own member; an OCMD (membership dict) carries its members in /OCGs — a
+// single ref or an array of refs. Raw refs are collected, never resolved, so
+// identity comparison against the catalog's OFF list works. Entries that are
+// not refs (inline dicts, /VE-only OCMDs) yield [] = treated as visible.
+function ocMembers(dict, key) {
+  const raw = dict.get(key);
+  if (!raw) return null;
+  const isRef = r => r && r.objectNumber !== undefined;
+  const res = asDict(dict.lookup(key));
+  const inner = res && res.get ? res.get(PL.PDFName.of("OCGs")) : null;
+  if (!inner) return isRef(raw) ? [raw] : [];
+  const resolved = res.lookup(PL.PDFName.of("OCGs"));
+  if (resolved && typeof resolved.asArray === "function") return resolved.asArray().filter(isRef);
+  return isRef(inner) ? [inner] : [];
+}
+// Walk source and copy IN PARALLEL by resource name, mapping the source's
+// hidden state (a set of raw OCG refs) onto the copied objects. Matching by
+// ref identity within each resource dict — never by layer NAME — because
+// names are per-namespace and routinely duplicated (the file that motivated
+// all this has four OCGs called "Layer 1", two on and two off). Covers BDC
+// marked content (/Properties), /OC sitting directly on image/form XObjects,
+// OCMD membership dicts (AnyOn default: hidden iff every member is off), and
+// nested XObjects with their own /Properties namespaces. A copy entry with no
+// source counterpart stays visible — the safe default.
+function ocWalk(srcRes, outRes, hiddenRefs, acc, depth) {
+  if ((depth || 0) > 6) return;
+  const S = asDict(srcRes), O = asDict(outRes);
+  if (!O) return;
+  const N = n => PL.PDFName.of(n);
+  const hiddenBy = m => !!m && m.length > 0 && m.every(r => hiddenRefs.has(String(r)));
+  try {
+    const sp = S ? asDict(S.lookup(N("Properties"))) : null;
+    const op = asDict(O.lookup(N("Properties")));
+    if (op && op.keys) for (const k of op.keys()) {
+      const outM = ocMembers(op, k) || [];
+      const hid = sp ? hiddenBy(ocMembers(sp, k)) : false;
+      for (const r of outM) { acc.all.set(String(r), r); if (hid) acc.off.set(String(r), r); }
+    }
+    const sx = S ? asDict(S.lookup(N("XObject"))) : null;
+    const ox = asDict(O.lookup(N("XObject")));
+    if (ox && ox.keys) for (const k of ox.keys()) {
+      const oChild = asDict(ox.lookup(k));
+      if (!oChild) continue;
+      const sChild = sx ? asDict(sx.lookup(k)) : null;
+      const outOC = ocMembers(oChild, N("OC")) || [];
+      const hid = sChild ? hiddenBy(ocMembers(sChild, N("OC"))) : false;
+      for (const r of outOC) { acc.all.set(String(r), r); if (hid) acc.off.set(String(r), r); }
+      ocWalk(sChild ? sChild.lookup(N("Resources")) : null, oChild.lookup(N("Resources")), hiddenRefs, acc, (depth || 0) + 1);
+    }
+  } catch (e) {}
+}
+// Resolve one pending embed (recorded before flush; the copied XObject only
+// exists in the context afterwards) and feed it through the parallel walk.
+function collectPendingOC(outDoc, pending, acc) {
+  for (const e of pending) {
+    try {
+      const xo = asDict(outDoc.context.lookup(e.ref));
+      if (xo) ocWalk(e.srcRes, xo.lookup(PL.PDFName.of("Resources")), e.hidden, acc, 0);
+    } catch (err) {}
+  }
+}
+// Write the accumulated configuration onto the output catalog. Hidden groups
+// also get /Usage /Print /PrintState /OFF so a RIP that reads usage rather than
+// the default config still leaves them out.
+function writeOCProperties(outDoc, acc) {
+  if (!acc.all.size) return 0;
+  const ctx = outDoc.context;
+  const all = [...acc.all.values()];
+  const off = [...acc.off.values()];
+  const on = all.filter(r => !acc.off.has(String(r)));
+  for (const r of off) {
+    try {
+      const g = ctx.lookup(r);
+      if (g && g.set) g.set(PL.PDFName.of("Usage"), ctx.obj({ Print: { PrintState: PL.PDFName.of("OFF") },
+                                                              View: { ViewState: PL.PDFName.of("OFF") } }));
+    } catch (e) {}
+  }
+  outDoc.catalog.set(PL.PDFName.of("OCProperties"), ctx.obj({
+    OCGs: ctx.obj(all),
+    D: ctx.obj({ BaseState: PL.PDFName.of("ON"), OFF: ctx.obj(off), ON: ctx.obj(on) }),
+  }));
+  return off.length;
 }
 
 // Stamp the art with its trim centered on targetTrim (inches, y-up),
@@ -1260,6 +1452,15 @@ function drawFoldMarks(page, layout, cells) {
   }
 }
 
+// Marks are three independent switches now: crop/trim marks, saddle fold
+// guides, and the slug line. `marks` stays the master for older specs — an
+// explicit false still silences everything unless a switch is turned back on.
+function marksOf(spec) {
+  const base = spec.marks !== false;
+  const on = (v, d) => (v == null ? d : v !== false);
+  return { showMarks: base, showFold: on(spec.foldMarks, base), showSlug: on(spec.slug, base) };
+}
+
 async function imposeSaddle(artBytes, spec, layout) {
   const warnings = [...layout.warnings];
   const bk = layout.booklet;
@@ -1275,6 +1476,11 @@ async function imposeSaddle(artBytes, spec, layout) {
   const out = await PL.PDFDocument.create();
   const font = await out.embedFont(PL.StandardFonts.Helvetica);
   const embeds = await out.embedPdf(src, Array.from({ length: n }, (_, i) => i));
+  const ocSrc = srcHiddenOCGRefs(src);
+  const ocAcc = { all: new Map(), off: new Map() };
+  const ocPending = ocSrc.any
+    ? embeds.map((e, i) => ({ ref: e.ref, srcRes: pageResources(src.getPage(i).node), hidden: ocSrc.hidden }))
+    : [];
 
   // Resolve every page once (trim location, orientation, fit) in SPREAD
   // space — each slot is pw×ph regardless of how the grid rotated the spread.
@@ -1285,6 +1491,7 @@ async function imposeSaddle(artBytes, spec, layout) {
     return m && m !== "off" ? m : null;
   };
   const inset = insetOf(spec);
+  const { showMarks, showFold, showSlug } = marksOf(spec);
   let inkDoc = null;
   const arts = [];
   const artCache = new Map(); // pages with identical geometry share one resolution
@@ -1360,9 +1567,9 @@ async function imposeSaddle(artBytes, spec, layout) {
       }
       const label = `SIG ${k + 1}/${S} ${inner ? "INSIDE" : "OUTSIDE"}${k === 0 ? " (COVER)" : ""}`;
       pageLabels.push(label);
-      if (spec.marks !== false) {
-        drawMarks(page, layout, cells);
-        drawFoldMarks(page, layout, cells);
+      if (showMarks) drawMarks(page, layout, cells);
+      if (showFold) drawFoldMarks(page, layout, cells);
+      if (showSlug) {
         const placed = drawSlug(page, layout, font, {
           side: label + (sheetsPerSig ? ` · run ${sheetsPerSig} sheets` : ""),
           orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
@@ -1375,6 +1582,12 @@ async function imposeSaddle(artBytes, spec, layout) {
     }
   }
 
+  if (ocPending.length) {
+    await out.flush();   // materialise the copied XObjects before reading them
+    collectPendingOC(out, ocPending, ocAcc);
+  }
+  const ocHidden = writeOCProperties(out, ocAcc);
+  if (ocHidden) warnings.push(`source has ${ocHidden} HIDDEN layer(s) — kept hidden on the imposed sheet (they are switched off in the output too, and marked do-not-print). Flatten the layers in the source if your RIP ignores optional content.`);
   out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "booklet"} — ${P}pg saddle, ${bk.spreadsPerSide} spread(s)/side on ${layout.sheet.label}`);
   out.setProducer("PPS Auto-Imposition Tool");
   out.setCreator("PPS Auto-Imposition Tool");
@@ -1394,8 +1607,10 @@ async function imposeSaddle(artBytes, spec, layout) {
   });
   if (!layout.mismatch && !layout.efficient && !layout.fillSheet && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
     issues.push(`placed ${layout.imp} pages/side ≠ priced ${layout.pricedImp}`);
-  // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that down
-  if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && layout.sheet.key === "13x27.5"))
+  // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that
+  // down, unless the operator forced a different parent sheet (their call,
+  // and the spread-count expectation still holds).
+  if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && (layout.sheet.key === "13x27.5" || layout.sheetForced)))
     issues.push(`imp:1 size expected 1 spread/side on 13×27.5, got ${bk.spreadsPerSide} on ${layout.sheet.key}`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
@@ -1428,6 +1643,8 @@ function layoutOpts(spec) {
     manualGrid: isFinite(+spec.gridAcross) && +spec.gridAcross >= 1 && isFinite(+spec.gridDown) && +spec.gridDown >= 1
       ? { across: +spec.gridAcross, down: +spec.gridDown } : null,
     manualSheet: spec.gridSheet || null,
+    // Parent-sheet override (throws on an unusable custom size).
+    sheetOverride: sheetOverrideOf(spec),
     colGaps: Array.isArray(spec.colGaps) ? spec.colGaps : null,
     rowGaps: Array.isArray(spec.rowGaps) ? spec.rowGaps : null,
     fillSheet: spec.fillSheet == null ? null : !!spec.fillSheet,
@@ -1513,6 +1730,13 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     return m && m !== "off" ? m : null;
   };
   const inset = insetOf(spec);
+  const { showMarks, showSlug } = marksOf(spec);
+  // Optional-content accumulator: one config for the whole output, fed by every
+  // source document that gets embedded (gang combos bring several).
+  const ocAcc = { all: new Map(), off: new Map() };
+  const ocPending = [];
+  const ocCache = new Map();
+  const ocSrcFor = doc => { if (!ocCache.has(doc)) ocCache.set(doc, srcHiddenOCGRefs(doc)); return ocCache.get(doc); };
   const inkDocs = {};
   async function inkDocFor(which) { // lazy pdf.js rasterizer per source file
     if (!inkDocs[which]) {
@@ -1629,6 +1853,9 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       else if (sides === 2 && pieces[0].back && key === keyOf(pieces[0].back)) art.notes.forEach(n => warnings.push("back: " + n));
       else if (art.scale !== 1) scaledPages++;
       const [embedded] = await out.embedPdf(ref.doc, [ref.pno]);
+      // Layer visibility, per source document (gang files each bring their own).
+      const ocSrc = ocSrcFor(ref.doc);
+      if (ocSrc.any) ocPending.push({ ref: embedded.ref, srcRes: pageResources(ref.doc.getPage(ref.pno).node), hidden: ocSrc.hidden });
       artCache.set(key, art); embedCache.set(key, embedded);
     }
     return { art: artCache.get(key), embedded: embedCache.get(key) };
@@ -1678,8 +1905,8 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       }
       const label = (sideIdx === 0 ? "FRONT" : "BACK") + (D > 1 ? ` ${s + 1}/${D}` : "") + (mode === "combo" ? " · GANG COMBO" : mode === "gang" ? " · GANG" : mode === "stack" ? " · CUT&STACK" : mode === "each" ? ` · PIECE ${s + 1}` : "");
       pageLabels.push(label);
-      if (spec.marks !== false) {
-        drawMarks(page, layout, cellsForMarks);
+      if (showMarks) drawMarks(page, layout, cellsForMarks);
+      if (showSlug) {
         const placed = drawSlug(page, layout, font, {
           side: label, orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
           qty: spec.qty, sheets, date: dateStr,
@@ -1704,6 +1931,12 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   if (mode === "combo") sideReports.push({ side: "COMBO", pieces: pieces.length, sheetsPerSet: 1, modeName: "gang combo", alloc: gang.map((g, i) => `${g.name} ×${gangAlloc[i]}`).join(" · ") });
   else if (mode !== "repeat") sideReports.push({ side: "COLLATED", pieces: pieces.length, sheetsPerSet: D, modeName: mode });
 
+  if (ocPending.length) {
+    await out.flush();   // materialise the copied XObjects before reading them
+    collectPendingOC(out, ocPending, ocAcc);
+  }
+  const ocHidden = writeOCProperties(out, ocAcc);
+  if (ocHidden) warnings.push(`source has ${ocHidden} HIDDEN layer(s) — kept hidden on the imposed sheet (they are switched off in the output too, and marked do-not-print). Flatten the layers in the source if your RIP ignores optional content.`);
   out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "job"} — ${layout.imp}-up on ${layout.sheet.label}`);
   out.setProducer("PPS Auto-Imposition Tool");
   out.setCreator("PPS Auto-Imposition Tool");
@@ -2009,7 +2242,13 @@ function App() {
   const [jobName, setJobName] = useState("");
   const [orderRef, setOrderRef] = useState("");
   const [itemRef, setItemRef] = useState(""); // order item id — tags the output filename so per-item IMPOSED detection works
-  const [marks, setMarks] = useState(true);
+  const [marks, setMarks] = useState(true);          // crop / trim marks
+  const [foldMarks, setFoldMarks] = useState(true);  // saddle fold guides
+  const [slugOn, setSlugOn] = useState(true);        // slug line
+  const [sheetSel, setSheetSel] = useState("auto");  // parent sheet override
+  const [sheetLong, setSheetLong] = useState(19);
+  const [sheetShort, setSheetShort] = useState(13);
+  const [sheetMargin, setSheetMargin] = useState(0.25);
   const [allowBestFit, setAllowBestFit] = useState(false);
   const [allowHashMismatch, setAllowHashMismatch] = useState(false); // conscious override of the approval-hash refusal; output is flagged UNAPPROVED
   const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
@@ -2074,7 +2313,8 @@ function App() {
     calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0,
     sides: +sides, qty: +qty || 0, sheetFlip,
     backRotate: backRotate === "auto" ? "auto" : +backRotate,
-    jobName, orderRef, itemRef, marks, allowBestFit,
+    jobName, orderRef, itemRef, marks, foldMarks, slug: slugOn, allowBestFit,
+    sheet: sheetSel, sheetLong: +sheetLong || 0, sheetShort: +sheetShort || 0, sheetMargin: +sheetMargin,
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
@@ -2085,7 +2325,8 @@ function App() {
     gridAcross: !isSaddle && gridOn ? +gridAcross || 0 : null,
     gridDown: !isSaddle && gridOn ? +gridDown || 0 : null,
     gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
-  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
+  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
+       sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, addBleedPages,
        gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet]);
   const debSpec = useDebounced(spec, 450);
@@ -2514,6 +2755,45 @@ function App() {
                 <input type="number" step="0.0625" min="0" max="0.5" value={bleedIn} onChange={e => setBleedIn(e.target.value)} />
               </Field>
             </div>
+            <Field label="Parent sheet">
+              <select value={sheetSel} onChange={e => setSheetSel(e.target.value)}>
+                <option value="auto">Auto — the product's own press sheet</option>
+                <option value="13x19">13×19</option>
+                <option value="13x27.5">13×27.5 (oversize)</option>
+                <option value="12x18">12×18 crack-n-peel</option>
+                <option value="custom">Custom size…</option>
+              </select>
+              {sheetSel === "custom" && (
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 6, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet long (in)</div>
+                    <input type="number" step="0.25" min="3" max="60" value={sheetLong} style={{ width: 84 }}
+                           onChange={e => setSheetLong(e.target.value)} />
+                  </div>
+                  <span style={{ paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet short (in)</div>
+                    <input type="number" step="0.25" min="3" max="60" value={sheetShort} style={{ width: 84 }}
+                           onChange={e => setSheetShort(e.target.value)} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Imageable margin (in)</div>
+                    <input type="number" step="0.0625" min="0" value={sheetMargin} style={{ width: 96 }}
+                           onChange={e => setSheetMargin(e.target.value)} />
+                  </div>
+                  <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
+                    prints {(Math.max(+sheetLong || 0, +sheetShort || 0) - 2 * (+sheetMargin || 0)).toFixed(2)}×
+                    {(Math.min(+sheetLong || 0, +sheetShort || 0) - 2 * (+sheetMargin || 0)).toFixed(2)}″
+                  </div>
+                </div>
+              )}
+              {sheetSel !== "auto" && (
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                  Changes the physical sheet only — the priced imp stays what the calculator quoted, so a count that
+                  no longer fits is flagged rather than silently changed. Marks and slug follow the new imageable area.
+                </div>
+              )}
+            </Field>
             <Field label="Add bleed (files with none)">
               <select value={addBleed} onChange={e => setAddBleed(e.target.value)}
                       style={addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w))
@@ -2775,17 +3055,8 @@ function App() {
                             <input type="number" min="1" step="1" value={gridDown} style={{ width: 74, fontSize: 12 }}
                                    onChange={e => setDown(e.target.value)} />
                           </div>
-                          <div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Press sheet</div>
-                            <select value={gridSheet} onChange={e => setGridSheet(e.target.value)} style={{ fontSize: 12, width: 168 }}>
-                              <option value="auto">Auto (fit)</option>
-                              <option value="13x19">13×19</option>
-                              <option value="13x27.5">13×27.5 (oversize)</option>
-                              <option value="12x18">12×18 crack-n-peel</option>
-                            </select>
-                          </div>
                           <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                            = <b>{manualCount}</b>-up{lay.pricedImp ? <span style={{ color: manualCount === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}-up)</span> : null}
+                            on <b>{lay.sheet.label}</b> · = <b>{manualCount}</b>-up{lay.pricedImp ? <span style={{ color: manualCount === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}-up)</span> : null}
                           </div>
                         </div>
                       )}
@@ -2842,10 +3113,25 @@ function App() {
                 </div>
               );
             })()}
-            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
-              Crop marks + slug (inside printable area, as space allows)
-            </label>
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
+                Crop / trim marks
+              </label>
+              {isSaddle && (
+                <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                  <input type="checkbox" checked={foldMarks} onChange={e => setFoldMarks(e.target.checked)} style={{ width: "auto" }} />
+                  Fold guides
+                </label>
+              )}
+              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={slugOn} onChange={e => setSlugOn(e.target.checked)} style={{ width: "auto" }} />
+                Slug line
+              </label>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+                independent — all drawn inside the printable area, as space allows
+              </span>
+            </div>
             <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
               <input type="checkbox" checked={allowBestFit} onChange={e => setAllowBestFit(e.target.checked)} style={{ width: "auto" }} />
               <span>Allow best physical fit if the priced imp can't be placed <span style={{ color: "rgba(255,255,255,.4)" }}>(mismatch is flagged on sheet + slug)</span></span>
