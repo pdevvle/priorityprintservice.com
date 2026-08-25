@@ -115,6 +115,27 @@ download the imposed PDF. Useful for testing and one-off jobs.
   priced 13×19 layout (otherwise it says so and stays on 13×19); duplex
   registration on the wide sheet is verified by the physical simulator on
   both flip edges.
+- **Optional content (PDF layers) is preserved.** `pdf-lib` copies a page's
+  marked content and its OCG objects but NOT the catalog's `/OCProperties` —
+  the dictionary recording which layers are switched OFF. Without it every
+  layer defaults to visible, so a customer's HIDDEN layer prints. This bit a
+  real job (Nursing Form, 2026-08-25): a hidden Illustrator "Layer 1" ghosted
+  behind the live artwork on all four cells — 31% of the ink on the sheet.
+  The tool now rebuilds `/OCProperties` on the output, carrying the source's
+  ON/OFF state onto the copied OCGs, and additionally stamps hidden groups
+  `/Usage /Print /PrintState /OFF` so a RIP reading usage rather than the
+  default config also leaves them out. A warning names how many hidden layers
+  were found. Applies to imposition (flats, saddle, gang) and the CLEAN 1:1
+  copy alike. The visibility is *carried*, not flattened: marked-content
+  nesting and `q`/`Q` nesting are independently legal in PDF (that very file
+  opens a `q` inside the hidden block and closes it after the `EMC`), so
+  cutting the block out by hand corrupts the graphics state. If a RIP ignores
+  optional content entirely, flatten the layers in the source.
+  - Implementation note: `asDict()` exists because a pdf-lib `PDFDict` *also*
+    has a `.dict` property — the internal `Map`, not a sub-dictionary — so the
+    `.lookup` test must come first or form XObjects silently read as empty.
+    Collection happens after `await out.flush()`, because `embedPdf` is lazy
+    and the copied XObjects do not exist in the context until then.
 - **Parent sheet override** (`spec.sheet`): `auto` (the product's own press
   sheet) / `13x19` / `13x27.5` / `12x18` / `custom` with `sheetLong`,
   `sheetShort` and `sheetMargin` (imageable margin per edge, default 0.25″ —
