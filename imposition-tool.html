@@ -2005,6 +2005,20 @@ function detectTrim(doc, bleed) {
 
 function sanitizeName(s) { return String(s || "").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(0, 60); }
 
+// ── Approval binding ─────────────────────────────────────────────
+// Orders placed since the proof-parity work carry _pps_proof_hash: the SHA-256
+// the calculator computed over the print-ready bytes at the moment the
+// customer approved. Before imposing we hash what Drive actually returned and
+// refuse anything else — a mismatch means the file is NOT what the customer
+// approved (replaced, re-exported, wrong pick). Pre-hash orders carry no hash
+// and impose as before. Returns null when the page can't hash (no
+// crypto.subtle — non-HTTPS admin).
+async function sha256Hex(bytes) {
+  if (!(window.crypto && crypto.subtle)) return null;
+  const dig = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(dig)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 function imposedFilename(spec, layout) {
   const bits = ["IMPOSED"];
   // Order-<id>-i<item> lets the admin queue mark IMPOSED per line item, not
@@ -2017,7 +2031,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf };
+window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -2236,6 +2250,7 @@ function App() {
   const [sheetShort, setSheetShort] = useState(13);
   const [sheetMargin, setSheetMargin] = useState(0.25);
   const [allowBestFit, setAllowBestFit] = useState(false);
+  const [allowHashMismatch, setAllowHashMismatch] = useState(false); // conscious override of the approval-hash refusal; output is flagged UNAPPROVED
   const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
   const [gutterMode, setGutterMode] = useState("auto");   // "auto" | fixed inches
   // Shared per-gap gutter editor (saddle signatures + flat/sticker grids).
@@ -2335,6 +2350,9 @@ function App() {
       .then(res => {
         if (seq !== genSeq.current) return;
         res.filename = imposedFilename(debSpec, res.layout);
+        // An overridden approval mismatch travels on the filename so the flag
+        // survives into the Drive folder and the press room.
+        if (art && art.hashState === "override") res.filename = res.filename.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
         setResult(res);
       })
       .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); } })
@@ -2417,9 +2435,24 @@ function App() {
         try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
       }
       catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
+      // Manual drops while a hash-bound order is active go through the same
+      // approval check as queue loads — otherwise dragging in any file was a
+      // silent bypass with a clean output filename.
+      let manualHashState = "unbound";
+      const orderHash = (activeOrder && activeOrder.proof_hash || "").toLowerCase();
+      if (slot !== "back" && /^[0-9a-f]{64}$/.test(orderHash)) {
+        const got = await sha256Hex(bytes);
+        if (!got) manualHashState = "unverifiable";
+        else if (got === orderHash) manualHashState = "verified";
+        else if (allowHashMismatch) manualHashState = "override";
+        else {
+          setError(`APPROVAL MISMATCH: "${f.name}" hashes ${got.slice(0, 12)}… but order #${activeOrder.order_id}'s customer approved ${orderHash.slice(0, 12)}…. This is not the approved file. Tick "impose despite approval mismatch" to stage it anyway (output flagged UNAPPROVED), or clear the active order first.`);
+          continue;
+        }
+      }
       if (slot === "back") setBackArt({ bytes, name: f.name, pageCount, threats });
       else {
-        setArt({ bytes, name: f.name, pageCount, threats });
+        setArt({ bytes, name: f.name, pageCount, threats, hashState: manualHashState });
         setAddBleedPages({}); // per-page overrides belong to the previous file
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
         if (det) {
@@ -2459,14 +2492,28 @@ function App() {
       const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
       if (!r.ok) throw await ajaxFail(r, "artwork download");
       const bytes = new Uint8Array(await r.arrayBuffer());
+      // Approval binding — verify BEFORE anything is staged, so an unapproved
+      // file never even reaches the preview.
+      let hashState = "unbound";
+      const expectedHash = (row.proof_hash || "").toLowerCase();
+      if (/^[0-9a-f]{64}$/.test(expectedHash)) {
+        const got = await sha256Hex(bytes);
+        if (!got) hashState = "unverifiable";
+        else if (got === expectedHash) hashState = "verified";
+        else if (allowHashMismatch) hashState = "override";
+        else throw new Error(`APPROVAL MISMATCH on order #${row.order_id}: "${row.art_file_name}" hashes ${got.slice(0, 12)}… but the customer approved ${expectedHash.slice(0, 12)}…. This is not the file they approved — it was replaced, re-exported, or the wrong file was picked. Check the Drive folder and the order, or tick "impose despite approval mismatch" to proceed with the output flagged UNAPPROVED.`);
+      }
       const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
       const pageCount = doc.getPageCount();
       let threats = [];
       try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
-      setArt({ bytes, name: row.art_file_name, pageCount, threats });
+      setArt({ bytes, name: row.art_file_name, pageCount, threats, hashState });
       setAddBleedPages({});
       setBackArt(null);
       let note = `Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
+      if (hashState === "verified") note = `✓ Approval hash verified — byte-for-byte the file the customer approved. ` + note;
+      else if (hashState === "override") note = `⚠ APPROVAL MISMATCH overridden — the output filename will carry UNAPPROVED. ` + note;
+      else if (hashState === "unverifiable") note = `⚠ This order carries an approval hash but the page cannot verify it (no crypto.subtle — is wp-admin on HTTPS?). ` + note;
       try {
         const det = detectTrim(doc, +bleedIn);
         const specL = Math.max(s.trimLong, s.trimShort), specS = Math.min(s.trimLong, s.trimShort);
@@ -2475,7 +2522,13 @@ function App() {
         }
       } catch (e2) { /* best-effort */ }
       setNotice(note);
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      // A failed load (approval mismatch included) must leave NOTHING staged:
+      // the previous order's art was still loaded here, and one "Send to
+      // Drive" click would have filed it as THIS order's press-ready PDF.
+      setArt(null); setBackArt(null); setActiveOrder(null); setResult(null);
+      setError(e.message);
+    }
     finally { setQueueBusy(null); }
   };
 
@@ -2515,6 +2568,16 @@ function App() {
         const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
         if (!r.ok) throw await ajaxFail(r, "artwork download");
         const bytes = new Uint8Array(await r.arrayBuffer());
+        // Bulk NEVER overrides an approval mismatch — a flagged row fails here
+        // and must be loaded individually to inspect.
+        const expectedHash = (row.proof_hash || "").toLowerCase();
+        if (/^[0-9a-f]{64}$/.test(expectedHash)) {
+          const got = await sha256Hex(bytes);
+          // An unverifiable hash (no crypto.subtle — non-HTTPS admin) fails the
+          // row rather than silently imposing a hash-bound order unchecked.
+          if (!got) throw new Error(`cannot verify the approval hash (crypto.subtle unavailable — is wp-admin on HTTPS?). Load the order individually to see the same warning, or fix admin HTTPS.`);
+          if (got !== expectedHash) throw new Error(`approval mismatch — the file in Drive is not what the customer approved (${got.slice(0, 12)}… vs approved ${expectedHash.slice(0, 12)}…). Load the order individually to inspect.`);
+        }
         const res = await imposePdf(bytes, null, s);
         const filename = imposedFilename(s, res.layout);
         const fd = new FormData();
@@ -3072,6 +3135,10 @@ function App() {
             <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
               <input type="checkbox" checked={allowBestFit} onChange={e => setAllowBestFit(e.target.checked)} style={{ width: "auto" }} />
               <span>Allow best physical fit if the priced imp can't be placed <span style={{ color: "rgba(255,255,255,.4)" }}>(mismatch is flagged on sheet + slug)</span></span>
+            </label>
+            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
+              <input type="checkbox" checked={allowHashMismatch} onChange={e => setAllowHashMismatch(e.target.checked)} style={{ width: "auto" }} />
+              <span>Impose despite approval mismatch <span style={{ color: "rgba(255,255,255,.4)" }}>(file hash ≠ what the customer approved; output flagged UNAPPROVED)</span></span>
             </label>
           </div>
         </div>
