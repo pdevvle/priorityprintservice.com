@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-24 08:11 UTC · IMPOSE-V1.9</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-25 00:33 UTC · IMPOSE-V1.10</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -67,6 +67,34 @@ const SHEETS = {
   "13x27.5": { key:"13x27.5", label:"13×27.5 (oversize)", long:27.5, short:13, usableLong:27,   usableShort:12.5 },
   "12x18":   { key:"12x18",   label:"12×18 crack-n-peel", long:18,   short:12, usableLong:17.5, usableShort:11.5 },
 };
+
+// Every stock sheet images to 0.25″ inside its edge; a custom parent sheet
+// takes the same default unless the operator knows their press does otherwise.
+const SHEET_MARGIN = 0.25;
+const SHEET_MAX = 60;
+function customSheet(a, b, margin) {
+  const L = Math.max(a, b), S = Math.min(a, b);
+  const m = isFinite(margin) ? Math.max(0, margin) : SHEET_MARGIN;
+  const t = n => (Math.round(n * 1000) / 1000);
+  return { key: "custom", label: `${t(L)}×${t(S)} custom`, long: L, short: S,
+           usableLong: L - 2 * m, usableShort: S - 2 * m, custom: true, margin: m };
+}
+// Operator override of the parent sheet. Returns null for "auto" (the product's
+// own press sheet). NOTE this changes only the PHYSICAL sheet — the priced imp
+// is still whatever the calculator quoted, so any resulting difference is
+// surfaced by the usual mismatch machinery rather than silently absorbed.
+function sheetOverrideOf(spec) {
+  const k = spec && spec.sheet;
+  if (!k || k === "auto") return null;
+  if (k !== "custom") return SHEETS[k] || null;
+  const L = +spec.sheetLong, S = +spec.sheetShort;
+  if (!(L >= 3 && S >= 3)) throw new Error("Custom parent sheet needs both dimensions (minimum 3″).");
+  if (L > SHEET_MAX || S > SHEET_MAX) throw new Error(`Custom parent sheet is capped at ${SHEET_MAX}″.`);
+  const m = spec.sheetMargin === "" || spec.sheetMargin == null ? SHEET_MARGIN : +spec.sheetMargin;
+  if (!(m >= 0)) throw new Error("Imageable margin must be 0″ or more.");
+  if (2 * m >= Math.min(L, S)) throw new Error(`A ${m}″ imageable margin leaves no printable area on a ${L}×${S}″ sheet.`);
+  return customSheet(L, S, m);
+}
 
 const CALC_TYPES = [
   { val:"brochure",      label:"Brochure / Flat" },
@@ -412,8 +440,15 @@ function computeLayout(calc, trimA, trimB, opts) {
     throw new Error(`Unknown calc type "${calc}"`);
   }
 
+  // Operator's parent-sheet override replaces the product's press sheet. The
+  // priced imp above is left alone, so a count that no longer fits surfaces
+  // through the normal mismatch path instead of quietly changing.
+  const ovSheet = (opts && opts.sheetOverride) || null;
+  if (ovSheet) sheet = ovSheet;
+
   if (manual) {
-    const cands = opts && opts.manualSheet && SHEETS[opts.manualSheet] ? [SHEETS[opts.manualSheet]]
+    const cands = ovSheet ? [ovSheet]
+                : opts && opts.manualSheet && SHEETS[opts.manualSheet] ? [SHEETS[opts.manualSheet]]
                 : calc === "sticker" ? [SHEETS["12x18"]] : [SHEETS["13x19"], SHEETS["13x27.5"]];
     const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
     if (!res.ok) {
@@ -427,7 +462,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     if (!rawCol && !rawRow && grid.g < gutters[0] && gutters.length > 1) warnings.push(grid.g === 0
       ? "Butt-cut layout (no gutter) needed to fit the manual grid — adjacent pieces share cut lines, no inter-piece bleed."
       : `Gutter squeezed to ${grid.g}″ to fit the manual grid.`);
-  } else if (calc === "sticker") {
+  } else if (calc === "sticker" && !ovSheet) {
     if (opts && isFinite(opts.gutter) && opts.gutter !== null && Math.abs(+opts.gutter - STICKER.pitch) > EPS) {
       warnings.push(`Sticker pitch is fixed at ${STICKER.pitch}″ by the 12×18 crack-n-peel spec — gutter override ignored.`);
     }
@@ -440,17 +475,21 @@ function computeLayout(calc, trimA, trimB, opts) {
     if (gg.a * gg.d < 1) throw new Error("Forced orientation does not fit the sticker sheet.");
     grid = { a: gg.a, d: gg.d, rotated, g: STICKER.pitch };
   } else {
-    if (opts && opts.efficient && sheet.key === "13x19" && priced >= 2) {
-      // Efficient mode: same piece laid out on the 13×27.5 sheet, the
-      // multiple expanding to whatever physically fits the 27″ usable axis.
-      // Pricing basis stays the 13×19 imp — this is a press-pass saver.
-      sheet = SHEETS["13x27.5"];
+    if (calc === "sticker" && ovSheet) {
+      warnings.push(`Parent sheet overridden to ${sheet.label} — the 12×18 crack-n-peel ${STICKER.pitch}″ pitch no longer applies; confirm the liner/die matches.`);
+    }
+    // Efficient mode: re-lay the piece on the oversize sheet (or on whatever
+    // parent the operator forced) and let the multiple expand to fill it.
+    // The pricing basis stays the product's own imp — this saves press passes.
+    const effSheet = ovSheet || SHEETS["13x27.5"];
+    if (opts && opts.efficient && priced >= 2 && (ovSheet || sheet.key === "13x19")) {
+      sheet = effSheet;
       grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot);
-      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on 13×27.5 with the selected gutter/orientation.`);
+      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on ${sheet.label} with the selected gutter/orientation.`);
       efficient = true;
-      warnings.push(`Efficient mode: ${grid.a * grid.d}-up on 13×27.5 (priced ${priced}-up per 13×19).`);
+      warnings.push(`Efficient mode: ${grid.a * grid.d}-up on ${sheet.label} (priced ${priced}-up).`);
     } else {
-      if (opts && opts.efficient) warnings.push("Efficient 13×27.5 mode applies to sizes imaging ≥2-up on 13×19 — ignored for this size.");
+      if (opts && opts.efficient) warnings.push(`Efficient mode applies to sizes imaging ≥2-up — ignored for this size.`);
       grid = bestGridForCount(Math.round(priced), pieceLong, pieceShort, sheet, gutters, allowedRot);
       if (!grid) {
         // Pricing promised more than physically fits — surface loudly, never
@@ -528,6 +567,9 @@ function computeSaddleLayout(pw, ph, opts) {
     target = 1;
     warnings.push("Open spread requires the 13×27.5 oversize sheet (1 spread per side).");
   }
+  // Parent-sheet override: physical sheet only, priced imp untouched.
+  const ovSheet = (opts && opts.sheetOverride) || null;
+  if (ovSheet) sheet = ovSheet;
   // Saddle spreads BUTT by default: signatures share one cut line and the
   // interior bleed is cropped at it (cell clips stop at the shared trim), so
   // bleed never manufactures a gutter the operator didn't ask for. The
@@ -535,13 +577,14 @@ function computeSaddleLayout(pw, ph, opts) {
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : [0];
   let grid = null, colGaps = null, rowGaps = null, fillSheet = false;
 
-  // Efficient mode (explicit oversize 13×27.5).
+  // Efficient mode — the oversize sheet, or whatever parent was forced.
   if (!grid && opts && opts.efficient) {
-    const effGrid = bestPhysicalGrid(spL, spS, SHEETS["13x27.5"], gutters);
+    const effSheet = ovSheet || SHEETS["13x27.5"];
+    const effGrid = bestPhysicalGrid(spL, spS, effSheet, gutters);
     if (effGrid && effGrid.a * effGrid.d > target) {
-      sheet = SHEETS["13x27.5"]; grid = effGrid; efficient = true;
+      sheet = effSheet; grid = effGrid; efficient = true;
       const c = effGrid.a * effGrid.d;
-      warnings.push(`Efficient mode: ${c} signature cop${c === 1 ? "y" : "ies"}/side on 13×27.5 (priced ${target} per 13×19-side).`);
+      warnings.push(`Efficient mode: ${c} signature cop${c === 1 ? "y" : "ies"}/side on ${effSheet.label} (priced ${target} per 13×19-side).`);
     } else {
       warnings.push("Efficient 13×27.5 mode fits no additional signature copies for this booklet size — ignored.");
     }
@@ -1260,6 +1303,15 @@ function drawFoldMarks(page, layout, cells) {
   }
 }
 
+// Marks are three independent switches now: crop/trim marks, saddle fold
+// guides, and the slug line. `marks` stays the master for older specs — an
+// explicit false still silences everything unless a switch is turned back on.
+function marksOf(spec) {
+  const base = spec.marks !== false;
+  const on = (v, d) => (v == null ? d : v !== false);
+  return { showMarks: base, showFold: on(spec.foldMarks, base), showSlug: on(spec.slug, base) };
+}
+
 async function imposeSaddle(artBytes, spec, layout) {
   const warnings = [...layout.warnings];
   const bk = layout.booklet;
@@ -1285,6 +1337,7 @@ async function imposeSaddle(artBytes, spec, layout) {
     return m && m !== "off" ? m : null;
   };
   const inset = insetOf(spec);
+  const { showMarks, showFold, showSlug } = marksOf(spec);
   let inkDoc = null;
   const arts = [];
   const artCache = new Map(); // pages with identical geometry share one resolution
@@ -1360,9 +1413,9 @@ async function imposeSaddle(artBytes, spec, layout) {
       }
       const label = `SIG ${k + 1}/${S} ${inner ? "INSIDE" : "OUTSIDE"}${k === 0 ? " (COVER)" : ""}`;
       pageLabels.push(label);
-      if (spec.marks !== false) {
-        drawMarks(page, layout, cells);
-        drawFoldMarks(page, layout, cells);
+      if (showMarks) drawMarks(page, layout, cells);
+      if (showFold) drawFoldMarks(page, layout, cells);
+      if (showSlug) {
         const placed = drawSlug(page, layout, font, {
           side: label + (sheetsPerSig ? ` · run ${sheetsPerSig} sheets` : ""),
           orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
@@ -1428,6 +1481,8 @@ function layoutOpts(spec) {
     manualGrid: isFinite(+spec.gridAcross) && +spec.gridAcross >= 1 && isFinite(+spec.gridDown) && +spec.gridDown >= 1
       ? { across: +spec.gridAcross, down: +spec.gridDown } : null,
     manualSheet: spec.gridSheet || null,
+    // Parent-sheet override (throws on an unusable custom size).
+    sheetOverride: sheetOverrideOf(spec),
     colGaps: Array.isArray(spec.colGaps) ? spec.colGaps : null,
     rowGaps: Array.isArray(spec.rowGaps) ? spec.rowGaps : null,
     fillSheet: spec.fillSheet == null ? null : !!spec.fillSheet,
@@ -1513,6 +1568,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     return m && m !== "off" ? m : null;
   };
   const inset = insetOf(spec);
+  const { showMarks, showSlug } = marksOf(spec);
   const inkDocs = {};
   async function inkDocFor(which) { // lazy pdf.js rasterizer per source file
     if (!inkDocs[which]) {
@@ -1678,8 +1734,8 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       }
       const label = (sideIdx === 0 ? "FRONT" : "BACK") + (D > 1 ? ` ${s + 1}/${D}` : "") + (mode === "combo" ? " · GANG COMBO" : mode === "gang" ? " · GANG" : mode === "stack" ? " · CUT&STACK" : mode === "each" ? ` · PIECE ${s + 1}` : "");
       pageLabels.push(label);
-      if (spec.marks !== false) {
-        drawMarks(page, layout, cellsForMarks);
+      if (showMarks) drawMarks(page, layout, cellsForMarks);
+      if (showSlug) {
         const placed = drawSlug(page, layout, font, {
           side: label, orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
           qty: spec.qty, sheets, date: dateStr,
@@ -1772,20 +1828,6 @@ function detectTrim(doc, bleed) {
 
 function sanitizeName(s) { return String(s || "").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(0, 60); }
 
-// ── Approval binding ─────────────────────────────────────────────
-// Orders placed since the proof-parity work carry _pps_proof_hash: the SHA-256
-// the calculator computed over the print-ready bytes at the moment the
-// customer approved. Before imposing we hash what Drive actually returned and
-// refuse anything else — a mismatch means the file is NOT what the customer
-// approved (replaced, re-exported, wrong pick). Pre-hash orders carry no hash
-// and impose as before. Returns null when the page can't hash (no
-// crypto.subtle — non-HTTPS admin).
-async function sha256Hex(bytes) {
-  if (!(window.crypto && crypto.subtle)) return null;
-  const dig = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(dig)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
 function imposedFilename(spec, layout) {
   const bits = ["IMPOSED"];
   // Order-<id>-i<item> lets the admin queue mark IMPOSED per line item, not
@@ -1798,7 +1840,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex };
+window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -2009,9 +2051,14 @@ function App() {
   const [jobName, setJobName] = useState("");
   const [orderRef, setOrderRef] = useState("");
   const [itemRef, setItemRef] = useState(""); // order item id — tags the output filename so per-item IMPOSED detection works
-  const [marks, setMarks] = useState(true);
+  const [marks, setMarks] = useState(true);          // crop / trim marks
+  const [foldMarks, setFoldMarks] = useState(true);  // saddle fold guides
+  const [slugOn, setSlugOn] = useState(true);        // slug line
+  const [sheetSel, setSheetSel] = useState("auto");  // parent sheet override
+  const [sheetLong, setSheetLong] = useState(19);
+  const [sheetShort, setSheetShort] = useState(13);
+  const [sheetMargin, setSheetMargin] = useState(0.25);
   const [allowBestFit, setAllowBestFit] = useState(false);
-  const [allowHashMismatch, setAllowHashMismatch] = useState(false); // conscious override of the approval-hash refusal; output is flagged UNAPPROVED
   const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
   const [gutterMode, setGutterMode] = useState("auto");   // "auto" | fixed inches
   // Shared per-gap gutter editor (saddle signatures + flat/sticker grids).
@@ -2074,7 +2121,8 @@ function App() {
     calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0,
     sides: +sides, qty: +qty || 0, sheetFlip,
     backRotate: backRotate === "auto" ? "auto" : +backRotate,
-    jobName, orderRef, itemRef, marks, allowBestFit,
+    jobName, orderRef, itemRef, marks, foldMarks, slug: slugOn, allowBestFit,
+    sheet: sheetSel, sheetLong: +sheetLong || 0, sheetShort: +sheetShort || 0, sheetMargin: +sheetMargin,
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
@@ -2085,7 +2133,8 @@ function App() {
     gridAcross: !isSaddle && gridOn ? +gridAcross || 0 : null,
     gridDown: !isSaddle && gridOn ? +gridDown || 0 : null,
     gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
-  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
+  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
+       sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, addBleedPages,
        gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet]);
   const debSpec = useDebounced(spec, 450);
@@ -2109,9 +2158,6 @@ function App() {
       .then(res => {
         if (seq !== genSeq.current) return;
         res.filename = imposedFilename(debSpec, res.layout);
-        // An overridden approval mismatch travels on the filename so the flag
-        // survives into the Drive folder and the press room.
-        if (art && art.hashState === "override") res.filename = res.filename.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
         setResult(res);
       })
       .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); } })
@@ -2194,24 +2240,9 @@ function App() {
         try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
       }
       catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
-      // Manual drops while a hash-bound order is active go through the same
-      // approval check as queue loads — otherwise dragging in any file was a
-      // silent bypass with a clean output filename.
-      let manualHashState = "unbound";
-      const orderHash = (activeOrder && activeOrder.proof_hash || "").toLowerCase();
-      if (slot !== "back" && /^[0-9a-f]{64}$/.test(orderHash)) {
-        const got = await sha256Hex(bytes);
-        if (!got) manualHashState = "unverifiable";
-        else if (got === orderHash) manualHashState = "verified";
-        else if (allowHashMismatch) manualHashState = "override";
-        else {
-          setError(`APPROVAL MISMATCH: "${f.name}" hashes ${got.slice(0, 12)}… but order #${activeOrder.order_id}'s customer approved ${orderHash.slice(0, 12)}…. This is not the approved file. Tick "impose despite approval mismatch" to stage it anyway (output flagged UNAPPROVED), or clear the active order first.`);
-          continue;
-        }
-      }
       if (slot === "back") setBackArt({ bytes, name: f.name, pageCount, threats });
       else {
-        setArt({ bytes, name: f.name, pageCount, threats, hashState: manualHashState });
+        setArt({ bytes, name: f.name, pageCount, threats });
         setAddBleedPages({}); // per-page overrides belong to the previous file
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
         if (det) {
@@ -2251,28 +2282,14 @@ function App() {
       const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
       if (!r.ok) throw await ajaxFail(r, "artwork download");
       const bytes = new Uint8Array(await r.arrayBuffer());
-      // Approval binding — verify BEFORE anything is staged, so an unapproved
-      // file never even reaches the preview.
-      let hashState = "unbound";
-      const expectedHash = (row.proof_hash || "").toLowerCase();
-      if (/^[0-9a-f]{64}$/.test(expectedHash)) {
-        const got = await sha256Hex(bytes);
-        if (!got) hashState = "unverifiable";
-        else if (got === expectedHash) hashState = "verified";
-        else if (allowHashMismatch) hashState = "override";
-        else throw new Error(`APPROVAL MISMATCH on order #${row.order_id}: "${row.art_file_name}" hashes ${got.slice(0, 12)}… but the customer approved ${expectedHash.slice(0, 12)}…. This is not the file they approved — it was replaced, re-exported, or the wrong file was picked. Check the Drive folder and the order, or tick "impose despite approval mismatch" to proceed with the output flagged UNAPPROVED.`);
-      }
       const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
       const pageCount = doc.getPageCount();
       let threats = [];
       try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
-      setArt({ bytes, name: row.art_file_name, pageCount, threats, hashState });
+      setArt({ bytes, name: row.art_file_name, pageCount, threats });
       setAddBleedPages({});
       setBackArt(null);
       let note = `Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
-      if (hashState === "verified") note = `✓ Approval hash verified — byte-for-byte the file the customer approved. ` + note;
-      else if (hashState === "override") note = `⚠ APPROVAL MISMATCH overridden — the output filename will carry UNAPPROVED. ` + note;
-      else if (hashState === "unverifiable") note = `⚠ This order carries an approval hash but the page cannot verify it (no crypto.subtle — is wp-admin on HTTPS?). ` + note;
       try {
         const det = detectTrim(doc, +bleedIn);
         const specL = Math.max(s.trimLong, s.trimShort), specS = Math.min(s.trimLong, s.trimShort);
@@ -2281,13 +2298,7 @@ function App() {
         }
       } catch (e2) { /* best-effort */ }
       setNotice(note);
-    } catch (e) {
-      // A failed load (approval mismatch included) must leave NOTHING staged:
-      // the previous order's art was still loaded here, and one "Send to
-      // Drive" click would have filed it as THIS order's press-ready PDF.
-      setArt(null); setBackArt(null); setActiveOrder(null); setResult(null);
-      setError(e.message);
-    }
+    } catch (e) { setError(e.message); }
     finally { setQueueBusy(null); }
   };
 
@@ -2327,16 +2338,6 @@ function App() {
         const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
         if (!r.ok) throw await ajaxFail(r, "artwork download");
         const bytes = new Uint8Array(await r.arrayBuffer());
-        // Bulk NEVER overrides an approval mismatch — a flagged row fails here
-        // and must be loaded individually to inspect.
-        const expectedHash = (row.proof_hash || "").toLowerCase();
-        if (/^[0-9a-f]{64}$/.test(expectedHash)) {
-          const got = await sha256Hex(bytes);
-          // An unverifiable hash (no crypto.subtle — non-HTTPS admin) fails the
-          // row rather than silently imposing a hash-bound order unchecked.
-          if (!got) throw new Error(`cannot verify the approval hash (crypto.subtle unavailable — is wp-admin on HTTPS?). Load the order individually to see the same warning, or fix admin HTTPS.`);
-          if (got !== expectedHash) throw new Error(`approval mismatch — the file in Drive is not what the customer approved (${got.slice(0, 12)}… vs approved ${expectedHash.slice(0, 12)}…). Load the order individually to inspect.`);
-        }
         const res = await imposePdf(bytes, null, s);
         const filename = imposedFilename(s, res.layout);
         const fd = new FormData();
@@ -2514,6 +2515,45 @@ function App() {
                 <input type="number" step="0.0625" min="0" max="0.5" value={bleedIn} onChange={e => setBleedIn(e.target.value)} />
               </Field>
             </div>
+            <Field label="Parent sheet">
+              <select value={sheetSel} onChange={e => setSheetSel(e.target.value)}>
+                <option value="auto">Auto — the product's own press sheet</option>
+                <option value="13x19">13×19</option>
+                <option value="13x27.5">13×27.5 (oversize)</option>
+                <option value="12x18">12×18 crack-n-peel</option>
+                <option value="custom">Custom size…</option>
+              </select>
+              {sheetSel === "custom" && (
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 6, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet long (in)</div>
+                    <input type="number" step="0.25" min="3" max="60" value={sheetLong} style={{ width: 84 }}
+                           onChange={e => setSheetLong(e.target.value)} />
+                  </div>
+                  <span style={{ paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet short (in)</div>
+                    <input type="number" step="0.25" min="3" max="60" value={sheetShort} style={{ width: 84 }}
+                           onChange={e => setSheetShort(e.target.value)} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Imageable margin (in)</div>
+                    <input type="number" step="0.0625" min="0" value={sheetMargin} style={{ width: 96 }}
+                           onChange={e => setSheetMargin(e.target.value)} />
+                  </div>
+                  <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
+                    prints {(Math.max(+sheetLong || 0, +sheetShort || 0) - 2 * (+sheetMargin || 0)).toFixed(2)}×
+                    {(Math.min(+sheetLong || 0, +sheetShort || 0) - 2 * (+sheetMargin || 0)).toFixed(2)}″
+                  </div>
+                </div>
+              )}
+              {sheetSel !== "auto" && (
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                  Changes the physical sheet only — the priced imp stays what the calculator quoted, so a count that
+                  no longer fits is flagged rather than silently changed. Marks and slug follow the new imageable area.
+                </div>
+              )}
+            </Field>
             <Field label="Add bleed (files with none)">
               <select value={addBleed} onChange={e => setAddBleed(e.target.value)}
                       style={addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w))
@@ -2775,17 +2815,8 @@ function App() {
                             <input type="number" min="1" step="1" value={gridDown} style={{ width: 74, fontSize: 12 }}
                                    onChange={e => setDown(e.target.value)} />
                           </div>
-                          <div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Press sheet</div>
-                            <select value={gridSheet} onChange={e => setGridSheet(e.target.value)} style={{ fontSize: 12, width: 168 }}>
-                              <option value="auto">Auto (fit)</option>
-                              <option value="13x19">13×19</option>
-                              <option value="13x27.5">13×27.5 (oversize)</option>
-                              <option value="12x18">12×18 crack-n-peel</option>
-                            </select>
-                          </div>
                           <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                            = <b>{manualCount}</b>-up{lay.pricedImp ? <span style={{ color: manualCount === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}-up)</span> : null}
+                            on <b>{lay.sheet.label}</b> · = <b>{manualCount}</b>-up{lay.pricedImp ? <span style={{ color: manualCount === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}-up)</span> : null}
                           </div>
                         </div>
                       )}
@@ -2842,17 +2873,28 @@ function App() {
                 </div>
               );
             })()}
-            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
-              Crop marks + slug (inside printable area, as space allows)
-            </label>
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
+                Crop / trim marks
+              </label>
+              {isSaddle && (
+                <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                  <input type="checkbox" checked={foldMarks} onChange={e => setFoldMarks(e.target.checked)} style={{ width: "auto" }} />
+                  Fold guides
+                </label>
+              )}
+              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={slugOn} onChange={e => setSlugOn(e.target.checked)} style={{ width: "auto" }} />
+                Slug line
+              </label>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+                independent — all drawn inside the printable area, as space allows
+              </span>
+            </div>
             <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
               <input type="checkbox" checked={allowBestFit} onChange={e => setAllowBestFit(e.target.checked)} style={{ width: "auto" }} />
               <span>Allow best physical fit if the priced imp can't be placed <span style={{ color: "rgba(255,255,255,.4)" }}>(mismatch is flagged on sheet + slug)</span></span>
-            </label>
-            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
-              <input type="checkbox" checked={allowHashMismatch} onChange={e => setAllowHashMismatch(e.target.checked)} style={{ width: "auto" }} />
-              <span>Impose despite approval mismatch <span style={{ color: "rgba(255,255,255,.4)" }}>(file hash ≠ what the customer approved; output flagged UNAPPROVED)</span></span>
             </label>
           </div>
         </div>
