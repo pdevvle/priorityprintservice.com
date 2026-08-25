@@ -52,6 +52,22 @@ window.ppsAnalyzePdfRisks = async function (doc) {
   var risks = [];
   var add = function (x) { if (risks.indexOf(x) < 0) risks.push(x); };
   try {
+    // Optional content (layers): pdf.js honours the file's saved visibility, so
+    // a switched-off layer is invisible in every proof AND excluded from the
+    // print-ready render -- consistent, but the customer may not know the
+    // content exists at all (a stale Illustrator layer someone toggled off), and
+    // any downstream engine that drops /OCProperties would print it. Surface it
+    // so hiding the layer becomes a decision made while looking at the proof,
+    // not a silent property of the file. Same never-throw posture as the rest.
+    try {
+      var occ = await doc.getOptionalContentConfig();
+      var ogs = occ && occ.getGroups ? occ.getGroups() : null;
+      if (ogs) {
+        var offNames = [];
+        for (var og in ogs) { if (ogs[og] && ogs[og].visible === false) offNames.push(String(ogs[og].name || og)); }
+        if (offNames.length) add("hidden layers (switched off in the file \u2014 they will NOT print: " + offNames.slice(0, 3).join(", ") + (offNames.length > 3 ? ", \u2026" : "") + ")");
+      }
+    } catch (eoc) {}
     var OPS = window.pdfjsLib.OPS;
     var limit = Math.min(doc.numPages, 40);   // enough pages to decide; bounded on purpose
     for (var i = 1; i <= limit; i++) {
