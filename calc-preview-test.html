@@ -53,6 +53,22 @@ window.ppsAnalyzePdfRisks = async function (doc) {
   var risks = [];
   var add = function (x) { if (risks.indexOf(x) < 0) risks.push(x); };
   try {
+    // Optional content (layers): pdf.js honours the file's saved visibility, so
+    // a switched-off layer is invisible in every proof AND excluded from the
+    // print-ready render -- consistent, but the customer may not know the
+    // content exists at all (a stale Illustrator layer someone toggled off), and
+    // any downstream engine that drops /OCProperties would print it. Surface it
+    // so hiding the layer becomes a decision made while looking at the proof,
+    // not a silent property of the file. Same never-throw posture as the rest.
+    try {
+      var occ = await doc.getOptionalContentConfig();
+      var ogs = occ && occ.getGroups ? occ.getGroups() : null;
+      if (ogs) {
+        var offNames = [];
+        for (var og in ogs) { if (ogs[og] && ogs[og].visible === false) offNames.push(String(ogs[og].name || og)); }
+        if (offNames.length) add("hidden layers (switched off in the file \u2014 they will NOT print: " + offNames.slice(0, 3).join(", ") + (offNames.length > 3 ? ", \u2026" : "") + ")");
+      }
+    } catch (eoc) {}
     var OPS = window.pdfjsLib.OPS;
     var limit = Math.min(doc.numPages, 40);   // enough pages to decide; bounded on purpose
     for (var i = 1; i <= limit; i++) {
@@ -2130,7 +2146,20 @@ async function extractPdfPages(file, onProgress) {
     // blank, split spread) is composed from its raster instead.
     result.push({ dataUrl: url, label, srcPdfPage: i });
   }
-  return { pages: result, dims: { wIn: pdfW, hIn: pdfH, wPx: pxW, hPx: pxH, source: "pdf" }, pdfDoc: pdf };
+
+  // Optional content (layers) switched OFF in the file. pdf.js honours the
+  // saved visibility, so proof and print-ready agree — but the customer may
+  // not know the content exists (a stale layer a designer toggled off), and a
+  // downstream engine that drops /OCProperties would print it. Threaded into
+  // preflight so it trips the acknowledgment gate and lands in the manifest.
+  let hiddenLayers = [];
+  try {
+    const occ = await pdf.getOptionalContentConfig();
+    const ogs = occ && occ.getGroups ? occ.getGroups() : null;
+    if (ogs) for (const og in ogs) { if (ogs[og] && ogs[og].visible === false) hiddenLayers.push(String(ogs[og].name || og)); }
+  } catch (e) { hiddenLayers = []; }
+
+  return { pages: result, dims: { wIn: pdfW, hIn: pdfH, wPx: pxW, hPx: pxH, source: "pdf" }, pdfDoc: pdf, hiddenLayers };
 }
 
 // Split a reader's-spread PDF into single pages. Any page wider than ~1.5× the
@@ -2690,6 +2719,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // null = the customer has not chosen yet (we still lay them out the historical way,
   // at the end, so nothing changes underneath them until they decide).
   const [blankPlacement, setBlankPlacement] = useState(null); // null | "covers" | "end"
+  const [ocHidden, setOcHidden] = useState([]); // names of optional-content layers switched OFF in the uploaded PDF
   // Dismiss the view-settings popover on an outside click or Escape, the same way the
   // form's settings gear does. This MUST sit below the useState above: Babel compiles
   // the const to a hoisted var, so declaring the effect first does not throw — the deps
@@ -3633,8 +3663,19 @@ update();
     }
     // If needsRotation is true, it's already covered by the rotation checks above
 
+    // 5. Hidden layers (optional content switched OFF in the file). The proof
+    // and the print-ready render both honour the off state, so what you see
+    // is what prints — but the customer may not know the content exists at
+    // all. A warn makes hiding it an acknowledged decision, recorded in the
+    // manifest, instead of a silent property of the file.
+    if (ocHidden && ocHidden.length) {
+      const names = ocHidden.slice(0, 3).join(", ") + (ocHidden.length > 3 ? ", …" : "");
+      checks.push({ level: "warn", id: "layers", label: "Hidden layers",
+        detail: `File contains ${ocHidden.length} switched-off layer${ocHidden.length > 1 ? "s" : ""} (${names}) — ${ocHidden.length > 1 ? "they" : "it"} will NOT print. Fine if ${ocHidden.length > 1 ? "they're" : "it's"} stale leftovers; if you expected ${ocHidden.length > 1 ? "them" : "it"} to show, fix the file and re-upload.` });
+    }
+
     return { checks, hasBleed, hasMargins: edgeHasMargins, artW: wIn, artH: hIn };
-  }, [effectiveDims, rawPages, dims, pageCount, shouldRotate, needsRotation, rotateSteps, artDims, edgeHasMargins]);
+  }, [effectiveDims, rawPages, dims, pageCount, shouldRotate, needsRotation, rotateSteps, artDims, edgeHasMargins, ocHidden]);
 
   const preflight = useMemo(() => _preflight?.checks || null, [_preflight]);
   // Flagged checks the customer must explicitly acknowledge before approving —
@@ -3904,11 +3945,12 @@ update();
       // proof, per-page transforms, and print-ready all operate on real pages.
       if (isPdf && splitSpreads && extracted.pdfDoc) {
         const split = await splitReaderSpreads(extracted.pdfDoc, dims.w, onProgress);
-        if (split.pages.length) extracted = split;
+        if (split.pages.length) extracted = { ...split, hiddenLayers: extracted.hiddenLayers };
       }
       setRawPages(extracted.pages);
       setArtDims(extracted.dims);
       setUploadPageCount(extracted.pages.length);
+      setOcHidden(extracted.hiddenLayers || []);
       pdfDocRef.current = extracted.pdfDoc || null;
       setComposedProof(null);
       setPreviewMode("closed"); setSpread(0); setRot({ x: -15, y: -25 });
@@ -3969,7 +4011,7 @@ update();
     setRawPages([]); setFileName(""); setUploadPageCount(0);
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
     setRotatedCache({ key: "", pages: [] }); setPageTransforms({}); setTxHistory([]);
-    setEdgeHasMargins(null); setComposedProof(null); setArtApproved(false); setApprovalPkg(null);
+    setEdgeHasMargins(null); setComposedProof(null); setArtApproved(false); setApprovalPkg(null); setOcHidden([]);
     setVpScale(1); setVpX(0); setVpY(0);
     pdfDocRef.current = null;
     rawFileRef.current = null;
