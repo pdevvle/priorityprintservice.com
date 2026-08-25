@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-25 03:43 UTC · IMPOSE-V1.11</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-25 04:38 UTC · IMPOSE-V1.12</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -76,7 +76,9 @@ function customSheet(a, b, margin) {
   const L = Math.max(a, b), S = Math.min(a, b);
   const m = isFinite(margin) ? Math.max(0, margin) : SHEET_MARGIN;
   const t = n => (Math.round(n * 1000) / 1000);
-  return { key: "custom", label: `${t(L)}×${t(S)} custom`, long: L, short: S,
+  // key carries the dimensions so the slug and IMPOSED_ filename stay
+  // traceable — "custom17x11", not a bare "custom" that loses the size.
+  return { key: `custom${t(L)}x${t(S)}`, label: `${t(L)}×${t(S)} custom`, long: L, short: S,
            usableLong: L - 2 * m, usableShort: S - 2 * m, custom: true, margin: m };
 }
 // Operator override of the parent sheet. Returns null for "auto" (the product's
@@ -534,7 +536,7 @@ function computeLayout(calc, trimA, trimB, opts) {
   const layout = {
     sheet, calc, pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    colGaps, rowGaps, fillSheet,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet,
     imp: grid.a * grid.d, pricedImp: priced, mismatch, efficient, manualGrid, warnings,
     cellW, cellH,
   };
@@ -632,7 +634,7 @@ function computeSaddleLayout(pw, ph, opts) {
   const layout = {
     sheet, calc: "saddle", pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    colGaps, rowGaps, fillSheet,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet,
     imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
     pricedImp: imp,                 // pages per side the calculator priced
     mismatch, efficient, warnings,
@@ -767,7 +769,7 @@ async function sanitizePdf(bytes) {
   const ocSrc = srcHiddenOCGRefs(src);
   const ocAcc = { all: new Map(), off: new Map() };
   const ocPending = ocSrc.any
-    ? embeds.map((e, i) => ({ ref: e.ref, names: hiddenPropNames(src.getPage(i).node, ocSrc.hidden) }))
+    ? embeds.map((e, i) => ({ ref: e.ref, srcRes: pageResources(src.getPage(i).node), hidden: ocSrc.hidden }))
     : [];
   for (let i = 0; i < n; i++) {
     const sp = src.getPage(i);
@@ -788,7 +790,7 @@ async function sanitizePdf(bytes) {
   out.setCreator("PPS Auto-Imposition Tool");
   if (ocPending.length) {
     await out.flush();
-    for (const e of ocPending) collectEmbeddedOCGs(out, e.ref, e.names, ocAcc, 0);
+    collectPendingOC(out, ocPending, ocAcc);
     writeOCProperties(out, ocAcc);
   }
   return { bytes: await out.save({ useObjectStreams: false }), pages: n, threats };
@@ -1088,44 +1090,75 @@ function srcHiddenOCGRefs(srcDoc) {
   } catch (e) { /* no optional content, or an unreadable config */ }
   return { hidden, any };
 }
-// Names in a source page's /Resources/Properties that resolve to a hidden OCG.
-// Marked content refers to layers BY NAME within a resource dict, and the names
-// survive copying, so they are what ties the source config to the copy.
-function hiddenPropNames(dict, hiddenRefs) {
-  const names = new Set();
-  try {
-    const nd = asDict(dict);
-    const res = nd ? asDict(nd.lookup(PL.PDFName.of("Resources"))) : null;
-    const props = res ? asDict(res.lookup(PL.PDFName.of("Properties"))) : null;
-    if (props && props.keys) for (const k of props.keys()) {
-      if (hiddenRefs.has(String(props.get(k)))) names.add(String(k));
-    }
-  } catch (e) {}
-  return names;
+// A page's Resources, honouring INHERITANCE — /Resources may live on an
+// ancestor Pages node rather than the page itself (legal and common), and a
+// raw lookup on the leaf would miss it, silently disabling the whole mapping.
+function pageResources(node) {
+  try { if (typeof node.Resources === "function") { const r = asDict(node.Resources()); if (r) return r; } } catch (e) {}
+  try { if (typeof node.getInheritableAttribute === "function") { const r = asDict(node.getInheritableAttribute(PL.PDFName.of("Resources"))); if (r) return r; } } catch (e) {}
+  try { return asDict(node.lookup(PL.PDFName.of("Resources"))); } catch (e) { return null; }
 }
-// Walk a copied XObject and record its OCGs, flagging the ones the source hid.
-function collectEmbeddedOCGs(outDoc, xobjRef, hiddenNames, acc, depth) {
-  if ((depth || 0) > 4) return;
-  let xo;
-  try { xo = outDoc.context.lookup(xobjRef); } catch (e) { return; }
-  const dict = asDict(xo);
-  if (!dict) return;
+// The OCG refs an /OC or /Properties entry stands for. A direct OCG entry is
+// its own member; an OCMD (membership dict) carries its members in /OCGs — a
+// single ref or an array of refs. Raw refs are collected, never resolved, so
+// identity comparison against the catalog's OFF list works. Entries that are
+// not refs (inline dicts, /VE-only OCMDs) yield [] = treated as visible.
+function ocMembers(dict, key) {
+  const raw = dict.get(key);
+  if (!raw) return null;
+  const isRef = r => r && r.objectNumber !== undefined;
+  const res = asDict(dict.lookup(key));
+  const inner = res && res.get ? res.get(PL.PDFName.of("OCGs")) : null;
+  if (!inner) return isRef(raw) ? [raw] : [];
+  const resolved = res.lookup(PL.PDFName.of("OCGs"));
+  if (resolved && typeof resolved.asArray === "function") return resolved.asArray().filter(isRef);
+  return isRef(inner) ? [inner] : [];
+}
+// Walk source and copy IN PARALLEL by resource name, mapping the source's
+// hidden state (a set of raw OCG refs) onto the copied objects. Matching by
+// ref identity within each resource dict — never by layer NAME — because
+// names are per-namespace and routinely duplicated (the file that motivated
+// all this has four OCGs called "Layer 1", two on and two off). Covers BDC
+// marked content (/Properties), /OC sitting directly on image/form XObjects,
+// OCMD membership dicts (AnyOn default: hidden iff every member is off), and
+// nested XObjects with their own /Properties namespaces. A copy entry with no
+// source counterpart stays visible — the safe default.
+function ocWalk(srcRes, outRes, hiddenRefs, acc, depth) {
+  if ((depth || 0) > 6) return;
+  const S = asDict(srcRes), O = asDict(outRes);
+  if (!O) return;
+  const N = n => PL.PDFName.of(n);
+  const hiddenBy = m => !!m && m.length > 0 && m.every(r => hiddenRefs.has(String(r)));
   try {
-    const oc = dict.get(PL.PDFName.of("OC"));         // /OC straight on the XObject
-    if (oc) { acc.all.set(String(oc), oc); if (hiddenNames.has("*OC*")) acc.off.set(String(oc), oc); }
-    const res = asDict(dict.lookup(PL.PDFName.of("Resources")));
-    if (!res) return;
-    const props = asDict(res.lookup(PL.PDFName.of("Properties")));
-    if (props && props.keys) for (const k of props.keys()) {
-      const ref = props.get(k);
-      acc.all.set(String(ref), ref);
-      if (hiddenNames.has(String(k))) acc.off.set(String(ref), ref);
+    const sp = S ? asDict(S.lookup(N("Properties"))) : null;
+    const op = asDict(O.lookup(N("Properties")));
+    if (op && op.keys) for (const k of op.keys()) {
+      const outM = ocMembers(op, k) || [];
+      const hid = sp ? hiddenBy(ocMembers(sp, k)) : false;
+      for (const r of outM) { acc.all.set(String(r), r); if (hid) acc.off.set(String(r), r); }
     }
-    const nested = asDict(res.lookup(PL.PDFName.of("XObject")));
-    if (nested && nested.keys) for (const k of nested.keys()) {
-      collectEmbeddedOCGs(outDoc, nested.get(k), hiddenNames, acc, (depth || 0) + 1);
+    const sx = S ? asDict(S.lookup(N("XObject"))) : null;
+    const ox = asDict(O.lookup(N("XObject")));
+    if (ox && ox.keys) for (const k of ox.keys()) {
+      const oChild = asDict(ox.lookup(k));
+      if (!oChild) continue;
+      const sChild = sx ? asDict(sx.lookup(k)) : null;
+      const outOC = ocMembers(oChild, N("OC")) || [];
+      const hid = sChild ? hiddenBy(ocMembers(sChild, N("OC"))) : false;
+      for (const r of outOC) { acc.all.set(String(r), r); if (hid) acc.off.set(String(r), r); }
+      ocWalk(sChild ? sChild.lookup(N("Resources")) : null, oChild.lookup(N("Resources")), hiddenRefs, acc, (depth || 0) + 1);
     }
   } catch (e) {}
+}
+// Resolve one pending embed (recorded before flush; the copied XObject only
+// exists in the context afterwards) and feed it through the parallel walk.
+function collectPendingOC(outDoc, pending, acc) {
+  for (const e of pending) {
+    try {
+      const xo = asDict(outDoc.context.lookup(e.ref));
+      if (xo) ocWalk(e.srcRes, xo.lookup(PL.PDFName.of("Resources")), e.hidden, acc, 0);
+    } catch (err) {}
+  }
 }
 // Write the accumulated configuration onto the output catalog. Hidden groups
 // also get /Usage /Print /PrintState /OFF so a RIP that reads usage rather than
@@ -1446,7 +1479,7 @@ async function imposeSaddle(artBytes, spec, layout) {
   const ocSrc = srcHiddenOCGRefs(src);
   const ocAcc = { all: new Map(), off: new Map() };
   const ocPending = ocSrc.any
-    ? embeds.map((e, i) => ({ ref: e.ref, names: hiddenPropNames(src.getPage(i).node, ocSrc.hidden) }))
+    ? embeds.map((e, i) => ({ ref: e.ref, srcRes: pageResources(src.getPage(i).node), hidden: ocSrc.hidden }))
     : [];
 
   // Resolve every page once (trim location, orientation, fit) in SPREAD
@@ -1551,7 +1584,7 @@ async function imposeSaddle(artBytes, spec, layout) {
 
   if (ocPending.length) {
     await out.flush();   // materialise the copied XObjects before reading them
-    for (const e of ocPending) collectEmbeddedOCGs(out, e.ref, e.names, ocAcc, 0);
+    collectPendingOC(out, ocPending, ocAcc);
   }
   const ocHidden = writeOCProperties(out, ocAcc);
   if (ocHidden) warnings.push(`source has ${ocHidden} HIDDEN layer(s) — kept hidden on the imposed sheet (they are switched off in the output too, and marked do-not-print). Flatten the layers in the source if your RIP ignores optional content.`);
@@ -1574,8 +1607,10 @@ async function imposeSaddle(artBytes, spec, layout) {
   });
   if (!layout.mismatch && !layout.efficient && !layout.fillSheet && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
     issues.push(`placed ${layout.imp} pages/side ≠ priced ${layout.pricedImp}`);
-  // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that down
-  if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && layout.sheet.key === "13x27.5"))
+  // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that
+  // down, unless the operator forced a different parent sheet (their call,
+  // and the spread-count expectation still holds).
+  if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && (layout.sheet.key === "13x27.5" || layout.sheetForced)))
     issues.push(`imp:1 size expected 1 spread/side on 13×27.5, got ${bk.spreadsPerSide} on ${layout.sheet.key}`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
@@ -1820,7 +1855,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       const [embedded] = await out.embedPdf(ref.doc, [ref.pno]);
       // Layer visibility, per source document (gang files each bring their own).
       const ocSrc = ocSrcFor(ref.doc);
-      if (ocSrc.any) ocPending.push({ ref: embedded.ref, names: hiddenPropNames(ref.doc.getPage(ref.pno).node, ocSrc.hidden) });
+      if (ocSrc.any) ocPending.push({ ref: embedded.ref, srcRes: pageResources(ref.doc.getPage(ref.pno).node), hidden: ocSrc.hidden });
       artCache.set(key, art); embedCache.set(key, embedded);
     }
     return { art: artCache.get(key), embedded: embedCache.get(key) };
@@ -1898,7 +1933,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
 
   if (ocPending.length) {
     await out.flush();   // materialise the copied XObjects before reading them
-    for (const e of ocPending) collectEmbeddedOCGs(out, e.ref, e.names, ocAcc, 0);
+    collectPendingOC(out, ocPending, ocAcc);
   }
   const ocHidden = writeOCProperties(out, ocAcc);
   if (ocHidden) warnings.push(`source has ${ocHidden} HIDDEN layer(s) — kept hidden on the imposed sheet (they are switched off in the output too, and marked do-not-print). Flatten the layers in the source if your RIP ignores optional content.`);
