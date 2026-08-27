@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-25 04:38 UTC · IMPOSE-V1.12</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-27 23:37 UTC · IMPOSE-V1.13</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -579,6 +579,31 @@ function computeSaddleLayout(pw, ph, opts) {
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : [0];
   let grid = null, colGaps = null, rowGaps = null, fillSheet = false;
 
+  // ── Manual signature copies (operator dictates how many go on the sheet) ──
+  // The saddle equivalent of the flats manual grid: instead of taking the
+  // spread count from the priced imp table, the operator says "3 across × 1
+  // down" and gets exactly that many identical signature copies per side.
+  // Fewer press passes for the same book count; pricing parity is NOT assumed,
+  // so the result is flagged against the priced imp exactly like a flat.
+  let manualGrid = false;
+  const mgIn = opts && opts.manualGrid;
+  const manual = mgIn && +mgIn.across >= 1 && +mgIn.down >= 1
+    ? { a: Math.floor(+mgIn.across), d: Math.floor(+mgIn.down) } : null;
+  if (manual) {
+    if (manual.a * manual.d > MANUAL_GRID_MAX)
+      throw new Error(`Manual grid ${manual.a}×${manual.d} = ${manual.a * manual.d} signature copies exceeds the ${MANUAL_GRID_MAX}-cell limit.`);
+    const cands = ovSheet ? [ovSheet] : [SHEETS["13x19"], SHEETS["13x27.5"]];
+    const res = fitManualGrid(manual.a, manual.d, spL, spS, cands, gutters, [false, true],
+                              opts && opts.saddleColGaps, opts && opts.saddleRowGaps, !!(opts && opts.saddleFillSheet));
+    if (!res.ok) {
+      const b = res.best;
+      throw new Error(`Manual ${manual.a}×${manual.d} of a ${spreadW}×${spreadH}″ spread needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} ${(opts && opts.saddleFillSheet) ? "sheet" : "printable area"} is ${b.bw}×${b.bh}″. Reduce copies or gutters${(opts && opts.saddleFillSheet) ? "" : ", or tick “fill full sheet”"}.`);
+    }
+    sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
+    const c = grid.a * grid.d;
+    warnings.push(`Manual signatures: ${grid.a} across × ${grid.d} down = ${c} cop${c === 1 ? "y" : "ies"}/side on ${sheet.label}${grid.rotated ? " (spreads rotated 90°)" : ""}${c === target ? "" : ` — pricing assumed ${target} per 13×19-side, so sheet count and cost per book will differ`}.`);
+  }
+
   // Efficient mode — the oversize sheet, or whatever parent was forced.
   if (!grid && opts && opts.efficient) {
     const effSheet = ovSheet || SHEETS["13x27.5"];
@@ -634,7 +659,7 @@ function computeSaddleLayout(pw, ph, opts) {
   const layout = {
     sheet, calc: "saddle", pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet, manualGrid,
     imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
     pricedImp: imp,                 // pages per side the calculator priced
     mismatch, efficient, warnings,
@@ -1009,12 +1034,15 @@ function applySynthBleed(art, mode, bleed, gaps, streakEps, inset) {
   // the art in drags its bleed in with it, so the coverage falls short.
   if (!mode || mode === "off" || (art.hasBleed && !(inset > 0))) return art;
   art.streakEps = streakEps || STREAK_EPS;
-  // White-by-design edges normally need no synthesis — but an inset opens a
-  // real gap that still has to be filled, so the skip only applies without one.
-  if (!(inset > 0) && gaps && [gaps.left, gaps.right, gaps.top, gaps.bottom].every(g => g > SYNTH_MAXFIX)) {
-    art.notes.push("edges are white by design (no ink near trim) — bleed synthesis skipped");
-    return art;
-  }
+  // Art whose edges are white for more than SYNTH_MAXFIX on ALL four sides is
+  // a design choice (white border, centred form), not art that fell shy of the
+  // cut. That must not drag the shy-art PRE-SCALE in — but it is no reason to
+  // refuse the operator's explicit fill: mirroring a white edge yields white
+  // bleed, which is exactly right. This used to return early and silently
+  // veto the whole setting, which read as "the bleed control does nothing".
+  // fix() below already yields 0 for any gap past SYNTH_MAXFIX, so the
+  // pre-scale is suppressed without skipping the fill.
+  const designMargins = gaps && [gaps.left, gaps.right, gaps.top, gaps.bottom].every(g => g > SYNTH_MAXFIX);
   art.synth = mode;
   art.synthB = isFinite(bleed) ? bleed : BLEED;
   const fix = g => (gaps && g > SYNTH_MINGAP && g <= SYNTH_MAXFIX) ? g : 0;
@@ -1045,7 +1073,8 @@ function applySynthBleed(art, mode, bleed, gaps, streakEps, inset) {
     : mode === "streak" ? `no bleed in source — ${art.synthB}″ streak bleed synthesized (outermost ${art.streakEps}″ stretched outward)`
     : mode === "auto" ? `no bleed in source — ${art.synthB}″ bleed synthesized (mirror${streaked.length ? `; streak on ${streaked.join("/")} — text near trim, a mirror would duplicate it` : ", no text near trim"})`
     : `no bleed in source — ${art.synthB}″ mirrored-edge bleed synthesized`)
-    + (short ? ` · art stopped ${short.toFixed(3)}″ shy of trim — pre-scaled ×${f.toFixed(4)} so ink reaches the cut` : ""));
+    + (short ? ` · art stopped ${short.toFixed(3)}″ shy of trim — pre-scaled ×${f.toFixed(4)} so ink reaches the cut` : "")
+    + (designMargins ? " · edges are white for more than 3/16″ on all four sides, so the fill is white too — that is the file, not the setting" : ""));
   return art;
 }
 
@@ -1605,12 +1634,12 @@ async function imposeSaddle(artBytes, spec, layout) {
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
     if (i === 0) { const th = inspectPdfThreats(check); if (th.length) issues.push(`output carries active content: ${th.join("; ")}`); }
   });
-  if (!layout.mismatch && !layout.efficient && !layout.fillSheet && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
+  if (!layout.mismatch && !layout.efficient && !layout.fillSheet && !layout.manualGrid && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
     issues.push(`placed ${layout.imp} pages/side ≠ priced ${layout.pricedImp}`);
   // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that
   // down, unless the operator forced a different parent sheet (their call,
   // and the spread-count expectation still holds).
-  if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && (layout.sheet.key === "13x27.5" || layout.sheetForced)))
+  if (!layout.mismatch && !layout.manualGrid && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && (layout.sheet.key === "13x27.5" || layout.sheetForced)))
     issues.push(`imp:1 size expected 1 spread/side on 13×27.5, got ${bk.spreadsPerSide} on ${layout.sheet.key}`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
@@ -2307,8 +2336,8 @@ function App() {
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
     saddleColGaps: gapCols, saddleRowGaps: gapRows, saddleFillSheet: gapFill,
     colGaps: gapCols, rowGaps: gapRows, fillSheet: gapFill,
-    gridAcross: !isSaddle && gridOn ? +gridAcross || 0 : null,
-    gridDown: !isSaddle && gridOn ? +gridDown || 0 : null,
+    gridAcross: gridOn ? +gridAcross || 0 : null,
+    gridDown: gridOn ? +gridDown || 0 : null,
     gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
@@ -2967,7 +2996,7 @@ function App() {
                       block {tw.toFixed(2)}×{th.toFixed(2)}″ / sheet {lay.sheet.long}×{lay.sheet.short}″{over ? " — OVERFLOW" : ""}
                     </span>
                   </div>
-                  {!isSaddle && (
+                  {(
                     <div style={{ marginBottom: 8 }}>
                       <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
                         <input type="checkbox" checked={gridOn} style={{ width: "auto" }}
@@ -2977,23 +3006,23 @@ function App() {
                                  setGapCols(null); setGapRows(null);
                                  setGridOn(on);
                                }} />
-                        <span>Set columns × rows manually <span style={{ color: "rgba(255,255,255,.4)" }}>— places exactly this many; the count is flagged against the priced imp</span></span>
+                        <span>{isSaddle ? "Set signature copies manually" : "Set columns × rows manually"} <span style={{ color: "rgba(255,255,255,.4)" }}>— places exactly this many; the count is flagged against the priced imp</span></span>
                       </label>
                       {gridOn && (
                         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
                           <div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Columns (across)</div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>{isSaddle ? "Copies across" : "Columns (across)"}</div>
                             <input type="number" min="1" step="1" value={gridAcross} style={{ width: 74, fontSize: 12 }}
                                    onChange={e => setAcross(e.target.value)} />
                           </div>
                           <span style={{ fontSize: 13, paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
                           <div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Rows (down)</div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>{isSaddle ? "Copies down" : "Rows (down)"}</div>
                             <input type="number" min="1" step="1" value={gridDown} style={{ width: 74, fontSize: 12 }}
                                    onChange={e => setDown(e.target.value)} />
                           </div>
                           <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                            on <b>{lay.sheet.label}</b> · = <b>{manualCount}</b>-up{lay.pricedImp ? <span style={{ color: manualCount === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}-up)</span> : null}
+                            on <b>{lay.sheet.label}</b> · = <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{lay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
                           </div>
                         </div>
                       )}

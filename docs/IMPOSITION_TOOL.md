@@ -194,6 +194,14 @@ download the imposed PDF. Useful for testing and one-off jobs.
     the gap (that band would print paper-white *inside* the trim); or when the
     inset would shrink the art by more than half.
   - Recorded on the slug as `PULLED OFF TRIM <n>in`.
+- **Manual signature copies** (saddle): the same control on the saddle side —
+  the operator sets copies across × down outright instead of taking the spread
+  count from the priced imp table, so a booklet can be ganged 3-up on the
+  oversize sheet for fewer press passes. Every copy on a side is the SAME
+  signature (verified byte-identical cell-to-cell), pagination and the duplex
+  flip are unaffected, and the count is flagged against the priced imp exactly
+  like a flat's manual grid — badge, warning, slug, excluded from the parity
+  preflight. Refuses with a footprint report when the copies cannot fit.
 - **Manual grid** (flats & stickers, Fiery-style): the operator can set the
   **columns × rows outright** instead of taking the count derived from the
   priced imp — a 2×4 coupon can be run 9 across × 3 down, 8×2, 4×5, whatever
@@ -294,8 +302,13 @@ download the imposed PDF. Useful for testing and one-off jobs.
     ×(h+b)/(h−gap)) — without this, mirroring/scaling from the page edge
     would DOUBLE the white sliver at the cut;
   - edges are **white by design** (all margins >3/16″: text pages,
-    bordered layouts) → synthesis is skipped entirely, page passes
-    through untouched (white bleed happens naturally).
+    bordered layouts) → the shy-art **pre-scale is suppressed**, but the
+    fill still runs. It used to skip synthesis entirely, which read to the
+    operator as *"the bleed control does nothing"* on exactly the files
+    where they had reached for it. Mirroring a white edge yields white
+    bleed — correct either way — so there was never cause to veto an
+    explicit setting; the note now says the fill is white because of the
+    file, not the setting.
   Detection failures fall back to synthesizing from the page edge with a
   warning. Verified: shy-art fixtures show ink through the cut with smart
   on and a white sliver with it off; design-margin pages render
