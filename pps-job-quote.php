@@ -420,7 +420,7 @@ function pps_quote_form_view( array $q, $error ) {
     $states   = array( 'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC','PR' );
     $single   = count( $tiers ) === 1;
     ob_start(); ?>
-    <div class="pps-acct"><div style="max-width:640px;margin:0 auto">
+    <div class="pps-acct"><div class="pps-q-wrap" style="max-width:640px;margin:0 auto">
         <p class="lookup-eyebrow">Your quote</p>
 
         <?php // The description IS the product here -- a conversation-minted job has
@@ -503,9 +503,8 @@ function pps_quote_form_view( array $q, $error ) {
                 <div class="field">
                     <label for="q-date">Requested delivery date</label>
                     <input type="date" id="q-date" name="date" min="<?php echo esc_attr( $earliest ); ?>">
-                    <span class="field-hint">This job needs <?php echo (int) $q['min_days']; ?> production
-                        <?php echo 1 === (int) $q['min_days'] ? 'day' : 'days'; ?> plus transit, so the earliest
-                        delivery is <?php echo esc_html( date_i18n( 'l, M j, Y', strtotime( $earliest ) ) ); ?>.
+                    <span class="field-hint">Earliest delivery is
+                        <?php echo esc_html( date_i18n( 'l, M j, Y', strtotime( $earliest ) ) ); ?>.
                         Leave blank for standard turnaround.</span>
                 </div>
             <?php endif; ?>
@@ -545,7 +544,19 @@ function pps_quote_form_view( array $q, $error ) {
       .pps-q-note{margin:0 0 10px;opacity:.85}
       .pps-q-price{font-size:1.6rem;font-weight:700;margin:0 0 2px}
       .pps-q-incl{margin:0 0 10px;opacity:.75;font-size:.92rem}
-      .pps-q-transit{margin:-4px 0 12px}
+      .pps-q-transit{margin:-4px 0 12px;font-size:1rem}
+      /* Scoped to this page: it is read once, by somebody deciding whether to
+         spend money, often on a phone. Comfortable beats compact. */
+      .pps-q-wrap{font-size:1.05rem}
+      .pps-q-wrap .con-h{font-size:1.3rem}
+      .pps-q-wrap .field label,
+      .pps-q-wrap .con-radio{font-size:1.02rem}
+      .pps-q-wrap input,
+      .pps-q-wrap select,
+      .pps-q-wrap textarea{font-size:1.05rem;padding:11px 12px}
+      .pps-q-wrap .field-hint{font-size:.98rem;line-height:1.45}
+      .pps-q-wrap .btn-submit{font-size:1.1rem;padding:13px 22px}
+      .pps-q-wrap .form-foot{font-size:.98rem}
     </style>
     <script>
     (function(){
@@ -569,7 +580,6 @@ function pps_quote_form_view( array $q, $error ) {
             st  = document.getElementById('q-state'),
             out = document.getElementById('q-transit'),
             seen = {}, timer = null;
-        var MIN_DAYS = <?php echo (int) ( $q['min_days'] ?? 0 ); ?>;
         function ask(){
             var z = (zip.value || '').replace(/[^0-9]/g,'').slice(0,5);
             if (z.length !== 5 || seen[z] !== undefined) return;
@@ -582,9 +592,7 @@ function pps_quote_form_view( array $q, $error ) {
                 if (!(d >= 1 && d <= 30)) return;
                 seen[z] = d;
                 out.hidden = false;
-                out.textContent = MIN_DAYS > 0
-                    ? 'About ' + d + ' business ' + (d === 1 ? 'day' : 'days') + ' in transit, after ' + MIN_DAYS + ' production ' + (MIN_DAYS === 1 ? 'day' : 'days') + '.'
-                    : 'About ' + d + ' business ' + (d === 1 ? 'day' : 'days') + ' in transit once it ships.';
+                out.textContent = 'About ' + d + ' business ' + (d === 1 ? 'day' : 'days') + ' in transit once it ships.';
             }).catch(function(){});
         }
         function queue(){ clearTimeout(timer); timer = setTimeout(ask, 600); }
