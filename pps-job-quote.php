@@ -253,25 +253,49 @@ function pps_quote_to_order( array $q, array $p ) {
     if ( is_wp_error( $order ) ) return new WP_Error( 'create', 'Could not start your order. Please contact us.' );
 
     $order->set_created_via( 'pps-job-quote' );
-    $order->set_billing_first_name( sanitize_text_field( $p['first'] ) );
-    $order->set_billing_last_name( sanitize_text_field( $p['last'] ) );
-    $order->set_billing_email( $email );
-    $order->set_billing_phone( isset( $p['phone'] ) ? sanitize_text_field( $p['phone'] ) : '' );
-    $order->set_billing_company( isset( $p['company'] ) ? sanitize_text_field( $p['company'] ) : '' );
-    $order->set_billing_address_1( sanitize_text_field( $p['address_1'] ) );
-    $order->set_billing_address_2( isset( $p['address_2'] ) ? sanitize_text_field( $p['address_2'] ) : '' );
-    $order->set_billing_city( sanitize_text_field( $p['city'] ) );
-    $order->set_billing_state( sanitize_text_field( $p['state'] ) );
-    $order->set_billing_postcode( sanitize_text_field( $p['postcode'] ) );
-    $order->set_billing_country( 'US' );
 
-    // Ship-to defaults to billing, which is also what WooCommerce would do —
-    // but these products are virtual, so nothing else would ever collect it.
-    $same = ! empty( $p['ship_same'] );
-    $g = function( $k ) use ( $p, $same ) {
-        $src = $same ? $k : 's_' . $k;
+    // Which address the primary fields carry depends on the form that posted.
+    //
+    // v2 asks for the DESTINATION first, because that is the answer the job
+    // actually needs — it drives transit, and the customer knows it before
+    // they think about a card. Billing then defaults to it. v1 asked the other
+    // way round. The version travels with the form so a link already open in
+    // somebody's tab keeps being read the way it was rendered; getting this
+    // backwards would silently ship to the cardholder instead of the
+    // recipient, which is the shape of the fault behind order 87032.
+    $v2 = ( '2' === (string) ( $p['pps_form_v'] ?? '' ) );
+
+    $primary = function( $k ) use ( $p ) {
+        return isset( $p[ $k ] ) ? sanitize_text_field( $p[ $k ] ) : '';
+    };
+    // The alternate block: billing overrides in v2, shipping overrides in v1.
+    $alt_prefix = $v2 ? 'b_' : 's_';
+    $alt_same   = $v2 ? ! empty( $p['bill_same'] ) : ! empty( $p['ship_same'] );
+    $alt = function( $k ) use ( $p, $alt_prefix, $alt_same, $primary ) {
+        if ( $alt_same ) return $primary( $k );
+        $src = $alt_prefix . $k;
         return isset( $p[ $src ] ) ? sanitize_text_field( $p[ $src ] ) : '';
     };
+
+    // Contact details are contact, not address — they belong to the person
+    // buying whichever way round the form asked.
+    $order->set_billing_email( $email );
+    $order->set_billing_phone( isset( $p['phone'] ) ? sanitize_text_field( $p['phone'] ) : '' );
+
+    $bill = $v2 ? $alt : $primary;   // v2: billing is the alternate block
+    $ship = $v2 ? $primary : $alt;   // v2: shipping is the primary block
+
+    $order->set_billing_first_name( $bill( 'first' ) );
+    $order->set_billing_last_name( $bill( 'last' ) );
+    $order->set_billing_company( $bill( 'company' ) );
+    $order->set_billing_address_1( $bill( 'address_1' ) );
+    $order->set_billing_address_2( $bill( 'address_2' ) );
+    $order->set_billing_city( $bill( 'city' ) );
+    $order->set_billing_state( $bill( 'state' ) );
+    $order->set_billing_postcode( $bill( 'postcode' ) );
+    $order->set_billing_country( 'US' );
+
+    $g = $ship;
     $order->set_shipping_first_name( $g( 'first' ) );
     $order->set_shipping_last_name( $g( 'last' ) );
     $order->set_shipping_company( $g( 'company' ) );
@@ -394,21 +418,43 @@ function pps_quote_form_view( array $q, $error ) {
     $tiers    = pps_quote_normalise_tiers( $q['tiers'] );
     $earliest = $q['allow_date'] ? pps_quote_earliest_date( $q['min_days'] ) : '';
     $states   = array( 'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC','PR' );
+    $single   = count( $tiers ) === 1;
     ob_start(); ?>
     <div class="pps-acct"><div style="max-width:640px;margin:0 auto">
         <p class="lookup-eyebrow">Your quote</p>
-        <h2 class="lookup-title"><?php echo esc_html( $product ? $product->get_name() : 'Print job' ); ?></h2>
-        <?php if ( $q['specs'] ) : ?><pre class="oc-specs"><?php echo esc_html( $q['specs'] ); ?></pre><?php endif; ?>
 
-        <form method="post" class="form" style="margin-top:16px">
+        <?php // The description IS the product here -- a conversation-minted job has
+              // no catalogue page to explain it, so it carries the whole spec and is
+              // set at reading size rather than as a caption under a heading. ?>
+        <?php if ( $q['specs'] ) : ?>
+            <pre class="oc-specs pps-q-spec"><?php echo esc_html( $q['specs'] ); ?></pre>
+        <?php else : ?>
+            <h2 class="lookup-title"><?php echo esc_html( $product ? $product->get_name() : 'Print job' ); ?></h2>
+        <?php endif; ?>
+        <?php if ( ! empty( $q['note'] ) ) : ?>
+            <p class="pps-q-note"><?php echo esc_html( $q['note'] ); ?></p>
+        <?php endif; ?>
+
+        <?php // A single tier is not a choice, so it is shown as the price of the job
+              // rather than as a quantity field the customer has to acknowledge. ?>
+        <?php if ( $single ) : ?>
+            <p class="pps-q-price"><?php echo wp_kses_post( wc_price( $tiers[0]['price'] ) ); ?></p>
+        <?php endif; ?>
+
+        <form method="post" class="form" id="pps-q-form" style="margin-top:16px">
             <?php wp_nonce_field( 'pps_quote_' . $q['token'], 'pps_quote_nonce' ); ?>
+            <input type="hidden" name="pps_form_v" value="2">
+            <?php // Inside the form, not hoisted out with a form= attribute: the tier
+                  // index must post even if that attribute is ever unsupported, or the
+                  // order silently takes tier 0 by fallback instead of by intent. ?>
+            <?php if ( $single ) : ?><input type="hidden" name="tier" value="0"><?php endif; ?>
             <?php if ( $error ) : ?>
                 <div class="banner banner-error"><div><strong><?php echo esc_html( $error ); ?></strong></div></div>
             <?php endif; ?>
 
-            <div class="field">
-                <label for="q-tier">Quantity <span class="req">*</span></label>
-                <?php if ( count( $tiers ) > 1 ) : ?>
+            <?php if ( ! $single ) : ?>
+                <div class="field">
+                    <label for="q-tier">Quantity <span class="req">*</span></label>
                     <select id="q-tier" name="tier">
                         <?php foreach ( $tiers as $i => $t ) : ?>
                             <option value="<?php echo esc_attr( $i ); ?>">
@@ -416,61 +462,68 @@ function pps_quote_form_view( array $q, $error ) {
                             </option>
                         <?php endforeach; ?>
                     </select>
-                <?php else : ?>
-                    <input type="hidden" name="tier" value="0">
-                    <p style="margin:0"><strong><?php echo esc_html( number_format_i18n( $tiers[0]['qty'] ) ); ?></strong>
-                        — <?php echo wp_kses_post( wc_price( $tiers[0]['price'] ) ); ?></p>
-                <?php endif; ?>
+                </div>
+            <?php endif; ?>
+
+            <?php // Destination first: it is what the job needs, it drives transit, and
+                  // the customer knows it before they think about a card. ?>
+            <h3 class="con-h" style="margin-top:20px">Shipping</h3>
+            <div class="con-row">
+                <div class="field"><label for="q-first">First name <span class="req">*</span></label><input type="text" id="q-first" name="first" required autocomplete="shipping given-name"></div>
+                <div class="field"><label for="q-last">Last name <span class="req">*</span></label><input type="text" name="last" id="q-last" required autocomplete="shipping family-name"></div>
             </div>
+            <div class="field"><label for="q-company">Company</label><input type="text" id="q-company" name="company" autocomplete="shipping organization"></div>
+            <div class="field"><label for="q-a1">Street address <span class="req">*</span></label><input type="text" id="q-a1" name="address_1" required autocomplete="shipping address-line1"></div>
+            <div class="field"><label for="q-a2">Apt, suite, unit</label><input type="text" id="q-a2" name="address_2" autocomplete="shipping address-line2"></div>
+            <div class="con-row">
+                <div class="field"><label for="q-city">City <span class="req">*</span></label><input type="text" id="q-city" name="city" required autocomplete="shipping address-level2"></div>
+                <div class="field"><label for="q-state">State <span class="req">*</span></label>
+                    <select id="q-state" name="state" required autocomplete="shipping address-level1">
+                        <option value="">—</option>
+                        <?php foreach ( $states as $s ) : ?><option value="<?php echo esc_attr( $s ); ?>"><?php echo esc_html( $s ); ?></option><?php endforeach; ?>
+                    </select></div>
+                <div class="field"><label for="q-zip">ZIP <span class="req">*</span></label><input type="text" id="q-zip" name="postcode" required inputmode="numeric" autocomplete="shipping postal-code"></div>
+            </div>
+
+            <?php // Filled in by the same transit endpoint the calculators use, so the
+                  // date quoted here and the date quoted on a product page come from
+                  // one source rather than two that can drift apart. ?>
+            <p class="field-hint pps-q-transit" id="q-transit" hidden></p>
 
             <?php if ( $q['allow_date'] ) : ?>
                 <div class="field">
                     <label for="q-date">Requested delivery date</label>
                     <input type="date" id="q-date" name="date" min="<?php echo esc_attr( $earliest ); ?>">
-                    <span class="field-hint">Earliest we can deliver this job is <?php echo esc_html( date_i18n( 'l, M j, Y', strtotime( $earliest ) ) ); ?>. Leave blank for standard turnaround.</span>
+                    <span class="field-hint">This job needs <?php echo (int) $q['min_days']; ?> production
+                        <?php echo 1 === (int) $q['min_days'] ? 'day' : 'days'; ?> plus transit, so the earliest
+                        delivery is <?php echo esc_html( date_i18n( 'l, M j, Y', strtotime( $earliest ) ) ); ?>.
+                        Leave blank for standard turnaround.</span>
                 </div>
             <?php endif; ?>
 
             <h3 class="con-h" style="margin-top:20px">Billing</h3>
-            <div class="con-row">
-                <div class="field"><label for="q-first">First name <span class="req">*</span></label><input type="text" id="q-first" name="first" required></div>
-                <div class="field"><label for="q-last">Last name <span class="req">*</span></label><input type="text" name="last" id="q-last" required></div>
-            </div>
-            <div class="field"><label for="q-email">Email <span class="req">*</span></label><input type="email" id="q-email" name="email" required>
+            <div class="field"><label for="q-email">Email <span class="req">*</span></label><input type="email" id="q-email" name="email" required autocomplete="email">
                 <span class="field-hint">Your receipt and order history use this address.</span></div>
-            <div class="field"><label for="q-phone">Phone</label><input type="text" id="q-phone" name="phone"></div>
-            <div class="field"><label for="q-company">Company</label><input type="text" id="q-company" name="company"></div>
-            <div class="field"><label for="q-a1">Street address <span class="req">*</span></label><input type="text" id="q-a1" name="address_1" required></div>
-            <div class="field"><label for="q-a2">Apt, suite, unit</label><input type="text" id="q-a2" name="address_2"></div>
-            <div class="con-row">
-                <div class="field"><label for="q-city">City <span class="req">*</span></label><input type="text" id="q-city" name="city" required></div>
-                <div class="field"><label for="q-state">State <span class="req">*</span></label>
-                    <select id="q-state" name="state" required>
-                        <option value="">—</option>
-                        <?php foreach ( $states as $s ) : ?><option value="<?php echo esc_attr( $s ); ?>"><?php echo esc_html( $s ); ?></option><?php endforeach; ?>
-                    </select></div>
-                <div class="field"><label for="q-zip">ZIP <span class="req">*</span></label><input type="text" id="q-zip" name="postcode" required></div>
-            </div>
+            <div class="field"><label for="q-phone">Phone</label><input type="text" id="q-phone" name="phone" autocomplete="tel"></div>
 
             <div class="field">
-                <label class="con-radio"><input type="checkbox" name="ship_same" value="1" checked id="q-same"> Ship to this address</label>
+                <label class="con-radio"><input type="checkbox" name="bill_same" value="1" checked id="q-same"> Billing address same as shipping</label>
             </div>
-            <div id="q-ship" hidden>
-                <h3 class="con-h">Ship to</h3>
+            <div id="q-bill" hidden>
                 <div class="con-row">
-                    <div class="field"><label for="q-sfirst">First name</label><input type="text" id="q-sfirst" name="s_first"></div>
-                    <div class="field"><label for="q-slast">Last name</label><input type="text" name="s_last" id="q-slast"></div>
+                    <div class="field"><label for="q-bfirst">First name</label><input type="text" id="q-bfirst" name="b_first" autocomplete="billing given-name"></div>
+                    <div class="field"><label for="q-blast">Last name</label><input type="text" name="b_last" id="q-blast" autocomplete="billing family-name"></div>
                 </div>
-                <div class="field"><label for="q-scompany">Company</label><input type="text" id="q-scompany" name="s_company"></div>
-                <div class="field"><label for="q-sa1">Street address</label><input type="text" id="q-sa1" name="s_address_1"></div>
-                <div class="field"><label for="q-sa2">Apt, suite, unit</label><input type="text" id="q-sa2" name="s_address_2"></div>
+                <div class="field"><label for="q-bcompany">Company</label><input type="text" id="q-bcompany" name="b_company" autocomplete="billing organization"></div>
+                <div class="field"><label for="q-ba1">Street address</label><input type="text" id="q-ba1" name="b_address_1" autocomplete="billing address-line1"></div>
+                <div class="field"><label for="q-ba2">Apt, suite, unit</label><input type="text" id="q-ba2" name="b_address_2" autocomplete="billing address-line2"></div>
                 <div class="con-row">
-                    <div class="field"><label for="q-scity">City</label><input type="text" id="q-scity" name="s_city"></div>
-                    <div class="field"><label for="q-sstate">State</label>
-                        <select id="q-sstate" name="s_state"><option value="">—</option>
+                    <div class="field"><label for="q-bcity">City</label><input type="text" id="q-bcity" name="b_city" autocomplete="billing address-level2"></div>
+                    <div class="field"><label for="q-bstate">State</label>
+                        <select id="q-bstate" name="b_state" autocomplete="billing address-level1"><option value="">—</option>
                             <?php foreach ( $states as $s ) : ?><option value="<?php echo esc_attr( $s ); ?>"><?php echo esc_html( $s ); ?></option><?php endforeach; ?>
                         </select></div>
-                    <div class="field"><label for="q-szip">ZIP</label><input type="text" id="q-szip" name="s_postcode"></div>
+                    <div class="field"><label for="q-bzip">ZIP</label><input type="text" id="q-bzip" name="b_postcode" inputmode="numeric" autocomplete="billing postal-code"></div>
                 </div>
             </div>
 
@@ -478,18 +531,55 @@ function pps_quote_form_view( array $q, $error ) {
             <p class="form-foot">You'll confirm payment on the next screen.</p>
         </form>
     </div></div>
+    <style>
+      .pps-q-spec{font-size:1.05rem;line-height:1.55;white-space:pre-wrap;word-break:break-word;margin:0 0 10px}
+      .pps-q-note{margin:0 0 10px;opacity:.85}
+      .pps-q-price{font-size:1.6rem;font-weight:700;margin:0 0 4px}
+      .pps-q-transit{margin:-4px 0 12px}
+    </style>
     <script>
     (function(){
-        var same = document.getElementById('q-same'), ship = document.getElementById('q-ship');
+        var same = document.getElementById('q-same'), bill = document.getElementById('q-bill');
         function sync(){
-            ship.hidden = same.checked;
+            bill.hidden = same.checked;
             // Required only while the panel is visible, or a hidden blank field
             // would block submission with an error nobody can see.
-            ship.querySelectorAll('input,select').forEach(function(i){
-                if (i.name === 's_address_1' || i.name === 's_city' || i.name === 's_state' || i.name === 's_postcode') i.required = !same.checked;
+            bill.querySelectorAll('input,select').forEach(function(i){
+                if (i.name === 'b_address_1' || i.name === 'b_city' || i.name === 'b_state' || i.name === 'b_postcode') i.required = !same.checked;
             });
         }
         same.addEventListener('change', sync); sync();
+
+        // Live transit, from the same endpoint the calculators call. Debounced
+        // and asked once per ZIP: the answer is cached server-side for 30 days
+        // because UPS ground transit does not move, and a per-IP limit means a
+        // page left open cannot burn the Shippo quota. Any failure is silent --
+        // an estimate is a courtesy, and a broken one must not block a sale.
+        var zip = document.getElementById('q-zip'),
+            st  = document.getElementById('q-state'),
+            out = document.getElementById('q-transit'),
+            seen = {}, timer = null;
+        var MIN_DAYS = <?php echo (int) ( $q['min_days'] ?? 0 ); ?>;
+        function ask(){
+            var z = (zip.value || '').replace(/[^0-9]/g,'').slice(0,5);
+            if (z.length !== 5 || seen[z] !== undefined) return;
+            seen[z] = 0;
+            fetch('<?php echo esc_js( rest_url( 'pps/v1/shipping/transit-estimate' ) ); ?>', {
+                method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+                body: JSON.stringify({ zip:z, state: st.value || '', country:'US' })
+            }).then(function(r){ return r && r.ok ? r.json() : null; }).then(function(j){
+                var d = j ? Number(j.transit_days) : NaN;
+                if (!(d >= 1 && d <= 30)) return;
+                seen[z] = d;
+                out.hidden = false;
+                out.textContent = MIN_DAYS > 0
+                    ? 'About ' + d + ' business ' + (d === 1 ? 'day' : 'days') + ' in transit, after ' + MIN_DAYS + ' production ' + (MIN_DAYS === 1 ? 'day' : 'days') + '.'
+                    : 'About ' + d + ' business ' + (d === 1 ? 'day' : 'days') + ' in transit once it ships.';
+            }).catch(function(){});
+        }
+        function queue(){ clearTimeout(timer); timer = setTimeout(ask, 600); }
+        zip.addEventListener('input', queue);
+        st.addEventListener('change', queue);
     })();
     </script>
     <?php return ob_get_clean();
