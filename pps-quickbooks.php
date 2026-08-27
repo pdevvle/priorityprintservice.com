@@ -370,6 +370,11 @@ function pps_qbo_invoice_order( $order ) {
         if ( $amount <= 0 ) continue;
         $qty  = max( 1, (int) $item->get_quantity() );
         $desc = $item->get_name();
+        // The customer's own name for the job leads, when they gave one: it is
+        // the phrase they will use on the phone, so it is the one worth having
+        // at the top of the invoice line rather than buried under the spec.
+        $project = $item->get_meta( 'Project' );
+        if ( $project ) $desc = $project . ' — ' . $desc;
         // The Specs meta is the job as the operator described it in the thread;
         // it is what makes the QuickBooks line readable months later.
         $specs = $item->get_meta( 'Specs' );

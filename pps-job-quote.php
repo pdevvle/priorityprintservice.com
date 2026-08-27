@@ -322,6 +322,13 @@ function pps_quote_to_order( array $q, array $p ) {
     if ( $item_id ) {
         $item = $order->get_item( $item_id );
         if ( $item ) {
+            // Non-underscore, so WooCommerce renders it wherever line meta is
+            // shown. Capped because a runaway paste would otherwise widen every
+            // order table it appears in.
+            $project = isset( $p['project'] ) ? sanitize_text_field( $p['project'] ) : '';
+            if ( '' !== $project ) {
+                $item->add_meta_data( 'Project', mb_substr( $project, 0, 120 ), true );
+            }
             if ( $q['specs'] ) $item->add_meta_data( 'Specs', $q['specs'], true );
             if ( $date ) $item->add_meta_data( 'Requested delivery', $date, true );
             $item->save();
@@ -331,6 +338,9 @@ function pps_quote_to_order( array $q, array $p ) {
     // The alternatives travel with the order so a reorder can offer them.
     $order->update_meta_data( '_pps_qty_tiers', $tiers );
     $order->update_meta_data( '_pps_quote_token', $q['token'] );
+    if ( ! empty( $p['project'] ) ) {
+        $order->update_meta_data( '_pps_project_name', mb_substr( sanitize_text_field( $p['project'] ), 0, 120 ) );
+    }
     if ( $date ) $order->update_meta_data( '_pps_requested_date', $date );
     $order->update_meta_data( '_pps_pay_source', $q['pay_source'] ?: 'site' );
     if ( ! empty( $q['pay_link'] ) ) $order->update_meta_data( '_pps_pay_link', $q['pay_link'] );
@@ -400,6 +410,12 @@ function pps_quote_placed_view( $order, $settled ) {
     ob_start(); ?>
     <div class="pps-acct"><div class="lookup-shell">
         <h2 class="lookup-title">Order #<?php echo esc_html( $order->get_order_number() ); ?></h2>
+        <?php // Echo their own name for the job back, so they can see it was
+              // recorded rather than having to trust that it was. ?>
+        <?php $proj = (string) $order->get_meta( '_pps_project_name' ); ?>
+        <?php if ( '' !== $proj ) : ?>
+            <p class="pps-q-note"><strong><?php echo esc_html( $proj ); ?></strong></p>
+        <?php endif; ?>
         <?php if ( $settled ) : ?>
             <div class="banner banner-success"><div><strong>This order is paid.</strong> Thank you — we'll be in touch about artwork and production.</div></div>
         <?php else : ?>
@@ -482,6 +498,21 @@ function pps_quote_form_view( array $q, $error ) {
                     <span class="field-hint">Delivery included — the price shown is the total.</span>
                 </div>
             <?php endif; ?>
+
+            <?php // The customer's own name for the job. Optional, and deliberately
+                  // first: it is about the work, not about paying for it, and it is
+                  // the one thing on this page they know better than we do.
+                  //
+                  // Stored as VISIBLE line-item meta, so it follows the order into
+                  // wp-admin, the confirmation email and the /reorders card without
+                  // anything else having to be taught about it. ?>
+            <div class="field">
+                <label for="q-project">Project name</label>
+                <input type="text" id="q-project" name="project" maxlength="120"
+                       placeholder="e.g. Spring mailer">
+                <span class="field-hint">Optional — what you call this job. It appears on your
+                    receipt and order history, which makes it easier to find later.</span>
+            </div>
 
             <?php // Destination first: it is what the job needs, it drives transit, and
                   // the customer knows it before they think about a card. ?>
