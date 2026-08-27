@@ -142,6 +142,12 @@ if ( file_exists( PPS_CALC_DIR . 'pps-job-quote.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-job-quote.php';
 }
 
+// Minting a quote link from a conversation (Missive) rather than a form.
+// Loaded after the quote module, whose helpers it calls.
+if ( file_exists( PPS_CALC_DIR . 'pps-pay-link.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-pay-link.php';
+}
+
 // Shared quote link → defaults blob (product + preset admin).
 if ( file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-defaults-url.php';
