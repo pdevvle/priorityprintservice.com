@@ -53,6 +53,22 @@ window.ppsAnalyzePdfRisks = async function (doc) {
   var risks = [];
   var add = function (x) { if (risks.indexOf(x) < 0) risks.push(x); };
   try {
+    // Optional content (layers): pdf.js honours the file's saved visibility, so
+    // a switched-off layer is invisible in every proof AND excluded from the
+    // print-ready render -- consistent, but the customer may not know the
+    // content exists at all (a stale Illustrator layer someone toggled off), and
+    // any downstream engine that drops /OCProperties would print it. Surface it
+    // so hiding the layer becomes a decision made while looking at the proof,
+    // not a silent property of the file. Same never-throw posture as the rest.
+    try {
+      var occ = await doc.getOptionalContentConfig();
+      var ogs = occ && occ.getGroups ? occ.getGroups() : null;
+      if (ogs) {
+        var offNames = [];
+        for (var og in ogs) { if (ogs[og] && ogs[og].visible === false) offNames.push(String(ogs[og].name || og)); }
+        if (offNames.length) add("hidden layers (switched off in the file \u2014 they will NOT print: " + offNames.slice(0, 3).join(", ") + (offNames.length > 3 ? ", \u2026" : "") + ")");
+      }
+    } catch (eoc) {}
     var OPS = window.pdfjsLib.OPS;
     var limit = Math.min(doc.numPages, 40);   // enough pages to decide; bounded on purpose
     for (var i = 1; i <= limit; i++) {
@@ -826,6 +842,88 @@ function pageLabel(idx, total) {
   if (idx === total - 2 && total > 2) return "Inside Back Cover";
   if (idx === total - 1) return "Back Cover";
   return "Page " + (idx + 1);
+}
+
+// ── DRAFT wraparound cover helpers ─────────────────────────────────────────
+// Caliper heuristics ported from calc-perfect-bound.html — label-driven with
+// an explicit paper.caliper override winning when present.
+function getPaperCaliper(paper) {
+  if (!paper || !paper.label) return 0.0046;
+  if (paper.caliper) return paper.caliper;
+  const s = paper.label.toLowerCase();
+  const ptMatch = s.match(/(\d+)\s*pt/);
+  if (ptMatch) return parseInt(ptMatch[1], 10) / 1000;
+  if (/cardstock|cover|c1s|c2s/.test(s)) return 0.0092;
+  return 0.0046;
+}
+// Coupon spine: pageCount includes the four cover faces (see pageLabel); the
+// wrap sheet replaces those. DRAFT ASSUMPTION for the leaf model: 2-sided
+// coupon books put two faces on a leaf (book-like); 1-sided books use one
+// leaf per face. Review before rollout.
+function calcCouponSpineInches({ pageCount, insidePaper, coverPaper, coverMode, sidesPrinted }) {
+  const faces = Math.max(0, (pageCount || 0) - 4);
+  const leaves = sidesPrinted === "single" ? faces : Math.ceil(faces / 2);
+  const cover = coverMode === "same" ? insidePaper : (coverPaper || insidePaper);
+  return leaves * getPaperCaliper(insidePaper) + 2 * getPaperCaliper(cover) + 0.005;
+}
+function fmtSpine(inches) {
+  if (!inches || inches < 0.001) return "0\u2033";
+  return `${inches.toFixed(3)}\u2033`;
+}
+// Standalone wraparound-cover template: one wide flat (back + spine + front),
+// two pages (outside face, then inside/glue face). Deliberately self-contained
+// so the existing per-page generateTemplate stays untouched.
+function generateCouponWrapCoverTemplate(trimW, trimH, sizeLabel, spineInches) {
+  try {
+    if (!window.jspdf) { alert("PDF library not loaded. Please refresh the page."); return; }
+    const { jsPDF } = window.jspdf;
+    const bleed = 0.125, safety = 0.125;
+    const spine = Math.max(0, Number(spineInches) || 0);
+    const docW = 2 * trimW + spine + bleed * 2, docH = trimH + bleed * 2;
+    const pdf = new jsPDF({ orientation: docW > docH ? "l" : "p", unit: "in", format: [docW, docH] });
+    const dash = (x1, y1, x2, y2, d, g) => {
+      const len = Math.hypot(x2 - x1, y2 - y1); if (!len) return;
+      const ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+      for (let t = 0; t < len; t += d + g) {
+        const e = Math.min(t + d, len);
+        pdf.line(x1 + ux * t, y1 + uy * t, x1 + ux * e, y1 + uy * e);
+      }
+    };
+    const face = (side) => {
+      const panels = [[bleed, trimW], [bleed + trimW + spine, trimW]];
+      pdf.setFillColor(255, 255, 255); pdf.rect(0, 0, docW, docH, "F");
+      if (spine > 0) {
+        pdf.setFillColor(side === "inside" ? 255 : 245, side === "inside" ? 244 : 245, side === "inside" ? 214 : 245);
+        pdf.rect(bleed + trimW, bleed, spine, trimH, "F");
+        pdf.setDrawColor(59, 130, 246); pdf.setLineWidth(0.008);
+        dash(bleed + trimW, bleed, bleed + trimW, bleed + trimH, 0.06, 0.04);
+        dash(bleed + trimW + spine, bleed, bleed + trimW + spine, bleed + trimH, 0.06, 0.04);
+        pdf.setFontSize(6); pdf.setTextColor(59, 130, 246);
+        const lbl = side === "inside" ? "INNER SPINE - NO PRINTING (GLUE)" : ("SPINE " + spine.toFixed(3) + '"');
+        pdf.text(lbl, spine > 0.06 ? (bleed + trimW + spine / 2) : (bleed + trimW - 0.07), bleed + trimH / 2, { angle: 90, align: "center" });
+      }
+      pdf.setDrawColor(0, 0, 0); pdf.setLineWidth(0.006);
+      panels.forEach(([x0]) => {
+        dash(x0, bleed, x0 + trimW, bleed, 0.08, 0.05); dash(x0, bleed + trimH, x0 + trimW, bleed + trimH, 0.08, 0.05);
+        dash(x0, bleed, x0, bleed + trimH, 0.08, 0.05); dash(x0 + trimW, bleed, x0 + trimW, bleed + trimH, 0.08, 0.05);
+      });
+      pdf.setDrawColor(56, 161, 105);
+      panels.forEach(([x0]) => {
+        const sx = x0 + safety, sy = bleed + safety, sw = trimW - safety * 2, sh = trimH - safety * 2;
+        dash(sx, sy, sx + sw, sy, 0.05, 0.05); dash(sx, sy + sh, sx + sw, sy + sh, 0.05, 0.05);
+        dash(sx, sy, sx, sy + sh, 0.05, 0.05); dash(sx + sw, sy, sx + sw, sy + sh, 0.05, 0.05);
+      });
+      pdf.setFontSize(8); pdf.setTextColor(120, 120, 120);
+      pdf.text(side === "inside" ? "INSIDE BACK COVER" : "BACK COVER", bleed + trimW / 2, bleed + trimH / 2, { align: "center" });
+      pdf.text(side === "inside" ? "INSIDE FRONT COVER" : "FRONT COVER", bleed + trimW + spine + trimW / 2, bleed + trimH / 2, { align: "center" });
+      pdf.setFontSize(6.5); pdf.setTextColor(150, 150, 150);
+      pdf.text("Wraparound cover \u00b7 " + sizeLabel + " \u00b7 " + (side === "inside" ? "inside face (glue side)" : "outside face") + " \u00b7 art must extend to the sheet edge (bleed)", docW / 2, docH - 0.05, { align: "center" });
+    };
+    face("outside");
+    pdf.addPage([docW, docH], docW > docH ? "l" : "p");
+    face("inside");
+    pdf.save("PPS_CouponBook_Wrap-Cover_" + String(sizeLabel).replace(/[^a-z0-9.x-]+/gi, "_") + ".pdf"); // ASCII-only: Chromium drops non-ASCII download names
+  } catch (e) { alert("Template generation failed: " + ((e && e.message) || e)); }
 }
 
 function resolveSize(c) {
@@ -2668,7 +2766,7 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
-function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug, pageTransforms, setPageTransforms, artDims, setArtDims }) {
+function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, proof, setProof, onPagesDetected, onCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug, pageTransforms, setPageTransforms, artDims, setArtDims, insidePaper, coverPaper, coverMode, bindStyle, sidesPrinted }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2705,6 +2803,56 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const rawFileRef = useRef(null); // holds the original uploaded File for the raw deliverable
   const rawFilesRef = useRef([]); // all originals from a multi-file select — rawFileRef alone forgets files 2..N
   const fileInputRef = useRef(null);
+
+  // ── DRAFT: separate wraparound-cover upload (see calc-perfect-bound for the
+  // reference implementation; trigger here is the Wraparound bind style) ──
+  const wrapInputRef = useRef(null);
+  const [wrapCover, setWrapCover] = useState(null); // {pages:[{dataUrl,label,isWrap}], file, dims:{wIn,hIn}}
+  const hasWrapUpload = bindStyle === "wraparound" && !!wrapCover;
+  async function handleWrapCoverFile(e) {
+    const f = e.target && e.target.files && e.target.files[0];
+    if (wrapInputRef.current) wrapInputRef.current.value = "";
+    if (!f) return;
+    try {
+      const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+      const pages = []; let dimsIn = null;
+      if (isPdf) {
+        const buf = await f.arrayBuffer();
+        await window.__ppsPdfJs;
+        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+        const n = Math.min(2, pdf.numPages);
+        for (let i = 1; i <= n; i++) {
+          const pg = await pdf.getPage(i);
+          const vp = pg.getViewport({ scale: 300 / 72 });
+          const c = document.createElement("canvas");
+          c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+          await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+          pages.push({ dataUrl: c.toDataURL("image/jpeg", 0.92), label: i === 1 ? "Cover — Outside" : "Cover — Inside (glue side)", isWrap: true, isBlank: false });
+          if (i === 1) { const v = pg.view; dimsIn = { wIn: +(((v[2] - v[0]) / 72).toFixed(3)), hIn: +(((v[3] - v[1]) / 72).toFixed(3)) }; }
+        }
+      } else if (/^image\//.test(f.type)) {
+        const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+        const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = dataUrl; });
+        pages.push({ dataUrl, label: "Cover — Outside", isWrap: true, isBlank: false });
+        dimsIn = { wIn: +((img.naturalWidth / 300).toFixed(3)), hIn: +((img.naturalHeight / 300).toFixed(3)) };
+      } else { alert("Upload the wraparound cover as a PDF (1-2 pages) or an image."); return; }
+      if (!pages.length) { alert("No pages could be read from that file."); return; }
+      setWrapCover({ pages, file: f, dims: dimsIn });
+      setArtApproved(false); setApprovalPkg(null);
+      if (onCoverArt) {
+        try {
+          const im = await new Promise((res, rej) => { const i2 = new Image(); i2.onload = () => res(i2); i2.onerror = rej; i2.src = pages[0].dataUrl; });
+          const fullW = wrapTrimW + 0.25;
+          const wFrac = dims.w / fullW, xFrac = (0.125 + dims.w + spineNow) / fullW;
+          const c2 = document.createElement("canvas");
+          c2.width = Math.max(1, Math.round(im.naturalWidth * wFrac)); c2.height = im.naturalHeight;
+          c2.getContext("2d").drawImage(im, Math.round(im.naturalWidth * xFrac), 0, c2.width, im.naturalHeight, 0, 0, c2.width, im.naturalHeight);
+          onCoverArt(c2.toDataURL("image/jpeg", 0.85));
+        } catch (e2) {}
+      }
+    } catch (err) { alert("Couldn't read the cover file: " + ((err && err.message) || err)); }
+  }
+  function removeWrapCover() { setWrapCover(null); setArtApproved(false); setApprovalPkg(null); }
   const dragRef = useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
   const [approvalPkg, setApprovalPkg] = useState(null); // { printReadyBlob, previewBlobs[], manifestBlob, skippedGeneration }
   const [generatingPdf, setGeneratingPdf] = useState(false); // true while building print-ready PDF
@@ -2788,6 +2936,9 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     }
     return { w, h };
   }, [sizeLabel, customLong, customShort, bindDir]);
+  // Wraparound geometry (sits after `dims` — TDZ) — draft cover slot
+  const spineNow = calcCouponSpineInches({ pageCount, insidePaper, coverPaper, coverMode, sidesPrinted });
+  const wrapTrimW = +(dims.w * 2 + spineNow).toFixed(3);
 
   const gsFilter = insideColor === "bw" ? "grayscale(1)" : "none";
 
@@ -2942,7 +3093,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     let printReadyBlob = null;
     const previewBlobs = [];
 
-    if (noTransforms && isSourcePdf && rawFileRef.current) {
+    if (noTransforms && isSourcePdf && rawFileRef.current && !(bindStyle === "wraparound" && wrapCover)) {
       // Raw PDF is already print-ready — skip rasterization to preserve vector quality
       printReadyBlob = rawFileRef.current; // File object, not Blob, but works the same
       // Still generate preview images from the display pages
@@ -2969,17 +3120,25 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     } else {
       // ── Full generation: render each page with transforms ──
       const { jsPDF } = window.jspdf;
+      // Wraparound cover sheets are wider than coupon pages — the first page's
+      // format is fixed at construction, so size it for whatever page 0 is.
+      const _wrapSheetW = dims.w * 2 + calcCouponSpineInches({ pageCount, insidePaper, coverPaper, coverMode, sidesPrinted }) + BLEED * 2;
+      const _wrapLead = (bindStyle === "wraparound" && wrapCover) ? wrapCover.pages.length : 0;
+      const _firstW = (pageSources[0] && pageSources[0].isWrap) ? _wrapSheetW : bleedW;
       const pdf = new jsPDF({
-        orientation: bleedW > bleedH ? "landscape" : "portrait",
+        orientation: _firstW > bleedH ? "landscape" : "portrait",
         unit: "in",
-        format: [bleedW, bleedH],
+        format: [_firstW, bleedH],
       });
 
       for (let i = 0; i < totalPages; i++) {
-        if (i > 0) pdf.addPage([bleedW, bleedH], bleedW > bleedH ? "landscape" : "portrait");
+        const page = pageSources[i];
+        const isWrapPg = !!page.isWrap;
+        const pgBleedW = isWrapPg ? _wrapSheetW : bleedW;
+        const pgCanvasW = Math.round(pgBleedW * DPI);
+        if (i > 0) pdf.addPage([pgBleedW, bleedH], pgBleedW > bleedH ? "landscape" : "portrait");
         setGenProgress({ step: "print-ready", page: i + 1, totalPages });
 
-        const page = pageSources[i];
         if (page.isBlank) { previewBlobs.push(null); continue; }
 
         // Per-page transform
@@ -2988,8 +3147,8 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
         // Render source at 300 DPI
         let srcCanvas = null;
-        if (pdfDocRef.current && isSourcePdf) {
-          const pdfPageNum = i + 1;
+        if (pdfDocRef.current && isSourcePdf && !isWrapPg) {
+          const pdfPageNum = i + 1 - _wrapLead;
           if (pdfPageNum <= pdfDocRef.current.numPages) {
             const pg = await pdfDocRef.current.getPage(pdfPageNum);
             const vp = pg.getViewport({ scale: DPI / 72 });
@@ -3029,33 +3188,36 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
         // Draw onto print-ready canvas with fit mode
         const c = document.createElement("canvas");
-        c.width = canvasW; c.height = canvasH;
+        c.width = pgCanvasW; c.height = canvasH;
         const ctx = c.getContext("2d");
         ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, canvasW, canvasH);
+        ctx.fillRect(0, 0, pgCanvasW, canvasH);
 
         const srcW = srcCanvas.width, srcH = srcCanvas.height;
-        if (tx.fitMode === "stretch") {
-          ctx.drawImage(srcCanvas, 0, 0, canvasW, canvasH);
+        if (isWrapPg) {
+          // Cover rendered at 300 DPI from its own upload — place 1:1, centred.
+          ctx.drawImage(srcCanvas, Math.round((pgCanvasW - srcW) / 2), Math.round((canvasH - srcH) / 2));
+        } else if (tx.fitMode === "stretch") {
+          ctx.drawImage(srcCanvas, 0, 0, pgCanvasW, canvasH);
         } else if (tx.fitMode === "crop" || tx.fitMode === "scale") {
           const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
-          const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
+          const nativeW = ed ? (ed.wIn / pgBleedW) * mult : mult;
           const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
-          const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
-          ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+          const drawW = pgCanvasW * nativeW, drawH = canvasH * nativeH;
+          ctx.drawImage(srcCanvas, (pgCanvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
         } else if (tx.fitMode === "cover") {
-          const sc = Math.max(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+          const sc = Math.max(pgCanvasW / srcW, canvasH / srcH);
+          ctx.drawImage(srcCanvas, (pgCanvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
         } else {
-          const sc = Math.min(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+          const sc = Math.min(pgCanvasW / srcW, canvasH / srcH);
+          ctx.drawImage(srcCanvas, (pgCanvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
         }
 
-        pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, bleedW, bleedH);
+        pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, pgBleedW, bleedH);
 
         // Downscale the same 300 DPI canvas for preview (no second render)
         setGenProgress({ step: "previews", page: i + 1, totalPages });
-        const prevW = Math.round(bleedW * 150);
+        const prevW = Math.round(pgBleedW * 150);
         const prevH = Math.round(bleedH * 150);
         const pc = document.createElement("canvas");
         pc.width = prevW; pc.height = prevH;
@@ -3372,6 +3534,25 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 
   // ── Reconcile effectivePages against pageCount ──
   const { displayPages, reconcileInfo } = useMemo(() => {
+    // DRAFT wraparound with a separate cover upload: cover faces come from
+    // their own file; the ENTIRE main upload is coupon pages, reconciled
+    // against pageCount - 4. Main-upload page i maps linearly to PDF page i+1.
+    if (bindStyle === "wraparound" && wrapCover) {
+      const coverPages = wrapCover.pages.map((p) => ({ ...p }));
+      const target = Math.max(0, pageCount - 4);
+      const rawAll = effectivePages;
+      let interior, info = null;
+      if (rawAll.length === target) interior = rawAll;
+      else if (rawAll.length < target) {
+        const n = target - rawAll.length;
+        interior = [...rawAll, ...Array.from({ length: n }, (_, i) => ({ dataUrl: blankPage, label: `Blank ${i + 1}`, isBlank: true }))];
+        info = rawAll.length ? { type: "padded", count: n, raw: rawAll.length, target } : null;
+      } else {
+        interior = rawAll.slice(0, target);
+        info = { type: "trimmed", count: rawAll.length - target, raw: rawAll.length, target };
+      }
+      return { displayPages: [...coverPages, ...interior.map((p, i) => ({ ...p, label: `Coupon page ${i + 1}` }))], reconcileInfo: info };
+    }
     if (effectivePages.length < 2) {
       // No file yet — generate empty slot grid from pageCount
       const slots = Array.from({ length: pageCount }, (_, i) => ({
@@ -3405,7 +3586,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       { ...backCover, label: pageLabel(target - 1, target) },
     ];
     return { displayPages: result, reconcileInfo: info };
-  }, [effectivePages, pageCount, blankPage]);
+  }, [effectivePages, pageCount, blankPage, bindStyle, wrapCover]);
 
   // Trimmed pages for 3D book preview — per-page transforms applied, bleed cropped
   const [trimmedPages, setTrimmedPages] = useState([]);
@@ -3520,10 +3701,14 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     if (!page || page.isBlank) { setHiResProof(null); return; }
     // Cache hit — already have correct hi-res for this page + rotation state
     if (hiResProof && hiResProof.idx === proofIdx && hiResProof.rotated === rotateSteps) return;
+    // Wrap-cover pages were rendered at 300 DPI from their own upload
+    if (page.isWrap) { setHiResProof({ idx: proofIdx, rotated: rotateSteps, dataUrl: page.dataUrl }); return; }
     // For PDF source — re-render from PDF at 300 DPI
     if (pdfDocRef.current && artDims?.source === "pdf") {
       let canceled = false;
-      const pdfPageNum = proofIdx + 1; // pdf.js pages are 1-indexed
+      const _wrapLead = (bindStyle === "wraparound" && wrapCover) ? wrapCover.pages.length : 0;
+      const pdfPageNum = proofIdx + 1 - _wrapLead; // pdf.js pages are 1-indexed
+      if (pdfPageNum < 1) return;
       if (pdfPageNum > pdfDocRef.current.numPages) return;
       (async () => {
         try {
@@ -3596,10 +3781,12 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       } else {
         setPageTransforms({});
       }
-      if (onCoverArt && extracted.pages.length >= 1) onCoverArt(extracted.pages[0].dataUrl);
+      if (onCoverArt && extracted.pages.length >= 1 && !(bindStyle === "wraparound" && wrapCover)) onCoverArt(extracted.pages[0].dataUrl);
       if (onPagesDetected && extracted.pages.length >= 2) {
-        // Perfect bound: round up to next even page count, min 20
-        let pg = extracted.pages.length % 2 === 0 ? extracted.pages.length : extracted.pages.length + 1;
+        // Round up to next even page count, min 20. With a separate wraparound
+        // cover the upload is coupon pages only — add the four cover faces back.
+        const _detBase = extracted.pages.length + ((bindStyle === "wraparound" && wrapCover) ? 4 : 0);
+        let pg = _detBase % 2 === 0 ? _detBase : _detBase + 1;
         if (pg < 20) pg = 20;
         onPagesDetected(pg);
       }
@@ -3625,7 +3812,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   function handleDragLeave(e) { e.preventDefault(); e.stopPropagation(); setDropHover(false); }
 
   function handleClear() {
-    setRawPages([]); setFileName(""); setUploadPageCount(0);
+    setRawPages([]); setFileName(""); setUploadPageCount(0); setWrapCover(null);
     setArtDims(null); setPreviewMode("closed"); setSpread(0); setActiveModal(null);
     setRotatedCache({ key: "", pages: [] }); setPageTransforms({});
     setEdgeHasMargins(null); setHiResProof(null); setArtApproved(false); setApprovalPkg(null);
@@ -3834,6 +4021,44 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     <div style={{ marginTop: 8 }}>
       <input ref={fileInputRef} type="file" accept=".pdf,image/*" multiple onChange={handleFiles} style={{display:"none"}} />
       <input ref={slotInputRef} type="file" accept=".pdf,image/*" onChange={handleSlotFile} style={{display:"none"}} />
+      <input ref={wrapInputRef} type="file" accept=".pdf,image/*" onChange={handleWrapCoverFile} style={{display:"none"}} />
+
+      {/* ── DRAFT: separate wraparound-cover upload slot ── */}
+      {bindStyle === "wraparound" && (
+        <div style={{ marginBottom: 10, padding: "10px 12px", borderRadius: 6, border: `1.5px dashed ${wrapCover ? "#86efac" : CK.cyan}`, background: wrapCover ? "#f0fdf4" : "rgba(0,126,255,.04)" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, flexWrap:"wrap" }}>
+            <div style={{ fontSize:11.5, fontWeight:700, color:CC.dark }}>Wraparound cover — separate file</div>
+            <button type="button" onClick={() => generateCouponWrapCoverTemplate(dims.w, dims.h, (sizeLabel === "Custom Size" ? `${customShort}×${customLong}` : sizeLabel), spineNow)} style={{ padding:"4px 8px", fontSize:10, fontWeight:600, border:`1px dashed ${CC.border}`, borderRadius:4, background:"#fafafa", color:CC.mid, cursor:"pointer", fontFamily:"inherit" }}>📐 Cover template</button>
+          </div>
+          <div style={{ fontSize:10, color:CC.mid, marginTop:3, lineHeight:1.5 }}>
+            One flat sheet: back panel + {fmtSpine(spineNow)} spine + front panel.
+            Upload at <strong>{(wrapTrimW + 0.25).toFixed(3)}″ × {(dims.h + 0.25).toFixed(3)}″</strong> (with bleed) — outside face, plus an optional page 2 for the inside face. The main upload below then carries only the {Math.max(0, pageCount - 4)} coupon pages.
+          </div>
+          {!wrapCover ? (
+            <button type="button" onClick={() => wrapInputRef.current && wrapInputRef.current.click()} style={{ width:"100%", marginTop:8, padding:"10px", borderRadius:5, border:`1.5px dashed ${CK.cyan}`, background:"#fff", color:CK.cyan, fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>⬆ Upload wraparound cover (PDF or image)</button>
+          ) : (() => {
+            const sizeOk = wrapCover.dims && Math.abs(wrapCover.dims.wIn - (wrapTrimW + 0.25)) <= 0.5 && Math.abs(wrapCover.dims.hIn - (dims.h + 0.25)) <= 0.5;
+            return (
+              <div style={{ marginTop:8, display:"flex", gap:8, alignItems:"flex-start" }}>
+                {wrapCover.pages.map((pg, i) => (
+                  <div key={i} style={{ textAlign:"center", flexShrink:0 }}>
+                    <img src={pg.dataUrl} alt={pg.label} style={{ height:54, border:`1px solid ${CC.border}`, borderRadius:3, display:"block" }} />
+                    <span style={{ fontSize:8.5, color:CC.mid }}>{i === 0 ? "Outside" : "Inside"}</span>
+                  </div>
+                ))}
+                <div style={{ flex:1, fontSize:10, color:CC.mid, lineHeight:1.5, minWidth:0 }}>
+                  <div style={{ fontWeight:600, color:CC.dark, overflowWrap:"anywhere" }}>{wrapCover.file.name}</div>
+                  {wrapCover.dims && <div>Measures {wrapCover.dims.wIn}″ × {wrapCover.dims.hIn}″</div>}
+                  <div style={{ color: sizeOk ? "#16a34a" : "#b45309", fontWeight:600 }}>
+                    {sizeOk ? "✓ Matches the wraparound size" : `⚠ Expected ${(wrapTrimW + 0.25).toFixed(3)}″ × ${(dims.h + 0.25).toFixed(3)}″ with bleed — check the proof carefully`}
+                  </div>
+                </div>
+                <button type="button" onClick={removeWrapCover} title="Remove cover file" style={{ border:"none", background:"#e74c3c", color:"#fff", width:18, height:18, borderRadius:"50%", fontSize:10, cursor:"pointer", flexShrink:0, lineHeight:1, padding:0 }}>✕</button>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {!hasFile ? (
         /* ── No file yet: dropzone ── */
@@ -4083,6 +4308,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             };
                             _pushOrig(rawFileRef.current);
                             (rawFilesRef.current || []).forEach(_pushOrig);
+                            if (bindStyle === "wraparound" && wrapCover && wrapCover.file) _pushOrig(new File([wrapCover.file], "wraparound-cover_" + wrapCover.file.name, { type: wrapCover.file.type }));
                             Object.keys(slotFilesRef.current || {}).sort((a, b) => a - b).forEach(sk => {
                               const sf = slotFilesRef.current[sk];
                               if (sf) _pushOrig(new File([sf], `page_${String(Number(sk) + 1).padStart(3, "0")}_${sf.name}`, { type: sf.type }));
@@ -4251,8 +4477,15 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                 const artW = ed ? ed.wIn : dims.w;
                 const artH = ed ? ed.hIn : dims.h;
                 const bleed = 0.125, safety = 0.125;
+                // DRAFT wraparound: cover sheets from the separate upload are one wide
+                // flat (back panel + spine + front panel)
+                const isWrapCover = bindStyle === "wraparound" && !!(proofPage && proofPage.isWrap);
+                const spineInchesNow = calcCouponSpineInches({ pageCount, insidePaper, coverPaper, coverMode, sidesPrinted });
+                const trimW = isWrapCover ? (dims.w * 2 + spineInchesNow) : dims.w;
+                const spineLeftPct = isWrapCover ? ((bleed + dims.w) / (trimW + bleed * 2)) * 100 : null;
+                const spineRightPct = isWrapCover ? ((bleed + dims.w + spineInchesNow) / (trimW + bleed * 2)) * 100 : null;
                 // Container is now bleed-inclusive size
-                const bleedW = dims.w + bleed * 2;
+                const bleedW = trimW + bleed * 2;
                 const bleedH = dims.h + bleed * 2;
                 // Guide positions as percentages of the bleed-inclusive container
                 const bleedPctX = (bleed / bleedW) * 100;  // trim inset from container edge
@@ -4383,9 +4616,19 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
                             <div style={{ position:"absolute", top:`${bleedPctY}%`, left:`${bleedPctX}%`, right:`${bleedPctX}%`, bottom:`${bleedPctY}%`, border:"2px dashed #fff", boxSizing:"border-box", borderRadius:rcCSS, filter:"drop-shadow(1px 0 0 #000) drop-shadow(-1px 0 0 #000) drop-shadow(0 1px 0 #000) drop-shadow(0 -1px 0 #000)" }}/>
                             {/* Safety — green dashed further inset (keep text inside) */}
                             <div style={{ position:"absolute", top:`${safetyPctY}%`, left:`${safetyPctX}%`, right:`${safetyPctX}%`, bottom:`${safetyPctY}%`, border:"2.5px dashed #38a169", boxSizing:"border-box", borderRadius:rcCSS }}/>
-                            {/* Spine — perfect bound: binding edge always on left (glued spine) */}
+                            {isWrapCover && <>
+                              {/* Wraparound spine boundaries — back panel | spine | front panel */}
+                              <div style={{ position:"absolute", left:`${spineLeftPct}%`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, background:"#3b82f6", boxShadow:"0 0 0 1px rgba(59,130,246,.2)" }}/>
+                              <div style={{ position:"absolute", left:`${spineRightPct}%`, top:`${bleedPctY}%`, bottom:`${bleedPctY}%`, width:2, background:"#3b82f6", boxShadow:"0 0 0 1px rgba(59,130,246,.2)" }}/>
+                              <div style={{ position:"absolute", left:`${(bleedPctX + spineLeftPct)/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"var(--bp-dim)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Back</div>
+                              <div style={{ position:"absolute", left:`${(spineLeftPct + spineRightPct)/2}%`, top:"50%", transform:"translate(-50%, -50%) rotate(-90deg)", fontSize:9, fontWeight:700, color:"#3b82f6", letterSpacing:".08em", textTransform:"uppercase", whiteSpace:"nowrap", textShadow:"0 1px 2px rgba(0,0,0,.5)" }}>Spine · {fmtSpine(spineInchesNow)}</div>
+                              <div style={{ position:"absolute", left:`${(spineRightPct + (100 - bleedPctX))/2}%`, bottom:`${bleedPctY + 1}%`, transform:"translateX(-50%)", fontSize:9, fontWeight:700, color:"var(--bp-dim)", letterSpacing:".08em", textTransform:"uppercase", textShadow:"0 1px 2px rgba(0,0,0,.6)" }}>Front</div>
+                            </>}
+                            {/* Spine — glue edge on the left; suppressed on the wide wrap sheet */}
+                            {!isWrapCover && <>
                             <div style={{ position:"absolute", left:`${bleedPctX}%`, top:`${bleedPctY + 2}%`, bottom:`${bleedPctY + 2}%`, width:3, background:"#3b82f6", borderRadius:2 }}/>
                             <div style={{ position:"absolute", left:`${bleedPctX + 1.2}%`, top:"50%", transform:"translateY(-50%) rotate(-90deg)", transformOrigin:"center center", fontSize:8, fontWeight:700, color:"#3b82f6", letterSpacing:".06em", whiteSpace:"nowrap", textTransform:"uppercase", opacity:0.7 }}>Spine</div>
+                            </>}
                           </div>
                         )}
                         {rcRadius > 0 && !proofPage.isBlank && (
@@ -5807,7 +6050,12 @@ function App(){
     // Only files awaiting approval are blocked: "existing" is artwork already
     // approved on a previous order (reorder), and "none" is a customer sending
     // art later, neither of which has a proof to approve here.
-    if (artFiles && artFiles.type === "files" && !artFiles.approved) {
+    // Gate applies ONLY to free online proofing (proof === 0), where the
+    // customer's own on-screen approval is the sign-off. Manual digital and
+    // hardcopy proofs are approved by STAFF after the order — gating those on
+    // an Approve button that never renders made paid-proofing uploads
+    // impossible to order.
+    if (artFiles && artFiles.type === "files" && !artFiles.approved && proof === 0) {
       alert("Please approve your artwork proof before ordering.\n\n"
         + "Open the proof in Artwork & Proofing, check your artwork against the bleed, "
         + "trim and safety guides, then click APPROVE NOW.\n\n"
@@ -6126,6 +6374,8 @@ function App(){
               <SetPreview
                 sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir}
                 pageCount={sets[0]?.pages||8} roundCorner={roundCorner} insideColor={insideColor}
+                insidePaper={insidePaper} coverPaper={coverPaper} coverMode={coverMode}
+                bindStyle={bindStyle} sidesPrinted={sidesPrinted}
                 proof={proof} setProof={setProof}
                 pageTransforms={pageTransforms} setPageTransforms={setPageTransforms}
                 artDims={artDims} setArtDims={setArtDims}

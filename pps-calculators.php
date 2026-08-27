@@ -2113,6 +2113,15 @@ function pps_ajax_add_to_cart() {
         $cart_item_data['pps_artwork_path'] = $artwork_path;
     }
 
+    // Approval binding: SHA-256 the calculator computed over the print-ready
+    // bytes the customer approved. Strict 64-hex or dropped — this is a
+    // production gate (the imposition tool refuses on mismatch), so a malformed
+    // value must vanish rather than half-match.
+    $proof_hash = strtolower( sanitize_text_field( wp_unslash( $_POST['pps_proof_hash'] ?? '' ) ) );
+    if ( preg_match( '/^[0-9a-f]{64}$/', $proof_hash ) ) {
+        $cart_item_data['pps_proof_hash'] = $proof_hash;
+    }
+
     // Full approval package: every uploaded deliverable (raw + print-ready PDF +
     // preview pages + manifest) as an array of { path, name }. The raw file is
     // also kept in pps_artwork_path above for reorder/back-compat.
@@ -2268,7 +2277,7 @@ add_action( 'woocommerce_cart_loaded_from_session', function( $cart ) {
 // ═══════════════════════════════════════════════════════════════
 
 add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $values ) {
-    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path', 'pps_artwork_files' );
+    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path', 'pps_artwork_files', 'pps_proof_hash' );
     foreach ( $keys as $k ) {
         if ( isset( $values[ $k ] ) ) {
             $cart_item[ $k ] = $values[ $k ];
@@ -2787,6 +2796,13 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         if ( $clean ) {
             $item->add_meta_data( '_pps_artwork_files', wp_json_encode( $clean ), true );
         }
+    }
+
+    // Approval binding: SHA-256 of the print-ready bytes the customer approved
+    // on screen. The imposition tool hashes the file it is about to impose and
+    // refuses on mismatch — what was approved is what prints.
+    if ( ! empty( $values['pps_proof_hash'] ) && preg_match( '/^[0-9a-f]{64}$/', (string) $values['pps_proof_hash'] ) ) {
+        $item->add_meta_data( '_pps_proof_hash', (string) $values['pps_proof_hash'], true );
     }
 
     // Visible in order emails
@@ -3410,6 +3426,7 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
     $hidden[] = '_pps_delivery_date';
     $hidden[] = '_pps_artwork_path';
     $hidden[] = '_pps_artwork_files';
+    $hidden[] = '_pps_proof_hash';
     return $hidden;
 });
 

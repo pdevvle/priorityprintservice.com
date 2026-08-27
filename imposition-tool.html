@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-01 · IMPOSE-V1.7</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-25 04:38 UTC · IMPOSE-V1.12</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -67,6 +67,36 @@ const SHEETS = {
   "13x27.5": { key:"13x27.5", label:"13×27.5 (oversize)", long:27.5, short:13, usableLong:27,   usableShort:12.5 },
   "12x18":   { key:"12x18",   label:"12×18 crack-n-peel", long:18,   short:12, usableLong:17.5, usableShort:11.5 },
 };
+
+// Every stock sheet images to 0.25″ inside its edge; a custom parent sheet
+// takes the same default unless the operator knows their press does otherwise.
+const SHEET_MARGIN = 0.25;
+const SHEET_MAX = 60;
+function customSheet(a, b, margin) {
+  const L = Math.max(a, b), S = Math.min(a, b);
+  const m = isFinite(margin) ? Math.max(0, margin) : SHEET_MARGIN;
+  const t = n => (Math.round(n * 1000) / 1000);
+  // key carries the dimensions so the slug and IMPOSED_ filename stay
+  // traceable — "custom17x11", not a bare "custom" that loses the size.
+  return { key: `custom${t(L)}x${t(S)}`, label: `${t(L)}×${t(S)} custom`, long: L, short: S,
+           usableLong: L - 2 * m, usableShort: S - 2 * m, custom: true, margin: m };
+}
+// Operator override of the parent sheet. Returns null for "auto" (the product's
+// own press sheet). NOTE this changes only the PHYSICAL sheet — the priced imp
+// is still whatever the calculator quoted, so any resulting difference is
+// surfaced by the usual mismatch machinery rather than silently absorbed.
+function sheetOverrideOf(spec) {
+  const k = spec && spec.sheet;
+  if (!k || k === "auto") return null;
+  if (k !== "custom") return SHEETS[k] || null;
+  const L = +spec.sheetLong, S = +spec.sheetShort;
+  if (!(L >= 3 && S >= 3)) throw new Error("Custom parent sheet needs both dimensions (minimum 3″).");
+  if (L > SHEET_MAX || S > SHEET_MAX) throw new Error(`Custom parent sheet is capped at ${SHEET_MAX}″.`);
+  const m = spec.sheetMargin === "" || spec.sheetMargin == null ? SHEET_MARGIN : +spec.sheetMargin;
+  if (!(m >= 0)) throw new Error("Imageable margin must be 0″ or more.");
+  if (2 * m >= Math.min(L, S)) throw new Error(`A ${m}″ imageable margin leaves no printable area on a ${L}×${S}″ sheet.`);
+  return customSheet(L, S, m);
+}
 
 const CALC_TYPES = [
   { val:"brochure",      label:"Brochure / Flat" },
@@ -167,6 +197,9 @@ function resolveSaddleImp(pw, ph) {
 // gutter (0.25″), squeeze to 0.125″ then butt-cut 0 only when the priced
 // count can't fit otherwise. Deterministic and reported.
 const GUTTERS = [0.25, 0.125, 0];
+// Sanity cap on an operator-dictated grid (a fat-fingered "90 across" would
+// otherwise build tens of thousands of cells before failing to fit).
+const MANUAL_GRID_MAX = 400;
 
 // The press images only the usable area (18.5×12.5 on 13×19; 27×12.5 on
 // 13×27.5; 17.5×11.5 on 12×18) — everything placed, including marks, must
@@ -330,6 +363,37 @@ function bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot) {
   return best;
 }
 
+// Manual grid: the operator dictates columns × rows outright (e.g. a 2×4
+// coupon run 9 across × 3 down) instead of the count being derived from the
+// priced imp. Tries each candidate sheet, then each allowed orientation, then
+// the gutter ladder, and returns the first combination that physically fits —
+// explicit per-gap gutters are used as-is when their length matches the grid.
+// Never derives the count: it places exactly what was asked for, or fails and
+// hands back the tightest near-miss so the caller can report the footprint.
+function fitManualGrid(a, d, pieceLong, pieceShort, sheets, gutters, allowedRot, colGaps, rowGaps, fillSheet) {
+  const cgOK = colGaps && colGaps.length === a - 1 ? colGaps : null;
+  const rgOK = rowGaps && rowGaps.length === d - 1 ? rowGaps : null;
+  let best = null;
+  for (const sh of sheets) {
+    const bw = fillSheet ? sh.long : sh.usableLong;
+    const bh = fillSheet ? sh.short : sh.usableShort;
+    for (const rotated of (allowedRot || [false, true])) {
+      const w = rotated ? pieceShort : pieceLong, h = rotated ? pieceLong : pieceShort;
+      for (const g of (gutters || GUTTERS)) {
+        const cg = cgOK || Array(Math.max(0, a - 1)).fill(g);
+        const rg = rgOK || Array(Math.max(0, d - 1)).fill(g);
+        const W = a * w + sum(cg), H = d * h + sum(rg);
+        const cand = { sheet: sh, grid: { a, d, rotated, g }, W, H, bw, bh };
+        if (W <= bw + EPS && H <= bh + EPS) return { ok: cand };
+        const over = q => Math.max(0, q.W - q.bw) + Math.max(0, q.H - q.bh);
+        if (!best || over(cand) < over(best)) best = cand;
+        if (cgOK && rgOK) break; // the gutter ladder changes nothing when both axes are explicit
+      }
+    }
+  }
+  return { ok: null, best };
+}
+
 function computeLayout(calc, trimA, trimB, opts) {
   if (calc === "saddle") return computeSaddleLayout(trimA, trimB, opts); // trimA = page WIDTH, trimB = page HEIGHT (not normalized — spine is the height edge)
   const pieceLong = Math.max(trimA, trimB), pieceShort = Math.min(trimA, trimB);
@@ -349,11 +413,58 @@ function computeLayout(calc, trimA, trimB, opts) {
   // long axis only; "yes" = rotated 90° only; anything else = auto.
   const allowedRot = opts && opts.forceRotated === "yes" ? [true]
                    : opts && opts.forceRotated === "no" ? [false] : [false, true];
-  let sheet, priced, grid, efficient = false;
+  // ── Manual grid + per-gap gutters (operator dictates the layout) ──
+  // Columns × rows set outright, and optionally each individual gutter, the
+  // press sheet, and whether the block may run past the imageable area.
+  // Pricing parity is NOT assumed here: the placed count is always reported
+  // against the priced imp on the badge, in the warnings, and on the slug.
+  const rawCol = opts && Array.isArray(opts.colGaps) ? opts.colGaps.map(v => Math.max(0, +v || 0)) : null;
+  const rawRow = opts && Array.isArray(opts.rowGaps) ? opts.rowGaps.map(v => Math.max(0, +v || 0)) : null;
+  const fillSheet = !!(opts && opts.fillSheet);
+  const mgIn = opts && opts.manualGrid;
+  const manual = mgIn && +mgIn.across >= 1 && +mgIn.down >= 1
+    ? { a: Math.floor(+mgIn.across), d: Math.floor(+mgIn.down) } : null;
+  if (manual && manual.a * manual.d > MANUAL_GRID_MAX)
+    throw new Error(`Manual grid ${manual.a}×${manual.d} = ${manual.a * manual.d} pieces exceeds the ${MANUAL_GRID_MAX}-cell limit.`);
+
+  // Priced imp + default press sheet per calc type (verbatim pricing ports).
+  let sheet, priced, grid, efficient = false, manualGrid = false;
   if (calc === "sticker") {
     priced = stickerImp(pieceLong, pieceShort);
     if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not fit the 12×18 sticker sheet`);
     sheet = SHEETS["12x18"];
+  } else if (FLAT_CALCS.includes(calc)) {
+    priced = flatImp(pieceLong, pieceShort);
+    sheet = SHEETS["13x19"];
+    if (priced < 1) { priced = flatImp(pieceLong, pieceShort, 27); sheet = SHEETS["13x27.5"]; } // calculators' two-sheet rule
+    if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not image on any press sheet`);
+  } else {
+    throw new Error(`Unknown calc type "${calc}"`);
+  }
+
+  // Operator's parent-sheet override replaces the product's press sheet. The
+  // priced imp above is left alone, so a count that no longer fits surfaces
+  // through the normal mismatch path instead of quietly changing.
+  const ovSheet = (opts && opts.sheetOverride) || null;
+  if (ovSheet) sheet = ovSheet;
+
+  if (manual) {
+    const cands = ovSheet ? [ovSheet]
+                : opts && opts.manualSheet && SHEETS[opts.manualSheet] ? [SHEETS[opts.manualSheet]]
+                : calc === "sticker" ? [SHEETS["12x18"]] : [SHEETS["13x19"], SHEETS["13x27.5"]];
+    const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
+    if (!res.ok) {
+      const b = res.best;
+      throw new Error(`Manual ${manual.a}×${manual.d} grid of ${pieceLong}×${pieceShort}″ needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} ${fillSheet ? "sheet" : "printable area"} is ${b.bw}×${b.bh}″. Reduce columns/rows or gutters${fillSheet ? "" : ", or tick “fill full sheet” to use the whole sheet"}.`);
+    }
+    sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
+    const placed = grid.a * grid.d;
+    warnings.push(`Manual grid: ${grid.a} across × ${grid.d} down = ${placed}-up on ${sheet.label}${grid.rotated ? " (pieces rotated 90°)" : ""}${placed === Math.round(priced) ? "" : ` — pricing assumed ${priced}-up, so sheet count and cost per piece will differ`}.`);
+    if (calc === "sticker") warnings.push(`Manual grid overrides the 12×18 crack-n-peel ${STICKER.pitch}″ pitch — confirm the liner/die matches before printing.`);
+    if (!rawCol && !rawRow && grid.g < gutters[0] && gutters.length > 1) warnings.push(grid.g === 0
+      ? "Butt-cut layout (no gutter) needed to fit the manual grid — adjacent pieces share cut lines, no inter-piece bleed."
+      : `Gutter squeezed to ${grid.g}″ to fit the manual grid.`);
+  } else if (calc === "sticker" && !ovSheet) {
     if (opts && isFinite(opts.gutter) && opts.gutter !== null && Math.abs(+opts.gutter - STICKER.pitch) > EPS) {
       warnings.push(`Sticker pitch is fixed at ${STICKER.pitch}″ by the 12×18 crack-n-peel spec — gutter override ignored.`);
     }
@@ -365,22 +476,22 @@ function computeLayout(calc, trimA, trimB, opts) {
     if (gg.a * gg.d < priced) { mismatch = true; warnings.push(`MISMATCH: forced orientation fits ${gg.a * gg.d}-up but pricing assumed ${priced}-up.`); }
     if (gg.a * gg.d < 1) throw new Error("Forced orientation does not fit the sticker sheet.");
     grid = { a: gg.a, d: gg.d, rotated, g: STICKER.pitch };
-  } else if (FLAT_CALCS.includes(calc)) {
-    priced = flatImp(pieceLong, pieceShort);
-    sheet = SHEETS["13x19"];
-    if (priced < 1) { priced = flatImp(pieceLong, pieceShort, 27); sheet = SHEETS["13x27.5"]; } // calculators' two-sheet rule
-    if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not image on any press sheet`);
-    if (opts && opts.efficient && sheet.key === "13x19" && priced >= 2) {
-      // Efficient mode: same piece laid out on the 13×27.5 sheet, the
-      // multiple expanding to whatever physically fits the 27″ usable axis.
-      // Pricing basis stays the 13×19 imp — this is a press-pass saver.
-      sheet = SHEETS["13x27.5"];
+  } else {
+    if (calc === "sticker" && ovSheet) {
+      warnings.push(`Parent sheet overridden to ${sheet.label} — the 12×18 crack-n-peel ${STICKER.pitch}″ pitch no longer applies; confirm the liner/die matches.`);
+    }
+    // Efficient mode: re-lay the piece on the oversize sheet (or on whatever
+    // parent the operator forced) and let the multiple expand to fill it.
+    // The pricing basis stays the product's own imp — this saves press passes.
+    const effSheet = ovSheet || SHEETS["13x27.5"];
+    if (opts && opts.efficient && priced >= 2 && (ovSheet || sheet.key === "13x19")) {
+      sheet = effSheet;
       grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot);
-      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on 13×27.5 with the selected gutter/orientation.`);
+      if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on ${sheet.label} with the selected gutter/orientation.`);
       efficient = true;
-      warnings.push(`Efficient mode: ${grid.a * grid.d}-up on 13×27.5 (priced ${priced}-up per 13×19).`);
+      warnings.push(`Efficient mode: ${grid.a * grid.d}-up on ${sheet.label} (priced ${priced}-up).`);
     } else {
-      if (opts && opts.efficient) warnings.push("Efficient 13×27.5 mode applies to sizes imaging ≥2-up on 13×19 — ignored for this size.");
+      if (opts && opts.efficient) warnings.push(`Efficient mode applies to sizes imaging ≥2-up — ignored for this size.`);
       grid = bestGridForCount(Math.round(priced), pieceLong, pieceShort, sheet, gutters, allowedRot);
       if (!grid) {
         // Pricing promised more than physically fits — surface loudly, never
@@ -399,15 +510,35 @@ function computeLayout(calc, trimA, trimB, opts) {
         ? `Butt-cut layout (no gutter) needed to honour the priced ${priced}-up — adjacent pieces share cut lines, no inter-piece bleed.`
         : `Gutter squeezed to ${grid.g}″ to honour the priced ${priced}-up.`);
     }
-  } else {
-    throw new Error(`Unknown calc type "${calc}"`);
   }
+
+  const cellW = grid.rotated ? pieceShort : pieceLong;
+  const cellH = grid.rotated ? pieceLong : pieceShort;
+
+  // ── Explicit per-gap gutters, validated against the final grid ──
+  // Arrays sized to a different grid (the operator changed columns/rows after
+  // editing gutters) fall back to the uniform gutter rather than mis-space.
+  const colGaps = rawCol && rawCol.length === grid.a - 1 ? rawCol : null;
+  const rowGaps = rawRow && rawRow.length === grid.d - 1 ? rawRow : null;
+  if ((rawCol && rawCol.length && !colGaps) || (rawRow && rawRow.length && !rowGaps))
+    warnings.push(`Custom gutters were set for a different grid — reset to the uniform ${grid.g}″ gutter for this ${grid.a}×${grid.d} layout.`);
+
+  // Footprint must fit the physical sheet; past the imageable area is allowed
+  // only as a deliberate full-sheet fill (guillotine cutting).
+  const cgA = colGaps || Array(Math.max(0, grid.a - 1)).fill(grid.g);
+  const rgA = rowGaps || Array(Math.max(0, grid.d - 1)).fill(grid.g);
+  const totalW = grid.a * cellW + sum(cgA), totalH = grid.d * cellH + sum(rgA);
+  if (totalW > sheet.long + EPS || totalH > sheet.short + EPS)
+    throw new Error(`Gutters make the ${grid.a}×${grid.d} layout ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ — larger than the ${sheet.label} sheet. Reduce gutters or pieces.`);
+  if (!fillSheet && (totalW > sheet.usableLong + EPS || totalH > sheet.usableShort + EPS))
+    warnings.push(`Block ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ is larger than the printable area (${sheet.usableLong}×${sheet.usableShort}″) — the outer edges will not image. Tick “fill full sheet” only if this sheet is being guillotine-cut.`);
+
   const layout = {
     sheet, calc, pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    imp: grid.a * grid.d, pricedImp: priced, mismatch, efficient, warnings,
-    cellW: grid.rotated ? pieceShort : pieceLong,
-    cellH: grid.rotated ? pieceLong : pieceShort,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet,
+    imp: grid.a * grid.d, pricedImp: priced, mismatch, efficient, manualGrid, warnings,
+    cellW, cellH,
   };
   buildCells(layout, opts);
   return layout;
@@ -438,6 +569,9 @@ function computeSaddleLayout(pw, ph, opts) {
     target = 1;
     warnings.push("Open spread requires the 13×27.5 oversize sheet (1 spread per side).");
   }
+  // Parent-sheet override: physical sheet only, priced imp untouched.
+  const ovSheet = (opts && opts.sheetOverride) || null;
+  if (ovSheet) sheet = ovSheet;
   // Saddle spreads BUTT by default: signatures share one cut line and the
   // interior bleed is cropped at it (cell clips stop at the shared trim), so
   // bleed never manufactures a gutter the operator didn't ask for. The
@@ -445,13 +579,14 @@ function computeSaddleLayout(pw, ph, opts) {
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : [0];
   let grid = null, colGaps = null, rowGaps = null, fillSheet = false;
 
-  // Efficient mode (explicit oversize 13×27.5).
+  // Efficient mode — the oversize sheet, or whatever parent was forced.
   if (!grid && opts && opts.efficient) {
-    const effGrid = bestPhysicalGrid(spL, spS, SHEETS["13x27.5"], gutters);
+    const effSheet = ovSheet || SHEETS["13x27.5"];
+    const effGrid = bestPhysicalGrid(spL, spS, effSheet, gutters);
     if (effGrid && effGrid.a * effGrid.d > target) {
-      sheet = SHEETS["13x27.5"]; grid = effGrid; efficient = true;
+      sheet = effSheet; grid = effGrid; efficient = true;
       const c = effGrid.a * effGrid.d;
-      warnings.push(`Efficient mode: ${c} signature cop${c === 1 ? "y" : "ies"}/side on 13×27.5 (priced ${target} per 13×19-side).`);
+      warnings.push(`Efficient mode: ${c} signature cop${c === 1 ? "y" : "ies"}/side on ${effSheet.label} (priced ${target} per 13×19-side).`);
     } else {
       warnings.push("Efficient 13×27.5 mode fits no additional signature copies for this booklet size — ignored.");
     }
@@ -473,11 +608,17 @@ function computeSaddleLayout(pw, ph, opts) {
 
   // ── Manual per-gap gutter override (from the signature-gutter editor) ──
   // Sized to the current across×down grid; replaces the rule/uniform gaps.
-  const mCol = opts && Array.isArray(opts.saddleColGaps) ? opts.saddleColGaps : null;
-  const mRow = opts && Array.isArray(opts.saddleRowGaps) ? opts.saddleRowGaps : null;
+  // (saddle* names are the original opts; the generic colGaps/rowGaps/fillSheet
+  // are the shared editor's — either is accepted so both callers work.)
+  const mCol = opts && Array.isArray(opts.saddleColGaps) ? opts.saddleColGaps
+             : opts && Array.isArray(opts.colGaps) ? opts.colGaps : null;
+  const mRow = opts && Array.isArray(opts.saddleRowGaps) ? opts.saddleRowGaps
+             : opts && Array.isArray(opts.rowGaps) ? opts.rowGaps : null;
   if (mCol && mCol.length === grid.a - 1) colGaps = mCol.map(v => Math.max(0, +v || 0));
   if (mRow && mRow.length === grid.d - 1) rowGaps = mRow.map(v => Math.max(0, +v || 0));
-  if (opts && opts.saddleFillSheet != null) fillSheet = !!opts.saddleFillSheet;
+  const mFill = opts && opts.saddleFillSheet != null ? opts.saddleFillSheet
+              : opts && opts.fillSheet != null ? opts.fillSheet : null;
+  if (mFill != null) fillSheet = !!mFill;
 
   // Footprint must fit the physical sheet.
   const cgA = colGaps || Array(Math.max(0, grid.a - 1)).fill(grid.g);
@@ -493,7 +634,7 @@ function computeSaddleLayout(pw, ph, opts) {
   const layout = {
     sheet, calc: "saddle", pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    colGaps, rowGaps, fillSheet,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet,
     imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
     pricedImp: imp,                 // pages per side the calculator priced
     mismatch, efficient, warnings,
@@ -622,6 +763,14 @@ async function sanitizePdf(bytes) {
   stripActiveContent(src);
   const out = await PL.PDFDocument.create();
   const embeds = await out.embedPdf(src, Array.from({ length: n }, (_, i) => i));
+  // Carry the source's layer visibility onto the copy (see srcHiddenOCGRefs).
+  // embedPdf is lazy — the copied XObjects only exist after flush(), so the
+  // per-page hidden names are noted now and resolved against the copy later.
+  const ocSrc = srcHiddenOCGRefs(src);
+  const ocAcc = { all: new Map(), off: new Map() };
+  const ocPending = ocSrc.any
+    ? embeds.map((e, i) => ({ ref: e.ref, srcRes: pageResources(src.getPage(i).node), hidden: ocSrc.hidden }))
+    : [];
   for (let i = 0; i < n; i++) {
     const sp = src.getPage(i);
     const mb = sp.getMediaBox();
@@ -639,6 +788,11 @@ async function sanitizePdf(bytes) {
   out.setTitle("CLEAN sanitized copy");
   out.setProducer("PPS Auto-Imposition Tool");
   out.setCreator("PPS Auto-Imposition Tool");
+  if (ocPending.length) {
+    await out.flush();
+    collectPendingOC(out, ocPending, ocAcc);
+    writeOCProperties(out, ocAcc);
+  }
   return { bytes: await out.save({ useObjectStreams: false }), pages: n, threats };
 }
 
@@ -700,8 +854,14 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed) {
   }
   const hasBleed = (W - trimRaw.w > 1) || (H - trimRaw.h > 1);
   if (!hasBleed) notes.push("no bleed available — cut lines may show paper white");
+  // How far the art's own content runs past its trim, in PLACED inches — the
+  // smallest of the four sides, so it is safe on every edge and needs no
+  // rotation mapping (a min over all four is rotation-invariant). 0 for
+  // no-bleed art. Used to work out what the pull-off-trim inset leaves behind.
+  const ownBleed = Math.max(0, Math.min(
+    trimRaw.x, W - trimRaw.x - trimRaw.w, trimRaw.y, H - trimRaw.y - trimRaw.h)) * scale / PT;
 
-  return { page, rot, mediaW: W, mediaH: H, trimRaw, cellRotate, scale, hasBleed, notes,
+  return { page, rot, mediaW: W, mediaH: H, trimRaw, cellRotate, scale, hasBleed, ownBleed, notes,
            placedW: cellW, placedH: cellH };
 }
 
@@ -788,10 +948,70 @@ async function detectTextNearEdges(pdfjsDoc, pnoZero, art, bleed) {
 // fixable shortfalls fold into the scale factor so the synth never amplifies
 // a white sliver at the cut. Only applies when the source page genuinely
 // lacks bleed — files with real bleed are never touched.
-function applySynthBleed(art, mode, bleed, gaps, streakEps) {
-  if (!mode || mode === "off" || art.hasBleed) return art;
+// ── Pull art off the trim (safety inset) ────────────────────────────────────
+// Customers routinely push text right up to the cut. This shrinks the placed
+// art about the cell centre so every edge pulls INWARD by at least `inset`,
+// moving that content away from the trim; the add-bleed synthesizer then fills
+// the ring it opens — from the art's new edge out past the trim to the bleed
+// box — so the cut still lands in ink. The two settings are one operation:
+// the inset makes the room, the bleed fill makes up the difference.
+//
+// The scale is UNIFORM (never distort customer art), so a single factor cannot
+// give the same inset on both axes. We solve for the SHORT axis and let the
+// long axis pull in proportionally further — that way `inset` is a guaranteed
+// minimum on every edge, which is the promise the operator needs.
+const INSET_MAX = 0.5;
+function insetOf(spec) {
+  const v = +(spec && spec.artInset) || 0;
+  if (!(v > 0)) return 0;
+  const inset = Math.min(v, INSET_MAX);
+  const modes = [spec.addBleed, ...Object.values(spec.addBleedPages || {})].filter(m => m && m !== "off");
+  if (modes.includes("scale")) {
+    throw new Error(`Pull-off-trim (${inset}″) and "Scale art up to bleed" are opposite operations — scale mode re-expands the art to the bleed box, undoing the inset. Choose Auto (text-safe), Mirror or Streak.`);
+  }
+  return inset;
+}
+function applyArtInset(art, inset) {
+  if (!(inset > 0)) return art;
+  const f = 1 - 2 * inset / Math.min(art.placedW, art.placedH);
+  if (!(f > 0.5)) throw new Error(`Pull-off-trim ${inset}″ is too deep for a ${art.placedW}×${art.placedH}″ piece (it would shrink the art by more than half).`);
+  art.insetF = f;
+  art.insetDx = art.placedW * (1 - f) / 2;   // actual pull-in per edge, x
+  art.insetDy = art.placedH * (1 - f) / 2;   // actual pull-in per edge, y
+  art.notes.push(`pulled off trim by ${art.insetDx.toFixed(3)}″ across × ${art.insetDy.toFixed(3)}″ down (art scaled ×${f.toFixed(4)}) — content that was at the cut now sits that far inside it`);
+  return art;
+}
+
+// Where the art's outer edge ends up relative to the trim, per axis, once every
+// scale factor is in (fit-to-trim, shy-art pre-scale, inset). Positive = the art
+// still covers that far PAST the trim; negative = it now stops that far INSIDE
+// the trim and the fill must reach back in to meet it.
+function finalizeArtCoverage(art, bleed) {
+  const g = (art.synth ? (art.synthScale || 1) : 1) * (art.insetF || 1);
+  const ob = art.ownBleed || 0;
+  art.covX = g * (art.placedW / 2 + ob) - art.placedW / 2;
+  art.covY = g * (art.placedH / 2 + ob) - art.placedH / 2;
+  const b = isFinite(bleed) ? bleed : BLEED;
+  if (!art.synth) {
+    // Nothing is filling the ring, so the art's own coverage has to carry it.
+    if (art.covX < -EPS || art.covY < -EPS) {
+      throw new Error(`Pull-off-trim leaves the art ${Math.abs(Math.min(art.covX, art.covY)).toFixed(3)}″ short of the cut with no bleed fill set — that band would print as paper white INSIDE the trim. Set "Add bleed" to Auto (text-safe), Mirror or Streak.`);
+    }
+    if (art.covX < b - EPS || art.covY < b - EPS) {
+      art.notes.push(`art covers only ${Math.min(art.covX, art.covY).toFixed(3)}″ past the trim (need ${b}″) — cut lines may show paper white`);
+    }
+  }
+  return art;
+}
+
+function applySynthBleed(art, mode, bleed, gaps, streakEps, inset) {
+  // With an inset the ring must be filled even for art that HAS bleed: pulling
+  // the art in drags its bleed in with it, so the coverage falls short.
+  if (!mode || mode === "off" || (art.hasBleed && !(inset > 0))) return art;
   art.streakEps = streakEps || STREAK_EPS;
-  if (gaps && [gaps.left, gaps.right, gaps.top, gaps.bottom].every(g => g > SYNTH_MAXFIX)) {
+  // White-by-design edges normally need no synthesis — but an inset opens a
+  // real gap that still has to be filled, so the skip only applies without one.
+  if (!(inset > 0) && gaps && [gaps.left, gaps.right, gaps.top, gaps.bottom].every(g => g > SYNTH_MAXFIX)) {
     art.notes.push("edges are white by design (no ink near trim) — bleed synthesis skipped");
     return art;
   }
@@ -829,12 +1049,147 @@ function applySynthBleed(art, mode, bleed, gaps, streakEps) {
   return art;
 }
 
+// ── Optional content (PDF layers) ───────────────────────────────────────────
+// pdf-lib copies a page's marked content AND its OCG objects, but NOT the
+// document catalog's /OCProperties — the dictionary that records which layers
+// are switched OFF. Drop it and every layer defaults to visible, so a
+// customer's HIDDEN layer prints. Caught on a real job (Nursing Form,
+// 2026-08-25): an Illustrator "Layer 1" was off in the source and ghosted
+// behind the live artwork on all four cells of the imposed sheet.
+//
+// The fix is to carry that configuration onto the output rather than to cut the
+// content out: marked-content nesting and q/Q nesting are independently legal
+// in PDF (this very file opens a `q` inside the hidden block and closes it
+// after the EMC), so stripping the block by hand corrupts the graphics state.
+// Resolve an object to something with .lookup(): a PDFDict is already one, a
+// PDFStream keeps its dictionary at .dict. NOTE a PDFDict also has a `.dict`
+// property — it is the internal Map, not a sub-dictionary — so the .lookup
+// test has to come first or form XObjects silently read as empty.
+function asDict(o) {
+  if (o && typeof o.lookup === "function") return o;
+  if (o && o.dict && typeof o.dict.lookup === "function") return o.dict;
+  return null;
+}
+function srcHiddenOCGRefs(srcDoc) {
+  const hidden = new Set();
+  let any = false;
+  try {
+    const ocp = asDict(srcDoc.catalog.lookup(PL.PDFName.of("OCProperties")));
+    if (!ocp) return { hidden, any };
+    any = true;
+    const cfg = asDict(ocp.lookup(PL.PDFName.of("D")));
+    if (!cfg) return { hidden, any };
+    const asRefs = v => (v && typeof v.asArray === "function" ? v.asArray() : []);
+    for (const r of asRefs(cfg.lookup(PL.PDFName.of("OFF")))) hidden.add(String(r));
+    // /BaseState /OFF inverts the sense: everything is off but the /ON list.
+    const base = cfg.lookup(PL.PDFName.of("BaseState"));
+    if (base && String(base) === "/OFF") {
+      const on = new Set(asRefs(cfg.lookup(PL.PDFName.of("ON"))).map(String));
+      for (const r of asRefs(ocp.lookup(PL.PDFName.of("OCGs")))) if (!on.has(String(r))) hidden.add(String(r));
+    }
+  } catch (e) { /* no optional content, or an unreadable config */ }
+  return { hidden, any };
+}
+// A page's Resources, honouring INHERITANCE — /Resources may live on an
+// ancestor Pages node rather than the page itself (legal and common), and a
+// raw lookup on the leaf would miss it, silently disabling the whole mapping.
+function pageResources(node) {
+  try { if (typeof node.Resources === "function") { const r = asDict(node.Resources()); if (r) return r; } } catch (e) {}
+  try { if (typeof node.getInheritableAttribute === "function") { const r = asDict(node.getInheritableAttribute(PL.PDFName.of("Resources"))); if (r) return r; } } catch (e) {}
+  try { return asDict(node.lookup(PL.PDFName.of("Resources"))); } catch (e) { return null; }
+}
+// The OCG refs an /OC or /Properties entry stands for. A direct OCG entry is
+// its own member; an OCMD (membership dict) carries its members in /OCGs — a
+// single ref or an array of refs. Raw refs are collected, never resolved, so
+// identity comparison against the catalog's OFF list works. Entries that are
+// not refs (inline dicts, /VE-only OCMDs) yield [] = treated as visible.
+function ocMembers(dict, key) {
+  const raw = dict.get(key);
+  if (!raw) return null;
+  const isRef = r => r && r.objectNumber !== undefined;
+  const res = asDict(dict.lookup(key));
+  const inner = res && res.get ? res.get(PL.PDFName.of("OCGs")) : null;
+  if (!inner) return isRef(raw) ? [raw] : [];
+  const resolved = res.lookup(PL.PDFName.of("OCGs"));
+  if (resolved && typeof resolved.asArray === "function") return resolved.asArray().filter(isRef);
+  return isRef(inner) ? [inner] : [];
+}
+// Walk source and copy IN PARALLEL by resource name, mapping the source's
+// hidden state (a set of raw OCG refs) onto the copied objects. Matching by
+// ref identity within each resource dict — never by layer NAME — because
+// names are per-namespace and routinely duplicated (the file that motivated
+// all this has four OCGs called "Layer 1", two on and two off). Covers BDC
+// marked content (/Properties), /OC sitting directly on image/form XObjects,
+// OCMD membership dicts (AnyOn default: hidden iff every member is off), and
+// nested XObjects with their own /Properties namespaces. A copy entry with no
+// source counterpart stays visible — the safe default.
+function ocWalk(srcRes, outRes, hiddenRefs, acc, depth) {
+  if ((depth || 0) > 6) return;
+  const S = asDict(srcRes), O = asDict(outRes);
+  if (!O) return;
+  const N = n => PL.PDFName.of(n);
+  const hiddenBy = m => !!m && m.length > 0 && m.every(r => hiddenRefs.has(String(r)));
+  try {
+    const sp = S ? asDict(S.lookup(N("Properties"))) : null;
+    const op = asDict(O.lookup(N("Properties")));
+    if (op && op.keys) for (const k of op.keys()) {
+      const outM = ocMembers(op, k) || [];
+      const hid = sp ? hiddenBy(ocMembers(sp, k)) : false;
+      for (const r of outM) { acc.all.set(String(r), r); if (hid) acc.off.set(String(r), r); }
+    }
+    const sx = S ? asDict(S.lookup(N("XObject"))) : null;
+    const ox = asDict(O.lookup(N("XObject")));
+    if (ox && ox.keys) for (const k of ox.keys()) {
+      const oChild = asDict(ox.lookup(k));
+      if (!oChild) continue;
+      const sChild = sx ? asDict(sx.lookup(k)) : null;
+      const outOC = ocMembers(oChild, N("OC")) || [];
+      const hid = sChild ? hiddenBy(ocMembers(sChild, N("OC"))) : false;
+      for (const r of outOC) { acc.all.set(String(r), r); if (hid) acc.off.set(String(r), r); }
+      ocWalk(sChild ? sChild.lookup(N("Resources")) : null, oChild.lookup(N("Resources")), hiddenRefs, acc, (depth || 0) + 1);
+    }
+  } catch (e) {}
+}
+// Resolve one pending embed (recorded before flush; the copied XObject only
+// exists in the context afterwards) and feed it through the parallel walk.
+function collectPendingOC(outDoc, pending, acc) {
+  for (const e of pending) {
+    try {
+      const xo = asDict(outDoc.context.lookup(e.ref));
+      if (xo) ocWalk(e.srcRes, xo.lookup(PL.PDFName.of("Resources")), e.hidden, acc, 0);
+    } catch (err) {}
+  }
+}
+// Write the accumulated configuration onto the output catalog. Hidden groups
+// also get /Usage /Print /PrintState /OFF so a RIP that reads usage rather than
+// the default config still leaves them out.
+function writeOCProperties(outDoc, acc) {
+  if (!acc.all.size) return 0;
+  const ctx = outDoc.context;
+  const all = [...acc.all.values()];
+  const off = [...acc.off.values()];
+  const on = all.filter(r => !acc.off.has(String(r)));
+  for (const r of off) {
+    try {
+      const g = ctx.lookup(r);
+      if (g && g.set) g.set(PL.PDFName.of("Usage"), ctx.obj({ Print: { PrintState: PL.PDFName.of("OFF") },
+                                                              View: { ViewState: PL.PDFName.of("OFF") } }));
+    } catch (e) {}
+  }
+  outDoc.catalog.set(PL.PDFName.of("OCProperties"), ctx.obj({
+    OCGs: ctx.obj(all),
+    D: ctx.obj({ BaseState: PL.PDFName.of("ON"), OFF: ctx.obj(off), ON: ctx.obj(on) }),
+  }));
+  return off.length;
+}
+
 // Stamp the art with its trim centered on targetTrim (inches, y-up),
 // hard-clipped to clipRect so neighbours can never overlap (fix c/d).
 function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
   const drawRot = (((art.cellRotate + (extraRotate || 0) - art.rot) % 360) + 360) % 360; // CCW for pdf-lib degrees()
   let s = art.scale;
   if (art.synth) s *= art.synthScale || 1; // scale-to-bleed and/or shortfall pre-scale
+  if (art.insetF) s *= art.insetF;         // pull-off-trim safety inset
   const C = { x: (targetTrim.x + targetTrim.w / 2) * PT, y: (targetTrim.y + targetTrim.h / 2) * PT };
   const tc = { x: art.trimRaw.x + art.trimRaw.w / 2, y: art.trimRaw.y + art.trimRaw.h / 2 };
   // anchor = C − s·Rot(tc): drawPage maps raw (u,v) → anchor + s·Rot_ccw(u,v)
@@ -865,24 +1220,33 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
     // interior butt cuts and the saddle spine stay untouched.
     const b = art.synthB, T = targetTrim;
     const xL = T.x, xR = T.x + T.w, yB = T.y, yT = T.y + T.h;
-    const K = b / (art.streakEps || STREAK_EPS);
+    // The art's outer edge sits covX/covY past the trim (negative once a
+    // pull-off-trim inset has drawn it back inside). Reflect about THAT edge,
+    // and widen the band to reach from it out to the bleed box — so with no
+    // inset this is exactly the previous trim-edge mirror of width b.
+    const cx = art.covX || 0, cy = art.covY || 0;
+    const bx = b - cx, by = b - cy;                       // band width per axis
+    const eL = xL - cx, eR = xR + cx, eB = yB - cy, eT = yT + cy; // art edges
+    const eps = art.streakEps || STREAK_EPS;
+    const Kx = bx / eps, Ky = by / eps;
     const cyc = ["left", "bottom", "right", "top"]; // CCW edge cycle
     const rawEdge = e => cyc[(((cyc.indexOf(e) - drawRot / 90) % 4) + 4) % 4];
     const streaky = e => art.synth === "streak" || (art.synth === "auto" && art.textNear && art.textNear[rawEdge(e)]);
-    const kx = { left: streaky("left") ? K : 1, right: streaky("right") ? K : 1 };
-    const ky = { bottom: streaky("bottom") ? K : 1, top: streaky("top") ? K : 1 };
+    const kx = { left: streaky("left") ? Kx : 1, right: streaky("right") ? Kx : 1 };
+    const ky = { bottom: streaky("bottom") ? Ky : 1, top: streaky("top") ? Ky : 1 };
     const mX = (E, k) => [-k, 0, 0, 1, E * (1 + k) * PT, 0];   // mirrored map about x=E
     const mY = (F, k) => [1, 0, 0, -k, 0, F * (1 + k) * PT];   // mirrored map about y=F
     const mXY = (E, F, k1, k2) => [-k1, 0, 0, -k2, E * (1 + k1) * PT, F * (1 + k2) * PT];
-    const regions = [
-      { r: { x: xL - b, y: yB, w: b, h: T.h }, m: mX(xL, kx.left) },
-      { r: { x: xR, y: yB, w: b, h: T.h }, m: mX(xR, kx.right) },
-      { r: { x: xL, y: yB - b, w: T.w, h: b }, m: mY(yB, ky.bottom) },
-      { r: { x: xL, y: yT, w: T.w, h: b }, m: mY(yT, ky.top) },
-      { r: { x: xL - b, y: yB - b, w: b, h: b }, m: mXY(xL, yB, kx.left, ky.bottom) },
-      { r: { x: xR, y: yB - b, w: b, h: b }, m: mXY(xR, yB, kx.right, ky.bottom) },
-      { r: { x: xL - b, y: yT, w: b, h: b }, m: mXY(xL, yT, kx.left, ky.top) },
-      { r: { x: xR, y: yT, w: b, h: b }, m: mXY(xR, yT, kx.right, ky.top) },
+    const iw = eR - eL, ih = eT - eB;   // art's own span, for the side bands
+    const regions = bx <= 0 && by <= 0 ? [] : [
+      { r: { x: eL - bx, y: eB, w: bx, h: ih }, m: mX(eL, kx.left) },
+      { r: { x: eR, y: eB, w: bx, h: ih }, m: mX(eR, kx.right) },
+      { r: { x: eL, y: eB - by, w: iw, h: by }, m: mY(eB, ky.bottom) },
+      { r: { x: eL, y: eT, w: iw, h: by }, m: mY(eT, ky.top) },
+      { r: { x: eL - bx, y: eB - by, w: bx, h: by }, m: mXY(eL, eB, kx.left, ky.bottom) },
+      { r: { x: eR, y: eB - by, w: bx, h: by }, m: mXY(eR, eB, kx.right, ky.bottom) },
+      { r: { x: eL - bx, y: eT, w: bx, h: by }, m: mXY(eL, eT, kx.left, ky.top) },
+      { r: { x: eR, y: eT, w: bx, h: by }, m: mXY(eR, eT, kx.right, ky.top) },
     ];
     for (const { r, m } of regions) {
       const ix = Math.max(r.x, cl.x), iy = Math.max(r.y, cl.y);
@@ -1006,11 +1370,13 @@ function drawSlug(page, layout, font, info, cells) {
     info.jobName ? String(info.jobName).replace(/[^\x20-\x7E]/g, "?") : null,
     layout.booklet ? `pages ${layout.booklet.pw}x${layout.booklet.ph}in` : `${layout.pieceLong}x${layout.pieceShort}in`,
     layout.mismatch ? `MISMATCH ${layout.imp}-up placed vs ${layout.pricedImp}-up priced` : `${layout.imp}-up on ${layout.sheet.key}`,
+    layout.manualGrid ? `MANUAL GRID ${layout.across}x${layout.down} (priced ${layout.pricedImp}-up)` : null,
     layout.efficient ? `EFFICIENT 13x27.5 (priced ${layout.pricedImp}-up/13x19)`
       : layout.fillSheet ? `FILL ${layout.across}x${layout.down} full-sheet (priced ${layout.pricedImp}-up)` : null,
     (layout.colGaps || layout.rowGaps) ? "custom gutters"
       : layout.gutter !== 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
     Math.abs(layout.bleed - BLEED) > EPS ? `bleed ${layout.bleed}in` : null,
+    info.artInset ? `PULLED OFF TRIM ${info.artInset}in` : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
     info.date,
   ].filter(Boolean);
@@ -1086,6 +1452,15 @@ function drawFoldMarks(page, layout, cells) {
   }
 }
 
+// Marks are three independent switches now: crop/trim marks, saddle fold
+// guides, and the slug line. `marks` stays the master for older specs — an
+// explicit false still silences everything unless a switch is turned back on.
+function marksOf(spec) {
+  const base = spec.marks !== false;
+  const on = (v, d) => (v == null ? d : v !== false);
+  return { showMarks: base, showFold: on(spec.foldMarks, base), showSlug: on(spec.slug, base) };
+}
+
 async function imposeSaddle(artBytes, spec, layout) {
   const warnings = [...layout.warnings];
   const bk = layout.booklet;
@@ -1101,6 +1476,11 @@ async function imposeSaddle(artBytes, spec, layout) {
   const out = await PL.PDFDocument.create();
   const font = await out.embedFont(PL.StandardFonts.Helvetica);
   const embeds = await out.embedPdf(src, Array.from({ length: n }, (_, i) => i));
+  const ocSrc = srcHiddenOCGRefs(src);
+  const ocAcc = { all: new Map(), off: new Map() };
+  const ocPending = ocSrc.any
+    ? embeds.map((e, i) => ({ ref: e.ref, srcRes: pageResources(src.getPage(i).node), hidden: ocSrc.hidden }))
+    : [];
 
   // Resolve every page once (trim location, orientation, fit) in SPREAD
   // space — each slot is pw×ph regardless of how the grid rotated the spread.
@@ -1110,6 +1490,8 @@ async function imposeSaddle(artBytes, spec, layout) {
     const m = abPages[i + 1] != null ? abPages[i + 1] : spec.addBleed;
     return m && m !== "off" ? m : null;
   };
+  const inset = insetOf(spec);
+  const { showMarks, showFold, showSlug } = marksOf(spec);
   let inkDoc = null;
   const arts = [];
   const artCache = new Map(); // pages with identical geometry share one resolution
@@ -1123,21 +1505,25 @@ async function imposeSaddle(artBytes, spec, layout) {
     let art = artCache.get(key);
     if (!art) {
       art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed);
-      if (abm && !art.hasBleed) {
+      applyArtInset(art, inset);
+      if (abm && (!art.hasBleed || inset > 0)) {
         let gaps = null;
         try {
           if (!inkDoc) inkDoc = await pdfjsLib.getDocument({ data: artBytes.slice(0) }).promise;
           if (spec.addBleedSmart !== false) gaps = await detectInkGaps(inkDoc, i, art);
         } catch (e) { warnings.push(`add-bleed ink detection failed on page ${i + 1} (${e.message}) — synthesized from the page edge instead`); }
         if (abm === "auto") {
-          try { art.textNear = await detectTextNearEdges(inkDoc, i, art, layout.bleed); }
+          // the inset widens the band that gets reflected, so text further in
+          // than the bleed alone can still be duplicated — widen the search.
+          try { art.textNear = await detectTextNearEdges(inkDoc, i, art, layout.bleed + inset); }
           catch (e) {
             art.textNear = { left: true, right: true, top: true, bottom: true };
             warnings.push(`text detection failed on page ${i + 1} (${e.message}) — streak bleed used on all edges`);
           }
         }
-        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec));
+        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec), inset);
       }
+      finalizeArtCoverage(art, layout.bleed);
       artCache.set(key, art);
     }
     arts.push(art);
@@ -1181,12 +1567,12 @@ async function imposeSaddle(artBytes, spec, layout) {
       }
       const label = `SIG ${k + 1}/${S} ${inner ? "INSIDE" : "OUTSIDE"}${k === 0 ? " (COVER)" : ""}`;
       pageLabels.push(label);
-      if (spec.marks !== false) {
-        drawMarks(page, layout, cells);
-        drawFoldMarks(page, layout, cells);
+      if (showMarks) drawMarks(page, layout, cells);
+      if (showFold) drawFoldMarks(page, layout, cells);
+      if (showSlug) {
         const placed = drawSlug(page, layout, font, {
           side: label + (sheetsPerSig ? ` · run ${sheetsPerSig} sheets` : ""),
-          orderRef: spec.orderRef, jobName: spec.jobName,
+          orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
           qty, sheets: totalSheets, date: dateStr,
         }, cells);
         if (!placed && k === 0 && !inner) warnings.push("no clear space inside the printable area for the slug line — omitted");
@@ -1196,6 +1582,12 @@ async function imposeSaddle(artBytes, spec, layout) {
     }
   }
 
+  if (ocPending.length) {
+    await out.flush();   // materialise the copied XObjects before reading them
+    collectPendingOC(out, ocPending, ocAcc);
+  }
+  const ocHidden = writeOCProperties(out, ocAcc);
+  if (ocHidden) warnings.push(`source has ${ocHidden} HIDDEN layer(s) — kept hidden on the imposed sheet (they are switched off in the output too, and marked do-not-print). Flatten the layers in the source if your RIP ignores optional content.`);
   out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "booklet"} — ${P}pg saddle, ${bk.spreadsPerSide} spread(s)/side on ${layout.sheet.label}`);
   out.setProducer("PPS Auto-Imposition Tool");
   out.setCreator("PPS Auto-Imposition Tool");
@@ -1215,8 +1607,10 @@ async function imposeSaddle(artBytes, spec, layout) {
   });
   if (!layout.mismatch && !layout.efficient && !layout.fillSheet && layout.pricedImp >= 2 && layout.imp !== layout.pricedImp)
     issues.push(`placed ${layout.imp} pages/side ≠ priced ${layout.pricedImp}`);
-  // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that down
-  if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && layout.sheet.key === "13x27.5"))
+  // imp:1 sizes intentionally run 1 spread/side on 13×27.5 — still pin that
+  // down, unless the operator forced a different parent sheet (their call,
+  // and the spread-count expectation still holds).
+  if (!layout.mismatch && layout.pricedImp < 2 && !(bk.spreadsPerSide === 1 && (layout.sheet.key === "13x27.5" || layout.sheetForced)))
     issues.push(`imp:1 size expected 1 spread/side on 13×27.5, got ${bk.spreadsPerSide} on ${layout.sheet.key}`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
@@ -1244,6 +1638,16 @@ function layoutOpts(spec) {
     saddleColGaps: Array.isArray(spec.saddleColGaps) ? spec.saddleColGaps : null,
     saddleRowGaps: Array.isArray(spec.saddleRowGaps) ? spec.saddleRowGaps : null,
     saddleFillSheet: spec.saddleFillSheet == null ? null : !!spec.saddleFillSheet,
+    // Manual grid (flats/stickers): operator-set columns × rows, optional press
+    // sheet, plus the shared per-gap gutter arrays / full-sheet flag.
+    manualGrid: isFinite(+spec.gridAcross) && +spec.gridAcross >= 1 && isFinite(+spec.gridDown) && +spec.gridDown >= 1
+      ? { across: +spec.gridAcross, down: +spec.gridDown } : null,
+    manualSheet: spec.gridSheet || null,
+    // Parent-sheet override (throws on an unusable custom size).
+    sheetOverride: sheetOverrideOf(spec),
+    colGaps: Array.isArray(spec.colGaps) ? spec.colGaps : null,
+    rowGaps: Array.isArray(spec.rowGaps) ? spec.rowGaps : null,
+    fillSheet: spec.fillSheet == null ? null : !!spec.fillSheet,
   };
 }
 
@@ -1325,6 +1729,14 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     const m = abPages[pno + 1] != null ? abPages[pno + 1] : spec.addBleed;
     return m && m !== "off" ? m : null;
   };
+  const inset = insetOf(spec);
+  const { showMarks, showSlug } = marksOf(spec);
+  // Optional-content accumulator: one config for the whole output, fed by every
+  // source document that gets embedded (gang combos bring several).
+  const ocAcc = { all: new Map(), off: new Map() };
+  const ocPending = [];
+  const ocCache = new Map();
+  const ocSrcFor = doc => { if (!ocCache.has(doc)) ocCache.set(doc, srcHiddenOCGRefs(doc)); return ocCache.get(doc); };
   const inkDocs = {};
   async function inkDocFor(which) { // lazy pdf.js rasterizer per source file
     if (!inkDocs[which]) {
@@ -1417,7 +1829,8 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed);
       const abm = ref.gi != null || ref.doc === backDoc
         ? (spec.addBleed && spec.addBleed !== "off" ? spec.addBleed : null) : abMode(ref.pno);
-      if (abm && !art.hasBleed) {
+      applyArtInset(art, inset);
+      if (abm && (!art.hasBleed || inset > 0)) {
         const which = ref.gi != null ? "G" + ref.gi : ref.doc === backDoc ? "B" : "F";
         let gaps = null;
         if (spec.addBleedSmart !== false) {
@@ -1425,19 +1838,24 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
           catch (e) { warnings.push(`add-bleed ink detection failed on ${keyOf(ref)} (${e.message}) — synthesized from the page edge instead`); }
         }
         if (abm === "auto") {
-          try { art.textNear = await detectTextNearEdges(await inkDocFor(which), ref.pno, art, layout.bleed); }
+          // the inset widens the reflected band — look for text that far in too
+          try { art.textNear = await detectTextNearEdges(await inkDocFor(which), ref.pno, art, layout.bleed + inset); }
           catch (e) { // can't prove the edges are text-free — streak everywhere
             art.textNear = { left: true, right: true, top: true, bottom: true };
             warnings.push(`text detection failed on ${keyOf(ref)} (${e.message}) — streak bleed used on all edges`);
           }
         }
-        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec));
+        applySynthBleed(art, abm, layout.bleed, gaps, streakEpsOf(spec), inset);
       }
+      finalizeArtCoverage(art, layout.bleed);
       if (ref.gi != null) art.notes.forEach(n => warnings.push(`${gang[ref.gi].name}${ref.pno ? " (back)" : ""}: ${n}`));
       else if (key === keyOf(pieces[0].front)) art.notes.forEach(n => warnings.push("front: " + n));
       else if (sides === 2 && pieces[0].back && key === keyOf(pieces[0].back)) art.notes.forEach(n => warnings.push("back: " + n));
       else if (art.scale !== 1) scaledPages++;
       const [embedded] = await out.embedPdf(ref.doc, [ref.pno]);
+      // Layer visibility, per source document (gang files each bring their own).
+      const ocSrc = ocSrcFor(ref.doc);
+      if (ocSrc.any) ocPending.push({ ref: embedded.ref, srcRes: pageResources(ref.doc.getPage(ref.pno).node), hidden: ocSrc.hidden });
       artCache.set(key, art); embedCache.set(key, embedded);
     }
     return { art: artCache.get(key), embedded: embedCache.get(key) };
@@ -1487,10 +1905,10 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       }
       const label = (sideIdx === 0 ? "FRONT" : "BACK") + (D > 1 ? ` ${s + 1}/${D}` : "") + (mode === "combo" ? " · GANG COMBO" : mode === "gang" ? " · GANG" : mode === "stack" ? " · CUT&STACK" : mode === "each" ? ` · PIECE ${s + 1}` : "");
       pageLabels.push(label);
-      if (spec.marks !== false) {
-        drawMarks(page, layout, cellsForMarks);
+      if (showMarks) drawMarks(page, layout, cellsForMarks);
+      if (showSlug) {
         const placed = drawSlug(page, layout, font, {
-          side: label, orderRef: spec.orderRef, jobName: spec.jobName,
+          side: label, orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
           qty: spec.qty, sheets, date: dateStr,
         }, cellsForMarks);
         if (!placed && !slugWarned) { slugWarned = true; warnings.push("no clear space inside the printable area for the slug line — omitted"); }
@@ -1513,6 +1931,12 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   if (mode === "combo") sideReports.push({ side: "COMBO", pieces: pieces.length, sheetsPerSet: 1, modeName: "gang combo", alloc: gang.map((g, i) => `${g.name} ×${gangAlloc[i]}`).join(" · ") });
   else if (mode !== "repeat") sideReports.push({ side: "COLLATED", pieces: pieces.length, sheetsPerSet: D, modeName: mode });
 
+  if (ocPending.length) {
+    await out.flush();   // materialise the copied XObjects before reading them
+    collectPendingOC(out, ocPending, ocAcc);
+  }
+  const ocHidden = writeOCProperties(out, ocAcc);
+  if (ocHidden) warnings.push(`source has ${ocHidden} HIDDEN layer(s) — kept hidden on the imposed sheet (they are switched off in the output too, and marked do-not-print). Flatten the layers in the source if your RIP ignores optional content.`);
   out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "job"} — ${layout.imp}-up on ${layout.sheet.label}`);
   out.setProducer("PPS Auto-Imposition Tool");
   out.setCreator("PPS Auto-Imposition Tool");
@@ -1530,7 +1954,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
     if (i === 0) { const th = inspectPdfThreats(check); if (th.length) issues.push(`output carries active content: ${th.join("; ")}`); }
   });
-  if (!layout.mismatch && !layout.efficient && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
+  if (!layout.mismatch && !layout.efficient && !layout.manualGrid && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
   return { bytes, layout, warnings, sheets, sideReports, pageLabels, pieces: pieces.length, sheetsPerSet: D };
@@ -1581,6 +2005,20 @@ function detectTrim(doc, bleed) {
 
 function sanitizeName(s) { return String(s || "").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(0, 60); }
 
+// ── Approval binding ─────────────────────────────────────────────
+// Orders placed since the proof-parity work carry _pps_proof_hash: the SHA-256
+// the calculator computed over the print-ready bytes at the moment the
+// customer approved. Before imposing we hash what Drive actually returned and
+// refuse anything else — a mismatch means the file is NOT what the customer
+// approved (replaced, re-exported, wrong pick). Pre-hash orders carry no hash
+// and impose as before. Returns null when the page can't hash (no
+// crypto.subtle — non-HTTPS admin).
+async function sha256Hex(bytes) {
+  if (!(window.crypto && crypto.subtle)) return null;
+  const dig = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(dig)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 function imposedFilename(spec, layout) {
   const bits = ["IMPOSED"];
   // Order-<id>-i<item> lets the admin queue mark IMPOSED per line item, not
@@ -1593,7 +2031,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf };
+window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -1804,13 +2242,26 @@ function App() {
   const [jobName, setJobName] = useState("");
   const [orderRef, setOrderRef] = useState("");
   const [itemRef, setItemRef] = useState(""); // order item id — tags the output filename so per-item IMPOSED detection works
-  const [marks, setMarks] = useState(true);
+  const [marks, setMarks] = useState(true);          // crop / trim marks
+  const [foldMarks, setFoldMarks] = useState(true);  // saddle fold guides
+  const [slugOn, setSlugOn] = useState(true);        // slug line
+  const [sheetSel, setSheetSel] = useState("auto");  // parent sheet override
+  const [sheetLong, setSheetLong] = useState(19);
+  const [sheetShort, setSheetShort] = useState(13);
+  const [sheetMargin, setSheetMargin] = useState(0.25);
   const [allowBestFit, setAllowBestFit] = useState(false);
+  const [allowHashMismatch, setAllowHashMismatch] = useState(false); // conscious override of the approval-hash refusal; output is flagged UNAPPROVED
   const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
   const [gutterMode, setGutterMode] = useState("auto");   // "auto" | fixed inches
-  const [sigColGaps, setSigColGaps] = useState(null);     // manual saddle column gaps (in), null = uniform/butt
-  const [sigRowGaps, setSigRowGaps] = useState(null);     // manual saddle row gaps (in), null = uniform/butt
-  const [sigFillSheet, setSigFillSheet] = useState(null); // manually place past the imageable area
+  // Shared per-gap gutter editor (saddle signatures + flat/sticker grids).
+  const [gapCols, setGapCols] = useState(null);           // manual column gaps (in), null = uniform/butt
+  const [gapRows, setGapRows] = useState(null);           // manual row gaps (in), null = uniform/butt
+  const [gapFill, setGapFill] = useState(null);           // manually place past the imageable area
+  // Manual grid (flats/stickers): operator-set columns × rows + press sheet.
+  const [gridOn, setGridOn] = useState(false);
+  const [gridAcross, setGridAcross] = useState(1);
+  const [gridDown, setGridDown] = useState(1);
+  const [gridSheet, setGridSheet] = useState("auto");
   const [offsetMode, setOffsetMode] = useState("jog");    // jog lower-right 0.5″ | center | custom
   const [offsetRight, setOffsetRight] = useState(0.5);
   const [offsetBottom, setOffsetBottom] = useState(0.5);
@@ -1820,6 +2271,7 @@ function App() {
   const [bleedIn, setBleedIn] = useState(0.125);           // per-job bleed override
   const [addBleed, setAddBleed] = useState("off");         // synthesize bleed for no-bleed files: off | mirror | scale
   const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
+  const [artInset, setArtInset] = useState(0);            // pull art off the trim (in), fill makes up the difference
   const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
   const [gangFiles, setGangFiles] = useState([]);          // manual gang combo: [{bytes,name,pageCount,slots}]
   const [cleanBusy, setCleanBusy] = useState(false);       // sanitize-only passthrough in flight
@@ -1861,16 +2313,22 @@ function App() {
     calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0,
     sides: +sides, qty: +qty || 0, sheetFlip,
     backRotate: backRotate === "auto" ? "auto" : +backRotate,
-    jobName, orderRef, itemRef, marks, allowBestFit,
+    jobName, orderRef, itemRef, marks, foldMarks, slug: slugOn, allowBestFit,
+    sheet: sheetSel, sheetLong: +sheetLong || 0, sheetShort: +sheetShort || 0, sheetMargin: +sheetMargin,
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
-    bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps,
+    bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps, artInset: +artInset || 0,
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
-    saddleColGaps: sigColGaps, saddleRowGaps: sigRowGaps, saddleFillSheet: sigFillSheet,
-  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, allowBestFit,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, addBleedPages,
-       sigColGaps, sigRowGaps, sigFillSheet]);
+    saddleColGaps: gapCols, saddleRowGaps: gapRows, saddleFillSheet: gapFill,
+    colGaps: gapCols, rowGaps: gapRows, fillSheet: gapFill,
+    gridAcross: !isSaddle && gridOn ? +gridAcross || 0 : null,
+    gridDown: !isSaddle && gridOn ? +gridDown || 0 : null,
+    gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
+  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
+       sheetSel, sheetLong, sheetShort, sheetMargin,
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, addBleedPages,
+       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -1892,6 +2350,9 @@ function App() {
       .then(res => {
         if (seq !== genSeq.current) return;
         res.filename = imposedFilename(debSpec, res.layout);
+        // An overridden approval mismatch travels on the filename so the flag
+        // survives into the Drive folder and the press room.
+        if (art && art.hashState === "override") res.filename = res.filename.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
         setResult(res);
       })
       .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); } })
@@ -1974,9 +2435,24 @@ function App() {
         try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
       }
       catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
+      // Manual drops while a hash-bound order is active go through the same
+      // approval check as queue loads — otherwise dragging in any file was a
+      // silent bypass with a clean output filename.
+      let manualHashState = "unbound";
+      const orderHash = (activeOrder && activeOrder.proof_hash || "").toLowerCase();
+      if (slot !== "back" && /^[0-9a-f]{64}$/.test(orderHash)) {
+        const got = await sha256Hex(bytes);
+        if (!got) manualHashState = "unverifiable";
+        else if (got === orderHash) manualHashState = "verified";
+        else if (allowHashMismatch) manualHashState = "override";
+        else {
+          setError(`APPROVAL MISMATCH: "${f.name}" hashes ${got.slice(0, 12)}… but order #${activeOrder.order_id}'s customer approved ${orderHash.slice(0, 12)}…. This is not the approved file. Tick "impose despite approval mismatch" to stage it anyway (output flagged UNAPPROVED), or clear the active order first.`);
+          continue;
+        }
+      }
       if (slot === "back") setBackArt({ bytes, name: f.name, pageCount, threats });
       else {
-        setArt({ bytes, name: f.name, pageCount, threats });
+        setArt({ bytes, name: f.name, pageCount, threats, hashState: manualHashState });
         setAddBleedPages({}); // per-page overrides belong to the previous file
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
         if (det) {
@@ -2016,14 +2492,28 @@ function App() {
       const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
       if (!r.ok) throw await ajaxFail(r, "artwork download");
       const bytes = new Uint8Array(await r.arrayBuffer());
+      // Approval binding — verify BEFORE anything is staged, so an unapproved
+      // file never even reaches the preview.
+      let hashState = "unbound";
+      const expectedHash = (row.proof_hash || "").toLowerCase();
+      if (/^[0-9a-f]{64}$/.test(expectedHash)) {
+        const got = await sha256Hex(bytes);
+        if (!got) hashState = "unverifiable";
+        else if (got === expectedHash) hashState = "verified";
+        else if (allowHashMismatch) hashState = "override";
+        else throw new Error(`APPROVAL MISMATCH on order #${row.order_id}: "${row.art_file_name}" hashes ${got.slice(0, 12)}… but the customer approved ${expectedHash.slice(0, 12)}…. This is not the file they approved — it was replaced, re-exported, or the wrong file was picked. Check the Drive folder and the order, or tick "impose despite approval mismatch" to proceed with the output flagged UNAPPROVED.`);
+      }
       const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
       const pageCount = doc.getPageCount();
       let threats = [];
       try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
-      setArt({ bytes, name: row.art_file_name, pageCount, threats });
+      setArt({ bytes, name: row.art_file_name, pageCount, threats, hashState });
       setAddBleedPages({});
       setBackArt(null);
       let note = `Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
+      if (hashState === "verified") note = `✓ Approval hash verified — byte-for-byte the file the customer approved. ` + note;
+      else if (hashState === "override") note = `⚠ APPROVAL MISMATCH overridden — the output filename will carry UNAPPROVED. ` + note;
+      else if (hashState === "unverifiable") note = `⚠ This order carries an approval hash but the page cannot verify it (no crypto.subtle — is wp-admin on HTTPS?). ` + note;
       try {
         const det = detectTrim(doc, +bleedIn);
         const specL = Math.max(s.trimLong, s.trimShort), specS = Math.min(s.trimLong, s.trimShort);
@@ -2032,7 +2522,13 @@ function App() {
         }
       } catch (e2) { /* best-effort */ }
       setNotice(note);
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      // A failed load (approval mismatch included) must leave NOTHING staged:
+      // the previous order's art was still loaded here, and one "Send to
+      // Drive" click would have filed it as THIS order's press-ready PDF.
+      setArt(null); setBackArt(null); setActiveOrder(null); setResult(null);
+      setError(e.message);
+    }
     finally { setQueueBusy(null); }
   };
 
@@ -2072,6 +2568,16 @@ function App() {
         const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
         if (!r.ok) throw await ajaxFail(r, "artwork download");
         const bytes = new Uint8Array(await r.arrayBuffer());
+        // Bulk NEVER overrides an approval mismatch — a flagged row fails here
+        // and must be loaded individually to inspect.
+        const expectedHash = (row.proof_hash || "").toLowerCase();
+        if (/^[0-9a-f]{64}$/.test(expectedHash)) {
+          const got = await sha256Hex(bytes);
+          // An unverifiable hash (no crypto.subtle — non-HTTPS admin) fails the
+          // row rather than silently imposing a hash-bound order unchecked.
+          if (!got) throw new Error(`cannot verify the approval hash (crypto.subtle unavailable — is wp-admin on HTTPS?). Load the order individually to see the same warning, or fix admin HTTPS.`);
+          if (got !== expectedHash) throw new Error(`approval mismatch — the file in Drive is not what the customer approved (${got.slice(0, 12)}… vs approved ${expectedHash.slice(0, 12)}…). Load the order individually to inspect.`);
+        }
         const res = await imposePdf(bytes, null, s);
         const filename = imposedFilename(s, res.layout);
         const fd = new FormData();
@@ -2098,7 +2604,7 @@ function App() {
   const pendingCount = (rows || []).filter(rowPending).length;
 
   const lay = layoutInfo.layout;
-  const parityOk = lay && !lay.mismatch && !lay.efficient && !lay.fillSheet && (lay.booklet
+  const parityOk = lay && !lay.mismatch && !lay.efficient && !lay.fillSheet && !lay.manualGrid && (lay.booklet
     ? (lay.pricedImp < 2 || lay.imp === lay.pricedImp)   // imp:1 presets legitimately move to the 27.5 sheet
     : lay.imp === Math.round(lay.pricedImp));
 
@@ -2249,6 +2755,45 @@ function App() {
                 <input type="number" step="0.0625" min="0" max="0.5" value={bleedIn} onChange={e => setBleedIn(e.target.value)} />
               </Field>
             </div>
+            <Field label="Parent sheet">
+              <select value={sheetSel} onChange={e => setSheetSel(e.target.value)}>
+                <option value="auto">Auto — the product's own press sheet</option>
+                <option value="13x19">13×19</option>
+                <option value="13x27.5">13×27.5 (oversize)</option>
+                <option value="12x18">12×18 crack-n-peel</option>
+                <option value="custom">Custom size…</option>
+              </select>
+              {sheetSel === "custom" && (
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 6, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet long (in)</div>
+                    <input type="number" step="0.25" min="3" max="60" value={sheetLong} style={{ width: 84 }}
+                           onChange={e => setSheetLong(e.target.value)} />
+                  </div>
+                  <span style={{ paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet short (in)</div>
+                    <input type="number" step="0.25" min="3" max="60" value={sheetShort} style={{ width: 84 }}
+                           onChange={e => setSheetShort(e.target.value)} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Imageable margin (in)</div>
+                    <input type="number" step="0.0625" min="0" value={sheetMargin} style={{ width: 96 }}
+                           onChange={e => setSheetMargin(e.target.value)} />
+                  </div>
+                  <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
+                    prints {(Math.max(+sheetLong || 0, +sheetShort || 0) - 2 * (+sheetMargin || 0)).toFixed(2)}×
+                    {(Math.min(+sheetLong || 0, +sheetShort || 0) - 2 * (+sheetMargin || 0)).toFixed(2)}″
+                  </div>
+                </div>
+              )}
+              {sheetSel !== "auto" && (
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                  Changes the physical sheet only — the priced imp stays what the calculator quoted, so a count that
+                  no longer fits is flagged rather than silently changed. Marks and slug follow the new imageable area.
+                </div>
+              )}
+            </Field>
             <Field label="Add bleed (files with none)">
               <select value={addBleed} onChange={e => setAddBleed(e.target.value)}
                       style={addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w))
@@ -2266,7 +2811,41 @@ function App() {
                   (a mirror would visibly reflect people at the edges).
                 </div>
               )}
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 4, cursor: "pointer" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, flexWrap: "wrap" }}>
+                <b style={{ fontWeight: 600 }}>Pull art off trim:</b>
+                <input type="number" step="0.03125" min="0" max="0.5" value={artInset}
+                       style={{ width: 70, outline: +artInset > 0 && addBleed === "scale" ? "2px solid #e91e63" : undefined }}
+                       onChange={e => setArtInset(e.target.value)} />
+                ″ minimum on every edge
+                {+artInset > 0 && (() => {
+                  const W = Math.max(+trimLong || 0, +trimShort || 0), H = Math.min(+trimLong || 0, +trimShort || 0);
+                  if (!(H > 0)) return null;
+                  const f = 1 - 2 * (+artInset) / H;
+                  return (
+                    <span style={{ color: f > 0.5 ? "rgba(255,255,255,.5)" : "#f87171" }}>
+                      — art ×{f.toFixed(4)} ({(100 - f * 100).toFixed(2)}% smaller): pulls in {(W * (1 - f) / 2).toFixed(3)}″ across, {(H * (1 - f) / 2).toFixed(3)}″ down;
+                      fill band becomes {((W * (1 - f) / 2) + (+bleedIn || 0)).toFixed(3)}″
+                    </span>
+                  );
+                })()}
+              </div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 2 }}>
+                For art whose text crowds the cut. Shrinks the art so content backs away from the trim, then the
+                bleed fill above covers the gap it opens — out from the art's new edge to past the cut. Scale is
+                uniform (art is never distorted), so the value is a guaranteed <i>minimum</i>: the long edge pulls
+                in proportionally further. Needs a fill mode — Auto, Mirror or Streak, not Scale.
+              </div>
+              {+artInset > 0 && addBleed === "scale" && (
+                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
+                  “Scale art up to bleed” re-expands the art to the bleed box, undoing the pull-off. Use Auto, Mirror or Streak.
+                </div>
+              )}
+              {+artInset > 0 && addBleed === "off" && (
+                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
+                  With Add bleed off, the gap the pull-off opens would print as paper white inside the trim. Set a fill mode.
+                </div>
+              )}
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, cursor: "pointer" }}>
                 <input type="checkbox" checked={addBleedSmart} onChange={e => setAddBleedSmart(e.target.checked)} />
                 Smart edge detect — if the art stops just short of trim (≤3/16″), pre-scale so the synthesized
                 bleed never amplifies the white sliver; big white margins are respected as design.
@@ -2429,32 +3008,70 @@ function App() {
                 <span>Lay out on 13×27.5 (efficient mode) <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "more signature copies per sheet" : "multiple expands to fill the 27″ axis"}</span></span>
               </label>
             )}
-            {isSaddle && lay && lay.booklet && (() => {
+            {lay && (isSaddle ? !!lay.booklet : true) && (() => {
               const nc = Math.max(0, lay.across - 1), nr = Math.max(0, lay.down - 1);
-              const effCol = (sigColGaps && sigColGaps.length === nc) ? sigColGaps : (lay.colGaps || Array(nc).fill(lay.gutter || 0));
-              const effRow = (sigRowGaps && sigRowGaps.length === nr) ? sigRowGaps : (lay.rowGaps || Array(nr).fill(lay.gutter || 0));
-              const setCol = (i, v) => { const a = effCol.slice(); a[i] = v === "" ? 0 : +v; setSigColGaps(a); };
-              const setRow = (i, v) => { const a = effRow.slice(); a[i] = v === "" ? 0 : +v; setSigRowGaps(a); };
-              const custom = sigColGaps || sigRowGaps || sigFillSheet != null;
+              const effCol = (gapCols && gapCols.length === nc) ? gapCols : (lay.colGaps || Array(nc).fill(lay.gutter || 0));
+              const effRow = (gapRows && gapRows.length === nr) ? gapRows : (lay.rowGaps || Array(nr).fill(lay.gutter || 0));
+              const setCol = (i, v) => { const a = effCol.slice(); a[i] = v === "" ? 0 : +v; setGapCols(a); };
+              const setRow = (i, v) => { const a = effRow.slice(); a[i] = v === "" ? 0 : +v; setGapRows(a); };
+              const custom = gapCols || gapRows || gapFill != null;
               const tw = lay.across * lay.cellW + effCol.reduce((x, y) => x + y, 0);
               const th = lay.down * lay.cellH + effRow.reduce((x, y) => x + y, 0);
               const over = tw > lay.sheet.long + 1e-6 || th > lay.sheet.short + 1e-6;
+              // Changing the grid invalidates gap arrays sized to the old one.
+              const setAcross = v => { setGridAcross(v); setGapCols(null); };
+              const setDown = v => { setGridDown(v); setGapRows(null); };
+              const manualCount = (Math.floor(+gridAcross) || 0) * (Math.floor(+gridDown) || 0);
               return (
                 <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 8, background: "rgba(255,255,255,.02)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span className="lbl" style={{ margin: 0 }}>Signature gutters</span>
+                    <span className="lbl" style={{ margin: 0 }}>{isSaddle ? "Signature gutters" : "Manual grid & gutters"}</span>
                     <span style={{ fontSize: 11, color: over ? "#f87171" : "rgba(255,255,255,.4)" }}>
                       block {tw.toFixed(2)}×{th.toFixed(2)}″ / sheet {lay.sheet.long}×{lay.sheet.short}″{over ? " — OVERFLOW" : ""}
                     </span>
                   </div>
+                  {!isSaddle && (
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                        <input type="checkbox" checked={gridOn} style={{ width: "auto" }}
+                               onChange={e => {
+                                 const on = e.target.checked;
+                                 if (on) { setGridAcross(lay.across); setGridDown(lay.down); } // seed from the current layout
+                                 setGapCols(null); setGapRows(null);
+                                 setGridOn(on);
+                               }} />
+                        <span>Set columns × rows manually <span style={{ color: "rgba(255,255,255,.4)" }}>— places exactly this many; the count is flagged against the priced imp</span></span>
+                      </label>
+                      {gridOn && (
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Columns (across)</div>
+                            <input type="number" min="1" step="1" value={gridAcross} style={{ width: 74, fontSize: 12 }}
+                                   onChange={e => setAcross(e.target.value)} />
+                          </div>
+                          <span style={{ fontSize: 13, paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Rows (down)</div>
+                            <input type="number" min="1" step="1" value={gridDown} style={{ width: 74, fontSize: 12 }}
+                                   onChange={e => setDown(e.target.value)} />
+                          </div>
+                          <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
+                            on <b>{lay.sheet.label}</b> · = <b>{manualCount}</b>-up{lay.pricedImp ? <span style={{ color: manualCount === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}-up)</span> : null}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginBottom: 7 }}>
-                    Set the gutter between each signature column/row independently. Turn on “fill full sheet” to allow gutters that push the layout past the imageable area (guillotine cutting).
+                    {isSaddle
+                      ? "Set the gutter between each signature column/row independently. Turn on “fill full sheet” to allow gutters that push the layout past the imageable area (guillotine cutting)."
+                      : "Set the gutter between each column/row independently. Turn on “fill full sheet” to allow a block that runs past the imageable area (guillotine cutting) — it centres on the sheet instead of jogging."}
                   </div>
                   {(nc > 0 || nr > 0) ? (
                     <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
                       {nc > 0 && (
                         <div>
-                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Column gaps (between spreads, in)</div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Column gaps (between {isSaddle ? "spreads" : "columns"}, in)</div>
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                             {effCol.map((g, i) => (
                               <input key={i} type="number" step="0.0625" min="0" value={g} style={{ width: 62, fontSize: 12 }}
@@ -2476,29 +3093,52 @@ function App() {
                       )}
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)" }}>Single spread per side — no inter-signature gutters to set. Raise copies (fill rules / efficient) to gang more.</div>
+                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)" }}>
+                      {isSaddle
+                        ? "Single spread per side — no inter-signature gutters to set. Raise copies (efficient mode) to gang more."
+                        : "Single piece per sheet — no gutters to set. Raise columns/rows above to gang more."}
+                    </div>
                   )}
                   <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
                     <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                      <input type="checkbox" checked={sigFillSheet == null ? !!lay.fillSheet : sigFillSheet}
-                             onChange={e => setSigFillSheet(e.target.checked)} style={{ width: "auto" }} />
+                      <input type="checkbox" checked={gapFill == null ? !!lay.fillSheet : gapFill}
+                             onChange={e => setGapFill(e.target.checked)} style={{ width: "auto" }} />
                       Fill full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>(place past the imageable area)</span>
                     </label>
                     {custom && (
                       <button type="button" className="imp-btn sec" style={{ padding: "3px 10px", fontSize: 12 }}
-                              onClick={() => { setSigColGaps(null); setSigRowGaps(null); setSigFillSheet(null); }}>Reset to rules</button>
+                              onClick={() => { setGapCols(null); setGapRows(null); setGapFill(null); }}>Reset gutters</button>
                     )}
                   </div>
                 </div>
               );
             })()}
-            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
-              Crop marks + slug (inside printable area, as space allows)
-            </label>
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
+                Crop / trim marks
+              </label>
+              {isSaddle && (
+                <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                  <input type="checkbox" checked={foldMarks} onChange={e => setFoldMarks(e.target.checked)} style={{ width: "auto" }} />
+                  Fold guides
+                </label>
+              )}
+              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={slugOn} onChange={e => setSlugOn(e.target.checked)} style={{ width: "auto" }} />
+                Slug line
+              </label>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+                independent — all drawn inside the printable area, as space allows
+              </span>
+            </div>
             <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
               <input type="checkbox" checked={allowBestFit} onChange={e => setAllowBestFit(e.target.checked)} style={{ width: "auto" }} />
               <span>Allow best physical fit if the priced imp can't be placed <span style={{ color: "rgba(255,255,255,.4)" }}>(mismatch is flagged on sheet + slug)</span></span>
+            </label>
+            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
+              <input type="checkbox" checked={allowHashMismatch} onChange={e => setAllowHashMismatch(e.target.checked)} style={{ width: "auto" }} />
+              <span>Impose despite approval mismatch <span style={{ color: "rgba(255,255,255,.4)" }}>(file hash ≠ what the customer approved; output flagged UNAPPROVED)</span></span>
             </label>
           </div>
         </div>
@@ -2523,9 +3163,12 @@ function App() {
                     </div>
                   ) : (
                     <div>Grid: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.imp}-up</b>{" "}
-                      {lay.efficient
+                      {lay.manualGrid
+                        ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>MANUAL GRID {lay.across}×{lay.down} — PRICED {lay.pricedImp}-UP</span>
+                        : lay.efficient
                         ? <span className={"imp-badge " + (lay.imp >= lay.pricedImp ? "ok" : "warn")}>13×27.5 EFFICIENT — PRICED {lay.pricedImp}-UP/13×19</span>
                         : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}-UP`}</span>}
+                      {lay.fillSheet && <span className="imp-badge warn" style={{ marginLeft: 6 }}>FULL-SHEET FILL — PAST IMAGEABLE AREA</span>}
                     </div>
                   )}
                   <div>Gutter: <b>{lay.gutter}″</b>{lay.gutter === 0 ? " (butt-cut)" : ""}</div>
