@@ -17,7 +17,7 @@ function wp_generate_password($n, $s = true, $x = true) { return str_repeat('x',
 function wc_get_product($id) { return false; }
 function absint($v) { return abs(intval($v)); }
 
-require '__DIR__ . "/../pps-pay-link.php"';
+require __DIR__ . '/../pps-pay-link.php';
 
 $pass = 0; $fail = 0;
 function ok($label, $got, $want) {
