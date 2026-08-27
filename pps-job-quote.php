@@ -674,5 +674,13 @@ function pps_quote_chrome_css() {
     .ast-small-footer,
     .footer-adv,
     .ast-footer-overlay { display: none !important; }
+
+    /* Room below the form. Removing the footer took away the only thing that
+       was standing between the submit button and the bottom of the window, so
+       the last field sat hard against the edge -- which reads as a page that
+       has been cut off rather than one that has ended. Applied to .pps-acct so
+       the confirmation screen gets it too; that view is shorter and would look
+       worse. Scales with the viewport but never collapses on a phone. */
+    .pps-acct { padding-bottom: clamp(80px, 14vh, 180px); }
     ';
 }
