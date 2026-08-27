@@ -378,6 +378,85 @@ function pps_paylink_create( array $a ) {
 }
 
 /* ─────────────────────────────────────────────────────────────
+ * Answering in the conversation
+ * ───────────────────────────────────────────────────────────── */
+
+/**
+ * The conversation the command came from, if the payload names one.
+ * Mirrors pps_assistant_missive_extract() for the same reason it exists.
+ */
+function pps_paylink_extract_conversation( $payload ) {
+    if ( ! is_array( $payload ) ) return '';
+    $nodes = array( $payload );
+    foreach ( array( 'message', 'post', 'draft', 'data', 'comment' ) as $k ) {
+        if ( isset( $payload[ $k ] ) && is_array( $payload[ $k ] ) ) $nodes[] = $payload[ $k ];
+    }
+    foreach ( $nodes as $n ) {
+        if ( ! empty( $n['conversation'] ) && is_string( $n['conversation'] ) ) return $n['conversation'];
+        if ( ! empty( $n['conversation']['id'] ) ) return (string) $n['conversation']['id'];
+        if ( ! empty( $n['conversation_id'] ) ) return (string) $n['conversation_id'];
+    }
+    return '';
+}
+
+/**
+ * Post an internal note back into the thread.
+ *
+ * WHY THIS EXISTS EVEN THOUGH THE LINK IS PREDICTABLE
+ * On the happy path the operator already knows the link, so this is only a
+ * convenience. On the UNHAPPY path it is the whole safety net: without it a
+ * refused mint is completely silent in Missive, and the operator pastes a
+ * timestamp link that 404s to a customer, having done nothing wrong that they
+ * could see. A note costs one API call and turns a silent failure into a
+ * visible one.
+ *
+ * Internal note, never a customer-facing message: this is shop-floor
+ * information, and the thread may well be open in front of the buyer.
+ *
+ * Best effort by design — a failure here must never fail the mint. The link
+ * exists either way, and the operator can still type it.
+ */
+function pps_paylink_missive_note( $conversation_id, $text ) {
+    if ( ! $conversation_id ) return false;
+    if ( ! function_exists( 'pps_assistant_config' ) ) return false;
+
+    $cfg   = pps_assistant_config();
+    $token = (string) ( $cfg['missive_token'] ?? '' );
+    if ( '' === $token ) return false;
+
+    $payload = array( 'posts' => array(
+        'conversation' => (string) $conversation_id,
+        'notification' => array( 'title' => 'Pay link', 'body' => wp_trim_words( (string) $text, 12 ) ),
+        'text'         => (string) $text,
+    ) );
+
+    $res = wp_remote_post( 'https://public.missiveapp.com/v1/posts', array(
+        'timeout' => 8,
+        'headers' => array(
+            'Authorization' => 'Bearer ' . $token,
+            'Content-Type'  => 'application/json',
+        ),
+        'body' => wp_json_encode( $payload ),
+    ) );
+    if ( is_wp_error( $res ) ) {
+        pps_paylink_log_note( 'note_failed', $res->get_error_message() );
+        return false;
+    }
+    $code = (int) wp_remote_retrieve_response_code( $res );
+    $ok   = $code >= 200 && $code < 300;
+    pps_paylink_log_note( $ok ? 'note_ok' : 'note_failed', 'HTTP ' . $code );
+    return $ok;
+}
+
+/** Whether the note went out, kept for the admin screen. No message bodies. */
+function pps_paylink_log_note( $event, $detail = '' ) {
+    $log = get_option( 'pps_paylink_notes', array() );
+    if ( ! is_array( $log ) ) $log = array();
+    array_unshift( $log, array( 'at' => gmdate( 'c' ), 'event' => (string) $event, 'detail' => (string) $detail ) );
+    update_option( 'pps_paylink_notes', array_slice( $log, 0, 10 ), false );
+}
+
+/* ─────────────────────────────────────────────────────────────
  * REST route
  * ───────────────────────────────────────────────────────────── */
 
@@ -458,6 +537,9 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
     if ( ! is_array( $body ) ) $body = $request->get_body_params();
     if ( ! is_array( $body ) ) $body = array();
 
+    // Held from here on so a REFUSAL can be reported too, not just a success.
+    $conversation = pps_paylink_extract_conversation( $body );
+
     // A caller that sends the fields uses them. A rule engine that posts its
     // own envelope gets the command read out of whatever text it carried.
     if ( empty( $body['description'] ) || ! isset( $body['price'] ) || '' === $body['price'] ) {
@@ -475,6 +557,8 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         }
         $parsed = pps_paylink_parse_command( $text );
         if ( is_wp_error( $parsed ) ) {
+            pps_paylink_missive_note( $conversation,
+                "⚠️ No pay link was created.\n\n" . $parsed->get_error_message() );
             return new WP_REST_Response( array(
                 'ok' => false, 'error' => $parsed->get_error_code(), 'message' => $parsed->get_error_message(),
             ), 400 );
@@ -493,6 +577,8 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
     ) );
 
     if ( is_wp_error( $res ) ) {
+        pps_paylink_missive_note( $conversation,
+            "⚠️ No pay link was created.\n\n" . $res->get_error_message() );
         return new WP_REST_Response( array(
             'ok'    => false,
             'error' => $res->get_error_code(),
@@ -501,6 +587,15 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
             'message' => $res->get_error_message(),
         ), 400 );
     }
+
+    // The link is knowable without this, but seeing it confirms it was actually
+    // minted — and says so when QuickBooks was asked for and could not be given,
+    // which the operator would otherwise discover from the customer.
+    $note = $res['url'];
+    if ( ! empty( $res['qbo_fell_back'] ) ) {
+        $note .= "\n\n⚠️ QuickBooks was requested but is not ready, so this link uses card checkout.";
+    }
+    pps_paylink_missive_note( $conversation, $note );
 
     return new WP_REST_Response( array( 'ok' => true ) + $res, 201 );
 }

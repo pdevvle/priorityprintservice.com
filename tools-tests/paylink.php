@@ -248,5 +248,17 @@ ok('all sigils: qbo',   $r['qbo'], true);
 ok('all sigils: ref',   $r['reference'], 'jan-batch');
 ok('all sigils: desc',  $r['description'], 'Letterhead 8.5 x 11, 70lb');
 
+// ── Finding the conversation to answer in ────────────────────────────────
+ok('flat conversation id',   pps_paylink_extract_conversation(array('conversation' => 'abc')), 'abc');
+ok('nested conversation id', pps_paylink_extract_conversation(array('conversation' => array('id' => 'xyz'))), 'xyz');
+ok('snake_case id',          pps_paylink_extract_conversation(array('conversation_id' => 'c1')), 'c1');
+ok('inside a comment',       pps_paylink_extract_conversation(array('comment' => array('conversation' => 'c2'))), 'c2');
+ok('absent is empty',        pps_paylink_extract_conversation(array('text' => 'hi')), '');
+ok('non-array is empty',     pps_paylink_extract_conversation('nope'), '');
+
+// A note must never be attempted without somewhere to put it -- and must be
+// refused rather than erroring, since it is best-effort by design.
+ok('no conversation, no note', pps_paylink_missive_note('', 'x'), false);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
