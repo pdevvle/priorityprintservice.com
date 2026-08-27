@@ -151,6 +151,111 @@ function pps_paylink_token( $reference = '' ) {
 }
 
 /* ─────────────────────────────────────────────────────────────
+ * Reading a command typed in a conversation
+ * ───────────────────────────────────────────────────────────── */
+
+/**
+ * Find the operator's typed text inside whatever the caller posted.
+ *
+ * A rule engine posts ITS payload, not ours: a Missive rule delivers the
+ * message/comment envelope, and the text is somewhere inside it. Mirrors
+ * pps_assistant_missive_extract(), which walks a list of plausible paths for
+ * exactly this reason — Missive 403s automated fetches of its own docs, so the
+ * shape is reconstructed rather than read off a spec.
+ *
+ * A caller that already sends {description, price} never reaches this.
+ */
+function pps_paylink_extract_text( $payload ) {
+    if ( ! is_array( $payload ) ) return '';
+
+    // An explicit field wins over anything found by walking.
+    foreach ( array( 'text', 'command', 'message' ) as $k ) {
+        if ( ! empty( $payload[ $k ] ) && is_string( $payload[ $k ] ) ) return $payload[ $k ];
+    }
+
+    $nodes = array( $payload );
+    foreach ( array( 'message', 'post', 'draft', 'data', 'comment' ) as $k ) {
+        if ( isset( $payload[ $k ] ) && is_array( $payload[ $k ] ) ) $nodes[] = $payload[ $k ];
+    }
+    foreach ( $nodes as $n ) {
+        foreach ( array( 'body', 'text', 'delivered_body', 'preview', 'markdown' ) as $bk ) {
+            if ( ! empty( $n[ $bk ] ) && is_string( $n[ $bk ] ) ) return $n[ $bk ];
+        }
+    }
+    return '';
+}
+
+/**
+ * Pull a job out of a line an operator typed.
+ *
+ *   /pay $250 500 postcards, 16pt gloss
+ *   pay $1,250.00 qbo 2000 booklets #acme-october
+ *
+ * WHY THE PRICE MUST BE UNAMBIGUOUS
+ * "500 postcards $250" and "$250 500 postcards" both mean the same job, and a
+ * parser that takes the first number would charge 500 dollars for one of them.
+ * A wrong price is worse than a refusal, so: the $-prefixed amount wins; with
+ * no $ and exactly one number in the line that number is the price; with no $
+ * and several numbers this refuses and says why.
+ *
+ * @return array|WP_Error {description, price, qbo, reference}
+ */
+function pps_paylink_parse_command( $text ) {
+    $text = trim( (string) $text );
+    if ( '' === $text ) return new WP_Error( 'empty', 'Nothing to read — send the job and its price.' );
+
+    // Strip a leading command word so "/pay" does not land in the description.
+    $text = preg_replace( '/^\s*\/?(pay|paylink|quote)\b[:\s]*/i', '', $text, 1 );
+
+    // #reference, pulled out before anything else so its digits cannot be read
+    // as a price.
+    $reference = '';
+    if ( preg_match( '/(?:^|\s)#([A-Za-z0-9_-]{2,60})\b/', $text, $m ) ) {
+        $reference = $m[1];
+        $text = str_replace( $m[0], ' ', $text );
+    }
+
+    // The QuickBooks flag as a standalone word, so "quickbooks-style booklets"
+    // in a description does not silently route a payment.
+    $qbo = false;
+    if ( preg_match( '/(?:^|\s)(qbo|quickbooks)(?=$|\s)/i', $text, $m ) ) {
+        $qbo  = true;
+        $text = preg_replace( '/(?:^|\s)(qbo|quickbooks)(?=$|\s)/i', ' ', $text, 1 );
+    }
+
+    $price = null;
+    if ( preg_match( '/\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/', $text, $m ) ) {
+        $price = pps_paylink_parse_price( $m[1] );
+        $text  = str_replace( $m[0], ' ', $text );
+    } else {
+        preg_match_all( '/(?:^|\s)([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?=$|\s|,)/', $text, $all );
+        $nums = isset( $all[1] ) ? $all[1] : array();
+        if ( 1 === count( $nums ) ) {
+            $price = pps_paylink_parse_price( $nums[0] );
+            $text  = preg_replace( '/(?:^|\s)' . preg_quote( $nums[0], '/' ) . '(?=$|\s|,)/', ' ', $text, 1 );
+        } elseif ( count( $nums ) > 1 ) {
+            return new WP_Error( 'ambiguous',
+                'More than one number and no $ — write the price as $250 so it cannot be confused with a quantity.' );
+        }
+    }
+    if ( null === $price || $price <= 0 ) {
+        return new WP_Error( 'price', 'No price found. Write it as $250.' );
+    }
+
+    $description = trim( preg_replace( '/\s+/', ' ', $text ), " \t\n\r,;-" );
+    if ( '' === $description ) {
+        return new WP_Error( 'description', 'No job description found — say what the job is as well as the price.' );
+    }
+
+    return array(
+        'description' => $description,
+        'price'       => $price,
+        'qbo'         => $qbo,
+        'reference'   => $reference,
+    );
+}
+
+/* ─────────────────────────────────────────────────────────────
  * Minting
  * ───────────────────────────────────────────────────────────── */
 
@@ -269,6 +374,22 @@ function pps_paylink_log_reject( WP_REST_Request $request ) {
     update_option( PPS_PAYLINK_REJECTS, array_slice( $log, 0, 5 ), false );
 }
 
+/**
+ * Record the SHAPE of a payload we could not read -- key names only, never
+ * values. The point is to learn where a rule engine puts the text, not to keep
+ * a copy of what was said in somebody's conversation.
+ */
+function pps_paylink_log_shape( array $body ) {
+    $shape = array();
+    foreach ( $body as $k => $v ) {
+        $shape[] = $k . ':' . ( is_array( $v ) ? '{' . implode( ',', array_slice( array_keys( $v ), 0, 12 ) ) . '}' : gettype( $v ) );
+    }
+    $log = get_option( 'pps_paylink_shapes', array() );
+    if ( ! is_array( $log ) ) $log = array();
+    array_unshift( $log, array( 'at' => gmdate( 'c' ), 'keys' => array_slice( $shape, 0, 25 ) ) );
+    update_option( 'pps_paylink_shapes', array_slice( $log, 0, 5 ), false );
+}
+
 add_action( 'rest_api_init', function () {
     register_rest_route( 'pps/v1', '/pay-link', array(
         'methods'             => array( 'POST' ),
@@ -289,6 +410,30 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
     $body = $request->get_json_params();
     if ( ! is_array( $body ) ) $body = $request->get_body_params();
     if ( ! is_array( $body ) ) $body = array();
+
+    // A caller that sends the fields uses them. A rule engine that posts its
+    // own envelope gets the command read out of whatever text it carried.
+    if ( empty( $body['description'] ) || ! isset( $body['price'] ) || '' === $body['price'] ) {
+        $text = pps_paylink_extract_text( $body );
+        if ( '' === $text ) {
+            // The one failure worth recording in full: we could not find the
+            // operator's words anywhere in the payload, which is a one-line fix
+            // to pps_paylink_extract_text() once the shape is known -- but only
+            // if the shape was kept. Keys only; values may carry customer text.
+            pps_paylink_log_shape( $body );
+            return new WP_REST_Response( array(
+                'ok' => false, 'error' => 'no_text',
+                'message' => 'No description/price fields and no readable text in the payload. The keys received have been recorded on the Pay Links screen.',
+            ), 400 );
+        }
+        $parsed = pps_paylink_parse_command( $text );
+        if ( is_wp_error( $parsed ) ) {
+            return new WP_REST_Response( array(
+                'ok' => false, 'error' => $parsed->get_error_code(), 'message' => $parsed->get_error_message(),
+            ), 400 );
+        }
+        $body = array_merge( $body, $parsed );
+    }
 
     $res = pps_paylink_create( array(
         'description' => isset( $body['description'] ) ? $body['description'] : '',

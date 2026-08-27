@@ -127,5 +127,46 @@ ok('timestamp token passed through', $GLOBALS['captured']['token'] ?? '', '20260
 $res = pps_paylink_create(array('description' => 'job', 'price' => '100', 'reference' => 'acme-october'));
 ok('reference token passed through',  $GLOBALS['captured']['token'] ?? '', 'acme-october');
 
+// ── Reading a command typed in a conversation ────────────────────────────
+function parse($t) { return pps_paylink_parse_command($t); }
+function pcode($r) { return is_wp_error($r) ? $r->get_error_code() : 'ok'; }
+
+$r = parse('/pay $250 500 postcards, 16pt gloss');
+ok('price from $ form',     $r['price'], 250.0);
+ok('description survives',  $r['description'], '500 postcards, 16pt gloss');
+ok('qbo off by default',    $r['qbo'], false);
+
+// The case that makes a naive first-number parser charge $500.
+$r = parse('500 postcards $250');
+ok('$ wins over leading qty', $r['price'], 250.0);
+ok('qty stays in description', $r['description'], '500 postcards');
+
+// Refuse rather than guess when two bare numbers could each be the price.
+ok('two bare numbers refused', pcode(parse('500 postcards 250')), 'ambiguous');
+// One bare number is unambiguous, so it is allowed.
+$r = parse('booklets 250');
+ok('single bare number is the price', $r['price'], 250.0);
+
+$r = parse('pay $1,250.00 qbo 2000 booklets #acme-october');
+ok('commas parsed',      $r['price'], 1250.0);
+ok('qbo flag read',      $r['qbo'], true);
+ok('reference read',     $r['reference'], 'acme-october');
+ok('flags left the text', $r['description'], '2000 booklets');
+
+// A word merely containing "quickbooks" must not route a payment.
+$r = parse('$99 quickbooks-style ledger books');
+ok('substring does not set qbo', $r['qbo'], false);
+
+ok('no price refused',       pcode(parse('some postcards')), 'price');
+ok('no description refused', pcode(parse('$250')), 'description');
+ok('empty refused',          pcode(parse('   ')), 'empty');
+
+// ── Finding that text inside a rule engine's envelope ────────────────────
+ok('explicit text field',  pps_paylink_extract_text(array('text' => 'a')), 'a');
+ok('missive comment body', pps_paylink_extract_text(array('comment' => array('body' => 'b'))), 'b');
+ok('nested message body',  pps_paylink_extract_text(array('message' => array('delivered_body' => 'c'))), 'c');
+ok('nothing readable',     pps_paylink_extract_text(array('conversation' => array('id' => 'x'))), '');
+ok('non-array is empty',   pps_paylink_extract_text('nope'), '');
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
