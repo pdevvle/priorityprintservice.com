@@ -142,6 +142,12 @@ if ( file_exists( PPS_CALC_DIR . 'pps-job-quote.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-job-quote.php';
 }
 
+// QuickBooks: raise the invoice, take the payment, hear about it settling.
+// Loaded before the pay-link module, which routes on whether this can pay.
+if ( file_exists( PPS_CALC_DIR . 'pps-quickbooks.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-quickbooks.php';
+}
+
 // Minting a quote link from a conversation (Missive) rather than a form.
 // Loaded after the quote module, whose helpers it calls.
 if ( file_exists( PPS_CALC_DIR . 'pps-pay-link.php' ) ) {
