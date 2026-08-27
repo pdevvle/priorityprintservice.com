@@ -102,7 +102,12 @@ function pps_quote_create( array $a ) {
         return new WP_Error( 'tiers', 'Enter at least one quantity and price.' );
     }
 
-    $source = ( isset( $a['pay_source'] ) && 'quickbooks' === $a['pay_source'] ) ? 'quickbooks' : 'site';
+    // Three routes, not two. 'quickbooks' is the legacy pasted link settled by
+    // hand; 'qbo_api' raises the invoice through the API and is settled by a
+    // webhook. Anything unrecognised falls to site checkout rather than
+    // guessing, because the wrong guess strands a customer at payment.
+    $asked  = isset( $a['pay_source'] ) ? (string) $a['pay_source'] : 'site';
+    $source = in_array( $asked, array( 'quickbooks', 'qbo_api' ), true ) ? $asked : 'site';
     $link   = isset( $a['pay_link'] ) ? esc_url_raw( trim( (string) $a['pay_link'] ) ) : '';
     if ( 'quickbooks' === $source ) {
         if ( ! $link || ! wp_http_validate_url( $link ) || 0 !== stripos( $link, 'https://' ) ) {
@@ -257,6 +262,9 @@ function pps_quote_to_order( array $q, array $p ) {
     if ( 'quickbooks' === $q['pay_source'] ) {
         $order->set_payment_method( 'pps_quickbooks' );
         $order->set_payment_method_title( 'QuickBooks payment link' );
+    } elseif ( 'qbo_api' === $q['pay_source'] ) {
+        $order->set_payment_method( 'pps_qbo' );
+        $order->set_payment_method_title( 'QuickBooks' );
     }
 
     $order->calculate_totals( false );
@@ -266,7 +274,8 @@ function pps_quote_to_order( array $q, array $p ) {
     $order->add_order_note( sprintf(
         'Placed from quote %s by the customer. %s%s',
         $q['token'],
-        'quickbooks' === $q['pay_source'] ? 'Awaiting QuickBooks payment.' : 'Awaiting card payment.',
+        in_array( $q['pay_source'], array( 'quickbooks', 'qbo_api' ), true )
+            ? 'Awaiting QuickBooks payment.' : 'Awaiting card payment.',
         $date ? ' Requested delivery ' . $date . '.' : ''
     ) );
 
@@ -322,6 +331,13 @@ function pps_quote_placed_view( $order, $settled ) {
             <p class="form-intro">Your order is reserved. It is not confirmed until payment is received.</p>
             <?php if ( $link ) : ?>
                 <p><a class="btn btn-primary btn-submit" href="<?php echo esc_url( $link ); ?>">Pay <?php echo wp_kses_post( wc_price( $order->get_total() ) ); ?></a></p>
+            <?php else : ?>
+                <?php // A reserved order with no way to pay is a dead end. Say so,
+                      // rather than showing a page with no button and leaving the
+                      // customer to guess whether they are finished. ?>
+                <div class="banner banner-error"><div><strong>We could not start the payment for this order.</strong>
+                    Nothing has been charged. Please reply to your quote email and we will send a payment link —
+                    your order number is <?php echo esc_html( $order->get_order_number() ); ?>.</div></div>
             <?php endif; ?>
         <?php endif; ?>
         <p class="form-foot">A copy of this order is in your history at
