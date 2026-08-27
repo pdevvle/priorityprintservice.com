@@ -1490,8 +1490,10 @@ add_action( 'wp_ajax_nopriv_pps_add_to_cart', 'pps_ajax_add_to_cart' );
 //
 // Customer fills in name/email/phone/question while viewing a quote.
 // Calculator JS posts the current calc state + a re-open URL. We email
-// the staff (admin_email by default; override via pps_question_recipient
-// option) and send a confirmation back to the customer. Honeypot + rate
+// the staff (PCF question_recipient_email → pps_question_recipient option →
+// WooCommerce from-address; the WP admin email is deliberately NOT in the
+// chain except as an unreachable-recipient last resort — owner rule
+// 2026-08-25) and send a confirmation back to the customer. Honeypot + rate
 // limit prevent the obvious bot floods. Reuses the pps_add_to_cart nonce
 // since the calculator already has it loaded.
 
@@ -1664,7 +1666,11 @@ function pps_ajax_quote_question() {
     }
 
     // ── Compose staff email ──
-    // Recipient resolution: PCF (admin-editable) → legacy option → WP admin_email.
+    // Recipient resolution: PCF (admin-editable) → legacy option → WooCommerce
+    // from-address. Owner rule (2026-08-25): the WP admin email is a personal
+    // mailbox and must NOT receive site inquiry notifications — it remains only
+    // as the very last resort, because a form whose notification silently goes
+    // nowhere is worse than one that reaches the wrong inbox.
     $recipient = '';
     if ( function_exists( 'pps_get_config' ) ) {
         $cfg = pps_get_config();
@@ -1673,6 +1679,10 @@ function pps_ajax_quote_question() {
     }
     if ( ! $recipient ) {
         $cand = get_option( 'pps_question_recipient', '' );
+        if ( is_email( $cand ) ) $recipient = $cand;
+    }
+    if ( ! $recipient ) {
+        $cand = get_option( 'woocommerce_email_from_address', '' );
         if ( is_email( $cand ) ) $recipient = $cand;
     }
     if ( ! $recipient ) $recipient = get_option( 'admin_email' );
