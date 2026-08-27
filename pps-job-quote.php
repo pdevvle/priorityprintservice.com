@@ -78,6 +78,17 @@ function pps_quote_normalise_tiers( $raw ) {
 /** Business days from now — "min production days" means working days. */
 function pps_quote_earliest_date( $min_days ) {
     $min_days = max( 0, (int) $min_days );
+
+    // Defer to the shared helper, which honours pps_get_closures() — the same
+    // holiday list the calculators use. This used to run its own loop that
+    // skipped weekends only, so a quote could offer a delivery date on
+    // Christmas Day and the shop would find out when the customer did.
+    if ( function_exists( 'pps_add_business_days' ) ) {
+        $start = new DateTime( current_time( 'Y-m-d' ) );
+        return pps_add_business_days( $start, $min_days )->format( 'Y-m-d' );
+    }
+
+    // Only reached if this file is loaded without the main plugin.
     $ts = current_time( 'timestamp' );
     while ( $min_days > 0 ) {
         $ts = strtotime( '+1 day', $ts );

@@ -196,7 +196,12 @@ function pps_paylink_extract_text( $payload ) {
  *   /ppspay *qbo [500 postcards, 16pt gloss] $250 #acme-october
  *
  * Every token carries a sigil, so nothing has to be inferred from position:
- * [ ] description, $ price, #reference, *qbo.
+ * [ ] description, $ price, #reference, *qbo, !5 minimum production days.
+ *
+ * !5 means the job cannot be delivered sooner than five PRODUCTION days from
+ * now, before transit is added on top. It opens the delivery-date picker on
+ * the quote page with that floor enforced server-side — the min attribute on
+ * a date input is a hint, not a constraint.
  *
  * BRACKETS ARE THE FIRM FORM
  * Everything between the first [ and the last ] is the description, verbatim.
@@ -250,6 +255,15 @@ function pps_paylink_parse_command( $text ) {
     // * flag. The bare word still answers so nothing already typed breaks, and
     // both forms only match standing alone — a description saying
     // "quickbooks-style ledger books" must never route a payment.
+    // !N — minimum production days before the job can be delivered. Parsed
+    // before the price so its digits can never be read as money, for the same
+    // reason #reference is.
+    $min_days = 0;
+    if ( preg_match( '/(?:^|\s)!\s*([0-9]{1,2})(?=$|\s)/', $text, $m ) ) {
+        $min_days = (int) $m[1];
+        $text = str_replace( $m[0], ' ', $text );
+    }
+
     $qbo = false;
     if ( preg_match( '/(?:^|\s)\*?(qbo|quickbooks)(?=$|\s)/i', $text, $m ) ) {
         $qbo  = true;
@@ -299,6 +313,7 @@ function pps_paylink_parse_command( $text ) {
         'price'       => $price,
         'qbo'         => $qbo,
         'reference'   => $reference,
+        'min_days'    => $min_days,
     );
 }
 
@@ -346,8 +361,14 @@ function pps_paylink_create( array $a ) {
     // The price quoted is the price for the whole job, and pps_quote_create
     // stores a tier as (qty, price) where price is the LINE total for that
     // quantity — the same figure the frozen-price reorder later divides by qty.
+    // A stated production minimum is what makes a delivery date meaningful, so
+    // asking for one also turns the date picker on.
+    $min_days = isset( $a['min_days'] ) ? max( 0, (int) $a['min_days'] ) : 0;
+
     $quote = pps_quote_create( array(
         'token'      => pps_paylink_token( isset( $a['reference'] ) ? $a['reference'] : '' ),
+        'min_days'   => $min_days,
+        'allow_date' => $min_days > 0,
         'product'    => $pid,
         'tiers'      => array( array( 'qty' => $qty, 'price' => $price ) ),
         'specs'      => $description,
@@ -632,6 +653,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         'by'          => isset( $body['by'] ) ? $body['by'] : 'missive',
         'note'        => isset( $body['note'] ) ? $body['note'] : '',
         'reference'   => isset( $body['reference'] ) ? $body['reference'] : '',
+        'min_days'    => isset( $body['min_days'] ) ? $body['min_days'] : 0,
     ) );
 
     if ( is_wp_error( $res ) ) {

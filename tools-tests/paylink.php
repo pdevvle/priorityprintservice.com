@@ -306,5 +306,33 @@ ok('non-signature header ignored', sigok(array('x-request-id' => array($hex)), $
 $GLOBALS['opts']['pps_paylink_sig_secret'] = '';
 ok('no secret, no signature auth', sigok(array('x-hook-signature' => array($hex)), $body), false);
 
+// ── !N minimum production days ───────────────────────────────────────────
+$r = parse('/ppspay !5 [500 postcards] $250');
+ok('!5 read',            $r['min_days'], 5);
+ok('!5 leaves desc',     $r['description'], '500 postcards');
+ok('!5 leaves price',    $r['price'], 250.0);
+ok('absent means zero',  parse('/ppspay [500 postcards] $250')['min_days'], 0);
+ok('two digits',         parse('/ppspay !10 [job] $99')['min_days'], 10);
+ok('spaced form',        parse('/ppspay ! 7 [job] $99')['min_days'], 7);
+
+// The digits of !N must never be mistaken for the price -- the same reason
+// #reference is pulled out first.
+$r = parse('/ppspay !5 [job] 250');
+ok('!N digits are not the price', $r['price'], 250.0);
+ok('!N still read alongside',     $r['min_days'], 5);
+
+// Inside the brackets it is description, like every other sigil.
+$r = parse('/ppspay [rush !5 job] $99');
+ok('!N inside brackets ignored', $r['min_days'], 0);
+ok('!N inside brackets kept',    $r['description'], 'rush !5 job');
+
+// All five sigils together.
+$r = parse('/ppspay *qbo !3 #jan [Letterhead 8.5 x 11] $99.50');
+ok('five sigils: qbo',   $r['qbo'], true);
+ok('five sigils: days',  $r['min_days'], 3);
+ok('five sigils: ref',   $r['reference'], 'jan');
+ok('five sigils: price', $r['price'], 99.50);
+ok('five sigils: desc',  $r['description'], 'Letterhead 8.5 x 11');
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
