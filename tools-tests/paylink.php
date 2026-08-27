@@ -193,5 +193,60 @@ ok('multiline: line breaks kept',
 // pick one and invoice a page dimension.
 ok('real spec without $ refused', pcode(parse('/pay Pads 3.74 × 8.27, 10 pads of 50, 177.40')), 'ambiguous');
 
+// ── The bracketed form ───────────────────────────────────────────────────
+$r = parse('/ppspay [Pads 3.74 × 8.27 Color: Full Color / Full Color Paper: 80lb Matte Text 10 pads of 50] $177.40');
+ok('bracket: price',  $r['price'], 177.40);
+ok('bracket: desc verbatim', $r['description'],
+   'Pads 3.74 × 8.27 Color: Full Color / Full Color Paper: 80lb Matte Text 10 pads of 50');
+
+// Multiline inside brackets keeps its shape.
+$r = parse("/ppspay [Pads 3.74 × 8.27\nColor: Full Color\n10 pads of 50] \$177.40");
+ok('bracket: line breaks kept', $r['description'], "Pads 3.74 × 8.27\nColor: Full Color\n10 pads of 50");
+
+// Flags outside compose in any order.
+$r = parse('/ppspay qbo [500 postcards, 16pt gloss] $250 #acme-october');
+ok('bracket: qbo',       $r['qbo'], true);
+ok('bracket: reference', $r['reference'], 'acme-october');
+ok('bracket: desc clean', $r['description'], '500 postcards, 16pt gloss');
+
+// The point of brackets: what is inside is NEVER parsed. A description that
+// mentions a price, a quantity, a #tag or the word qbo must stay description.
+$r = parse('/ppspay [reprint of the $50 job, 2000 up, qbo #legacy] $500');
+ok('inside: price not stolen',  $r['price'], 500.0);
+ok('inside: qbo not triggered', $r['qbo'], false);
+ok('inside: ref not stolen',    $r['reference'], '');
+ok('inside: kept verbatim',     $r['description'], 'reprint of the $50 job, 2000 up, qbo #legacy');
+
+// Failures that must be loud rather than guessed.
+ok('unclosed bracket refused', pcode(parse('/ppspay [Pads 3.74 x 8.27 $177.40')), 'unclosed');
+ok('empty brackets refused',   pcode(parse('/ppspay [] $177.40')), 'description');
+ok('no price outside refused', pcode(parse('/ppspay [Pads 10 of 50]')), 'price');
+
+// The command word itself.
+ok('ppspay accepted',      parse('/ppspay [job] $10')['description'], 'job');
+ok('bare ppspay accepted', parse('ppspay [job] $10')['description'], 'job');
+// The older spelling still answers, so anything already wired keeps working.
+ok('legacy /pay accepted', parse('/pay [job] $10')['description'], 'job');
+// A description that merely starts with the word must not be eaten.
+ok('command word only stripped once', parse('/ppspay [payment stubs] $10')['description'], 'payment stubs');
+
+// ── *qbo, the sigil form ─────────────────────────────────────────────────
+$r = parse('/ppspay *qbo [500 postcards] $250');
+ok('*qbo sets the flag', $r['qbo'], true);
+ok('*qbo leaves description clean', $r['description'], '500 postcards');
+// The bare word still answers, so nothing already typed stops working.
+ok('bare qbo still works', parse('/ppspay qbo [500 postcards] $250')['qbo'], true);
+// Inside the brackets it is description, sigil or not.
+ok('*qbo inside brackets is text',
+   parse('/ppspay [reprint *qbo notes] $250')['qbo'], false);
+ok('*qbo inside brackets kept',
+   parse('/ppspay [reprint *qbo notes] $250')['description'], 'reprint *qbo notes');
+// All four sigils at once, in an awkward order.
+$r = parse('/ppspay $99.50 *qbo #jan-batch [Letterhead 8.5 x 11, 70lb]');
+ok('all sigils: price', $r['price'], 99.50);
+ok('all sigils: qbo',   $r['qbo'], true);
+ok('all sigils: ref',   $r['reference'], 'jan-batch');
+ok('all sigils: desc',  $r['description'], 'Letterhead 8.5 x 11, 70lb');
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

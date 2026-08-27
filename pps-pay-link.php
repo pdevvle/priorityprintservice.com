@@ -188,15 +188,30 @@ function pps_paylink_extract_text( $payload ) {
 /**
  * Pull a job out of a line an operator typed.
  *
- *   /pay $250 500 postcards, 16pt gloss
- *   pay $1,250.00 qbo 2000 booklets #acme-october
+ *   /ppspay [Pads 3.74 x 8.27
+ *            Color: Full Color / Full Color
+ *            Paper: 80lb Matte Text
+ *            10 pads of 50] $177.40
  *
- * WHY THE PRICE MUST BE UNAMBIGUOUS
- * "500 postcards $250" and "$250 500 postcards" both mean the same job, and a
- * parser that takes the first number would charge 500 dollars for one of them.
- * A wrong price is worse than a refusal, so: the $-prefixed amount wins; with
- * no $ and exactly one number in the line that number is the price; with no $
- * and several numbers this refuses and says why.
+ *   /ppspay *qbo [500 postcards, 16pt gloss] $250 #acme-october
+ *
+ * Every token carries a sigil, so nothing has to be inferred from position:
+ * [ ] description, $ price, #reference, *qbo.
+ *
+ * BRACKETS ARE THE FIRM FORM
+ * Everything between the first [ and the last ] is the description, verbatim.
+ * Nothing inside is examined: a price, a quantity, a stray "qbo", a # — all of
+ * it is just words the customer will read. Only what sits OUTSIDE the brackets
+ * is parsed for the price and the flags. That removes the whole class of
+ * question this used to have to guess at.
+ *
+ * WITHOUT BRACKETS
+ * The older heuristic still applies, so a line typed the old way keeps working:
+ * the $-prefixed amount is the price; with no $ and exactly one number that
+ * number is the price; with no $ and several numbers it refuses. "500 postcards
+ * $250" and "$250 500 postcards" are the same job, and a parser that took the
+ * first number would bill $500 for one of them. A wrong price is worse than a
+ * refusal.
  *
  * @return array|WP_Error {description, price, qbo, reference}
  */
@@ -204,23 +219,41 @@ function pps_paylink_parse_command( $text ) {
     $text = trim( (string) $text );
     if ( '' === $text ) return new WP_Error( 'empty', 'Nothing to read — send the job and its price.' );
 
-    // Strip a leading command word so "/pay" does not land in the description.
-    $text = preg_replace( '/^\s*\/?(pay|paylink|quote)\b[:\s]*/i', '', $text, 1 );
+    // Strip the command word so it cannot land in the description. The older
+    // spellings still answer, because a link minted yesterday should not stop
+    // working because the command was renamed.
+    $text = preg_replace( '/^\s*\/?(ppspay|paylink|pay|quote)\b[:\s]*/i', '', $text, 1 );
 
-    // #reference, pulled out before anything else so its digits cannot be read
-    // as a price.
+    // ── The bracketed description, if there is one ───────────────────────
+    // First [ to LAST ], and . matches newlines: a spec is one block, however
+    // many lines it runs to.
+    $bracketed = null;
+    if ( false !== strpos( $text, '[' ) ) {
+        if ( ! preg_match( '/\[(.*)\]/s', $text, $m ) ) {
+            // An opened bracket that never closes is a typo, and guessing where
+            // it ended would put half a spec on an invoice.
+            return new WP_Error( 'unclosed',
+                'That opens a [ but never closes it. Put the whole description inside [ ], with the price outside.' );
+        }
+        $bracketed = $m[1];
+        $text = str_replace( $m[0], ' ', $text );
+    }
+
+    // ── Flags and price, from OUTSIDE the brackets only ──────────────────
     $reference = '';
     if ( preg_match( '/(?:^|\s)#([A-Za-z0-9_-]{2,60})\b/', $text, $m ) ) {
         $reference = $m[1];
         $text = str_replace( $m[0], ' ', $text );
     }
 
-    // The QuickBooks flag as a standalone word, so "quickbooks-style booklets"
-    // in a description does not silently route a payment.
+    // *qbo, matching the sigils the other tokens use: $ money, # reference,
+    // * flag. The bare word still answers so nothing already typed breaks, and
+    // both forms only match standing alone — a description saying
+    // "quickbooks-style ledger books" must never route a payment.
     $qbo = false;
-    if ( preg_match( '/(?:^|\s)(qbo|quickbooks)(?=$|\s)/i', $text, $m ) ) {
+    if ( preg_match( '/(?:^|\s)\*?(qbo|quickbooks)(?=$|\s)/i', $text, $m ) ) {
         $qbo  = true;
-        $text = preg_replace( '/(?:^|\s)(qbo|quickbooks)(?=$|\s)/i', ' ', $text, 1 );
+        $text = preg_replace( '/(?:^|\s)\*?(qbo|quickbooks)(?=$|\s)/i', ' ', $text, 1 );
     }
 
     $price = null;
@@ -235,23 +268,30 @@ function pps_paylink_parse_command( $text ) {
             $text  = preg_replace( '/(?:^|\s)' . preg_quote( $nums[0], '/' ) . '(?=$|\s|,)/', ' ', $text, 1 );
         } elseif ( count( $nums ) > 1 ) {
             return new WP_Error( 'ambiguous',
-                'More than one number and no $ — write the price as $250 so it cannot be confused with a quantity.' );
+                null === $bracketed
+                    ? 'More than one number and no $ — write the price as $250, or put the description in [ ] so only the price is left outside.'
+                    : 'More than one number outside the brackets — the price should be the only thing there, written as $250.' );
         }
     }
     if ( null === $price || $price <= 0 ) {
-        return new WP_Error( 'price', 'No price found. Write it as $250.' );
+        return new WP_Error( 'price', 'No price found. Write it as $250, outside the brackets.' );
     }
 
-    // Collapse runs of SPACES but keep the operator's line breaks: a spec typed
-    // over several lines is read back by a customer on the quote page, which
-    // renders it in a <pre>, and by whoever reads the QuickBooks invoice line.
-    // Flattening it to one line would throw away structure both surfaces show.
-    $description = preg_replace( '/[ \t]+/', ' ', $text );
+    // ── The description ──────────────────────────────────────────────────
+    // Collapse runs of SPACES but keep the operator's line breaks: the quote
+    // page renders the spec in a <pre> and the QuickBooks invoice line keeps
+    // the newline, so structure typed here is structure both of them show.
+    $description = ( null !== $bracketed ) ? $bracketed : $text;
+    $description = preg_replace( '/[ \t]+/', ' ', $description );
     $description = preg_replace( '/[ \t]*\n[ \t]*/', "\n", $description );
     $description = preg_replace( '/\n{3,}/', "\n\n", $description );
     $description = trim( $description, " \t\n\r,;-" );
+
     if ( '' === $description ) {
-        return new WP_Error( 'description', 'No job description found — say what the job is as well as the price.' );
+        return new WP_Error( 'description',
+            null === $bracketed
+                ? 'No job description found — say what the job is as well as the price.'
+                : 'The brackets are empty — put the job description inside them.' );
     }
 
     return array(
@@ -645,6 +685,28 @@ function pps_paylink_admin_page() {
                         value="<?php echo esc_attr( rest_url( 'pps/v1/pay-link' ) ); ?>">
                         <p class="description">POST JSON: <code>description</code>, <code>price</code>,
                         optional <code>qbo</code>, <code>qty</code>, <code>note</code>.</p></td>
+                </tr>
+                <tr>
+                    <th scope="row">Command format</th>
+                    <td>
+                        <p class="description" style="margin-top:0">What an operator types in a conversation.
+                        Every part carries a sigil, so nothing depends on word order:</p>
+                        <pre style="background:#f6f7f7;padding:10px;border-left:3px solid #c3c4c7;overflow-x:auto;margin:6px 0"><code>/ppspay [Pads 3.74 &times; 8.27
+Color: Full Color / Full Color
+Paper: 80lb Matte Text
+10 pads of 50] $177.40
+
+/ppspay *qbo [500 postcards, 16pt gloss] $250 #acme-october</code></pre>
+                        <p class="description">
+                        <code>[&nbsp;]</code> the description, kept exactly as typed — line breaks and all.
+                        Nothing inside is read as a command, so a spec may mention a price or a quantity freely.<br>
+                        <code>$177.40</code> the price. Must sit outside the brackets.<br>
+                        <code>*qbo</code> take payment through QuickBooks. Omit for card checkout.<br>
+                        <code>#acme-october</code> use this instead of the timestamp in the link.</p>
+                        <p class="description">Without a reference the link is the minute it was created, in site
+                        time (<?php echo esc_html( wp_timezone_string() ); ?>) — so it can be written into a reply
+                        from a clock rather than waited for.</p>
+                    </td>
                 </tr>
                 <tr>
                     <th scope="row">Shared secret</th>
