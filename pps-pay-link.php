@@ -460,12 +460,66 @@ function pps_paylink_log_note( $event, $detail = '' ) {
  * REST route
  * ───────────────────────────────────────────────────────────── */
 
+/** The signing secret, when the caller signs instead of presenting a key. */
+function pps_paylink_sig_secret() { return (string) get_option( 'pps_paylink_sig_secret', '' ); }
+
 /**
- * Authenticate a call. Accepted from an X-PPS-Key header OR a ?k= query
- * parameter: not every rule engine lets you set headers, and a caller that
- * silently drops one is indistinguishable from a wrong secret without this.
+ * Does any signature header on this request prove knowledge of the signing
+ * secret?
+ *
+ * WHY THIS IS WORTH HAVING OVER ?k=
+ * A shared key in the query string is written to every access log it passes
+ * through, and anyone who can read those logs can mint links. A signature
+ * never puts the secret on the wire, and covers the body as well — a request
+ * altered in flight stops verifying.
+ *
+ * WHY IT IS WRITTEN SO LOOSELY
+ * Missive 403s automated fetches of its own documentation (see
+ * pps-assistant-missive.php), so the header name and digest encoding are not
+ * something that could be looked up. Rather than guess one and fail silently,
+ * every header that looks like a signature is tried against both encodings.
+ * This costs nothing — only a correct HMAC passes either way — and the header
+ * NAMES of a failed attempt are recorded so the first miss is a one-line fix.
+ *
+ * The raw body must be hashed: re-encoding parsed JSON changes the bytes and
+ * every signature fails.
+ */
+function pps_paylink_signature_ok( WP_REST_Request $request ) {
+    $secret = pps_paylink_sig_secret();
+    if ( '' === $secret ) return false;
+
+    $raw = (string) $request->get_body();
+    $hex = hash_hmac( 'sha256', $raw, $secret );
+    $b64 = base64_encode( hash_hmac( 'sha256', $raw, $secret, true ) );
+
+    foreach ( (array) $request->get_headers() as $name => $values ) {
+        // Only headers that plausibly carry a signature, so an unrelated header
+        // that happens to equal the digest cannot authenticate a request.
+        if ( ! preg_match( '/sign|hmac|digest/i', (string) $name ) ) continue;
+        foreach ( (array) $values as $v ) {
+            $v = trim( (string) $v );
+            if ( '' === $v ) continue;
+            // "sha256=..." is a common wrapper; compare the bare digest too.
+            $bare = preg_replace( '/^sha256[=:]\s*/i', '', $v );
+            foreach ( array( $v, $bare ) as $candidate ) {
+                if ( hash_equals( $hex, $candidate ) || hash_equals( $b64, $candidate ) ) return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Authenticate a call.
+ *
+ * Either a signature (preferred — the secret never travels) or a shared key
+ * from an X-PPS-Key header or ?k= query parameter. Both are offered because
+ * not every rule engine can set headers, and a caller that silently drops one
+ * is indistinguishable from a wrong secret without the reject log.
  */
 function pps_paylink_authorized( WP_REST_Request $request ) {
+    if ( pps_paylink_signature_ok( $request ) ) return true;
+
     $expected = pps_paylink_secret();
     if ( '' === $expected ) return false;
     foreach ( array( $request->get_header( 'x_pps_key' ), $request->get_param( 'k' ) ) as $given ) {
@@ -492,6 +546,10 @@ function pps_paylink_log_reject( WP_REST_Request $request ) {
         'k_length'           => is_string( $given ) ? strlen( $given ) : 0,
         'header_key_present' => '' !== (string) $request->get_header( 'x_pps_key' ),
         'query_keys'         => array_keys( (array) $request->get_query_params() ),
+        // Names only. Which signature headers arrived is the whole question
+        // when a signing secret is configured and nothing verified.
+        'sig_configured'     => '' !== pps_paylink_sig_secret(),
+        'header_names'       => array_slice( array_keys( (array) $request->get_headers() ), 0, 30 ),
     );
 
     $log = get_option( PPS_PAYLINK_REJECTS, array() );
@@ -621,6 +679,12 @@ add_action( 'admin_post_pps_paylink_settings', function () {
     $back = admin_url( 'admin.php?page=pps-pay-link' );
 
     update_option( PPS_PAYLINK_PRODUCT_OPT, absint( $_POST['product'] ?? 0 ), false );
+
+    // Only overwrite the signing secret when something was typed, so re-saving
+    // the form does not silently disable signature checking.
+    $sig = trim( (string) wp_unslash( $_POST['sig_secret'] ?? '' ) );
+    if ( '' !== $sig ) update_option( 'pps_paylink_sig_secret', $sig, false );
+    if ( ! empty( $_POST['clear_sig'] ) ) delete_option( 'pps_paylink_sig_secret' );
 
     // Rotating the secret immediately breaks any caller still holding the old
     // one, which is the point — but it is not something to do by accident, so
@@ -808,9 +872,28 @@ Paper: 80lb Matte Text
                     <td><input type="text" class="large-text code" readonly onclick="this.select()"
                         value="<?php echo esc_attr( pps_paylink_secret() ); ?>">
                         <p class="description">Send as an <code>X-PPS-Key</code> header, or <code>?k=</code>
-                        on the URL when the caller cannot set headers.</p>
+                        on the URL when the caller cannot set headers.
+                        <strong>A key in the URL is written to access logs</strong>, so prefer the signing
+                        secret below where the caller supports it.</p>
                         <p><label><input type="checkbox" name="regenerate" value="1"> Generate a new secret
                         (immediately refuses anything using the old one)</label></p></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="pl-sig">Signing secret</label></th>
+                    <td><input type="password" id="pl-sig" name="sig_secret" class="large-text code"
+                        placeholder="<?php echo pps_paylink_sig_secret() ? 'stored — leave blank to keep' : 'optional'; ?>">
+                        <p class="description">Paste the same value into the rule's signature-secret field.
+                        The caller then signs each request instead of carrying a key, so the secret never
+                        appears in a URL and a request altered in flight stops verifying.</p>
+                        <p class="description">HMAC-SHA256 of the raw body. Both hex and base64 digests are
+                        accepted, on any header whose name mentions <code>sign</code>, <code>hmac</code> or
+                        <code>digest</code> — the exact scheme is not documented publicly, so if the first
+                        call is refused the header names it sent are listed below.</p>
+                        <?php if ( pps_paylink_sig_secret() ) : ?>
+                            <p><label><input type="checkbox" name="clear_sig" value="1"> Remove the signing
+                            secret (falls back to the shared key)</label></p>
+                        <?php endif; ?>
+                    </td>
                 </tr>
             </table>
             <p><button type="submit" class="button button-primary">Save settings</button></p>

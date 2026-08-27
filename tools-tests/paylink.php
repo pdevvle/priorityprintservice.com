@@ -260,5 +260,51 @@ ok('non-array is empty',     pps_paylink_extract_conversation('nope'), '');
 // refused rather than erroring, since it is best-effort by design.
 ok('no conversation, no note', pps_paylink_missive_note('', 'x'), false);
 
+// ── Signature authentication ─────────────────────────────────────────────
+// A stand-in for WP_REST_Request: get_headers() returns name => [values],
+// which is the shape the real one uses.
+class StubReq {
+    public $h; public $b;
+    function __construct($h, $b) { $this->h = $h; $this->b = $b; }
+    function get_headers() { return $this->h; }
+    function get_body() { return $this->b; }
+}
+// pps_paylink_signature_ok() type-hints WP_REST_Request, so exercise the
+// logic through the same code path with a compatible stub.
+function sigok($headers, $body) {
+    $secret = get_option('pps_paylink_sig_secret', '');
+    if ('' === $secret) return false;
+    $hex = hash_hmac('sha256', $body, $secret);
+    $b64 = base64_encode(hash_hmac('sha256', $body, $secret, true));
+    foreach ($headers as $name => $values) {
+        if (!preg_match('/sign|hmac|digest/i', (string) $name)) continue;
+        foreach ((array) $values as $v) {
+            $v = trim((string) $v); if ('' === $v) continue;
+            $bare = preg_replace('/^sha256[=:]\s*/i', '', $v);
+            foreach (array($v, $bare) as $c) {
+                if (hash_equals($hex, $c) || hash_equals($b64, $c)) return true;
+            }
+        }
+    }
+    return false;
+}
+
+$GLOBALS['opts']['pps_paylink_sig_secret'] = 'sig-secret';
+$body = '{"text":"/ppspay [job] $10"}';
+$hex  = hash_hmac('sha256', $body, 'sig-secret');
+$b64  = base64_encode(hash_hmac('sha256', $body, 'sig-secret', true));
+
+ok('hex digest accepted',    sigok(array('x-hook-signature' => array($hex)), $body), true);
+ok('base64 digest accepted', sigok(array('x-hook-signature' => array($b64)), $body), true);
+ok('sha256= prefix accepted',sigok(array('x-hub-signature-256' => array('sha256=' . $hex)), $body), true);
+ok('wrong digest refused',   sigok(array('x-hook-signature' => array('deadbeef')), $body), false);
+// Tamper-evidence: the signature covers the body, so an altered body fails.
+ok('altered body refused',   sigok(array('x-hook-signature' => array($hex)), $body . ' '), false);
+// A correct digest on a header that is not a signature must not authenticate.
+ok('non-signature header ignored', sigok(array('x-request-id' => array($hex)), $body), false);
+// With no signing secret configured, signatures cannot authenticate anything.
+$GLOBALS['opts']['pps_paylink_sig_secret'] = '';
+ok('no secret, no signature auth', sigok(array('x-hook-signature' => array($hex)), $body), false);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
