@@ -436,9 +436,17 @@ function pps_quote_form_view( array $q, $error ) {
         <?php endif; ?>
 
         <?php // A single tier is not a choice, so it is shown as the price of the job
-              // rather than as a quantity field the customer has to acknowledge. ?>
+              // rather than as a quantity field the customer has to acknowledge.
+              //
+              // The price a pay link carries is the WHOLE job, delivery included:
+              // the operator quoted one figure in a conversation and that is what
+              // gets charged. No shipping line is ever added, so the total on the
+              // next screen matches this exactly. Said out loud here because the
+              // page asks for a shipping address immediately afterwards, which
+              // otherwise invites "is delivery extra?" at the moment of payment. ?>
         <?php if ( $single ) : ?>
             <p class="pps-q-price"><?php echo wp_kses_post( wc_price( $tiers[0]['price'] ) ); ?></p>
+            <p class="pps-q-incl">Delivery included — this is the total.</p>
         <?php endif; ?>
 
         <form method="post" class="form" id="pps-q-form" style="margin-top:16px">
@@ -462,6 +470,7 @@ function pps_quote_form_view( array $q, $error ) {
                             </option>
                         <?php endforeach; ?>
                     </select>
+                    <span class="field-hint">Delivery included — the price shown is the total.</span>
                 </div>
             <?php endif; ?>
 
@@ -534,7 +543,8 @@ function pps_quote_form_view( array $q, $error ) {
     <style>
       .pps-q-spec{font-size:1.05rem;line-height:1.55;white-space:pre-wrap;word-break:break-word;margin:0 0 10px}
       .pps-q-note{margin:0 0 10px;opacity:.85}
-      .pps-q-price{font-size:1.6rem;font-weight:700;margin:0 0 4px}
+      .pps-q-price{font-size:1.6rem;font-weight:700;margin:0 0 2px}
+      .pps-q-incl{margin:0 0 10px;opacity:.75;font-size:.92rem}
       .pps-q-transit{margin:-4px 0 12px}
     </style>
     <script>
