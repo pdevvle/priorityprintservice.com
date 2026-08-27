@@ -242,7 +242,14 @@ function pps_paylink_parse_command( $text ) {
         return new WP_Error( 'price', 'No price found. Write it as $250.' );
     }
 
-    $description = trim( preg_replace( '/\s+/', ' ', $text ), " \t\n\r,;-" );
+    // Collapse runs of SPACES but keep the operator's line breaks: a spec typed
+    // over several lines is read back by a customer on the quote page, which
+    // renders it in a <pre>, and by whoever reads the QuickBooks invoice line.
+    // Flattening it to one line would throw away structure both surfaces show.
+    $description = preg_replace( '/[ \t]+/', ' ', $text );
+    $description = preg_replace( '/[ \t]*\n[ \t]*/', "\n", $description );
+    $description = preg_replace( '/\n{3,}/', "\n\n", $description );
+    $description = trim( $description, " \t\n\r,;-" );
     if ( '' === $description ) {
         return new WP_Error( 'description', 'No job description found — say what the job is as well as the price.' );
     }

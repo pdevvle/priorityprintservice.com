@@ -168,5 +168,30 @@ ok('nested message body',  pps_paylink_extract_text(array('message' => array('de
 ok('nothing readable',     pps_paylink_extract_text(array('conversation' => array('id' => 'x'))), '');
 ok('non-array is empty',   pps_paylink_extract_text('nope'), '');
 
+// ── A real spec line, as an operator actually types it ───────────────────
+// Five numbers in the description (3.74, 8.27, 80, 10, 50) and one price.
+// Any parser that guesses at a number instead of honouring the $ bills the
+// customer for a paper weight or a page size.
+$real = '/pay Pads 3.74 × 8.27 Color: Full Color / Full Color Paper: 80lb Matte Text  10 pads of 50, $177.40';
+$r = parse($real);
+ok('real spec: price',  $r['price'], 177.40);
+ok('real spec: desc',   $r['description'],
+   'Pads 3.74 × 8.27 Color: Full Color / Full Color Paper: 80lb Matte Text 10 pads of 50');
+ok('real spec: no qbo', $r['qbo'], false);
+
+// The same job typed over several lines. Missive comments are usually
+// multiline, and the quote page renders the spec in a <pre>, so the line
+// structure has to survive rather than being flattened.
+$multi = "/pay Pads 3.74 × 8.27\nColor: Full Color / Full Color\nPaper: 80lb Matte Text\n10 pads of 50, \$177.40";
+$r = parse($multi);
+ok('multiline: price', $r['price'], 177.40);
+ok('multiline: line breaks kept',
+   $r['description'],
+   "Pads 3.74 × 8.27\nColor: Full Color / Full Color\nPaper: 80lb Matte Text\n10 pads of 50");
+
+// Same spec, no $ — five candidate numbers, so it must refuse rather than
+// pick one and invoice a page dimension.
+ok('real spec without $ refused', pcode(parse('/pay Pads 3.74 × 8.27, 10 pads of 50, 177.40')), 'ambiguous');
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
