@@ -155,7 +155,7 @@ function pps_paylink_create( array $a ) {
     if ( ! $pid ) {
         return new WP_Error(
             'product',
-            'No pay-link product is configured. Set one in WP Admin → PPS Calculators → Invoice a Job.'
+            'No pay-link product is configured. Set one in WP Admin → PPS Calculators → Pay Links.'
         );
     }
 
@@ -284,4 +284,184 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
     }
 
     return new WP_REST_Response( array( 'ok' => true ) + $res, 201 );
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * Admin — configure, and mint one by hand to test
+ * ───────────────────────────────────────────────────────────── */
+
+add_action( 'admin_menu', function () {
+    add_submenu_page(
+        'pps-calculators',
+        'Pay Links',
+        'Pay Links',
+        'manage_options',
+        'pps-pay-link',
+        'pps_paylink_admin_page'
+    );
+}, 21 );
+
+add_action( 'admin_post_pps_paylink_settings', function () {
+    if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
+    check_admin_referer( 'pps_paylink_settings' );
+    $back = admin_url( 'admin.php?page=pps-pay-link' );
+
+    update_option( PPS_PAYLINK_PRODUCT_OPT, absint( $_POST['product'] ?? 0 ), false );
+
+    // Rotating the secret immediately breaks any caller still holding the old
+    // one, which is the point — but it is not something to do by accident, so
+    // it needs its own deliberate button rather than riding on a settings save.
+    if ( ! empty( $_POST['regenerate'] ) ) {
+        update_option( PPS_PAYLINK_SECRET_OPT, wp_generate_password( 40, false, false ), false );
+        wp_safe_redirect( add_query_arg( 'pl_done', 'secret', $back ) ); exit;
+    }
+
+    wp_safe_redirect( add_query_arg( 'pl_done', 'saved', $back ) ); exit;
+} );
+
+add_action( 'admin_post_pps_paylink_mint', function () {
+    if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
+    check_admin_referer( 'pps_paylink_mint' );
+    $back = admin_url( 'admin.php?page=pps-pay-link' );
+
+    $res = pps_paylink_create( array(
+        'description' => wp_unslash( $_POST['description'] ?? '' ),
+        'price'       => wp_unslash( $_POST['price'] ?? '' ),
+        'qty'         => $_POST['qty'] ?? 1,
+        'qbo'         => ! empty( $_POST['qbo'] ),
+        'by'          => wp_get_current_user()->user_login,
+    ) );
+
+    if ( is_wp_error( $res ) ) {
+        wp_safe_redirect( add_query_arg( 'pl_err', rawurlencode( $res->get_error_message() ), $back ) ); exit;
+    }
+    wp_safe_redirect( add_query_arg( array(
+        'pl_link' => rawurlencode( $res['url'] ),
+        'pl_back' => $res['qbo_fell_back'] ? '1' : '0',
+    ), $back ) ); exit;
+} );
+
+function pps_paylink_admin_page() {
+    if ( ! current_user_can( 'manage_options' ) ) return;
+
+    $done = isset( $_GET['pl_done'] ) ? sanitize_key( $_GET['pl_done'] ) : '';
+    $err  = isset( $_GET['pl_err'] ) ? sanitize_text_field( wp_unslash( $_GET['pl_err'] ) ) : '';
+    $link = isset( $_GET['pl_link'] ) ? esc_url_raw( wp_unslash( $_GET['pl_link'] ) ) : '';
+    $fell = ! empty( $_GET['pl_back'] );
+
+    $pid      = pps_paylink_product_id();
+    $product  = $pid ? wc_get_product( $pid ) : null;
+    $products = wc_get_products( array( 'limit' => 200, 'status' => 'publish', 'orderby' => 'title', 'order' => 'ASC' ) );
+    $qbo_ok   = pps_paylink_qbo_ready();
+    ?>
+    <div class="wrap" style="max-width:780px">
+        <h1>Pay Links</h1>
+
+        <?php if ( 'saved' === $done ) : ?><div class="notice notice-success"><p>Settings saved.</p></div><?php endif; ?>
+        <?php if ( 'secret' === $done ) : ?><div class="notice notice-warning"><p>New secret generated. Any caller still using the old one will now be refused.</p></div><?php endif; ?>
+        <?php if ( $err ) : ?><div class="notice notice-error"><p><?php echo esc_html( $err ); ?></p></div><?php endif; ?>
+        <?php if ( $link ) : ?>
+            <div class="notice notice-success">
+                <p><strong>Link created.</strong> Send this to the customer:</p>
+                <p><input type="text" class="large-text code" readonly onclick="this.select()" value="<?php echo esc_attr( $link ); ?>"></p>
+                <?php if ( $fell ) : ?>
+                    <p><em>QuickBooks was requested but is not ready, so this link uses card checkout.
+                    Check the QuickBooks screen.</em></p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
+        <p style="color:#50575e">Turns a job agreed in a conversation into a link. The customer opens it,
+        enters their details, and pays — by card checkout, or through QuickBooks when that is switched on
+        for the link. Nothing exists in WooCommerce until they submit, so links that go nowhere cost nothing.</p>
+
+        <h2>Mint a link</h2>
+        <?php if ( ! $product ) : ?>
+            <div class="notice notice-error inline"><p>Choose a product below first — a WooCommerce order
+            line needs one, and links cannot be minted until it is set.</p></div>
+        <?php else : ?>
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+            <?php wp_nonce_field( 'pps_paylink_mint' ); ?>
+            <input type="hidden" name="action" value="pps_paylink_mint">
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="pl-desc">Description</label></th>
+                    <td><textarea id="pl-desc" name="description" rows="3" class="large-text"
+                        placeholder="500 postcards, 4/4, 16pt gloss cover"></textarea>
+                        <p class="description">What the customer sees on the quote page, and what appears on the invoice line.</p></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="pl-price">Price</label></th>
+                    <td><input type="text" id="pl-price" name="price" class="regular-text" placeholder="250.00">
+                        <p class="description">The total for the job. <code>$250</code> and <code>1,250.00</code> are both fine.</p></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="pl-qty">Quantity</label></th>
+                    <td><input type="number" id="pl-qty" name="qty" value="1" min="1" class="small-text">
+                        <p class="description">Only affects how the line reads; the price above is the total either way.</p></td>
+                </tr>
+                <tr>
+                    <th scope="row">QuickBooks</th>
+                    <td>
+                        <label><input type="checkbox" name="qbo" value="1" <?php disabled( ! $qbo_ok ); ?>>
+                            Take payment through QuickBooks</label>
+                        <?php if ( ! $qbo_ok ) : ?>
+                            <p class="description">Unavailable — QuickBooks is not connected, has no service item,
+                            or Payments has not been confirmed. See <a href="<?php echo esc_url( admin_url( 'admin.php?page=pps-qbo' ) ); ?>">the QuickBooks screen</a>.</p>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            </table>
+            <p><button type="submit" class="button button-primary">Create link</button></p>
+        </form>
+        <?php endif; ?>
+
+        <hr>
+        <h2>Settings</h2>
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+            <?php wp_nonce_field( 'pps_paylink_settings' ); ?>
+            <input type="hidden" name="action" value="pps_paylink_settings">
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="pl-product">Line-item product</label></th>
+                    <td>
+                        <select id="pl-product" name="product">
+                            <option value="0">— none —</option>
+                            <?php foreach ( $products as $p ) : ?>
+                                <option value="<?php echo esc_attr( $p->get_id() ); ?>" <?php selected( $pid, $p->get_id() ); ?>>
+                                    <?php echo esc_html( $p->get_name() ); ?><?php echo $p->is_virtual() ? '' : ' (not virtual)'; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description">Every conversation-minted job hangs off this one product; the
+                        description rides on the line. A generic &ldquo;Custom Print Job&rdquo; is the intent.</p>
+                        <?php if ( $product && ! $product->is_virtual() ) : ?>
+                            <p class="description" style="color:#b32d2e"><strong>This product is not virtual.</strong>
+                            WooCommerce will try to run its own shipping on the order, which can stop the
+                            customer completing checkout. Mark it virtual — the quote page collects the
+                            delivery address itself.</p>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">Endpoint</th>
+                    <td><input type="text" class="large-text code" readonly onclick="this.select()"
+                        value="<?php echo esc_attr( rest_url( 'pps/v1/pay-link' ) ); ?>">
+                        <p class="description">POST JSON: <code>description</code>, <code>price</code>,
+                        optional <code>qbo</code>, <code>qty</code>, <code>note</code>.</p></td>
+                </tr>
+                <tr>
+                    <th scope="row">Shared secret</th>
+                    <td><input type="text" class="large-text code" readonly onclick="this.select()"
+                        value="<?php echo esc_attr( pps_paylink_secret() ); ?>">
+                        <p class="description">Send as an <code>X-PPS-Key</code> header, or <code>?k=</code>
+                        on the URL when the caller cannot set headers.</p>
+                        <p><label><input type="checkbox" name="regenerate" value="1"> Generate a new secret
+                        (immediately refuses anything using the old one)</label></p></td>
+                </tr>
+            </table>
+            <p><button type="submit" class="button button-primary">Save settings</button></p>
+        </form>
+    </div>
+    <?php
 }
