@@ -242,6 +242,15 @@ function pps_quote_to_order( array $q, array $p ) {
             if ( strcmp( $d, $earliest ) < 0 ) {
                 return new WP_Error( 'date', 'The earliest we can deliver this job is ' . $earliest . '.' );
             }
+            // Weekends and shop closures are not deliverable. Checked here and
+            // not only in the browser: the date input's min attribute is a hint,
+            // the JS guard is a courtesy, and a posted date is user input like
+            // any other. Accepting a Saturday would put a promise on the order
+            // that production cannot keep.
+            if ( function_exists( 'pps_is_business_day' )
+                 && ! pps_is_business_day( new DateTime( $d ) ) ) {
+                return new WP_Error( 'date', 'We are closed that day — please choose a weekday we are open.' );
+            }
             $date = $d;
         }
     }
@@ -560,6 +569,35 @@ function pps_quote_form_view( array $q, $error ) {
     </style>
     <script>
     (function(){
+        // Closed days, so a weekend or holiday can be refused as it is picked
+        // rather than after a round trip. The server checks this too — this is
+        // only here to save the customer a rejected submission.
+        var CLOSED = <?php echo wp_json_encode( array_values( (array) ( function_exists( 'pps_get_closures' ) ? pps_get_closures() : array() ) ) ); ?>;
+        var dateEl = document.getElementById('q-date');
+        if (dateEl) {
+            var msg = document.createElement('span');
+            msg.className = 'field-hint'; msg.style.color = '#b32d2e'; msg.hidden = true;
+            dateEl.parentNode.appendChild(msg);
+            dateEl.addEventListener('change', function(){
+                msg.hidden = true;
+                var v = dateEl.value; if (!v) return;
+                // Parsed as local parts, not Date(v), which reads a bare
+                // YYYY-MM-DD as UTC and can land on the previous day.
+                var p = v.split('-'), dt = new Date(+p[0], +p[1] - 1, +p[2]);
+                var dow = dt.getDay();
+                var closed = (dow === 0 || dow === 6)
+                    || CLOSED.indexOf(v) !== -1
+                    || CLOSED.indexOf(v.slice(5)) !== -1;
+                if (closed) {
+                    dateEl.value = '';
+                    msg.hidden = false;
+                    msg.textContent = (dow === 0 || dow === 6)
+                        ? 'We do not deliver at weekends — please choose a weekday.'
+                        : 'We are closed that day — please choose another.';
+                }
+            });
+        }
+
         var same = document.getElementById('q-same'), bill = document.getElementById('q-bill');
         function sync(){
             bill.hidden = same.checked;
