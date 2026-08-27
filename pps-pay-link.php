@@ -125,6 +125,31 @@ function pps_paylink_wants_qbo( $raw ) {
     return in_array( $s, array( '1', 'true', 'yes', 'on', 'qbo', 'quickbooks' ), true );
 }
 
+/**
+ * The token the link will carry.
+ *
+ * Defaults to the minute it was minted, in SITE time — 20260827-0215. The
+ * point is that the operator can write the link into their reply straight
+ * away from a clock, instead of waiting for something to hand it back to
+ * them. An explicit reference wins when given, because "acme-october" is
+ * easier to say on the phone than a timestamp.
+ *
+ * The trade this makes is deliberate and worth stating: a predictable token
+ * can be enumerated, so a quote link is closer to unlisted than to private.
+ * What it protects is a job description and a price. It is NOT a password,
+ * and nothing behind it may assume otherwise — which is why the used-quote
+ * page masks the customer's email.
+ *
+ * Two links minted in the same minute do not collide into one another:
+ * pps_quote_create() reads the stored slug back, so the second becomes
+ * -2 and its real link is the one returned.
+ */
+function pps_paylink_token( $reference = '' ) {
+    $reference = sanitize_title( (string) $reference );
+    if ( '' !== $reference ) return $reference;
+    return current_time( 'Ymd-Hi' );
+}
+
 /* ─────────────────────────────────────────────────────────────
  * Minting
  * ───────────────────────────────────────────────────────────── */
@@ -170,6 +195,7 @@ function pps_paylink_create( array $a ) {
     // stores a tier as (qty, price) where price is the LINE total for that
     // quantity — the same figure the frozen-price reorder later divides by qty.
     $quote = pps_quote_create( array(
+        'token'      => pps_paylink_token( isset( $a['reference'] ) ? $a['reference'] : '' ),
         'product'    => $pid,
         'tiers'      => array( array( 'qty' => $qty, 'price' => $price ) ),
         'specs'      => $description,
@@ -271,6 +297,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         'qbo'         => isset( $body['qbo'] ) ? $body['qbo'] : false,
         'by'          => isset( $body['by'] ) ? $body['by'] : 'missive',
         'note'        => isset( $body['note'] ) ? $body['note'] : '',
+        'reference'   => isset( $body['reference'] ) ? $body['reference'] : '',
     ) );
 
     if ( is_wp_error( $res ) ) {
@@ -329,6 +356,7 @@ add_action( 'admin_post_pps_paylink_mint', function () {
         'price'       => wp_unslash( $_POST['price'] ?? '' ),
         'qty'         => $_POST['qty'] ?? 1,
         'qbo'         => ! empty( $_POST['qbo'] ),
+        'reference'   => wp_unslash( $_POST['reference'] ?? '' ),
         'by'          => wp_get_current_user()->user_login,
     ) );
 
@@ -375,6 +403,12 @@ function pps_paylink_admin_page() {
         enters their details, and pays — by card checkout, or through QuickBooks when that is switched on
         for the link. Nothing exists in WooCommerce until they submit, so links that go nowhere cost nothing.</p>
 
+        <div class="notice notice-info inline"><p><strong>Predictable links are unlisted, not private.</strong>
+        A timestamped or named link can be guessed, so treat what is behind it — the job description and the
+        price — as readable by anyone who tries. The customer's email is masked on the page for that reason.
+        Both forms here are guessable — blank gives the timestamp, not a random link. The console's full quote
+        form still mints unguessable links, so use that for anything you would not want enumerated.</p></div>
+
         <h2>Mint a link</h2>
         <?php if ( ! $product ) : ?>
             <div class="notice notice-error inline"><p>Choose a product below first — a WooCommerce order
@@ -399,6 +433,16 @@ function pps_paylink_admin_page() {
                     <th scope="row"><label for="pl-qty">Quantity</label></th>
                     <td><input type="number" id="pl-qty" name="qty" value="1" min="1" class="small-text">
                         <p class="description">Only affects how the line reads; the price above is the total either way.</p></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="pl-ref">Reference</label></th>
+                    <td><input type="text" id="pl-ref" name="reference" class="regular-text" placeholder="acme-october">
+                        <p class="description">Optional. Leave blank and the link is stamped with the minute
+                        it was created, so you can write it into a reply from a clock without waiting for
+                        anything to hand it back:<br>
+                        <code><?php echo esc_html( pps_quote_url( pps_paylink_token() ) ); ?></code><br>
+                        A reference replaces the timestamp when you would rather the link read as something
+                        you can say out loud.</p></td>
                 </tr>
                 <tr>
                     <th scope="row">QuickBooks</th>

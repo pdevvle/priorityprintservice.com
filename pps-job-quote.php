@@ -117,7 +117,11 @@ function pps_quote_create( array $a ) {
         $link = '';
     }
 
-    $token = wp_generate_password( 24, false, false );
+    // A caller may supply the token so the link can be known before it is
+    // created (see pps_paylink_token). Anything unsupplied stays random.
+    $token = isset( $a['token'] ) ? sanitize_title( (string) $a['token'] ) : '';
+    if ( '' === $token ) $token = wp_generate_password( 24, false, false );
+
     $id = wp_insert_post( array(
         'post_type'   => PPS_QUOTE_CPT,
         'post_status' => 'publish',
@@ -125,6 +129,14 @@ function pps_quote_create( array $a ) {
         'post_name'   => $token,
     ), true );
     if ( is_wp_error( $id ) ) return new WP_Error( 'create', 'Could not store the quote.' );
+
+    // Read the slug BACK rather than trusting what we asked for. WordPress
+    // appends -2, -3 to make post_name unique, and pps_quote_get() looks the
+    // quote up by name — so a suffixed slug with the original in _q_token
+    // produces a link that 404s. Random tokens never collided and hid this;
+    // predictable ones collide whenever two are minted in the same minute.
+    $saved = get_post( $id );
+    if ( $saved && $saved->post_name ) $token = $saved->post_name;
 
     update_post_meta( $id, '_q_token', $token );
     update_post_meta( $id, '_q_product', $pid );
@@ -164,6 +176,25 @@ function pps_quote_get( $token ) {
         'order'      => (int) get_post_meta( $id, '_q_order', true ),
         'note'       => (string) get_post_meta( $id, '_q_note', true ),
     );
+}
+
+/**
+ * Enough of an address for the person who typed it to recognise, and useless
+ * to anyone else.
+ *
+ * This page is reachable by anyone holding the quote token, and tokens are no
+ * longer necessarily unguessable — a predictable one can be enumerated, which
+ * would otherwise turn this line into a list of customer email addresses.
+ * The real customer only needs to be reminded which address to use.
+ */
+function pps_quote_mask_email( $email ) {
+    $email = (string) $email;
+    $at = strpos( $email, '@' );
+    if ( false === $at || $at < 1 ) return '';
+    $user = substr( $email, 0, $at );
+    $rest = substr( $email, $at );
+    $keep = mb_substr( $user, 0, 1 );
+    return $keep . str_repeat( '•', max( 3, min( 6, mb_strlen( $user ) - 1 ) ) ) . $rest;
 }
 
 function pps_quote_url( $token ) {
@@ -342,7 +373,7 @@ function pps_quote_placed_view( $order, $settled ) {
         <?php endif; ?>
         <p class="form-foot">A copy of this order is in your history at
             <a href="<?php echo esc_url( home_url( '/reorders/' ) ); ?>">/reorders</a>, using
-            <strong><?php echo esc_html( $order->get_billing_email() ); ?></strong>.</p>
+            <strong><?php echo esc_html( pps_quote_mask_email( $order->get_billing_email() ) ); ?></strong>.</p>
     </div></div>
     <?php return ob_get_clean();
 }

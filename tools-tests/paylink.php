@@ -79,6 +79,14 @@ function pps_quote_url($t) { return 'https://example.test/quote/?q=' . $t; }
 function get_post_meta($id, $k, $single = false) { return 'tok123'; }
 function update_post_meta($id, $k, $v) { $GLOBALS['meta'][$k] = $v; return true; }
 function sanitize_textarea_field($v) { return $v; }
+// Approximates sanitize_title_with_dashes for the cases under test:
+// lowercase, spaces to dashes, everything else non-alphanumeric dropped.
+function sanitize_title($t) {
+    $t = strtolower(trim((string) $t));
+    $t = preg_replace('/\s+/', '-', $t);
+    $t = preg_replace('/[^a-z0-9\-]/', '', $t);
+    return trim(preg_replace('/-+/', '-', $t), '-');
+}
 
 // A real product is required before anything mints.
 $GLOBALS['opts']['pps_paylink_product'] = 7;
@@ -102,6 +110,22 @@ ok('the ask is still recorded', $GLOBALS['meta']['_q_qbo'] ?? null, 1);
 $res = pps_paylink_create(array('description' => 'job', 'price' => '100'));
 ok('no ask is not a fallback', $res['qbo_fell_back'] ?? null, false);
 ok('unasked flag stored as 0', $GLOBALS['meta']['_q_qbo'] ?? null, 0);
+
+// ── Predictable tokens ───────────────────────────────────────────────────
+function current_time($fmt) { return '20260827-0215'; }   // frozen clock
+
+ok('blank reference is the timestamp', pps_paylink_token(''), '20260827-0215');
+ok('reference wins over timestamp',    pps_paylink_token('Acme October'), 'acme-october');
+ok('reference is slugified',           pps_paylink_token('  ACME/October!! '), 'acmeoctober');
+// A reference that slugifies to nothing must not produce an empty token,
+// which would make the quote unreachable.
+ok('unusable reference falls back',    pps_paylink_token('!!!'), '20260827-0215');
+
+// The token reaches the quote engine, which is what makes the link knowable.
+$res = pps_paylink_create(array('description' => 'job', 'price' => '100'));
+ok('timestamp token passed through', $GLOBALS['captured']['token'] ?? '', '20260827-0215');
+$res = pps_paylink_create(array('description' => 'job', 'price' => '100', 'reference' => 'acme-october'));
+ok('reference token passed through',  $GLOBALS['captured']['token'] ?? '', 'acme-october');
 
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
