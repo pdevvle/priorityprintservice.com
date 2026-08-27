@@ -651,5 +651,28 @@ add_action( 'wp_enqueue_scripts', function() {
     wp_register_style( 'pps-acct-ui', false, array(), $ver );
     wp_enqueue_style( 'pps-acct-ui' );
     $extra = function_exists( 'pps_job_console_css' ) ? pps_job_console_css() : '';
-    wp_add_inline_style( 'pps-acct-ui', pps_acct_ui_css() . $extra );
+    wp_add_inline_style( 'pps-acct-ui', pps_acct_ui_css() . $extra . pps_quote_chrome_css() );
 }, 11 );
+
+/**
+ * Strip the site footer from the quote page.
+ *
+ * This page has one job — take a payment — and the footer is a set of exits
+ * from it. Nothing below the button helps somebody decide, and the shop links,
+ * policy pages and newsletter form all lead away mid-checkout.
+ *
+ * Astra's selectors, because that is the active theme; pps-theme's footer.php
+ * emits no footer at all, so this is a no-op there rather than a mistake if
+ * the theme is ever switched. Scoped by the enqueue above, which only runs on
+ * the page carrying the shortcode, so no other page loses its footer.
+ */
+function pps_quote_chrome_css() {
+    return '
+    #colophon,
+    footer.site-footer,
+    .site-footer,
+    .ast-small-footer,
+    .footer-adv,
+    .ast-footer-overlay { display: none !important; }
+    ';
+}
