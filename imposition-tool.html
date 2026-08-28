@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-27 23:37 UTC · IMPOSE-V1.13</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 03:12 UTC · IMPOSE-V1.14</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -986,6 +986,18 @@ async function detectTextNearEdges(pdfjsDoc, pnoZero, art, bleed) {
 // long axis pull in proportionally further — that way `inset` is a guaranteed
 // minimum on every edge, which is the promise the operator needs.
 const INSET_MAX = 0.5;
+// Free scale on the placed art, up or down, independent of the bleed-coupled
+// pull-off-trim inset (the two compose). Scaling DOWN opens the same kind of
+// gap the inset does, so it feeds the same coverage maths and inherits the
+// same protection against printing paper white inside the trim.
+const ART_SCALE_MIN = 25, ART_SCALE_MAX = 400;
+function artScaleOf(spec) {
+  const v = +(spec && spec.artScale);
+  if (!isFinite(v) || v === 100 || v <= 0) return 1;
+  if (v < ART_SCALE_MIN || v > ART_SCALE_MAX)
+    throw new Error(`Art scale ${v}% is outside the ${ART_SCALE_MIN}–${ART_SCALE_MAX}% range.`);
+  return v / 100;
+}
 function insetOf(spec) {
   const v = +(spec && spec.artInset) || 0;
   if (!(v > 0)) return 0;
@@ -995,6 +1007,12 @@ function insetOf(spec) {
     throw new Error(`Pull-off-trim (${inset}″) and "Scale art up to bleed" are opposite operations — scale mode re-expands the art to the bleed box, undoing the inset. Choose Auto (text-safe), Mirror or Streak.`);
   }
   return inset;
+}
+function applyArtScale(art, userScale) {
+  if (!(userScale > 0) || userScale === 1) return art;
+  art.userScale = userScale;
+  art.notes.push(`art scaled to ${(userScale * 100).toFixed(2)}% of the placed size (${userScale > 1 ? "content grows past the trim and is clipped" : "content pulls in from the trim — the bleed fill covers the gap"})`);
+  return art;
 }
 function applyArtInset(art, inset) {
   if (!(inset > 0)) return art;
@@ -1012,7 +1030,7 @@ function applyArtInset(art, inset) {
 // still covers that far PAST the trim; negative = it now stops that far INSIDE
 // the trim and the fill must reach back in to meet it.
 function finalizeArtCoverage(art, bleed) {
-  const g = (art.synth ? (art.synthScale || 1) : 1) * (art.insetF || 1);
+  const g = (art.synth ? (art.synthScale || 1) : 1) * (art.insetF || 1) * (art.userScale || 1);
   const ob = art.ownBleed || 0;
   art.covX = g * (art.placedW / 2 + ob) - art.placedW / 2;
   art.covY = g * (art.placedH / 2 + ob) - art.placedH / 2;
@@ -1020,7 +1038,8 @@ function finalizeArtCoverage(art, bleed) {
   if (!art.synth) {
     // Nothing is filling the ring, so the art's own coverage has to carry it.
     if (art.covX < -EPS || art.covY < -EPS) {
-      throw new Error(`Pull-off-trim leaves the art ${Math.abs(Math.min(art.covX, art.covY)).toFixed(3)}″ short of the cut with no bleed fill set — that band would print as paper white INSIDE the trim. Set "Add bleed" to Auto (text-safe), Mirror or Streak.`);
+      const why = (art.userScale && art.userScale < 1) ? (art.insetF ? "Pull-off-trim and the art scale leave" : "Scaling the art down leaves") : "Pull-off-trim leaves";
+      throw new Error(`${why} the art ${Math.abs(Math.min(art.covX, art.covY)).toFixed(3)}″ short of the cut with no bleed fill set — that band would print as paper white INSIDE the trim. Set "Add bleed" to Auto (text-safe), Mirror or Streak.`);
     }
     if (art.covX < b - EPS || art.covY < b - EPS) {
       art.notes.push(`art covers only ${Math.min(art.covX, art.covY).toFixed(3)}″ past the trim (need ${b}″) — cut lines may show paper white`);
@@ -1219,6 +1238,7 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
   let s = art.scale;
   if (art.synth) s *= art.synthScale || 1; // scale-to-bleed and/or shortfall pre-scale
   if (art.insetF) s *= art.insetF;         // pull-off-trim safety inset
+  if (art.userScale) s *= art.userScale;   // operator's free scale
   const C = { x: (targetTrim.x + targetTrim.w / 2) * PT, y: (targetTrim.y + targetTrim.h / 2) * PT };
   const tc = { x: art.trimRaw.x + art.trimRaw.w / 2, y: art.trimRaw.y + art.trimRaw.h / 2 };
   // anchor = C − s·Rot(tc): drawPage maps raw (u,v) → anchor + s·Rot_ccw(u,v)
@@ -1406,6 +1426,8 @@ function drawSlug(page, layout, font, info, cells) {
       : layout.gutter !== 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
     Math.abs(layout.bleed - BLEED) > EPS ? `bleed ${layout.bleed}in` : null,
     info.artInset ? `PULLED OFF TRIM ${info.artInset}in` : null,
+    (info.artScale && info.artScale !== 1) ? `ART ${(info.artScale * 100).toFixed(2)}%` : null,
+    info.creep ? `CREEP ${info.creep}in total (this sig ${(info.creepAt || 0).toFixed(4)}in)` : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
     info.date,
   ].filter(Boolean);
@@ -1434,6 +1456,34 @@ function mirrorRect(r, layout, flip) {
 // pages meet exactly at the fold; outer edges keep the cell's bleed clip.
 // When the grid rotated the spread (90° CCW), the spread-left page lands in
 // the bottom half of the cell.
+// ── Creep / shingling compensation ───────────────────────────────────────────
+// Folded signatures nest, so the inner leaves push outward and get trimmed
+// narrower than the cover unless the content is shifted back toward the spine.
+// `creep` is the TOTAL shift applied to the innermost signature; the outermost
+// (the cover, k=0) gets none and the rest are spread linearly between them —
+// the standard shingling ramp, and the one Fiery states the same way.
+//
+// The TRIM does not move: the guillotine still cuts in the same place. Only the
+// placed content slides spine-ward, which opens a sliver at the outer edge that
+// the art's bleed covers — so a no-bleed file wants Add bleed on as well, and
+// says so.
+const CREEP_MAX = 0.5;
+function creepOf(spec) {
+  const v = +(spec && spec.creep) || 0;
+  if (!(v > 0)) return 0;
+  if (v > CREEP_MAX) throw new Error(`Creep ${v}″ is beyond the ${CREEP_MAX}″ limit — check the value is a total, not per-signature.`);
+  return v;
+}
+// Shift for signature k of S, 0 = outermost.
+function creepShift(creep, k, S) { return (!(creep > 0) || S < 2) ? 0 : creep * k / (S - 1); }
+// Slide a half-page rect toward the spine by d. `half` is which side of the
+// spread the page sits on; spreadAlongX says whether the spine runs vertically.
+function creepRect(rect, half, d, alongX) {
+  if (!(d > 0)) return rect;
+  const sign = half === "left" ? 1 : -1;   // left page moves +, right page moves −
+  return alongX ? { ...rect, x: rect.x + sign * d } : { ...rect, y: rect.y + sign * d };
+}
+
 function bookletSlots(layout) {
   const slots = [];
   for (const cell of layout.cells) {
@@ -1500,7 +1550,9 @@ async function imposeSaddle(artBytes, spec, layout) {
   const P = Math.ceil(n / 4) * 4;
   if (P !== n) warnings.push(`page count ${n} padded to ${P} — ${P - n} blank page(s) at the back of the book`);
   const S = P / 4;
-  if (S >= 8) warnings.push(`${S} nested sheets — v1 applies no creep/shingling compensation; check inner-page margins on thick stock`);
+  if (creep > 0 && S >= 2) warnings.push(`Creep: content shifted spine-ward from 0″ on the cover to ${creep}″ on the innermost signature (${(creep / (S - 1)).toFixed(4)}″ per step over ${S} signatures). Cut lines unchanged; the outer sliver this opens is covered by the art's bleed.`);
+  else if (creep > 0) warnings.push("Creep set but this book is a single signature — nothing nests, so no shift applied.");
+  else if (S >= 8) warnings.push(`${S} nested sheets and no creep compensation set — check inner-page margins on thick stock, or set a creep total.`);
 
   const out = await PL.PDFDocument.create();
   const font = await out.embedFont(PL.StandardFonts.Helvetica);
@@ -1520,6 +1572,8 @@ async function imposeSaddle(artBytes, spec, layout) {
     return m && m !== "off" ? m : null;
   };
   const inset = insetOf(spec);
+  const userScale = artScaleOf(spec);
+  const creep = creepOf(spec);
   const { showMarks, showFold, showSlug } = marksOf(spec);
   let inkDoc = null;
   const arts = [];
@@ -1534,6 +1588,7 @@ async function imposeSaddle(artBytes, spec, layout) {
     let art = artCache.get(key);
     if (!art) {
       art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed);
+      applyArtScale(art, userScale);
       applyArtInset(art, inset);
       if (abm && (!art.hasBleed || inset > 0)) {
         let gaps = null;
@@ -1583,6 +1638,7 @@ async function imposeSaddle(artBytes, spec, layout) {
 
   for (let k = 0; k < S; k++) {
     const outside = { left: P - 2 * k, right: 2 * k + 1 };
+    const creepD = creepShift(creep, k, S);
     for (const inner of [false, true]) {
       const page = out.addPage([W, H]);
       const cells = inner ? mirrorCells(layout.cells, layout, flip) : layout.cells;
@@ -1590,7 +1646,11 @@ async function imposeSaddle(artBytes, spec, layout) {
         const frontPno = slot.half === "left" ? outside.left : outside.right;
         const pno = inner ? mate(frontPno) : frontPno;      // leaf-mate backs the same physical region
         if (pno > n) continue;                              // padded blank — cell stays empty, never filled
-        const rect = inner ? mirrorRect(slot.rect, layout, flip) : slot.rect;
+        // creep: slide the content spine-ward for this signature's depth. The
+        // clip is deliberately NOT moved — it marks where this page may print,
+        // and the cut lines have not changed.
+        const crept = creepRect(slot.rect, slot.half, creepD, !!bk.spreadAlongX);
+        const rect = inner ? mirrorRect(crept, layout, flip) : crept;
         const clip = inner ? mirrorRect(slot.clip, layout, flip) : slot.clip;
         placeArt(page, embeds[pno - 1], arts[pno - 1], rect, clip, spreadRot + (inner && tumble ? 180 : 0));
       }
@@ -1602,6 +1662,7 @@ async function imposeSaddle(artBytes, spec, layout) {
         const placed = drawSlug(page, layout, font, {
           side: label + (sheetsPerSig ? ` · run ${sheetsPerSig} sheets` : ""),
           orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
+          artScale: userScale, creep, creepAt: creepD,
           qty, sheets: totalSheets, date: dateStr,
         }, cells);
         if (!placed && k === 0 && !inner) warnings.push("no clear space inside the printable area for the slug line — omitted");
@@ -1759,6 +1820,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     return m && m !== "off" ? m : null;
   };
   const inset = insetOf(spec);
+  const userScale = artScaleOf(spec);
   const { showMarks, showSlug } = marksOf(spec);
   // Optional-content accumulator: one config for the whole output, fed by every
   // source document that gets embedded (gang combos bring several).
@@ -1858,6 +1920,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed);
       const abm = ref.gi != null || ref.doc === backDoc
         ? (spec.addBleed && spec.addBleed !== "off" ? spec.addBleed : null) : abMode(ref.pno);
+      applyArtScale(art, userScale);
       applyArtInset(art, inset);
       if (abm && (!art.hasBleed || inset > 0)) {
         const which = ref.gi != null ? "G" + ref.gi : ref.doc === backDoc ? "B" : "F";
@@ -1937,7 +2000,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       if (showMarks) drawMarks(page, layout, cellsForMarks);
       if (showSlug) {
         const placed = drawSlug(page, layout, font, {
-          side: label, orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
+          side: label, orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0, artScale: userScale,
           qty: spec.qty, sheets, date: dateStr,
         }, cellsForMarks);
         if (!placed && !slugWarned) { slugWarned = true; warnings.push("no clear space inside the printable area for the slug line — omitted"); }
@@ -2285,6 +2348,8 @@ function App() {
   const [bleedIn, setBleedIn] = useState(0.125);           // per-job bleed override
   const [addBleed, setAddBleed] = useState("off");         // synthesize bleed for no-bleed files: off | mirror | scale
   const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
+  const [artScale, setArtScale] = useState(100);         // free scale on placed art, %
+  const [creep, setCreep] = useState(0);                 // saddle shingling total, in
   const [artInset, setArtInset] = useState(0);            // pull art off the trim (in), fill makes up the difference
   const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
   const [gangFiles, setGangFiles] = useState([]);          // manual gang combo: [{bytes,name,pageCount,slots}]
@@ -2332,7 +2397,7 @@ function App() {
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
-    bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps, artInset: +artInset || 0,
+    bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps, artInset: +artInset || 0, artScale: +artScale || 100, creep: +creep || 0,
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
     saddleColGaps: gapCols, saddleRowGaps: gapRows, saddleFillSheet: gapFill,
     colGaps: gapCols, rowGaps: gapRows, fillSheet: gapFill,
@@ -2341,7 +2406,7 @@ function App() {
     gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, addBleedPages,
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
        gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet]);
   const debSpec = useDebounced(spec, 450);
 
@@ -2777,6 +2842,17 @@ function App() {
                   (a mirror would visibly reflect people at the edges).
                 </div>
               )}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 8, flexWrap: "wrap" }}>
+                <b style={{ fontWeight: 600 }}>Scale art:</b>
+                <input type="number" step="1" min="25" max="400" value={artScale} style={{ width: 74 }}
+                       onChange={e => setArtScale(e.target.value)} />
+                <span>% of placed size</span>
+                {+artScale !== 100 && (
+                  <span style={{ color: "rgba(255,255,255,.5)" }}>
+                    — {+artScale > 100 ? "grows past the trim (clipped to the cell)" : "pulls in from the trim; needs a bleed fill to cover the gap"}
+                  </span>
+                )}
+              </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, flexWrap: "wrap" }}>
                 <b style={{ fontWeight: 600 }}>Pull art off trim:</b>
                 <input type="number" step="0.03125" min="0" max="0.5" value={artInset}
@@ -2991,7 +3067,7 @@ function App() {
               return (
                 <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 8, background: "rgba(255,255,255,.02)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span className="lbl" style={{ margin: 0 }}>{isSaddle ? "Signature gutters" : "Manual grid & gutters"}</span>
+                    <span className="lbl" style={{ margin: 0 }}>{isSaddle ? "Signatures per sheet, creep & gutters" : "Manual grid & gutters"}</span>
                     <span style={{ fontSize: 11, color: over ? "#f87171" : "rgba(255,255,255,.4)" }}>
                       block {tw.toFixed(2)}×{th.toFixed(2)}″ / sheet {lay.sheet.long}×{lay.sheet.short}″{over ? " — OVERFLOW" : ""}
                     </span>
@@ -3025,6 +3101,19 @@ function App() {
                             on <b>{lay.sheet.label}</b> · = <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{lay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
                           </div>
                         </div>
+                      )}
+                    </div>
+                  )}
+                  {isSaddle && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, marginBottom: 9, flexWrap: "wrap" }}>
+                      <b style={{ fontWeight: 600 }}>Creep (total):</b>
+                      <input type="number" step="0.0078125" min="0" max="0.5" value={creep} style={{ width: 88 }}
+                             onChange={e => setCreep(e.target.value)} />
+                      <span>″ at the innermost signature</span>
+                      {+creep > 0 && (
+                        <span style={{ color: "rgba(255,255,255,.5)" }}>
+                          — cover 0″, stepping spine-ward to {(+creep).toFixed(4)}″; cut lines unchanged
+                        </span>
                       )}
                     </div>
                   )}
@@ -3117,7 +3206,9 @@ function App() {
                   <div>Press sheet: <b>{lay.sheet.label}</b></div>
                   {lay.booklet ? (
                     <div>Spreads: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.booklet.spreadsPerSide}/side</b> ({lay.imp} pages/side){" "}
-                      {lay.efficient
+                      {lay.manualGrid
+                        ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>MANUAL {lay.booklet.spreadsPerSide}/SIDE — PRICED {lay.pricedImp} PAGES/SIDE</span>
+                        : lay.efficient
                         ? <span className="imp-badge ok">13×27.5 EFFICIENT — PRICED {lay.pricedImp}/SIDE</span>
                         : lay.fillSheet
                         ? <span className="imp-badge warn">FULL-SHEET FILL {lay.across}×{lay.down} — PAST IMAGEABLE AREA</span>
