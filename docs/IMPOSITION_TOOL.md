@@ -220,22 +220,49 @@ download the imposed PDF. Useful for testing and one-off jobs.
   flip are unaffected, and the count is flagged against the priced imp exactly
   like a flat's manual grid — badge, warning, slug, excluded from the parity
   preflight. Refuses with a footprint report when the copies cannot fit.
-- **Step and repeat** (saddle, `spec.sigRepeat`): the same outcome asked for the
-  way a pressman says it — a **count**, not a shape. Sits directly beneath the
-  manual-copies control: tick it, type `3`, and each signature prints three
-  times on the sheet; the tool picks the arrangement that fits (fewest rows
-  first) and promotes to 13×27.5 — or to whatever parent sheet is forced — when
-  the standard sheet cannot hold a whole grid. **Pagination is untouched**: the
-  book still imposes into signatures normally, and only the number of copies of
-  each signature riding one press sheet changes. Verified on a numbered 16pp
-  fixture that all three cells of a side carry the same page pair
-  (`PAGE 16 | PAGE 1`, back `PAGE 15 | PAGE 2`) and that duplex registers.
-  Flagged like the manual grid (badge `STEP & REPEAT n× PER SHEET`, warning,
-  slug `STEP AND REPEAT nx per sheet`, excluded from the parity preflight).
-  The two controls are mutually exclusive in the UI, and if a caller sets both,
-  the manual grid wins — it is the more specific instruction. A count that
-  cannot form a whole grid refuses with the largest count that would fit,
-  leaving the control on screen so the number can be lowered.
+- **Ganged signatures (the default) vs step and repeat** (saddle). Multi-cell
+  saddle sheets used to place the *same* signature in every cell, which is only
+  one of the two press forms a shop needs and made the step-and-repeat switch a
+  no-op. What goes in which cell is now explicit:
+
+  - **GANG — default.** Consecutive signatures ride the sheet side by side.
+    A 36pp book is 9 signatures; 2-up that is 5 forms — `1+2, 3+4, 5+6, 7+8, 9`
+    — so one sheet through the press is **one book's worth** of those
+    signatures. This is "impose the pages into signatures, then the signatures
+    onto sheets". A 16pp 3.5×5.5 book (4-up) now lands on a **single sheet,
+    front and back**, where it used to take four.
+  - **REPEAT — `spec.sigRepeat`, the "step and repeat" toggle.** One signature
+    fills every cell, one form per signature; the run divides (`ceil(qty/C)`
+    sheets per form) and the cut stacks are collated into books. Give it a
+    **count**, not a shape — "print each signature 3× per sheet" — and the tool
+    picks the arrangement that fits (fewest rows first), promoting to 13×27.5,
+    or to whatever parent sheet is forced, when the standard sheet cannot hold
+    a whole grid. Flagged like the manual grid (badge `STEP & REPEAT n× PER
+    SHEET`, warning, slug `STEP AND REPEAT nx per sheet`, out of the parity
+    preflight). A count that cannot form a whole grid refuses with the largest
+    that would fit, leaving the control on screen so it can be lowered.
+
+  Pagination into signatures is identical in both modes — only which signature
+  lands in which cell changes. Uneven ganging leaves the last form's spare
+  cells **blank** (filling them would print unequal quantities of a signature),
+  and the warning quantifies the cost: *"9 signatures do not fill 2 cells
+  evenly … this runs 500 sheets where step and repeat would run 450."* The
+  reverse case — fewer signatures than cells, when the cells divide evenly
+  among them — tiles instead (2 signatures in 4 cells → `1,2,1,2`), which fills
+  the sheet while keeping every signature's quantity equal.
+
+  Sheet labels and the slug now read `FORM f/F SIGS 1+2 OUTSIDE`, and a
+  preflight guard counts every page across the forms and refuses if any is
+  placed more or fewer times than the mode calls for — a ganging mistake cannot
+  silently drop or duplicate a section.
+
+  Verified against a real 36pp customer job (`AH216627`, 5.5×8.5) with every
+  page stamped: form 1 carries `36|1` and `34|3`, form 5 carries `20|17` with
+  one cell blank, and **18/18 half-pages back the correct leaf-mate under a
+  single rigid sheet flip** on both the short and long edge, in gang, repeat,
+  3-up, efficient, gutter and creep modes. Flats and stickers are byte-identical
+  across the change; every saddle case keeps identical cell geometry and only
+  changes which pages land in the cells.
 - **Manual grid** (flats & stickers, Fiery-style): the operator can set the
   **columns × rows outright** instead of taking the count derived from the
   priced imp — a 2×4 coupon can be run 9 across × 3 down, 8×2, 4×5, whatever
