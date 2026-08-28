@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 03:12 UTC · IMPOSE-V1.14</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 04:07 UTC · IMPOSE-V1.15</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -3050,16 +3050,25 @@ function App() {
                 <span>Lay out on 13×27.5 (efficient mode) <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "more signature copies per sheet" : "multiple expands to fill the 27″ axis"}</span></span>
               </label>
             )}
-            {lay && (isSaddle ? !!lay.booklet : true) && (() => {
-              const nc = Math.max(0, lay.across - 1), nr = Math.max(0, lay.down - 1);
-              const effCol = (gapCols && gapCols.length === nc) ? gapCols : (lay.colGaps || Array(nc).fill(lay.gutter || 0));
-              const effRow = (gapRows && gapRows.length === nr) ? gapRows : (lay.rowGaps || Array(nr).fill(lay.gutter || 0));
+            {/* Render whenever a layout resolved OR the operator has a manual
+                override switched on. That second case is the important one: an
+                over-large grid makes computeLayout throw, and if the panel were
+                gated on `lay` alone the control that caused it would vanish,
+                leaving no way to undo. The settings live in state, so they are
+                still editable with no layout at all. */}
+            {(lay ? (isSaddle ? !!lay.booklet : true) : (gridOn || gapCols || gapRows || gapFill != null)) && (() => {
+              const ok = !!lay;
+              const nc = ok ? Math.max(0, lay.across - 1) : 0;
+              const nr = ok ? Math.max(0, lay.down - 1) : 0;
+              const uni = ok ? (lay.gutter || 0) : 0;
+              const effCol = (gapCols && gapCols.length === nc) ? gapCols : ((ok && lay.colGaps) || Array(nc).fill(uni));
+              const effRow = (gapRows && gapRows.length === nr) ? gapRows : ((ok && lay.rowGaps) || Array(nr).fill(uni));
               const setCol = (i, v) => { const a = effCol.slice(); a[i] = v === "" ? 0 : +v; setGapCols(a); };
               const setRow = (i, v) => { const a = effRow.slice(); a[i] = v === "" ? 0 : +v; setGapRows(a); };
               const custom = gapCols || gapRows || gapFill != null;
-              const tw = lay.across * lay.cellW + effCol.reduce((x, y) => x + y, 0);
-              const th = lay.down * lay.cellH + effRow.reduce((x, y) => x + y, 0);
-              const over = tw > lay.sheet.long + 1e-6 || th > lay.sheet.short + 1e-6;
+              const tw = ok ? lay.across * lay.cellW + effCol.reduce((x, y) => x + y, 0) : 0;
+              const th = ok ? lay.down * lay.cellH + effRow.reduce((x, y) => x + y, 0) : 0;
+              const over = ok && (tw > lay.sheet.long + 1e-6 || th > lay.sheet.short + 1e-6);
               // Changing the grid invalidates gap arrays sized to the old one.
               const setAcross = v => { setGridAcross(v); setGapCols(null); };
               const setDown = v => { setGridDown(v); setGapRows(null); };
@@ -3069,7 +3078,8 @@ function App() {
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <span className="lbl" style={{ margin: 0 }}>{isSaddle ? "Signatures per sheet, creep & gutters" : "Manual grid & gutters"}</span>
                     <span style={{ fontSize: 11, color: over ? "#f87171" : "rgba(255,255,255,.4)" }}>
-                      block {tw.toFixed(2)}×{th.toFixed(2)}″ / sheet {lay.sheet.long}×{lay.sheet.short}″{over ? " — OVERFLOW" : ""}
+                      {ok ? `block ${tw.toFixed(2)}×${th.toFixed(2)}″ / sheet ${lay.sheet.long}×${lay.sheet.short}″${over ? " — OVERFLOW" : ""}`
+                          : "layout refused — adjust or reset below"}
                     </span>
                   </div>
                   {(
@@ -3078,7 +3088,7 @@ function App() {
                         <input type="checkbox" checked={gridOn} style={{ width: "auto" }}
                                onChange={e => {
                                  const on = e.target.checked;
-                                 if (on) { setGridAcross(lay.across); setGridDown(lay.down); } // seed from the current layout
+                                 if (on && ok) { setGridAcross(lay.across); setGridDown(lay.down); } // seed from the current layout
                                  setGapCols(null); setGapRows(null);
                                  setGridOn(on);
                                }} />
@@ -3098,7 +3108,7 @@ function App() {
                                    onChange={e => setDown(e.target.value)} />
                           </div>
                           <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                            on <b>{lay.sheet.label}</b> · = <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{lay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
+                            {ok ? <>on <b>{lay.sheet.label}</b> · </> : null}= <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{ok && lay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
                           </div>
                         </div>
                       )}
@@ -3156,13 +3166,20 @@ function App() {
                   )}
                   <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
                     <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                      <input type="checkbox" checked={gapFill == null ? !!lay.fillSheet : gapFill}
+                      <input type="checkbox" checked={gapFill == null ? !!(ok && lay.fillSheet) : gapFill}
                              onChange={e => setGapFill(e.target.checked)} style={{ width: "auto" }} />
                       Fill full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>(place past the imageable area)</span>
                     </label>
                     {custom && (
                       <button type="button" className="imp-btn sec" style={{ padding: "3px 10px", fontSize: 12 }}
                               onClick={() => { setGapCols(null); setGapRows(null); setGapFill(null); }}>Reset gutters</button>
+                    )}
+                    {(!ok || gridOn) && (
+                      <button type="button" className="imp-btn sec"
+                              style={{ padding: "3px 10px", fontSize: 12, borderColor: ok ? undefined : "#f87171", color: ok ? undefined : "#f87171" }}
+                              onClick={() => { setGridOn(false); setGapCols(null); setGapRows(null); setGapFill(null); }}>
+                        Back to automatic
+                      </button>
                     )}
                   </div>
                 </div>
