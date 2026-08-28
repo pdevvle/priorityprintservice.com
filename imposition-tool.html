@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 10:34 UTC · IMPOSE-V1.16</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 10:11 UTC · IMPOSE-V1.17</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -604,6 +604,32 @@ function computeSaddleLayout(pw, ph, opts) {
     warnings.push(`Manual signatures: ${grid.a} across × ${grid.d} down = ${c} cop${c === 1 ? "y" : "ies"}/side on ${sheet.label}${grid.rotated ? " (spreads rotated 90°)" : ""}${c === target ? "" : ` — pricing assumed ${target} per 13×19-side, so sheet count and cost per book will differ`}.`);
   }
 
+  // ── Step and repeat (saddle): N identical copies of each signature per sheet ──
+  // Pagination is untouched — the book is still imposed into signatures the
+  // normal way; this only says how many copies of the SAME signature ride one
+  // press sheet. Unlike the manual grid the operator gives a COUNT, not a
+  // shape: the tool picks the arrangement that fits (fewest cuts first) and
+  // promotes to the oversize sheet when the standard one cannot hold it.
+  let stepRepeat = 0;
+  const repN = opts && isFinite(+opts.sigRepeat) ? Math.floor(+opts.sigRepeat) : 0;
+  if (!grid && repN >= 1) {
+    if (repN > MANUAL_GRID_MAX)
+      throw new Error(`Step and repeat ${repN} copies exceeds the ${MANUAL_GRID_MAX}-cell limit.`);
+    const cands = ovSheet ? [ovSheet] : [SHEETS["13x19"], SHEETS["13x27.5"]];
+    let hit = null;
+    for (const sh of cands) {
+      const g = bestGridForCount(repN, spL, spS, sh, gutters);
+      if (g) { hit = { sheet: sh, grid: g }; break; }
+    }
+    if (!hit) {
+      const room = cands.map(sh => { const b = bestPhysicalGrid(spL, spS, sh, gutters); return { sh, n: b ? b.a * b.d : 0 }; })
+                        .reduce((x, y) => (y.n > x.n ? y : x));
+      throw new Error(`Step and repeat ${repN}: ${repN} copies of a ${spreadW}×${spreadH}″ spread do not fit in a whole grid${room.n ? ` — ${room.sh.label} holds at most ${room.n}` : ""}. Lower the count, or use “set signature copies manually” for an uneven arrangement.`);
+    }
+    sheet = hit.sheet; grid = hit.grid; stepRepeat = repN; manualGrid = true;
+    warnings.push(`Step and repeat: ${repN} identical cop${repN === 1 ? "y" : "ies"} of each signature per side — ${grid.a} across × ${grid.d} down on ${sheet.label}${grid.rotated ? " (spreads rotated 90°)" : ""}${repN === target ? "" : ` — pricing assumed ${target} per 13×19-side, so sheet count and cost per book will differ`}.`);
+  }
+
   // Efficient mode — the oversize sheet, or whatever parent was forced.
   if (!grid && opts && opts.efficient) {
     const effSheet = ovSheet || SHEETS["13x27.5"];
@@ -659,7 +685,7 @@ function computeSaddleLayout(pw, ph, opts) {
   const layout = {
     sheet, calc: "saddle", pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet, manualGrid,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet, manualGrid, stepRepeat,
     imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
     pricedImp: imp,                 // pages per side the calculator priced
     mismatch, efficient, warnings,
@@ -1419,7 +1445,8 @@ function drawSlug(page, layout, font, info, cells) {
     info.jobName ? String(info.jobName).replace(/[^\x20-\x7E]/g, "?") : null,
     layout.booklet ? `pages ${layout.booklet.pw}x${layout.booklet.ph}in` : `${layout.pieceLong}x${layout.pieceShort}in`,
     layout.mismatch ? `MISMATCH ${layout.imp}-up placed vs ${layout.pricedImp}-up priced` : `${layout.imp}-up on ${layout.sheet.key}`,
-    layout.manualGrid ? `MANUAL GRID ${layout.across}x${layout.down} (priced ${layout.pricedImp}-up)` : null,
+    layout.stepRepeat ? `STEP AND REPEAT ${layout.stepRepeat}x per sheet (${layout.across}x${layout.down}, priced ${layout.pricedImp}-up)`
+      : layout.manualGrid ? `MANUAL GRID ${layout.across}x${layout.down} (priced ${layout.pricedImp}-up)` : null,
     layout.efficient ? `EFFICIENT 13x27.5 (priced ${layout.pricedImp}-up/13x19)`
       : layout.fillSheet ? `FILL ${layout.across}x${layout.down} full-sheet (priced ${layout.pricedImp}-up)` : null,
     (layout.colGaps || layout.rowGaps) ? "custom gutters"
@@ -1733,6 +1760,9 @@ function layoutOpts(spec) {
     manualGrid: isFinite(+spec.gridAcross) && +spec.gridAcross >= 1 && isFinite(+spec.gridDown) && +spec.gridDown >= 1
       ? { across: +spec.gridAcross, down: +spec.gridDown } : null,
     manualSheet: spec.gridSheet || null,
+    // Step and repeat (saddle): copies of the SAME signature per sheet. The
+    // manual grid wins when both are set — it is the more specific instruction.
+    sigRepeat: isFinite(+spec.sigRepeat) && +spec.sigRepeat >= 1 ? Math.floor(+spec.sigRepeat) : null,
     // Parent-sheet override (throws on an unusable custom size).
     sheetOverride: sheetOverrideOf(spec),
     colGaps: Array.isArray(spec.colGaps) ? spec.colGaps : null,
@@ -2339,6 +2369,9 @@ function App() {
   const [gridAcross, setGridAcross] = useState(1);
   const [gridDown, setGridDown] = useState(1);
   const [gridSheet, setGridSheet] = useState("auto");
+  // Step and repeat (saddle): duplicate each signature N× on the press sheet.
+  const [repOn, setRepOn] = useState(false);
+  const [repN, setRepN] = useState(2);
   const [offsetMode, setOffsetMode] = useState("jog");    // jog lower-right 0.5″ | center | custom
   const [offsetRight, setOffsetRight] = useState(0.5);
   const [offsetBottom, setOffsetBottom] = useState(0.5);
@@ -2404,10 +2437,11 @@ function App() {
     gridAcross: gridOn ? +gridAcross || 0 : null,
     gridDown: gridOn ? +gridDown || 0 : null,
     gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
+    sigRepeat: isSaddle && repOn && !gridOn ? +repN || 0 : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet]);
+       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -3090,6 +3124,7 @@ function App() {
                                onChange={e => {
                                  const on = e.target.checked;
                                  if (on && ok) { setGridAcross(lay.across); setGridDown(lay.down); } // seed from the current layout
+                                 if (on) setRepOn(false);   // the two are alternative ways to say the same thing
                                  setGapCols(null); setGapRows(null);
                                  setGridOn(on);
                                }} />
@@ -3111,6 +3146,34 @@ function App() {
                           <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
                             {ok ? <>on <b>{lay.sheet.label}</b> · </> : null}= <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{ok && lay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
                           </div>
+                        </div>
+                      )}
+                      {isSaddle && (
+                        <div style={{ marginTop: 9, paddingTop: 9, borderTop: "1px dashed rgba(255,255,255,.12)" }}>
+                          <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                            <input type="checkbox" checked={repOn} style={{ width: "auto" }}
+                                   onChange={e => {
+                                     const on = e.target.checked;
+                                     if (on) setGridOn(false);   // count, not shape — the manual grid is the other way to say it
+                                     setGapCols(null); setGapRows(null);
+                                     setRepOn(on);
+                                   }} />
+                            <span>Step and repeat <span style={{ color: "rgba(255,255,255,.4)" }}>— print the same signature more than once per sheet; the tool picks the arrangement that fits</span></span>
+                          </label>
+                          {repOn && (
+                            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
+                              <div>
+                                <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Copies of each signature, per sheet</div>
+                                <input type="number" min="1" step="1" value={repN} style={{ width: 74, fontSize: 12 }}
+                                       onChange={e => { setRepN(e.target.value); setGapCols(null); setGapRows(null); }} />
+                              </div>
+                              <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
+                                {ok && lay.stepRepeat
+                                  ? <>= <b>{lay.across} × {lay.down}</b> on <b>{lay.sheet.label}</b> · pages still impose into signatures normally</>
+                                  : <>pages still impose into signatures normally — this only duplicates each one on the sheet</>}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -3175,10 +3238,10 @@ function App() {
                       <button type="button" className="imp-btn sec" style={{ padding: "3px 10px", fontSize: 12 }}
                               onClick={() => { setGapCols(null); setGapRows(null); setGapFill(null); }}>Reset gutters</button>
                     )}
-                    {(!ok || gridOn) && (
+                    {(!ok || gridOn || repOn) && (
                       <button type="button" className="imp-btn sec"
                               style={{ padding: "3px 10px", fontSize: 12, borderColor: ok ? undefined : "#f87171", color: ok ? undefined : "#f87171" }}
-                              onClick={() => { setGridOn(false); setGapCols(null); setGapRows(null); setGapFill(null); }}>
+                              onClick={() => { setGridOn(false); setRepOn(false); setGapCols(null); setGapRows(null); setGapFill(null); }}>
                         Back to automatic
                       </button>
                     )}
@@ -3224,7 +3287,9 @@ function App() {
                   <div>Press sheet: <b>{lay.sheet.label}</b></div>
                   {lay.booklet ? (
                     <div>Spreads: <b>{lay.across} × {lay.down}{lay.rotated ? " (rotated 90°)" : ""}</b> = <b>{lay.booklet.spreadsPerSide}/side</b> ({lay.imp} pages/side){" "}
-                      {lay.manualGrid
+                      {lay.stepRepeat
+                        ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>STEP &amp; REPEAT {lay.stepRepeat}× PER SHEET — PRICED {lay.pricedImp} PAGES/SIDE</span>
+                        : lay.manualGrid
                         ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>MANUAL {lay.booklet.spreadsPerSide}/SIDE — PRICED {lay.pricedImp} PAGES/SIDE</span>
                         : lay.efficient
                         ? <span className="imp-badge ok">13×27.5 EFFICIENT — PRICED {lay.pricedImp}/SIDE</span>
