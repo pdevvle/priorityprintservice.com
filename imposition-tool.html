@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 10:00 UTC · IMPOSE-V1.15</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 10:34 UTC · IMPOSE-V1.16</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -3056,7 +3056,8 @@ function App() {
                 gated on `lay` alone the control that caused it would vanish,
                 leaving no way to undo. The settings live in state, so they are
                 still editable with no layout at all. */}
-            {(lay ? (isSaddle ? !!lay.booklet : true) : (gridOn || gapCols || gapRows || gapFill != null)) && (() => {
+            {(lay ? (isSaddle ? !!lay.booklet : true)
+                  : (isSaddle || FLAT_CALCS.includes(calc) || calc === "sticker")) && (() => {
               const ok = !!lay;
               const nc = ok ? Math.max(0, lay.across - 1) : 0;
               const nr = ok ? Math.max(0, lay.down - 1) : 0;
