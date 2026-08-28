@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 19:08 UTC · IMPOSE-V1.20</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 21:11 UTC · IMPOSE-V1.21</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1574,6 +1574,30 @@ async function imposeSaddle(artBytes, spec, layout) {
   stripActiveContent(src);
   const n = src.getPageCount();
   if (n < 3) throw new Error(`Booklet artwork must be a multi-page PDF in reading order — got ${n} page(s)`);
+  // ── Page ORIENTATION must match the artwork ───────────────────────────────
+  // Saddle stitch folds on the HEIGHT edge, so 5.5×8.5 and 8.5×5.5 are
+  // different products, not the same size entered two ways. The drop-time
+  // trim check normalises to long/short and is therefore blind to a swap:
+  // entering the landscape pair builds a landscape signature (1 across × 2
+  // down instead of 2 across × 1) and rotates every page 90° into it, and
+  // nothing in the tool said a word. On a 36pp job that is 450 sheets printed
+  // sideways. Check it here, where the real page size is known, so every
+  // entry path is covered — including the wp-admin order queue, where the
+  // spec is authoritative and no autodetect ever runs.
+  try {
+    const det = detectTrim(src, layout.bleed);
+    const sq = d => Math.abs(d.w - d.h) <= 0.03;
+    const specPortrait = bk.ph > bk.pw, srcPortrait = det.h > det.w;
+    if (!sq(det) && Math.abs(bk.pw - bk.ph) > 0.03 && specPortrait !== srcPortrait) {
+      throw new Error(
+        `Page orientation mismatch: the artwork's pages are ${det.w}×${det.h}″ (${srcPortrait ? "portrait" : "landscape"}) but the spec says ${bk.pw}×${bk.ph}″ (${specPortrait ? "portrait" : "landscape"}). ` +
+        `Saddle stitch folds on the height edge, so this would build a ${specPortrait ? "portrait" : "landscape"} signature and turn every page 90°. ` +
+        `Set Page width ${det.w}″ and Page height ${det.h}″ — or supply artwork that really is ${specPortrait ? "portrait" : "landscape"}.`);
+    }
+  } catch (e) {
+    if (/orientation mismatch/.test(e.message)) throw e;   // detection itself is best-effort
+  }
+
   const P = Math.ceil(n / 4) * 4;
   if (P !== n) warnings.push(`page count ${n} padded to ${P} — ${P - n} blank page(s) at the back of the book`);
   const S = P / 4;
@@ -2472,6 +2496,13 @@ function App() {
   const [multiMode, setMultiMode] = useState("repeat");    // multipage flat files: repeat | gang | stack
   const isSaddle = calc === "saddle";
   const [art, setArt] = useState(null);      // { bytes, name, pageCount }
+  // Trim as MEASURED off the dropped file, kept in the file's own orientation.
+  // Saddle reads the two size boxes as width × height (the spine is the height
+  // edge); every other calc reads them as long × short. So the same numbers
+  // mean different things per calc, and dropping a file before choosing the
+  // product left a portrait booklet described as landscape — silently, because
+  // the long/short pair is identical either way. Re-orient on every switch.
+  const [detTrim, setDetTrim] = useState(null);
   const [backArt, setBackArt] = useState(null);
   const [result, setResult] = useState(null); // { bytes, layout, warnings, sheets, filename }
   const [busy, setBusy] = useState(false);
@@ -2501,6 +2532,12 @@ function App() {
       .catch(e => !dead && setQueueErr(e.message));
     return () => { dead = true; };
   }, [refreshKey]);
+
+  useEffect(() => {
+    if (!detTrim || activeOrder) return;
+    if (isSaddle) { setTrimLong(detTrim.w); setTrimShort(detTrim.h); }   // width × height
+    else { setTrimLong(Math.max(detTrim.w, detTrim.h)); setTrimShort(Math.min(detTrim.w, detTrim.h)); }
+  }, [isSaddle, detTrim, activeOrder]);
 
   const spec = useMemo(() => ({
     calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0,
@@ -2630,15 +2667,24 @@ function App() {
       if (slot === "back") setBackArt({ bytes, name: f.name, pageCount, threats });
       else {
         setArt({ bytes, name: f.name, pageCount, threats });
+        setDetTrim(det ? { w: det.w, h: det.h } : null);
         setAddBleedPages({}); // per-page overrides belong to the previous file
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
         if (det) {
           const specL = Math.max(+trimLong || 0, +trimShort || 0), specS = Math.min(+trimLong || 0, +trimShort || 0);
           const detL = Math.max(det.w, det.h), detS = Math.min(det.w, det.h);
           const differs = Math.abs(detL - specL) > 0.03 || Math.abs(detS - specS) > 0.03;
+          // For saddle the ORIENTATION is part of the spec — the spine sits on
+          // the height edge — and a swap has the same long/short pair, so
+          // `differs` cannot see it. Check it separately or a landscape entry
+          // sails through and every page prints sideways.
+          const flipped = isSaddle && !differs
+            && Math.abs(det.w - det.h) > 0.03
+            && ((+trimShort > +trimLong) !== (det.h > det.w));
           if (activeOrder) {
             // order spec is authoritative — but flag a measurement conflict loudly
             if (differs) setNotice(`⚠ "${f.name}" measures ${det.w}×${det.h}″ (${det.method}) but the order spec is ${specL}×${specS}″ — check that this is the right file/spec before printing.`);
+            else if (flipped) setNotice(`⚠ "${f.name}" is ${det.w}×${det.h}″ (${det.h > det.w ? "portrait" : "landscape"}) but the order spec reads ${trimLong}×${trimShort}″ — saddle folds on the height edge, so imposing as-is would turn every page 90°. Swap the page width/height before printing.`);
           } else {
             if (isSaddle) { setTrimLong(det.w); setTrimShort(det.h); }
             else { setTrimLong(detL); setTrimShort(detS); }
