@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 10:11 UTC · IMPOSE-V1.17</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 10:37 UTC · IMPOSE-V1.18</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1657,42 +1657,96 @@ async function imposeSaddle(artBytes, spec, layout) {
 
   const frontSlots = bookletSlots(layout);
   const qty = spec.qty || 0;
-  const sheetsPerSig = qty ? Math.ceil(qty / bk.spreadsPerSide) : null;
-  const totalSheets = sheetsPerSig ? sheetsPerSig * S : null;
   const dateStr = new Date().toISOString().slice(0, 10);
   const W = layout.sheet.long * PT, H = layout.sheet.short * PT;
   const pageLabels = [];
 
-  for (let k = 0; k < S; k++) {
-    const outside = { left: P - 2 * k, right: 2 * k + 1 };
-    const creepD = creepShift(creep, k, S);
+  // ── Which signature goes in which cell ────────────────────────────────────
+  // Two genuinely different press forms, and the difference is the whole point
+  // of the step-and-repeat switch:
+  //
+  //   GANG (default) — consecutive signatures ride the sheet side by side.
+  //     A 36pp book is 9 signatures; 2-up that is 5 forms: [1,2] [3,4] [5,6]
+  //     [7,8] [9,·]. Cut the sheet apart and each stack is a different section
+  //     of the SAME book, so one sheet through the press = one book's worth of
+  //     those signatures. This is "impose the pages into signatures, then the
+  //     signatures onto sheets".
+  //   REPEAT — one signature fills every cell, so a sheet yields C copies of
+  //     that one section and the book is built by collating across forms.
+  //     Fewer sheets when the run is long; chosen with the step-and-repeat
+  //     toggle (or by asking for a copy count).
+  //
+  // Everything downstream — page count, sheet count, slug, labels, preflight —
+  // follows from `forms`, so neither mode is a special case anywhere else.
+  const C = bk.spreadsPerSide;
+  const repeatMode = !!layout.stepRepeat;
+  const forms = [];
+  // A book with fewer signatures than the sheet has cells would otherwise run
+  // every impression half empty. When the cells divide evenly among the
+  // signatures we tile them instead (2 sigs in 4 cells → 1,2,1,2), which keeps
+  // every signature's quantity equal — the thing a wrap-around must never
+  // break. Uneven cases fall through to normal ganging and warn.
+  const tile = !repeatMode && S < C && C % S === 0 ? C / S : 0;
+  if (repeatMode) {
+    for (let k = 0; k < S; k++) forms.push(Array(C).fill(k));
+  } else if (tile) {
+    forms.push(Array.from({ length: C }, (_, c) => c % S));
+  } else {
+    for (let f = 0; f < Math.ceil(S / C); f++)
+      forms.push(Array.from({ length: C }, (_, c) => f * C + c).filter(k => k < S));
+  }
+  const F = forms.length;
+  const perSheet = repeatMode ? C : (tile ? tile : 1);   // copies of each placed signature per sheet
+  const sheetsPerForm = qty ? Math.ceil(qty / perSheet) : null;
+  const totalSheets = sheetsPerForm ? sheetsPerForm * F : null;
+  if (repeatMode) {
+    warnings.push(`Step and repeat: each signature fills all ${C} cells — ${F} form${F === 1 ? "" : "s"}, one per signature${qty ? `, ${sheetsPerForm} sheets each (${totalSheets} total for ${qty})` : ""}.`);
+  } else {
+    if (tile) warnings.push(`Only ${S} signature${S === 1 ? "" : "s"} for ${C} cells — each is repeated ${tile}× per sheet so the sheet runs full and every signature keeps the same quantity.`);
+    else if (C > 1) warnings.push(`Ganged ${C} consecutive signatures per sheet — ${F} form${F === 1 ? "" : "s"} (${forms.map(fm => fm.map(k => k + 1).join("+")).join(", ")}). One sheet through the press = one book's worth of those signatures.`);
+    const leftover = tile ? 0 : (C - (S % C)) % C;
+    if (leftover) {
+      const repSheets = qty ? Math.ceil(qty / C) * S : null;
+      warnings.push(`${S} signatures do not fill ${C} cells evenly — the last form carries ${S % C} and leaves ${leftover} cell(s) blank${repSheets && totalSheets ? `, so this runs ${totalSheets} sheets where step and repeat would run ${repSheets}` : ""}. Tick “step and repeat” if you would rather fill every cell with one signature.`);
+    }
+  }
+
+  for (let f = 0; f < F; f++) {
+    const sigs = forms[f];
     for (const inner of [false, true]) {
       const page = out.addPage([W, H]);
       const cells = inner ? mirrorCells(layout.cells, layout, flip) : layout.cells;
-      for (const slot of frontSlots) {
+      frontSlots.forEach((slot, si) => {
+        const k = sigs[Math.floor(si / 2)];                 // two slots per cell
+        if (k === undefined) return;                        // unfilled cell in the last ganged form
+        const outside = { left: P - 2 * k, right: 2 * k + 1 };
         const frontPno = slot.half === "left" ? outside.left : outside.right;
         const pno = inner ? mate(frontPno) : frontPno;      // leaf-mate backs the same physical region
-        if (pno > n) continue;                              // padded blank — cell stays empty, never filled
-        // creep: slide the content spine-ward for this signature's depth. The
-        // clip is deliberately NOT moved — it marks where this page may print,
-        // and the cut lines have not changed.
-        const crept = creepRect(slot.rect, slot.half, creepD, !!bk.spreadAlongX);
+        if (pno > n) return;                                // padded blank — cell stays empty, never filled
+        // creep: slide the content spine-ward for THIS cell's signature depth
+        // (ganged cells sit at different depths on one sheet). The clip is
+        // deliberately NOT moved — it marks where this page may print, and the
+        // cut lines have not changed.
+        const crept = creepRect(slot.rect, slot.half, creepShift(creep, k, S), !!bk.spreadAlongX);
         const rect = inner ? mirrorRect(crept, layout, flip) : crept;
         const clip = inner ? mirrorRect(slot.clip, layout, flip) : slot.clip;
         placeArt(page, embeds[pno - 1], arts[pno - 1], rect, clip, spreadRot + (inner && tumble ? 180 : 0));
-      }
-      const label = `SIG ${k + 1}/${S} ${inner ? "INSIDE" : "OUTSIDE"}${k === 0 ? " (COVER)" : ""}`;
+      });
+      const sigTxt = repeatMode ? `SIG ${sigs[0] + 1}/${S} x${C}`
+                   : sigs.length === 1 ? `SIG ${sigs[0] + 1}/${S}`
+                   : `SIGS ${sigs.map(k => k + 1).join("+")}/${S}`;
+      const label = `FORM ${f + 1}/${F} ${sigTxt} ${inner ? "INSIDE" : "OUTSIDE"}${sigs.includes(0) ? " (COVER)" : ""}`;
       pageLabels.push(label);
       if (showMarks) drawMarks(page, layout, cells);
       if (showFold) drawFoldMarks(page, layout, cells);
       if (showSlug) {
         const placed = drawSlug(page, layout, font, {
-          side: label + (sheetsPerSig ? ` · run ${sheetsPerSig} sheets` : ""),
+          side: label + (sheetsPerForm ? ` · run ${sheetsPerForm} sheets` : ""),
           orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
-          artScale: userScale, creep, creepAt: creepD,
+          artScale: userScale, creep, creepAt: creepShift(creep, sigs[sigs.length - 1], S),
           qty, sheets: totalSheets, date: dateStr,
         }, cells);
-        if (!placed && k === 0 && !inner) warnings.push("no clear space inside the printable area for the slug line — omitted");
+        if (!placed && f === 0 && !inner) warnings.push("no clear space inside the printable area for the slug line — omitted");
       }
       page.setMediaBox(0, 0, W, H); page.setCropBox(0, 0, W, H);
       page.setBleedBox(0, 0, W, H); page.setTrimBox(0, 0, W, H);
@@ -1705,7 +1759,7 @@ async function imposeSaddle(artBytes, spec, layout) {
   }
   const ocHidden = writeOCProperties(out, ocAcc);
   if (ocHidden) warnings.push(`source has ${ocHidden} HIDDEN layer(s) — kept hidden on the imposed sheet (they are switched off in the output too, and marked do-not-print). Flatten the layers in the source if your RIP ignores optional content.`);
-  out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "booklet"} — ${P}pg saddle, ${bk.spreadsPerSide} spread(s)/side on ${layout.sheet.label}`);
+  out.setTitle(`IMPOSED ${spec.jobName || spec.orderRef || "booklet"} — ${P}pg saddle, ${S} signature(s) on ${F} form(s), ${bk.spreadsPerSide} spread(s)/side ${repeatMode ? "step-and-repeat" : "ganged"} on ${layout.sheet.label}`);
   out.setProducer("PPS Auto-Imposition Tool");
   out.setCreator("PPS Auto-Imposition Tool");
   const bytes = await out.save({ useObjectStreams: false });
@@ -1713,7 +1767,16 @@ async function imposeSaddle(artBytes, spec, layout) {
   // Preflight
   const check = await PL.PDFDocument.load(bytes);
   const issues = [];
-  if (check.getPageCount() !== 2 * S) issues.push(`page count ${check.getPageCount()} ≠ ${2 * S} signature sides`);
+  if (check.getPageCount() !== 2 * F) issues.push(`page count ${check.getPageCount()} ≠ ${2 * F} form sides`);
+  // Every page of the book must appear exactly once across the forms — the
+  // guard that a ganging or step-and-repeat mistake cannot silently drop or
+  // duplicate a section.
+  const seen = new Array(P + 1).fill(0);
+  for (const fm of forms) for (const k of fm) for (const pg of [P - 2 * k, 2 * k + 1, mate(P - 2 * k), mate(2 * k + 1)]) seen[pg]++;
+  const want = repeatMode ? C : (tile || 1);
+  const wrong = [];
+  for (let pg = 1; pg <= P; pg++) if (seen[pg] !== want) wrong.push(`${pg}×${seen[pg]}`);
+  if (wrong.length) issues.push(`page coverage wrong (expected ${want} placement(s) each): ${wrong.slice(0, 8).join(", ")}${wrong.length > 8 ? "…" : ""}`);
   check.getPages().forEach((p, i) => {
     const m = p.getMediaBox();
     if (Math.abs(m.width - layout.sheet.long * PT) > 0.5 || Math.abs(m.height - layout.sheet.short * PT) > 0.5)
@@ -1733,7 +1796,8 @@ async function imposeSaddle(artBytes, spec, layout) {
 
   return {
     bytes, layout, warnings, sheets: totalSheets, pageLabels,
-    sideReports: [{ side: "BOOKLET", pages: n, padded: P, signatures: S, spreadsPerSide: bk.spreadsPerSide, tumble, srcRotPages: arts.filter(a => a.rot).length }],
+    sideReports: [{ side: "BOOKLET", pages: n, padded: P, signatures: S, forms: F, sigMode: repeatMode ? "repeat" : "gang",
+      formPlan: forms.map(fm => fm.map(k => k + 1)), spreadsPerSide: bk.spreadsPerSide, tumble, srcRotPages: arts.filter(a => a.rot).length }],
   };
 }
 
@@ -3128,7 +3192,7 @@ function App() {
                                  setGapCols(null); setGapRows(null);
                                  setGridOn(on);
                                }} />
-                        <span>{isSaddle ? "Set signature copies manually" : "Set columns × rows manually"} <span style={{ color: "rgba(255,255,255,.4)" }}>— places exactly this many; the count is flagged against the priced imp</span></span>
+                        <span>{isSaddle ? "Set cells per sheet manually" : "Set columns × rows manually"} <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "how many signature slots the sheet carries (consecutive signatures fill them, unless step and repeat is on below)" : "places exactly this many"}; the count is flagged against the priced imp</span></span>
                       </label>
                       {gridOn && (
                         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
@@ -3158,7 +3222,7 @@ function App() {
                                      setGapCols(null); setGapRows(null);
                                      setRepOn(on);
                                    }} />
-                            <span>Step and repeat <span style={{ color: "rgba(255,255,255,.4)" }}>— print the same signature more than once per sheet; the tool picks the arrangement that fits</span></span>
+                            <span>Step and repeat <span style={{ color: "rgba(255,255,255,.4)" }}>— fill every cell with the SAME signature. Off (default), consecutive signatures are ganged: 9 signatures 2-up = forms 1+2, 3+4, 5+6, 7+8, 9, so one sheet through the press is one book's worth.</span></span>
                           </label>
                           {repOn && (
                             <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
@@ -3169,8 +3233,8 @@ function App() {
                               </div>
                               <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
                                 {ok && lay.stepRepeat
-                                  ? <>= <b>{lay.across} × {lay.down}</b> on <b>{lay.sheet.label}</b> · pages still impose into signatures normally</>
-                                  : <>pages still impose into signatures normally — this only duplicates each one on the sheet</>}
+                                  ? <>= <b>{lay.across} × {lay.down}</b> on <b>{lay.sheet.label}</b> · one form per signature; collate the cut stacks into books</>
+                                  : <>one form per signature; collate the cut stacks into books</>}
                               </div>
                             </div>
                           )}
@@ -3310,7 +3374,9 @@ function App() {
                   <div>Gutter: <b>{lay.gutter}″</b>{lay.gutter === 0 ? " (butt-cut)" : ""}</div>
                   {lay.booklet && <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)" }}>Spread {lay.booklet.spreadW}×{lay.booklet.spreadH}″ · spine gets no bleed · signatures fold + nest, outermost = cover</div>}
                   {spec.qty > 0 && !lay.booklet && <div>Sheets: <b>{Math.ceil(spec.qty / lay.imp)}</b> ({spec.qty} ÷ {lay.imp})</div>}
-                  {spec.qty > 0 && lay.booklet && <div>Sheets per signature: <b>{Math.ceil(spec.qty / lay.booklet.spreadsPerSide)}</b> × number of signatures (from page count)</div>}
+                  {spec.qty > 0 && lay.booklet && (lay.stepRepeat
+                    ? <div>Step and repeat: every cell is one signature — <b>{Math.ceil(spec.qty / lay.booklet.spreadsPerSide)}</b> sheets per signature, one form per signature</div>
+                    : <div>Ganged: <b>{lay.booklet.spreadsPerSide}</b> consecutive signature{lay.booklet.spreadsPerSide === 1 ? "" : "s"} per sheet — <b>{spec.qty}</b> sheets per form, forms = signatures ÷ {lay.booklet.spreadsPerSide} (rounded up). Exact counts appear in the report once artwork is loaded.</div>)}
                   {lay.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12 }}>⚠ {w}</div>)}
                 </div>
               </div>
@@ -3345,7 +3411,7 @@ function App() {
               {result.sideReports && (
                 <div style={{ marginBottom: 10, fontSize: 11.5, color: "rgba(255,255,255,.45)", lineHeight: 1.7 }}>
                   {result.sideReports.map((s, i) => s.side === "BOOKLET"
-                    ? <div key={i}>Booklet: {s.pages} pages{s.padded !== s.pages ? ` (padded to ${s.padded})` : ""} · {s.signatures} signatures · {s.spreadsPerSide} spread{s.spreadsPerSide === 1 ? "" : "s"}/side · back {s.tumble ? "tumbled 180°" : "upright"}{s.srcRotPages ? ` · ${s.srcRotPages} source pages carried /Rotate (normalized)` : ""}</div>
+                    ? <div key={i}>Booklet: {s.pages} pages{s.padded !== s.pages ? ` (padded to ${s.padded})` : ""} · {s.signatures} signatures on {s.forms} form{s.forms === 1 ? "" : "s"} ({s.sigMode === "repeat" ? "step and repeat" : "ganged"}: {s.formPlan.map(fm => fm.join("+")).join(", ")}) · {s.spreadsPerSide} spread{s.spreadsPerSide === 1 ? "" : "s"}/side · back {s.tumble ? "tumbled 180°" : "upright"}{s.srcRotPages ? ` · ${s.srcRotPages} source pages carried /Rotate (normalized)` : ""}</div>
                     : s.side === "COMBO"
                     ? <div key={i}>Gang combo: {s.alloc} — one sheet design, qty = press sheets</div>
                     : s.side === "COLLATED"
