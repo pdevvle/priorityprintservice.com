@@ -429,6 +429,10 @@ add_filter( 'robots_txt', function ( $output ) {
 
 /**
  * Admin pointer: the feed exists, here is its state, here is where it goes.
+ *
+ * Hide is persistent per user but keyed to the current counts — dismissing
+ * "31 in, 5 out" stays hidden until the numbers change, at which point the
+ * notice has something new to say and comes back on its own.
  */
 add_action( 'admin_notices', function () {
     if ( ! current_user_can( 'manage_woocommerce' ) ) return;
@@ -442,10 +446,37 @@ add_action( 'admin_notices', function () {
     $k = count( $report['skipped'] );
     if ( ! $n && ! $k ) return;
 
+    $sig = $n . '|' . $k;
+    if ( get_user_meta( get_current_user_id(), 'pps_feed_notice_hidden', true ) === $sig ) return;
+
     $url = home_url( '/' . PPS_PRODUCT_FEED_SLUG );
+    $hide_url = wp_nonce_url(
+        admin_url( 'admin-post.php?action=pps_feed_notice_hide' ),
+        'pps_feed_notice_hide'
+    );
     echo '<div class="notice notice-info"><p><strong>Merchant Center feed:</strong> '
        . esc_html( sprintf( '%d product%s in the feed, %d left out.', $n, $n === 1 ? '' : 's', $k ) )
        . ' <a href="' . esc_url( $url ) . '" target="_blank">View feed</a> · '
-       . '<a href="' . esc_url( add_query_arg( 'debug', '1', $url ) ) . '" target="_blank">Why were products left out?</a>'
+       . '<a href="' . esc_url( add_query_arg( 'debug', '1', $url ) ) . '" target="_blank">Why were products left out?</a> · '
+       . '<a href="' . esc_url( $hide_url ) . '">Hide</a>'
        . '</p></div>';
+} );
+
+/**
+ * Persist the notice dismissal. The signature is recomputed server-side so a
+ * crafted link cannot pre-dismiss a future state.
+ */
+add_action( 'admin_post_pps_feed_notice_hide', function () {
+    if ( ! current_user_can( 'manage_woocommerce' ) ) wp_die( 'Insufficient permissions.' );
+    check_admin_referer( 'pps_feed_notice_hide' );
+
+    $report = pps_catalog_report( array(
+        'require_price' => true, 'require_image' => true, 'require_virtual' => true,
+    ) );
+    $sig = count( $report['rows'] ) . '|' . count( $report['skipped'] );
+    update_user_meta( get_current_user_id(), 'pps_feed_notice_hidden', $sig );
+
+    $back = wp_get_referer();
+    wp_safe_redirect( $back ? $back : admin_url() );
+    exit;
 } );
