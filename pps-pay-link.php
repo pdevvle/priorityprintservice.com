@@ -469,6 +469,26 @@ function pps_paylink_missive_note( $conversation_id, $text ) {
     return $ok;
 }
 
+/**
+ * Record the OUTCOME of every authenticated request.
+ *
+ * Diagnostics used to depend on a note being postable: an authenticated
+ * request that was refused with no conversation id in its payload left no
+ * trace anywhere -- not in the rejects log (auth passed), not in the shapes
+ * log (text was found), not in the notes log (nothing was posted). "It did
+ * not mint" was then unanswerable.
+ *
+ * Shape only, never content: the job text is the operator's words about a
+ * customer's work and does not belong in an options row. What is kept is
+ * enough to tell a parse refusal from a mint refusal from a silent success.
+ */
+function pps_paylink_log_outcome( $outcome, array $facts = array() ) {
+    $log = get_option( 'pps_paylink_outcomes', array() );
+    if ( ! is_array( $log ) ) $log = array();
+    array_unshift( $log, array( 'at' => gmdate( 'c' ), 'outcome' => (string) $outcome ) + $facts );
+    update_option( 'pps_paylink_outcomes', array_slice( $log, 0, 20 ), false );
+}
+
 /** Whether the note went out, kept for the admin screen. No message bodies. */
 function pps_paylink_log_note( $event, $detail = '' ) {
     $log = get_option( 'pps_paylink_notes', array() );
@@ -629,6 +649,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
             // to pps_paylink_extract_text() once the shape is known -- but only
             // if the shape was kept. Keys only; values may carry customer text.
             pps_paylink_log_shape( $body );
+            pps_paylink_log_outcome( 'no_text', array( 'conversation' => '' !== $conversation ) );
             return new WP_REST_Response( array(
                 'ok' => false, 'error' => 'no_text',
                 'message' => 'No description/price fields and no readable text in the payload. The keys received have been recorded on the Pay Links screen.',
@@ -636,6 +657,13 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         }
         $parsed = pps_paylink_parse_command( $text );
         if ( is_wp_error( $parsed ) ) {
+            pps_paylink_log_outcome( 'parse_refused', array(
+                'error'        => $parsed->get_error_code(),
+                'text_len'     => strlen( $text ),
+                'has_brackets' => ( false !== strpos( $text, '[' ) ) && ( false !== strpos( $text, ']' ) ),
+                'has_dollar'   => ( false !== strpos( $text, '$' ) ),
+                'conversation' => '' !== $conversation,
+            ) );
             pps_paylink_missive_note( $conversation,
                 "⚠️ No pay link was created.\n\n" . $parsed->get_error_message() );
             return new WP_REST_Response( array(
@@ -657,6 +685,10 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
     ) );
 
     if ( is_wp_error( $res ) ) {
+        pps_paylink_log_outcome( 'mint_refused', array(
+            'error'        => $res->get_error_code(),
+            'conversation' => '' !== $conversation,
+        ) );
         pps_paylink_missive_note( $conversation,
             "⚠️ No pay link was created.\n\n" . $res->get_error_message() );
         return new WP_REST_Response( array(
@@ -675,6 +707,11 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
     if ( ! empty( $res['qbo_fell_back'] ) ) {
         $note .= "\n\n⚠️ QuickBooks was requested but is not ready, so this link uses card checkout.";
     }
+    pps_paylink_log_outcome( 'minted', array(
+        'token'        => $res['token'],
+        'pay_source'   => $res['pay_source'],
+        'conversation' => '' !== $conversation,
+    ) );
     pps_paylink_missive_note( $conversation, $note );
 
     return new WP_REST_Response( array( 'ok' => true ) + $res, 201 );
@@ -831,6 +868,27 @@ function pps_paylink_admin_page() {
             </table>
             <p><button type="submit" class="button button-primary">Create link</button></p>
         </form>
+        <?php endif; ?>
+
+        <?php $outcomes = get_option( 'pps_paylink_outcomes', array() ); ?>
+        <?php if ( is_array( $outcomes ) && $outcomes ) : ?>
+            <hr>
+            <h2>Recent requests</h2>
+            <p class="description">Every authenticated call, and what became of it. If a command
+            produced nothing at all and does not appear here, it never reached the site — look at
+            the rule, or at anything between it and WordPress, rather than at the command.</p>
+            <table class="widefat striped"><tbody>
+            <?php foreach ( array_slice( $outcomes, 0, 12 ) as $row ) : ?>
+                <tr>
+                    <td style="width:180px"><?php echo esc_html( $row['at'] ?? '' ); ?></td>
+                    <td style="width:120px"><code><?php echo esc_html( $row['outcome'] ?? '' ); ?></code></td>
+                    <td><?php
+                        $rest = $row; unset( $rest['at'], $rest['outcome'] );
+                        echo esc_html( $rest ? wp_json_encode( $rest ) : '' );
+                    ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody></table>
         <?php endif; ?>
 
         <hr>
