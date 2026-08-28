@@ -220,6 +220,22 @@ download the imposed PDF. Useful for testing and one-off jobs.
   flip are unaffected, and the count is flagged against the priced imp exactly
   like a flat's manual grid — badge, warning, slug, excluded from the parity
   preflight. Refuses with a footprint report when the copies cannot fit.
+- **Step and repeat** (saddle, `spec.sigRepeat`): the same outcome asked for the
+  way a pressman says it — a **count**, not a shape. Sits directly beneath the
+  manual-copies control: tick it, type `3`, and each signature prints three
+  times on the sheet; the tool picks the arrangement that fits (fewest rows
+  first) and promotes to 13×27.5 — or to whatever parent sheet is forced — when
+  the standard sheet cannot hold a whole grid. **Pagination is untouched**: the
+  book still imposes into signatures normally, and only the number of copies of
+  each signature riding one press sheet changes. Verified on a numbered 16pp
+  fixture that all three cells of a side carry the same page pair
+  (`PAGE 16 | PAGE 1`, back `PAGE 15 | PAGE 2`) and that duplex registers.
+  Flagged like the manual grid (badge `STEP & REPEAT n× PER SHEET`, warning,
+  slug `STEP AND REPEAT nx per sheet`, excluded from the parity preflight).
+  The two controls are mutually exclusive in the UI, and if a caller sets both,
+  the manual grid wins — it is the more specific instruction. A count that
+  cannot form a whole grid refuses with the largest count that would fit,
+  leaving the control on screen so the number can be lowered.
 - **Manual grid** (flats & stickers, Fiery-style): the operator can set the
   **columns × rows outright** instead of taking the count derived from the
   priced imp — a 2×4 coupon can be run 9 across × 3 down, 8×2, 4×5, whatever
