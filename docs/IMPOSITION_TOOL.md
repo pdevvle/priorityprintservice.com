@@ -220,6 +220,36 @@ download the imposed PDF. Useful for testing and one-off jobs.
   flip are unaffected, and the count is flagged against the priced imp exactly
   like a flat's manual grid — badge, warning, slug, excluded from the parity
   preflight. Refuses with a footprint report when the copies cannot fit.
+- **Page orientation is part of a saddle spec** (1.21). Saddle stitch folds on
+  the **height** edge, so `5.5×8.5` and `8.5×5.5` are different products — not
+  one size typed two ways. The two size boxes are read as **width × height**
+  for saddle and **long × short** for every other calc, and the trim measured
+  when a file is dropped was stored already normalised to long/short. So the
+  ordinary operator sequence — *drop the file, then choose the product* —
+  left `8.5 × 5.5` in the boxes, and switching to Saddle stitch reinterpreted
+  that as a landscape page. The result was a landscape signature: layout
+  `1 × 2` instead of `2 × 1 rotated`, cell `17 × 5.5` instead of `8.5 × 11`,
+  and every page turned 90° into it. **Nothing warned**, because the drop-time
+  conflict check compares long/short and a swapped pair is identical.
+
+  Three fixes, because the trap has three doors:
+
+  1. The trim measured at drop is kept in the **file's own orientation**
+     (`detTrim`) and re-applied on every calc change — width × height for
+     saddle, long × short otherwise. Drop-then-choose now lands correctly.
+  2. The drop-time check flags an **orientation flip** separately from a size
+     mismatch, so the order-queue path (where the spec is authoritative and
+     nothing is auto-set) says so instead of staying silent.
+  3. `imposeSaddle` **refuses outright** when the artwork's page orientation
+     contradicts the spec, naming both sizes and the numbers to enter. This is
+     the backstop that covers every entry path, including wp-admin.
+
+  Verified by driving the real UI in the operator's sequence: on 1.20, drop →
+  `8.5 × 5.5`, switch to saddle → still `8.5 × 5.5`, layout `1 × 2`. On 1.21,
+  the switch re-orients to `5.5 × 8.5` and the layout is `2 × 1 rotated`. The
+  ten-case regression is byte-identical to 1.20 and registration passes in
+  every signature mode.
+
 - **Signatures onto the sheet** (saddle, `spec.sigOrder`) — a three-way radio
   in the options panel. Step and repeat here operates on a signature that
   already carries its own imposition (the 4-page saddle spread: `36|1` on the
