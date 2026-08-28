@@ -194,6 +194,24 @@ download the imposed PDF. Useful for testing and one-off jobs.
     the gap (that band would print paper-white *inside* the trim); or when the
     inset would shrink the art by more than half.
   - Recorded on the slug as `PULLED OFF TRIM <n>in`.
+- **Creep / shingling compensation** (saddle, `spec.creep`): folded signatures
+  nest, so inner leaves push outward and trim narrower than the cover. The
+  operator sets the TOTAL shift at the innermost signature; the cover gets none
+  and the rest ramp linearly (`creep · k/(S−1)`) — the same way Fiery states it.
+  Content slides spine-ward (left page +, right page −); the **trim and clip
+  rects deliberately do not move**, because the guillotine still cuts in the
+  same place. The sliver that opens at the outer edge is covered by the art's
+  bleed, so a no-bleed file wants Add bleed on too. Capped at 0.5″ with a
+  message that the value is a total, not per-signature. Verified: ramp linear
+  to ±0.005″ across 8 signatures (ink-profile correlation), the two halves shift
+  in OPPOSITE directions, trim/clip byte-identical with creep on, and duplex
+  registers on both flip edges.
+- **Free art scale** (`spec.artScale`, 25–400%): a plain scale on the placed
+  art, up or down. Independent of the bleed-coupled pull-off-trim inset — the
+  two compose — and it feeds the same `covX/covY` coverage maths, so scaling
+  down inherits the refusal that stops a band printing paper white inside the
+  trim. Scaling up simply clips to the cell. Verified exact at 90% and 110%
+  against interior markers.
 - **Manual signature copies** (saddle): the same control on the saddle side —
   the operator sets copies across × down outright instead of taking the spread
   count from the priced imp table, so a booklet can be ganged 3-up on the
