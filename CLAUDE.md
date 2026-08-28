@@ -198,6 +198,58 @@ Whole-file deploys are the mechanism that destroys surgical patches, so check fi
   deployed bytes are pinned to a reviewable commit, and rollback is the same call with
   a different SHA.
 
+### Concurrent sessions: the server's copy must be an ANCESTOR of yours
+
+The size check above only catches a file edited *by hand*. It does not catch the more
+common failure now that several Claude sessions run at once: the server holding a
+**real commit from somebody else's branch**. The size matches a genuine commit, the
+check passes, and the deploy silently reverts work that was live and being used.
+
+This happened on 2026-08-27. One session deployed `pps-calculators.php` from `6b75f46`
+at 22:52. That commit did not carry another session's two `require_once` lines, so
+`pps-pay-link.php` and `pps-quickbooks.php` stopped loading and `/pps/v1/pay-link`
+ceased to exist. Missive's webhook got a 404 and reported only "failed to send
+webhook"; the feature's own diagnostics stayed empty because none of its code ran. The
+outage lasted until somebody happened to GET the route. **Nothing alerted. Nothing
+logged. A paying feature was simply gone.**
+
+So before overwriting a shared PHP file, ask the question the size check does not:
+
+```bash
+SIZE=<bytes reported by pps_plugin_list_files>
+for c in $(git log --all --format=%H -100 -- <file>); do
+  [ "$(git cat-file -s $(git rev-parse $c:<file>) 2>/dev/null)" = "$SIZE" ] && echo "$c"
+done
+# then, for whatever that returns:
+git merge-base --is-ancestor <server-commit> HEAD && echo SAFE || echo "STOP — merge first"
+```
+
+- **SAFE** means the server is running something you already contain; deploying moves it
+  forward.
+- **STOP** means the server has work your branch does not. Fetch and merge that branch
+  first, verify the merged byte count equals *both* contributions, and deploy the merged
+  file. Never "fix" this by redeploying your own copy — that is the same fault pointed
+  the other way.
+- A size matching **several** commits is ambiguous; read the file and compare a hash
+  rather than guessing.
+
+### Running more than one session at a time
+
+- **One deploy lane.** Feature branches are fine; deploying from them is not. Merge into
+  the integration branch and deploy *that* commit, so production only ever receives bytes
+  from one lineage. Two branches deploying the same file is the whole problem.
+- **Split by file, not by feature.** Two sessions editing `pps-calculators.php` for
+  unrelated reasons will collide no matter how careful each is.
+- **Merge early.** A branch open all day drifts far enough that a merge stops being
+  routine. Land it while the diff is small.
+- **Say so in the handoff.** A session that deploys a shared file should record what it
+  deployed and from which SHA, so the next one can run the ancestry check without
+  archaeology.
+- **A feature that reaches production before it is merged is on loan.** Until the change
+  lives on the shared branch, every unrelated deploy of those files can take it away —
+  and the symptom will not look like a deploy problem. Prefer merging over deploying from
+  a branch; when that is not possible, treat the merge as unfinished work, not paperwork.
+
 ### Applies equally to
 
 Anything edited outside version control and relied upon: `wp_options` values that
