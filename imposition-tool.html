@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 19:03 UTC · IMPOSE-V1.19</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 19:08 UTC · IMPOSE-V1.20</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1743,10 +1743,15 @@ async function imposeSaddle(artBytes, spec, layout) {
         const clip = inner ? mirrorRect(slot.clip, layout, flip) : slot.clip;
         placeArt(page, embeds[pno - 1], arts[pno - 1], rect, clip, spreadRot + (inner && tumble ? 180 : 0));
       });
-      const sigTxt = repeatMode ? `SIG ${sigs[0] + 1}/${S} x${C}`
-                   : sigs.length === 1 ? `SIG ${sigs[0] + 1}/${S}`
-                   : `SIGS ${sigs.map(k => k + 1).join("+")}/${S}`;
-      const label = `FORM ${f + 1}/${F} ${sigTxt} ${inner ? "INSIDE" : "OUTSIDE"}${sigs.includes(0) ? " (COVER)" : ""}`;
+      // The label names the mode, because the modes differ only in what is in
+      // the cells and the operator has to be able to tell them apart in the
+      // preview strip. Step and repeat keeps the plain "SIG k/S" wording the
+      // tool has always used — it is one signature per form — with the copy
+      // count appended; the multi-signature modes lead with the form number.
+      const label = repeatMode
+        ? `SIG ${sigs[0] + 1}/${S}${C > 1 ? ` REPEATED ${C}-UP` : ""} ${inner ? "INSIDE" : "OUTSIDE"}${sigs[0] === 0 ? " (COVER)" : ""}`
+        : `FORM ${f + 1}/${F} ${sigs.length === 1 ? `SIG ${sigs[0] + 1}/${S}` : `SIGS ${sigs.map(k => k + 1).join(order === "cutstack" ? " | " : "+")}/${S}`}`
+          + ` ${inner ? "INSIDE" : "OUTSIDE"}${sigs.includes(0) ? " (COVER)" : ""}`;
       pageLabels.push(label);
       if (showMarks) drawMarks(page, layout, cells);
       if (showFold) drawFoldMarks(page, layout, cells);
