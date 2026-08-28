@@ -437,6 +437,26 @@ function pps_paylink_extract_conversation( $payload ) {
  * Best effort by design — a failure here must never fail the mint. The link
  * exists either way, and the operator can still type it.
  */
+/**
+ * Queue a note to go out AFTER the response has been produced.
+ *
+ * The note is an outbound HTTPS call to Missive, and it used to happen inline,
+ * which put Missive's own API latency inside our acknowledgement of Missive's
+ * webhook. A sender that gives up before we answer records "failed to send
+ * webhook" and may retry — for work we had already done. Decoupling the two
+ * means the ack is as fast as the database, and a slow or unreachable Missive
+ * costs a note rather than a delivery.
+ *
+ * Best effort remains best effort: if shutdown never runs, the link still
+ * exists and is still in the response body.
+ */
+function pps_paylink_queue_note( $conversation_id, $text ) {
+    if ( ! $conversation_id ) return;
+    add_action( 'shutdown', function () use ( $conversation_id, $text ) {
+        pps_paylink_missive_note( $conversation_id, $text );
+    }, 20 );
+}
+
 function pps_paylink_missive_note( $conversation_id, $text ) {
     if ( ! $conversation_id ) return false;
     if ( ! function_exists( 'pps_assistant_config' ) ) return false;
@@ -617,7 +637,12 @@ function pps_paylink_log_shape( array $body ) {
 
 add_action( 'rest_api_init', function () {
     register_rest_route( 'pps/v1', '/pay-link', array(
-        'methods'             => array( 'POST' ),
+        // GET answers as a reachability probe, the same reason
+        // pps-assistant-webhook.php accepts one: when a rule engine reports
+        // "failed to send webhook" with no detail, the first thing worth
+        // knowing is whether anything can reach the route at all. Without a
+        // probe that question cannot be separated from "the body was refused".
+        'methods'             => array( 'GET', 'POST' ),
         // Open on purpose, with the real check inside the handler: a
         // permission_callback refuses before anything can be recorded, which
         // is how the Missive webhook once produced a 401 nobody could explain.
@@ -627,6 +652,18 @@ add_action( 'rest_api_init', function () {
 } );
 
 function pps_paylink_handle_request( WP_REST_Request $request ) {
+    // Reachability only. Deliberately unauthenticated and deliberately empty:
+    // it confirms the route is alive and says nothing about how it is
+    // configured, who may call it, or what it has minted. The route's
+    // existence is already implied by anyone holding the webhook URL.
+    if ( 'GET' === $request->get_method() ) {
+        return new WP_REST_Response( array(
+            'ok'      => true,
+            'service' => 'pps-pay-link',
+            'method'  => 'POST to create a link',
+        ), 200 );
+    }
+
     if ( ! pps_paylink_authorized( $request ) ) {
         pps_paylink_log_reject( $request );
         return new WP_REST_Response( array( 'ok' => false, 'error' => 'unauthorized' ), 401 );
@@ -664,7 +701,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
                 'has_dollar'   => ( false !== strpos( $text, '$' ) ),
                 'conversation' => '' !== $conversation,
             ) );
-            pps_paylink_missive_note( $conversation,
+            pps_paylink_queue_note( $conversation,
                 "⚠️ No pay link was created.\n\n" . $parsed->get_error_message() );
             return new WP_REST_Response( array(
                 'ok' => false, 'error' => $parsed->get_error_code(), 'message' => $parsed->get_error_message(),
@@ -689,7 +726,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
             'error'        => $res->get_error_code(),
             'conversation' => '' !== $conversation,
         ) );
-        pps_paylink_missive_note( $conversation,
+        pps_paylink_queue_note( $conversation,
             "⚠️ No pay link was created.\n\n" . $res->get_error_message() );
         return new WP_REST_Response( array(
             'ok'    => false,
@@ -712,7 +749,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         'pay_source'   => $res['pay_source'],
         'conversation' => '' !== $conversation,
     ) );
-    pps_paylink_missive_note( $conversation, $note );
+    pps_paylink_queue_note( $conversation, $note );
 
     return new WP_REST_Response( array( 'ok' => true ) + $res, 201 );
 }
