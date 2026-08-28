@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 10:37 UTC · IMPOSE-V1.18</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 19:03 UTC · IMPOSE-V1.19</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1679,7 +1679,10 @@ async function imposeSaddle(artBytes, spec, layout) {
   // Everything downstream — page count, sheet count, slug, labels, preflight —
   // follows from `forms`, so neither mode is a special case anywhere else.
   const C = bk.spreadsPerSide;
-  const repeatMode = !!layout.stepRepeat;
+  // How the signatures are dealt into the cells. `sigRepeat` (a copy count)
+  // implies step and repeat; otherwise the operator picks the order outright.
+  const order = layout.stepRepeat ? "repeat" : (spec.sigOrder || "repeat");
+  const repeatMode = order === "repeat";
   const forms = [];
   // A book with fewer signatures than the sheet has cells would otherwise run
   // every impression half empty. When the cells divide evenly among the
@@ -1687,12 +1690,19 @@ async function imposeSaddle(artBytes, spec, layout) {
   // every signature's quantity equal — the thing a wrap-around must never
   // break. Uneven cases fall through to normal ganging and warn.
   const tile = !repeatMode && S < C && C % S === 0 ? C / S : 0;
+  const nForms = Math.ceil(S / C);
   if (repeatMode) {
     for (let k = 0; k < S; k++) forms.push(Array(C).fill(k));
   } else if (tile) {
     forms.push(Array.from({ length: C }, (_, c) => c % S));
+  } else if (order === "cutstack") {
+    // Cut and stack: the signature list is dealt DOWN the columns, so after
+    // one cut the right-hand lift drops straight under the left-hand lift and
+    // the pile is already in order 1…S. Column c of form f holds f + c·F.
+    for (let f = 0; f < nForms; f++)
+      forms.push(Array.from({ length: C }, (_, c) => f + c * nForms).filter(k => k < S));
   } else {
-    for (let f = 0; f < Math.ceil(S / C); f++)
+    for (let f = 0; f < nForms; f++)
       forms.push(Array.from({ length: C }, (_, c) => f * C + c).filter(k => k < S));
   }
   const F = forms.length;
@@ -1703,6 +1713,7 @@ async function imposeSaddle(artBytes, spec, layout) {
     warnings.push(`Step and repeat: each signature fills all ${C} cells — ${F} form${F === 1 ? "" : "s"}, one per signature${qty ? `, ${sheetsPerForm} sheets each (${totalSheets} total for ${qty})` : ""}.`);
   } else {
     if (tile) warnings.push(`Only ${S} signature${S === 1 ? "" : "s"} for ${C} cells — each is repeated ${tile}× per sheet so the sheet runs full and every signature keeps the same quantity.`);
+    else if (C > 1 && order === "cutstack") warnings.push(`Cut and stack: ${F} form${F === 1 ? "" : "s"} (${forms.map(fm => fm.map(k => k + 1).join(" | ")).join(", ")}). Cut the pile between the columns and drop each lift under the one to its left — the stack is then in signature order 1–${S}.`);
     else if (C > 1) warnings.push(`Ganged ${C} consecutive signatures per sheet — ${F} form${F === 1 ? "" : "s"} (${forms.map(fm => fm.map(k => k + 1).join("+")).join(", ")}). One sheet through the press = one book's worth of those signatures.`);
     const leftover = tile ? 0 : (C - (S % C)) % C;
     if (leftover) {
@@ -1796,7 +1807,7 @@ async function imposeSaddle(artBytes, spec, layout) {
 
   return {
     bytes, layout, warnings, sheets: totalSheets, pageLabels,
-    sideReports: [{ side: "BOOKLET", pages: n, padded: P, signatures: S, forms: F, sigMode: repeatMode ? "repeat" : "gang",
+    sideReports: [{ side: "BOOKLET", pages: n, padded: P, signatures: S, forms: F, sigMode: order,
       formPlan: forms.map(fm => fm.map(k => k + 1)), spreadsPerSide: bk.spreadsPerSide, tumble, srcRotPages: arts.filter(a => a.rot).length }],
   };
 }
@@ -2435,6 +2446,7 @@ function App() {
   const [gridSheet, setGridSheet] = useState("auto");
   // Step and repeat (saddle): duplicate each signature N× on the press sheet.
   const [repOn, setRepOn] = useState(false);
+  const [sigOrder, setSigOrder] = useState("repeat");  // repeat | gang | cutstack
   const [repN, setRepN] = useState(2);
   const [offsetMode, setOffsetMode] = useState("jog");    // jog lower-right 0.5″ | center | custom
   const [offsetRight, setOffsetRight] = useState(0.5);
@@ -2502,10 +2514,11 @@ function App() {
     gridDown: gridOn ? +gridDown || 0 : null,
     gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
     sigRepeat: isSaddle && repOn && !gridOn ? +repN || 0 : null,
+    sigOrder: isSaddle ? sigOrder : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN]);
+       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -3214,27 +3227,34 @@ function App() {
                       )}
                       {isSaddle && (
                         <div style={{ marginTop: 9, paddingTop: 9, borderTop: "1px dashed rgba(255,255,255,.12)" }}>
-                          <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-                            <input type="checkbox" checked={repOn} style={{ width: "auto" }}
-                                   onChange={e => {
-                                     const on = e.target.checked;
-                                     if (on) setGridOn(false);   // count, not shape — the manual grid is the other way to say it
-                                     setGapCols(null); setGapRows(null);
-                                     setRepOn(on);
-                                   }} />
-                            <span>Step and repeat <span style={{ color: "rgba(255,255,255,.4)" }}>— fill every cell with the SAME signature. Off (default), consecutive signatures are ganged: 9 signatures 2-up = forms 1+2, 3+4, 5+6, 7+8, 9, so one sheet through the press is one book's worth.</span></span>
-                          </label>
-                          {repOn && (
-                            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
-                              <div>
-                                <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Copies of each signature, per sheet</div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 5 }}>
+                            Signatures onto the sheet — what goes in each cell (pagination into signatures is the same in all three)
+                          </div>
+                          {[
+                            { v: "repeat", t: "Step and repeat", d: "every cell is the SAME signature, stepped across the sheet. One form per signature; the run divides by the number of cells. Cut, then collate the lifts into books." },
+                            { v: "cutstack", t: "Cut and stack", d: "the signature list runs DOWN the columns — 9 signatures 2-up gives 1|6, 2|7, 3|8, 4|9, 5|·. Cut the pile once and drop each lift under the one left of it and the stack is already in order 1–9." },
+                            { v: "gang", t: "Gang in order", d: "consecutive signatures side by side — 1+2, 3+4, 5+6, 7+8, 9. One sheet through the press is one book's worth of those signatures." },
+                          ].map(o => (
+                            <label key={o.v} style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 4 }}>
+                              <input type="radio" name="pps-sigorder" checked={sigOrder === o.v} style={{ width: "auto", marginTop: 3 }}
+                                     onChange={() => { setSigOrder(o.v); if (o.v !== "repeat") setRepOn(false); setGapCols(null); setGapRows(null); }} />
+                              <span><b style={{ fontWeight: 600 }}>{o.t}</b> <span style={{ color: "rgba(255,255,255,.4)" }}>— {o.d}</span></span>
+                            </label>
+                          ))}
+                          {sigOrder === "repeat" && (
+                            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7, paddingLeft: 22 }}>
+                              <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer", paddingBottom: 6 }}>
+                                <input type="checkbox" checked={repOn} style={{ width: "auto" }}
+                                       onChange={e => { const on = e.target.checked; if (on) setGridOn(false); setGapCols(null); setGapRows(null); setRepOn(on); }} />
+                                Set copies per sheet
+                              </label>
+                              {repOn && <div>
+                                <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Copies of each signature</div>
                                 <input type="number" min="1" step="1" value={repN} style={{ width: 74, fontSize: 12 }}
                                        onChange={e => { setRepN(e.target.value); setGapCols(null); setGapRows(null); }} />
-                              </div>
+                              </div>}
                               <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                                {ok && lay.stepRepeat
-                                  ? <>= <b>{lay.across} × {lay.down}</b> on <b>{lay.sheet.label}</b> · one form per signature; collate the cut stacks into books</>
-                                  : <>one form per signature; collate the cut stacks into books</>}
+                                {ok ? <>{lay.across} × {lay.down} on <b>{lay.sheet.label}</b></> : null}
                               </div>
                             </div>
                           )}
