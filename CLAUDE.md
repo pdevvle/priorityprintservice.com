@@ -234,6 +234,35 @@ git merge-base --is-ancestor <server-commit> HEAD && echo SAFE || echo "STOP —
 - A size matching **several** commits is ambiguous; read the file and compare a hash
   rather than guessing.
 
+### Pay Link and QuickBooks load themselves — do not "restore" the requires
+
+`pps-pay-link.php` and `pps-quickbooks.php` are **separately activated plugins**,
+listed in `active_plugins` as `pps-calculators/pps-pay-link.php` and
+`pps-calculators/pps-quickbooks.php`. This is the same pattern
+`pps-assistant.php`, `pps-assistant-webhook.php`, `pps-html-deploy.php` and
+`pps-intake.php` already use — several plugin files sharing one directory, each
+with its own `Plugin Name` header.
+
+They are NOT required from `pps-calculators.php`, and must not be. They were,
+and twice — 2026-08-27 22:52 and 2026-08-29 00:10 — another session redeployed
+that file from a branch without the two `require_once` lines. Both times the
+modules stopped existing: `/pps/v1/pay-link` 404d, Missive reported only
+"failed to send webhook", and none of the module's own diagnostics fired
+because none of its code ran. A money-taking feature was silently offline for
+hours, twice, and nothing alerted.
+
+Loading themselves is what makes that impossible: no deploy of
+`pps-calculators.php` can unload a plugin WordPress activates directly.
+
+- **Do not add `require_once` lines for them back into `pps-calculators.php`.**
+  Both files guard with `PPS_PAYLINK_LOADED` / `PPS_QBO_LOADED` and would
+  return early rather than fatal, but the guard is a safety net, not a design.
+- **If either stops working, check `active_plugins` first.** A missing entry is
+  the failure; the fix is re-adding it, not re-adding a require.
+- **Anything that must survive an unrelated deploy belongs in one of these two
+  files**, not in `pps-job-quote.php` or `pps-calculators.php`. The receipt's
+  shipping-address filter lives in `pps-pay-link.php` for exactly this reason.
+
 ### Running more than one session at a time
 
 - **One deploy lane.** Feature branches are fine; deploying from them is not. Merge into
