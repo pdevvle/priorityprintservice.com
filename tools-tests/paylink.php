@@ -11,6 +11,7 @@
 define('ABSPATH', '/tmp/');
 $GLOBALS['opts'] = array();
 function add_action(...$a) {}
+function add_filter(...$a) {}
 function get_option($k, $d = '') { return $GLOBALS['opts'][$k] ?? $d; }
 function update_option($k, $v, $a = true) { $GLOBALS['opts'][$k] = $v; return true; }
 function wp_generate_password($n, $s = true, $x = true) { return str_repeat('x', $n); }
