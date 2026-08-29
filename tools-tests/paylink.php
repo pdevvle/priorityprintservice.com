@@ -15,7 +15,8 @@ function add_filter(...$a) {}
 function get_option($k, $d = '') { return $GLOBALS['opts'][$k] ?? $d; }
 function update_option($k, $v, $a = true) { $GLOBALS['opts'][$k] = $v; return true; }
 function wp_generate_password($n, $s = true, $x = true) { return str_repeat('x', $n); }
-class PPS_StubProduct { public function exists() { return true; } public function get_name() { return 'Custom Print Job'; } }
+class PPS_StubProduct { public function exists() { return true; } public function get_name() { return 'Custom Print Job'; }
+    public function is_virtual() { return empty($GLOBALS['product_virtual_off']); } }
 function wc_get_product($id) { return empty($GLOBALS['product_ok']) ? false : new PPS_StubProduct(); }
 function absint($v) { return abs(intval($v)); }
 class WP_Error { public $code; public $msg;
@@ -334,6 +335,54 @@ ok('five sigils: days',  $r['min_days'], 3);
 ok('five sigils: ref',   $r['reference'], 'jan');
 ok('five sigils: price', $r['price'], 99.50);
 ok('five sigils: desc',  $r['description'], 'Letterhead 8.5 x 11');
+
+// --- self-check: what it reports, and what it stays quiet about
+// The whole point is that a broken deploy is loud, so each of these asserts a
+// specific outage we have actually had, or nearly had.
+function labels_failing() {
+    $out = array();
+    foreach (pps_paylink_health() as $c) if (!$c['ok']) $out[] = $c['label'];
+    return $out;
+}
+
+// A fully working site: nothing to report.
+$GLOBALS['product_ok'] = true;
+$GLOBALS['product_virtual_off'] = false;
+$GLOBALS['opts']['active_plugins'] = array('pps-calculators/pps-pay-link.php', 'pps-calculators/pps-quickbooks.php');
+$GLOBALS['opts'][PPS_PAYLINK_PRODUCT_OPT] = 42;
+$GLOBALS['opts'][PPS_PAYLINK_SECRET_OPT] = 'a-secret';
+if (!function_exists('pps_is_business_day')) { function pps_is_business_day() {} }
+ok('healthy site reports nothing', pps_paylink_health_failures(), array());
+
+// The outage that happened twice: the plugin entry vanishes from active_plugins.
+$GLOBALS['opts']['active_plugins'] = array('pps-calculators/pps-quickbooks.php');
+ok('missing paylink entry is caught', in_array('Active: pps-pay-link.php', labels_failing(), true), true);
+
+$GLOBALS['opts']['active_plugins'] = array('pps-calculators/pps-pay-link.php');
+ok('missing qbo entry is caught', in_array('Active: pps-quickbooks.php', labels_failing(), true), true);
+$GLOBALS['opts']['active_plugins'] = array('pps-calculators/pps-pay-link.php', 'pps-calculators/pps-quickbooks.php');
+
+// No product means a command is accepted and then cannot mint.
+$GLOBALS['product_ok'] = false;
+ok('unconfigured product is caught', in_array('Line-item product', labels_failing(), true), true);
+$GLOBALS['product_ok'] = true;
+
+// Non-virtual: WooCommerce's own shipping can block checkout on these.
+$GLOBALS['product_virtual_off'] = true;
+ok('non-virtual product is caught', in_array('Product is virtual', labels_failing(), true), true);
+$GLOBALS['product_virtual_off'] = false;
+
+// A failing check must carry a sentence a human can act on, not just a label.
+$GLOBALS['product_ok'] = false;
+foreach (pps_paylink_health() as $c) {
+    if (!$c['ok']) { ok('failure explains itself', $c['detail'] !== '', true); break; }
+}
+$GLOBALS['product_ok'] = true;
+
+// And a passing check must not, so the mail is only ever the failures.
+foreach (pps_paylink_health() as $c) {
+    if ($c['ok']) { ok('passing check adds no noise', $c['detail'], ''); break; }
+}
 
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

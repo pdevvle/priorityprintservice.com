@@ -684,11 +684,18 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
     // configured, who may call it, or what it has minted. The route's
     // existence is already implied by anyone holding the webhook URL.
     if ( 'GET' === $request->get_method() ) {
+        // Degraded is reported, but not described. An outside poller only has
+        // to watch for a non-200 -- 404 when this file is not loading at all,
+        // 503 when it loads but cannot mint -- and those are the two shapes
+        // the outage has actually taken. What is broken stays in the mail and
+        // the log, where it is behind a login.
+        $degraded = (bool) pps_paylink_health_failures();
         return new WP_REST_Response( array(
-            'ok'      => true,
+            'ok'      => ! $degraded,
             'service' => 'pps-pay-link',
+            'status'  => $degraded ? 'degraded' : 'ok',
             'method'  => 'POST to create a link',
-        ), 200 );
+        ), $degraded ? 503 : 200 );
     }
 
     if ( ! pps_paylink_authorized( $request ) ) {
@@ -780,6 +787,112 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
 
     return new WP_REST_Response( array( 'ok' => true ) + $res, 201 );
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * Self-check: notice when this stops working, and say so
+ * ───────────────────────────────────────────────────────────── */
+
+/**
+ * WHY THIS EXISTS
+ *
+ * Twice this feature was offline for hours and nothing said a word. Both times
+ * it was found by accident -- once because a customer's command failed, once
+ * because a probe added for another reason returned 404. Every diagnostic built
+ * for it was silent precisely because the code holding those diagnostics was
+ * not running.
+ *
+ * A silent outage on a money-taking feature is the failure worth engineering
+ * against, more than any individual cause: the next cause will be one nobody
+ * predicted. So this checks the things that must be true, on a schedule, and
+ * emails once when they stop being true.
+ *
+ * It cannot report its own absence -- if this file stops loading, nothing here
+ * runs. That gap is covered from outside by GET /wp-json/pps/v1/pay-link, which
+ * anything can poll.
+ *
+ * @return array of ['ok' => bool, 'label' => string, 'detail' => string]
+ */
+function pps_paylink_health() {
+    $out = array();
+    $add = function ( $ok, $label, $detail = '' ) use ( &$out ) {
+        $out[] = array( 'ok' => (bool) $ok, 'label' => $label, 'detail' => $detail );
+    };
+
+    // The failure mode that actually happened, twice. A missing entry here is
+    // now the first thing to check, not a missing require_once.
+    $active = (array) get_option( 'active_plugins', array() );
+    foreach ( array( 'pps-calculators/pps-pay-link.php', 'pps-calculators/pps-quickbooks.php' ) as $entry ) {
+        $add( in_array( $entry, $active, true ), 'Active: ' . basename( $entry ),
+              in_array( $entry, $active, true ) ? '' : 'Not in active_plugins — re-add it.' );
+    }
+
+    // Lives in pps-job-quote.php, loaded by pps-calculators.php. Without it a
+    // command is accepted and then cannot mint.
+    $add( function_exists( 'pps_quote_create' ), 'Quote engine',
+          function_exists( 'pps_quote_create' ) ? '' : 'pps_quote_create() missing — pps-job-quote.php is not loading.' );
+
+    // Guarded at its call site, so its absence silently stops closed-day
+    // enforcement rather than erroring.
+    $add( function_exists( 'pps_is_business_day' ), 'Closed-day check',
+          function_exists( 'pps_is_business_day' ) ? '' : 'pps_is_business_day() missing — weekends and holidays are NOT being refused.' );
+
+    // Guarded: if WooCommerce is what broke, this check must report that
+    // rather than fatal inside the reporting code.
+    if ( ! function_exists( 'wc_get_product' ) ) {
+        $add( false, 'WooCommerce', 'wc_get_product() missing — WooCommerce is not loaded.' );
+    } else {
+        $pid  = pps_paylink_product_id();
+        $prod = $pid ? wc_get_product( $pid ) : null;
+        $add( (bool) $prod, 'Line-item product', $prod ? '' : 'No product configured — minting refuses.' );
+        if ( $prod ) {
+            $add( $prod->is_virtual(), 'Product is virtual',
+                  $prod->is_virtual() ? '' : 'Not virtual — WooCommerce may block checkout on its own shipping.' );
+        }
+    }
+
+    $add( '' !== pps_paylink_secret(), 'Shared secret', '' !== pps_paylink_secret() ? '' : 'No secret — nothing can authenticate.' );
+
+    return $out;
+}
+
+/** The failures only, as a stable signature, so one problem emails once. */
+function pps_paylink_health_failures() {
+    $bad = array();
+    foreach ( pps_paylink_health() as $c ) {
+        if ( ! $c['ok'] ) $bad[] = $c['label'] . ': ' . $c['detail'];
+    }
+    return $bad;
+}
+
+add_action( 'init', function () {
+    if ( ! wp_next_scheduled( 'pps_paylink_healthcheck' ) ) {
+        wp_schedule_event( time() + 300, 'hourly', 'pps_paylink_healthcheck' );
+    }
+} );
+
+add_action( 'pps_paylink_healthcheck', function () {
+    $bad  = pps_paylink_health_failures();
+    $sig  = $bad ? md5( implode( '|', $bad ) ) : '';
+    $last = (string) get_option( 'pps_paylink_health_sig', '' );
+
+    update_option( 'pps_paylink_health_last', gmdate( 'c' ), false );
+    if ( $sig === $last ) return;              // unchanged: already reported, or still fine
+    update_option( 'pps_paylink_health_sig', $sig, false );
+
+    pps_paylink_log_outcome( $bad ? 'health_failing' : 'health_recovered', array( 'checks' => $bad ) );
+    if ( ! $bad ) return;
+
+    // One mail per distinct failure, not one per hour: an alert that repeats
+    // every hour is an alert that gets filtered.
+    wp_mail(
+        get_option( 'admin_email' ),
+        'Pay links are not working on ' . wp_parse_url( home_url(), PHP_URL_HOST ),
+        "The pay-link self-check is failing:\n\n  - " . implode( "\n  - ", $bad )
+        . "\n\nPay Links screen: " . admin_url( 'admin.php?page=pps-pay-link' )
+        . "\nReachability:     " . rest_url( 'pps/v1/pay-link' )
+        . "\n\nThis mail is sent once per distinct failure, not hourly."
+    );
+} );
 
 /* ─────────────────────────────────────────────────────────────
  * A floor under the closed-day check
