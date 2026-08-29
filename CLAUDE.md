@@ -263,6 +263,28 @@ Loading themselves is what makes that impossible: no deploy of
   files**, not in `pps-job-quote.php` or `pps-calculators.php`. The receipt's
   shipping-address filter lives in `pps-pay-link.php` for exactly this reason.
 
+### Pay links tell you when they are broken — ask them first
+
+`GET /wp-json/pps/v1/pay-link` is the one-call diagnosis, unauthenticated on
+purpose:
+
+| Response | Meaning |
+|---|---|
+| `200 {"ok":true,"status":"ok"}` | Loading and able to mint. |
+| `503 {"ok":false,"status":"degraded"}` | Loading, but something it needs is missing. |
+| `404 rest_no_route` | `pps-pay-link.php` is not loading at all — check `active_plugins`. |
+
+`pps_paylink_health()` holds the checks (both `active_plugins` entries,
+`pps_quote_create()`, `pps_is_business_day()`, the line product and its
+`_virtual` flag, the shared secret). The endpoint reports *that* it is degraded
+without saying *what* is wrong; the detail goes to `admin_email` and the
+outcome log. The hourly `pps_paylink_healthcheck` cron mails **once per distinct
+failure**, not once per hour — if you add a check, keep that property.
+
+The gap it cannot close is its own absence: if the file stops loading, nothing
+in it runs, which is exactly what happened twice. Only an outside poller
+watching for any non-200 covers both shapes.
+
 ### Running more than one session at a time
 
 - **One deploy lane.** Feature branches are fine; deploying from them is not. Merge into
