@@ -46,16 +46,14 @@ function pps_paper_report_catalog() {
     if ( ! function_exists( 'pps_get_config' ) ) return $cache;
 
     $cfg = pps_get_config();
-    $pcf = isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ? $cfg['pcf'] : array();
 
-    // Paper pools as the config stores them. Names differ per pool but the row
-    // shape (label/val/days/factory) is uniform.
-    $pools = array( 'papers_nc', 'papers_cs', 'papers', 'cover_papers' );
-    foreach ( $pools as $pool ) {
-        if ( empty( $pcf[ $pool ] ) || ! is_array( $pcf[ $pool ] ) ) continue;
-        $rows = $pcf[ $pool ];
-        if ( function_exists( 'pps_paper_enrich' ) ) $rows = pps_paper_enrich( $rows, $pool );
-        foreach ( $rows as $row ) {
+    // The two pools the config actually stores (non-cardstock, cardstock).
+    // They sit at the TOP level of the config, not under 'pcf', and
+    // pps_get_config() already runs pps_paper_enrich() over both, so days/
+    // factory are populated here without a second pass.
+    foreach ( array( 'papers_nc', 'papers_cs' ) as $pool ) {
+        if ( empty( $cfg[ $pool ] ) || ! is_array( $cfg[ $pool ] ) ) continue;
+        foreach ( $cfg[ $pool ] as $row ) {
             if ( ! is_array( $row ) || ! isset( $row['val'] ) ) continue;
             $cache[ pps_paper_report_key( $row['val'] ) ] = $row;
         }
