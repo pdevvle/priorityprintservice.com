@@ -1,0 +1,233 @@
+{
+  "vivid": {
+    "title": "Enhanced Vivid Printing",
+    "content": [
+      { "type": "text", "value": "Our vivid print mode runs your job through an enhanced print profile that produces richer blacks, more saturated colors, and sharper detail. Great for photography-heavy pieces and marketing materials." },
+      { "type": "text", "value": "Adds approximately 1 day per 2,500 sheets to turnaround. Cost is roughly equivalent to a second press pass." }
+    ]
+  },
+  "coating": {
+    "title": "UV Cover Coating",
+    "content": [
+      { "type": "text", "value": "A liquid UV coating applied after printing. Enhances durability, color vibrancy, and provides a professional finish." },
+      { "type": "text", "value": "UV Gloss: High-shine reflective finish that makes colors pop. UV Matte: Soft, non-reflective finish with a velvety feel." },
+      { "type": "text", "value": "Requires a glossy or coated paper. Cannot be applied to uncoated stocks." }
+    ]
+  },
+  "bundling": {
+    "title": "Bundling",
+    "content": [
+      { "type": "text", "value": "Pieces are counted and bundled in your chosen quantity using kraft paper or shrink wrap. Keeps your order organized and protected during shipping and storage." },
+      { "type": "text", "value": "Available for orders of 100+ pieces. Bundle sizes: 25, 50, or 100 per bundle." }
+    ]
+  },
+  "round_cornering": {
+    "title": "Round Cornering",
+    "content": [
+      { "type": "text", "value": "Rounds the corners of your finished piece for a softer, modern look. Available in two radius sizes and two corner configurations." },
+      { "type": "text", "value": "Outside 2: rounds the two corners on the open (non-spine) edge. All 4: rounds every corner including the spine side." },
+      { "type": "text", "value": "1/4\" radius is subtle and professional. 3/8\" radius is more pronounced and playful." }
+    ]
+  },
+  "perforation": {
+    "title": "Perforation",
+    "content": [
+      { "type": "text", "value": "A line of small holes punched through the paper, allowing a section to be torn off cleanly. Common for reply cards, coupons, and tear-off tabs." },
+      { "type": "text", "value": "Available for select sizes. Perforation lines run parallel to the fold or binding edge." }
+    ]
+  },
+  "outfold": {
+    "title": "Fold-Out Page (Outfold)",
+    "content": [
+      { "type": "text", "value": "An extra panel that folds out from the booklet, like a brochure insert inside the book. Printed full color on both sides." },
+      { "type": "text", "value": "Adds both printing cost (full color) and folding labor. Available as single or double fold-out." }
+    ]
+  },
+  "perfect_binding": {
+    "title": "Perfect Binding",
+    "content": [
+      { "type": "text", "value": "Pages are glued to a flat spine creating a clean, professional book-style edge. The cover wraps around the spine, which is printable." },
+      { "type": "text", "value": "Requires enough pages to create a spine (typically 20+). Ideal for catalogs, manuals, and publications." }
+    ]
+  },
+  "saddle_stitch": {
+    "title": "Saddle Stitch Binding",
+    "content": [
+      { "type": "text", "value": "Pages are folded and stapled through the spine. The most cost-effective binding method for booklets up to 64 pages." },
+      { "type": "text", "value": "Page counts must be in multiples of 4. One or two staples depending on size." }
+    ]
+  },
+  "bleed": {
+    "title": "Artwork Bleeds",
+    "content": [
+      { "type": "text", "value": "Bleed is the area of artwork that extends beyond the trim line. When your design has color or images that go to the edge of the page, the bleed ensures no white border appears after cutting." },
+      { "type": "text", "value": "Standard bleed is 0.125\" (1/8\") on all sides. If your file doesn't include bleeds, we can add them for an additional fee." }
+    ]
+  },
+  "paper_text_weight": {
+    "title": "Text Weight Paper",
+    "content": [
+      { "type": "text", "value": "Lighter, flexible paper used for most booklet interior pages. Measured in pounds (lb) — higher numbers are thicker." },
+      { "type": "text", "value": "70lb Uncoated: Clean, natural feel. Best for text-heavy content. 80lb Matte: Smooth with slight sheen. Good all-purpose choice. 100lb Gloss: Shiny, vibrant colors. Best for photo-heavy content." }
+    ]
+  },
+  "paper_cardstock": {
+    "title": "Cardstock",
+    "content": [
+      { "type": "text", "value": "Heavier, rigid paper typically used for covers. Measured in points (pt) or pounds (lb)." },
+      { "type": "text", "value": "80lb Cardstock: Light card, good for self-mailers. 14pt C1S: One glossy side, one uncoated — premium cover stock. 16pt C2S: Glossy both sides, thick and sturdy." }
+    ]
+  },
+  "paper_text_70lb_uncoated_opaque_text": {
+    "title": "70lb Uncoated Opaque Text",
+    "content": [
+      { "type": "text", "value": "Our lightest in-stock text paper. Uncoated surface with a clean, natural feel and excellent opacity — no show-through even with double-sided printing." },
+      { "type": "text", "value": "Best for: newsletters, church bulletins, text-heavy booklets, inserts, and any project where readability matters more than photo reproduction." },
+      { "type": "text", "value": "In stock • Not UV coatable (uncoated surface)" }
+    ]
+  },
+  "paper_text_80lb_matte_text": {
+    "title": "80lb Matte Text",
+    "content": [
+      { "type": "text", "value": "Smooth matte surface with a subtle sheen. Our most versatile text-weight paper — handles both text and images well without glare." },
+      { "type": "text", "value": "Best for: brochures, catalogs, programs, menus, and marketing materials with a mix of text and imagery." },
+      { "type": "text", "value": "In stock • Not UV coatable" }
+    ]
+  },
+  "paper_text_100lb_gloss_text": {
+    "title": "100lb Gloss Text",
+    "content": [
+      { "type": "text", "value": "High-gloss finish that makes colors pop and photographs look crisp. The heaviest in-stock text paper with a premium, magazine-quality feel." },
+      { "type": "text", "value": "Best for: photo-heavy brochures, lookbooks, product catalogs, and any piece where vibrant color reproduction is the priority." },
+      { "type": "text", "value": "In stock • UV coatable for even more shine and durability" }
+    ]
+  },
+  "paper_text_50lb_offset_smooth_opaque": {
+    "title": "50lb Offset Smooth Opaque",
+    "content": [
+      { "type": "text", "value": "Ultra-lightweight economy stock with a smooth, opaque surface. The most cost-effective option for high-volume print runs." },
+      { "type": "text", "value": "Best for: large-run manuals, directories, mass-mailed inserts, and projects where cost per piece is the primary concern." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • Not UV coatable" }
+    ]
+  },
+  "paper_text_60lb_offset_smooth_opaque": {
+    "title": "60lb Offset Smooth Opaque",
+    "content": [
+      { "type": "text", "value": "Light, economical stock with a smooth finish and good opacity. A step up from 50lb while still keeping costs low on large runs." },
+      { "type": "text", "value": "Best for: newsletters, programs, multi-page booklets, training manuals, and budget-conscious catalogs." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • Not UV coatable" }
+    ]
+  },
+  "paper_text_80lb_offset_smooth_opaque": {
+    "title": "80lb Offset Smooth Opaque",
+    "content": [
+      { "type": "text", "value": "Mid-weight offset with a smooth, professional feel. Excellent quality-to-value ratio — noticeably more substantial than lighter offsets without the premium price of coated stocks." },
+      { "type": "text", "value": "Best for: catalogs, programs, annual reports, and booklets where you want a quality feel at a competitive price point." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • Not UV coatable" }
+    ]
+  },
+  "paper_text_80lb_gloss_factory_coated": {
+    "title": "80lb Gloss Factory Coated (Text)",
+    "content": [
+      { "type": "text", "value": "Pre-coated glossy text-weight stock with vivid color reproduction straight off the press. No additional UV coating needed for a glossy look." },
+      { "type": "text", "value": "Best for: photo-heavy catalogs, marketing brochures, and color-critical pieces where you want gloss without the added cost of UV coating." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • UV coatable for extra protection" }
+    ]
+  },
+  "paper_text_100lb_matte_factory_coated": {
+    "title": "100lb Matte Factory Coated (Text)",
+    "content": [
+      { "type": "text", "value": "Pre-coated matte text stock with excellent ink holdout. Rich, luxurious feel without the glare of gloss — photos look sophisticated, text stays sharp." },
+      { "type": "text", "value": "Best for: upscale catalogs, lookbooks, art portfolios, and premium marketing materials that need a refined, modern aesthetic." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • UV coatable" }
+    ]
+  },
+  "paper_cs_80lb_opaque_uncoated": {
+    "title": "80lb Opaque Uncoated Cardstock",
+    "content": [
+      { "type": "text", "value": "Sturdy uncoated cardstock with a professional, writable surface. The lightest cardstock option — rigid enough for covers while still folding cleanly." },
+      { "type": "text", "value": "Best for: self-cover booklets, reply cards, table tents, and pieces that need to be written on." },
+      { "type": "text", "value": "In stock • Not UV coatable (uncoated surface)" }
+    ]
+  },
+  "paper_cs_80lb_matte_cardstock": {
+    "title": "80lb Matte Cardstock",
+    "content": [
+      { "type": "text", "value": "Smooth matte cardstock with an elegant, substantial feel. Excellent ink adhesion with no glare — text and images both look sharp." },
+      { "type": "text", "value": "Best for: booklet covers, presentation folders, postcards, and any project that needs a sophisticated, understated finish." },
+      { "type": "text", "value": "In stock • UV coatable for added durability and sheen" }
+    ]
+  },
+  "paper_cs_100lb_gloss_cardstock": {
+    "title": "100lb Gloss Cardstock",
+    "content": [
+      { "type": "text", "value": "Glossy cardstock that delivers bold, saturated colors and razor-sharp images. Thick enough to stand on its own with a premium, polished feel." },
+      { "type": "text", "value": "Best for: booklet covers, postcards, product sheets, and high-impact marketing pieces where color vibrancy is key." },
+      { "type": "text", "value": "In stock • UV coatable for maximum gloss and scratch resistance" }
+    ]
+  },
+  "paper_cs_14pt_gloss_c1s": {
+    "title": "14pt Gloss C1S Cardstock",
+    "content": [
+      { "type": "text", "value": "Thick, premium cardstock coated on one side (C1S). The glossy front delivers vibrant colors; the uncoated back accepts pen and pencil." },
+      { "type": "text", "value": "Best for: postcards, booklet covers, business cards, door hangers, and any piece that benefits from a printable glossy front and writable matte back." },
+      { "type": "text", "value": "In stock • UV coatable on the glossy side" }
+    ]
+  },
+  "paper_cs_16pt_coated_c2s": {
+    "title": "16pt Coated C2S Cardstock",
+    "content": [
+      { "type": "text", "value": "Our heaviest in-stock cardstock, coated on both sides (C2S). Maximum thickness and rigidity with a smooth, glossy finish front and back." },
+      { "type": "text", "value": "Best for: premium business cards, thick postcards, durable covers, table tents, and any piece that demands maximum heft and polish." },
+      { "type": "text", "value": "In stock • UV coatable for ultimate durability" }
+    ]
+  },
+  "paper_cs_80lb_gloss_factory_coated": {
+    "title": "80lb Gloss Factory Coated (Cardstock)",
+    "content": [
+      { "type": "text", "value": "Glossy coated cardstock with a factory-applied coating for vivid color reproduction. Great alternative to in-stock glossy cardstocks at factory pricing for larger runs." },
+      { "type": "text", "value": "Best for: high-volume cover printing, promotional cards, and large-run marketing materials that need a glossy cardstock finish." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • UV coatable" }
+    ]
+  },
+  "paper_cs_100lb_matte_factory_coated": {
+    "title": "100lb Matte Factory Coated (Cardstock)",
+    "content": [
+      { "type": "text", "value": "Matte factory-coated cardstock with excellent ink adhesion and a smooth, sophisticated finish. Premium feel without the reflective glare of gloss." },
+      { "type": "text", "value": "Best for: upscale booklet covers, premium postcards, and marketing pieces that call for an elegant matte presentation." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • UV coatable" }
+    ]
+  },
+  "paper_cs_12pt_c2s_factory_coated": {
+    "title": "12pt C2S Factory Coated Cardstock",
+    "content": [
+      { "type": "text", "value": "Mid-weight double-coated factory cardstock. A good balance of thickness and economy — coated both sides for smooth printing and a professional finish." },
+      { "type": "text", "value": "Best for: catalog covers, large-run postcards, and projects that need cardstock weight at competitive factory pricing." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • UV coatable" }
+    ]
+  },
+  "paper_cs_14pt_c2s_factory_coated": {
+    "title": "14pt C2S Factory Coated Cardstock",
+    "content": [
+      { "type": "text", "value": "Thick double-coated factory cardstock matching the quality feel of in-stock 14pt at factory pricing. Coated both sides for vibrant, consistent color." },
+      { "type": "text", "value": "Best for: large-run booklet covers, premium postcards, and high-volume pieces that need thick, coated cardstock." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • UV coatable" }
+    ]
+  },
+  "paper_cs_18pt_c1s_factory_gloss": {
+    "title": "18pt C1S Factory Gloss Cardstock",
+    "content": [
+      { "type": "text", "value": "Our thickest available cardstock. Single-side coated with a high-gloss finish for maximum rigidity and premium feel. Nearly board-weight thickness." },
+      { "type": "text", "value": "Best for: luxury packaging inserts, ultra-premium covers, thick business cards, and any piece where maximum thickness makes an impression." },
+      { "type": "text", "value": "Factory order (5–7 business day lead time) • UV coatable on the glossy side" }
+    ]
+  },
+  "page_count": {
+    "title": "How to Count Booklet Pages",
+    "content": [
+      { "type": "text", "value": "Count pages, not sheets. Each folded sheet holds 4 pages — front and back of each half — and the front and back covers each count as a page." },
+      { "type": "text", "value": "Saddle-stitch booklets must be a multiple of 4 pages. If your file isn't divisible by 4, blank pages are added to reach the next multiple." },
+      { "type": "image", "src": "https://woocommerce-70867-4915293.cloudwaysapps.com/wp-content/uploads/2025/05/how-to-count-booklet-pages.webp", "alt": "Animated guide to counting saddle-stitch booklet pages" }
+    ]
+  }
+}
