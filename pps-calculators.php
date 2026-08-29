@@ -154,6 +154,12 @@ if ( file_exists( PPS_CALC_DIR . 'pps-catalog.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-catalog.php';
 }
 
+// Paper report: which open jobs sit on stock we don't inventory. Depends on
+// pps-config-admin.php for the inventoried test.
+if ( file_exists( PPS_CALC_DIR . 'pps-paper-report.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-paper-report.php';
+}
+
 // /pps-product-feed.xml for Google Merchant Center. Depends on pps-catalog.php.
 if ( file_exists( PPS_CALC_DIR . 'pps-product-feed.php' )
      && file_exists( PPS_CALC_DIR . 'pps-catalog.php' ) ) {
