@@ -228,7 +228,7 @@ function pps_quote_to_order( array $q, array $p ) {
 
     $email = isset( $p['email'] ) ? sanitize_email( $p['email'] ) : '';
     if ( ! $email || ! is_email( $email ) ) return new WP_Error( 'email', 'Please enter a valid email address.' );
-    foreach ( array( 'first' => 'first name', 'last' => 'last name', 'address_1' => 'street address', 'city' => 'city', 'state' => 'state', 'postcode' => 'ZIP code' ) as $k => $label ) {
+    foreach ( array( 'first' => 'first name', 'last' => 'last name', 'phone' => 'phone number', 'address_1' => 'street address', 'city' => 'city', 'state' => 'state', 'postcode' => 'ZIP code' ) as $k => $label ) {
         if ( empty( $p[ $k ] ) ) return new WP_Error( $k, 'Please enter your ' . $label . '.' );
     }
 
@@ -313,6 +313,12 @@ function pps_quote_to_order( array $q, array $p ) {
     $order->set_shipping_city( $g( 'city' ) );
     $order->set_shipping_state( $g( 'state' ) );
     $order->set_shipping_postcode( $g( 'postcode' ) );
+    // Carriers read the shipping phone, not the billing one, and a delivery
+    // exception is resolved by whoever answers at the destination. Same number
+    // on both: it is collected once, in the shipping block, for that purpose.
+    if ( is_callable( array( $order, 'set_shipping_phone' ) ) ) {
+        $order->set_shipping_phone( isset( $p['phone'] ) ? sanitize_text_field( $p['phone'] ) : '' );
+    }
     $order->set_shipping_country( 'US' );
 
     $item_id = $order->add_product( $product, $tier['qty'], array(
@@ -521,7 +527,12 @@ function pps_quote_form_view( array $q, $error ) {
                 <div class="field"><label for="q-first">First name <span class="req">*</span></label><input type="text" id="q-first" name="first" required autocomplete="shipping given-name"></div>
                 <div class="field"><label for="q-last">Last name <span class="req">*</span></label><input type="text" name="last" id="q-last" required autocomplete="shipping family-name"></div>
             </div>
-            <div class="field"><label for="q-company">Company</label><input type="text" id="q-company" name="company" autocomplete="shipping organization"></div>
+            <div class="con-row">
+                <div class="field"><label for="q-company">Company</label><input type="text" id="q-company" name="company" autocomplete="shipping organization"></div>
+                <div class="field"><label for="q-phone">Phone <span class="req">*</span></label>
+                    <input type="tel" id="q-phone" name="phone" required autocomplete="tel" inputmode="tel">
+                    <span class="field-hint">Given to UPS / FedEx for delivery.</span></div>
+            </div>
             <div class="field"><label for="q-a1">Street address <span class="req">*</span></label><input type="text" id="q-a1" name="address_1" required autocomplete="shipping address-line1"></div>
             <div class="field"><label for="q-a2">Apt, suite, unit</label><input type="text" id="q-a2" name="address_2" autocomplete="shipping address-line2"></div>
             <div class="con-row">
@@ -552,7 +563,6 @@ function pps_quote_form_view( array $q, $error ) {
             <h3 class="con-h" style="margin-top:20px">Billing</h3>
             <div class="field"><label for="q-email">Email <span class="req">*</span></label><input type="email" id="q-email" name="email" required autocomplete="email">
                 <span class="field-hint">Your receipt and order history use this address.</span></div>
-            <div class="field"><label for="q-phone">Phone</label><input type="text" id="q-phone" name="phone" autocomplete="tel"></div>
 
             <div class="field">
                 <label class="con-radio"><input type="checkbox" name="bill_same" value="1" checked id="q-same"> Billing address same as shipping</label>
