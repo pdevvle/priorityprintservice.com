@@ -782,40 +782,79 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
 }
 
 /* ─────────────────────────────────────────────────────────────
- * Show the destination on the receipt
+ * Stamp the destination onto the line, for checking against Shippo
  * ───────────────────────────────────────────────────────────── */
 
 /**
- * Put the shipping address back on the receipt, the emails and the
- * order-received page for jobs sold this way.
- *
- * WooCommerce hides it when nothing on the order needs shipping, and the
- * line-item product here is deliberately virtual so Woo's own shipping
- * machinery stays out of a checkout where we already collected the address.
- * The side effect is that the one field worth checking -- where the job is
- * actually going -- was the one field nobody could see. On an order where
- * billing and shipping differ, the receipt showed only the cardholder.
- *
- * Restricted to orders this flow created, and only when a destination was
- * actually captured, so no other virtual order starts advertising an address
- * it never collected.
- *
- * Lives here rather than in pps-job-quote.php on purpose: that file is shared
- * and has been reverted by another session's deploy before. This module is its
- * own plugin, so what sits in it survives.
+ * The destination as one readable block, in the order a label reads.
  */
-add_filter( 'woocommerce_order_needs_shipping_address', function ( $needs, $hide, $order ) {
-    if ( ! $order instanceof WC_Order ) return $needs;
+function pps_paylink_format_destination( WC_Order $order ) {
+    $name = trim( $order->get_shipping_first_name() . ' ' . $order->get_shipping_last_name() );
+    $city = trim(
+        $order->get_shipping_city()
+        . ( $order->get_shipping_state() ? ', ' . $order->get_shipping_state() : '' )
+        . ' ' . $order->get_shipping_postcode()
+    );
+    $phone = is_callable( array( $order, 'get_shipping_phone' ) ) ? (string) $order->get_shipping_phone() : '';
+    if ( '' === $phone ) $phone = (string) $order->get_billing_phone();
+
+    $lines = array_filter( array(
+        $name,
+        $order->get_shipping_company(),
+        $order->get_shipping_address_1(),
+        $order->get_shipping_address_2(),
+        $city,
+        $phone ? 'Tel ' . $phone : '',
+    ), function ( $l ) { return '' !== trim( (string) $l ); } );
+
+    return implode( "\n", $lines );
+}
+
+/**
+ * Record the destination on the line item, once, as visible meta.
+ *
+ * WHY A COPY AND NOT JUST THE ORDER'S OWN FIELDS
+ * The order's shipping fields stay editable for the life of the order, so they
+ * answer "where is it going now" rather than "what did the customer type".
+ * Checking a label against Shippo needs the second one: a frozen snapshot taken
+ * at submit, which cannot drift if somebody corrects the order afterwards. If
+ * the two ever disagree, that disagreement is the finding.
+ *
+ * Visible meta, so it appears wherever line meta appears -- the order screen,
+ * the receipt and the emails -- without any template being taught about it.
+ * That is also why the earlier woocommerce_order_needs_shipping_address filter
+ * is gone: this shows the address on the receipt already, and both would have
+ * printed it twice.
+ *
+ * Hooked rather than written inline in pps_quote_to_order() so it lives in this
+ * file, which is a plugin in its own right. pps-job-quote.php is shared and has
+ * been reverted by another session's deploy twice.
+ */
+add_action( 'woocommerce_update_order', function ( $order_id ) {
+    static $seen = array();
+    if ( isset( $seen[ $order_id ] ) ) return;   // one pass per request
+
+    $order = wc_get_order( $order_id );
+    if ( ! $order instanceof WC_Order ) return;
 
     $via = (string) $order->get_created_via();
-    if ( 'pps-job-quote' !== $via && 'pps-job-invoice' !== $via ) return $needs;
+    if ( 'pps-job-quote' !== $via && 'pps-job-invoice' !== $via ) return;
 
-    // Nothing to show is worse than nothing shown: an empty "Ship to" block
-    // reads as a missing address rather than an absent one.
-    if ( '' === trim( (string) $order->get_shipping_address_1() ) ) return $needs;
+    // Nothing captured yet: this hook also fires on the empty order that
+    // wc_create_order() makes, before any address has been set.
+    if ( '' === trim( (string) $order->get_shipping_address_1() ) ) return;
 
-    return true;
-}, 10, 3 );
+    $seen[ $order_id ] = true;
+    $dest = pps_paylink_format_destination( $order );
+
+    foreach ( $order->get_items() as $item ) {
+        // Written once. A later edit to the order must not rewrite the record
+        // of what was originally submitted -- that would defeat the point.
+        if ( '' !== (string) $item->get_meta( 'Ship to' ) ) continue;
+        $item->add_meta_data( 'Ship to', $dest, true );
+        $item->save();
+    }
+}, 20, 1 );
 
 /* ─────────────────────────────────────────────────────────────
  * Admin — configure, and mint one by hand to test
