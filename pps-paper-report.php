@@ -252,6 +252,18 @@ function pps_paper_report_maybe_refresh() {
 add_action( 'admin_init', 'pps_paper_report_maybe_refresh' );
 add_action( 'rest_api_init', 'pps_paper_report_maybe_refresh' );
 
+/**
+ * Hourly cron is the real refresh: it runs with no user, so the report is
+ * current even when nobody has opened wp-admin for a week. The capability-
+ * gated hooks above only cover the gap between cron ticks.
+ */
+add_action( 'init', function () {
+    if ( ! wp_next_scheduled( 'pps_paper_report_refresh' ) ) {
+        wp_schedule_event( time() + 60, 'hourly', 'pps_paper_report_refresh' );
+    }
+} );
+add_action( 'pps_paper_report_refresh', function () { pps_paper_report_get( true ); } );
+
 /* ─────────────────────────────────────────────────────────────
  * Admin screen — PPS Calculators → Paper Report
  * ───────────────────────────────────────────────────────────── */
