@@ -782,6 +782,42 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
 }
 
 /* ─────────────────────────────────────────────────────────────
+ * A floor under the closed-day check
+ * ───────────────────────────────────────────────────────────── */
+
+/**
+ * Define pps_is_business_day() if nothing else has.
+ *
+ * It normally lives in pps-calculators.php, and pps-job-quote.php calls it
+ * behind a function_exists() guard when refusing delivery dates the shop is
+ * closed on. That guard is the problem: if another session redeploys
+ * pps-calculators.php from a branch without the extraction, the function
+ * vanishes, the guard goes false, and the check stops enforcing SILENTLY.
+ * Customers could pick a Saturday and nothing would say otherwise.
+ *
+ * On plugins_loaded at a late priority, so the real definition has already
+ * been made if it is going to be. Declaring the function inside this closure
+ * defines it globally only when the closure runs, so there is no redeclare
+ * fatal if load order ever changes -- which a plain conditional declaration at
+ * file scope could not promise.
+ *
+ * Same closure list and the same two matching forms as the original: Y-m-d for
+ * a specific day, m-d for an annually recurring one. A fallback that disagreed
+ * with the real one would be worse than none.
+ */
+add_action( 'plugins_loaded', function () {
+    if ( function_exists( 'pps_is_business_day' ) ) return;
+
+    function pps_is_business_day( DateTime $d ): bool {
+        if ( (int) $d->format( 'N' ) >= 6 ) return false;
+        $closures = function_exists( 'pps_get_closures' ) ? pps_get_closures() : array();
+        if ( ! is_array( $closures ) ) $closures = array();
+        return ! in_array( $d->format( 'Y-m-d' ), $closures, true )
+            && ! in_array( $d->format( 'm-d' ), $closures, true );
+    }
+}, 20 );
+
+/* ─────────────────────────────────────────────────────────────
  * Stamp the destination onto the line, for checking against Shippo
  * ───────────────────────────────────────────────────────────── */
 

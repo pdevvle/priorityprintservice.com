@@ -57,5 +57,36 @@ ok('closure on a saturday', day('2026-08-29'), false);
 $GLOBALS['closures'] = array();
 ok('empty closure list', day('2026-12-25'), true);
 
+// ── The fallback in pps-pay-link.php must agree, byte for byte in behaviour ──
+// It exists because pps-job-quote.php calls this behind a function_exists()
+// guard: if pps-calculators.php is reverted the function vanishes and the
+// closed-day check stops enforcing silently. A fallback that disagreed with
+// the real one would be a different kind of silent wrong.
+$fb = file_get_contents(__DIR__ . '/../pps-pay-link.php');
+if (!preg_match('/function pps_is_business_day\s*\([^)]*\)\s*:\s*bool\s*\{.*?\n    \}/s', $fb, $m)) {
+    fwrite(STDERR, "could not find the fallback pps_is_business_day() in pps-pay-link.php\n");
+    exit(1);
+}
+$body = preg_replace('/^\s{4}/m', '', $m[0]);
+eval(str_replace('pps_is_business_day', 'pps_fallback_business_day', $body));
+
+function fbday($ymd) { return pps_fallback_business_day(new DateTime($ymd)); }
+$GLOBALS['closures'] = array();
+ok('fallback: thursday open', fbday('2026-08-27'), true);
+ok('fallback: saturday shut', fbday('2026-08-29'), false);
+ok('fallback: sunday shut',   fbday('2026-08-30'), false);
+$GLOBALS['closures'] = array('12-25');
+ok('fallback: recurring closure', fbday('2026-12-25'), false);
+ok('fallback: recurring next year', fbday('2027-12-25'), false);
+$GLOBALS['closures'] = array('2026-09-03');
+ok('fallback: dated closure', fbday('2026-09-03'), false);
+ok('fallback: dated does not recur', fbday('2027-09-03'), true);
+
+// And the two must agree on every one of those.
+$GLOBALS['closures'] = array('12-25', '2026-09-03');
+foreach (array('2026-08-27','2026-08-29','2026-08-30','2026-12-25','2027-12-25','2026-09-03','2027-09-03') as $d) {
+    ok('real and fallback agree on ' . $d, day($d), fbday($d));
+}
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
