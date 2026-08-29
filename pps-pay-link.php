@@ -1,5 +1,10 @@
 <?php
 /**
+ * Plugin Name: PPS Pay Link
+ * Description: Mint a payment link for a job agreed in a Missive thread. Loads itself so a redeploy of the calculators plugin cannot unload it.
+ * Version: 1.0.0
+ * Author: Priority Print Service
+ *
  * PPS Pay Link — mint a payment link for a job quoted in conversation.
  *
  * The job console assumes somebody is sitting at it. Most jobs are actually
@@ -40,6 +45,28 @@
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
+
+/**
+ * WHY THIS FILE LOADS ITSELF
+ *
+ * It used to be pulled in by two require_once lines inside pps-calculators.php.
+ * Several Claude sessions work this site at once, and twice — 27 Aug 22:52 and
+ * 29 Aug 00:10 — another session redeployed that file from a branch without
+ * those lines. Both times this module simply stopped existing: the REST route
+ * 404d, Missive reported an unexplained "failed to send webhook", and none of
+ * the diagnostics here fired because none of this code ran. Hours of a
+ * money-taking feature, gone silently, twice.
+ *
+ * So it is a plugin in its own directory now. Nothing another session deploys
+ * to pps-calculators/ can remove it.
+ *
+ * The guard below is the belt to that braces: during the migration both a
+ * standalone copy and an old required copy can exist, at different paths, so
+ * require_once cannot dedupe them. A second load returns here instead of
+ * fataling on redeclared functions.
+ */
+if ( defined( 'PPS_PAYLINK_LOADED' ) ) return;
+define( 'PPS_PAYLINK_LOADED', '1.0.0' );
 
 const PPS_PAYLINK_SECRET_OPT  = 'pps_paylink_secret';
 const PPS_PAYLINK_PRODUCT_OPT = 'pps_paylink_product';
@@ -753,6 +780,42 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
 
     return new WP_REST_Response( array( 'ok' => true ) + $res, 201 );
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * Show the destination on the receipt
+ * ───────────────────────────────────────────────────────────── */
+
+/**
+ * Put the shipping address back on the receipt, the emails and the
+ * order-received page for jobs sold this way.
+ *
+ * WooCommerce hides it when nothing on the order needs shipping, and the
+ * line-item product here is deliberately virtual so Woo's own shipping
+ * machinery stays out of a checkout where we already collected the address.
+ * The side effect is that the one field worth checking -- where the job is
+ * actually going -- was the one field nobody could see. On an order where
+ * billing and shipping differ, the receipt showed only the cardholder.
+ *
+ * Restricted to orders this flow created, and only when a destination was
+ * actually captured, so no other virtual order starts advertising an address
+ * it never collected.
+ *
+ * Lives here rather than in pps-job-quote.php on purpose: that file is shared
+ * and has been reverted by another session's deploy before. This module is its
+ * own plugin, so what sits in it survives.
+ */
+add_filter( 'woocommerce_order_needs_shipping_address', function ( $needs, $hide, $order ) {
+    if ( ! $order instanceof WC_Order ) return $needs;
+
+    $via = (string) $order->get_created_via();
+    if ( 'pps-job-quote' !== $via && 'pps-job-invoice' !== $via ) return $needs;
+
+    // Nothing to show is worse than nothing shown: an empty "Ship to" block
+    // reads as a missing address rather than an absent one.
+    if ( '' === trim( (string) $order->get_shipping_address_1() ) ) return $needs;
+
+    return true;
+}, 10, 3 );
 
 /* ─────────────────────────────────────────────────────────────
  * Admin — configure, and mint one by hand to test

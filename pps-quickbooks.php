@@ -1,5 +1,10 @@
 <?php
 /**
+ * Plugin Name: PPS QuickBooks
+ * Description: Raise the invoice in QuickBooks and let QuickBooks take the payment. Loads itself so a redeploy of the calculators plugin cannot unload it.
+ * Version: 1.0.0
+ * Author: Priority Print Service
+ *
  * PPS QuickBooks — raise the invoice in QuickBooks and let QuickBooks take the
  * payment.
  *
@@ -37,6 +42,11 @@
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
+
+// Own plugin directory, for the reason set out in pps-pay-link.php: a redeploy
+// of pps-calculators.php by another session must not be able to unload this.
+if ( defined( 'PPS_QBO_LOADED' ) ) return;
+define( 'PPS_QBO_LOADED', '1.0.0' );
 
 /**
  * Endpoints. Named constants because they are the first thing to check if a

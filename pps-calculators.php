@@ -142,17 +142,14 @@ if ( file_exists( PPS_CALC_DIR . 'pps-job-quote.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-job-quote.php';
 }
 
-// QuickBooks: raise the invoice, take the payment, hear about it settling.
-// Loaded before the pay-link module, which routes on whether this can pay.
-if ( file_exists( PPS_CALC_DIR . 'pps-quickbooks.php' ) ) {
-    require_once PPS_CALC_DIR . 'pps-quickbooks.php';
-}
-
-// Minting a quote link from a conversation (Missive) rather than a form.
-// Loaded after the quote module, whose helpers it calls.
-if ( file_exists( PPS_CALC_DIR . 'pps-pay-link.php' ) ) {
-    require_once PPS_CALC_DIR . 'pps-pay-link.php';
-}
+// Pay Link and QuickBooks are NOT loaded here. They are standalone plugins in
+// their own directories (pps-pay-link/, pps-quickbooks/), because they were
+// required from here twice and twice a redeploy of THIS file by another
+// session removed the lines and silently took a money-taking feature offline.
+// A module whose existence depends on a line in a file everybody redeploys is
+// a module that will disappear. Do not "restore" the requires: both modules
+// guard against double-loading, but the copies would be at different paths and
+// only the guard would stop a fatal.
 
 // Shared quote link → defaults blob (product + preset admin).
 if ( file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
