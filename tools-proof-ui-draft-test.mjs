@@ -150,7 +150,10 @@ ck('rotate shows deg pills + apply all', await p.evaluate(()=>{const t=[...docum
 
 // ── revision 3: in 3D the thumbnails move into the right panel ──
 await go('book'); await p.waitForTimeout(400);
-ck('3D disables view controls', await p.evaluate(()=>document.getElementById('viewGroup').classList.contains('disabledish')));
+ck('3D swaps the view controls for the book controls', await p.evaluate(()=>
+  document.getElementById('viewGroup').hidden===true
+  && document.getElementById('bookGroup').hidden===false
+  && getComputedStyle(document.getElementById('viewGroup')).display==='none'));
 ck('3D shows mockup disclaimer', await p.evaluate(()=>/not the print surface/.test(document.getElementById('issuePanel').innerText)));
 ck('3D hides the legend', await p.evaluate(()=>
   getComputedStyle(document.getElementById('legendBar')).display==='none' && document.getElementById('showLegend').hidden));
@@ -176,6 +179,126 @@ ck('back in proof: edit panel returns, thumbnails go back below', await p.evalua
   && document.getElementById('railStripWrap').hidden
   && document.querySelectorAll('#stripBottom .pg').length===8
   && document.querySelectorAll('#stripRail .pg').length===0));
+
+// ── revision 9: the real 3D rendering, ported from the shipped preview ──
+await go('book'); await p.waitForTimeout(400);
+await p.evaluate(()=>[...document.querySelectorAll('#bookModes button')].find(b=>b.dataset.book==='closed').click());
+await p.waitForTimeout(300);
+ck('closed book builds all six faces', await p.evaluate(()=>{
+  const f=[...document.querySelectorAll('#bpv .bpface')];
+  const has=c=>f.some(e=>e.classList.contains(c));
+  return f.length===6 && ['front','back','topedge','bottomedge','foreedge','spineedge'].every(has);}),
+  await p.evaluate(()=>document.querySelectorAll('#bpv .bpface').length+' faces'));
+ck('front face is page 1, back face is the last page', await p.evaluate(()=>{
+  const g=c=>document.querySelector('#bpv .bpface.'+c).style.backgroundImage;
+  const thumbs=[...document.querySelectorAll('#stripRail .pg .thumb')].map(e=>e.style.backgroundImage);
+  return thumbs.length===8 && g('front')===thumbs[0] && g('back')===thumbs[7]
+      && g('front')!==g('back');}));
+ck('saddle depth comes from the page count, no spine face', await p.evaluate(()=>{
+  const c=document.querySelector('#bpv .bpclosed');
+  const half=parseFloat(c.style.getPropertyValue('--half-depth'));
+  return Math.abs(half-(Math.max(2,8*0.3)/2))<0.001 && !document.querySelector('#bpv .bpface.spine');}),
+  await p.evaluate(()=>document.querySelector('#bpv .bpclosed').style.getPropertyValue('--half-depth')));
+ck('viewport has perspective and the scene is 3D', await p.evaluate(()=>{
+  const v=getComputedStyle(document.getElementById('bpv'));
+  const sc=getComputedStyle(document.getElementById('bpscene'));
+  return v.perspective!=='none' && sc.transformStyle==='preserve-3d' && sc.transform!=='none';}));
+ck('drag rotates the book', await p.evaluate(()=>{
+  const before=document.getElementById('bpscene').style.transform;
+  const vp=document.getElementById('bpv');
+  vp.dispatchEvent(new MouseEvent('mousedown',{clientX:400,clientY:300,bubbles:true,cancelable:true}));
+  window.dispatchEvent(new MouseEvent('mousemove',{clientX:500,clientY:340,bubbles:true}));
+  const during=document.getElementById('bpscene').style.transform;
+  window.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
+  return before!==during && /rotateY\(15deg\)/.test(during) && /rotateX\(-27deg\)/.test(during);}),
+  await p.evaluate(()=>document.getElementById('bpscene').style.transform));
+ck('pitch is clamped, yaw is free', await p.evaluate(()=>{
+  const vp=document.getElementById('bpv');
+  vp.dispatchEvent(new MouseEvent('mousedown',{clientX:0,clientY:0,bubbles:true,cancelable:true}));
+  window.dispatchEvent(new MouseEvent('mousemove',{clientX:2000,clientY:-4000,bubbles:true}));
+  const t=document.getElementById('bpscene').style.transform;
+  window.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
+  return /rotateX\(60deg\)/.test(t) && !/rotateY\(60deg\)/.test(t);}),
+  await p.evaluate(()=>document.getElementById('bpscene').style.transform));
+ck('"Reset view" returns the starting angle', await p.evaluate(()=>{
+  document.getElementById('resetView').click();
+  return document.getElementById('bpscene').style.transform==='rotateX(-15deg) rotateY(-25deg)';}));
+// Pages view
+await p.evaluate(()=>[...document.querySelectorAll('#bookModes button')].find(b=>b.dataset.book==='open').click());
+await p.waitForTimeout(300);
+ck('Pages view shows two leaves with a gutter', await p.evaluate(()=>
+  document.querySelectorAll('#bpv .bppage').length===2
+  && !!document.querySelector('#bpv .bppage.left') && !!document.querySelector('#bpv .bppage.right')
+  && !!document.querySelector('#bpv .bpspineshadow')));
+ck('Pages opens to the spread you were already looking at', await p.evaluate(()=>{
+  // the rail selection at this point is P4, so the book should open there
+  return [...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',')==='4,5';}),
+  await p.evaluate(()=>[...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',')));
+// drive to the first spread deliberately for the remaining checks
+await p.evaluate(()=>[...document.querySelectorAll('#stripRail .pg')].find(e=>/P2/.test(e.textContent)).click());
+await p.waitForTimeout(200);
+ck('spreads pair the interior pages, covers excluded', await p.evaluate(()=>{
+  const n=[...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent);
+  return JSON.stringify(n)===JSON.stringify(['2','3']);}),
+  await p.evaluate(()=>[...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',')));
+ck('covers never appear as a spread leaf', await p.evaluate(()=>{
+  const seen=new Set();
+  for(let i=0;i<6;i++){
+    [...document.querySelectorAll('#bpv .bppagenum')].forEach(e=>seen.add(e.textContent));
+    const n=document.getElementById('nextSpread'); if(n.disabled) break; n.click();
+  }
+  return !seen.has('1') && !seen.has('8') && seen.size===6;}),
+  await p.evaluate(()=>'pages seen across all spreads'));
+await p.evaluate(()=>[...document.querySelectorAll('#stripRail .pg')].find(e=>/P2/.test(e.textContent)).click());
+await p.waitForTimeout(200);
+ck('nav reads the spread and back is disabled at the start', await p.evaluate(()=>
+  document.querySelector('.navlbl').textContent.replace(/\u2013/g,'-')==='Pages 2-3'
+  && document.getElementById('prevSpread').disabled===true
+  && document.getElementById('nextSpread').disabled===false));
+ck('stepping forward advances the spread', await p.evaluate(()=>{
+  document.getElementById('nextSpread').click();
+  return [...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',')==='4,5';}));
+ck('arrow keys step spreads too', await p.evaluate(()=>{
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+  const fwd=[...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',');
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
+  const back=[...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',');
+  return fwd==='6,7' && back==='4,5';}));
+ck('last spread disables forward', await p.evaluate(()=>{
+  document.getElementById('nextSpread').click();
+  return document.getElementById('nextSpread').disabled===true
+      && document.getElementById('prevSpread').disabled===false;}));
+ck('stepping keeps the rail thumbnails in step', await p.evaluate(()=>{
+  const sel=[...document.querySelectorAll('#stripRail .pg.sel')].map(e=>e.textContent.match(/P(\d)/)[1]);
+  return JSON.stringify(sel)===JSON.stringify(['6','7']);}),
+  await p.evaluate(()=>[...document.querySelectorAll('#stripRail .pg.sel')].map(e=>e.textContent.match(/P(\d)/)[1]).join(',')));
+ck('clicking an interior thumbnail opens that spread', await p.evaluate(()=>{
+  [...document.querySelectorAll('#stripRail .pg')].find(e=>/P4/.test(e.textContent)).click();
+  return [...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',')==='4,5';}));
+ck('clicking a cover thumbnail returns to the closed book', await p.evaluate(()=>{
+  [...document.querySelectorAll('#stripRail .pg')].find(e=>/P8/.test(e.textContent)).click();
+  return !!document.querySelector('#bpv .bpclosed') && !document.querySelector('#bpv .bpopen')
+      && [...document.querySelectorAll('#bookModes button')].find(b=>b.classList.contains('on')).dataset.book==='closed';}));
+ck('opening Pages from a cover moves the rail selection with it', await p.evaluate(()=>{
+  const go=b=>[...document.querySelectorAll('#bookModes button')].find(x=>x.dataset.book===b).click();
+  go('closed');
+  [...document.querySelectorAll('#stripRail .pg')].find(e=>/P1/.test(e.textContent)).click();
+  go('open');
+  const leaves=[...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',');
+  const sel=[...document.querySelectorAll('#stripRail .pg.sel')].map(e=>e.textContent.match(/P(\d)/)[1]).join(',');
+  return leaves==='2,3' && sel==='2,3';}),
+  await p.evaluate(()=>[...document.querySelectorAll('#stripRail .pg.sel')].map(e=>e.textContent.match(/P(\d)/)[1]).join(',')));
+ck('drag handlers do not stack across re-renders', await p.evaluate(()=>{
+  const go=b=>[...document.querySelectorAll('#bookModes button')].find(x=>x.dataset.book===b).click();
+  for(let i=0;i<6;i++){ go('open'); go('closed'); }
+  document.getElementById('resetView').click();
+  const vp=document.getElementById('bpv');
+  vp.dispatchEvent(new MouseEvent('mousedown',{clientX:0,clientY:0,bubbles:true,cancelable:true}));
+  window.dispatchEvent(new MouseEvent('mousemove',{clientX:100,clientY:0,bubbles:true}));
+  const t=document.getElementById('bpscene').style.transform;
+  window.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
+  return /rotateY\(15deg\)/.test(t);}),
+  await p.evaluate(()=>document.getElementById('bpscene').style.transform));
 
 ck('no horizontal page scroll', await p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1));
 ck('no page errors overall', errs.length===0, errs[0]||'');
