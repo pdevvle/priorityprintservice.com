@@ -59,9 +59,20 @@
   .note{border:1.5px solid var(--magenta);background:var(--bp-surface-2);border-radius:4px;padding:8px 10px;
         font-size:11.5px;line-height:1.5;color:var(--bp-ink)}
   .note a{color:inherit;font-weight:600}
-  .agree{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:7px;font-size:14px}
-  .agree label{border-bottom:1px solid var(--bp-ink);padding-bottom:2px;cursor:pointer;display:flex;gap:8px;align-items:center}
-  .agree .req{font-size:11px;color:var(--bp-faint);border:none}
+  .agree{display:flex;align-items:center;gap:8px;margin-top:9px;padding-top:8px;
+         border-top:1px solid rgba(236,0,140,.30);font-size:13.5px}
+  .agree label{cursor:pointer;display:flex;gap:8px;align-items:center;font-weight:600}
+  .agree .req{font-size:11px;color:var(--bp-faint)}
+  .approvewrap{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+  .approvehint{font-size:10px;color:var(--bp-faint);max-width:190px;line-height:1.35}
+  .closebtn{margin-left:auto;align-self:flex-start;width:34px;height:34px;flex-shrink:0;border-radius:50%;
+            border:1px solid var(--bp-line);background:var(--bp-surface);color:var(--bp-dim);
+            font-size:17px;line-height:1;cursor:pointer}
+  .closebtn:hover{background:var(--bp-btn);color:var(--bp-ink)}
+  .rail.hidden{display:none}
+  .showlegend{border:1px dashed var(--bp-line);background:var(--bp-surface);border-radius:6px;
+              padding:9px 14px;font-size:12px;font-weight:600;color:var(--bp-dim);cursor:pointer;white-space:nowrap}
+  .showlegend:hover{border-style:solid;color:var(--bp-ink)}
 
   /* ── body ────────────────────────────────────────────────── */
   .body{display:flex;flex:1;min-height:0}
@@ -102,7 +113,10 @@
         display:flex;flex-direction:column;min-height:0}
   .railhead{display:flex;align-items:baseline;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid var(--bp-ink);margin:0 16px}
   .railhead h2{margin:0;font-size:21px;letter-spacing:-.01em}
-  .undo{font-size:13px;color:var(--bp-dim);background:none;border:none;cursor:pointer;text-decoration:underline}
+  .undo{font-size:13px;color:var(--bp-dim);background:none;border:none;cursor:pointer;
+        display:inline-flex;align-items:center;gap:5px}
+  .undo:hover{color:var(--bp-ink)}
+  .undo .ic{font-size:15px;line-height:1}
   .railscroll{overflow-y:auto;padding:4px 16px 20px;flex:1}
   .acc{border-bottom:1px solid var(--bp-line)}
   .acchead{width:100%;display:flex;align-items:center;gap:8px;background:none;border:none;padding:13px 2px;
@@ -146,6 +160,11 @@
 
   <!-- ══ TOP BAR ══ -->
   <div class="topbar">
+    <div class="approvewrap">
+      <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
+      <span class="approvehint" id="approveHint">Tick &ldquo;I understand and agree&rdquo; to enable.</span>
+    </div>
+
     <div class="viewgroup" id="viewGroup">
       <span class="lbl">View</span>
       <label class="chk" for="zoom">Zoom</label>
@@ -164,19 +183,19 @@
       <button data-mode="book">3D Preview</button>
     </div>
 
-    <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
-
     <div class="disclose">
       <div class="note">
         Note: Online proof approval is best for expediency, but may not produce the best results. For color accuracy,
         request and purchase a <a href="#">Hardcopy Proof</a>. If you're unsure about the template markings and what
         they mean then request a <a href="#">Professional Digital Proof</a>.
-      </div>
-      <div class="agree">
-        <label><input type="checkbox" id="agree"> I understand and agree</label>
-        <span class="req">(required)</span>
+        <div class="agree">
+          <label><input type="checkbox" id="agree"> I understand and agree</label>
+          <span class="req">(required)</span>
+        </div>
       </div>
     </div>
+
+    <button class="closebtn" id="closeBtn" title="Close proof" aria-label="Close proof">&#10005;</button>
   </div>
 
   <!-- ══ BODY ══ -->
@@ -190,6 +209,7 @@
       </div>
 
       <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
+        <button class="showlegend" id="showLegend" hidden>Show legend</button>
         <div class="legend" id="legend">
           <h4>Legend <label class="chk" style="font-size:12px"><input type="checkbox" id="hideLegend"> Hide</label></h4>
           <div class="row"><span class="swatch" style="border-top:2.5px solid #ef4444"></span><span style="color:#ef4444">Bleed</span></div>
@@ -205,10 +225,10 @@
     </div>
 
     <!-- ══ RIGHT RAIL ══ -->
-    <div class="rail">
+    <div class="rail" id="railPanel">
       <div class="railhead">
         <h2>Artwork Edit</h2>
-        <button class="undo">Undo last change</button>
+        <button class="undo" title="Undo last change"><span class="ic">&#8630;</span>Undo</button>
       </div>
       <div class="railscroll" id="rail"></div>
     </div>
@@ -481,25 +501,49 @@ function subOptions(n){
 }
 
 /* ── view-dependent chrome ──────────────────────────────────── */
+/* The legend explains the guides, so it cannot outlive them: hiding guides
+   (or switching to 3D, which has none) hides the legend outright rather than
+   leaving a key to markings that aren't on screen. The restore button only
+   appears when the legend is the ONLY thing hidden — when there are no guides
+   to explain there is nothing to restore it to. */
+function renderLegend(){
+  const guidesOff = document.getElementById('hideGuides').checked;
+  const manuallyHidden = document.getElementById('hideLegend').checked;
+  const applicable = state.mode === 'proof' && !guidesOff;
+  const legend = document.getElementById('legend');
+  const btn = document.getElementById('showLegend');
+  legend.style.display = (applicable && !manuallyHidden) ? '' : 'none';
+  btn.hidden = !(applicable && manuallyHidden);
+}
+
 function renderChrome(){
   const book = state.mode === 'book';
   document.getElementById('viewGroup').classList.toggle('disabledish', book);
-  document.getElementById('legend').classList.toggle('disabledish', book);
+  // 3D is a finished-product view, not an editing surface — the whole
+  // Artwork Edit rail goes away rather than sitting there inapplicable.
+  document.getElementById('railPanel').classList.toggle('hidden', book);
   document.querySelectorAll('#modes button').forEach(b =>
     b.classList.toggle('on', b.dataset.mode === state.mode));
 }
 
-function renderAll(){ renderChrome(); renderStage(); renderIssues(); renderStrip(); renderRail(); }
+function renderAll(){ renderChrome(); renderStage(); renderIssues(); renderStrip(); renderRail(); renderLegend(); }
 
 document.getElementById('modes').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
   state.mode = b.dataset.mode; renderAll();
 };
-document.getElementById('hideGuides').onchange = renderStage;
-document.getElementById('hideLegend').onchange = e =>
-  document.getElementById('legend').style.visibility = e.target.checked ? 'hidden' : 'visible';
-document.getElementById('agree').onchange = e =>
+document.getElementById('hideGuides').onchange = () => { renderStage(); renderLegend(); };
+document.getElementById('hideLegend').onchange = renderLegend;
+document.getElementById('showLegend').onclick = () => {
+  document.getElementById('hideLegend').checked = false;
+  renderLegend();
+};
+document.getElementById('agree').onchange = e => {
   document.getElementById('approveBtn').disabled = !e.target.checked;
+  document.getElementById('approveHint').style.visibility = e.target.checked ? 'hidden' : 'visible';
+};
+document.getElementById('closeBtn').onclick = () =>
+  alert('Prototype — this would close the proof and return to the calculator.');
 document.getElementById('approveBtn').onclick = () =>
   alert('Prototype — no artwork is approved and no files are produced.');
 
