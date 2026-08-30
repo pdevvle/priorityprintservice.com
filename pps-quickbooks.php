@@ -241,6 +241,14 @@ function pps_qbo_request( $method, $path, $body = null, array $query = array() )
             $e = $out['Fault']['Error'][0];
             $detail = trim( ( $e['Message'] ?? '' ) . ' — ' . ( $e['Detail'] ?? '' ) );
         }
+        // A 401/403 from Intuit is not a JSON Fault, so $detail comes out empty
+        // precisely when the reason matters most. Keep a short raw snippet for
+        // those -- it names the failure (AuthenticationFailed, realm mismatch)
+        // where the parsed field cannot.
+        if ( '' === $detail && ( 401 === $code || 403 === $code ) ) {
+            $detail = trim( substr( wp_strip_all_tags( (string) wp_remote_retrieve_body( $res ) ), 0, 300 ) );
+            if ( '' === $detail ) $detail = 'empty body; ' . wp_remote_retrieve_response_message( $res );
+        }
         pps_qbo_log( 'api_error', array( 'status' => $code, 'path' => $path, 'detail' => $detail ) );
         return new WP_Error( 'qbo_http_' . $code, $detail ?: ( 'QuickBooks returned ' . $code ), array( 'status' => $code ) );
     }
@@ -661,6 +669,23 @@ function pps_qbo_admin_page() {
         $notice = 'Disconnected from QuickBooks.';
     }
 
+    // ---- Test the connection -------------------------------------------
+    // Cheapest honest question we can ask the company file: who are you. It
+    // exercises exactly the path an invoice uses -- token, realm, base URL --
+    // so a pass here means the next failure is about the invoice, not the
+    // connection.
+    if ( isset( $_POST['pps_qbo_test'] ) && check_admin_referer( 'pps_qbo_save' ) ) {
+        $probe = pps_qbo_request( 'GET', 'companyinfo/' . rawurlencode( pps_qbo_realm_id() ) );
+        if ( is_wp_error( $probe ) ) {
+            $error = 'Test failed: ' . $probe->get_error_message()
+                . ' (' . $probe->get_error_code() . '). The log below has the detail.';
+        } else {
+            $ci = $probe['CompanyInfo'] ?? array();
+            $notice = 'Connection works — reached "' . ( $ci['CompanyName'] ?? 'unknown company' ) . '"'
+                . ( isset( $ci['Country'] ) ? ', ' . $ci['Country'] : '' ) . '.';
+        }
+    }
+
     // ---- OAuth callback ------------------------------------------------
     if ( isset( $_GET['code'] ) ) {
         if ( ! isset( $_GET['state'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['state'] ) ), 'pps_qbo_oauth' ) ) {
@@ -817,6 +842,7 @@ function pps_qbo_admin_page() {
             <p>
                 <button type="submit" name="pps_qbo_save" class="button button-primary">Save settings</button>
                 <?php if ( $connected ) : ?>
+                    <button type="submit" name="pps_qbo_test" class="button">Test connection</button>
                     <button type="submit" name="pps_qbo_disconnect" class="button"
                         onclick="return confirm('Disconnect from QuickBooks?')">Disconnect</button>
                 <?php endif; ?>
