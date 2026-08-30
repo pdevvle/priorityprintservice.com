@@ -302,7 +302,120 @@ ck('drag handlers do not stack across re-renders', await p.evaluate(()=>{
   window.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
   return /rotateY\(15deg\)/.test(t);}));
 
-await go('proof'); await p.waitForTimeout(350);
+// ── one section at a time in the rail ──
+await go('proof'); await p.waitForTimeout(300);
+await p.evaluate(()=>{ if(!document.querySelector('#rail .acc.open')) return;
+  const wf=document.querySelector('#rail .acc'); if(!wf.classList.contains('open')) wf.querySelector('.acchead').click(); });
+await p.waitForTimeout(250);
+ck('Whole File starts expanded with no page open', await p.evaluate(()=>{
+  const accs=[...document.querySelectorAll('#rail .acc')];
+  return accs[0].classList.contains('open') && accs.slice(1).every(a=>!a.classList.contains('open'));}));
+ck('opening a page collapses Whole File', await p.evaluate(async ()=>{
+  const accs=[...document.querySelectorAll('#rail .acc')];
+  accs[1].querySelector('.acchead').click();
+  await new Promise(r=>setTimeout(r,250));
+  const now=[...document.querySelectorAll('#rail .acc')];
+  return !now[0].classList.contains('open') && now[1].classList.contains('open');}));
+ck('re-opening Whole File collapses the page', await p.evaluate(async ()=>{
+  document.querySelector('#rail .acc .acchead').click();
+  await new Promise(r=>setTimeout(r,250));
+  const now=[...document.querySelectorAll('#rail .acc')];
+  return now[0].classList.contains('open') && now.slice(1).every(a=>!a.classList.contains('open'));}));
+ck('never two sections open at once', await p.evaluate(async ()=>{
+  const heads=[...document.querySelectorAll('#rail .acchead')];
+  for(const i of [2,5,0,3]){
+    heads[i] && heads[i].click(); await new Promise(r=>setTimeout(r,120));
+    if(document.querySelectorAll('#rail .acc.open').length>1) return false;
+  }
+  return true;}));
+
+// ── apply to all pages, on every behaviour ──
+await openPage(2); await p.waitForTimeout(250);
+ck('apply-to-all is offered on every behaviour, not just Rotate', await p.evaluate(async ()=>{
+  const sel=document.querySelector('.behavior select');
+  for(const b of ['crop','fill','fit','stretch','scale','rotate']){
+    sel.value=b; sel.dispatchEvent(new Event('change'));
+    await new Promise(r=>setTimeout(r,180));
+    if(!document.getElementById('applyAll')) return 'missing on '+b;
+  }
+  return true;}));
+ck('the old one-shot Rotate button is gone', await p.evaluate(()=>
+  ![...document.querySelectorAll('.pill')].some(b=>/all pages/i.test(b.textContent))));
+ck('ticking it copies this page to every page', await p.evaluate(async ()=>{
+  const sel=document.querySelector('.behavior select');
+  sel.value='fill'; sel.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,200));
+  document.getElementById('applyAll').click(); await new Promise(r=>setTimeout(r,300));
+  // every thumbnail should now be composed the same way: none flags a bleed gap
+  return !document.querySelector('#stripBottom .pg .dot');}));
+ck('and later changes keep every page matched', await p.evaluate(async ()=>{
+  const sel=document.querySelector('.behavior select');
+  sel.value='fit'; sel.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,350));
+  // Fit letterboxes, so EVERY page should now report the bleed gap
+  return document.querySelectorAll('#stripBottom .pg .dot').length===8;}),
+  await p.evaluate(()=>document.querySelectorAll('#stripBottom .pg .dot').length+' of 8 flagged'));
+ck('unticking lets pages diverge again', await p.evaluate(async ()=>{
+  document.getElementById('applyAll').click(); await new Promise(r=>setTimeout(r,250));
+  const sel=document.querySelector('.behavior select');
+  sel.value='fill'; sel.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,350));
+  // only the open page changed, so 7 of 8 still carry the Fit bleed gap
+  return document.querySelectorAll('#stripBottom .pg .dot').length===7;}),
+  await p.evaluate(()=>document.querySelectorAll('#stripBottom .pg .dot').length+' of 8 flagged'));
+
+// ── longer documents ──
+for (const [count, groups, spreads] of [[16,9,7],[64,33,31]]){
+  const t0=Date.now();
+  await p.selectOption('#pageCount', String(count));
+  await p.waitForTimeout(count>32?1400:700);
+  const ms=Date.now()-t0;
+  ck(count+'pp: rail lists every page', await p.evaluate(c=>
+    document.querySelectorAll('#rail .acc').length===c+1, count),
+    await p.evaluate(()=>document.querySelectorAll('#rail .acc').length+' rows'));
+  ck(count+'pp: filmstrip pairs interior pages into spreads', await p.evaluate(([c,g])=>
+    document.querySelectorAll('#stripBottom .grp').length===g
+    && document.querySelectorAll('#stripBottom .pg').length===c, [count,groups]),
+    await p.evaluate(()=>document.querySelectorAll('#stripBottom .grp').length+' groups, '
+      +document.querySelectorAll('#stripBottom .pg').length+' pages'));
+  ck(count+'pp: covers are still named, interior pages are not', await p.evaluate(c=>{
+    const cells=[...document.querySelectorAll('#stripBottom .pg')];
+    return /front cover/.test(cells[0].textContent) && /back cover/.test(cells[c-1].textContent)
+        && /inside front cover/.test(cells[1].textContent);}, count));
+  ck(count+'pp: no horizontal page scroll', await p.evaluate(()=>
+    document.documentElement.scrollWidth<=window.innerWidth+1));
+  ck(count+'pp: rebuilt in reasonable time', ms<9000, ms+'ms');
+  ck(count+'pp: the shell stays bounded, panels scroll inside it', await p.evaluate(()=>{
+    const sh=document.querySelector('.shell').getBoundingClientRect();
+    const railScrolls=document.getElementById('rail').scrollHeight>document.getElementById('rail').clientHeight+2
+                   || document.querySelectorAll('#rail .acc').length<12;
+    return sh.height<=920 && railScrolls;}),
+    await p.evaluate(()=>Math.round(document.querySelector('.shell').getBoundingClientRect().height)+'px tall'));
+  ck(count+'pp: the filmstrip does not become a wall', await p.evaluate(()=>
+    document.getElementById('stripBottom').getBoundingClientRect().height<=232),
+    await p.evaluate(()=>Math.round(document.getElementById('stripBottom').getBoundingClientRect().height)+'px'));
+  ck(count+'pp: the artwork is still the biggest thing on screen', await p.evaluate(()=>{
+    const a=document.getElementById('sheet').getBoundingClientRect();
+    const strip=document.getElementById('stripBottom').getBoundingClientRect();
+    return a.height>strip.height;}));
+  await go('book'); await p.waitForTimeout(500);
+  ck(count+'pp: the book gets visibly thicker', await p.evaluate(c=>{
+    const half=parseFloat(document.querySelector('#bpv .bpclosed').style.getPropertyValue('--half-depth'));
+    return Math.abs(half-Math.max(2,c*0.3)/2)<0.01;}, count),
+    await p.evaluate(()=>(parseFloat(document.querySelector('#bpv .bpclosed').style.getPropertyValue('--half-depth'))*2).toFixed(1)+'px thick'));
+  await p.evaluate(()=>[...document.querySelectorAll('#bookModes button')].find(b=>b.dataset.book==='open').click());
+  await p.waitForTimeout(450);
+  ck(count+'pp: spreads run to the end of the interior', await p.evaluate(async s=>{
+    let n=0;
+    for(let i=0;i<200;i++){ const b=document.getElementById('nextSpread'); if(!b||b.disabled) break; b.click(); n++;
+      await new Promise(r=>setTimeout(r,0)); }
+    return n===s-1;}, spreads),
+    'expected '+spreads+' spreads');
+  ck(count+'pp: last spread is the final interior pair', await p.evaluate(c=>
+    [...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',')===(c-2)+','+(c-1), count),
+    await p.evaluate(()=>[...document.querySelectorAll('#bpv .bppagenum')].map(e=>e.textContent).join(',')));
+  await go('proof'); await p.waitForTimeout(400);
+  ck(count+'pp: no errors', errs.length===0, errs[0]||'');
+}
+await p.selectOption('#pageCount','8'); await p.waitForTimeout(600);
+
 ck('no horizontal page scroll', await p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1));
 ck('no page errors overall', errs.length===0, errs[0]||'');
 await b.close();

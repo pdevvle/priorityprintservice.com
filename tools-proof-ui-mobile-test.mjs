@@ -24,6 +24,9 @@ for (const d of DEVICES){
   await p.waitForTimeout(1100);
 
   ck(d.name+': renders without errors', errs.length===0, errs[0]||'');
+  ck(d.name+': layout viewport matches the device (not shrunk to fit)', await p.evaluate(w=>
+    Math.abs(window.innerWidth-w)<=2, d.w),
+    await p.evaluate(()=>'innerWidth '+window.innerWidth));
 
   // 1. nothing runs off the side
   ck(d.name+': no horizontal page scroll', await p.evaluate(()=>
@@ -171,6 +174,9 @@ for (const d of DEVICES){
     return r.width>=30 && r.right<=window.innerWidth+1;}));
   ck(d.name+': 3D still blocks approval', await p.evaluate(()=>
     document.getElementById('agree').disabled===true && document.getElementById('approveBtn').disabled===true));
+  ck(d.name+': 3D does not shrink the layout viewport either', await p.evaluate(w=>
+    Math.abs(window.innerWidth-w)<=2 && document.documentElement.scrollWidth<=window.innerWidth+1, d.w),
+    await p.evaluate(()=>'innerWidth '+window.innerWidth));
 
   // 9. rotate back and make sure it recomposes rather than stretching
   await p.evaluate(()=>[...document.querySelectorAll('#modes button')].find(b=>b.dataset.mode==='proof').click());
