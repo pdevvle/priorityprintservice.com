@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Proof UI — organizational draft (saddle stitch)</title>
+<!--
+  DRAFT / PROTOTYPE — not wired to any calculator.
+
+  Purpose: evaluate the ORGANIZATION of the reorganized proof UI before any of
+  it is built into calc-preview-test.html. Everything here is clickable but
+  nothing is real: pages are drawn placeholders, issues are scripted, and no
+  file is ever produced. Styling reuses the calculators' tokens so the layout
+  is judged on structure rather than on looking foreign.
+
+  Decisions carried in from review:
+   - all six art behaviours (Crop / Fill / Fit / Stretch / Scale / Rotate);
+     sub-options render beneath the dropdown — pills, or a slider for Scale
+   - the agree checkbox is ALWAYS required and lives inside the disclosure
+   - APPROVE sits in the far-right corner, close is the outermost element
+   - bind-specific vocabulary (spreads, cover names) comes from the MODEL
+     descriptor, never from the shell
+   - 3D replaces the proof surface AND swaps the right rail from Artwork Edit
+     to the page thumbnails, since 3D is a viewing mode, not an editing one
+   - the legend is a horizontal strip under the view controls and cannot
+     outlive the guides it explains
+-->
+<style>
+  :root{
+    --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
+    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#64748b;
+    --bp-btn:#f1f4f8; --bp-info:#1d4ed8;
+    --cyan:#007eff; --magenta:#ec008c; --green:#38a169;
+    --rail:376px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+       background:#eef1f5;color:var(--bp-ink);font-size:14px;padding:18px}
+  .banner{max-width:1560px;margin:0 auto 12px;font-size:11.5px;color:var(--bp-dim);
+          background:#fffbe6;border:1px solid #f6d67a;border-radius:8px;padding:8px 12px;line-height:1.5}
+  .shell{max-width:1560px;margin:0 auto;background:var(--bp-surface);border:1px solid var(--bp-line);
+         border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-height:760px}
+  select,button,input{font-family:inherit;font-size:inherit;color:inherit}
+
+  /* ── header ──────────────────────────────────────────────── */
+  .header{border-bottom:1px solid var(--bp-line);padding:12px 16px 10px}
+  .topbar{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+  .viewgroup{display:flex;align-items:center;gap:8px;border:1px solid var(--bp-line);border-radius:999px;
+             padding:6px 12px;background:var(--bp-surface)}
+  .viewgroup > .lbl{font-weight:800;letter-spacing:.02em;margin-right:2px}
+  .vsep{width:1px;align-self:stretch;background:var(--bp-line)}
+  .chk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--bp-dim);cursor:pointer;white-space:nowrap}
+  .chk input{margin:0;cursor:pointer}
+  .zoom{border:none;background:transparent;font-size:13px;cursor:pointer;padding:2px 4px}
+  .modes{display:flex;border:1px solid var(--bp-line);border-radius:999px;overflow:hidden;background:var(--bp-btn)}
+  .modes button{border:none;background:transparent;padding:7px 16px;font-size:12.5px;font-weight:700;cursor:pointer;color:var(--bp-dim)}
+  .modes button.on{background:var(--bp-ink);color:#fff}
+  .disclose{flex:1;min-width:320px;max-width:600px}
+  .note{border:1.5px solid var(--magenta);background:var(--bp-surface-2);border-radius:4px;padding:8px 10px;
+        font-size:11.5px;line-height:1.5}
+  .note a{color:inherit;font-weight:600}
+  .agree{display:flex;align-items:center;gap:8px;margin-top:9px;padding-top:8px;
+         border-top:1px solid rgba(236,0,140,.30);font-size:13.5px}
+  .agree label{cursor:pointer;display:flex;gap:8px;align-items:center;font-weight:600}
+  .agree .req{font-size:11px;color:var(--bp-faint)}
+  .approvewrap{display:flex;flex-direction:column;gap:4px;align-items:flex-end;margin-left:auto}
+  .approve{border:none;border-radius:999px;background:var(--cyan);color:#fff;font-weight:800;letter-spacing:.03em;
+           padding:12px 26px;font-size:15px;cursor:pointer;white-space:nowrap;box-shadow:0 2px 10px rgba(0,126,255,.35)}
+  .approve:disabled{background:#b9c6d4;box-shadow:none;cursor:not-allowed}
+  .approvehint{font-size:10px;color:var(--bp-faint);max-width:190px;line-height:1.35;text-align:right}
+  .closebtn{width:34px;height:34px;flex-shrink:0;border-radius:50%;border:1px solid var(--bp-line);
+            background:var(--bp-surface);color:var(--bp-dim);font-size:17px;line-height:1;cursor:pointer}
+  .closebtn:hover{background:var(--bp-btn);color:var(--bp-ink)}
+
+  /* legend as a horizontal strip under the controls, not a box */
+  .legendbar{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:9px;padding-top:9px;
+             border-top:1px solid var(--bp-line);font-size:11.5px}
+  .legendbar .cap{font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--bp-faint);font-size:10px}
+  .lgitem{display:inline-flex;align-items:center;gap:7px;font-weight:700;white-space:nowrap}
+  .swatch{width:30px;height:0;flex-shrink:0}
+  .legendbar .chk{margin-left:auto}
+  .showlegend{border:1px dashed var(--bp-line);background:var(--bp-surface);border-radius:999px;
+              padding:5px 13px;font-size:11.5px;font-weight:600;color:var(--bp-dim);cursor:pointer;
+              margin-top:9px}
+  .showlegend:hover{border-style:solid;color:var(--bp-ink)}
+
+  /* ── body ────────────────────────────────────────────────── */
+  .body{display:flex;flex:1;min-height:0}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;padding:14px 16px;gap:14px}
+  .stagewrap{flex:1;display:flex;gap:16px;align-items:flex-start;min-height:0}
+  .stage{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
+  .sheet{position:relative;background:#fff;box-shadow:0 2px 14px rgba(15,23,42,.13)}
+  .sheet img{display:block;width:100%;height:100%}
+  .badge{position:absolute;top:8px;right:8px;font-size:9.5px;font-weight:600;color:#fff;
+         background:rgba(15,23,42,.62);padding:3px 7px;border-radius:8px}
+  .g{position:absolute;pointer-events:none;box-sizing:border-box}
+  .issues{width:262px;flex-shrink:0;display:flex;flex-direction:column;gap:12px;padding-top:6px}
+  .issue{display:flex;gap:8px;font-size:11.5px;line-height:1.5;color:var(--magenta)}
+  .bang{flex-shrink:0;width:17px;height:17px;border-radius:50%;background:var(--magenta);color:#fff;
+        font-weight:800;font-size:11px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+
+  /* ── filmstrip — every cell identical, whatever its label ── */
+  .strip{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}
+  .grp{display:flex;border:1px solid var(--bp-ink);border-radius:2px;overflow:hidden}
+  .pg{width:84px;height:96px;padding:6px;font-size:9.5px;line-height:1.2;cursor:pointer;
+      background:var(--bp-surface);border-right:1px solid var(--bp-ink);position:relative;
+      text-align:left;display:flex;flex-direction:column}
+  /* the group's own border draws the outer edge; keep the 1px reserved so the
+     last cell's thumbnail is exactly as wide as every other cell's */
+  .grp .pg:last-child{border-right-color:transparent}
+  .pg.sel{background:rgba(0,126,255,.10);box-shadow:inset 0 0 0 2px var(--cyan)}
+  .pg .thumb{height:44px;flex-shrink:0;background:var(--bp-surface-2);border:1px solid var(--bp-line);
+             margin-bottom:4px;background-size:cover;background-position:center}
+  .pg .cap{overflow:hidden}
+  .pg .n{font-weight:800}
+  .pg .dot{position:absolute;top:3px;right:3px;width:11px;height:11px;border-radius:50%;background:var(--magenta);
+           color:#fff;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center}
+  .arrow{align-self:center;color:var(--bp-faint);font-size:17px;padding-top:34px}
+
+  /* ── right rail ──────────────────────────────────────────── */
+  .rail{width:var(--rail);flex-shrink:0;border-left:1px solid var(--bp-line);background:var(--bp-surface);
+        display:flex;flex-direction:column;min-height:0}
+  .railhead{display:flex;align-items:baseline;justify-content:space-between;padding:14px 0 10px;
+            border-bottom:1px solid var(--bp-ink);margin:0 16px}
+  .railhead h2{margin:0;font-size:21px;letter-spacing:-.01em}
+  .undo{font-size:13px;color:var(--bp-dim);background:none;border:none;cursor:pointer;
+        display:inline-flex;align-items:center;gap:5px}
+  .undo:hover{color:var(--bp-ink)}
+  .undo .ic{font-size:15px;line-height:1}
+  .railscroll{overflow-y:auto;padding:4px 16px 20px;flex:1}
+  .acc{border-bottom:1px solid var(--bp-line)}
+  .acchead{width:100%;display:flex;align-items:center;gap:8px;background:none;border:none;padding:13px 2px;
+           cursor:pointer;font-size:15px;text-align:left}
+  .acchead .caret{margin-left:auto;color:var(--bp-dim);transition:transform .18s}
+  .acc.open .acchead .caret{transform:rotate(180deg)}
+  .accbody{display:none;padding:0 2px 16px}
+  .acc.open .accbody{display:block}
+  .review{color:var(--bp-info);font-size:11.5px;line-height:1.5;margin:0 0 9px}
+  .behavior{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
+  .behavior select{padding:7px 10px;border:1px solid var(--bp-line);border-radius:6px;
+                   background:var(--bp-surface);font-size:14px;min-width:130px}
+  .subbox{padding:11px 12px;border:1px dashed var(--bp-line);border-radius:8px;background:var(--bp-surface-2)}
+  .subtitle{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--bp-faint);
+            display:block;margin-bottom:8px}
+  .pills{display:flex;flex-wrap:wrap;gap:6px}
+  .pill{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:999px;padding:6px 13px;
+        font-size:12px;font-weight:600;color:var(--bp-dim);cursor:pointer}
+  .pill.on{background:var(--cyan);border-color:var(--cyan);color:#fff}
+  .pill.wide{border-radius:8px}
+  .subnote{font-size:11.5px;color:var(--bp-faint);line-height:1.5;margin:0}
+
+  /* scale: 50–200% slider with fine 0.5% stepping */
+  .scalerow{display:flex;align-items:center;gap:9px}
+  .scalerow input[type=range]{flex:1;accent-color:var(--cyan);min-width:0}
+  .knurl{width:30px;height:30px;flex-shrink:0;border:1px solid var(--bp-line);border-radius:8px;
+         background:var(--bp-surface);cursor:pointer;font-size:15px;font-weight:700;line-height:1;
+         color:var(--bp-dim);padding:0}
+  .knurl:hover{background:var(--bp-btn);color:var(--bp-ink)}
+  .scaleval{min-width:64px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;font-size:13px}
+  .scaleends{display:flex;justify-content:space-between;font-size:10px;color:var(--bp-faint);margin-top:3px}
+
+  .railstrip{padding:14px 16px 20px;overflow-y:auto}
+  .railstriphead{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+                 color:var(--bp-faint);margin-bottom:10px}
+  .disabledish{opacity:.34;pointer-events:none}
+  .book{perspective:1500px;display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+  .bk{position:relative;transform-style:preserve-3d;transform:rotateX(-10deg) rotateY(-26deg)}
+  .bk .face{position:absolute;top:0;left:0;background-size:cover;background-position:center;
+            background-color:#f4f1ea;box-shadow:0 10px 26px rgba(0,0,0,.22)}
+  @media (max-width:1180px){ .rail{width:330px} .issues{display:none} }
+</style>
+</head>
+<body>
+
+<div class="banner">
+  <strong>Draft prototype — organizational only.</strong> Nothing is wired to a calculator: pages are placeholders,
+  issues are scripted, transforms don't recompose the art yet. Try the <em>Art Behavior</em> dropdown on an expanded
+  page (Scale is a slider, the rest are pills), and the <em>Proof / 3D Preview</em> toggle — in 3D the thumbnails
+  move into the right panel.
+</div>
+
+<div class="shell">
+
+  <!-- ══ HEADER ══ -->
+  <div class="header">
+    <div class="topbar">
+      <div class="viewgroup" id="viewGroup">
+        <span class="lbl">View</span>
+        <label class="chk" for="zoom">Zoom</label>
+        <select class="zoom" id="zoom">
+          <option>10%</option><option>25%</option><option>50%</option><option>75%</option>
+          <option selected>100%</option><option>125%</option>
+        </select>
+        <span class="vsep"></span>
+        <label class="chk"><input type="checkbox" id="mag"> Magnifying Glass</label>
+        <span class="vsep"></span>
+        <label class="chk"><input type="checkbox" id="hideGuides"> Hide Guides</label>
+      </div>
+
+      <div class="modes" id="modes">
+        <button class="on" data-mode="proof">Proof</button>
+        <button data-mode="book">3D Preview</button>
+      </div>
+
+      <div class="disclose">
+        <div class="note">
+          Note: Online proof approval is best for expediency, but may not produce the best results. For color accuracy,
+          request and purchase a <a href="#">Hardcopy Proof</a>. If you're unsure about the template markings and what
+          they mean then request a <a href="#">Professional Digital Proof</a>.
+          <div class="agree">
+            <label><input type="checkbox" id="agree"> I understand and agree</label>
+            <span class="req">(required)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="approvewrap">
+        <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
+        <span class="approvehint" id="approveHint">Tick &ldquo;I understand and agree&rdquo; to enable.</span>
+      </div>
+
+      <button class="closebtn" id="closeBtn" title="Close proof" aria-label="Close proof">&#10005;</button>
+    </div>
+
+    <div class="legendbar" id="legendBar">
+      <span class="cap">Legend</span>
+      <span class="lgitem" style="color:#ef4444"><span class="swatch" style="border-top:2.5px solid #ef4444"></span>Bleed</span>
+      <span class="lgitem"><span class="swatch" style="border-top:2.5px dashed #111"></span>Trim</span>
+      <span class="lgitem" style="color:var(--green)"><span class="swatch" style="border-top:2.5px dashed #38a169"></span>Safety Margin</span>
+      <span class="lgitem" style="color:#3b82f6"><span class="swatch" style="border-top:2.5px solid #3b82f6"></span>Bound Edge</span>
+      <label class="chk"><input type="checkbox" id="hideLegend"> Hide legend</label>
+    </div>
+    <button class="showlegend" id="showLegend" hidden>Show legend</button>
+  </div>
+
+  <!-- ══ BODY ══ -->
+  <div class="body">
+    <div class="main">
+      <div class="stagewrap">
+        <div class="stage"><div class="sheet" id="sheet"></div></div>
+        <div class="issues" id="issuePanel"></div>
+      </div>
+      <div class="strip" id="stripBottom"></div>
+    </div>
+
+    <div class="rail" id="railPanel">
+      <!-- proof mode: artwork edit -->
+      <div id="railEdit" style="display:flex;flex-direction:column;min-height:0;flex:1">
+        <div class="railhead">
+          <h2>Artwork Edit</h2>
+          <button class="undo" title="Undo last change"><span class="ic">&#8630;</span>Undo</button>
+        </div>
+        <div class="railscroll" id="rail"></div>
+      </div>
+      <!-- 3D mode: the thumbnails take the panel -->
+      <div id="railStripWrap" class="railstrip" hidden>
+        <div class="railstriphead">Pages</div>
+        <div class="strip" id="stripRail"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────
+   PAGE MODEL DESCRIPTOR — the bind-specific part.
+   The shell knows nothing about saddle stitch: page names, which pages pair
+   in the finished piece, and the bound-edge label all arrive here. Perfect
+   bound, coupon and the flats would each supply their own.
+   ───────────────────────────────────────────────────────────── */
+const MODEL = {
+  calc: 'saddle',
+  trim: { w: 5.5, h: 8.5 },
+  bleed: 0.125,
+  safety: 0.125,
+  groups: [ {pages:[1]}, {pages:[2,3]}, {pages:[4,5]}, {pages:[6,7]}, {pages:[8]} ],
+  pages: [
+    { n:1, name:'front cover',        issues:['bleed'] },
+    { n:2, name:'inside front cover', issues:[] },
+    { n:3, name:'',                   issues:[] },
+    { n:4, name:'',                   issues:[] },
+    { n:5, name:'',                   issues:[] },
+    { n:6, name:'',                   issues:[] },
+    { n:7, name:'inside back cover',  issues:[] },
+    { n:8, name:'back cover',         issues:[] }
+  ],
+  wholeFile: [
+    'Review: Art was uploaded as electronic colors (RGB). It has been converted to CMYK. This increases the opportunity for unwarranted color drift.',
+    'Review: Saddlestitch binding method requires increments of 4 pages. (3) blank pages have been inserted into your file to reflect the physical requirements.'
+  ]
+};
+
+const ISSUE_TEXT = {
+  bleed: "Issue: Art doesn't fill bleed area. Ensure that you're including at least .125\" bleed, or scale the art to fill the area without getting text or other elements too close to the trim (safety margin)."
+};
+
+/* Behaviours and their sub-options. Crop and Fill both hard-centre in the
+   shipped calculator today; the anchor pills are the review proposal, since
+   that centring is what cost order 87032. Fit and Stretch take no parameters
+   and say so rather than showing an empty box. */
+const BEHAVIORS = {
+  crop:    { label:'Crop',    sub:{ type:'pills', key:'anchor', title:'Anchor — which part of the art to keep',
+                                    pills:['Center','Top','Bottom','Left','Right'] } },
+  fill:    { label:'Fill',    sub:{ type:'pills', key:'anchor', title:'Anchor — which part of the art to keep',
+                                    pills:['Center','Top','Bottom','Left','Right'] } },
+  fit:     { label:'Fit',     sub:{ type:'note',  note:'No options — the whole page is fitted inside the trim, so some paper may show at two edges.' } },
+  stretch: { label:'Stretch', sub:{ type:'note',  note:'No options — art is stretched to fill the page. Proportions will change.' } },
+  scale:   { label:'Scale',   sub:{ type:'slider', key:'scale', title:'Size', min:50, max:200, step:0.5 } },
+  rotate:  { label:'Rotate',  sub:{ type:'pills', key:'rot', title:'Rotation',
+                                    pills:['0°','90°','180°','270°'], extra:'all' } }
+};
+
+const state = { mode:'proof', selected:1, openPage:1, wholeOpen:true, perPage:{} };
+MODEL.pages.forEach(p => state.perPage[p.n] = { behavior:'crop', anchor:'Center', scale:100, rot:'0°' });
+
+/* placeholder artwork, drawn not fetched */
+function pageArt(n, w, h){
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  const cover = (n === 1 || n === 8);
+  x.fillStyle = cover ? '#4a4a4a' : '#f7f7f5';
+  x.fillRect(0,0,w,h);
+  if (cover){
+    x.fillStyle = 'rgba(255,255,255,.10)';
+    for (let i=0;i<9;i++) x.fillRect(0, h*i/9, w, h/26);
+    x.fillStyle = '#fff'; x.textAlign = 'center';
+    x.font = 'bold ' + Math.round(w/9) + 'px Georgia, serif';
+    x.fillText(n === 1 ? 'Capoeira' : 'Viva Raiz', w/2, h*0.46);
+    x.font = Math.round(w/26) + 'px sans-serif';
+    x.fillText(n === 1 ? 'BATIZADO · 2026' : 'SEATTLE, WA', w/2, h*0.56);
+  } else {
+    x.fillStyle = '#d9d9d4';
+    for (let i=0;i<11;i++){
+      const yy = h*0.14 + i*(h*0.055);
+      x.fillRect(w*0.14, yy, w*0.72*(i%4===3?0.55:1), h*0.017);
+    }
+    x.fillStyle = '#b9b9b2'; x.textAlign = 'center';
+    x.font = 'bold ' + Math.round(w/16) + 'px sans-serif';
+    x.fillText('Page ' + n, w/2, h*0.085);
+  }
+  return c.toDataURL('image/png');
+}
+const ART = {};
+MODEL.pages.forEach(p => ART[p.n] = pageArt(p.n, 330, 510));
+
+function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+/* ── the surface ────────────────────────────────────────────── */
+function renderStage(){
+  const sheet = document.getElementById('sheet');
+  const bleedW = MODEL.trim.w + MODEL.bleed*2, bleedH = MODEL.trim.h + MODEL.bleed*2;
+
+  if (state.mode === 'book'){
+    const W = 260, H = Math.round(W * (MODEL.trim.h/MODEL.trim.w)), d = 5;
+    sheet.style.cssText = 'width:100%;height:520px;box-shadow:none;background:transparent';
+    sheet.innerHTML =
+      '<div class="book"><div class="bk" style="width:'+W+'px;height:'+H+'px">' +
+        '<div class="face" style="width:'+W+'px;height:'+H+'px;transform:translateZ('+d+'px);background-image:url('+ART[1]+')"></div>' +
+        '<div class="face" style="width:'+W+'px;height:'+H+'px;transform:rotateY(180deg) translateZ('+d+'px);background-image:url('+ART[8]+')"></div>' +
+        '<div class="face" style="width:'+(d*2)+'px;height:'+H+'px;left:'+W+'px;transform:rotateY(90deg) translateX(-'+d+'px);transform-origin:left center;background:linear-gradient(90deg,#e8e2d6,#f6f2ea)"></div>' +
+      '</div></div>';
+    return;
+  }
+
+  const guidesOff = document.getElementById('hideGuides').checked;
+  const H = 470, W = Math.round(H * (bleedW/bleedH));
+  const pc = (v,t) => (v/t*100) + '%';
+  const bl = pc(MODEL.bleed,bleedW), bt = pc(MODEL.bleed,bleedH);
+  const sl = pc(MODEL.bleed+MODEL.safety,bleedW), st2 = pc(MODEL.bleed+MODEL.safety,bleedH);
+  const spineLeft = state.selected % 2 === 1;
+
+  sheet.style.cssText = 'width:'+W+'px;height:'+H+'px';
+  sheet.innerHTML =
+    '<img src="'+ART[state.selected]+'" alt="">' +
+    '<div class="badge">300 DPI · print pixels</div>' +
+    (guidesOff ? '' :
+      '<div class="g" style="inset:0;border:2px dashed #ef4444"></div>' +
+      '<div class="g" style="top:'+bt+';left:'+bl+';right:'+bl+';bottom:'+bt+';border:2px dashed #fff;filter:drop-shadow(0 0 1px #000)"></div>' +
+      '<div class="g" style="top:'+st2+';left:'+sl+';right:'+sl+';bottom:'+st2+';border:2px dashed '+css('--green')+'"></div>' +
+      '<div class="g" style="'+(spineLeft?'left:'+bl:'right:'+bl)+';top:'+bt+';bottom:'+bt+';width:3px;background:#3b82f6"></div>');
+}
+
+function renderIssues(){
+  const el = document.getElementById('issuePanel');
+  if (state.mode === 'book'){
+    el.innerHTML = '<div class="issue" style="color:var(--bp-faint)"><span class="bang" style="background:var(--bp-faint)">i</span>' +
+      '<span>Finished-product mockup. This is <strong>not</strong> the print surface — bleed, trim and safety are only shown on the Proof view.</span></div>';
+    return;
+  }
+  const pg = MODEL.pages.find(p => p.n === state.selected);
+  el.innerHTML = (pg.issues||[]).map(k =>
+    '<div class="issue"><span class="bang">!</span><span>'+ISSUE_TEXT[k]+'</span></div>').join('');
+}
+
+/* ── filmstrip: identical cells, rendered into whichever container is
+   active — bottom of the stage in Proof, the right panel in 3D ───── */
+function renderStrip(){
+  const book = state.mode === 'book';
+  const target = document.getElementById(book ? 'stripRail' : 'stripBottom');
+  const other  = document.getElementById(book ? 'stripBottom' : 'stripRail');
+  other.innerHTML = '';
+  target.innerHTML = '';
+
+  MODEL.groups.forEach((g, gi) => {
+    if (gi > 0 && !book){ const a = document.createElement('div'); a.className='arrow'; a.textContent='›'; target.appendChild(a); }
+    const grp = document.createElement('div'); grp.className = 'grp';
+    g.pages.forEach(n => {
+      const p = MODEL.pages.find(q => q.n === n);
+      const d = document.createElement('div');
+      d.className = 'pg' + (isSel(n) ? ' sel' : '');
+      d.innerHTML = '<div class="thumb" style="background-image:url('+ART[n]+')"></div>' +
+                    '<div class="cap"><span class="n">P'+n+'</span>' + (p.name ? '<br>'+p.name : '') + '</div>' +
+                    ((p.issues||[]).length ? '<span class="dot">!</span>' : '');
+      d.onclick = () => { state.selected = n; state.openPage = n; renderAll(); };
+      grp.appendChild(d);
+    });
+    target.appendChild(grp);
+  });
+}
+function isSel(n){
+  if (state.mode !== 'book') return n === state.selected;
+  const g = MODEL.groups.find(g => g.pages.includes(state.selected));
+  return g ? g.pages.includes(n) : n === state.selected;
+}
+
+/* ── right rail ─────────────────────────────────────────────── */
+function renderRail(){
+  const rail = document.getElementById('rail');
+  rail.innerHTML = '';
+
+  const wf = document.createElement('div');
+  wf.className = 'acc' + (state.wholeOpen ? ' open' : '');
+  wf.innerHTML = '<button class="acchead"><span>Whole File</span><span class="bang">!</span><span class="caret">⌄</span></button>' +
+                 '<div class="accbody">' + MODEL.wholeFile.map(t => '<p class="review">'+t+'</p>').join('') + '</div>';
+  wf.querySelector('.acchead').onclick = () => { state.wholeOpen = !state.wholeOpen; renderRail(); };
+  rail.appendChild(wf);
+
+  MODEL.pages.forEach(p => {
+    const open = state.openPage === p.n;
+    const st = state.perPage[p.n];
+    const acc = document.createElement('div');
+    acc.className = 'acc' + (open ? ' open' : '');
+    const title = 'Page: ' + p.n + (p.name ? ' (' + p.name + ')' : '');
+    const bang = (p.issues||[]).length ? '<span class="bang">!</span>' : '';
+    acc.innerHTML = '<button class="acchead"><span>'+title+'</span>'+bang+'<span class="caret">⌄</span></button>' +
+                    '<div class="accbody"></div>';
+    acc.querySelector('.acchead').onclick = () => {
+      state.openPage = open ? null : p.n;
+      if (!open) state.selected = p.n;
+      renderAll();
+    };
+    if (open){
+      const body = acc.querySelector('.accbody');
+      const row = document.createElement('div');
+      row.className = 'behavior';
+      row.innerHTML = '<span>Art Behavior:</span>';
+      const sel = document.createElement('select');
+      Object.keys(BEHAVIORS).forEach(k => {
+        const o = document.createElement('option');
+        o.value = k; o.textContent = BEHAVIORS[k].label; o.selected = (st.behavior === k);
+        sel.appendChild(o);
+      });
+      sel.onchange = e => { st.behavior = e.target.value; renderRail(); };
+      row.appendChild(sel);
+      body.appendChild(row);
+      body.appendChild(subOptions(p.n));
+    }
+    rail.appendChild(acc);
+  });
+}
+
+function subOptions(n){
+  const st = state.perPage[n];
+  const sub = BEHAVIORS[st.behavior].sub;
+  const box = document.createElement('div');
+  box.className = 'subbox';
+
+  if (sub.type === 'note'){ box.innerHTML = '<p class="subnote">'+sub.note+'</p>'; return box; }
+
+  box.innerHTML = '<span class="subtitle">'+sub.title+'</span>';
+
+  if (sub.type === 'slider'){
+    const row = document.createElement('div');
+    row.className = 'scalerow';
+    const dec = document.createElement('button'); dec.className='knurl'; dec.textContent='−'; dec.title='−0.5%';
+    const inc = document.createElement('button'); inc.className='knurl'; inc.textContent='+'; inc.title='+0.5%';
+    const rng = document.createElement('input');
+    rng.type='range'; rng.min=sub.min; rng.max=sub.max; rng.step=sub.step; rng.value=st.scale;
+    const val = document.createElement('span'); val.className='scaleval';
+    const show = () => { val.textContent = st.scale.toFixed(1) + '%'; rng.value = st.scale; };
+    const set = v => { st.scale = Math.min(sub.max, Math.max(sub.min, Math.round(v*2)/2)); show(); };
+    rng.oninput = e => set(parseFloat(e.target.value));
+    dec.onclick = () => set(st.scale - sub.step);
+    inc.onclick = () => set(st.scale + sub.step);
+    row.append(dec, rng, inc, val);
+    box.appendChild(row);
+    const ends = document.createElement('div');
+    ends.className = 'scaleends';
+    ends.innerHTML = '<span>'+sub.min+'%</span><span>steps of '+sub.step+'%</span><span>'+sub.max+'%</span>';
+    box.appendChild(ends);
+    show();
+    return box;
+  }
+
+  const pills = document.createElement('div');
+  pills.className = 'pills';
+  sub.pills.forEach(v => {
+    const b = document.createElement('button');
+    b.className = 'pill' + (st[sub.key] === v ? ' on' : '');
+    b.textContent = v;
+    b.onclick = () => { st[sub.key] = v; renderRail(); };
+    pills.appendChild(b);
+  });
+  if (sub.extra === 'all'){
+    const b = document.createElement('button');
+    b.className = 'pill wide'; b.textContent = '↻ Apply to all pages';
+    pills.appendChild(b);
+  }
+  box.appendChild(pills);
+  return box;
+}
+
+/* The legend explains the guides, so it cannot outlive them: hiding guides
+   (or entering 3D, which has none) hides it outright. The restore button
+   appears only when the legend is the ONLY thing hidden. */
+function renderLegend(){
+  const guidesOff = document.getElementById('hideGuides').checked;
+  const manual = document.getElementById('hideLegend').checked;
+  const applicable = state.mode === 'proof' && !guidesOff;
+  document.getElementById('legendBar').style.display = (applicable && !manual) ? '' : 'none';
+  document.getElementById('showLegend').hidden = !(applicable && manual);
+}
+
+function renderChrome(){
+  const book = state.mode === 'book';
+  document.getElementById('viewGroup').classList.toggle('disabledish', book);
+  // 3D is a viewing mode, not an editing one: the rail stays, but it carries
+  // the page thumbnails instead of controls that cannot apply here.
+  document.getElementById('railEdit').style.display = book ? 'none' : 'flex';
+  document.getElementById('railStripWrap').hidden = !book;
+  document.querySelectorAll('#modes button').forEach(b =>
+    b.classList.toggle('on', b.dataset.mode === state.mode));
+}
+
+function renderAll(){ renderChrome(); renderStage(); renderIssues(); renderStrip(); renderRail(); renderLegend(); }
+
+document.getElementById('modes').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.mode = b.dataset.mode; renderAll();
+};
+document.getElementById('hideGuides').onchange = () => { renderStage(); renderLegend(); };
+document.getElementById('hideLegend').onchange = renderLegend;
+document.getElementById('showLegend').onclick = () => {
+  document.getElementById('hideLegend').checked = false; renderLegend();
+};
+document.getElementById('agree').onchange = e => {
+  document.getElementById('approveBtn').disabled = !e.target.checked;
+  document.getElementById('approveHint').style.visibility = e.target.checked ? 'hidden' : 'visible';
+};
+document.getElementById('approveBtn').onclick = () =>
+  alert('Prototype — no artwork is approved and no files are produced.');
+document.getElementById('closeBtn').onclick = () =>
+  alert('Prototype — this would close the proof and return to the calculator.');
+
+renderAll();
+</script>
+</body>
+</html>
