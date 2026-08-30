@@ -690,7 +690,23 @@ function pps_qbo_admin_page() {
                     delete_option( 'pps_qbo_parent_id' );   // may be a different company now
                     $notice = 'Connected to QuickBooks.';
                 } else {
-                    $error = 'Intuit did not return a refresh token. Check the client id, secret and redirect URI.';
+                    // Surface what Intuit actually said. The reason matters more
+                    // here than anywhere else in this file: invalid_grant means
+                    // the code was spent or expired (retry the connect),
+                    // invalid_client means the keys are wrong (a different fix
+                    // entirely). Reporting one generic sentence for both sent us
+                    // checking credentials that were fine.
+                    $why = '';
+                    if ( is_array( $body ) && ! empty( $body['error'] ) ) {
+                        $why = (string) $body['error'];
+                        if ( ! empty( $body['error_description'] ) ) $why .= ' — ' . $body['error_description'];
+                    }
+                    pps_qbo_log( 'oauth_failed', array( 'error' => $why ?: 'no refresh_token in response' ) );
+                    $error = 'Intuit did not return a refresh token'
+                        . ( $why ? ': ' . $why : '.' )
+                        . ( false !== strpos( $why, 'invalid_grant' )
+                            ? ' That code was already used — click Connect to QuickBooks again from a clean page.'
+                            : ' Check the client id, secret and redirect URI.' );
                 }
             }
         }
@@ -744,7 +760,10 @@ function pps_qbo_admin_page() {
             <p><em>Enter the client id and secret below, save, then connect.</em></p>
         <?php endif; ?>
 
-        <form method="post">
+        <?php /* Post to the bare page URL, never the current one: after the OAuth
+                 callback the address still carries ?code=, and a form with no
+                 action would replay that spent code on every Save. */ ?>
+        <form method="post" action="<?php echo esc_url( pps_qbo_redirect_uri() ); ?>">
             <?php wp_nonce_field( 'pps_qbo_save' ); ?>
             <h2>Settings</h2>
             <table class="form-table" role="presentation">
