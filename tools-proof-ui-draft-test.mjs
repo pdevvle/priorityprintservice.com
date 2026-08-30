@@ -41,9 +41,10 @@ ck('full disclaimer text is still present, unabridged', await p.evaluate(()=>{
 ck('agree sits directly above APPROVE and close', await p.evaluate(()=>{
   const ar=document.querySelector('.approvewrap .agree').getBoundingClientRect();
   return ar.bottom<=document.getElementById('approveBtn').getBoundingClientRect().top+1;}));
-ck('close button is the outermost element', await p.evaluate(()=>
-  document.querySelector('.topbar').lastElementChild===document.querySelector('.approvewrap')
-  && document.querySelector('.approverow').lastElementChild===document.getElementById('closeBtn')));
+ck('close is the outermost element, past APPROVE', await p.evaluate(()=>{
+  const c=document.getElementById('closeBtn'), tb=document.querySelector('.topbar');
+  return tb.lastElementChild===c
+      && c.getBoundingClientRect().left > document.getElementById('approveBtn').getBoundingClientRect().left;}));
 ck('no "center spread" caption under any thumbnail', await p.evaluate(()=>
   ![...document.querySelectorAll('#stripBottom .pg')].some(e=>/spread/i.test(e.textContent))));
 ck('all filmstrip cells identical box', await p.evaluate(()=>{
