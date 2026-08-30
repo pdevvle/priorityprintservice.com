@@ -1171,12 +1171,16 @@ function renderNote(){
 function renderIssues(){
   const el = document.getElementById('issuePanel');
   if (state.mode === 'book'){ el.innerHTML = ''; return; }
-  const list = analyze(state.selected);
-  el.innerHTML = list.length
-    ? list.map(i => '<div class="issue '+(i.level === 'warn' ? 'warn' : '')+'">' +
-        '<span class="bang">!</span><span>'+i.text+'</span></div>').join('')
-    : '<div class="issue info"><span class="bang">&#10003;</span><span>No problems found on this page: the art ' +
-      'reaches the bleed on all four sides and has enough resolution at this size.</span></div>';
+  /* Nothing is said when nothing is found. An all-clear reads as "we checked
+     your artwork and it is good", and this only measures two things: whether
+     the art reaches the bleed, and what resolution it works out to at this
+     size. It cannot see a subject cropped out, a typo, or the wrong file
+     entirely. Silence is the honest state; a tick is a claim we cannot back,
+     placed directly above the button that transfers responsibility. */
+  el.innerHTML = analyze(state.selected)
+    .map(i => '<div class="issue '+(i.level === 'warn' ? 'warn' : '')+'">' +
+              '<span class="bang">!</span><span>'+i.text+'</span></div>')
+    .join('');
 }
 
 /* ── filmstrip: identical cells, rendered into whichever container is

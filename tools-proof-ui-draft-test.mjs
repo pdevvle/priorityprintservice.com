@@ -86,6 +86,14 @@ ck('Fill covers the bleed, so the paper corner is gone', fillCorner<230,
   'top-left luminance '+fillCorner);
 ck('and the bleed issue clears', await p.evaluate(()=>
   !/doesn.t fill bleed/.test(document.getElementById('issuePanel').innerText)));
+// A clean page says nothing at all. An all-clear would read as "we checked your
+// artwork", when only bleed coverage and resolution are measured — and it would
+// sit directly above the button that transfers responsibility.
+ck('a clean page shows no findings and no reassurance', await p.evaluate(()=>{
+  const el=document.getElementById('issuePanel');
+  return el.children.length===0 && el.innerText.trim()===''
+      && !/no problem|looks good|all clear|ready to print|✓/i.test(el.innerHTML);}),
+  await p.evaluate(()=>JSON.stringify(document.getElementById('issuePanel').innerText.slice(0,60))));
 
 // the anchor actually moves the art
 await p.selectOption('.behavior select','crop'); await p.waitForTimeout(300);
