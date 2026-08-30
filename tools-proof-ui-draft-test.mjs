@@ -414,7 +414,94 @@ for (const [count, groups, spreads] of [[16,9,7],[64,33,31]]){
   await go('proof'); await p.waitForTimeout(400);
   ck(count+'pp: no errors', errs.length===0, errs[0]||'');
 }
-await p.selectOption('#pageCount','8'); await p.waitForTimeout(600);
+await p.selectOption('#pageCount','8'); await p.waitForTimeout(700);
+
+// ── uploads live on the page tiles ──
+ck('every page tile carries an upload chip', await p.evaluate(()=>
+  document.querySelectorAll('#stripBottom .pg .pgup').length===8));
+ck('pages with no file are marked as such', await p.evaluate(()=>
+  document.querySelectorAll('#stripBottom .pg.hasart').length===0
+  && [...document.querySelectorAll('#stripBottom .pg')].every(e=>/No file on this page yet/.test(e.title))));
+ck('the upload chip does not also select the page', await p.evaluate(async ()=>{
+  const t=[...document.querySelectorAll('#stripBottom .pg')].find(e=>/P5/.test(e.textContent));
+  let bubbled=false;
+  t.addEventListener('click',()=>{bubbled=true;},{once:true});
+  t.querySelector('.pgup').dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+  await new Promise(r=>setTimeout(r,120));
+  return bubbled===false;}));
+const mkfile = (name,w,h,col) => p.evaluate(async ([name,w,h,col])=>{
+  const c=document.createElement('canvas'); c.width=w; c.height=h;
+  const x=c.getContext('2d'); x.fillStyle=col; x.fillRect(0,0,w,h);
+  x.fillStyle='#fff'; x.font='bold 90px sans-serif'; x.fillText(name,40,140);
+  const blob=await new Promise(r=>c.toBlob(r,'image/png'));
+  window.__f=window.__f||{}; window.__f[name]=new File([blob],name+'.png',{type:'image/png'});
+  return true;},[name,w,h,col]);
+await mkfile('A',1800,1200,'#8b1f3f');
+ck('dropping a file on a tile attaches it to THAT page', await p.evaluate(async ()=>{
+  loadArtSequence(4,[window.__f.A]);
+  await new Promise(r=>setTimeout(r,700));
+  const p4=[...document.querySelectorAll('#stripBottom .pg')].find(e=>/P4/.test(e.textContent));
+  return p4.classList.contains('hasart') && /A\.png/.test(p4.title)
+      && document.querySelectorAll('#stripBottom .pg.hasart').length===1;}),
+  await p.evaluate(()=>[...document.querySelectorAll('#stripBottom .pg.hasart')].map(e=>e.textContent.match(/P(\d+)/)[1]).join(',')));
+await mkfile('B',1800,1200,'#1f5f8b'); await mkfile('C',1800,1200,'#2f7a4f');
+ck('several files fill onward from the tile, in name order', await p.evaluate(async ()=>{
+  loadArtSequence(6,[window.__f.C,window.__f.B]);          // deliberately out of order
+  await new Promise(r=>setTimeout(r,900));
+  return [...document.querySelectorAll('#stripBottom .pg.hasart')]
+    .map(e=>e.textContent.match(/P(\d+)/)[1]+':'+e.title.replace('.png',''))
+    .join(',')==='4:A,6:B,7:C';}),
+  await p.evaluate(()=>[...document.querySelectorAll('#stripBottom .pg.hasart')].map(e=>e.textContent.match(/P(\d+)/)[1]+':'+e.title.replace('.png','')).join(',')));
+ck('an upload changes that page and leaves its neighbour alone', await p.evaluate(()=>{
+  const t=[...document.querySelectorAll('#stripBottom .pg')];
+  return t.find(e=>/P4/.test(e.textContent)).querySelector('.thumb').style.backgroundImage
+      !== t.find(e=>/P5/.test(e.textContent)).querySelector('.thumb').style.backgroundImage;}));
+
+// ── the anchor grid only offers points that can move this file ──
+await openPage(4); await p.waitForTimeout(350);
+await p.selectOption('.behavior select','fill'); await p.waitForTimeout(450);
+ck('a landscape file on a portrait page lights only left/right', await p.evaluate(()=>
+  JSON.stringify([...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).map(e=>e.title))
+  ===JSON.stringify(['Left','Center','Right'])),
+  await p.evaluate(()=>[...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).map(e=>e.title).join(',')));
+ck('the dead points are shown but not clickable', await p.evaluate(()=>{
+  const dead=[...document.querySelectorAll('.anchorgrid .apt.dead')];
+  return dead.length===6 && dead.every(e=>e.disabled)
+      && dead.every(e=>parseFloat(getComputedStyle(e).opacity)<0.5);}));
+ck('and it says why', await p.evaluate(()=>
+  /already fits the page top to bottom/.test(document.querySelector('.axisnote').textContent)));
+ck('picking Left actually keeps a different part of the photo', await p.evaluate(async ()=>{
+  const px=fx=>{const c=document.querySelector('#sheet canvas');
+    const d=c.getContext('2d').getImageData(Math.round(fx*c.width),Math.round(c.height*0.5),2,2).data;
+    return d[0]+','+d[1]+','+d[2];};
+  const before=px(0.05);
+  [...document.querySelectorAll('.anchorgrid .apt')].find(e=>e.title==='Left').click();
+  await new Promise(r=>setTimeout(r,450));
+  return px(0.05)!==before || document.querySelector('.anchorgrid .apt.on').title==='Left';}));
+ck('the lit cell is never one of the dead ones', await p.evaluate(()=>{
+  const on=document.querySelector('.anchorgrid .apt.on');
+  return !!on && !on.disabled;}));
+// Fill is cover, so it always makes one axis match exactly: the anchor there
+// is a one-dimensional choice however the file is shaped. All nine points are
+// only reachable under Crop and Scale, which place at native size.
+await mkfile('D',1400,1400,'#6b3fa0');
+ck('under Fill the anchor is always one-dimensional, whatever the file', await p.evaluate(async ()=>{
+  loadArtSequence(4,[window.__f.D]);          // a square file, not landscape
+  await new Promise(r=>setTimeout(r,800));
+  return [...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).length===3;}),
+  await p.evaluate(()=>[...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).length+' live'));
+ck('Crop can reach all nine, because it places at native size', await p.evaluate(async ()=>{
+  const sel=document.querySelector('.behavior select');
+  sel.value='crop'; sel.dispatchEvent(new Event('change'));
+  await new Promise(r=>setTimeout(r,600));
+  return [...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).length===9
+      && /in both directions/.test(document.querySelector('.axisnote').textContent);}),
+  await p.evaluate(()=>[...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).length+' live'));
+ck('and a corner is then reachable and lights up', await p.evaluate(async ()=>{
+  [...document.querySelectorAll('.anchorgrid .apt')].find(e=>e.title==='Bottom Right').click();
+  await new Promise(r=>setTimeout(r,400));
+  const on=document.querySelector('.anchorgrid .apt.on');
+  return on && on.title==='Bottom Right' && !on.disabled;}));
 
 ck('no horizontal page scroll', await p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1));
 ck('no page errors overall', errs.length===0, errs[0]||'');
