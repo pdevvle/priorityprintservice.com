@@ -16,8 +16,11 @@
 
   Decisions carried in from review:
    - all six art behaviours (Crop / Fill / Fit / Stretch / Scale / Rotate);
-     sub-options render beneath the dropdown — pills, or a slider for Scale
-   - the agree checkbox is ALWAYS required and lives inside the disclosure
+     sub-options render beneath the dropdown — pills, a 3x3 anchor grid, or a
+     slider for Scale
+   - the agree checkbox is ALWAYS required; it sits directly above APPROVE
+     rather than inside the disclosure, so the full disclaimer text can stay
+     without the header growing to hold it
    - APPROVE sits in the far-right corner, close is the outermost element
    - bind-specific vocabulary (spreads, cover names) comes from the MODEL
      descriptor, never from the shell
@@ -56,19 +59,21 @@
   .modes{display:flex;border:1px solid var(--bp-line);border-radius:999px;overflow:hidden;background:var(--bp-btn)}
   .modes button{border:none;background:transparent;padding:7px 16px;font-size:12.5px;font-weight:700;cursor:pointer;color:var(--bp-dim)}
   .modes button.on{background:var(--bp-ink);color:#fff}
-  .disclose{flex:1;min-width:320px;max-width:600px}
+  .disclose{flex:1;min-width:300px;max-width:560px}
   .note{border:1.5px solid var(--magenta);background:var(--bp-surface-2);border-radius:4px;padding:8px 10px;
         font-size:11.5px;line-height:1.5}
   .note a{color:inherit;font-weight:600}
-  .agree{display:flex;align-items:center;gap:8px;margin-top:9px;padding-top:8px;
-         border-top:1px solid rgba(236,0,140,.30);font-size:13.5px}
-  .agree label{cursor:pointer;display:flex;gap:8px;align-items:center;font-weight:600}
+  /* the gate lives with the button it gates, not inside the text it refers to:
+     the disclaimer keeps every word without the header growing to hold it */
+  .approvewrap{display:flex;flex-direction:column;gap:7px;align-items:flex-end;margin-left:auto}
+  .agree{display:flex;align-items:center;gap:7px;font-size:13.5px}
+  .agree label{cursor:pointer;display:flex;gap:7px;align-items:center;font-weight:600;white-space:nowrap}
+  .agree input{margin:0;cursor:pointer;width:16px;height:16px;accent-color:var(--magenta)}
   .agree .req{font-size:11px;color:var(--bp-faint)}
-  .approvewrap{display:flex;flex-direction:column;gap:4px;align-items:flex-end;margin-left:auto}
+  .approverow{display:flex;align-items:center;gap:9px}
   .approve{border:none;border-radius:999px;background:var(--cyan);color:#fff;font-weight:800;letter-spacing:.03em;
            padding:12px 26px;font-size:15px;cursor:pointer;white-space:nowrap;box-shadow:0 2px 10px rgba(0,126,255,.35)}
   .approve:disabled{background:#b9c6d4;box-shadow:none;cursor:not-allowed}
-  .approvehint{font-size:10px;color:var(--bp-faint);max-width:190px;line-height:1.35;text-align:right}
   .closebtn{width:34px;height:34px;flex-shrink:0;border-radius:50%;border:1px solid var(--bp-line);
             background:var(--bp-surface);color:var(--bp-dim);font-size:17px;line-height:1;cursor:pointer}
   .closebtn:hover{background:var(--bp-btn);color:var(--bp-ink)}
@@ -141,8 +146,20 @@
   .behavior select{padding:7px 10px;border:1px solid var(--bp-line);border-radius:6px;
                    background:var(--bp-surface);font-size:14px;min-width:130px}
   .subbox{padding:11px 12px;border:1px dashed var(--bp-line);border-radius:8px;background:var(--bp-surface-2)}
-  .subtitle{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--bp-faint);
-            display:block;margin-bottom:8px}
+  /* sentence case, not the usual all-caps micro-label: these headings are
+     phrases now, and a long phrase in caps is harder to read, not clearer */
+  .subtitle{font-size:11.5px;font-weight:700;color:var(--bp-dim);display:block;margin-bottom:9px;line-height:1.35}
+
+  /* 3x3 anchor grid — corners, sides, centre */
+  .anchorgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+  .apt{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:7px;cursor:pointer;
+       padding:7px 3px 6px;display:flex;flex-direction:column;align-items:center;gap:4px;
+       font-size:10px;font-weight:600;color:var(--bp-dim);line-height:1.15;min-height:52px;
+       justify-content:center;text-align:center}
+  .apt:hover{border-color:var(--bp-faint);color:var(--bp-ink)}
+  .aptdot{width:9px;height:9px;border-radius:50%;border:1.5px solid currentColor;flex-shrink:0}
+  .apt.on{background:var(--cyan);border-color:var(--cyan);color:#fff}
+  .apt.on .aptdot{background:#fff;border-color:#fff}
   .pills{display:flex;flex-wrap:wrap;gap:6px}
   .pill{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:999px;padding:6px 13px;
         font-size:12px;font-weight:600;color:var(--bp-dim);cursor:pointer}
@@ -208,19 +225,19 @@
           Note: Online proof approval is best for expediency, but may not produce the best results. For color accuracy,
           request and purchase a <a href="#">Hardcopy Proof</a>. If you're unsure about the template markings and what
           they mean then request a <a href="#">Professional Digital Proof</a>.
-          <div class="agree">
-            <label><input type="checkbox" id="agree"> I understand and agree</label>
-            <span class="req">(required)</span>
-          </div>
         </div>
       </div>
 
       <div class="approvewrap">
-        <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
-        <span class="approvehint" id="approveHint">Tick &ldquo;I understand and agree&rdquo; to enable.</span>
+        <div class="agree">
+          <label><input type="checkbox" id="agree"> I understand and agree</label>
+          <span class="req">(required)</span>
+        </div>
+        <div class="approverow">
+          <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
+          <button class="closebtn" id="closeBtn" title="Close proof" aria-label="Close proof">&#10005;</button>
+        </div>
       </div>
-
-      <button class="closebtn" id="closeBtn" title="Close proof" aria-label="Close proof">&#10005;</button>
     </div>
 
     <div class="legendbar" id="legendBar">
@@ -299,11 +316,16 @@ const ISSUE_TEXT = {
    shipped calculator today; the anchor pills are the review proposal, since
    that centring is what cost order 87032. Fit and Stretch take no parameters
    and say so rather than showing an empty box. */
+const ANCHORS = [
+  'Top Left',    'Top',    'Top Right',
+  'Left',        'Center', 'Right',
+  'Bottom Left', 'Bottom', 'Bottom Right'
+];
 const BEHAVIORS = {
-  crop:    { label:'Crop',    sub:{ type:'pills', key:'anchor', title:'Anchor — which part of the art to keep',
-                                    pills:['Center','Top','Bottom','Left','Right'] } },
-  fill:    { label:'Fill',    sub:{ type:'pills', key:'anchor', title:'Anchor — which part of the art to keep',
-                                    pills:['Center','Top','Bottom','Left','Right'] } },
+  crop:    { label:'Crop',    sub:{ type:'grid', key:'anchor', title:'Crop Anchor: which reference point for art',
+                                    cells:ANCHORS } },
+  fill:    { label:'Fill',    sub:{ type:'grid', key:'anchor', title:'Fill Anchor: which reference point for art',
+                                    cells:ANCHORS } },
   fit:     { label:'Fit',     sub:{ type:'note',  note:'No options — the whole page is fitted inside the trim, so some paper may show at two edges.' } },
   stretch: { label:'Stretch', sub:{ type:'note',  note:'No options — art is stretched to fill the page. Proportions will change.' } },
   scale:   { label:'Scale',   sub:{ type:'slider', key:'scale', title:'Size', min:50, max:200, step:0.5 } },
@@ -480,6 +502,23 @@ function subOptions(n){
 
   box.innerHTML = '<span class="subtitle">'+sub.title+'</span>';
 
+  /* nine reference points laid out where they actually sit on the page, so the
+     control looks like the thing it selects rather than a list of words */
+  if (sub.type === 'grid'){
+    const g = document.createElement('div');
+    g.className = 'anchorgrid';
+    sub.cells.forEach(v => {
+      const b = document.createElement('button');
+      b.className = 'apt' + (st[sub.key] === v ? ' on' : '');
+      b.title = v;
+      b.innerHTML = '<span class="aptdot"></span><span class="aptlbl">'+v+'</span>';
+      b.onclick = () => { st[sub.key] = v; renderRail(); };
+      g.appendChild(b);
+    });
+    box.appendChild(g);
+    return box;
+  }
+
   if (sub.type === 'slider'){
     const row = document.createElement('div');
     row.className = 'scalerow';
@@ -556,7 +595,6 @@ document.getElementById('showLegend').onclick = () => {
 };
 document.getElementById('agree').onchange = e => {
   document.getElementById('approveBtn').disabled = !e.target.checked;
-  document.getElementById('approveHint').style.visibility = e.target.checked ? 'hidden' : 'visible';
 };
 document.getElementById('approveBtn').onclick = () =>
   alert('Prototype — no artwork is approved and no files are produced.');

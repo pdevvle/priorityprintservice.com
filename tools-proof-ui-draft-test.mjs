@@ -17,7 +17,22 @@ ck('approve enables after agree', await p.evaluate(()=>document.getElementById('
 ck('page rows rendered', await p.evaluate(()=>document.querySelectorAll('#rail .acc').length)===9, 'want 9 (whole file + 8 pages)');
 ck('filmstrip groups', await p.evaluate(()=>document.querySelectorAll('#stripBottom .grp').length)===5);
 ck('issue callout on p1', await p.evaluate(()=>/doesn.t fill bleed/.test(document.getElementById('issuePanel').innerText)));
-ck('agree checkbox lives inside the magenta note', await p.evaluate(()=>!!document.querySelector('.note .agree input#agree')));
+// ── revision 7: the gate moves out of the note, above APPROVE + close ──
+ck('agree is NOT inside the disclaimer note any more', await p.evaluate(()=>!document.querySelector('.note .agree')));
+ck('full disclaimer text is still present, unabridged', await p.evaluate(()=>{
+  const t=document.querySelector('.note').innerText.replace(/\s+/g,' ');
+  return /Online proof approval is best for expediency/.test(t)
+      && /request and purchase a Hardcopy Proof/.test(t)
+      && /unsure about the template markings/.test(t)
+      && /request a Professional Digital Proof/.test(t);}));
+ck('agree sits directly above APPROVE and close', await p.evaluate(()=>{
+  const a=document.querySelector('.approvewrap .agree'), w=document.querySelector('.approvewrap');
+  if(!a||!w.contains(document.getElementById('approveBtn'))||!w.contains(document.getElementById('closeBtn'))) return false;
+  const ar=a.getBoundingClientRect(), br=document.getElementById('approveBtn').getBoundingClientRect();
+  const cr=document.getElementById('closeBtn').getBoundingClientRect();
+  return ar.bottom<=br.top+1 && ar.bottom<=cr.top+1;}));
+ck('header got shorter, not taller', await p.evaluate(()=>document.querySelector('.header').getBoundingClientRect().height<200),
+  await p.evaluate(()=>Math.round(document.querySelector('.header').getBoundingClientRect().height)+'px'));
 
 // ── revision 1: no "center spread" subheading anywhere under the thumbnails ──
 ck('no spread group labels in the DOM', await p.evaluate(()=>document.querySelectorAll('.spreadlbl').length===0));
@@ -66,7 +81,8 @@ ck('approve sits at the far right of the top bar', await p.evaluate(()=>{
   return a.left > tb.left + tb.width*0.6 && others.every(e=>e.getBoundingClientRect().left < a.left);}));
 ck('close button is the outermost element', await p.evaluate(()=>{
   const c=document.getElementById('closeBtn'), tb=document.querySelector('.topbar');
-  return tb.lastElementChild===c
+  return tb.lastElementChild===document.querySelector('.approvewrap')
+      && document.querySelector('.approverow').lastElementChild===c
       && c.getBoundingClientRect().left > document.getElementById('approveBtn').getBoundingClientRect().left;}));
 ck('undo reads "Undo" with an icon', await p.evaluate(()=>{
   const u=document.querySelector('.undo');
@@ -75,18 +91,42 @@ ck('undo reads "Undo" with an icon', await p.evaluate(()=>{
 // ── revision 6: Scale is a 50–200% slider with 0.5% knurled controls ──
 await p.evaluate(()=>{const h=[...document.querySelectorAll('#rail .acc .acchead')].find(b=>/Page: 1/.test(b.textContent)); if(!document.querySelector('#rail .acc.open .behavior')) h.click();});
 await p.waitForTimeout(150);
-const anchors = await p.evaluate(()=>[...document.querySelectorAll('.pills .pill')].map(b=>b.textContent));
-ck('crop shows anchor pills', anchors.includes('Center')&&anchors.includes('Top'), JSON.stringify(anchors));
+// ── revision 8: nine anchor points, corners included, new heading ──
+const anchors = await p.evaluate(()=>[...document.querySelectorAll('.anchorgrid .apt')].map(b=>b.title));
+ck('crop offers all 9 reference points', JSON.stringify(anchors)===JSON.stringify(
+  ['Top Left','Top','Top Right','Left','Center','Right','Bottom Left','Bottom','Bottom Right']), JSON.stringify(anchors));
+ck('anchors laid out 3 across, 3 down', await p.evaluate(()=>{
+  const r=[...document.querySelectorAll('.anchorgrid .apt')].map(e=>e.getBoundingClientRect());
+  const rows=[...new Set(r.map(x=>Math.round(x.top)))], cols=[...new Set(r.map(x=>Math.round(x.left)))];
+  return rows.length===3 && cols.length===3;}));
+ck('anchor position in the grid matches its name', await p.evaluate(()=>{
+  const b=[...document.querySelectorAll('.anchorgrid .apt')];
+  const g=n=>b.find(e=>e.title===n).getBoundingClientRect();
+  return g('Top Left').top<g('Center').top && g('Bottom Right').top>g('Center').top
+      && g('Top Left').left<g('Center').left && g('Bottom Right').left>g('Center').left
+      && Math.abs(g('Top').top-g('Top Left').top)<2 && Math.abs(g('Left').left-g('Top Left').left)<2;}));
+ck('heading reads "Crop Anchor: which reference point for art"', await p.evaluate(()=>
+  document.querySelector('.subbox .subtitle').textContent.trim()==='Crop Anchor: which reference point for art'),
+  await p.evaluate(()=>document.querySelector('.subbox .subtitle').textContent.trim()));
+ck('heading is not shouted in all caps', await p.evaluate(()=>
+  getComputedStyle(document.querySelector('.subbox .subtitle')).textTransform==='none'));
+ck('Center is selected by default', await p.evaluate(()=>document.querySelector('.anchorgrid .apt.on').title==='Center'));
+ck('picking a corner selects exactly that one', await p.evaluate(()=>{
+  [...document.querySelectorAll('.anchorgrid .apt')].find(e=>e.title==='Bottom Right').click();
+  const on=[...document.querySelectorAll('.anchorgrid .apt.on')];
+  return on.length===1 && on[0].title==='Bottom Right';}));
 await p.selectOption('.behavior select','fill'); await p.waitForTimeout(150);
-ck('fill shows anchor pills too', await p.evaluate(()=>[...document.querySelectorAll('.pills .pill')].map(b=>b.textContent).includes('Center')));
+ck('fill offers the same 9 points, with its own heading', await p.evaluate(()=>
+  document.querySelectorAll('.anchorgrid .apt').length===9
+  && document.querySelector('.subbox .subtitle').textContent.trim()==='Fill Anchor: which reference point for art'));
 await p.selectOption('.behavior select','fit'); await p.waitForTimeout(150);
-ck('fit shows a note, no pills', await p.evaluate(()=>!!document.querySelector('.subbox .subnote')&&document.querySelectorAll('.pills .pill').length===0));
+ck('fit shows a note, no controls', await p.evaluate(()=>!!document.querySelector('.subbox .subnote')&&document.querySelectorAll('.subbox .pill, .subbox .apt').length===0));
 await p.selectOption('.behavior select','stretch'); await p.waitForTimeout(150);
-ck('stretch shows a note, no pills', await p.evaluate(()=>!!document.querySelector('.subbox .subnote')&&document.querySelectorAll('.pills .pill').length===0));
+ck('stretch shows a note, no controls', await p.evaluate(()=>!!document.querySelector('.subbox .subnote')&&document.querySelectorAll('.subbox .pill, .subbox .apt').length===0));
 await p.selectOption('.behavior select','scale'); await p.waitForTimeout(200);
 ck('scale renders a slider, not pills', await p.evaluate(()=>{
   const r=document.querySelector('.subbox input[type=range]');
-  return !!r && document.querySelectorAll('.subbox .pill').length===0;}));
+  return !!r && document.querySelectorAll('.subbox .pill, .subbox .apt').length===0;}));
 ck('slider range is 50–200 stepping 0.5', await p.evaluate(()=>{
   const r=document.querySelector('.subbox input[type=range]');
   return r.min==='50' && r.max==='200' && r.step==='0.5';}),
