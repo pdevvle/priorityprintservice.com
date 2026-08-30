@@ -610,7 +610,11 @@ const MODEL = {
     { n:7, name:'inside back cover' },{ n:8, name:'back cover' }
   ],
   wholeFile: [
-    'Review: Art was uploaded as electronic colors (RGB). It has been converted to CMYK. This increases the opportunity for unwarranted color drift.',
+    // Was "It has been converted to CMYK", carried over from the wireframe.
+    // Nothing in this pipeline converts anything — the composition is sRGB from
+    // end to end — so that sentence claimed work no code does. Same defect as
+    // the all-clear: a reassuring statement with nothing behind it.
+    'Review: Art was uploaded in screen colours (RGB). It will be printed with CMYK inks, and some screen colours — bright blues, greens and oranges especially — cannot be mixed in ink and will come out duller than they look here.',
     'Review: Saddlestitch binding method requires increments of 4 pages. (3) blank pages have been inserted into your file to reflect the physical requirements.'
   ]
 };
