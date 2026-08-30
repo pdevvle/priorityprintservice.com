@@ -51,8 +51,16 @@
        background:#eef1f5;color:var(--bp-ink);font-size:14px;padding:18px}
   .banner{max-width:1560px;margin:0 auto 12px;font-size:11.5px;color:var(--bp-dim);
           background:#fffbe6;border:1px solid #f6d67a;border-radius:8px;padding:8px 12px;line-height:1.5}
+  .bannerctl{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:7px;padding-top:7px;
+             border-top:1px solid rgba(180,140,20,.28)}
+  .bannerctl select{padding:4px 8px;border:1px solid #e0c877;border-radius:6px;background:#fff;font-size:12px}
+  /* A proof is a modal: it is bounded by the window, and its panels scroll
+     inside it. Without a ceiling a 64-page booklet made the shell 6,500px
+     tall — the rail simply grew instead of scrolling, and the artwork ended up
+     stranded at the top of a page nobody would scroll back up. */
   .shell{max-width:1560px;margin:0 auto;background:var(--bp-surface);border:1px solid var(--bp-line);
-         border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-height:760px}
+         border-radius:14px;overflow:hidden;display:flex;flex-direction:column;
+         height:calc(100vh - 128px);min-height:520px;max-height:900px}
   select,button,input{font-family:inherit;font-size:inherit;color:inherit}
 
   /* ── header ──────────────────────────────────────────────── */
@@ -98,7 +106,7 @@
 
   /* ── body ────────────────────────────────────────────────── */
   .body{display:flex;flex:1;min-height:0}
-  .main{flex:1;min-width:0;display:flex;flex-direction:column;padding:14px 16px;gap:14px}
+  .main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;padding:14px 16px;gap:14px}
   .stagewrap{flex:1;display:flex;gap:16px;align-items:flex-start;min-height:0}
   .stage{flex:1;min-width:0;display:flex;align-items:flex-start;justify-content:center;
          max-height:560px;overflow:auto;padding:2px}
@@ -123,7 +131,11 @@
   .issue.info .bang{background:var(--bp-faint)}
 
   /* ── filmstrip — every cell identical, whatever its label ── */
-  .strip{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}
+  /* A 64-page booklet is 33 spread groups. Left to wrap freely that is seven
+     rows and roughly 500px — the page index would take more of the screen than
+     the page being proofed. Cap it and let it scroll instead. */
+  .strip{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;
+         max-height:228px;overflow-y:auto;flex-shrink:0}
   .grp{display:flex;border:1px solid var(--bp-ink);border-radius:2px;overflow:hidden}
   .pg{width:84px;height:96px;padding:6px;font-size:9.5px;line-height:1.2;cursor:pointer;
       background:var(--bp-surface);border-right:1px solid var(--bp-ink);position:relative;
@@ -197,13 +209,25 @@
   .scaleval{min-width:64px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;font-size:13px}
   .scaleends{display:flex;justify-content:space-between;font-size:10px;color:var(--bp-faint);margin-top:3px}
 
+  .applyall{display:flex;align-items:flex-start;gap:9px;margin-top:11px;padding:10px 12px;cursor:pointer;
+            border:1px solid var(--bp-line);border-radius:8px;font-size:12.5px;font-weight:600;color:var(--bp-dim)}
+  .applyall:hover{border-color:var(--bp-faint);color:var(--bp-ink)}
+  .applyall input{margin:1px 0 0;cursor:pointer;width:16px;height:16px;flex-shrink:0;accent-color:var(--cyan)}
+  .applyall.on{border-color:var(--cyan);background:rgba(0,126,255,.06);color:var(--bp-ink)}
+  .applyallhint{display:block;font-weight:400;font-size:11px;color:var(--bp-faint);line-height:1.4;margin-top:3px}
+
   .filerow{display:flex;align-items:center;gap:9px;margin-bottom:11px;font-size:11.5px;color:var(--bp-faint)}
   .filebtn{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:8px;padding:6px 12px;
            font-size:12px;font-weight:600;color:var(--bp-dim);cursor:pointer;white-space:nowrap}
   .filebtn:hover{background:var(--bp-btn);color:var(--bp-ink)}
   .srcmeta{line-height:1.35}
 
-  .railstrip{padding:14px 16px 20px;overflow-y:auto}
+  .railstrip{padding:14px 16px 20px;overflow-y:auto;flex:1;min-height:0}
+  /* In the rail the panel itself scrolls, so the strip must not also cap
+     itself — that clipped a 64-page index to two and a half rows. It keeps
+     wrapping though: a tall narrow panel wants rows, and overflow:visible here
+     would cancel the sideways scrolling the bottom strip relies on. */
+  .railstrip .strip{max-height:none;overflow:visible;flex-wrap:wrap}
   .railstriphead{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
                  color:var(--bp-faint);margin-bottom:10px}
 
@@ -266,7 +290,7 @@
     body{padding:8px}
     .banner{font-size:11px;padding:7px 10px;margin-bottom:8px}
     /* sticky needs a scrolling ancestor that is not overflow:hidden */
-    .shell{overflow:visible;min-height:0;border-radius:10px}
+    .shell{overflow:visible;height:auto;min-height:0;max-height:none;border-radius:10px}
     /* The header scrolls away rather than pinning. Pinned it cost ~195px —
        nearly a quarter of the screen — to hold a disclaimer you read once,
        and the artwork is the thing worth keeping in view. The two controls
@@ -314,7 +338,9 @@
     .issue{font-size:11px}
 
     /* one row that scrolls sideways, rather than a block that eats the screen */
-    .strip{flex-wrap:nowrap;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+    #stripBottom{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;max-height:none;
+                 padding-bottom:6px;-webkit-overflow-scrolling:touch}
+    #stripRail{flex-wrap:wrap;overflow:visible;max-height:none}
     .grp,.arrow{flex-shrink:0}
 
     .rail{width:auto;border-left:none;border-top:1px solid var(--bp-line);min-height:0}
@@ -344,7 +370,8 @@
   }
 
   @media (max-width:560px){
-    .banner{display:none}                    /* prototype chatter, not product */
+    .bannerprose{display:none}               /* prototype chatter, not product */
+    .bannerctl{margin-top:0;padding-top:0;border-top:none}
     .modes button{padding:7px 12px;font-size:12px}
     .viewgroup{padding:5px 9px;gap:6px}
     .viewgroup > .lbl{display:none}
@@ -359,10 +386,23 @@
 <body>
 
 <div class="banner">
-  <strong>Draft prototype — organizational, but working.</strong> The transforms really recompose the art, the issues
-  are measured off that composition, and the magnifier and zoom are live. <strong>Drop an image onto the page</strong>
-  (or use <em>Replace</em> in the rail) to try the anchors against your own artwork. Nothing is uploaded and no file is
-  ever produced.
+  <div class="bannerprose">
+    <strong>Draft prototype — organizational, but working.</strong> The transforms really recompose the art, the issues
+    are measured off that composition, and the magnifier and zoom are live. <strong>Drop an image onto the page</strong>
+    (or use <em>Replace</em> in the rail) to try the anchors against your own artwork. Nothing is uploaded and no file
+    is ever produced.
+  </div>
+  <div class="bannerctl">
+    <label for="pageCount"><strong>Document length</strong> — saddle stitch, so multiples of four:</label>
+    <select id="pageCount">
+      <option value="8" selected>8 pages</option>
+      <option value="16">16 pages</option>
+      <option value="24">24 pages</option>
+      <option value="32">32 pages</option>
+      <option value="48">48 pages</option>
+      <option value="64">64 pages</option>
+    </select>
+  </div>
 </div>
 
 <div class="shell">
@@ -516,13 +556,12 @@ const BEHAVIORS = {
   scale:   { label:'Scale',   subs:[ { type:'slider', key:'scale', title:'Size', min:50, max:200, step:0.5 },
                                      { type:'grid', title:'Scale Anchor: which reference point for art', ...ANCHOR_GRID } ] },
   rotate:  { label:'Rotate',  subs:[ { type:'pills', key:'rot', title:'Rotation',
-                                       pills:['0°','90°','180°','270°'], extra:'all' } ] }
+                                       pills:['0°','90°','180°','270°'] } ] }
 };
 
-const state = { mode:'proof', selected:1, openPage:1, wholeOpen:true, perPage:{},
+const state = { mode:'proof', selected:1, openPage:null, wholeOpen:true, perPage:{}, applyAll:false,
                 bookMode:'closed', spread:0, rot:{ x:-15, y:-25 },
                 zoom:'fit', lens:null };
-MODEL.pages.forEach(p => state.perPage[p.n] = { behavior:'crop', anchor:'Center', scale:100, rot:'0°' });
 
 /* Undo: whole-map snapshots. Cheap at this size and impossible to get subtly
    wrong, which matters more here than the memory would. */
@@ -578,11 +617,52 @@ function drawPlaceholder(n){
   }
   return c;
 }
-const SRC = {};
-MODEL.pages.forEach(p => {
-  const c = drawPlaceholder(p.n);
-  SRC[p.n] = { el:c, w:c.width, h:c.height, inW:MODEL.trim.w, inH:MODEL.trim.h, label:'placeholder' };
-});
+/* Placeholder pages are drawn on demand and kept in a small LRU. A 64-page
+   booklet would otherwise hold 64 full-resolution canvases at once — about a
+   quarter of a gigabyte — for artwork that costs a millisecond to redraw.
+   Uploads are never evicted: those cannot be regenerated. */
+const srcCache = new Map();
+const uploads  = new Map();
+const SRC_LRU  = 20;
+function SRCget(n){
+  if (uploads.has(n)) return uploads.get(n);
+  let s = srcCache.get(n);
+  if (s){ srcCache.delete(n); srcCache.set(n, s); return s; }   // touch = most recent
+  const c = drawPlaceholder(n);
+  s = { el:c, w:c.width, h:c.height, inW:MODEL.trim.w, inH:MODEL.trim.h, label:'placeholder' };
+  srcCache.set(n, s);
+  while (srcCache.size > SRC_LRU) srcCache.delete(srcCache.keys().next().value);
+  return s;
+}
+
+/* Saddle stitch comes in multiples of four. Rebuilding the model is the whole
+   bind-specific part of changing document length: page names, which pages pair
+   in the finished piece, and which are covers. */
+function rebuildModel(count){
+  MODEL.pages = [];
+  for (let n = 1; n <= count; n++){
+    const name = n === 1 ? 'front cover'
+               : n === 2 ? 'inside front cover'
+               : n === count ? 'back cover'
+               : n === count - 1 ? 'inside back cover' : '';
+    MODEL.pages.push({ n, name });
+  }
+  MODEL.groups = [{ pages:[1] }];
+  for (let n = 2; n < count; n += 2) MODEL.groups.push({ pages:[n, n+1] });
+  MODEL.groups.push({ pages:[count] });
+
+  MODEL.wholeFile[1] = 'Review: Saddlestitch binding method requires increments of 4 pages. (' +
+    (count - 5) + ') blank pages have been inserted into your file to reflect the physical requirements.';
+
+  INTERIOR = MODEL.pages.filter(p => p.n !== 1 && p.n !== count).map(p => p.n);
+  TOTAL_SPREADS = Math.ceil(INTERIOR.length / 2);
+
+  state.perPage = {};
+  MODEL.pages.forEach(p => state.perPage[p.n] = { behavior:'crop', anchor:'Center', scale:100, rot:'0°' });
+  state.selected = 1; state.openPage = null; state.wholeOpen = true;
+  state.spread = 0; state.bookMode = 'closed';
+  srcCache.clear(); uploads.clear(); cache.clear(); history.length = 0;
+}
 
 /* ── the composition engine ───────────────────────────────────
    ONE function. The proof surface, the magnifier, the thumbnails and the 3D
@@ -592,14 +672,15 @@ MODEL.pages.forEach(p => {
 const cache = new Map();
 function txKey(n){
   const t = state.perPage[n];
-  return n + '|' + t.behavior + '|' + t.anchor + '|' + t.scale + '|' + t.rot + '|' + (SRC[n].stamp || 0);
+  // read the stamp without forcing a placeholder to be drawn just to key a cache
+  return n + '|' + t.behavior + '|' + t.anchor + '|' + t.scale + '|' + t.rot + '|' + ((uploads.get(n)||{}).stamp || 0);
 }
 function composePage(n, W, H){
   const key = txKey(n) + '|' + W + 'x' + H;
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const t = state.perPage[n], src = SRC[n];
+  const t = state.perPage[n], src = SRCget(n);
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const ctx = c.getContext('2d');
@@ -812,8 +893,7 @@ function showLens(sheet, r, fx, fy, px, py){
    page count and its stapled edge is flat.
 
    The faces are composed pages, so a transform shows up on the mockup too. */
-const INTERIOR = MODEL.pages.filter(p => p.n !== 1 && p.n !== MODEL.pages.length).map(p => p.n);
-const TOTAL_SPREADS = Math.ceil(INTERIOR.length / 2);
+let INTERIOR = [], TOTAL_SPREADS = 0;
 const spreadOfPage = n => (n === 1 || n === MODEL.pages.length) ? null : Math.floor(INTERIOR.indexOf(n) / 2);
 
 let bookDrag = null;
@@ -1042,7 +1122,11 @@ function renderRail(){
   wf.className = 'acc' + (state.wholeOpen ? ' open' : '');
   wf.innerHTML = '<button class="acchead"><span>Whole File</span><span class="bang">!</span><span class="caret">⌄</span></button>' +
                  '<div class="accbody">' + MODEL.wholeFile.map(t => '<p class="review">'+t+'</p>').join('') + '</div>';
-  wf.querySelector('.acchead').onclick = () => { state.wholeOpen = !state.wholeOpen; renderRail(); };
+  wf.querySelector('.acchead').onclick = () => {
+    state.wholeOpen = !state.wholeOpen;
+    if (state.wholeOpen) state.openPage = null;     // same rule, the other way round
+    renderAll();
+  };
   rail.appendChild(wf);
 
   MODEL.pages.forEach(p => {
@@ -1057,14 +1141,16 @@ function renderRail(){
                     '<div class="accbody"></div>';
     acc.querySelector('.acchead').onclick = () => {
       state.openPage = open ? null : p.n;
-      if (!open) state.selected = p.n;
+      // one section at a time: opening a page puts the file-level review away,
+      // so the panel is never two competing sets of controls at once
+      if (!open){ state.selected = p.n; state.wholeOpen = false; }
       renderAll();
     };
     if (open){
       const body = acc.querySelector('.accbody');
 
       // Which file this page is showing, and what it is worth at this size.
-      const src = SRC[p.n], r = composePage(p.n, 460, Math.round(460 * BLEED_H / BLEED_W));
+      const src = SRCget(p.n), r = composePage(p.n, 460, Math.round(460 * BLEED_H / BLEED_W));
       const fr = document.createElement('div');
       fr.className = 'filerow';
       fr.innerHTML = '<span class="srcmeta">' + src.label + ' · ' + src.w + '&times;' + src.h +
@@ -1084,13 +1170,55 @@ function renderRail(){
         o.value = k; o.textContent = BEHAVIORS[k].label; o.selected = (st.behavior === k);
         sel.appendChild(o);
       });
-      sel.onchange = e => { pushHistory(); st.behavior = e.target.value; renderAll(); };
+      sel.onchange = e => { pushHistory(); st.behavior = e.target.value; afterChange(p.n); };
       row.appendChild(sel);
       body.appendChild(row);
       BEHAVIORS[st.behavior].subs.forEach(sub => body.appendChild(subOption(p.n, sub)));
+      body.appendChild(applyAllRow(p.n));
     }
     rail.appendChild(acc);
   });
+}
+
+/* One control, every behaviour. While it is ticked, this page IS the document:
+   the whole transform — behaviour, anchor, size, rotation — is copied to every
+   page, and stays copied as you keep adjusting. That is what makes it useful
+   on Stretch and Fit, which have no options of their own: the thing you are
+   applying to all pages is the behaviour itself.
+
+   It replaced the one-shot "Apply to all pages" button that Rotate used to
+   carry, because two affordances for one idea is one too many. */
+function propagate(n){
+  const src = state.perPage[n];
+  MODEL.pages.forEach(p => {
+    if (p.n !== n) state.perPage[p.n] = { ...src };
+  });
+}
+function applyAllRow(n){
+  const row = document.createElement('label');
+  row.className = 'applyall' + (state.applyAll ? ' on' : '');
+  const cb = document.createElement('input');
+  cb.type = 'checkbox'; cb.id = 'applyAll'; cb.checked = state.applyAll;
+  cb.onchange = () => {
+    pushHistory();
+    state.applyAll = cb.checked;
+    if (state.applyAll) propagate(n);
+    renderAll();
+  };
+  const txt = document.createElement('span');
+  txt.innerHTML = 'Apply to all pages' +
+    '<span class="applyallhint">' + (state.applyAll
+      ? 'Every page is following this one. Untick to set pages individually.'
+      : 'Copies this page’s settings to all ' + MODEL.pages.length + ' pages, and keeps them matched.') +
+    '</span>';
+  row.append(cb, txt);
+  return row;
+}
+/* Every control change funnels through here, so "keeps them matched" is a
+   property of the state rather than of remembering to call something. */
+function afterChange(n){
+  if (state.applyAll) propagate(n);
+  renderAll();
 }
 
 function subOption(n, sub){
@@ -1112,7 +1240,7 @@ function subOption(n, sub){
       b.className = 'apt' + (st[sub.key] === v ? ' on' : '');
       b.title = v;
       b.innerHTML = '<span class="aptdot"></span><span class="aptlbl">'+v+'</span>';
-      b.onclick = () => { pushHistory(); st[sub.key] = v; renderAll(); };
+      b.onclick = () => { pushHistory(); st[sub.key] = v; afterChange(n); };
       g.appendChild(b);
     });
     box.appendChild(g);
@@ -1136,9 +1264,9 @@ function subOption(n, sub){
       show(); repaintFromScale();
     };
     rng.oninput  = e => set(parseFloat(e.target.value), true);
-    rng.onchange = () => { dragging = false; renderAll(); };
-    dec.onclick = () => { pushHistory(); set(st.scale - sub.step, false); renderAll(); };
-    inc.onclick = () => { pushHistory(); set(st.scale + sub.step, false); renderAll(); };
+    rng.onchange = () => { dragging = false; afterChange(n); };
+    dec.onclick = () => { pushHistory(); set(st.scale - sub.step, false); afterChange(n); };
+    inc.onclick = () => { pushHistory(); set(st.scale + sub.step, false); afterChange(n); };
     row.append(dec, rng, inc, val);
     box.appendChild(row);
     const ends = document.createElement('div');
@@ -1155,20 +1283,9 @@ function subOption(n, sub){
     const b = document.createElement('button');
     b.className = 'pill' + (st[sub.key] === v ? ' on' : '');
     b.textContent = v;
-    b.onclick = () => { pushHistory(); st[sub.key] = v; renderAll(); };
+    b.onclick = () => { pushHistory(); st[sub.key] = v; afterChange(n); };
     pills.appendChild(b);
   });
-  if (sub.extra === 'all'){
-    const b = document.createElement('button');
-    b.className = 'pill wide'; b.textContent = '↻ Apply to all pages';
-    b.onclick = () => {
-      pushHistory();
-      const v = st[sub.key];
-      MODEL.pages.forEach(p => state.perPage[p.n][sub.key] = v);
-      renderAll();
-    };
-    pills.appendChild(b);
-  }
   box.appendChild(pills);
   return box;
 }
@@ -1204,9 +1321,9 @@ function loadArt(n, file){
   img.onload = () => {
     // A file with no stated physical size is taken at 300 DPI, which is what a
     // print shop assumes and makes the DPI readout mean something.
-    SRC[n] = { el:img, w:img.naturalWidth, h:img.naturalHeight,
-               inW:img.naturalWidth/300, inH:img.naturalHeight/300,
-               label:file.name, stamp:Date.now() };
+    uploads.set(n, { el:img, w:img.naturalWidth, h:img.naturalHeight,
+                     inW:img.naturalWidth/300, inH:img.naturalHeight/300,
+                     label:file.name, stamp:Date.now() });
     cache.clear();
     renderAll();
   };
@@ -1297,6 +1414,12 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'ArrowLeft') stepSpread(-1);
 });
 
+document.getElementById('pageCount').onchange = e => {
+  rebuildModel(parseInt(e.target.value, 10));
+  renderAll();
+};
+
+rebuildModel(parseInt(document.getElementById('pageCount').value, 10));
 renderAll();
 </script>
 </body>
