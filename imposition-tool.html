@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 21:11 UTC · IMPOSE-V1.21</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 10:39 UTC · IMPOSE-V1.22</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1601,9 +1601,6 @@ async function imposeSaddle(artBytes, spec, layout) {
   const P = Math.ceil(n / 4) * 4;
   if (P !== n) warnings.push(`page count ${n} padded to ${P} — ${P - n} blank page(s) at the back of the book`);
   const S = P / 4;
-  if (creep > 0 && S >= 2) warnings.push(`Creep: content shifted spine-ward from 0″ on the cover to ${creep}″ on the innermost signature (${(creep / (S - 1)).toFixed(4)}″ per step over ${S} signatures). Cut lines unchanged; the outer sliver this opens is covered by the art's bleed.`);
-  else if (creep > 0) warnings.push("Creep set but this book is a single signature — nothing nests, so no shift applied.");
-  else if (S >= 8) warnings.push(`${S} nested sheets and no creep compensation set — check inner-page margins on thick stock, or set a creep total.`);
 
   const out = await PL.PDFDocument.create();
   const font = await out.embedFont(PL.StandardFonts.Helvetica);
@@ -1625,6 +1622,16 @@ async function imposeSaddle(artBytes, spec, layout) {
   const inset = insetOf(spec);
   const userScale = artScaleOf(spec);
   const creep = creepOf(spec);
+  // These live HERE, not up beside the signature count where they read better:
+  // this block used to sit above, before `const creep` was assigned. Babel
+  // Standalone rewrites const to var, so the read silently returned undefined
+  // and the tool reported "no creep compensation set" on every job — including
+  // jobs that had creep and were being shifted correctly. A compiled build
+  // (no const→var) would have thrown a ReferenceError instead. Keep any use of
+  // creep below its declaration.
+  if (creep > 0 && S >= 2) warnings.push(`Creep: content shifted spine-ward from 0″ on the cover to ${creep}″ on the innermost signature (${(creep / (S - 1)).toFixed(4)}″ per step over ${S} signatures). Cut lines unchanged; the outer sliver this opens is covered by the art's bleed.`);
+  else if (creep > 0) warnings.push("Creep set but this book is a single signature — nothing nests, so no shift applied.");
+  else if (S >= 8) warnings.push(`${S} nested sheets and no creep compensation set — check inner-page margins on thick stock, or set a creep total.`);
   const { showMarks, showFold, showSlug } = marksOf(spec);
   let inkDoc = null;
   const arts = [];

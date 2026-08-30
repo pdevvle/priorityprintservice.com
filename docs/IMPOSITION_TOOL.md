@@ -206,6 +206,20 @@ download the imposed PDF. Useful for testing and one-off jobs.
   to ±0.005″ across 8 signatures (ink-profile correlation), the two halves shift
   in OPPOSITE directions, trim/clip byte-identical with creep on, and duplex
   registers on both flip edges.
+
+  **The creep confirmation used to lie (fixed 1.22).** The warning block sat
+  *above* `const creep = creepOf(spec)` in `imposeSaddle`. Babel Standalone
+  rewrites `const` to `var`, so instead of the TDZ ReferenceError a modern
+  build would throw, the read silently returned `undefined` — and every job
+  reported *"N nested sheets and no creep compensation set"*, including jobs
+  whose content was being shifted correctly. The geometry was always right;
+  only the message was wrong, which is the worse failure for a shop: an
+  operator told creep is unset will set it again. Moved below the declaration.
+  **Keep every use of `creep` below its declaration** — and treat the same
+  pattern as a live hazard anywhere else in this file, because the in-browser
+  Babel build converts what should be a hard error into a silent `undefined`.
+  If these calculators ever compile ahead of time (`tools-compile-calcs.mjs`),
+  a latent instance of this becomes a page-breaking ReferenceError instead.
 - **Free art scale** (`spec.artScale`, 25–400%): a plain scale on the placed
   art, up or down. Independent of the bleed-coupled pull-off-trim inset — the
   two compose — and it feeds the same `covX/covY` coverage maths, so scaling
