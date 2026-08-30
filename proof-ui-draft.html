@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>Proof UI — organizational draft (saddle stitch)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!--
   DRAFT / PROTOTYPE — not wired to any calculator, but no longer faked.
 
@@ -37,50 +40,85 @@
    - the legend is a thin strip that cannot outlive the guides it explains
 -->
 <style>
+  /* ── the calculator's skin ────────────────────────────────────
+     Tokens, type and control shapes lifted from calc-preview-test.html rather
+     than approximated, so this reads as the same product and not a mockup of
+     one. Process colours are the press inks the calculator names: cyan
+     #007eff, magenta #d1246a, yellow #f0a830 — the magenta here was a brighter
+     #ec008c, which is not an ink anyone mixes. The dark palette comes along
+     with them, keyed off the same data-pps-theme attribute the calculator
+     toggles, so the proof does not stay white when everything around it is
+     not. */
   :root{
+    --pps-display:'Montserrat','Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --pps-sans:'Work Sans','Segoe UI','Helvetica Neue',Arial,sans-serif;
     --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
     --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#64748b;
-    --bp-btn:#f1f4f8; --bp-info:#1d4ed8; --bp-warn:#b45309;
-    --cyan:#007eff; --magenta:#ec008c; --green:#38a169;
+    --bp-btn:#f1f4f8; --bp-info:#1d4ed8; --bp-warn:#92400e;
+    --bp-page:#f6f7f9;
+    --cyan:#007eff; --magenta:#d1246a; --green:#38a169;
+    --magenta-tint:#fce8ef; --cyan-tint:#e0edff; --yellow-tint:#fef5e0; --yellow-line:#f0a830;
     --rail:376px;
+  }
+  :root[data-pps-theme="dark"]{
+    --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
+    --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
+    --bp-btn:#0f151d; --bp-info:#60a5fa; --bp-warn:#f0a830;
+    --bp-page:#0d1117;
+    --magenta:#f0578f; --green:#5bc98a;
+    --magenta-tint:#2a1420; --cyan-tint:#12243a; --yellow-tint:#2a2113; --yellow-line:#6b5320;
   }
   *{box-sizing:border-box}
   /* the control groups set display:flex, which would otherwise beat [hidden] */
   [hidden]{display:none!important}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
-       background:#eef1f5;color:var(--bp-ink);font-size:14px;padding:18px}
+  body{margin:0;font-family:var(--pps-sans);background:var(--bp-page);color:var(--bp-ink);
+       font-size:14px;padding:18px}
   .banner{max-width:1560px;margin:0 auto 12px;font-size:11.5px;color:var(--bp-dim);
-          background:#fffbe6;border:1px solid #f6d67a;border-radius:8px;padding:8px 12px;line-height:1.5}
+          background:var(--yellow-tint);border:1px solid var(--yellow-line);border-radius:12px;
+          padding:9px 14px;line-height:1.5}
   .bannerctl{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:7px;padding-top:7px;
-             border-top:1px solid rgba(180,140,20,.28)}
-  .bannerctl select{padding:4px 8px;border:1px solid #e0c877;border-radius:6px;background:#fff;font-size:12px}
+             border-top:1px solid rgba(240,168,48,.32)}
+  .bannerctl select{padding:5px 9px;border:1px solid var(--bp-line);border-radius:8px;
+                    background:var(--bp-surface);color:var(--bp-ink);font-size:12px;font-family:inherit}
+  .themebtn{margin-left:auto;border:1px solid var(--bp-line);background:var(--bp-surface);color:var(--bp-dim);
+            border-radius:8px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit}
+  .themebtn:hover{border-color:var(--cyan);color:var(--cyan)}
   /* A proof is a modal: it is bounded by the window, and its panels scroll
      inside it. Without a ceiling a 64-page booklet made the shell 6,500px
      tall — the rail simply grew instead of scrolling, and the artwork ended up
      stranded at the top of a page nobody would scroll back up. */
   .shell{max-width:1560px;margin:0 auto;background:var(--bp-surface);border:1px solid var(--bp-line);
-         border-radius:14px;overflow:hidden;display:flex;flex-direction:column;
-         height:calc(100vh - 128px);min-height:520px;max-height:900px}
+         border-radius:16px;overflow:hidden;display:flex;flex-direction:column;
+         height:calc(100vh - 128px);min-height:520px;max-height:900px;
+         box-shadow:0 4px 6px rgba(16,24,40,.06), 0 24px 64px rgba(16,24,40,.28)}
   select,button,input{font-family:inherit;font-size:inherit;color:inherit}
 
   /* ── header ──────────────────────────────────────────────── */
-  .header{border-bottom:1px solid var(--bp-line);padding:12px 16px 8px}
+  .header{border-bottom:1px solid var(--bp-line);padding:12px 18px 9px;background:var(--bp-surface);
+          border-radius:16px 16px 0 0;flex-shrink:0}
   .topbar{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
-  .viewgroup{display:flex;align-items:center;gap:8px;border:1px solid var(--bp-line);border-radius:999px;
-             padding:6px 12px;background:var(--bp-surface)}
-  .viewgroup > .lbl{font-weight:800;letter-spacing:.02em;margin-right:2px}
+  .viewgroup{display:flex;align-items:center;gap:9px;border:1px solid var(--bp-line);border-radius:10px;
+             padding:6px 12px;background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
+  .viewgroup > .lbl{font-family:var(--pps-display);font-weight:700;font-size:11px;letter-spacing:.06em;
+                    text-transform:uppercase;color:var(--bp-faint);margin-right:2px}
   .vsep{width:1px;align-self:stretch;background:var(--bp-line)}
   .chk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--bp-dim);cursor:pointer;white-space:nowrap}
   .chk input{margin:0;cursor:pointer}
-  .zoom{border:none;background:transparent;font-size:13px;cursor:pointer;padding:2px 4px}
-  .modes{display:flex;border:1px solid var(--bp-line);border-radius:999px;overflow:hidden;background:var(--bp-btn)}
-  .modes button{border:none;background:transparent;padding:7px 16px;font-size:12.5px;font-weight:700;cursor:pointer;color:var(--bp-dim)}
-  .modes button.on{background:var(--bp-ink);color:#fff}
-  .modes.small button{padding:5px 13px;font-size:12px}
+  .zoom{border:none;background:transparent;font-size:12.5px;cursor:pointer;padding:3px 4px;
+        color:var(--bp-ink);font-family:inherit;font-weight:500}
+  .zoom:hover{color:var(--cyan)}
+  .modes{display:flex;gap:3px;padding:3px;border-radius:10px;border:1px solid var(--bp-line);
+         background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
+  .modes button{padding:6px 15px;border:none;border-radius:7px;background:transparent;color:var(--bp-dim);
+                font-size:11.5px;font-weight:500;font-family:inherit;cursor:pointer;
+                transition:all .18s cubic-bezier(.4,0,.2,1)}
+  .modes button:hover:not(.on){color:var(--cyan)}
+  .modes button.on{background:var(--cyan);color:#fff;font-weight:600;box-shadow:0 1px 2px rgba(0,126,255,.35)}
+  .modes.small button{padding:5px 12px;font-size:11px}
   .disclose{flex:1;min-width:300px;max-width:560px}
-  .note{border:1.5px solid var(--magenta);background:var(--bp-surface-2);border-radius:4px;padding:8px 10px;
-        font-size:11.5px;line-height:1.5}
-  .note a{color:inherit;font-weight:600}
+  .note{border:1px solid var(--magenta);background:var(--magenta-tint);border-radius:10px;padding:9px 12px;
+        font-size:11.5px;line-height:1.5;color:var(--bp-ink)}
+  .note a{color:var(--magenta);font-weight:600}
   /* the gate lives with the button it gates, not inside the text it refers to */
   .approvewrap{display:flex;flex-direction:column;gap:7px;align-items:flex-end;margin-left:auto}
   .agree{display:flex;align-items:center;gap:7px;font-size:13.5px}
@@ -90,13 +128,23 @@
   .approvewrap.locked{opacity:.5}
   .approvewrap.locked .agree label{cursor:not-allowed}
   .approverow{display:flex;align-items:center;gap:9px}
-  .approve{border:none;border-radius:999px;background:var(--cyan);color:#fff;font-weight:800;letter-spacing:.03em;
-           padding:12px 26px;font-size:15px;cursor:pointer;white-space:nowrap;box-shadow:0 2px 10px rgba(0,126,255,.35)}
-  .approve:disabled{background:#b9c6d4;box-shadow:none;cursor:not-allowed}
-  .closebtn{width:34px;height:34px;flex-shrink:0;border-radius:50%;border:1px solid var(--bp-line);
-            background:var(--bp-surface);color:var(--bp-dim);font-size:17px;line-height:1;cursor:pointer;
-            align-self:flex-end;margin-bottom:3px}
-  .closebtn:hover{background:var(--bp-btn);color:var(--bp-ink)}
+  @keyframes bp-approve-shimmer{ from{background-position:150% 0} to{background-position:-50% 0} }
+  .approve{display:inline-flex;align-items:center;justify-content:center;
+           padding:13px 23px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
+           font-size:14px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+           color:#fff;white-space:nowrap;
+           background:linear-gradient(105deg,#0062cc 0%,#007eff 34%,#8ccbff 50%,#007eff 66%,#0062cc 100%);
+           background-size:300% 100%;animation:bp-approve-shimmer 2.9s linear infinite;
+           box-shadow:0 3px 14px rgba(0,126,255,.4);
+           transition:transform .15s ease,box-shadow .15s ease}
+  .approve:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 5px 18px rgba(0,126,255,.45)}
+  .approve:disabled{background:var(--bp-btn);color:var(--bp-faint);border:1px solid var(--bp-line);
+                    animation:none;box-shadow:none;cursor:not-allowed}
+  .closebtn{width:36px;height:36px;min-width:36px;flex-shrink:0;border-radius:50%;border:1px solid var(--bp-line);
+            background:var(--bp-btn);color:var(--bp-dim);font-size:16px;line-height:1;cursor:pointer;
+            display:flex;align-items:center;justify-content:center;font-family:inherit;
+            transition:all .2s;align-self:flex-end;margin-bottom:3px}
+  .closebtn:hover{background:rgba(0,126,255,.12);border-color:var(--cyan);color:var(--cyan)}
 
   /* legend: the smallest thing that still explains four colours */
   .legendbar{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-top:7px;font-size:10px;
@@ -105,17 +153,19 @@
   .swatch{width:16px;height:0;flex-shrink:0}
 
   /* ── body ────────────────────────────────────────────────── */
-  .body{display:flex;flex:1;min-height:0}
+  .body{display:flex;flex:1;min-height:0;background:var(--bp-surface-2);border-radius:0 0 16px 16px}
   .main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;padding:14px 16px;gap:14px}
   .stagewrap{flex:1;display:flex;gap:16px;align-items:flex-start;min-height:0}
   .stage{flex:1;min-width:0;display:flex;align-items:flex-start;justify-content:center;
          max-height:560px;overflow:auto;padding:2px}
   .stage.center{align-items:center}
-  .sheet{position:relative;background:#fff;box-shadow:0 2px 14px rgba(15,23,42,.13);flex-shrink:0}
+  .sheet{position:relative;background:#fff;border-radius:2px;flex-shrink:0;
+         box-shadow:0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.18)}
   .sheet canvas{display:block;width:100%;height:100%}
   .sheet.dropping{outline:3px dashed var(--cyan);outline-offset:4px}
   .badge{position:absolute;top:8px;right:8px;font-size:9.5px;font-weight:600;color:#fff;
-         background:rgba(15,23,42,.62);padding:3px 7px;border-radius:8px;pointer-events:none}
+         background:rgba(15,23,42,.62);padding:4px 8px;border-radius:8px;pointer-events:none;
+         letter-spacing:.03em}
   .badge.warn{background:rgba(180,83,9,.85)}
   .g{position:absolute;pointer-events:none;box-sizing:border-box}
   .lens{position:absolute;width:190px;height:190px;border-radius:50%;overflow:hidden;pointer-events:none;
@@ -136,18 +186,19 @@
      the page being proofed. Cap it and let it scroll instead. */
   .strip{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;
          max-height:228px;overflow-y:auto;flex-shrink:0}
-  .grp{display:flex;border:1px solid var(--bp-ink);border-radius:2px;overflow:hidden}
+  .grp{display:flex;border:1px solid var(--bp-line);border-radius:8px;overflow:hidden;background:var(--bp-surface)}
   .pg{width:84px;height:96px;padding:6px;font-size:9.5px;line-height:1.2;cursor:pointer;
-      background:var(--bp-surface);border-right:1px solid var(--bp-ink);position:relative;
+      background:var(--bp-surface);border-right:1px solid var(--bp-line);position:relative;
       text-align:left;display:flex;flex-direction:column}
   /* the group's own border draws the outer edge; keep the 1px reserved so the
      last cell's thumbnail is exactly as wide as every other cell's */
   .grp .pg:last-child{border-right-color:transparent}
-  .pg.sel{background:rgba(0,126,255,.10);box-shadow:inset 0 0 0 2px var(--cyan)}
-  .pg .thumb{height:44px;flex-shrink:0;background:var(--bp-surface-2);border:1px solid var(--bp-line);
+  .pg.sel{background:var(--cyan-tint);box-shadow:inset 0 0 0 2px var(--cyan)}
+  .pg .thumb{height:44px;flex-shrink:0;background-color:var(--bp-surface-2);border:1px solid var(--bp-line);
+             border-radius:6px;box-shadow:0 1px 3px rgba(16,24,40,.14);
              margin-bottom:4px;background-size:contain;background-position:center;background-repeat:no-repeat}
   .pg .cap{overflow:hidden}
-  .pg .n{font-weight:800}
+  .pg .n{font-family:var(--pps-display);font-weight:700}
   .pg .dot{position:absolute;top:3px;right:3px;width:11px;height:11px;border-radius:50%;background:var(--magenta);
            color:#fff;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center}
   .pg .dot.warn{background:var(--bp-warn)}
@@ -155,71 +206,81 @@
 
   /* ── right rail ──────────────────────────────────────────── */
   .rail{width:var(--rail);flex-shrink:0;border-left:1px solid var(--bp-line);background:var(--bp-surface);
-        display:flex;flex-direction:column;min-height:0}
-  .railhead{display:flex;align-items:baseline;justify-content:space-between;padding:14px 0 10px;
-            border-bottom:1px solid var(--bp-ink);margin:0 16px}
-  .railhead h2{margin:0;font-size:21px;letter-spacing:-.01em}
-  .undo{font-size:13px;color:var(--bp-dim);background:none;border:none;cursor:pointer;
-        display:inline-flex;align-items:center;gap:5px}
-  .undo:hover:not(:disabled){color:var(--bp-ink)}
+        display:flex;flex-direction:column;min-height:0;border-radius:0 0 16px 0}
+  .railhead{display:flex;align-items:baseline;justify-content:space-between;padding:15px 0 11px;
+            border-bottom:1px solid var(--bp-line);margin:0 16px}
+  .railhead h2{margin:0;font-family:var(--pps-display);font-weight:650;font-size:19px;
+               letter-spacing:-.01em;color:var(--bp-ink)}
+  .undo{font-size:12.5px;font-family:inherit;font-weight:500;color:var(--bp-dim);background:none;border:none;
+        cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:color .2s}
+  .undo:hover:not(:disabled){color:var(--cyan)}
   .undo:disabled{opacity:.35;cursor:not-allowed}
   .undo .ic{font-size:15px;line-height:1}
   .railscroll{overflow-y:auto;padding:4px 16px 20px;flex:1}
   .acc{border-bottom:1px solid var(--bp-line)}
   .acchead{width:100%;display:flex;align-items:center;gap:8px;background:none;border:none;padding:13px 2px;
-           cursor:pointer;font-size:15px;text-align:left}
+           cursor:pointer;font-size:14px;font-family:var(--pps-display);font-weight:600;
+           letter-spacing:-.005em;color:var(--bp-ink);text-align:left;transition:color .2s}
+  .acchead:hover{color:var(--cyan)}
   .acchead .caret{margin-left:auto;color:var(--bp-dim);transition:transform .18s}
   .acc.open .acchead .caret{transform:rotate(180deg)}
   .accbody{display:none;padding:0 2px 16px}
   .acc.open .accbody{display:block}
   .review{color:var(--bp-info);font-size:11.5px;line-height:1.5;margin:0 0 9px}
   .behavior{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
-  .behavior select{padding:7px 10px;border:1px solid var(--bp-line);border-radius:6px;
-                   background:var(--bp-surface);font-size:14px;min-width:130px}
-  .subbox{padding:11px 12px;border:1px dashed var(--bp-line);border-radius:8px;background:var(--bp-surface-2)}
+  .behavior select{padding:8px 11px;border:1px solid var(--bp-line);border-radius:10px;
+                   background:var(--bp-surface);color:var(--bp-ink);font-size:13.5px;font-family:inherit;
+                   min-width:130px;box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
+  .subbox{padding:12px 13px;border:1px solid var(--bp-line);border-radius:12px;background:var(--bp-surface-2)}
   .subbox + .subbox{margin-top:9px}
   /* sentence case, not the usual all-caps micro-label: these headings are
      phrases now, and a long phrase in caps is harder to read, not clearer */
   .subtitle{font-size:11.5px;font-weight:700;color:var(--bp-dim);display:block;margin-bottom:9px;line-height:1.35}
   .pills{display:flex;flex-wrap:wrap;gap:6px}
-  .pill{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:999px;padding:6px 13px;
-        font-size:12px;font-weight:600;color:var(--bp-dim);cursor:pointer}
-  .pill.on{background:var(--cyan);border-color:var(--cyan);color:#fff}
+  .pill{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:8px;padding:7px 14px;
+        font-size:11.5px;font-weight:500;font-family:inherit;color:var(--bp-dim);cursor:pointer;
+        transition:all .18s cubic-bezier(.4,0,.2,1)}
+  .pill:hover:not(.on){border-color:var(--cyan);color:var(--cyan)}
+  .pill.on{background:var(--cyan);border-color:var(--cyan);color:#fff;font-weight:600;
+           box-shadow:0 1px 2px rgba(0,126,255,.35)}
   .pill.wide{border-radius:8px}
   .subnote{font-size:11.5px;color:var(--bp-faint);line-height:1.5;margin:0}
 
   /* 3x3 anchor grid — corners, sides, centre */
   .anchorgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
-  .apt{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:7px;cursor:pointer;
+  .apt{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:8px;cursor:pointer;
        padding:7px 3px 6px;display:flex;flex-direction:column;align-items:center;gap:4px;
-       font-size:10px;font-weight:600;color:var(--bp-dim);line-height:1.15;min-height:52px;
-       justify-content:center;text-align:center}
-  .apt:hover{border-color:var(--bp-faint);color:var(--bp-ink)}
+       font-size:10px;font-weight:500;font-family:inherit;color:var(--bp-dim);line-height:1.15;min-height:52px;
+       justify-content:center;text-align:center;transition:all .18s cubic-bezier(.4,0,.2,1)}
+  .apt:hover:not(.on){border-color:var(--cyan);color:var(--cyan)}
   .aptdot{width:9px;height:9px;border-radius:50%;border:1.5px solid currentColor;flex-shrink:0}
-  .apt.on{background:var(--cyan);border-color:var(--cyan);color:#fff}
+  .apt.on{background:var(--cyan);border-color:var(--cyan);color:#fff;font-weight:600;
+          box-shadow:0 1px 2px rgba(0,126,255,.35)}
   .apt.on .aptdot{background:#fff;border-color:#fff}
 
   /* scale: 50–200% slider with fine 0.5% stepping */
   .scalerow{display:flex;align-items:center;gap:9px}
   .scalerow input[type=range]{flex:1;accent-color:var(--cyan);min-width:0}
-  .knurl{width:30px;height:30px;flex-shrink:0;border:1px solid var(--bp-line);border-radius:8px;
+  .knurl{width:32px;height:32px;flex-shrink:0;border:1px solid var(--bp-line);border-radius:8px;
          background:var(--bp-surface);cursor:pointer;font-size:15px;font-weight:700;line-height:1;
-         color:var(--bp-dim);padding:0}
-  .knurl:hover{background:var(--bp-btn);color:var(--bp-ink)}
+         color:var(--bp-dim);padding:0;font-family:inherit;transition:all .2s}
+  .knurl:hover{background:rgba(0,126,255,.12);border-color:var(--cyan);color:var(--cyan)}
   .scaleval{min-width:64px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;font-size:13px}
   .scaleends{display:flex;justify-content:space-between;font-size:10px;color:var(--bp-faint);margin-top:3px}
 
-  .applyall{display:flex;align-items:flex-start;gap:9px;margin-top:11px;padding:10px 12px;cursor:pointer;
-            border:1px solid var(--bp-line);border-radius:8px;font-size:12.5px;font-weight:600;color:var(--bp-dim)}
-  .applyall:hover{border-color:var(--bp-faint);color:var(--bp-ink)}
+  .applyall{display:flex;align-items:flex-start;gap:9px;margin-top:11px;padding:11px 13px;cursor:pointer;
+            border:1px solid var(--bp-line);border-radius:12px;font-size:12.5px;font-weight:600;
+            color:var(--bp-dim);background:var(--bp-surface);transition:all .2s}
+  .applyall:hover{border-color:var(--cyan);color:var(--cyan)}
   .applyall input{margin:1px 0 0;cursor:pointer;width:16px;height:16px;flex-shrink:0;accent-color:var(--cyan)}
-  .applyall.on{border-color:var(--cyan);background:rgba(0,126,255,.06);color:var(--bp-ink)}
+  .applyall.on{border-color:var(--cyan);background:var(--cyan-tint);color:var(--bp-ink)}
   .applyallhint{display:block;font-weight:400;font-size:11px;color:var(--bp-faint);line-height:1.4;margin-top:3px}
 
   .filerow{display:flex;align-items:center;gap:9px;margin-bottom:11px;font-size:11.5px;color:var(--bp-faint)}
-  .filebtn{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:8px;padding:6px 12px;
-           font-size:12px;font-weight:600;color:var(--bp-dim);cursor:pointer;white-space:nowrap}
-  .filebtn:hover{background:var(--bp-btn);color:var(--bp-ink)}
+  .filebtn{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:8px;padding:7px 13px;
+           font-size:11.5px;font-weight:500;font-family:inherit;color:var(--bp-dim);cursor:pointer;
+           white-space:nowrap;transition:all .2s}
+  .filebtn:hover{border-color:var(--cyan);color:var(--cyan);background:rgba(0,126,255,.06)}
   .srcmeta{line-height:1.35}
 
   .railstrip{padding:14px 16px 20px;overflow-y:auto;flex:1;min-height:0}
@@ -228,8 +289,8 @@
      wrapping though: a tall narrow panel wants rows, and overflow:visible here
      would cancel the sideways scrolling the bottom strip relies on. */
   .railstrip .strip{max-height:none;overflow:visible;flex-wrap:wrap}
-  .railstriphead{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
-                 color:var(--bp-faint);margin-bottom:10px}
+  .railstriphead{font-family:var(--pps-display);font-size:10px;font-weight:700;letter-spacing:.08em;
+                 text-transform:uppercase;color:var(--bp-faint);margin-bottom:10px}
 
   /* ── 3D preview ──────────────────────────────────────────────
      Ported from the shipped saddle-stitch preview: same dark viewport, same
@@ -268,10 +329,11 @@
   .bpspineshadow{position:absolute;top:0;left:50%;transform:translateX(-50%);width:16px;pointer-events:none;z-index:10;
                  background:radial-gradient(ellipse at center,rgba(0,0,0,.2),transparent 70%)}
   .bpnav{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:12px}
-  .navbtn{width:32px;height:32px;border-radius:50%;border:1px solid var(--bp-line);background:var(--bp-surface);
-          color:var(--bp-dim);font-size:16px;line-height:1;cursor:pointer}
-  .navbtn:disabled{opacity:.35;cursor:not-allowed}
-  .navbtn:not(:disabled):hover{background:var(--bp-btn);color:var(--bp-ink)}
+  .navbtn{width:36px;height:36px;min-width:36px;border-radius:50%;border:1px solid var(--bp-line);
+          background:var(--bp-btn);color:var(--bp-dim);font-size:16px;line-height:1;cursor:pointer;
+          display:flex;align-items:center;justify-content:center;font-family:inherit;transition:all .2s}
+  .navbtn:disabled{opacity:.25;cursor:not-allowed}
+  .navbtn:not(:disabled):hover{background:rgba(0,126,255,.12);border-color:var(--cyan);color:var(--cyan)}
   .navlbl{font-size:12px;color:var(--bp-dim);min-width:110px;text-align:center}
   /* ── narrow viewports ────────────────────────────────────────
      Three things must survive the squeeze, because without them the proof is
@@ -402,6 +464,7 @@
       <option value="48">48 pages</option>
       <option value="64">64 pages</option>
     </select>
+    <button class="themebtn" id="themeBtn">Dark skin</button>
   </div>
 </div>
 
@@ -463,7 +526,7 @@
 
     <div class="legendbar" id="legendBar">
       <span class="lgitem" style="color:#ef4444"><span class="swatch" style="border-top:2px solid #ef4444"></span>Bleed</span>
-      <span class="lgitem"><span class="swatch" style="border-top:2px dashed #111"></span>Trim</span>
+      <span class="lgitem" style="color:var(--bp-ink)"><span class="swatch" style="border-top:2px dashed currentColor"></span>Trim</span>
       <span class="lgitem" style="color:var(--green)"><span class="swatch" style="border-top:2px dashed #38a169"></span>Safety</span>
       <span class="lgitem" style="color:#3b82f6"><span class="swatch" style="border-top:2px solid #3b82f6"></span>Bound edge</span>
     </div>
@@ -1413,6 +1476,23 @@ window.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight') stepSpread(1);
   else if (e.key === 'ArrowLeft') stepSpread(-1);
 });
+
+/* The calculator carries a light/dark skin on data-pps-theme, so the proof has
+   to follow it rather than staying white while everything around it is not.
+   In the real modal that attribute is already set by the page; the toggle here
+   is prototype chrome, which is why it lives in the yellow strip. */
+const themeBtn = document.getElementById('themeBtn');
+function applyTheme(dark){
+  document.documentElement.setAttribute('data-pps-theme', dark ? 'dark' : 'light');
+  themeBtn.textContent = dark ? 'Light skin' : 'Dark skin';
+}
+themeBtn.onclick = () => {
+  applyTheme(document.documentElement.getAttribute('data-pps-theme') !== 'dark');
+  renderAll();
+};
+// Attribute only at boot: the first render happens below, once the model
+// exists. Calling renderAll here would run the rail against an empty page map.
+applyTheme(!!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
 
 document.getElementById('pageCount').onchange = e => {
   rebuildModel(parseInt(e.target.value, 10));
