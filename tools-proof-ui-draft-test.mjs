@@ -194,11 +194,33 @@ ck('3D disables APPROVE even though agree is ticked', await p.evaluate(()=>
   document.getElementById('agree').checked===true && document.getElementById('approveBtn').disabled===true));
 ck('3D says why the gate is unavailable', await p.evaluate(()=>
   /proof view only/i.test(document.getElementById('agreeReq').textContent)));
-ck('returning to Proof restores the gate', await p.evaluate(async ()=>{
+// ── the disclosure slot carries the caution for the view you are in ──
+ck('3D replaces the proof disclaimer with the mockup disclaimer', await p.evaluate(()=>{
+  const t=document.getElementById('note').innerText.replace(/\s+/g,' ');
+  return /Finished-product mockup, trimmed as it will be in the bindery/.test(t)
+      && /This is not the print surface/.test(t)
+      && /bleed, trim and safety are only shown on the Proof view/.test(t)
+      && /artwork cannot be approved from here/.test(t)
+      && !/Hardcopy Proof/.test(t);}),
+  await p.evaluate(()=>document.getElementById('note').innerText.replace(/\s+/g,' ').slice(0,80)+'...'));
+ck('the mockup disclaimer is not also duplicated beside the stage', await p.evaluate(()=>
+  !/Finished-product mockup/.test(document.getElementById('issuePanel').innerText)));
+ck('the closing sentence names a control that is on screen', await p.evaluate(async ()=>{
+  const gb=b=>[...document.querySelectorAll('#bookModes button')].find(x=>x.dataset.book===b).click();
+  gb('open'); await new Promise(r=>setTimeout(r,250));
+  const openTail=/arrow keys to step through spreads/.test(document.getElementById('note').innerText)
+              && !!document.getElementById('nextSpread');
+  gb('closed'); await new Promise(r=>setTimeout(r,250));
+  const closedTail=/Drag the cover to turn the book/.test(document.getElementById('note').innerText)
+              && !document.getElementById('nextSpread');
+  return openTail && closedTail;}));
+ck('returning to Proof restores the gate and the proof disclaimer', await p.evaluate(async ()=>{
   [...document.querySelectorAll('#modes button')].find(b=>b.dataset.mode==='proof').click();
   await new Promise(r=>setTimeout(r,300));
+  const t=document.getElementById('note').innerText;
   return document.getElementById('agree').disabled===false
-      && document.getElementById('approveBtn').disabled===false;}));
+      && document.getElementById('approveBtn').disabled===false
+      && /Hardcopy Proof/.test(t) && !/Finished-product mockup/.test(t);}));
 
 // ── 3D rendering ──
 await go('book'); await p.waitForTimeout(450);
