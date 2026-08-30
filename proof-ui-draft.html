@@ -6,39 +6,46 @@
 <meta name="robots" content="noindex,nofollow">
 <title>Proof UI — organizational draft (saddle stitch)</title>
 <!--
-  DRAFT / PROTOTYPE — not wired to any calculator.
+  DRAFT / PROTOTYPE — not wired to any calculator, but no longer faked.
 
-  Purpose: evaluate the ORGANIZATION of the reorganized proof UI before any of
-  it is built into calc-preview-test.html. Everything here is clickable but
-  nothing is real: pages are drawn placeholders, issues are scripted, and no
-  file is ever produced. Styling reuses the calculators' tokens so the layout
-  is judged on structure rather than on looking foreign.
+  Purpose: evaluate the reorganized proof UI before any of it is built into
+  calc-preview-test.html. Everything here now actually works: one composition
+  engine drives the proof surface, the magnifier, the thumbnails and the 3D
+  faces; the transforms really recompose the art; the issues are measured off
+  that composition rather than scripted; and you can drop your own file in.
+
+  What is still not real: no file is ever produced, nothing is uploaded, and
+  there is no PDF path — a dropped PDF is refused rather than rasterised.
+
+  Placement semantics are taken from the shipped calculator, not invented:
+    Crop     art at its own native size, cropped by the page edges
+    Fill     uniform scale to cover the page          (cover)
+    Fit      uniform scale to sit inside the page     (contain)
+    Stretch  non-uniform scale to fill the page
+    Scale    native size times a percentage
+  Crop, Fill and Scale can all crop, so all three take an anchor. Fit and
+  Stretch never crop, so they take none. The shipped code hard-centres every
+  one of them; the anchor is the review proposal, since that centring is what
+  cost order 87032.
 
   Decisions carried in from review:
-   - all six art behaviours (Crop / Fill / Fit / Stretch / Scale / Rotate);
-     sub-options render beneath the dropdown — pills, a 3x3 anchor grid, or a
-     slider for Scale
-   - the agree checkbox is ALWAYS required; it sits directly above APPROVE
-     rather than inside the disclosure, so the full disclaimer text can stay
-     without the header growing to hold it
+   - the agree checkbox is ALWAYS required, sits above APPROVE, and neither is
+     actionable in 3D — you cannot approve from a view that is not the proof
    - APPROVE sits in the far-right corner, close is the outermost element
-   - bind-specific vocabulary (spreads, cover names) comes from the MODEL
-     descriptor, never from the shell
-   - 3D replaces the proof surface AND swaps the right rail from Artwork Edit
-     to the page thumbnails, since 3D is a viewing mode, not an editing one
-   - the legend is a horizontal strip under the view controls and cannot
-     outlive the guides it explains
+   - bind-specific vocabulary comes from the MODEL descriptor, never the shell
+   - 3D replaces the proof surface AND swaps the right rail to the thumbnails
+   - the legend is a thin strip that cannot outlive the guides it explains
 -->
 <style>
   :root{
     --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
     --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#64748b;
-    --bp-btn:#f1f4f8; --bp-info:#1d4ed8;
+    --bp-btn:#f1f4f8; --bp-info:#1d4ed8; --bp-warn:#b45309;
     --cyan:#007eff; --magenta:#ec008c; --green:#38a169;
     --rail:376px;
   }
   *{box-sizing:border-box}
-  /* the groups below set display:flex, which would otherwise beat [hidden] */
+  /* the control groups set display:flex, which would otherwise beat [hidden] */
   [hidden]{display:none!important}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
        background:#eef1f5;color:var(--bp-ink);font-size:14px;padding:18px}
@@ -49,7 +56,7 @@
   select,button,input{font-family:inherit;font-size:inherit;color:inherit}
 
   /* ── header ──────────────────────────────────────────────── */
-  .header{border-bottom:1px solid var(--bp-line);padding:12px 16px 10px}
+  .header{border-bottom:1px solid var(--bp-line);padding:12px 16px 8px}
   .topbar{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
   .viewgroup{display:flex;align-items:center;gap:8px;border:1px solid var(--bp-line);border-radius:999px;
              padding:6px 12px;background:var(--bp-surface)}
@@ -61,17 +68,19 @@
   .modes{display:flex;border:1px solid var(--bp-line);border-radius:999px;overflow:hidden;background:var(--bp-btn)}
   .modes button{border:none;background:transparent;padding:7px 16px;font-size:12.5px;font-weight:700;cursor:pointer;color:var(--bp-dim)}
   .modes button.on{background:var(--bp-ink);color:#fff}
+  .modes.small button{padding:5px 13px;font-size:12px}
   .disclose{flex:1;min-width:300px;max-width:560px}
   .note{border:1.5px solid var(--magenta);background:var(--bp-surface-2);border-radius:4px;padding:8px 10px;
         font-size:11.5px;line-height:1.5}
   .note a{color:inherit;font-weight:600}
-  /* the gate lives with the button it gates, not inside the text it refers to:
-     the disclaimer keeps every word without the header growing to hold it */
+  /* the gate lives with the button it gates, not inside the text it refers to */
   .approvewrap{display:flex;flex-direction:column;gap:7px;align-items:flex-end;margin-left:auto}
   .agree{display:flex;align-items:center;gap:7px;font-size:13.5px}
   .agree label{cursor:pointer;display:flex;gap:7px;align-items:center;font-weight:600;white-space:nowrap}
   .agree input{margin:0;cursor:pointer;width:16px;height:16px;accent-color:var(--magenta)}
   .agree .req{font-size:11px;color:var(--bp-faint)}
+  .approvewrap.locked{opacity:.5}
+  .approvewrap.locked .agree label{cursor:not-allowed}
   .approverow{display:flex;align-items:center;gap:9px}
   .approve{border:none;border-radius:999px;background:var(--cyan);color:#fff;font-weight:800;letter-spacing:.03em;
            padding:12px 26px;font-size:15px;cursor:pointer;white-space:nowrap;box-shadow:0 2px 10px rgba(0,126,255,.35)}
@@ -80,32 +89,37 @@
             background:var(--bp-surface);color:var(--bp-dim);font-size:17px;line-height:1;cursor:pointer}
   .closebtn:hover{background:var(--bp-btn);color:var(--bp-ink)}
 
-  /* legend as a horizontal strip under the controls, not a box */
-  .legendbar{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:9px;padding-top:9px;
-             border-top:1px solid var(--bp-line);font-size:11.5px}
-  .legendbar .cap{font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--bp-faint);font-size:10px}
-  .lgitem{display:inline-flex;align-items:center;gap:7px;font-weight:700;white-space:nowrap}
-  .swatch{width:30px;height:0;flex-shrink:0}
-  .legendbar .chk{margin-left:auto}
-  .showlegend{border:1px dashed var(--bp-line);background:var(--bp-surface);border-radius:999px;
-              padding:5px 13px;font-size:11.5px;font-weight:600;color:var(--bp-dim);cursor:pointer;
-              margin-top:9px}
-  .showlegend:hover{border-style:solid;color:var(--bp-ink)}
+  /* legend: the smallest thing that still explains four colours */
+  .legendbar{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-top:7px;font-size:10px;
+             color:var(--bp-faint);line-height:1}
+  .lgitem{display:inline-flex;align-items:center;gap:5px;font-weight:700;white-space:nowrap}
+  .swatch{width:16px;height:0;flex-shrink:0}
 
   /* ── body ────────────────────────────────────────────────── */
   .body{display:flex;flex:1;min-height:0}
   .main{flex:1;min-width:0;display:flex;flex-direction:column;padding:14px 16px;gap:14px}
   .stagewrap{flex:1;display:flex;gap:16px;align-items:flex-start;min-height:0}
-  .stage{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
-  .sheet{position:relative;background:#fff;box-shadow:0 2px 14px rgba(15,23,42,.13)}
-  .sheet img{display:block;width:100%;height:100%}
+  .stage{flex:1;min-width:0;display:flex;align-items:flex-start;justify-content:center;
+         max-height:560px;overflow:auto;padding:2px}
+  .stage.center{align-items:center}
+  .sheet{position:relative;background:#fff;box-shadow:0 2px 14px rgba(15,23,42,.13);flex-shrink:0}
+  .sheet canvas{display:block;width:100%;height:100%}
+  .sheet.dropping{outline:3px dashed var(--cyan);outline-offset:4px}
   .badge{position:absolute;top:8px;right:8px;font-size:9.5px;font-weight:600;color:#fff;
-         background:rgba(15,23,42,.62);padding:3px 7px;border-radius:8px}
+         background:rgba(15,23,42,.62);padding:3px 7px;border-radius:8px;pointer-events:none}
+  .badge.warn{background:rgba(180,83,9,.85)}
   .g{position:absolute;pointer-events:none;box-sizing:border-box}
+  .lens{position:absolute;width:190px;height:190px;border-radius:50%;overflow:hidden;pointer-events:none;
+        border:2px solid rgba(15,23,42,.55);box-shadow:0 6px 22px rgba(0,0,0,.3);background:#fff;z-index:5}
+  .lens canvas{position:absolute;left:0;top:0}
   .issues{width:262px;flex-shrink:0;display:flex;flex-direction:column;gap:12px;padding-top:6px}
   .issue{display:flex;gap:8px;font-size:11.5px;line-height:1.5;color:var(--magenta)}
+  .issue.warn{color:var(--bp-warn)}
+  .issue.info{color:var(--bp-faint)}
   .bang{flex-shrink:0;width:17px;height:17px;border-radius:50%;background:var(--magenta);color:#fff;
         font-weight:800;font-size:11px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+  .issue.warn .bang{background:var(--bp-warn)}
+  .issue.info .bang{background:var(--bp-faint)}
 
   /* ── filmstrip — every cell identical, whatever its label ── */
   .strip{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}
@@ -118,11 +132,12 @@
   .grp .pg:last-child{border-right-color:transparent}
   .pg.sel{background:rgba(0,126,255,.10);box-shadow:inset 0 0 0 2px var(--cyan)}
   .pg .thumb{height:44px;flex-shrink:0;background:var(--bp-surface-2);border:1px solid var(--bp-line);
-             margin-bottom:4px;background-size:cover;background-position:center}
+             margin-bottom:4px;background-size:contain;background-position:center;background-repeat:no-repeat}
   .pg .cap{overflow:hidden}
   .pg .n{font-weight:800}
   .pg .dot{position:absolute;top:3px;right:3px;width:11px;height:11px;border-radius:50%;background:var(--magenta);
            color:#fff;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center}
+  .pg .dot.warn{background:var(--bp-warn)}
   .arrow{align-self:center;color:var(--bp-faint);font-size:17px;padding-top:34px}
 
   /* ── right rail ──────────────────────────────────────────── */
@@ -133,7 +148,8 @@
   .railhead h2{margin:0;font-size:21px;letter-spacing:-.01em}
   .undo{font-size:13px;color:var(--bp-dim);background:none;border:none;cursor:pointer;
         display:inline-flex;align-items:center;gap:5px}
-  .undo:hover{color:var(--bp-ink)}
+  .undo:hover:not(:disabled){color:var(--bp-ink)}
+  .undo:disabled{opacity:.35;cursor:not-allowed}
   .undo .ic{font-size:15px;line-height:1}
   .railscroll{overflow-y:auto;padding:4px 16px 20px;flex:1}
   .acc{border-bottom:1px solid var(--bp-line)}
@@ -148,9 +164,16 @@
   .behavior select{padding:7px 10px;border:1px solid var(--bp-line);border-radius:6px;
                    background:var(--bp-surface);font-size:14px;min-width:130px}
   .subbox{padding:11px 12px;border:1px dashed var(--bp-line);border-radius:8px;background:var(--bp-surface-2)}
+  .subbox + .subbox{margin-top:9px}
   /* sentence case, not the usual all-caps micro-label: these headings are
      phrases now, and a long phrase in caps is harder to read, not clearer */
   .subtitle{font-size:11.5px;font-weight:700;color:var(--bp-dim);display:block;margin-bottom:9px;line-height:1.35}
+  .pills{display:flex;flex-wrap:wrap;gap:6px}
+  .pill{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:999px;padding:6px 13px;
+        font-size:12px;font-weight:600;color:var(--bp-dim);cursor:pointer}
+  .pill.on{background:var(--cyan);border-color:var(--cyan);color:#fff}
+  .pill.wide{border-radius:8px}
+  .subnote{font-size:11.5px;color:var(--bp-faint);line-height:1.5;margin:0}
 
   /* 3x3 anchor grid — corners, sides, centre */
   .anchorgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
@@ -162,12 +185,6 @@
   .aptdot{width:9px;height:9px;border-radius:50%;border:1.5px solid currentColor;flex-shrink:0}
   .apt.on{background:var(--cyan);border-color:var(--cyan);color:#fff}
   .apt.on .aptdot{background:#fff;border-color:#fff}
-  .pills{display:flex;flex-wrap:wrap;gap:6px}
-  .pill{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:999px;padding:6px 13px;
-        font-size:12px;font-weight:600;color:var(--bp-dim);cursor:pointer}
-  .pill.on{background:var(--cyan);border-color:var(--cyan);color:#fff}
-  .pill.wide{border-radius:8px}
-  .subnote{font-size:11.5px;color:var(--bp-faint);line-height:1.5;margin:0}
 
   /* scale: 50–200% slider with fine 0.5% stepping */
   .scalerow{display:flex;align-items:center;gap:9px}
@@ -179,10 +196,15 @@
   .scaleval{min-width:64px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;font-size:13px}
   .scaleends{display:flex;justify-content:space-between;font-size:10px;color:var(--bp-faint);margin-top:3px}
 
+  .filerow{display:flex;align-items:center;gap:9px;margin-bottom:11px;font-size:11.5px;color:var(--bp-faint)}
+  .filebtn{border:1px solid var(--bp-line);background:var(--bp-surface);border-radius:8px;padding:6px 12px;
+           font-size:12px;font-weight:600;color:var(--bp-dim);cursor:pointer;white-space:nowrap}
+  .filebtn:hover{background:var(--bp-btn);color:var(--bp-ink)}
+  .srcmeta{line-height:1.35}
+
   .railstrip{padding:14px 16px 20px;overflow-y:auto}
   .railstriphead{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
                  color:var(--bp-faint);margin-bottom:10px}
-  .disabledish{opacity:.34;pointer-events:none}
 
   /* ── 3D preview ──────────────────────────────────────────────
      Ported from the shipped saddle-stitch preview: same dark viewport, same
@@ -226,17 +248,16 @@
   .navbtn:disabled{opacity:.35;cursor:not-allowed}
   .navbtn:not(:disabled):hover{background:var(--bp-btn);color:var(--bp-ink)}
   .navlbl{font-size:12px;color:var(--bp-dim);min-width:110px;text-align:center}
-  .modes.small button{padding:5px 13px;font-size:12px}
   @media (max-width:1180px){ .rail{width:330px} .issues{display:none} }
 </style>
 </head>
 <body>
 
 <div class="banner">
-  <strong>Draft prototype — organizational only.</strong> Nothing is wired to a calculator: pages are placeholders,
-  issues are scripted, transforms don't recompose the art yet. Try the <em>Art Behavior</em> dropdown on an expanded
-  page (Crop and Fill give a 3&times;3 anchor grid, Scale a slider), and the <em>Proof / 3D Preview</em> toggle — in 3D
-  the thumbnails move into the right panel, the cover drags to rotate, and <em>Pages</em> steps through the spreads.
+  <strong>Draft prototype — organizational, but working.</strong> The transforms really recompose the art, the issues
+  are measured off that composition, and the magnifier and zoom are live. <strong>Drop an image onto the page</strong>
+  (or use <em>Replace</em> in the rail) to try the anchors against your own artwork. Nothing is uploaded and no file is
+  ever produced.
 </div>
 
 <div class="shell">
@@ -248,8 +269,9 @@
         <span class="lbl">View</span>
         <label class="chk" for="zoom">Zoom</label>
         <select class="zoom" id="zoom">
-          <option>10%</option><option>25%</option><option>50%</option><option>75%</option>
-          <option selected>100%</option><option>125%</option>
+          <option value="fit" selected>Fit</option>
+          <option value="25">25%</option><option value="50">50%</option><option value="75">75%</option>
+          <option value="100">100%</option><option value="150">150%</option><option value="200">200%</option>
         </select>
         <span class="vsep"></span>
         <label class="chk"><input type="checkbox" id="mag"> Magnifying Glass</label>
@@ -282,10 +304,10 @@
         </div>
       </div>
 
-      <div class="approvewrap">
+      <div class="approvewrap" id="approveWrap">
         <div class="agree">
           <label><input type="checkbox" id="agree"> I understand and agree</label>
-          <span class="req">(required)</span>
+          <span class="req" id="agreeReq">(required)</span>
         </div>
         <div class="approverow">
           <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
@@ -295,21 +317,18 @@
     </div>
 
     <div class="legendbar" id="legendBar">
-      <span class="cap">Legend</span>
-      <span class="lgitem" style="color:#ef4444"><span class="swatch" style="border-top:2.5px solid #ef4444"></span>Bleed</span>
-      <span class="lgitem"><span class="swatch" style="border-top:2.5px dashed #111"></span>Trim</span>
-      <span class="lgitem" style="color:var(--green)"><span class="swatch" style="border-top:2.5px dashed #38a169"></span>Safety Margin</span>
-      <span class="lgitem" style="color:#3b82f6"><span class="swatch" style="border-top:2.5px solid #3b82f6"></span>Bound Edge</span>
-      <label class="chk"><input type="checkbox" id="hideLegend"> Hide legend</label>
+      <span class="lgitem" style="color:#ef4444"><span class="swatch" style="border-top:2px solid #ef4444"></span>Bleed</span>
+      <span class="lgitem"><span class="swatch" style="border-top:2px dashed #111"></span>Trim</span>
+      <span class="lgitem" style="color:var(--green)"><span class="swatch" style="border-top:2px dashed #38a169"></span>Safety</span>
+      <span class="lgitem" style="color:#3b82f6"><span class="swatch" style="border-top:2px solid #3b82f6"></span>Bound edge</span>
     </div>
-    <button class="showlegend" id="showLegend" hidden>Show legend</button>
   </div>
 
   <!-- ══ BODY ══ -->
   <div class="body">
     <div class="main">
       <div class="stagewrap">
-        <div class="stage"><div class="sheet" id="sheet"></div></div>
+        <div class="stage" id="stage"><div class="sheet" id="sheet"></div></div>
         <div class="issues" id="issuePanel"></div>
       </div>
       <div class="strip" id="stripBottom"></div>
@@ -320,7 +339,7 @@
       <div id="railEdit" style="display:flex;flex-direction:column;min-height:0;flex:1">
         <div class="railhead">
           <h2>Artwork Edit</h2>
-          <button class="undo" title="Undo last change"><span class="ic">&#8630;</span>Undo</button>
+          <button class="undo" id="undoBtn" title="Undo last change" disabled><span class="ic">&#8630;</span>Undo</button>
         </div>
         <div class="railscroll" id="rail"></div>
       </div>
@@ -332,6 +351,8 @@
     </div>
   </div>
 </div>
+
+<input type="file" id="filePick" accept="image/*" hidden>
 
 <script>
 /* ─────────────────────────────────────────────────────────────
@@ -347,14 +368,10 @@ const MODEL = {
   safety: 0.125,
   groups: [ {pages:[1]}, {pages:[2,3]}, {pages:[4,5]}, {pages:[6,7]}, {pages:[8]} ],
   pages: [
-    { n:1, name:'front cover',        issues:['bleed'] },
-    { n:2, name:'inside front cover', issues:[] },
-    { n:3, name:'',                   issues:[] },
-    { n:4, name:'',                   issues:[] },
-    { n:5, name:'',                   issues:[] },
-    { n:6, name:'',                   issues:[] },
-    { n:7, name:'inside back cover',  issues:[] },
-    { n:8, name:'back cover',         issues:[] }
+    { n:1, name:'front cover' },      { n:2, name:'inside front cover' },
+    { n:3, name:'' },                 { n:4, name:'' },
+    { n:5, name:'' },                 { n:6, name:'' },
+    { n:7, name:'inside back cover' },{ n:8, name:'back cover' }
   ],
   wholeFile: [
     'Review: Art was uploaded as electronic colors (RGB). It has been converted to CMYK. This increases the opportunity for unwarranted color drift.',
@@ -362,40 +379,78 @@ const MODEL = {
   ]
 };
 
-const ISSUE_TEXT = {
-  bleed: "Issue: Art doesn't fill bleed area. Ensure that you're including at least .125\" bleed, or scale the art to fill the area without getting text or other elements too close to the trim (safety margin)."
-};
+const BLEED_W = MODEL.trim.w + MODEL.bleed * 2;
+const BLEED_H = MODEL.trim.h + MODEL.bleed * 2;
 
-/* Behaviours and their sub-options. Crop and Fill both hard-centre in the
-   shipped calculator today; the anchor pills are the review proposal, since
-   that centring is what cost order 87032. Fit and Stretch take no parameters
-   and say so rather than showing an empty box. */
+/* Resolution thresholds. Placeholder art is generated at 150 DPI, so the
+   default placement sits comfortably clear of both — a warning only appears
+   once a transform has actually stretched the pixels too thin. */
+const DPI_WARN = 120, DPI_BAD = 90;
+
 const ANCHORS = [
   'Top Left',    'Top',    'Top Right',
   'Left',        'Center', 'Right',
   'Bottom Left', 'Bottom', 'Bottom Right'
 ];
+const ANCHOR_GRID = { key:'anchor', cells:ANCHORS };
+
+/* Placement semantics come from the shipped calculator (FIT_OPTS + the
+   compose branch), not from taste:
+     crop    native size, cropped by the page edges
+     fill    cover      (uniform, fills the page, crops the excess)
+     fit     contain    (uniform, sits inside the page, paper shows)
+     stretch non-uniform to fill
+     scale   native size times a percentage
+   Anything that can crop takes an anchor; fit and stretch cannot, so they
+   take none and say so rather than showing an empty box. */
 const BEHAVIORS = {
-  crop:    { label:'Crop',    sub:{ type:'grid', key:'anchor', title:'Crop Anchor: which reference point for art',
-                                    cells:ANCHORS } },
-  fill:    { label:'Fill',    sub:{ type:'grid', key:'anchor', title:'Fill Anchor: which reference point for art',
-                                    cells:ANCHORS } },
-  fit:     { label:'Fit',     sub:{ type:'note',  note:'No options — the whole page is fitted inside the trim, so some paper may show at two edges.' } },
-  stretch: { label:'Stretch', sub:{ type:'note',  note:'No options — art is stretched to fill the page. Proportions will change.' } },
-  scale:   { label:'Scale',   sub:{ type:'slider', key:'scale', title:'Size', min:50, max:200, step:0.5 } },
-  rotate:  { label:'Rotate',  sub:{ type:'pills', key:'rot', title:'Rotation',
-                                    pills:['0°','90°','180°','270°'], extra:'all' } }
+  crop:    { label:'Crop',    subs:[ { type:'grid', title:'Crop Anchor: which reference point for art', ...ANCHOR_GRID } ] },
+  fill:    { label:'Fill',    subs:[ { type:'grid', title:'Fill Anchor: which reference point for art', ...ANCHOR_GRID } ] },
+  fit:     { label:'Fit',     subs:[ { type:'note',  note:'No options — the whole page is fitted inside the trim, so some paper may show at two edges.' } ] },
+  stretch: { label:'Stretch', subs:[ { type:'note',  note:'No options — art is stretched to fill the page. Proportions will change.' } ] },
+  scale:   { label:'Scale',   subs:[ { type:'slider', key:'scale', title:'Size', min:50, max:200, step:0.5 },
+                                     { type:'grid', title:'Scale Anchor: which reference point for art', ...ANCHOR_GRID } ] },
+  rotate:  { label:'Rotate',  subs:[ { type:'pills', key:'rot', title:'Rotation',
+                                       pills:['0°','90°','180°','270°'], extra:'all' } ] }
 };
 
 const state = { mode:'proof', selected:1, openPage:1, wholeOpen:true, perPage:{},
-                bookMode:'closed', spread:0, rot:{ x:-15, y:-25 } };
+                bookMode:'closed', spread:0, rot:{ x:-15, y:-25 },
+                zoom:'fit', lens:null };
 MODEL.pages.forEach(p => state.perPage[p.n] = { behavior:'crop', anchor:'Center', scale:100, rot:'0°' });
 
-/* placeholder artwork, drawn not fetched */
-function pageArt(n, w, h){
+/* Undo: whole-map snapshots. Cheap at this size and impossible to get subtly
+   wrong, which matters more here than the memory would. */
+const history = [];
+function pushHistory(){
+  history.push(JSON.stringify(state.perPage));
+  if (history.length > 50) history.shift();
+  syncUndo();
+}
+function undo(){
+  if (!history.length) return;
+  state.perPage = JSON.parse(history.pop());
+  cache.clear();
+  syncUndo();
+  renderAll();
+}
+function syncUndo(){
+  const b = document.getElementById('undoBtn');
+  if (b) b.disabled = history.length === 0;
+}
+
+/* ── art sources ──────────────────────────────────────────────
+   Each page has a source with a real physical size, because that is what
+   "native size" means and it is the whole basis of the Crop mode. Placeholder
+   art is drawn at 150 DPI at exactly the trim size, so at native size it does
+   NOT reach the bleed — which is precisely the condition the bleed issue is
+   meant to catch, and it now catches it by measurement. */
+const SRC_DPI = 150;
+function drawPlaceholder(n){
+  const w = Math.round(MODEL.trim.w * SRC_DPI), h = Math.round(MODEL.trim.h * SRC_DPI);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const x = c.getContext('2d');
-  const cover = (n === 1 || n === 8);
+  const cover = (n === 1 || n === MODEL.pages.length);
   x.fillStyle = cover ? '#4a4a4a' : '#f7f7f5';
   x.fillRect(0,0,w,h);
   if (cover){
@@ -416,36 +471,205 @@ function pageArt(n, w, h){
     x.font = 'bold ' + Math.round(w/16) + 'px sans-serif';
     x.fillText('Page ' + n, w/2, h*0.085);
   }
-  return c.toDataURL('image/png');
+  return c;
 }
-const ART = {};
-MODEL.pages.forEach(p => ART[p.n] = pageArt(p.n, 330, 510));
+const SRC = {};
+MODEL.pages.forEach(p => {
+  const c = drawPlaceholder(p.n);
+  SRC[p.n] = { el:c, w:c.width, h:c.height, inW:MODEL.trim.w, inH:MODEL.trim.h, label:'placeholder' };
+});
+
+/* ── the composition engine ───────────────────────────────────
+   ONE function. The proof surface, the magnifier, the thumbnails and the 3D
+   faces are all this, at different pixel sizes — which is the invariant the
+   shipped calculator now holds and the reason a proof can be trusted to match
+   what prints. Screen and print would differ only in the size asked for. */
+const cache = new Map();
+function txKey(n){
+  const t = state.perPage[n];
+  return n + '|' + t.behavior + '|' + t.anchor + '|' + t.scale + '|' + t.rot + '|' + (SRC[n].stamp || 0);
+}
+function composePage(n, W, H){
+  const key = txKey(n) + '|' + W + 'x' + H;
+  const hit = cache.get(key);
+  if (hit) return hit;
+
+  const t = state.perPage[n], src = SRC[n];
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+
+  // Rotation first, so every later measurement is of what actually lands.
+  const steps = ['0°','90°','180°','270°'].indexOf(t.rot);
+  const quarter = steps === 1 || steps === 3;
+  const sw = quarter ? src.h : src.w, sh = quarter ? src.w : src.h;
+  const inW = quarter ? src.inH : src.inW, inH = quarter ? src.inW : src.inH;
+
+  const pxPerIn = W / BLEED_W;
+  let drawW, drawH;
+  switch (t.behavior){
+    case 'stretch': drawW = W; drawH = H; break;
+    case 'fit':  { const s = Math.min(W/sw, H/sh); drawW = sw*s; drawH = sh*s; break; }
+    case 'fill': { const s = Math.max(W/sw, H/sh); drawW = sw*s; drawH = sh*s; break; }
+    case 'scale': drawW = inW * pxPerIn * (t.scale/100); drawH = inH * pxPerIn * (t.scale/100); break;
+    default:      drawW = inW * pxPerIn;                 drawH = inH * pxPerIn;           // crop, native
+  }
+
+  // Anchor. Fit and stretch never crop, so they are always centred whatever
+  // the stored anchor says — an anchor that does nothing must not appear to.
+  const anchored = t.behavior === 'crop' || t.behavior === 'fill' || t.behavior === 'scale';
+  const a = anchored ? t.anchor : 'Center';
+  const ax = /Left/.test(a) ? 0 : /Right/.test(a) ? 1 : 0.5;
+  const ay = /Top/.test(a)  ? 0 : /Bottom/.test(a) ? 1 : 0.5;
+  const dx = (W - drawW) * ax, dy = (H - drawH) * ay;
+
+  ctx.save();
+  ctx.translate(dx + drawW/2, dy + drawH/2);
+  if (steps) ctx.rotate(steps * Math.PI / 2);
+  ctx.drawImage(src.el, quarter ? -drawH/2 : -drawW/2, quarter ? -drawW/2 : -drawH/2,
+                        quarter ? drawH : drawW,       quarter ? drawW : drawH);
+  ctx.restore();
+
+  // Effective resolution of what was actually placed — the honest number, not
+  // the file's nominal DPI.
+  const effDpi = Math.round(sw / (drawW / pxPerIn));
+  const out = { canvas:c, place:{ x:dx, y:dy, w:drawW, h:drawH }, effDpi, W, H };
+  if (cache.size > 220) cache.clear();
+  cache.set(key, out);
+  return out;
+}
+
+/* Issues, measured rather than scripted. */
+const ISSUE_TEXT = {
+  bleed: "Issue: Art doesn't fill bleed area. Ensure that you're including at least " + MODEL.bleed + '" bleed, or scale the art to fill the area without getting text or other elements too close to the trim (safety margin).',
+  lowres: 'Issue: at this size the art works out to {dpi} DPI. Below about ' + DPI_BAD + ' DPI it will look soft or pixelated in print. Use a larger file or reduce the scale.',
+  softres: 'Heads up: at this size the art works out to {dpi} DPI. 300 DPI is ideal; below about ' + DPI_WARN + ' DPI, fine detail and small type start to soften.'
+};
+function analyze(n){
+  // Measured at a fixed working size — the geometry is scale-independent, so
+  // one modest composition answers for every display size.
+  const r = composePage(n, 460, Math.round(460 * BLEED_H / BLEED_W));
+  const out = [];
+  const p = r.place, eps = 0.5;
+  if (p.x > eps || p.y > eps || p.x + p.w < r.W - eps || p.y + p.h < r.H - eps){
+    out.push({ kind:'bleed', level:'error', text:ISSUE_TEXT.bleed });
+  }
+  if (r.effDpi < DPI_BAD){
+    out.push({ kind:'lowres', level:'error', text:ISSUE_TEXT.lowres.replace('{dpi}', r.effDpi) });
+  } else if (r.effDpi < DPI_WARN){
+    out.push({ kind:'softres', level:'warn', text:ISSUE_TEXT.softres.replace('{dpi}', r.effDpi) });
+  }
+  return out;
+}
 
 function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 
-/* ── the surface ────────────────────────────────────────────── */
+/* ── the proof surface ──────────────────────────────────────── */
+const FIT_H = 470;                                   // the "Fit" height
+function sheetSize(){
+  if (state.zoom === 'fit'){
+    const H = FIT_H;
+    return { W: Math.round(H * BLEED_W / BLEED_H), H };
+  }
+  // 96 CSS px to the inch is what "100%" has to mean for the number to be worth
+  // printing next to a physical size.
+  const s = parseFloat(state.zoom) / 100;
+  return { W: Math.round(BLEED_W * 96 * s), H: Math.round(BLEED_H * 96 * s) };
+}
+
 function renderStage(){
   const sheet = document.getElementById('sheet');
-  const bleedW = MODEL.trim.w + MODEL.bleed*2, bleedH = MODEL.trim.h + MODEL.bleed*2;
-
-  if (state.mode === 'book'){ renderBook(sheet); return; }
+  const stage = document.getElementById('stage');
+  if (state.mode === 'book'){ stage.classList.add('center'); renderBook(sheet); return; }
+  stage.classList.remove('center');
 
   const guidesOff = document.getElementById('hideGuides').checked;
-  const H = 470, W = Math.round(H * (bleedW/bleedH));
+  const { W, H } = sheetSize();
+  // Compose above display size so the magnifier has real pixels to show.
+  const r = composePage(state.selected, Math.max(W, 1100), Math.round(Math.max(W, 1100) * BLEED_H / BLEED_W));
+
   const pc = (v,t) => (v/t*100) + '%';
-  const bl = pc(MODEL.bleed,bleedW), bt = pc(MODEL.bleed,bleedH);
-  const sl = pc(MODEL.bleed+MODEL.safety,bleedW), st2 = pc(MODEL.bleed+MODEL.safety,bleedH);
+  const bl = pc(MODEL.bleed, BLEED_W), bt = pc(MODEL.bleed, BLEED_H);
+  const sl = pc(MODEL.bleed+MODEL.safety, BLEED_W), st2 = pc(MODEL.bleed+MODEL.safety, BLEED_H);
   const spineLeft = state.selected % 2 === 1;
 
+  const bad = r.effDpi < DPI_BAD, soft = r.effDpi < DPI_WARN;
   sheet.style.cssText = 'width:'+W+'px;height:'+H+'px';
   sheet.innerHTML =
-    '<img src="'+ART[state.selected]+'" alt="">' +
-    '<div class="badge">300 DPI · print pixels</div>' +
+    '<div class="badge'+(soft ? ' warn' : '')+'">'+r.effDpi+' DPI'+(bad ? ' · too low' : soft ? ' · soft' : '')+'</div>' +
     (guidesOff ? '' :
       '<div class="g" style="inset:0;border:2px dashed #ef4444"></div>' +
       '<div class="g" style="top:'+bt+';left:'+bl+';right:'+bl+';bottom:'+bt+';border:2px dashed #fff;filter:drop-shadow(0 0 1px #000)"></div>' +
       '<div class="g" style="top:'+st2+';left:'+sl+';right:'+sl+';bottom:'+st2+';border:2px dashed '+css('--green')+'"></div>' +
       '<div class="g" style="'+(spineLeft?'left:'+bl:'right:'+bl)+';top:'+bt+';bottom:'+bt+';width:3px;background:#3b82f6"></div>');
+  sheet.insertBefore(r.canvas, sheet.firstChild);
+  attachSheetHandlers(sheet, r);
+}
+
+/* Magnifier: the lens shows the SAME composition at 3x, so it can never
+   disagree with the surface underneath it. Guides are redrawn inside the lens
+   because a magnifier that hides the trim line is worse than none. */
+const LENS = 190, LENS_Z = 3;
+function attachSheetHandlers(sheet, r){
+  sheet.onmousemove = e => {
+    if (!document.getElementById('mag').checked) return;
+    const b = sheet.getBoundingClientRect();
+    const fx = (e.clientX - b.left) / b.width, fy = (e.clientY - b.top) / b.height;
+    if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return hideLens();
+    showLens(sheet, r, fx, fy, e.clientX - b.left, e.clientY - b.top);
+  };
+  sheet.onmouseleave = hideLens;
+  // Drag-and-drop replaces the art on the page you are looking at.
+  sheet.ondragover = e => { e.preventDefault(); sheet.classList.add('dropping'); };
+  sheet.ondragleave = () => sheet.classList.remove('dropping');
+  sheet.ondrop = e => {
+    e.preventDefault(); sheet.classList.remove('dropping');
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) loadArt(state.selected, f);
+  };
+}
+function hideLens(){
+  const l = document.getElementById('lens');
+  if (l) l.remove();
+}
+function showLens(sheet, r, fx, fy, px, py){
+  hideLens();
+  const wrap = document.createElement('div');
+  wrap.className = 'lens'; wrap.id = 'lens';
+  wrap.style.left = (px - LENS/2) + 'px';
+  wrap.style.top  = (py - LENS/2) + 'px';
+
+  const lc = document.createElement('canvas');
+  lc.width = LENS; lc.height = LENS;
+  const ctx = lc.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,LENS,LENS);
+  // Source window in composed pixels: the lens covers LENS/zoom display px.
+  const b = sheet.getBoundingClientRect();
+  const scale = r.W / b.width;                     // composed px per display px
+  const winW = (LENS / LENS_Z) * scale, winH = winW;
+  const sx = fx * r.W - winW/2, sy = fy * r.H - winH/2;
+  ctx.drawImage(r.canvas, sx, sy, winW, winH, 0, 0, LENS, LENS);
+
+  if (!document.getElementById('hideGuides').checked){
+    // Guide positions in composed pixels, mapped into the lens.
+    const toX = v => (v * r.W / BLEED_W - sx) * (LENS / winW);
+    const toY = v => (v * r.H / BLEED_H - sy) * (LENS / winH);
+    const box = (x0,y0,x1,y1,color,dash) => {
+      ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 2;
+      if (dash) ctx.setLineDash(dash);
+      ctx.strokeRect(toX(x0), toY(y0), toX(x1)-toX(x0), toY(y1)-toY(y0));
+      ctx.restore();
+    };
+    box(0, 0, BLEED_W, BLEED_H, '#ef4444', [7,5]);
+    box(MODEL.bleed, MODEL.bleed, BLEED_W-MODEL.bleed, BLEED_H-MODEL.bleed, '#111', [7,5]);
+    const s = MODEL.bleed + MODEL.safety;
+    box(s, s, BLEED_W-s, BLEED_H-s, '#38a169', [7,5]);
+  }
+  wrap.appendChild(lc);
+  sheet.appendChild(wrap);
 }
 
 /* ── 3D preview ───────────────────────────────────────────────
@@ -455,8 +679,7 @@ function renderStage(){
    same rule that a saddle book has no spine — its thickness comes from the
    page count and its stapled edge is flat.
 
-   Interior pages are everything but the outer covers, paired left/right, so a
-   spread here is exactly a spread in the finished piece. */
+   The faces are composed pages, so a transform shows up on the mockup too. */
 const INTERIOR = MODEL.pages.filter(p => p.n !== 1 && p.n !== MODEL.pages.length).map(p => p.n);
 const TOTAL_SPREADS = Math.ceil(INTERIOR.length / 2);
 const spreadOfPage = n => (n === 1 || n === MODEL.pages.length) ? null : Math.floor(INTERIOR.indexOf(n) / 2);
@@ -494,6 +717,17 @@ window.addEventListener('touchmove', e => {
 }, { passive:false });
 window.addEventListener('touchend', dragEnd);
 
+/* The finished piece is trimmed, so the mockup shows the TRIM area — the
+   bleed is cut off in the bindery and showing it here would be a lie. */
+function trimmedFace(n, W){
+  const H = Math.round(W * MODEL.trim.h / MODEL.trim.w);
+  const full = composePage(n, Math.round(W * BLEED_W / MODEL.trim.w), Math.round(H * BLEED_H / MODEL.trim.h));
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const inset = MODEL.bleed / BLEED_W * full.W, insetY = MODEL.bleed / BLEED_H * full.H;
+  c.getContext('2d').drawImage(full.canvas, inset, insetY, full.W - inset*2, full.H - insetY*2, 0, 0, W, H);
+  return c.toDataURL('image/png');
+}
+
 function renderBook(sheet){
   const closed = state.bookMode === 'closed';
   const H = 360, W = Math.round(H * (MODEL.trim.w / MODEL.trim.h));
@@ -505,13 +739,13 @@ function renderBook(sheet){
     // three open edges show page edges while the stapled edge is a flat band.
     const depth = Math.max(2, MODEL.pages.length * 0.3), half = depth / 2;
     const edge = 'repeating-linear-gradient(0deg,#f5f0e8 0px,#e8e0d4 1px,#f0ebe3 2px)';
-    const face = (n, radius) => '<div class="bpface '+(n === 1 ? 'front' : 'back')+'" style="width:'+W+'px;height:'+H+'px;'+
-      'background-image:url('+ART[n]+');background-size:cover;background-color:#f8f5f0;border-radius:'+radius+'"></div>';
+    const face = (n, cls, radius) => '<div class="bpface '+cls+'" style="width:'+W+'px;height:'+H+'px;'+
+      'background-image:url('+trimmedFace(n, W*2)+');background-size:cover;background-color:#f8f5f0;border-radius:'+radius+'"></div>';
     html +=
       '<div class="bpscene" id="bpscene" style="transform:rotateX('+state.rot.x+'deg) rotateY('+state.rot.y+'deg)">' +
         '<div class="bpclosed" style="width:'+W+'px;height:'+H+'px;--half-depth:'+half+'px">' +
-          face(1, '1px 4px 4px 1px') +
-          face(MODEL.pages.length, '4px 1px 1px 4px') +
+          face(1, 'front', '1px 4px 4px 1px') +
+          face(MODEL.pages.length, 'back', '4px 1px 1px 4px') +
           '<div class="bpface topedge"    style="width:'+W+'px;height:'+depth+'px;background:'+edge+'"></div>' +
           '<div class="bpface bottomedge" style="width:'+W+'px;height:'+depth+'px;background:'+edge+'"></div>' +
           '<div class="bpface foreedge"   style="width:'+depth+'px;height:'+H+'px;background:'+edge+'"></div>' +
@@ -523,7 +757,7 @@ function renderBook(sheet){
     const lp = INTERIOR[state.spread * 2], rp = INTERIOR[state.spread * 2 + 1];
     const leaf = (n, side) => n
       ? '<div class="bppage '+side+'" style="width:'+W+'px;height:'+H+'px;left:'+(side === 'left' ? 0 : W)+'px">' +
-          '<img src="'+ART[n]+'" alt=""><div class="bpshadow'+(side === 'left' ? 'l' : 'r')+'"></div>' +
+          '<img src="'+trimmedFace(n, W*2)+'" alt=""><div class="bpshadow'+(side === 'left' ? 'l' : 'r')+'"></div>' +
           '<span class="bppagenum">'+n+'</span></div>'
       : '';
     html +=
@@ -550,9 +784,8 @@ function renderBook(sheet){
     vp.onmousedown  = e => { e.preventDefault(); dragStart(e.clientX, e.clientY); };
     vp.ontouchstart = e => { const t = e.touches[0]; if (t) dragStart(t.clientX, t.clientY); };
   } else {
-    const prev = document.getElementById('prevSpread'), next = document.getElementById('nextSpread');
-    prev.onclick = () => stepSpread(-1);
-    next.onclick = () => stepSpread(1);
+    document.getElementById('prevSpread').onclick = () => stepSpread(-1);
+    document.getElementById('nextSpread').onclick = () => stepSpread(1);
   }
 }
 
@@ -592,17 +825,21 @@ function setBookMode(m){
 function renderIssues(){
   const el = document.getElementById('issuePanel');
   if (state.mode === 'book'){
-    el.innerHTML = '<div class="issue" style="color:var(--bp-faint)"><span class="bang" style="background:var(--bp-faint)">i</span>' +
-      '<span>Finished-product mockup. This is <strong>not</strong> the print surface — bleed, trim and safety are only shown on the Proof view.' +
+    el.innerHTML = '<div class="issue info"><span class="bang">i</span>' +
+      '<span>Finished-product mockup, trimmed as it will be in the bindery. This is <strong>not</strong> the print ' +
+      'surface — bleed, trim and safety are only shown on the Proof view, and artwork cannot be approved from here.' +
       (state.bookMode === 'closed'
         ? ' Drag the cover to turn the book.'
         : ' Use &#8249; &#8250; or the arrow keys to step through spreads.') +
       '</span></div>';
     return;
   }
-  const pg = MODEL.pages.find(p => p.n === state.selected);
-  el.innerHTML = (pg.issues||[]).map(k =>
-    '<div class="issue"><span class="bang">!</span><span>'+ISSUE_TEXT[k]+'</span></div>').join('');
+  const list = analyze(state.selected);
+  el.innerHTML = list.length
+    ? list.map(i => '<div class="issue '+(i.level === 'warn' ? 'warn' : '')+'">' +
+        '<span class="bang">!</span><span>'+i.text+'</span></div>').join('')
+    : '<div class="issue info"><span class="bang">&#10003;</span><span>No problems found on this page: the art ' +
+      'reaches the bleed on all four sides and has enough resolution at this size.</span></div>';
 }
 
 /* ── filmstrip: identical cells, rendered into whichever container is
@@ -619,11 +856,14 @@ function renderStrip(){
     const grp = document.createElement('div'); grp.className = 'grp';
     g.pages.forEach(n => {
       const p = MODEL.pages.find(q => q.n === n);
+      const issues = analyze(n);
+      const worst = issues.some(i => i.level === 'error') ? 'error' : issues.length ? 'warn' : '';
+      const thumb = composePage(n, 132, Math.round(132 * BLEED_H / BLEED_W)).canvas.toDataURL('image/png');
       const d = document.createElement('div');
       d.className = 'pg' + (isSel(n) ? ' sel' : '');
-      d.innerHTML = '<div class="thumb" style="background-image:url('+ART[n]+')"></div>' +
+      d.innerHTML = '<div class="thumb" style="background-image:url('+thumb+')"></div>' +
                     '<div class="cap"><span class="n">P'+n+'</span>' + (p.name ? '<br>'+p.name : '') + '</div>' +
-                    ((p.issues||[]).length ? '<span class="dot">!</span>' : '');
+                    (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'">!</span>' : '');
       d.onclick = () => {
         state.selected = n; state.openPage = n;
         if (state.mode === 'book') bookGoToPage(n);
@@ -655,10 +895,11 @@ function renderRail(){
   MODEL.pages.forEach(p => {
     const open = state.openPage === p.n;
     const st = state.perPage[p.n];
+    const issues = analyze(p.n);
     const acc = document.createElement('div');
     acc.className = 'acc' + (open ? ' open' : '');
     const title = 'Page: ' + p.n + (p.name ? ' (' + p.name + ')' : '');
-    const bang = (p.issues||[]).length ? '<span class="bang">!</span>' : '';
+    const bang = issues.length ? '<span class="bang"'+(issues.every(i=>i.level==='warn') ? ' style="background:var(--bp-warn)"' : '')+'>!</span>' : '';
     acc.innerHTML = '<button class="acchead"><span>'+title+'</span>'+bang+'<span class="caret">⌄</span></button>' +
                     '<div class="accbody"></div>';
     acc.querySelector('.acchead').onclick = () => {
@@ -668,6 +909,19 @@ function renderRail(){
     };
     if (open){
       const body = acc.querySelector('.accbody');
+
+      // Which file this page is showing, and what it is worth at this size.
+      const src = SRC[p.n], r = composePage(p.n, 460, Math.round(460 * BLEED_H / BLEED_W));
+      const fr = document.createElement('div');
+      fr.className = 'filerow';
+      fr.innerHTML = '<span class="srcmeta">' + src.label + ' · ' + src.w + '&times;' + src.h +
+                     'px · <strong>' + r.effDpi + ' DPI</strong> as placed</span>';
+      const fb = document.createElement('button');
+      fb.className = 'filebtn'; fb.textContent = 'Replace…';
+      fb.onclick = () => pickFileFor(p.n);
+      fr.appendChild(fb);
+      body.appendChild(fr);
+
       const row = document.createElement('div');
       row.className = 'behavior';
       row.innerHTML = '<span>Art Behavior:</span>';
@@ -677,18 +931,17 @@ function renderRail(){
         o.value = k; o.textContent = BEHAVIORS[k].label; o.selected = (st.behavior === k);
         sel.appendChild(o);
       });
-      sel.onchange = e => { st.behavior = e.target.value; renderRail(); };
+      sel.onchange = e => { pushHistory(); st.behavior = e.target.value; renderAll(); };
       row.appendChild(sel);
       body.appendChild(row);
-      body.appendChild(subOptions(p.n));
+      BEHAVIORS[st.behavior].subs.forEach(sub => body.appendChild(subOption(p.n, sub)));
     }
     rail.appendChild(acc);
   });
 }
 
-function subOptions(n){
+function subOption(n, sub){
   const st = state.perPage[n];
-  const sub = BEHAVIORS[st.behavior].sub;
   const box = document.createElement('div');
   box.className = 'subbox';
 
@@ -706,7 +959,7 @@ function subOptions(n){
       b.className = 'apt' + (st[sub.key] === v ? ' on' : '');
       b.title = v;
       b.innerHTML = '<span class="aptdot"></span><span class="aptlbl">'+v+'</span>';
-      b.onclick = () => { st[sub.key] = v; renderRail(); };
+      b.onclick = () => { pushHistory(); st[sub.key] = v; renderAll(); };
       g.appendChild(b);
     });
     box.appendChild(g);
@@ -722,10 +975,17 @@ function subOptions(n){
     rng.type='range'; rng.min=sub.min; rng.max=sub.max; rng.step=sub.step; rng.value=st.scale;
     const val = document.createElement('span'); val.className='scaleval';
     const show = () => { val.textContent = st.scale.toFixed(1) + '%'; rng.value = st.scale; };
-    const set = v => { st.scale = Math.min(sub.max, Math.max(sub.min, Math.round(v*2)/2)); show(); };
-    rng.oninput = e => set(parseFloat(e.target.value));
-    dec.onclick = () => set(st.scale - sub.step);
-    inc.onclick = () => set(st.scale + sub.step);
+    // A drag is one undo step, not a hundred: snapshot on the first move only.
+    let dragging = false;
+    const set = (v, snapshot) => {
+      if (snapshot && !dragging){ pushHistory(); dragging = true; }
+      st.scale = Math.min(sub.max, Math.max(sub.min, Math.round(v*2)/2));
+      show(); repaintFromScale();
+    };
+    rng.oninput  = e => set(parseFloat(e.target.value), true);
+    rng.onchange = () => { dragging = false; renderAll(); };
+    dec.onclick = () => { pushHistory(); set(st.scale - sub.step, false); renderAll(); };
+    inc.onclick = () => { pushHistory(); set(st.scale + sub.step, false); renderAll(); };
     row.append(dec, rng, inc, val);
     box.appendChild(row);
     const ends = document.createElement('div');
@@ -742,27 +1002,85 @@ function subOptions(n){
     const b = document.createElement('button');
     b.className = 'pill' + (st[sub.key] === v ? ' on' : '');
     b.textContent = v;
-    b.onclick = () => { st[sub.key] = v; renderRail(); };
+    b.onclick = () => { pushHistory(); st[sub.key] = v; renderAll(); };
     pills.appendChild(b);
   });
   if (sub.extra === 'all'){
     const b = document.createElement('button');
     b.className = 'pill wide'; b.textContent = '↻ Apply to all pages';
+    b.onclick = () => {
+      pushHistory();
+      const v = st[sub.key];
+      MODEL.pages.forEach(p => state.perPage[p.n][sub.key] = v);
+      renderAll();
+    };
     pills.appendChild(b);
   }
   box.appendChild(pills);
   return box;
 }
 
+/* Repaint only the surface while a slider is being dragged — a full renderAll
+   would rebuild the rail under the user's cursor and drop the drag. */
+function repaintFromScale(){
+  renderStage();
+}
+
+/* ── artwork replacement ────────────────────────────────────── */
+let pickTarget = null;
+function pickFileFor(n){
+  pickTarget = n;
+  document.getElementById('filePick').click();
+}
+document.getElementById('filePick').onchange = e => {
+  const f = e.target.files && e.target.files[0];
+  if (f && pickTarget != null) loadArt(pickTarget, f);
+  e.target.value = '';
+};
+function loadArt(n, file){
+  if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)){
+    alert('This prototype does not rasterise PDFs — the real calculator does. Try a PNG or JPEG.');
+    return;
+  }
+  if (!/^image\//.test(file.type)){
+    alert('That is not an image this prototype can show.');
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    // A file with no stated physical size is taken at 300 DPI, which is what a
+    // print shop assumes and makes the DPI readout mean something.
+    SRC[n] = { el:img, w:img.naturalWidth, h:img.naturalHeight,
+               inW:img.naturalWidth/300, inH:img.naturalHeight/300,
+               label:file.name, stamp:Date.now() };
+    cache.clear();
+    renderAll();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); alert('That image could not be read.'); };
+  img.src = url;
+}
+
 /* The legend explains the guides, so it cannot outlive them: hiding guides
-   (or entering 3D, which has none) hides it outright. The restore button
-   appears only when the legend is the ONLY thing hidden. */
+   (or entering 3D, which has none) hides it outright. */
 function renderLegend(){
   const guidesOff = document.getElementById('hideGuides').checked;
-  const manual = document.getElementById('hideLegend').checked;
-  const applicable = state.mode === 'proof' && !guidesOff;
-  document.getElementById('legendBar').style.display = (applicable && !manual) ? '' : 'none';
-  document.getElementById('showLegend').hidden = !(applicable && manual);
+  document.getElementById('legendBar').hidden = !(state.mode === 'proof' && !guidesOff);
+}
+
+/* Approval is a statement about the PROOF. In 3D you are looking at a trimmed
+   mockup with no guides, so neither the acknowledgement nor the button is
+   actionable there — the gate would otherwise be satisfiable from a view that
+   deliberately does not show what is being approved. */
+function renderApproval(){
+  const book = state.mode === 'book';
+  const agree = document.getElementById('agree');
+  const wrap  = document.getElementById('approveWrap');
+  agree.disabled = book;
+  wrap.classList.toggle('locked', book);
+  document.getElementById('agreeReq').textContent = book ? '(Proof view only)' : '(required)';
+  document.getElementById('approveBtn').disabled = book || !agree.checked;
+  wrap.title = book ? 'Switch to the Proof view to approve artwork.' : '';
 }
 
 function renderChrome(){
@@ -781,7 +1099,11 @@ function renderChrome(){
     b.classList.toggle('on', b.dataset.book === state.bookMode));
 }
 
-function renderAll(){ renderChrome(); renderStage(); renderIssues(); renderStrip(); renderRail(); renderLegend(); }
+function renderAll(){
+  renderChrome(); renderStage(); renderIssues(); renderStrip();
+  if (state.mode !== 'book') renderRail();
+  renderLegend(); renderApproval();
+}
 
 document.getElementById('modes').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -799,23 +1121,20 @@ document.getElementById('resetView').onclick = () => {
   const s = bookScene();
   if (s){ s.style.transition = ''; applyRot(); }
 };
+document.getElementById('zoom').onchange = e => { state.zoom = e.target.value; renderStage(); };
+document.getElementById('mag').onchange = () => { if (!document.getElementById('mag').checked) hideLens(); };
+document.getElementById('hideGuides').onchange = () => { renderStage(); renderLegend(); };
+document.getElementById('undoBtn').onclick = undo;
+document.getElementById('agree').onchange = renderApproval;
+document.getElementById('approveBtn').onclick = () =>
+  alert('Prototype — no artwork is approved and no files are produced.');
+document.getElementById('closeBtn').onclick = () =>
+  alert('Prototype — this would close the proof and return to the calculator.');
 window.addEventListener('keydown', e => {
   if (state.mode !== 'book' || state.bookMode !== 'open') return;
   if (e.key === 'ArrowRight') stepSpread(1);
   else if (e.key === 'ArrowLeft') stepSpread(-1);
 });
-document.getElementById('hideGuides').onchange = () => { renderStage(); renderLegend(); };
-document.getElementById('hideLegend').onchange = renderLegend;
-document.getElementById('showLegend').onclick = () => {
-  document.getElementById('hideLegend').checked = false; renderLegend();
-};
-document.getElementById('agree').onchange = e => {
-  document.getElementById('approveBtn').disabled = !e.target.checked;
-};
-document.getElementById('approveBtn').onclick = () =>
-  alert('Prototype — no artwork is approved and no files are produced.');
-document.getElementById('closeBtn').onclick = () =>
-  alert('Prototype — this would close the proof and return to the calculator.');
 
 renderAll();
 </script>
