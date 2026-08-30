@@ -199,6 +199,22 @@
              margin-bottom:4px;background-size:contain;background-position:center;background-repeat:no-repeat}
   .pg .cap{overflow:hidden}
   .pg .n{font-family:var(--pps-display);font-weight:700}
+  /* the tile is where a file gets attached to a page, so it carries the
+     affordance: a chip to pick one, and the whole cell as a drop target */
+  .pgup{position:absolute;bottom:3px;right:3px;width:19px;height:19px;border-radius:6px;
+        border:1px solid var(--bp-line);background:var(--bp-surface);color:var(--bp-faint);
+        font-size:12px;line-height:1;font-family:inherit;cursor:pointer;padding:0;
+        display:flex;align-items:center;justify-content:center;transition:all .18s;opacity:.75}
+  .pg:hover .pgup{opacity:1}
+  .pgup:hover{background:var(--cyan);border-color:var(--cyan);color:#fff;opacity:1}
+  /* a page with no customer file is the one worth noticing */
+  .pg:not(.hasart) .pgup{border-color:var(--cyan);color:var(--cyan);opacity:1}
+  .pg:not(.hasart) .thumb{border-style:dashed}
+  .pg.dropping{background:var(--cyan-tint);box-shadow:inset 0 0 0 2px var(--cyan)}
+  .dropcue{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+           background:rgba(0,126,255,.14);color:var(--cyan);font-size:10px;font-weight:700;
+           letter-spacing:.04em;text-transform:uppercase;pointer-events:none}
+  .pg.dropping .dropcue{display:flex}
   .pg .dot{position:absolute;top:3px;right:3px;width:11px;height:11px;border-radius:50%;background:var(--magenta);
            color:#fff;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center}
   .pg .dot.warn{background:var(--bp-warn)}
@@ -256,6 +272,10 @@
   .aptdot{width:9px;height:9px;border-radius:50%;border:1.5px solid currentColor;flex-shrink:0}
   .apt.on{background:var(--cyan);border-color:var(--cyan);color:#fff;font-weight:600;
           box-shadow:0 1px 2px rgba(0,126,255,.35)}
+  /* a point that cannot move this file is shown, not hidden: the grid stays a
+     map of the page, but only the reachable points invite a click */
+  .apt.dead{opacity:.32;cursor:not-allowed;background:var(--bp-surface-2)}
+  .axisnote{margin:9px 0 0;font-size:11px;line-height:1.45;color:var(--bp-faint)}
   .apt.on .aptdot{background:#fff;border-color:#fff}
 
   /* scale: 50–200% slider with fine 0.5% stepping */
@@ -560,7 +580,7 @@
   </div>
 </div>
 
-<input type="file" id="filePick" accept="image/*" hidden>
+<input type="file" id="filePick" accept="image/*" multiple hidden>
 
 <script>
 /* ─────────────────────────────────────────────────────────────
@@ -814,6 +834,28 @@ function analyze(n){
   return out;
 }
 
+/* An anchor can only do something on an axis where the art and the page are
+   different sizes. A landscape photo filled onto a portrait page overflows
+   left and right but matches top to bottom exactly — so Top, Center and Bottom
+   render identically, and offering all nine promises nine outcomes while
+   delivering three. Work out which axes are live and say so. */
+function anchorAxes(n){
+  const r = composePage(n, 460, Math.round(460 * BLEED_H / BLEED_W)), eps = 0.75;
+  return { x: Math.abs(r.place.w - r.W) > eps, y: Math.abs(r.place.h - r.H) > eps };
+}
+/* Project an anchor onto the axes that are live, so the highlighted cell is
+   always the one that produced what is on screen. */
+function effectiveAnchor(a, axes){
+  const v = axes.y ? (/Top/.test(a) ? 'Top' : /Bottom/.test(a) ? 'Bottom' : '') : '';
+  const h = axes.x ? (/Left/.test(a) ? 'Left' : /Right/.test(a) ? 'Right' : '') : '';
+  return (v && h) ? v + ' ' + h : (v || h || 'Center');
+}
+function anchorLive(cell, axes){
+  const v = /Top/.test(cell) ? 'Top' : /Bottom/.test(cell) ? 'Bottom' : '';
+  const h = /Left/.test(cell) ? 'Left' : /Right/.test(cell) ? 'Right' : '';
+  return (!v || axes.y) && (!h || axes.x);
+}
+
 function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 
 /* ── the proof surface ──────────────────────────────────────── */
@@ -901,8 +943,7 @@ function attachSheetHandlers(sheet, r){
   sheet.ondragleave = () => sheet.classList.remove('dropping');
   sheet.ondrop = e => {
     e.preventDefault(); sheet.classList.remove('dropping');
-    const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) loadArt(state.selected, f);
+    loadArtSequence(state.selected, e.dataTransfer.files);
   };
 }
 function hideLens(){
@@ -1155,15 +1196,30 @@ function renderStrip(){
       const issues = analyze(n);
       const worst = issues.some(i => i.level === 'error') ? 'error' : issues.length ? 'warn' : '';
       const thumb = composePage(n, 132, Math.round(132 * BLEED_H / BLEED_W)).canvas.toDataURL('image/png');
+      const up = uploads.get(n);
       const d = document.createElement('div');
-      d.className = 'pg' + (isSel(n) ? ' sel' : '');
+      d.className = 'pg' + (isSel(n) ? ' sel' : '') + (up ? ' hasart' : '');
+      d.title = up ? up.label : 'No file on this page yet — drop one here';
       d.innerHTML = '<div class="thumb" style="background-image:url('+thumb+')"></div>' +
                     '<div class="cap"><span class="n">P'+n+'</span>' + (p.name ? '<br>'+p.name : '') + '</div>' +
-                    (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'">!</span>' : '');
+                    (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'">!</span>' : '') +
+                    '<button class="pgup" title="' + (up ? 'Replace the file on page ' : 'Add a file to page ') + n +
+                    '">' + (up ? '↻' : '+') + '</button>' +
+                    '<span class="dropcue">Drop here</span>';
       d.onclick = () => {
         state.selected = n; state.openPage = n;
         if (state.mode === 'book') bookGoToPage(n);
         renderAll();
+      };
+      // The upload chip must not also select the page underneath it.
+      d.querySelector('.pgup').onclick = e => { e.stopPropagation(); pickFileFor(n); };
+      // Dropping onto a tile says which page the file belongs to — the thing
+      // that goes wrong when a whole document is handed over in one lump.
+      d.ondragover  = e => { e.preventDefault(); e.stopPropagation(); d.classList.add('dropping'); };
+      d.ondragleave = () => d.classList.remove('dropping');
+      d.ondrop = e => {
+        e.preventDefault(); e.stopPropagation(); d.classList.remove('dropping');
+        loadArtSequence(n, e.dataTransfer.files);
       };
       grp.appendChild(d);
     });
@@ -1214,12 +1270,14 @@ function renderRail(){
 
       // Which file this page is showing, and what it is worth at this size.
       const src = SRCget(p.n), r = composePage(p.n, 460, Math.round(460 * BLEED_H / BLEED_W));
+      // The facts about the file stay here; attaching one is done on the page
+      // tile, where you can see which page you are attaching it to.
       const fr = document.createElement('div');
       fr.className = 'filerow';
       fr.innerHTML = '<span class="srcmeta">' + src.label + ' · ' + src.w + '&times;' + src.h +
                      'px · <strong>' + r.effDpi + ' DPI</strong> as placed</span>';
       const fb = document.createElement('button');
-      fb.className = 'filebtn'; fb.textContent = 'Replace…';
+      fb.className = 'filebtn'; fb.textContent = 'Choose file…';
       fb.onclick = () => pickFileFor(p.n);
       fr.appendChild(fb);
       body.appendChild(fr);
@@ -1296,17 +1354,32 @@ function subOption(n, sub){
   /* nine reference points laid out where they actually sit on the page, so the
      control looks like the thing it selects rather than a list of words */
   if (sub.type === 'grid'){
+    const axes = anchorAxes(n);
+    // Keep the stored value on the live axes, so the lit cell is always the one
+    // that made the picture. This cannot change the output — it only renames an
+    // anchor to the equivalent one that is actually reachable.
+    st[sub.key] = effectiveAnchor(st[sub.key], axes);
     const g = document.createElement('div');
     g.className = 'anchorgrid';
     sub.cells.forEach(v => {
+      const live = anchorLive(v, axes);
       const b = document.createElement('button');
-      b.className = 'apt' + (st[sub.key] === v ? ' on' : '');
-      b.title = v;
+      b.className = 'apt' + (st[sub.key] === v ? ' on' : '') + (live ? '' : ' dead');
+      b.title = live ? v : v + ' — no different from ' + effectiveAnchor(v, axes) + ' for this file';
+      b.disabled = !live;
       b.innerHTML = '<span class="aptdot"></span><span class="aptlbl">'+v+'</span>';
-      b.onclick = () => { pushHistory(); st[sub.key] = v; afterChange(n); };
+      if (live) b.onclick = () => { pushHistory(); st[sub.key] = v; afterChange(n); };
       g.appendChild(b);
     });
     box.appendChild(g);
+    const note = document.createElement('p');
+    note.className = 'axisnote';
+    note.textContent =
+      (axes.x && axes.y) ? 'This file is a different shape from the page in both directions, so all nine points move it.'
+    : axes.x ? 'This file already fits the page top to bottom, so only left and right change anything.'
+    : axes.y ? 'This file already fits the page left to right, so only top and bottom change anything.'
+    : 'This file matches the page exactly, so there is nothing for an anchor to move.';
+    box.appendChild(note);
     return box;
   }
 
@@ -1366,10 +1439,25 @@ function pickFileFor(n){
   document.getElementById('filePick').click();
 }
 document.getElementById('filePick').onchange = e => {
-  const f = e.target.files && e.target.files[0];
-  if (f && pickTarget != null) loadArt(pickTarget, f);
+  if (pickTarget != null) loadArtSequence(pickTarget, e.target.files);
   e.target.value = '';
 };
+
+/* Several files dropped on one tile fill that page and the ones after it, in
+   name order. Page-at-a-time is right for a cover; a 64-page booklet handed
+   over as 64 files is not something anyone should place by hand, and the tile
+   you drop on says where the run starts. */
+function loadArtSequence(startPage, fileList){
+  const files = [...(fileList || [])].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric:true, sensitivity:'base' }));
+  if (!files.length) return;
+  const room = MODEL.pages.length - startPage + 1;
+  if (files.length > room){
+    alert(files.length + ' files dropped on page ' + startPage + ', but only ' + room +
+          ' pages follow it. The extra ' + (files.length - room) + ' were not placed.');
+  }
+  files.slice(0, room).forEach((f, i) => loadArt(startPage + i, f));
+}
 function loadArt(n, file){
   if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)){
     alert('This prototype does not rasterise PDFs — the real calculator does. Try a PNG or JPEG.');
