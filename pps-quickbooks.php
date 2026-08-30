@@ -583,7 +583,25 @@ function pps_qbo_invoice_link( $invoice_id ) {
     if ( is_wp_error( $res ) ) return $res;
     $link = (string) ( $res['Invoice']['invoiceLink'] ?? '' );
     if ( '' === $link ) {
-        return new WP_Error( 'qbo_link', 'QuickBooks did not return a payment link for that invoice. Confirm QuickBooks Payments is enabled on the company.' );
+        // An absent link was read as "the company cannot take payments" and that
+        // guess was wrong. QuickBooks echoes back what it actually accepted, so
+        // record that instead of inferring: if it silently turned the online
+        // payment flags off, the invoice itself says so, and if it kept them on
+        // the cause is elsewhere entirely.
+        $inv = (array) ( $res['Invoice'] ?? array() );
+        pps_qbo_log( 'invoice_link_missing', array(
+            'invoice' => (string) $invoice_id,
+            'cc'      => isset( $inv['AllowOnlineCreditCardPayment'] ) ? (bool) $inv['AllowOnlineCreditCardPayment'] : null,
+            'ach'     => isset( $inv['AllowOnlineACHPayment'] ) ? (bool) $inv['AllowOnlineACHPayment'] : null,
+            'email'   => (string) ( $inv['BillEmail']['Address'] ?? '' ),
+            'status'  => (string) ( $inv['EmailStatus'] ?? '' ),
+            'balance' => isset( $inv['Balance'] ) ? (float) $inv['Balance'] : null,
+            'keys'    => implode( ',', array_slice( array_keys( $inv ), 0, 40 ) ),
+        ) );
+        $why = ( isset( $inv['AllowOnlineCreditCardPayment'] ) && ! $inv['AllowOnlineCreditCardPayment'] )
+            ? 'QuickBooks turned online card payment off on this invoice, which means the company cannot take one for it.'
+            : 'The invoice kept its online payment flags, so the link is being withheld for another reason — see the QuickBooks log on the settings page.';
+        return new WP_Error( 'qbo_link', 'QuickBooks did not return a payment link for invoice ' . $invoice_id . '. ' . $why );
     }
     return $link;
 }
