@@ -297,11 +297,7 @@
       </div>
 
       <div class="disclose">
-        <div class="note">
-          Note: Online proof approval is best for expediency, but may not produce the best results. For color accuracy,
-          request and purchase a <a href="#">Hardcopy Proof</a>. If you're unsure about the template markings and what
-          they mean then request a <a href="#">Professional Digital Proof</a>.
-        </div>
+        <div class="note" id="note"></div>
       </div>
 
       <div class="approvewrap" id="approveWrap">
@@ -822,18 +818,28 @@ function setBookMode(m){
   renderAll();
 }
 
+/* The disclosure slot carries whichever caution belongs to the view you are
+   in. In 3D that is the mockup disclaimer, which used to sit beside the stage
+   — one statement, in one place, rather than the same warning in two. */
+const NOTE_PROOF =
+  'Note: Online proof approval is best for expediency, but may not produce the best results. For color accuracy, ' +
+  'request and purchase a <a href="#">Hardcopy Proof</a>. If you\'re unsure about the template markings and what ' +
+  'they mean then request a <a href="#">Professional Digital Proof</a>.';
+const NOTE_BOOK =
+  'Finished-product mockup, trimmed as it will be in the bindery. This is <strong>not</strong> the print surface — ' +
+  'bleed, trim and safety are only shown on the Proof view, and artwork cannot be approved from here.';
+function renderNote(){
+  const book = state.mode === 'book';
+  // the closing sentence names the control that is actually on screen
+  const tail = state.bookMode === 'closed'
+    ? ' Drag the cover to turn the book.'
+    : ' Use &#8249; &#8250; or the arrow keys to step through spreads.';
+  document.getElementById('note').innerHTML = book ? NOTE_BOOK + tail : NOTE_PROOF;
+}
+
 function renderIssues(){
   const el = document.getElementById('issuePanel');
-  if (state.mode === 'book'){
-    el.innerHTML = '<div class="issue info"><span class="bang">i</span>' +
-      '<span>Finished-product mockup, trimmed as it will be in the bindery. This is <strong>not</strong> the print ' +
-      'surface — bleed, trim and safety are only shown on the Proof view, and artwork cannot be approved from here.' +
-      (state.bookMode === 'closed'
-        ? ' Drag the cover to turn the book.'
-        : ' Use &#8249; &#8250; or the arrow keys to step through spreads.') +
-      '</span></div>';
-    return;
-  }
+  if (state.mode === 'book'){ el.innerHTML = ''; return; }
   const list = analyze(state.selected);
   el.innerHTML = list.length
     ? list.map(i => '<div class="issue '+(i.level === 'warn' ? 'warn' : '')+'">' +
@@ -1100,7 +1106,7 @@ function renderChrome(){
 }
 
 function renderAll(){
-  renderChrome(); renderStage(); renderIssues(); renderStrip();
+  renderChrome(); renderNote(); renderStage(); renderIssues(); renderStrip();
   if (state.mode !== 'book') renderRail();
   renderLegend(); renderApproval();
 }
