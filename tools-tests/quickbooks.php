@@ -124,5 +124,22 @@ ok('401 is not duplicate', pps_qbo_is_duplicate_name(
 ok('success is not duplicate', pps_qbo_is_duplicate_name(array('Customer' => array('Id' => '7'))), false);
 ok('null is not duplicate', pps_qbo_is_duplicate_name(null), false);
 
+// --- the payment link, whatever QuickBooks calls it
+// The bug this pins: the request parameter is include=invoiceLink, the response
+// field is InvoiceLink. Reading only the lower-case form discarded the link on
+// every invoice ever raised, and the error blamed the company's payment setup.
+$L = 'https://connect.intuit.com/pay/abc123';
+ok('reads InvoiceLink',   pps_qbo_pick_link(array('InvoiceLink' => $L)), $L);
+ok('reads invoiceLink',   pps_qbo_pick_link(array('invoiceLink' => $L)), $L);
+ok('reads INVOICELINK',   pps_qbo_pick_link(array('INVOICELINK' => $L)), $L);
+// Found among the other fields a real invoice carries, not alone.
+ok('found among siblings', pps_qbo_pick_link(array(
+    'AllowOnlineCreditCardPayment' => true, 'InvoiceLink' => $L, 'Balance' => 1.0)), $L);
+// And absence must still be absence -- the empty case is what the error path reports.
+ok('missing is empty',    pps_qbo_pick_link(array('Balance' => 1.0)), '');
+ok('empty string is empty', pps_qbo_pick_link(array('InvoiceLink' => '')), '');
+ok('non-string ignored',  pps_qbo_pick_link(array('InvoiceLink' => true)), '');
+ok('no fields is empty',  pps_qbo_pick_link(array()), '');
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

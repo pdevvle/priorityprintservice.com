@@ -572,6 +572,24 @@ function pps_qbo_invoice_order( $order ) {
 }
 
 /**
+ * The payment link out of an invoice payload, whatever QuickBooks calls it.
+ *
+ * The request parameter is documented as include=invoiceLink and the response
+ * field comes back as InvoiceLink. That one-character mismatch discarded the
+ * link on every invoice we ever raised, while the error we returned blamed the
+ * company's payment setup -- a setup that was correct the whole time. Match the
+ * key case-insensitively so a future casing change cannot do it again.
+ */
+function pps_qbo_pick_link( array $invoice ) {
+    foreach ( $invoice as $k => $v ) {
+        if ( 0 === strcasecmp( (string) $k, 'invoicelink' ) && is_string( $v ) && '' !== $v ) {
+            return $v;
+        }
+    }
+    return '';
+}
+
+/**
  * The customer-facing payment page for an invoice.
  *
  * Fetched on demand rather than stored: nothing authoritative says how long one
@@ -581,14 +599,14 @@ function pps_qbo_invoice_order( $order ) {
 function pps_qbo_invoice_link( $invoice_id ) {
     $res = pps_qbo_request( 'GET', 'invoice/' . rawurlencode( $invoice_id ), null, array( 'include' => 'invoiceLink' ) );
     if ( is_wp_error( $res ) ) return $res;
-    $link = (string) ( $res['Invoice']['invoiceLink'] ?? '' );
+    $inv  = (array) ( $res['Invoice'] ?? array() );
+    $link = pps_qbo_pick_link( $inv );
     if ( '' === $link ) {
         // An absent link was read as "the company cannot take payments" and that
         // guess was wrong. QuickBooks echoes back what it actually accepted, so
         // record that instead of inferring: if it silently turned the online
         // payment flags off, the invoice itself says so, and if it kept them on
         // the cause is elsewhere entirely.
-        $inv = (array) ( $res['Invoice'] ?? array() );
         pps_qbo_log( 'invoice_link_missing', array(
             'invoice' => (string) $invoice_id,
             'cc'      => isset( $inv['AllowOnlineCreditCardPayment'] ) ? (bool) $inv['AllowOnlineCreditCardPayment'] : null,
