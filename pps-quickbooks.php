@@ -281,18 +281,70 @@ function pps_qbo_display_name( $first, $last, $email ) {
     return mb_substr( $name, 0, 100 );
 }
 
+/**
+ * Whether a failed write was QuickBooks refusing a name that already exists.
+ * That error is not a dead end -- it is proof the record is there, and tells us
+ * to go looking again rather than give up.
+ */
+function pps_qbo_is_duplicate_name( $err ) {
+    return is_wp_error( $err ) && false !== stripos( $err->get_error_message(), 'Duplicate Name Exists' );
+}
+
+/**
+ * Find a customer by display name, seeing everything QuickBooks will refuse a
+ * new name against.
+ *
+ * A plain equality query is narrower than QuickBooks' own uniqueness rule in two
+ * ways that both bit us on the first production run: the query returns only
+ * ACTIVE records, and it matches case-sensitively while the uniqueness check
+ * does not. So "PPS ONLINE" could be simultaneously not-found and rejected as a
+ * duplicate -- which is exactly what happened, and left the message "could not
+ * find or create" on an order while the record sat in the books all along.
+ *
+ * @return array|null ['id' => string, 'name' => string, 'active' => bool]
+ */
+function pps_qbo_find_customer_by_name( $name ) {
+    $cols = 'select Id, DisplayName, Active from Customer where ';
+    $q    = pps_qbo_q( $name );
+
+    // Inactive records still hold the name, so ask for them explicitly.
+    foreach ( array(
+        $cols . "DisplayName = '{$q}' and Active in (true, false)",
+        $cols . "DisplayName like '{$q}' and Active in (true, false)",
+    ) as $sql ) {
+        $res = pps_qbo_request( 'GET', 'query', null, array( 'query' => $sql ) );
+        if ( is_wp_error( $res ) ) continue;
+        foreach ( (array) ( $res['QueryResponse']['Customer'] ?? array() ) as $c ) {
+            // Case-insensitive on our side, because QuickBooks' uniqueness is.
+            if ( empty( $c['Id'] ) || 0 !== strcasecmp( (string) ( $c['DisplayName'] ?? '' ), $name ) ) continue;
+            return array(
+                'id'     => (string) $c['Id'],
+                'name'   => (string) ( $c['DisplayName'] ?? $name ),
+                'active' => ! isset( $c['Active'] ) || (bool) $c['Active'],
+            );
+        }
+    }
+    return null;
+}
+
 /** The "PPS ONLINE" parent, found or created once and then remembered. */
 function pps_qbo_parent_customer_id() {
     $cached = (string) get_option( 'pps_qbo_parent_id', '' );
     if ( '' !== $cached ) return $cached;
 
-    $found = pps_qbo_request( 'GET', 'query', null, array(
-        'query' => "select Id from Customer where DisplayName = '" . pps_qbo_q( PPS_QBO_PARENT_NAME ) . "'",
-    ) );
-    if ( ! is_wp_error( $found ) && ! empty( $found['QueryResponse']['Customer'][0]['Id'] ) ) {
-        $id = (string) $found['QueryResponse']['Customer'][0]['Id'];
-        update_option( 'pps_qbo_parent_id', $id, false );
-        return $id;
+    $hit = pps_qbo_find_customer_by_name( PPS_QBO_PARENT_NAME );
+    if ( $hit && $hit['active'] ) {
+        update_option( 'pps_qbo_parent_id', $hit['id'], false );
+        return $hit['id'];
+    }
+    if ( $hit ) {
+        // Present but switched off. Adopting it would raise invoices against a
+        // record the owner deliberately retired, and reactivating their books
+        // from here is not ours to decide -- so name it and stop.
+        return new WP_Error( 'qbo_parent_inactive', sprintf(
+            'The QuickBooks customer "%s" (id %s) is marked inactive. Make it active in QuickBooks, then try again.',
+            $hit['name'], $hit['id']
+        ) );
     }
 
     $made = pps_qbo_request( 'POST', 'customer', array(
@@ -300,7 +352,18 @@ function pps_qbo_parent_customer_id() {
         'CompanyName'  => PPS_QBO_PARENT_NAME,
         'Notes'        => 'Parent for orders taken through the website. Each buyer is a sub-customer so stored payment methods stay scoped to them.',
     ) );
-    if ( is_wp_error( $made ) || empty( $made['Customer']['Id'] ) ) return '';
+
+    if ( pps_qbo_is_duplicate_name( $made ) ) {
+        // The name is taken by something a Customer query cannot see -- most
+        // often a vendor or employee, since QuickBooks shares one namespace
+        // across all of them. Say so; a generic failure sent us hunting.
+        return new WP_Error( 'qbo_parent_taken', sprintf(
+            'QuickBooks already has a name list entry called "%s" that is not an active customer — often a vendor or employee. Rename it, or reuse it as a customer, then try again.',
+            PPS_QBO_PARENT_NAME
+        ) );
+    }
+    if ( is_wp_error( $made ) ) return $made;
+    if ( empty( $made['Customer']['Id'] ) ) return new WP_Error( 'qbo_parent', 'QuickBooks did not return a customer id for the parent.' );
 
     $id = (string) $made['Customer']['Id'];
     update_option( 'pps_qbo_parent_id', $id, false );
@@ -322,7 +385,10 @@ function pps_qbo_resolve_customer( $first, $last, $email ) {
         return (string) $found['QueryResponse']['Customer'][0]['Id'];
     }
 
+    // Propagate the parent's own error rather than flattening every cause into
+    // "could not find or create" -- that sentence was true and useless.
     $parent = pps_qbo_parent_customer_id();
+    if ( is_wp_error( $parent ) ) return $parent;
     if ( '' === $parent ) return new WP_Error( 'qbo_parent', 'Could not find or create the PPS ONLINE parent customer.' );
 
     $payload = array(
@@ -334,6 +400,24 @@ function pps_qbo_resolve_customer( $first, $last, $email ) {
         'ParentRef'        => array( 'value' => $parent ),
     );
     $made = pps_qbo_request( 'POST', 'customer', $payload );
+
+    // Same trap as the parent: the buyer can be un-findable by email yet still
+    // own the display name (an existing record with no email on it, or an
+    // inactive one). The duplicate error proves it exists, so look again by the
+    // name we just tried instead of failing the checkout.
+    if ( pps_qbo_is_duplicate_name( $made ) ) {
+        $hit = pps_qbo_find_customer_by_name( $payload['DisplayName'] );
+        if ( $hit && $hit['active'] ) return $hit['id'];
+        if ( $hit ) return new WP_Error( 'qbo_customer_inactive', sprintf(
+            'The QuickBooks customer "%s" (id %s) is inactive. Make it active in QuickBooks, then try again.',
+            $hit['name'], $hit['id']
+        ) );
+        return new WP_Error( 'qbo_customer_taken', sprintf(
+            'QuickBooks already has a name list entry called "%s" that is not an active customer — often a vendor or employee.',
+            $payload['DisplayName']
+        ) );
+    }
+
     if ( is_wp_error( $made ) ) return $made;
     if ( empty( $made['Customer']['Id'] ) ) return new WP_Error( 'qbo_customer', 'QuickBooks did not return a customer id.' );
 

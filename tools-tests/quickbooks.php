@@ -14,6 +14,12 @@ define('ABSPATH', '/tmp/');
 $GLOBALS['opts'] = array();
 $GLOBALS['tr']   = array();
 
+class WP_Error { public $code; public $msg;
+    public function __construct($c = '', $m = '') { $this->code = $c; $this->msg = $m; }
+    public function get_error_code() { return $this->code; }
+    public function get_error_message() { return $this->msg; } }
+function is_wp_error($t) { return $t instanceof WP_Error; }
+
 function add_action(...$a) {}
 function add_submenu_page(...$a) {}
 function get_option($k, $d = '') { return $GLOBALS['opts'][$k] ?? $d; }
@@ -100,6 +106,23 @@ ok('refresh stored',  get_option('pps_qbo_refresh_token'), 'r1');
 pps_qbo_store_tokens(array('access_token' => 'a2', 'refresh_token' => 'r2', 'expires_in' => 3600));
 // The rotation case: Intuit reissues, and the NEW one must win.
 ok('rotated refresh replaces old', get_option('pps_qbo_refresh_token'), 'r2');
+
+// --- duplicate-name detection
+// This is the hinge of the production customer bug: QuickBooks refuses a name
+// that a Customer query cannot see, and the refusal is the proof it exists.
+// Misreading it as a generic failure is what put "could not find or create"
+// on a real order while the record sat in the books.
+ok('duplicate detected', pps_qbo_is_duplicate_name(
+    new WP_Error('qbo_http_400', 'Duplicate Name Exists Error — The name supplied already exists. : null')), true);
+ok('duplicate is case-insensitive', pps_qbo_is_duplicate_name(
+    new WP_Error('qbo_http_400', 'duplicate name exists error')), true);
+// Everything else must NOT be swallowed into the recovery path.
+ok('other 400 is not duplicate', pps_qbo_is_duplicate_name(
+    new WP_Error('qbo_http_400', 'Invalid Reference Id')), false);
+ok('401 is not duplicate', pps_qbo_is_duplicate_name(
+    new WP_Error('qbo_http_401', 'AuthenticationFailed')), false);
+ok('success is not duplicate', pps_qbo_is_duplicate_name(array('Customer' => array('Id' => '7'))), false);
+ok('null is not duplicate', pps_qbo_is_duplicate_name(null), false);
 
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
