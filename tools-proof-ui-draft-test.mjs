@@ -511,6 +511,100 @@ ck('and a corner is then reachable and lights up', await p.evaluate(async ()=>{
   const on=document.querySelector('.anchorgrid .apt.on');
   return on && on.title==='Bottom Right' && !on.disabled;}));
 
+// ── margin detection: type, not ink ──
+const kinds = () => p.evaluate(()=>{
+  const a=analyze(state.selected);
+  return { kinds:a.map(i=>i.kind), marks:(a.marks||[]).length,
+           cut:(a.marks||[]).filter(m=>m.level==='cut').length };});
+const setTx = (o) => p.evaluate(o=>{
+  Object.assign(state.perPage[state.selected], o); cache.clear(); renderAll();}, o);
+await p.selectOption('#pageCount','8'); await p.waitForTimeout(700);
+await p.evaluate(()=>{ state.selected=3; state.openPage=3; state.wholeOpen=false; renderAll(); });
+await p.waitForTimeout(300);
+
+await setTx({behavior:'crop', anchor:'Center', scale:100}); await p.waitForTimeout(300);
+ck('type well inside the margin raises nothing', await p.evaluate(()=>{
+  const a=analyze(3);
+  return !a.some(i=>['tight','cut','nomargin'].includes(i.kind)) && (a.marks||[]).length===0;}),
+  JSON.stringify(await kinds()));
+
+await setTx({behavior:'scale', scale:112}); await p.waitForTimeout(350);
+const tight = await kinds();
+ck('type inside the safety margin is a warning, not an error',
+  tight.kinds.includes('tight') && !tight.kinds.includes('cut') && tight.marks===1 && tight.cut===0,
+  JSON.stringify(tight));
+ck('and it says how close to the trim, in inches', await p.evaluate(()=>{
+  const t=analyze(3).find(i=>i.kind==='tight').text;
+  const m=t.match(/as close as ([\d.]+)"/);
+  return !!m && parseFloat(m[1])>0 && parseFloat(m[1])<0.125;}),
+  await p.evaluate(()=>(analyze(3).find(i=>i.kind==='tight')||{}).text||''));
+
+await setTx({scale:150}); await p.waitForTimeout(350);
+const cutS = await kinds();
+ck('type past the trim is an error', cutS.kinds.includes('cut') && cutS.cut>0, JSON.stringify(cutS));
+ck('the offending runs are ringed on the page', await p.evaluate(()=>
+  document.querySelectorAll('.typemark.cut').length>0));
+// getBoundingClientRect reports a child's full geometry even when an ancestor
+// clips its paint, so assert the clip itself rather than the boxes.
+ck('rings are clipped to the sheet, not hanging off it', await p.evaluate(()=>{
+  const w=document.querySelector('.markwrap'), s=document.getElementById('sheet');
+  if(!w) return false;
+  const wr=w.getBoundingClientRect(), sr=s.getBoundingClientRect();
+  return getComputedStyle(w).overflow==='hidden'
+      && Math.abs(wr.width-sr.width)<1 && Math.abs(wr.height-sr.height)<1
+      && Math.abs(wr.left-sr.left)<1 && Math.abs(wr.top-sr.top)<1
+      // and at least one ring really does extend past the page, or the clip
+      // would be untested
+      && [...document.querySelectorAll('.typemark')].some(e=>{
+           const r=e.getBoundingClientRect();
+           return r.left<sr.left-0.5 || r.right>sr.right+0.5 || r.top<sr.top-0.5 || r.bottom>sr.bottom+0.5;});}));
+ck('hiding the guides hides the rings too', await p.evaluate(async ()=>{
+  const g=document.getElementById('hideGuides'); g.checked=true; g.dispatchEvent(new Event('change'));
+  await new Promise(r=>setTimeout(r,250));
+  const none=document.querySelectorAll('.typemark').length===0;
+  g.checked=false; g.dispatchEvent(new Event('change'));
+  await new Promise(r=>setTimeout(r,250));
+  return none && document.querySelectorAll('.typemark').length>0;}));
+ck('rotating the art rotates what gets flagged', await p.evaluate(async ()=>{
+  const before=[...document.querySelectorAll('.typemark')].map(e=>Math.round(e.getBoundingClientRect().width)).join(',');
+  Object.assign(state.perPage[3],{rot:'90°'}); cache.clear(); renderAll();
+  await new Promise(r=>setTimeout(r,350));
+  const after=[...document.querySelectorAll('.typemark')].map(e=>Math.round(e.getBoundingClientRect().width)).join(',');
+  Object.assign(state.perPage[3],{rot:'0°'}); cache.clear(); renderAll();
+  await new Promise(r=>setTimeout(r,300));
+  return before!==after;}));
+
+// ink is deliberately NOT flagged: a cover whose photo runs to every edge is
+// what bleed is for, and warning about it would train people to ignore this
+await p.evaluate(()=>{ state.selected=1; state.openPage=1; renderAll(); });
+await p.waitForTimeout(300);
+await setTx({behavior:'fill', anchor:'Center', scale:100}); await p.waitForTimeout(350);
+ck('a full-bleed background is not treated as type', await p.evaluate(()=>{
+  const a=analyze(1);
+  return !a.some(i=>['tight','cut'].includes(i.kind)) && (a.marks||[]).length===0;}),
+  await p.evaluate(()=>analyze(1).map(i=>i.kind).join(',')||'clean'));
+
+// a flat upload has no text layer, so it discloses that rather than passing
+await p.evaluate(async ()=>{
+  const c=document.createElement('canvas'); c.width=1800; c.height=1200;
+  const x=c.getContext('2d'); x.fillStyle='#8b1f3f'; x.fillRect(0,0,1800,1200);
+  const blob=await new Promise(r=>c.toBlob(r,'image/png'));
+  loadArtSequence(1,[new File([blob],'photo.png',{type:'image/png'})]);
+});
+await p.waitForTimeout(800);
+ck('a flat image says the margin could not be checked', await p.evaluate(()=>{
+  const a=analyze(1);
+  return a.some(i=>i.kind==='nomargin')
+      && /no way to tell type from picture/.test(a.find(i=>i.kind==='nomargin').text);}),
+  await p.evaluate(()=>analyze(1).map(i=>i.kind).join(',')));
+ck('that disclosure is not dressed up as an all-clear', await p.evaluate(()=>{
+  const t=document.getElementById('issuePanel').innerText;
+  return !/no problem|looks good|all clear|ready to print/i.test(t) && /Not checked/.test(t);}));
+await p.evaluate(()=>{ uploads.clear(); cache.clear(); state.selected=1; state.openPage=null;
+  state.wholeOpen=true; MODEL.pages.forEach(pg=>state.perPage[pg.n]={behavior:'crop',anchor:'Center',scale:100,rot:'0°'});
+  renderAll(); });
+await p.waitForTimeout(400);
+
 ck('no horizontal page scroll', await p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1));
 ck('no page errors overall', errs.length===0, errs[0]||'');
 await b.close();

@@ -168,6 +168,14 @@
          letter-spacing:.03em}
   .badge.warn{background:rgba(180,83,9,.85)}
   .g{position:absolute;pointer-events:none;box-sizing:border-box}
+  /* type the margin check flagged, ringed on the page it is on */
+  /* clipped to the page: a ring hanging off the sheet reads as a broken
+     overlay rather than as type running off the edge */
+  .markwrap{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+  .typemark{position:absolute;pointer-events:none;box-sizing:border-box;border:1.5px solid var(--bp-warn);
+            outline:1px solid rgba(255,255,255,.65);border-radius:2px;
+            box-shadow:0 0 0 1px rgba(255,255,255,.45) inset}
+  .typemark.cut{border-color:var(--magenta);border-width:2px}
   .lens{position:absolute;width:190px;height:190px;border-radius:50%;overflow:hidden;pointer-events:none;
         border:2px solid rgba(15,23,42,.55);box-shadow:0 6px 22px rgba(0,0,0,.3);background:#fff;z-index:5}
   .lens canvas{position:absolute;left:0;top:0}
@@ -673,10 +681,24 @@ function syncUndo(){
    NOT reach the bleed — which is precisely the condition the bleed issue is
    meant to catch, and it now catches it by measurement. */
 const SRC_DPI = 150;
+/* The placeholder knows where its own type is, because it drew it. That is the
+   same thing pdf.js getTextContent() gives the real calculator for a PDF: the
+   position of every run of type, without guessing from pixels. The margin check
+   below consumes text boxes; where they come from is the only part that differs
+   between here and production. */
 function drawPlaceholder(n){
   const w = Math.round(MODEL.trim.w * SRC_DPI), h = Math.round(MODEL.trim.h * SRC_DPI);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const x = c.getContext('2d');
+  const text = [];
+  // record the box a fillText actually occupies, not the point it was drawn at
+  const type = (str, cx, baseline) => {
+    const m = x.measureText(str);
+    const asc = m.actualBoundingBoxAscent || 0, desc = m.actualBoundingBoxDescent || 0;
+    const left = x.textAlign === 'center' ? cx - m.width / 2 : cx;
+    text.push({ x:left, y:baseline - asc, w:m.width, h:asc + desc });
+    x.fillText(str, cx, baseline);
+  };
   const cover = (n === 1 || n === MODEL.pages.length);
   x.fillStyle = cover ? '#4a4a4a' : '#f7f7f5';
   x.fillRect(0,0,w,h);
@@ -685,20 +707,23 @@ function drawPlaceholder(n){
     for (let i=0;i<9;i++) x.fillRect(0, h*i/9, w, h/26);
     x.fillStyle = '#fff'; x.textAlign = 'center';
     x.font = 'bold ' + Math.round(w/9) + 'px Georgia, serif';
-    x.fillText(n === 1 ? 'Capoeira' : 'Viva Raiz', w/2, h*0.46);
+    type(n === 1 ? 'Capoeira' : 'Viva Raiz', w/2, h*0.46);
     x.font = Math.round(w/26) + 'px sans-serif';
-    x.fillText(n === 1 ? 'BATIZADO · 2026' : 'SEATTLE, WA', w/2, h*0.56);
+    type(n === 1 ? 'BATIZADO · 2026' : 'SEATTLE, WA', w/2, h*0.56);
   } else {
+    // the grey bars stand in for lines of body copy, so they count as type
     x.fillStyle = '#d9d9d4';
     for (let i=0;i<11;i++){
       const yy = h*0.14 + i*(h*0.055);
-      x.fillRect(w*0.14, yy, w*0.72*(i%4===3?0.55:1), h*0.017);
+      const bw = w*0.72*(i%4===3?0.55:1);
+      x.fillRect(w*0.14, yy, bw, h*0.017);
+      text.push({ x:w*0.14, y:yy, w:bw, h:h*0.017 });
     }
     x.fillStyle = '#b9b9b2'; x.textAlign = 'center';
     x.font = 'bold ' + Math.round(w/16) + 'px sans-serif';
-    x.fillText('Page ' + n, w/2, h*0.085);
+    type('Page ' + n, w/2, h*0.085);
   }
-  return c;
+  return { canvas:c, text };
 }
 /* Placeholder pages are drawn on demand and kept in a small LRU. A 64-page
    booklet would otherwise hold 64 full-resolution canvases at once — about a
@@ -711,8 +736,9 @@ function SRCget(n){
   if (uploads.has(n)) return uploads.get(n);
   let s = srcCache.get(n);
   if (s){ srcCache.delete(n); srcCache.set(n, s); return s; }   // touch = most recent
-  const c = drawPlaceholder(n);
-  s = { el:c, w:c.width, h:c.height, inW:MODEL.trim.w, inH:MODEL.trim.h, label:'placeholder' };
+  const d = drawPlaceholder(n);
+  s = { el:d.canvas, w:d.canvas.width, h:d.canvas.height, text:d.text,
+        inW:MODEL.trim.w, inH:MODEL.trim.h, label:'placeholder' };
   srcCache.set(n, s);
   while (srcCache.size > SRC_LRU) srcCache.delete(srcCache.keys().next().value);
   return s;
@@ -805,7 +831,7 @@ function composePage(n, W, H){
   // Effective resolution of what was actually placed — the honest number, not
   // the file's nominal DPI.
   const effDpi = Math.round(sw / (drawW / pxPerIn));
-  const out = { canvas:c, place:{ x:dx, y:dy, w:drawW, h:drawH }, effDpi, W, H };
+  const out = { canvas:c, place:{ x:dx, y:dy, w:drawW, h:drawH }, effDpi, W, H, steps, quarter };
   if (cache.size > 220) cache.clear();
   cache.set(key, out);
   return out;
@@ -813,10 +839,69 @@ function composePage(n, W, H){
 
 /* Issues, measured rather than scripted. */
 const ISSUE_TEXT = {
+  nomargin: 'Not checked: this file is a flat image, so there is no way to tell type from picture in it. Nothing here has confirmed your text is clear of the trim — please check it against the green safety line yourself.',
+  cut: 'Issue: {n} run{s} of type cross{s2} the trim line and will be cut off. Move the art, or scale it down, so all type sits inside the green safety margin.',
+  tight: 'Heads up: {n} run{s} of type sit{s3} inside the safety margin, as close as {gap}" to the trim. Trimming varies by about a sixteenth of an inch, so type this close can end up touching the edge.',
   bleed: "Issue: Art doesn't fill bleed area. Ensure that you're including at least " + MODEL.bleed + '" bleed, or scale the art to fill the area without getting text or other elements too close to the trim (safety margin).',
   lowres: 'Issue: at this size the art works out to {dpi} DPI. Below about ' + DPI_BAD + ' DPI it will look soft or pixelated in print. Use a larger file or reduce the scale.',
   softres: 'Heads up: at this size the art works out to {dpi} DPI. 300 DPI is ideal; below about ' + DPI_WARN + ' DPI, fine detail and small type start to soften.'
 };
+/* Map a box in source pixels through the same placement the composition used,
+   rotation included, and return it as a fraction of the page. Deriving it from
+   the composition rather than recomputing the maths is the point: a margin
+   warning that disagreed with the picture would be worse than none. */
+function mapSrcBox(r, src, box){
+  const dw = r.quarter ? r.place.h : r.place.w;
+  const dh = r.quarter ? r.place.w : r.place.h;
+  const cx = r.place.x + r.place.w / 2, cy = r.place.y + r.place.h / 2;
+  const th = r.steps * Math.PI / 2, cos = Math.cos(th), sin = Math.sin(th);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  [[box.x, box.y], [box.x+box.w, box.y], [box.x, box.y+box.h], [box.x+box.w, box.y+box.h]]
+    .forEach(([sx, sy]) => {
+      const rx = -dw/2 + (sx / src.w) * dw, ry = -dh/2 + (sy / src.h) * dh;
+      const px = cx + rx*cos - ry*sin, py = cy + rx*sin + ry*cos;
+      x0 = Math.min(x0, px); y0 = Math.min(y0, py);
+      x1 = Math.max(x1, px); y1 = Math.max(y1, py);
+    });
+  return { x:x0/r.W, y:y0/r.H, w:(x1-x0)/r.W, h:(y1-y0)/r.H };
+}
+
+/* Type too close to the trim. Deliberately type and not ink: a photograph that
+   runs off the edge is what bleed is for, and warning about it would train
+   people to ignore the warning. Only runs of text count, which is why this
+   needs a file that says where its text is — a flat raster cannot, and says so
+   rather than passing quietly. */
+const SAFE_L = (MODEL.bleed + MODEL.safety) / BLEED_W, SAFE_T = (MODEL.bleed + MODEL.safety) / BLEED_H;
+const TRIM_L = MODEL.bleed / BLEED_W, TRIM_T = MODEL.bleed / BLEED_H;
+function checkMargins(n, r){
+  const src = SRCget(n);
+  if (!src.text) return { known:false, marks:[], cut:0, tight:0, closest:null };
+  const marks = []; let cut = 0, tight = 0, closest = null;
+  src.text.forEach(b => {
+    const m = mapSrcBox(r, src, b);
+    const outsideTrim = m.x < TRIM_L || m.y < TRIM_T ||
+                        m.x + m.w > 1 - TRIM_L || m.y + m.h > 1 - TRIM_T;
+    const insideSafe  = m.x >= SAFE_L && m.y >= SAFE_T &&
+                        m.x + m.w <= 1 - SAFE_L && m.y + m.h <= 1 - SAFE_T;
+    if (outsideTrim || !insideSafe){
+      // how close this run gets to the trim, in inches; negative means past it
+      const gap = Math.min((m.x - TRIM_L) * BLEED_W, (m.y - TRIM_T) * BLEED_H,
+                           (1 - TRIM_L - m.x - m.w) * BLEED_W, (1 - TRIM_T - m.y - m.h) * BLEED_H);
+      if (closest === null || gap < closest) closest = gap;
+      if (outsideTrim) cut++; else tight++;
+      marks.push({ ...m, level: outsideTrim ? 'cut' : 'tight' });
+    }
+  });
+  return { known:true, marks, cut, tight, closest };
+}
+
+// "1 run … crosses" / "2 runs … cross"
+function plural(t, k){
+  return t.replace('{n}', k).replace('{s}', k === 1 ? '' : 's')
+          .replace('{s2}', k === 1 ? 'es' : '')      // crosses / cross
+          .replace('{s3}', k === 1 ? 's' : '');      // sits / sit
+}
+
 function analyze(n){
   // Measured at a fixed working size — the geometry is scale-independent, so
   // one modest composition answers for every display size.
@@ -831,7 +916,18 @@ function analyze(n){
   } else if (r.effDpi < DPI_WARN){
     out.push({ kind:'softres', level:'warn', text:ISSUE_TEXT.softres.replace('{dpi}', r.effDpi) });
   }
-  return out;
+
+  const mg = checkMargins(n, r);
+  if (!mg.known){
+    out.push({ kind:'nomargin', level:'info', text:ISSUE_TEXT.nomargin });
+  } else if (mg.cut){
+    out.push({ kind:'cut', level:'error', text:plural(ISSUE_TEXT.cut, mg.cut) });
+  } else if (mg.tight){
+    out.push({ kind:'tight', level:'warn',
+      text:plural(ISSUE_TEXT.tight, mg.tight)
+        .replace('{gap}', mg.closest.toFixed(3).replace(/0+$/,'').replace(/\.$/,'')) });
+  }
+  return Object.assign(out, { marks: mg.marks });
 }
 
 /* An anchor can only do something on an axis where the art and the page are
@@ -908,7 +1004,12 @@ function renderStage(){
       '<div class="g" style="inset:0;border:2px dashed #ef4444"></div>' +
       '<div class="g" style="top:'+bt+';left:'+bl+';right:'+bl+';bottom:'+bt+';border:2px dashed #fff;filter:drop-shadow(0 0 1px #000)"></div>' +
       '<div class="g" style="top:'+st2+';left:'+sl+';right:'+sl+';bottom:'+st2+';border:2px dashed '+css('--green')+'"></div>' +
-      '<div class="g" style="'+(spineLeft?'left:'+bl:'right:'+bl)+';top:'+bt+';bottom:'+bt+';width:3px;background:#3b82f6"></div>');
+      '<div class="g" style="'+(spineLeft?'left:'+bl:'right:'+bl)+';top:'+bt+';bottom:'+bt+';width:3px;background:#3b82f6"></div>') +
+    // A margin warning that only appears as a sentence makes the customer hunt
+    // for the offending line. Ring it instead.
+    (guidesOff ? '' : '<div class="markwrap">' + (analyze(state.selected).marks || []).map(m =>
+      '<div class="typemark'+(m.level === 'cut' ? ' cut' : '')+'" style="left:'+(m.x*100)+'%;top:'+(m.y*100)+
+      '%;width:'+(m.w*100)+'%;height:'+(m.h*100)+'%"></div>').join('') + '</div>');
   sheet.insertBefore(r.canvas, sheet.firstChild);
   attachSheetHandlers(sheet, r);
 }
