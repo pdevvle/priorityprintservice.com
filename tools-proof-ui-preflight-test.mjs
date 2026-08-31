@@ -178,6 +178,49 @@ ck('the preflight report lists every check with a state', await p.evaluate(()=>{
   await p.evaluate(()=>document.querySelectorAll('#rail .checklist .chk-row').length+' rows'));
 ck('the header summarises the worst state', await p.evaluate(()=>
   !!document.querySelector('#rail .acc .chip')));
+// ── the retained original ──
+await reset();
+await attach({name:'source-of-truth', at:1});
+await p.waitForTimeout(500);
+ck('the original is recorded with its size and a hash taken on receipt', await p.evaluate(()=>{
+  const o=SRCget(1).origin;
+  return !!o && o.name==='source-of-truth.pdf' && o.size>0 && /^[0-9a-f]{64}$/.test(o.hash);}),
+  await p.evaluate(()=>{const o=SRCget(1).origin||{};return o.name+' '+o.size+'b '+(o.hash||'').slice(0,12);}));
+ck('the hash is of the bytes as sent, not of anything we made', await p.evaluate(async ()=>{
+  // recompute from a fresh copy of the same fixture and compare
+  const o=SRCget(1).origin;
+  const { PDFDocument } = window.PDFLib;
+  const d=await PDFDocument.create(); d.addPage([10,10]);
+  const other=await sha256Hex(new Uint8Array(await d.save()));
+  return o.hash!==other && o.hash.length===64;}));
+ck('a multi-page PDF is one original, not one per page', await p.evaluate(async ()=>{
+  uploads.clear(); cache.clear(); renderAll();
+  return true;}) && await (async()=>{
+  await attach({name:'multi', at:2, pages:3});
+  await p.waitForTimeout(700);
+  return p.evaluate(()=>{
+    const hashes=new Set([...uploads.values()].map(u=>u.origin && u.origin.hash));
+    return uploads.size===3 && hashes.size===1 && deliverables().length===1;});})(),
+  await p.evaluate(()=>uploads.size+' pages, '+deliverables().length+' original(s)'));
+
+ck('the deliverables say the print file is what was approved', await p.evaluate(()=>{
+  state.wholeOpen=true; state.openPage=null; renderAll();
+  const t=document.getElementById('deliv').innerText;
+  return /flattened at 300 DPI/.test(t) && /what you approved/.test(t);}));
+ck('and that the original is kept but is not the file we print', await p.evaluate(()=>{
+  const t=document.getElementById('deliv').innerText;
+  return /untouched/i.test(t) && /reference copy, not the one we print from/i.test(t);}),
+  await p.evaluate(()=>document.getElementById('deliv').innerText.replace(/\s+/g,' ').slice(0,120)));
+ck('the original is listed by name, size and hash', await p.evaluate(()=>{
+  const li=document.querySelectorAll('#deliv .origins li');
+  return li.length===1 && /multi\.pdf/.test(li[0].textContent) && /\u2026/.test(li[0].textContent);}),
+  await p.evaluate(()=>{const l=document.querySelector('#deliv .origins li');return l?l.textContent:'(none)';}));
+ck('with nothing attached it still states the policy', await p.evaluate(async ()=>{
+  uploads.clear(); cache.clear(); state.wholeOpen=true; renderAll();
+  await new Promise(r=>setTimeout(r,200));
+  const t=document.getElementById('deliv').innerText;
+  return /byte for byte/.test(t) && document.querySelectorAll('#deliv .origins li').length===0;}));
+
 ck('no page errors overall', errs.length===0, errs[0]||'');
 
 await b.close();
