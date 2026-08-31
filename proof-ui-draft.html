@@ -258,6 +258,17 @@
   .chip.fail{background:var(--magenta);border-color:var(--magenta);color:#fff}
   .chip.warn{background:var(--yellow-tint);border-color:var(--yellow-line);color:var(--bp-warn)}
   .chip.pass{background:rgba(56,161,105,.12);border-color:var(--green);color:var(--green)}
+  .deliv{margin-top:14px;padding:12px 13px;border:1px solid var(--bp-line);border-radius:12px;
+         background:var(--bp-surface-2)}
+  .delivhead{font-family:var(--pps-display);font-size:10px;font-weight:700;letter-spacing:.08em;
+             text-transform:uppercase;color:var(--bp-faint);margin-bottom:9px}
+  .delivrow{font-size:11.5px;line-height:1.5;color:var(--bp-faint)}
+  .delivrow + .delivrow{margin-top:9px;padding-top:9px;border-top:1px solid var(--bp-line)}
+  .delivrow strong{color:var(--bp-ink)}
+  .origins{margin:7px 0 0;padding-left:16px}
+  .origins li{margin-top:3px}
+  .ofile{color:var(--bp-ink);font-weight:600}
+  .ohash{font-variant-numeric:tabular-nums;font-size:10.5px}
   .checklist{display:flex;flex-direction:column;gap:2px}
   .chk-row{display:flex;gap:10px;align-items:flex-start;padding:9px 2px;border-top:1px solid var(--bp-line)}
   .chk-row:first-child{border-top:none}
@@ -327,6 +338,7 @@
            white-space:nowrap;transition:all .2s}
   .filebtn:hover{border-color:var(--cyan);color:var(--cyan);background:rgba(0,126,255,.06)}
   .srcmeta{line-height:1.35}
+  .keptline{color:var(--green);font-size:10.5px}
 
   .railstrip{padding:14px 16px 20px;overflow-y:auto;flex:1;min-height:0}
   /* In the rail the panel itself scrolls, so the strip must not also cap
@@ -1369,7 +1381,7 @@ function renderRail(){
         '<span class="chk-state">' + STATE_LABEL[c.state] + '</span>' +
         '<div><span class="chk-label">' + c.label + '</span>' +
         '<p class="chk-text">' + c.text + '</p></div></div>').join('') +
-    '</div></div>';
+    '</div>' + deliverablesHtml() + '</div>';
   wf.querySelector('.acchead').onclick = () => {
     state.wholeOpen = !state.wholeOpen;
     if (state.wholeOpen) state.openPage = null;     // same rule, the other way round
@@ -1404,7 +1416,11 @@ function renderRail(){
       const fr = document.createElement('div');
       fr.className = 'filerow';
       fr.innerHTML = '<span class="srcmeta">' + src.label + ' · ' + src.w + '&times;' + src.h +
-                     'px · <strong>' + r.effDpi + ' DPI</strong> as placed</span>';
+                     'px · <strong>' + r.effDpi + ' DPI</strong> as placed' +
+                     (src.origin ? '<br><span class="keptline">Original kept as sent · ' +
+                        fmtBytes(src.origin.size) +
+                        (src.origin.hash ? ' · ' + src.origin.hash.slice(0, 12) + '…' : '') + '</span>' : '') +
+                     '</span>';
       const fb = document.createElement('button');
       fb.className = 'filebtn'; fb.textContent = 'Choose file…';
       fb.onclick = () => pickFileFor(p.n);
@@ -1596,6 +1612,35 @@ function ensureLibs(){
   return libsPromise;
 }
 
+/* ── the original, kept as sent ─────────────────────────────────
+   Policy: everything is flattened for print, and the file the customer sent is
+   kept beside it, byte for byte, never touched.
+
+   The two halves depend on each other. Flattening in a browser is only a safe
+   thing to do because the original survives it: if the rasteriser drops a page,
+   shifts a colour or gets a transform wrong, there is something to go back to.
+
+   What the ORIGINAL is not, is the file to print. The file to print is the
+   flattened one, because that is the one the customer looked at and approved.
+   An operator who reaches for the original instead — it is vector, it looks
+   cleaner, it is tempting — prints something nobody signed off. Recorded here
+   so the deliverables can say which is which.
+
+   Its hash is taken at the moment of receipt, so "untouched" is checkable
+   later rather than merely intended. */
+async function sha256Hex(bytes){
+  const d = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function originOf(file){
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return { name:file.name, size:bytes.length, type:file.type || 'unknown', hash:await sha256Hex(bytes) };
+  } catch(e){
+    return { name:file.name, size:file.size, type:file.type || 'unknown', hash:null };
+  }
+}
+
 const PT = 72;                      // PDF units per inch
 const PDF_RENDER_DPI = 150;         // enough for the proof and the magnifier
 
@@ -1692,6 +1737,7 @@ async function readPdfStructure(bytes){
    check simply consumes it. */
 async function ingestPdf(file, startPage){
   await ensureLibs();
+  const origin = await originOf(file);
   const buf = await file.arrayBuffer();
   const struct = await readPdfStructure(new Uint8Array(buf.slice(0)));
   const doc = await window.pdfjsLib.getDocument({ data:new Uint8Array(buf.slice(0)) }).promise;
@@ -1727,6 +1773,7 @@ async function ingestPdf(file, startPage){
     uploads.set(startPage + i - 1, {
       el:c, w:c.width, h:c.height, text,
       inW:c.width/PDF_RENDER_DPI, inH:c.height/PDF_RENDER_DPI,
+      origin,
       label:file.name + (doc.numPages > 1 ? ' · p' + i : ''),
       stamp:Date.now() + i,
       pdf:{ ...struct, pageIndex:i - 1, numPages:doc.numPages, placed:count },
@@ -1766,7 +1813,7 @@ function loadArtSequence(startPage, fileList){
   }
   files.slice(0, room).forEach((f, i) => loadArt(startPage + i, f));
 }
-function loadArt(n, file){
+async function loadArt(n, file){
   if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)){
     ingestPdf(file, n).catch(err => {
       alert('That PDF could not be read: ' + (err && err.message ? err.message : err) +
@@ -1778,6 +1825,7 @@ function loadArt(n, file){
     alert('That is not an image this prototype can show.');
     return;
   }
+  const origin = await originOf(file);
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {
@@ -1785,7 +1833,7 @@ function loadArt(n, file){
     // print shop assumes and makes the DPI readout mean something.
     uploads.set(n, { el:img, w:img.naturalWidth, h:img.naturalHeight,
                      inW:img.naturalWidth/300, inH:img.naturalHeight/300,
-                     label:file.name, stamp:Date.now() });
+                     origin, label:file.name, stamp:Date.now() });
     cache.clear();
     renderAll();
   };
@@ -1867,9 +1915,46 @@ const FILE_CHECKS = [
     }},
 ];
 
+/* Everything flattens; the original is kept beside it. Saying so where the
+   customer can read it is half the point of the policy — the other half is
+   that the operator can see which file is which. */
+function deliverables(){
+  const origins = [];
+  const seen = new Set();
+  [...uploads.values()].forEach(u => {
+    if (!u.origin || seen.has(u.origin.hash || u.origin.name)) return;
+    seen.add(u.origin.hash || u.origin.name);
+    origins.push(u.origin);
+  });
+  return origins;
+}
+function fmtBytes(b){
+  return b >= 1048576 ? (b/1048576).toFixed(1) + ' MB'
+       : b >= 1024    ? Math.round(b/1024) + ' KB' : b + ' bytes';
+}
+
 function runFileChecks(){
   const f = fileFacts();
   return FILE_CHECKS.map(c => Object.assign({ id:c.id, label:c.label }, c.run(f)));
+}
+
+function deliverablesHtml(){
+  const origins = deliverables();
+  return '<div class="deliv" id="deliv">' +
+    '<div class="delivhead">What approving produces</div>' +
+    '<div class="delivrow"><strong>The print file.</strong> Every page flattened at 300 DPI exactly as you see it ' +
+      'here — the transforms baked in, nothing left to interpret. This is what goes on the press, because it is ' +
+      'what you approved.</div>' +
+    '<div class="delivrow"><strong>Your original, untouched.</strong> ' +
+      (origins.length
+        ? 'Kept exactly as sent and passed to production alongside the print file. It is the reference copy, not the ' +
+          'one we print from.'
+        : 'Whatever you send is kept exactly as sent, byte for byte, and passed to production alongside the print file.') +
+      (origins.length ? '<ul class="origins">' + origins.map(o =>
+          '<li><span class="ofile">' + o.name + '</span> · ' + fmtBytes(o.size) +
+          (o.hash ? ' · <span class="ohash" title="SHA-256 recorded on receipt, so untouched is checkable later">' +
+                    o.hash.slice(0, 12) + '…</span>' : '') + '</li>').join('') + '</ul>' : '') +
+    '</div></div>';
 }
 
 /* The legend explains the guides, so it cannot outlive them: hiding guides
