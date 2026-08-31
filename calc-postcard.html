@@ -666,7 +666,7 @@ const PERF_OPTS=_CFG.perf_opts||[{label:"No Perforation",val:0,price:0,count:0},
 // round cornering cost more than the printing. For scale, the guillotine uses
 // cutter_stackheight_inches: 3.5. Outside-2 is twice the height of All-4
 // because All-4 is two passes.
-const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
+const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:4.0},{label:'⅜" Round — Outside 2',val:215,price:3.0},{label:'¼" Round — All 4',val:108,price:2.0},{label:'⅜" Round — All 4',val:107,price:1.5}];
 const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01},{label:"Email Art After Order",val:0.02},{label:"Artwork already discussed",val:0.03},{label:"I have a design in Canva",val:0.04},{label:"Artwork needs edits",val:2.01},{label:"Design from scratch",val:4.01}];
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
 

@@ -224,12 +224,19 @@ function pps_default_config() {
             array( 'label' => 'Bundle in 50s',   'val' => 1500, 'price' => 50 ),
             array( 'label' => 'Bundle in 100s',  'val' => 3000, 'price' => 100 ),
         ),
+        // `price` here is the LIFT HEIGHT IN INCHES that goes through the corner
+        // rounder in one cycle — it divides, unlike every other finishing
+        // option's price, so a smaller number makes the job dearer. It was
+        // 0.2/0.15/0.1/0.075, which is thinner than a single 48pp booklet and
+        // charged about three cycles per book. Rescaled x20. All 4 stays half
+        // the height of Outside 2 because it is two passes. The guillotine's
+        // equivalent knob, cutter_stackheight_inches, is 3.5.
         'corners' => array(
             array( 'label' => 'No Round Cornering',                              'val' => 0,   'price' => 0 ),
-            array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 Outside 2",        'val' => 216, 'price' => 0.2 ),
-            array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 Outside 2",    'val' => 215, 'price' => 0.15 ),
-            array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 All 4",            'val' => 108, 'price' => 0.1 ),
-            array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 All 4",        'val' => 107, 'price' => 0.075 ),
+            array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 Outside 2",        'val' => 216, 'price' => 4.0 ),
+            array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 Outside 2",    'val' => 215, 'price' => 3.0 ),
+            array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 All 4",            'val' => 108, 'price' => 2.0 ),
+            array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 All 4",        'val' => 107, 'price' => 1.5 ),
         ),
         'art_opts' => array(
             array( 'label' => 'Upload Art with Order',      'val' => 0.01, 'price' => 0 ),
