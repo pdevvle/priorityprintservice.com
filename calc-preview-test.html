@@ -817,6 +817,13 @@ const isCardstockVal=v=>PAPERS_CS.some(p=>p.val===v);
 
 const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
 const BUNDLING=_CFG.bundling||[{label:"No Bundling",val:0,price:500},{label:"Bundle in 25s",val:750,price:25},{label:"Bundle in 50s",val:1500,price:50},{label:"Bundle in 100s",val:3000,price:100}];
+// NOTE: corners[].price is NOT a price. Every other finishing option's `price`
+// MULTIPLIES; this one DIVIDES — it is the stack height, in inches, that goes
+// through the corner rounder in one cycle. A smaller number therefore means a
+// DEARER job, and entering a per-piece dollar amount here (0.001-ish) makes
+// round cornering cost more than the printing. For scale, the guillotine uses
+// cutter_stackheight_inches: 3.5. Outside-2 is twice the height of All-4
+// because All-4 is two passes.
 const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
 const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01,price:0},{label:"Email Art After Order",val:0.02,price:0},{label:"Artwork already discussed",val:0.03,price:0},{label:"I have a design in Canva",val:0.04,price:0},{label:"Artwork needs edits",val:2.01,price:75},{label:"Design from scratch",val:4.01,price:75}];
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
@@ -986,7 +993,12 @@ function calculate(c) {
   P.coat=0;
   if(coat.val>0&&coatOK){const sc=tQ/imp;P.coat=Math.ceil((coat.price*sc*mk)+(((sc/PCF.uvcoaterimpressionsperhour)*PCF.labor_bindery_hr)*(coat.price*mk*3))+PCF.labor_bindery_hr)}
   P.bundle=(bund.val>0&&q100)?Math.ceil(((tQ/bund.price)/mk)*(PCF.labor_bindery_hr/PCF.bundlesperhour))+PCF.bundling_base_fee:0;
-  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.labor_bindery_hr*PCF.roundcornerperhour):0;
+  // Cycles / cycles-per-hour = hours; hours x dollars-per-hour = cost. This line
+  // had the last two operands transposed — dividing by the labour RATE and
+  // multiplying by the THROUGHPUT — which is dimensionally meaningless and
+  // charged 4.59x the intended amount. Perfect bound and coupon have always
+  // had it the right way round; saddle was the odd one out.
+  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr):0;
 
   let ndc=art.val>=4?(art.price*tP)*PCF.art_newdesignmodifier:0;
   let aec=(art.val>=2&&art.val<4)?PCF.art_pagesperhour+((c.artEditPages/PCF.art_pagesperhour)*art.price):0;
