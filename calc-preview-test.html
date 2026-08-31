@@ -998,7 +998,12 @@ function calculate(c) {
   // multiplying by the THROUGHPUT — which is dimensionally meaningless and
   // charged 4.59x the intended amount. Perfect bound and coupon have always
   // had it the right way round; saddle was the odd one out.
-  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr):0;
+  // The booklets had no setup term, so corner-rounding cost was purely linear in
+  // quantity and the per-unit price never moved — 25 or 5,000, the same number.
+  // The flats have always charged half a bindery hour to set the rounder up;
+  // there is no reason a booklet run is different, and without it a run of 25
+  // is priced as though setup were free.
+  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr)+(PCF.labor_bindery_hr/2):0;
 
   let ndc=art.val>=4?(art.price*tP)*PCF.art_newdesignmodifier:0;
   let aec=(art.val>=2&&art.val<4)?PCF.art_pagesperhour+((c.artEditPages/PCF.art_pagesperhour)*art.price):0;

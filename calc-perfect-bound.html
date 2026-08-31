@@ -1110,7 +1110,12 @@ function calculate(c) {
   P.coat=0;
   if(coat.val>0&&coatOK){const sc=tQ/imp;P.coat=Math.ceil((coat.price*sc*mk)+(((sc/PCF.uvcoaterimpressionsperhour)*PCF.labor_bindery_hr)*(coat.price*mk*3))+PCF.labor_bindery_hr)}
   P.bundle=(bund.val>0&&q100)?Math.ceil(((tQ/bund.price)/mk)*(PCF.labor_bindery_hr/PCF.bundlesperhour)+PCF.bundling_base_fee):0;
-  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr):0;
+  // The booklets had no setup term, so corner-rounding cost was purely linear in
+  // quantity and the per-unit price never moved — 25 or 5,000, the same number.
+  // The flats have always charged half a bindery hour to set the rounder up;
+  // there is no reason a booklet run is different, and without it a run of 25
+  // is priced as though setup were free.
+  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr)+(PCF.labor_bindery_hr/2):0;
 
   // ── Outfold ──
   P.outfold=0;
