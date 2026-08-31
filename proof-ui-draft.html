@@ -251,6 +251,23 @@
   .accbody{display:none;padding:0 2px 16px}
   .acc.open .accbody{display:block}
   .review{color:var(--bp-info);font-size:11.5px;line-height:1.5;margin:0 0 9px}
+  /* the preflight report: a state per check, and "not checked" reads as its
+     own answer rather than as a pass */
+  .chip{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;
+        border:1px solid var(--bp-line);background:var(--bp-btn);color:var(--bp-dim)}
+  .chip.fail{background:var(--magenta);border-color:var(--magenta);color:#fff}
+  .chip.warn{background:var(--yellow-tint);border-color:var(--yellow-line);color:var(--bp-warn)}
+  .chip.pass{background:rgba(56,161,105,.12);border-color:var(--green);color:var(--green)}
+  .checklist{display:flex;flex-direction:column;gap:2px}
+  .chk-row{display:flex;gap:10px;align-items:flex-start;padding:9px 2px;border-top:1px solid var(--bp-line)}
+  .chk-row:first-child{border-top:none}
+  .chk-state{flex-shrink:0;width:78px;font-size:10px;font-weight:700;letter-spacing:.03em;
+             text-transform:uppercase;padding-top:2px;color:var(--bp-faint)}
+  .chk-row.fail .chk-state{color:var(--magenta)}
+  .chk-row.warn .chk-state{color:var(--bp-warn)}
+  .chk-row.pass .chk-state{color:var(--green)}
+  .chk-label{font-size:12.5px;font-weight:600;color:var(--bp-ink)}
+  .chk-text{margin:3px 0 0;font-size:11.5px;line-height:1.5;color:var(--bp-faint)}
   .behavior{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
   .behavior select{padding:8px 11px;border:1px solid var(--bp-line);border-radius:10px;
                    background:var(--bp-surface);color:var(--bp-ink);font-size:13.5px;font-family:inherit;
@@ -588,7 +605,7 @@
   </div>
 </div>
 
-<input type="file" id="filePick" accept="image/*" multiple hidden>
+<input type="file" id="filePick" accept="image/*,application/pdf" multiple hidden>
 
 <script>
 /* ─────────────────────────────────────────────────────────────
@@ -609,14 +626,6 @@ const MODEL = {
     { n:5, name:'' },                 { n:6, name:'' },
     { n:7, name:'inside back cover' },{ n:8, name:'back cover' }
   ],
-  wholeFile: [
-    // Was "It has been converted to CMYK", carried over from the wireframe.
-    // Nothing in this pipeline converts anything — the composition is sRGB from
-    // end to end — so that sentence claimed work no code does. Same defect as
-    // the all-clear: a reassuring statement with nothing behind it.
-    'Review: Art was uploaded in screen colours (RGB). It will be printed with CMYK inks, and some screen colours — bright blues, greens and oranges especially — cannot be mixed in ink and will come out duller than they look here.',
-    'Review: Saddlestitch binding method requires increments of 4 pages. (3) blank pages have been inserted into your file to reflect the physical requirements.'
-  ]
 };
 
 const BLEED_W = MODEL.trim.w + MODEL.bleed * 2;
@@ -763,9 +772,6 @@ function rebuildModel(count){
   MODEL.groups = [{ pages:[1] }];
   for (let n = 2; n < count; n += 2) MODEL.groups.push({ pages:[n, n+1] });
   MODEL.groups.push({ pages:[count] });
-
-  MODEL.wholeFile[1] = 'Review: Saddlestitch binding method requires increments of 4 pages. (' +
-    (count - 5) + ') blank pages have been inserted into your file to reflect the physical requirements.';
 
   INTERIOR = MODEL.pages.filter(p => p.n !== 1 && p.n !== count).map(p => p.n);
   TOTAL_SPREADS = Math.ceil(INTERIOR.length / 2);
@@ -1346,10 +1352,24 @@ function renderRail(){
   const rail = document.getElementById('rail');
   rail.innerHTML = '';
 
+  const checks = runFileChecks();
+  const worstFile = checks.some(c => c.state === 'fail') ? 'fail'
+                  : checks.some(c => c.state === 'warn') ? 'warn'
+                  : checks.some(c => c.state === 'unknown') ? 'unknown' : 'pass';
   const wf = document.createElement('div');
   wf.className = 'acc' + (state.wholeOpen ? ' open' : '');
-  wf.innerHTML = '<button class="acchead"><span>Whole File</span><span class="bang">!</span><span class="caret">⌄</span></button>' +
-                 '<div class="accbody">' + MODEL.wholeFile.map(t => '<p class="review">'+t+'</p>').join('') + '</div>';
+  wf.innerHTML = '<button class="acchead"><span>Preflight</span>' +
+      '<span class="chip ' + worstFile + '">' + (
+        worstFile === 'fail' ? checks.filter(c=>c.state==='fail').length + ' problem' + (checks.filter(c=>c.state==='fail').length===1?'':'s')
+      : worstFile === 'warn' ? checks.filter(c=>c.state==='warn').length + ' to check'
+      : worstFile === 'unknown' ? checks.filter(c=>c.state==='unknown').length + ' not checked'
+      : 'all checks ran') + '</span><span class="caret">⌄</span></button>' +
+    '<div class="accbody"><div class="checklist">' +
+      checks.map(c => '<div class="chk-row ' + c.state + '">' +
+        '<span class="chk-state">' + STATE_LABEL[c.state] + '</span>' +
+        '<div><span class="chk-label">' + c.label + '</span>' +
+        '<p class="chk-text">' + c.text + '</p></div></div>').join('') +
+    '</div></div>';
   wf.querySelector('.acchead').onclick = () => {
     state.wholeOpen = !state.wholeOpen;
     if (state.wholeOpen) state.openPage = null;     // same rule, the other way round
@@ -1541,6 +1561,185 @@ function repaintFromScale(){
   renderStage();
 }
 
+/* ── reading what the customer actually sent ───────────────────
+   Everything above this line works on pixels. A PDF is not pixels: it knows
+   where its type is, which fonts it carries, what size it was built to, and
+   what it is hiding. Those are the checks a trade shop runs before it prints,
+   and none of them survive flattening — which is exactly why they belong here,
+   on the file as supplied, rather than on the raster we make from it.
+
+   Libraries load on first use, so a customer who only ever drops a JPEG never
+   pays for them. */
+const LIB_BASE = window.PPS_LIB_BASE || null;   // set by the test harness; CDN otherwise
+const LIB = {
+  pdfjs:  LIB_BASE ? LIB_BASE+'pdf.min.js'        : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  worker: LIB_BASE ? LIB_BASE+'pdf.worker.min.js' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  pdflib: LIB_BASE ? LIB_BASE+'pdf-lib.min.js'    : 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js',
+};
+let libsPromise = null;
+function loadScript(src){
+  return new Promise((res, rej) => {
+    const el = document.createElement('script');
+    el.src = src; el.onload = res;
+    el.onerror = () => rej(new Error('Could not load ' + src));
+    document.head.appendChild(el);
+  });
+}
+function ensureLibs(){
+  if (!libsPromise) libsPromise = (async () => {
+    await loadScript(LIB.pdfjs);
+    await loadScript(LIB.pdflib);
+    if (!window.pdfjsLib) throw new Error('pdf.js did not register');
+    if (!window.PDFLib)   throw new Error('pdf-lib did not register');
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = LIB.worker;
+  })();
+  return libsPromise;
+}
+
+const PT = 72;                      // PDF units per inch
+const PDF_RENDER_DPI = 150;         // enough for the proof and the magnifier
+
+/* Structure, read from the file's own dictionaries rather than inferred. */
+async function readPdfStructure(bytes){
+  const { PDFDocument, PDFName, PDFDict, PDFArray } = window.PDFLib;
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption:true, updateMetadata:false });
+  const ctx = doc.context;
+  // pdf-lib's typed lookup throws when a key is simply absent, which is the
+  // normal case for half of these. Dereference untyped and check the shape.
+  const deref = (v) => { try { const r = ctx.lookup(v); return (r === undefined) ? null : r; } catch(e){ return null; } };
+  const dictOf = (v) => { const r = deref(v); return (r && r instanceof PDFDict) ? r : null; };
+  // PDF names escape anything awkward as #XX, so "PANTONE 185 C" arrives as
+  // PANTONE#20185#20C. Decode it, or the customer reads their own ink back as
+  // machine noise.
+  const nameOf = (v) => ((v && v.asString) ? v.asString() : (v == null ? '' : String(v)))
+    .replace(/#([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  const box = (fn) => { try { const b = fn(); return b ? { w:b.width/PT, h:b.height/PT } : null; } catch(e){ return null; } };
+
+  const pages = doc.getPages().map(pg => ({
+    media: box(() => pg.getMediaBox()),
+    trim:  box(() => pg.getTrimBox()),
+    bleed: box(() => pg.getBleedBox()),
+  }));
+
+  /* A font is embedded when its descriptor carries the program itself
+     (FontFile / FontFile2 / FontFile3). Type3 fonts define their glyphs inline
+     and need no descriptor, so they are never "missing". Subset prefixes like
+     ABCDEF+ are stripped so one face is reported once. */
+  const notEmbedded = new Set();
+  const inspectFont = (fd, depth) => {
+    if (!fd || depth > 3) return;
+    const sub = nameOf(fd.get(PDFName.of('Subtype')));
+    if (sub === '/Type3') return;
+    if (sub === '/Type0'){
+      const kids = deref(fd.get(PDFName.of('DescendantFonts')));
+      if (kids && kids instanceof PDFArray){
+        for (let i = 0; i < kids.size(); i++) inspectFont(dictOf(kids.get(i)), depth + 1);
+      }
+      return;
+    }
+    const desc = dictOf(fd.get(PDFName.of('FontDescriptor')));
+    const embedded = !!(desc && (desc.get(PDFName.of('FontFile')) ||
+                                desc.get(PDFName.of('FontFile2')) ||
+                                desc.get(PDFName.of('FontFile3'))));
+    if (!embedded){
+      notEmbedded.add(nameOf(fd.get(PDFName.of('BaseFont')))
+        .replace(/^\//, '').replace(/^[A-Z]{6}\+/, '') || 'unnamed font');
+    }
+  };
+  doc.getPages().forEach(pg => {
+    const res = dictOf(pg.node.get(PDFName.of('Resources')));
+    const fonts = res ? dictOf(res.get(PDFName.of('Font'))) : null;
+    if (!fonts) return;
+    fonts.entries().forEach(([, ref]) => inspectFont(dictOf(ref), 0));
+  });
+
+  /* Spot colours. A Separation or DeviceN colorant is an ink of its own; on a
+     four-colour press it gets converted, and the customer's Pantone does not
+     come back. Worth naming rather than discovering on the sheet. */
+  const spots = new Set();
+  doc.getPages().forEach(pg => {
+    const res = dictOf(pg.node.get(PDFName.of('Resources')));
+    const csDict = res ? dictOf(res.get(PDFName.of('ColorSpace'))) : null;
+    if (!csDict) return;
+    csDict.entries().forEach(([, ref]) => {
+      const arr = deref(ref);
+      if (!arr || !(arr instanceof PDFArray) || arr.size() < 2) return;
+      const family = nameOf(deref(arr.get(0)));
+      if (family === '/Separation'){
+        spots.add(nameOf(deref(arr.get(1))).replace(/^\//, '') || 'unnamed');
+      } else if (family === '/DeviceN'){
+        const names = deref(arr.get(1));
+        if (names && names instanceof PDFArray){
+          for (let i = 0; i < names.size(); i++) spots.add(nameOf(deref(names.get(i))).replace(/^\//, ''));
+        } else spots.add('DeviceN');
+      }
+    });
+  });
+
+  const cat = doc.catalog;
+  const hasOptionalContent = !!cat.get(PDFName.of('OCProperties'));
+  const hasAcroForm = !!cat.get(PDFName.of('AcroForm'));
+  const hasAnnots = doc.getPages().some(pg => {
+    const a = deref(pg.node.get(PDFName.of('Annots')));
+    return !!(a && a.size && a.size() > 0);
+  });
+
+  return { pages, notEmbedded:[...notEmbedded], spots:[...spots], hasOptionalContent, hasAcroForm, hasAnnots };
+}
+
+/* Render each page, and take its type from the text layer rather than from the
+   pixels. This is the same information pdf.js gives any viewer; the margin
+   check simply consumes it. */
+async function ingestPdf(file, startPage){
+  await ensureLibs();
+  const buf = await file.arrayBuffer();
+  const struct = await readPdfStructure(new Uint8Array(buf.slice(0)));
+  const doc = await window.pdfjsLib.getDocument({ data:new Uint8Array(buf.slice(0)) }).promise;
+
+  const room = MODEL.pages.length - startPage + 1;
+  const count = Math.min(doc.numPages, room);
+  for (let i = 1; i <= count; i++){
+    const page = await doc.getPage(i);
+    const scale = PDF_RENDER_DPI / PT;
+    const vp = page.getViewport({ scale });
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.ceil(vp.width)); c.height = Math.max(1, Math.ceil(vp.height));
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext:cx, viewport:vp }).promise;
+
+    const tc = await page.getTextContent();
+    const text = [];
+    for (const it of tc.items){
+      if (!it.str || !it.str.trim()) continue;
+      const m = window.pdfjsLib.Util.transform(vp.transform, it.transform);
+      const h = Math.hypot(m[2], m[3]) || (it.height * scale);
+      const w = (it.width || 0) * scale;
+      if (!(w > 0) || !(h > 0)) continue;
+      // m[4],m[5] is the baseline origin in device space; allow for descenders
+      text.push({ x:m[4], y:m[5] - h, w, h:h * 1.22 });
+    }
+
+    // The physical size of the ART is the size of what was rendered — the
+    // viewport, which pdf.js takes from the CropBox. The TrimBox is a different
+    // fact about the file and is kept for the built-to-spec check; using it
+    // here would place every page 4-5% small.
+    uploads.set(startPage + i - 1, {
+      el:c, w:c.width, h:c.height, text,
+      inW:c.width/PDF_RENDER_DPI, inH:c.height/PDF_RENDER_DPI,
+      label:file.name + (doc.numPages > 1 ? ' · p' + i : ''),
+      stamp:Date.now() + i,
+      pdf:{ ...struct, pageIndex:i - 1, numPages:doc.numPages, placed:count },
+    });
+  }
+  cache.clear();
+  renderAll();
+  if (doc.numPages > room){
+    alert(file.name + ' has ' + doc.numPages + ' pages but only ' + room +
+          ' fit from page ' + startPage + '. The remaining ' + (doc.numPages - room) + ' were not placed.');
+  }
+}
+
 /* ── artwork replacement ────────────────────────────────────── */
 let pickTarget = null;
 function pickFileFor(n){
@@ -1569,7 +1768,10 @@ function loadArtSequence(startPage, fileList){
 }
 function loadArt(n, file){
   if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)){
-    alert('This prototype does not rasterise PDFs — the real calculator does. Try a PNG or JPEG.');
+    ingestPdf(file, n).catch(err => {
+      alert('That PDF could not be read: ' + (err && err.message ? err.message : err) +
+            '\n\nNothing has been attached to page ' + n + '.');
+    });
     return;
   }
   if (!/^image\//.test(file.type)){
@@ -1589,6 +1791,85 @@ function loadArt(n, file){
   };
   img.onerror = () => { URL.revokeObjectURL(url); alert('That image could not be read.'); };
   img.src = url;
+}
+
+/* ── preflight ─────────────────────────────────────────────────
+   The checks a trade shop runs before it puts a job on a press, each in one of
+   five states. "unknown" is a first-class result and not a quiet pass: most of
+   these can only be answered by a file that carries its own structure, and
+   saying so is the difference between a preflight and a reassurance. */
+const STATE_LABEL = { pass:'OK', warn:'Check', fail:'Problem', unknown:'Not checked', na:'—' };
+
+function fileFacts(){
+  const all = [...uploads.values()];
+  const pdfs = all.filter(u => u.pdf);
+  return {
+    pdfs, images: all.filter(u => !u.pdf),
+    placeholders: MODEL.pages.length - uploads.size,
+    notEmbedded: [...new Set(pdfs.flatMap(u => u.pdf.notEmbedded))],
+    spots:       [...new Set(pdfs.flatMap(u => u.pdf.spots || []))],
+    layers:      pdfs.some(u => u.pdf.hasOptionalContent),
+    interactive: pdfs.some(u => u.pdf.hasAcroForm || u.pdf.hasAnnots),
+  };
+}
+const NO_STRUCTURE = 'Nothing attached carries its own structure — a flat image is pixels and nothing else. Send a PDF and this can be answered.';
+
+const FILE_CHECKS = [
+  { id:'pages', label:'Page count for this binding', run(){
+      const c = MODEL.pages.length;
+      return c % 4 === 0
+        ? { state:'pass', text:c + ' pages. Saddle stitch is folded sheets, so the count has to be a multiple of four, and this is.' }
+        : { state:'fail', text:c + ' pages. Saddle stitch needs a multiple of four; blank pages will be inserted to make up the difference.' };
+    }},
+  { id:'size', label:'Built to the ordered size', run(f){
+      if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
+      const want = MODEL.trim, tol = 0.03, bad = [];
+      f.pdfs.forEach(u => {
+        const pg = u.pdf.pages[u.pdf.pageIndex] || {};
+        const t = pg.trim || pg.media;
+        if (!t) return;
+        const fits = (Math.abs(t.w - want.w) < tol && Math.abs(t.h - want.h) < tol) ||
+                     (Math.abs(t.w - want.h) < tol && Math.abs(t.h - want.w) < tol);
+        if (!fits) bad.push(u.label + ' is ' + t.w.toFixed(2) + '" \u00d7 ' + t.h.toFixed(2) + '"');
+      });
+      const noTrim = f.pdfs.filter(u => !(u.pdf.pages[u.pdf.pageIndex] || {}).trim).length;
+      if (bad.length) return { state:'warn', text:'Ordered ' + want.w + '" \u00d7 ' + want.h +
+        '". ' + bad.join('; ') + '. It will be scaled or cropped to fit, which is what the Art Behavior controls decide.' };
+      return { state:'pass', text:'Trimmed size matches the ' + want.w + '" \u00d7 ' + want.h + '" ordered.' +
+        (noTrim ? ' (' + noTrim + ' page' + (noTrim===1?'':'s') + ' carry no TrimBox, so the page size was used instead.)' : '') };
+    }},
+  { id:'fonts', label:'Fonts embedded', run(f){
+      if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
+      return f.notEmbedded.length
+        ? { state:'fail', text:'Not embedded: ' + f.notEmbedded.join(', ') +
+            '. A font that is not in the file is substituted at the press, and the substitute reflows the type. Re-export with fonts embedded, or outline them.' }
+        : { state:'pass', text:'Every font used is carried inside the file.' };
+    }},
+  { id:'spots', label:'Colour', run(f){
+      if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE +
+        ' Whatever is sent, it prints with CMYK inks, and bright screen colours come out duller.' };
+      return f.spots.length
+        ? { state:'warn', text:'Spot colours in the file: ' + f.spots.join(', ') +
+            '. This is a four-colour press, so each one is converted to CMYK and will not match the swatch.' }
+        : { state:'pass', text:'No spot colours — everything prints from the four process inks.' };
+    }},
+  { id:'layers', label:'Hidden layers', run(f){
+      if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
+      return f.layers
+        ? { state:'warn', text:'This file has optional-content layers. What prints is whatever was visible when it was saved, which is not always what the designer last looked at. Check the proof against what you expect to see.' }
+        : { state:'pass', text:'No optional-content layers.' };
+    }},
+  { id:'interactive', label:'Interactive content', run(f){
+      if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
+      return f.interactive
+        ? { state:'warn', text:'The file carries annotations or form fields. Those are screen furniture: comments, form boxes and links do not print, and anything you meant to be artwork needs to be flattened into the page.' }
+        : { state:'pass', text:'No annotations or form fields.' };
+    }},
+];
+
+function runFileChecks(){
+  const f = fileFacts();
+  return FILE_CHECKS.map(c => Object.assign({ id:c.id, label:c.label }, c.run(f)));
 }
 
 /* The legend explains the guides, so it cannot outlive them: hiding guides
