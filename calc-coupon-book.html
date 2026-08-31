@@ -1045,7 +1045,13 @@ function calculate(c) {
   const mk = Math.max(PCF.couponbook_maximummarkup - dL, PCF.couponbook_minimummarkup);
 
   // Spine proxy: used for bundling/corner turnaround estimates
-  const spine=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
+  // The whole run's stack height, the booklet twin of the flats'
+  // approxThickness — interior leaves plus cover, times the quantity. It was
+  // called `spine`, which is what a book has ONE of and does not multiply by
+  // how many you ordered; that name is why a finishing-cost bug read as a
+  // spine bug. The real per-book spine is computed separately as spineInches.
+  // Same caveat as the flats: caliper is proxied from paper price, not measured.
+  const approxThickness=((((tP/2)*c.insidePaper.price)+cvr.price)*tQ)*0.10;
   const csOK=sets.every(s=>s.pages<=24);
 
   const cvrScoring=COVER_SCORING_VALS.includes(cvr.val);
@@ -1098,7 +1104,7 @@ function calculate(c) {
   P.press=(tS/PCF.press_printsperhour)*PCF.labor_press_hr;
   P.cutting=((tS*imp)/PCF.cutter_sheetsperhour)*(PCF.labor_cutting_hr+mk)+PCF.cutterbasefee;
   // 3 finishing cuts (head, foot, face) after binding
-  P.finishingCuts=(((spine/PCF.cutter_stackheight_inches)*3)/PCF.cutter_cyclesperhour)*PCF.labor_cutting_hr+PCF.cutterbasefee;
+  P.finishingCuts=(((approxThickness/PCF.cutter_stackheight_inches)*3)/PCF.cutter_cyclesperhour)*PCF.labor_cutting_hr+PCF.cutterbasefee;
   P.scoreCover=cvrScoring?(tQ/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
   P.scoreInsides=csInside?(((tS*(imp/2))-tQ)/PCF.bindery_morgana_impressionperhour)*PCF.labor_bindery_hr:0;
 
@@ -1123,7 +1129,7 @@ function calculate(c) {
   // The flats have always charged half a bindery hour to set the rounder up;
   // there is no reason a booklet run is different, and without it a run of 25
   // is priced as though setup were free.
-  P.rc=rc.val>0?Math.floor((spine/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr)+(PCF.labor_bindery_hr/2):0;
+  P.rc=rc.val>0?Math.floor((approxThickness/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr)+(PCF.labor_bindery_hr/2):0;
 
   // ── Outfold ──
   P.outfold=0;
@@ -1225,8 +1231,8 @@ function calculate(c) {
   const pT=Math.max(c.insidePaper.days!=null?c.insidePaper.days:Math.floor(c.insidePaper.val||0),cvr.days!=null?cvr.days:Math.floor(cvr.val||0));
   const aT=(c.vividPrint?Math.floor(tS/PCF.sheetsturnaround):0)+
     (coat.val>0&&coatOK?Math.floor((tQ/(imp/2))/coat.val):0)+
-    (bund.val>0&&q100?Math.floor(spine/bund.val):0)+
-    (rc.val>0?Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)):0)+
+    (bund.val>0&&q100?Math.floor(approxThickness/bund.val):0)+
+    (rc.val>0?Math.floor(Math.min(approxThickness/rc.val,PCF.addon_roundcornermaxdays)):0)+
     outfoldTurnaround+perfTurnaround+perfBindTurnaround+magnetTurnaround+wraparoundPerfTurnaround;
   const dT=art.val>=4?Math.ceil(art.val*(tP/4)):0;
   const eT=(art.val>=2&&art.val<4)?Math.ceil((c.artEditPages/PCF.art_pagesperhour)/2):0;
@@ -1242,8 +1248,8 @@ function calculate(c) {
     perfectBind: perfBindTurnaround,
     vivid: c.vividPrint ? Math.floor(tS/PCF.sheetsturnaround) : 0,
     coating: (coat.val>0&&coatOK) ? Math.floor((tQ/(imp/2))/coat.val) : 0,
-    bundling: (bund.val>0&&q100) ? Math.floor(spine/bund.val) : 0,
-    roundCorner: rc.val>0 ? Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)) : 0,
+    bundling: (bund.val>0&&q100) ? Math.floor(approxThickness/bund.val) : 0,
+    roundCorner: rc.val>0 ? Math.floor(Math.min(approxThickness/rc.val,PCF.addon_roundcornermaxdays)) : 0,
     outfold: outfoldTurnaround,
     perforation: perfTurnaround,
     magnetBacker: magnetTurnaround,
@@ -1366,7 +1372,7 @@ function calculate(c) {
     // Pricing intermediates
     markup:mk,coverMarkup:mk,
     discountLog:dL,
-    spineThickness:spine,
+    approxThickness,
     materialsSubtotal:pComp,
     // Flags
     coverNeedsScoring:cvrScoring,
@@ -1409,8 +1415,8 @@ function calculate(c) {
         perfectBind:perfBindTurnaround,
         vivid:c.vividPrint?Math.floor(tS/PCF.sheetsturnaround):0,
         coating:(coat.val>0&&coatOK)?Math.floor((tQ/(imp/2))/coat.val):0,
-        bundling:(bund.val>0&&q100)?Math.floor(spine/bund.val):0,
-        roundCorner:rc.val>0?Math.floor(Math.min(spine/rc.val,PCF.addon_roundcornermaxdays)):0,
+        bundling:(bund.val>0&&q100)?Math.floor(approxThickness/bund.val):0,
+        roundCorner:rc.val>0?Math.floor(Math.min(approxThickness/rc.val,PCF.addon_roundcornermaxdays)):0,
         outfold:outfoldTurnaround,
         perforation:perfTurnaround,
         magnetBacker:magnetTurnaround,
@@ -2004,7 +2010,7 @@ function DebugPanel({debug}){
         <Row label="Discount log" value={d.discountLog}/>
         <Row label="Markup multiplier" value={d.markup} unit="×"/>
         <Row label="Cover markup" value={d.coverMarkup} unit="×"/>
-        <Row label="Spine thickness (proxy)" value={d.spineThickness}/>
+        <Row label="Stack thickness, whole run (proxy)" value={d.approxThickness}/>
         <Row label="Materials subtotal" value={d.materialsSubtotal} unit="$"/>
 
         <Hdr>Size & Binding</Hdr>
