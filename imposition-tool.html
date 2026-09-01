@@ -40,10 +40,36 @@
   table.imp-q td { padding:9px 10px; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:middle; }
   .lbl { font-size:11px; font-weight:700; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.5px; margin-bottom:5px; display:block; }
   @media(max-width:980px){ .imp-cols{flex-direction:column} }
+  /* Metadata reference — a lookup sheet folded into the tool, so the operator
+     never has to leave the queue to find out what a field means. */
+  .imp-ref { font-size:12.5px; line-height:1.55; color:rgba(255,255,255,.78); }
+  .imp-ref h4 { font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:#7ab8ff;
+                margin:18px 0 7px; font-weight:700; display:flex; gap:8px; align-items:baseline; }
+  .imp-ref h4:first-child { margin-top:0; }
+  .imp-ref h4 .n { font:11px/1 ui-monospace,Menlo,Consolas,monospace; color:rgba(255,255,255,.3); }
+  .imp-ref p { margin:0 0 9px; }
+  .imp-ref code { font:12px/1.5 ui-monospace,Menlo,Consolas,monospace; background:rgba(255,255,255,.06);
+                  border:1px solid rgba(255,255,255,.08); border-radius:3px; padding:1px 4px; color:#9fd0ff; }
+  .imp-ref pre { margin:0 0 10px; padding:11px 13px; background:#0f1216; border:1px solid rgba(255,255,255,.08);
+                 border-radius:8px; overflow-x:auto; font:11.5px/1.6 ui-monospace,Menlo,Consolas,monospace;
+                 color:rgba(255,255,255,.8); white-space:pre; }
+  .imp-ref table { width:100%; border-collapse:collapse; font-size:12px; margin:0 0 10px; }
+  .imp-ref th { text-align:left; padding:6px 9px; color:rgba(255,255,255,.4); font-size:10.5px;
+                text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid rgba(255,255,255,.1); white-space:nowrap; }
+  .imp-ref td { padding:6px 9px; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:top; }
+  .imp-ref td code { background:none; border:0; padding:0; }
+  .imp-ref .tw { overflow-x:auto; }
+  .imp-ref .trap { border-left:3px solid #e91e8c; background:rgba(233,30,140,.07); border-radius:0 6px 6px 0;
+                   padding:9px 12px; margin:0 0 10px; }
+  .imp-ref .tip  { border-left:3px solid #7ab8ff; background:rgba(122,184,255,.07); border-radius:0 6px 6px 0;
+                   padding:9px 12px; margin:0 0 10px; }
+  .imp-ref .trap b { color:#f9a8d4; } .imp-ref .tip b { color:#9fd0ff; }
+  .imp-ref ol { margin:0; padding-left:19px; } .imp-ref li { margin-bottom:6px; }
+  .imp-ref .yes { color:#4ade80; font-weight:700; } .imp-ref .no { color:#f9a8d4; font-weight:700; }
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-01 03:43 UTC · IMPOSE-V1.23</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-01 04:14 UTC · IMPOSE-V1.24</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2469,6 +2495,194 @@ function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
   );
 }
 
+// ── Metadata reference ────────────────────────────────────────────────────
+// The `_pps_metadata` blob is the only record of what the customer ordered and
+// the thing every queue row is parsed from, so the lookup sheet lives IN the
+// tool rather than in a doc nobody has open at the press.
+const META_SADDLE = `{
+  "sizeLabel": "5.5×8.5",
+  "customLong": 0,
+  "customShort": 0,
+  "bindDir": "short",
+  "sets": [ { "qty": 100, "pages": 36, "name": "" } ],
+  "insideColor": "4/4",
+  "coverColor": "4/4",
+  "insidePaper": "80lb-gloss-text",
+  "insidePaperType": "text",
+  "coverMode": "self",
+  "coverPaper": "",
+  "coverPaperType": "cover",
+  "twoStaple": false,
+  "vividPrint": false,
+  "coating": "none",
+  "bundling": "none",
+  "roundCorner": false,
+  "artwork": "upload",
+  "artEditPages": {},
+  "bleed": true,
+  "proof": "pdf",
+  "pageTransforms": { "0": { "fitMode": "fit", "artScale": 1, "rotateSteps": 0 } },
+  "artDims": { "wIn": 5.5, "hIn": 8.5 },
+  "shipState": "CA", "shipZip": "92101", "shipAddr": {},
+  "needByDate": "2026-09-15",
+  "estWeightLb": 41.0, "estCartons": 2, "transitDays": 3,
+  "productionBizDays": 5, "requestedBizDays": 8, "freeDeliveryBizDays": 8,
+  "rushMultiplier": 1, "rushCost": 0,
+  "productionStartDate": "2026-09-02",
+  "mustShipByDate": "2026-09-10",
+  "estimatedDeliveryDate": "2026-09-15",
+  "total": 1480.00, "baseTotal": 1480.00, "perUnit": 14.80,
+  "totalQty": 100, "days": 8, "debug": {}
+}`;
+
+const META_FLAT = `{
+  "calcType": "brochure",
+  "calcLabel": "Brochure / Flat Print",
+  "jobName": "Spring menu",
+  "qty": 500,
+  "sizeMode": "preset",
+  "sizeLabel": "8.5×11",
+  "longEdge": 11,
+  "shortEdge": 8.5,
+  "foldType": "trifold",
+  "foldDir": "long",
+  "frontColor": "4/4", "backColor": "4/4",
+  "sides": 2,
+  "paper": "100lb-gloss-text",
+  "vivid": false,
+  "coating": "none", "coatSides": 1,
+  "bundling": "none",
+  "perforation": false, "perfDir": "", "perfPositions": [],
+  "roundCorner": false,
+  "artwork": "upload",
+  "bleed": true,
+  "proof": "pdf", "proofAddrSame": true, "proofAddr": {},
+  "canvaLink": "", "canvaInstructions": "",
+  "shipState": "CA", "shipZip": "92101",
+  "shipAddr": { "line1": "…", "city": "…", "state": "CA", "zip": "92101" },
+  "needByDate": "2026-09-15",
+  "estWeightLb": 22.4, "estCartons": 1, "transitDays": 3,
+  "productionBizDays": 4, "requestedBizDays": 7, "freeDeliveryBizDays": 7,
+  "rushMultiplier": 1, "rushCost": 0,
+  "productionStartDate": "2026-09-02",
+  "mustShipByDate": "2026-09-10",
+  "estimatedDeliveryDate": "2026-09-15",
+  "total": 812.40, "baseTotal": 812.40, "perUnit": 1.62,
+  "totalQty": 500, "days": 7, "debug": {}
+}`;
+
+const REF_FIELDS = [
+  ["calcType", "Which imposition scheme", "Flats and stickers only — booklets do not write it (see §3)."],
+  ["sizeMode", "Trim cascade gate", "\"preset\" means ignore longEdge/shortEdge."],
+  ["longEdge, shortEdge", "Trim size", "Flats. Already long ≥ short."],
+  ["customLong, customShort", "Trim size", "Booklets ordered at a custom size."],
+  ["sizeLabel", "Trim size (last resort) AND saddle orientation", "e.g. \"8.5×11 Letter\". The only place page orientation survives."],
+  ["bindDir", "Saddle orientation fallback", "\"short\" or \"long\"."],
+  ["sides", "1 or 2", "Flats. Booklets are always 2."],
+  ["totalQty / qty / sets[].qty", "Run length", "First non-zero wins (see §4)."],
+  ["jobName", "Output filename + slug", "Flats only; booklets fall back to the product name."],
+];
+
+const REF_CALCS = [
+  ["Brochure / flat", true, "Straight from the blob"],
+  ["Postcard, letterhead, greeting card, sticker", true, "Straight from the blob"],
+  ["Saddle stitch", false, "Product registry → calculator filename → calc type"],
+  ["Perfect bound", false, "Same fallback"],
+  ["Coupon book", false, "Same fallback"],
+];
+
+function MetaRef({ onClose }) {
+  const [showFlat, setShowFlat] = useState(false);
+  return (
+    <div className="imp-card imp-ref" style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <div>
+          <span className="lbl" style={{ marginBottom: 2 }}>Order metadata reference</span>
+          <span style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)" }}>
+            line item meta <code style={{ fontSize: 11 }}>_pps_metadata</code> — a JSON string, written by each calculator, parsed into every queue row
+          </span>
+        </div>
+        <button className="imp-btn sec" style={{ padding: "4px 11px", fontSize: 12 }} onClick={onClose}>Close</button>
+      </div>
+
+      <h4><span className="n">01</span> Fields imposition actually uses</h4>
+      <p style={{ color: "rgba(255,255,255,.5)" }}>Everything else in the blob is pricing, shipping and proofing history.</p>
+      <div className="tw"><table>
+        <thead><tr><th>Key</th><th>Used for</th><th>Notes</th></tr></thead>
+        <tbody>{REF_FIELDS.map(([k, u, n]) => (
+          <tr key={k}><td><code>{k}</code></td><td>{u}</td><td style={{ color: "rgba(255,255,255,.55)" }}>{n}</td></tr>
+        ))}</tbody>
+      </table></div>
+
+      <h4><span className="n">02</span> How the trim size is derived</h4>
+      <pre>{`1. sizeMode !== 'preset'  AND  longEdge AND shortEdge   →  use them
+2. customLong AND customShort                           →  use them
+3. sizeLabel matches /(\\d+(\\.\\d+)?)\\s*[×x]\\s*(\\d+…)/    →  use the two numbers
+
+   then: if (long < short) swap                         →  normalised to long/short`}</pre>
+      <div className="trap">
+        <b>The trap.</b> That final swap throws away orientation. For flats it is correct — a 6×4 and a
+        4×6 postcard are the same press job. <b>For saddle stitch they are different products</b>, because the
+        spine sits on the height edge. So the tool re-derives width×height for saddle from <code>sizeLabel</code>,
+        falling back to <code>bindDir</code>.
+      </div>
+      <div className="tip">
+        <b>Check before you impose.</b> A portrait booklet must read <code>2 × 1</code> in the layout panel,
+        never <code>1 × 2</code>. Since v1.21 the engine refuses a job whose artwork orientation contradicts
+        the spec rather than printing 450 sheets sideways.
+      </div>
+
+      <h4><span className="n">03</span> Calc type — newer calculators stamp it, older ones don't</h4>
+      <div className="tw"><table>
+        <thead><tr><th>Calculator</th><th>calcType</th><th>Resolved how</th></tr></thead>
+        <tbody>{REF_CALCS.map(([c, has, how]) => (
+          <tr key={c}><td>{c}</td><td className={has ? "yes" : "no"}>{has ? "yes" : "no"}</td>
+            <td style={{ color: "rgba(255,255,255,.55)" }}>{how}</td></tr>
+        ))}</tbody>
+      </table></div>
+      <div className="tip">
+        <b>Diagnosis.</b> A product missing from <code>pps_get_registry()</code> shows <b>NO SPEC</b> in the queue
+        even when its metadata is perfect — the calc type is what's missing, not the size.
+      </div>
+
+      <h4><span className="n">04</span> Quantity</h4>
+      <pre>{`$qty = totalQty ?? qty ?? 0;
+if (!$qty && is_array(sets))  $qty = array_sum(column(sets, 'qty'));
+if (!$qty)                    $qty = $item->get_quantity();`}</pre>
+      <p style={{ color: "rgba(255,255,255,.55)" }}>Booklets carry quantity <b>per set</b>, so a three-set order
+        shows the sum. This only drives the run figure printed in the slug.</p>
+
+      <h4><span className="n">05</span> Sample blob — saddle stitch booklet</h4>
+      <pre>{META_SADDLE}</pre>
+      <div className="trap">
+        <b>Absent by design:</b> no <code>calcType</code>, no <code>jobName</code>, no <code>sizeMode</code>,
+        no <code>longEdge</code>/<code>shortEdge</code>, no <code>sides</code>. All five are derived or defaulted
+        downstream — which is why a saddle row leans on the registry and on <code>sizeLabel</code> far more
+        than a flat does. Perfect bound is the same shape; coupon adds <code>bindStyle</code>,
+        <code>sidesPrinted</code> and <code>frontColor</code>/<code>backColor</code>.
+      </div>
+      <button className="imp-btn sec" style={{ padding: "4px 11px", fontSize: 12, marginBottom: 10 }}
+              onClick={() => setShowFlat(v => !v)}>
+        {showFlat ? "− Hide" : "+ Show"} the flat (brochure) blob — the complete shape
+      </button>
+      {showFlat && <pre>{META_FLAT}</pre>}
+
+      <h4><span className="n">06</span> Things that bite</h4>
+      <ol>
+        <li><code>long_edge</code>/<code>short_edge</code> on a queue row are <b>always normalised</b>. Never read
+          them as width/height for a booklet — <code>sizeLabel</code> is the only orientation record.</li>
+        <li>Booklet metadata has <b>no calcType</b>, so a registry gap reads as NO SPEC.</li>
+        <li><code>sets[]</code> is per set, so a top-level <code>qty</code> may be absent on booklets.</li>
+        <li><code>debug</code> is <b>deliberately ignored</b> by the plugin — never derive production values from it.</li>
+        <li>The blob is the customer's order record. Editing it by hand rewrites what was bought — to change how
+          something images, change the spec here for this run.</li>
+        <li><code>artDims</code> records the artwork's own measured page size at order time. It settles an
+          orientation dispute against what was actually uploaded.</li>
+      </ol>
+    </div>
+  );
+}
+
 function App() {
   const [calc, setCalc] = useState("brochure");
   const [trimLong, setTrimLong] = useState(11);
@@ -2547,6 +2761,7 @@ function App() {
   // (it means "the list could not load"), so reporting a failed status change
   // through it wiped the queue the operator was working from.
   const [actionErr, setActionErr] = useState("");
+  const [refOpen, setRefOpen] = useState(false);           // metadata reference panel
   const genSeq = useRef(0);
 
   // Fetch the order queue (WP mode only)
@@ -2880,12 +3095,18 @@ function App() {
 
   return (
     <div style={{ maxWidth: 1220, margin: "0 auto", padding: "18px 16px 60px" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <h1 style={{ fontSize: 20, margin: 0 }}>🖨️ PPS Imposition Tool</h1>
         <span style={{ fontSize: 12, color: "rgba(255,255,255,.4)" }}>
           vector-preserving sheetwise step-and-repeat · {CFG ? "connected to WooCommerce + Google Drive" : "standalone mode (drag & drop)"}
         </span>
+        <button className="imp-btn sec" style={{ padding: "4px 11px", fontSize: 12, marginLeft: "auto" }}
+                onClick={() => setRefOpen(v => !v)} aria-expanded={refOpen}>
+          {refOpen ? "− " : "+ "}Order metadata reference
+        </button>
       </div>
+
+      {refOpen && <MetaRef onClose={() => setRefOpen(false)} />}
 
       {CFG && CFG.gdrive === false && (
         <div className="imp-card" style={{ marginBottom: 16, borderColor: "rgba(239,68,68,.4)" }}>
