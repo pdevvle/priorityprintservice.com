@@ -6,10 +6,18 @@
  * AJAX endpoints that bridge it to WooCommerce + the existing Google Drive
  * connection (pps-gdrive.php OAuth — no separate Drive login):
  *
- *   pps_impose_app       — stream the tool HTML with PPS_IMPOSE_CFG injected
- *   pps_impose_list      — recent orders with Drive artwork + parsed spec
- *   pps_impose_download  — proxy an artwork file from Drive to the browser
- *   pps_impose_upload    — file the imposed PDF back into the order's folder
+ *   pps_impose_app        — stream the tool HTML with PPS_IMPOSE_CFG injected
+ *   pps_impose_list       — open orders with Drive artwork + parsed spec
+ *   pps_impose_download   — proxy an artwork file from Drive to the browser
+ *   pps_impose_upload     — file the imposed PDF back into the order's folder
+ *   pps_impose_set_status — move an order to another WooCommerce status
+ *   pps_impose_set_hidden — park an order out of the queue without touching it
+ *
+ * Queue visibility: the queue is a WORK LIST, not an order report. It shows
+ * orders that still need imposing, so completed orders drop off it by status
+ * and anything else the operator is done with can be parked with Hide
+ * (`_pps_impose_hidden` order meta). Neither is destructive and both are
+ * reversible from the queue itself with "Show completed & hidden".
  *
  * The imposition engine itself runs entirely in the browser
  * (imposition-tool.html, pdf-lib) — no PDF processing happens in PHP.
@@ -63,11 +71,16 @@ add_action( 'wp_ajax_pps_impose_app', function() {
             $size_presets = $conf['size_presets'];
         }
     }
+    // Statuses come from WooCommerce itself (wc_get_order_statuses) so any
+    // custom status the shop registers shows up without touching this file.
+    $statuses = function_exists( 'wc_get_order_statuses' ) ? wc_get_order_statuses() : array();
     $cfg  = wp_json_encode( array(
-        'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
-        'nonce'       => wp_create_nonce( PPS_IMPOSE_NONCE ),
-        'gdrive'      => function_exists( 'pps_gdrive_is_connected' ) ? pps_gdrive_is_connected() : false,
-        'sizePresets' => $size_presets,
+        'ajaxUrl'       => admin_url( 'admin-ajax.php' ),
+        'nonce'         => wp_create_nonce( PPS_IMPOSE_NONCE ),
+        'gdrive'        => function_exists( 'pps_gdrive_is_connected' ) ? pps_gdrive_is_connected() : false,
+        'sizePresets'   => $size_presets,
+        'orderStatuses' => $statuses,          // { 'wc-processing': 'Processing', … }
+        'doneStatuses'  => pps_impose_done_statuses(),
     ), JSON_HEX_TAG );
     $inject = '<script>window.PPS_IMPOSE_CFG = ' . $cfg . ';</script>';
     $html   = str_replace( '</head>', $inject . "\n</head>", $html );
@@ -80,6 +93,24 @@ add_action( 'wp_ajax_pps_impose_app', function() {
 // ═══════════════════════════════════════════════════════════════
 // DRIVE HELPERS (read side — upload reuses pps_gdrive_upload_file)
 // ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// QUEUE VISIBILITY
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Statuses that mean "this job is off the prepress work list".
+ * Completed and the terminal states; filterable so the shop can add its own
+ * (e.g. a custom wc-shipped) without editing the plugin.
+ */
+function pps_impose_done_statuses() {
+    return apply_filters( 'pps_impose_done_statuses', array( 'completed', 'cancelled', 'refunded', 'failed', 'trash' ) );
+}
+
+/** Orders the operator has parked. Order meta, so it travels with the order. */
+function pps_impose_is_hidden( $order ) {
+    return $order->get_meta( '_pps_impose_hidden' ) === 'yes';
+}
 
 function pps_impose_drive_list( $folder_id, $bypass_cache = false ) {
     // The queue lists many orders in one request — cache each folder listing
@@ -234,17 +265,34 @@ add_action( 'wp_ajax_pps_impose_list', function() {
     }
 
     $bypass = ! empty( $_POST['refresh'] );
+    // The queue is a work list: by default it carries only orders still to be
+    // imposed. "Show completed & hidden" widens it so nothing is unreachable —
+    // re-imposing a finished job stays possible, it just isn't the default view.
+    $show_all = ! empty( $_POST['show_hidden'] );
+    $open     = array( 'wc-processing', 'wc-on-hold', 'wc-pending' );
+    $done     = array_map( function( $s ) { return 'wc-' . $s; }, pps_impose_done_statuses() );
+    $done     = array_values( array_diff( $done, array( 'wc-trash' ) ) ); // never list trashed orders
+    // Hidden orders are filtered in PHP (the flag is order meta and HPOS/legacy
+    // meta queries differ), so ask for enough rows that filtering still fills
+    // the list. The hidden check runs BEFORE any Drive call, so skipped orders
+    // cost nothing.
     $orders = wc_get_orders( array(
-        'limit'   => 30,
+        'limit'   => 60,
         'orderby' => 'date',
         'order'   => 'DESC',
-        'status'  => array( 'wc-processing', 'wc-on-hold', 'wc-pending', 'wc-completed' ),
+        'status'  => $show_all ? array_merge( $open, $done ) : $open,
     ) );
 
     $items = array();
+    $shown = 0;
     foreach ( $orders as $order ) {
+        if ( $shown >= 30 ) break;
+        $hidden = pps_impose_is_hidden( $order );
+        if ( $hidden && ! $show_all ) continue;
+
         $folder_id = $order->get_meta( '_pps_gdrive_folder_id' );
         if ( ! $folder_id ) continue;
+        $shown++;
 
         $files = pps_impose_drive_list( $folder_id, $bypass );
 
@@ -290,6 +338,10 @@ add_action( 'wp_ajax_pps_impose_list', function() {
             $items[] = array(
                 'order_id'      => $order->get_id(),
                 'item_id'       => $item_id,
+                'status'        => $order->get_status(),
+                'status_label'  => function_exists( 'wc_get_order_status_name' ) ? wc_get_order_status_name( $order->get_status() ) : $order->get_status(),
+                'hidden'        => $hidden,
+                'order_url'     => $order->get_edit_order_url(),
                 'product'       => $item->get_name(),
                 'job_name'      => (string) ( $m['jobName'] ?? '' ),
                 'calc'          => pps_impose_calc_type( $m, $item ),
@@ -309,6 +361,76 @@ add_action( 'wp_ajax_pps_impose_list', function() {
     }
 
     wp_send_json_success( array( 'items' => $items ) );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ORDER STATUS — move an order from the queue
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'wp_ajax_pps_impose_set_status', function() {
+    if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( PPS_IMPOSE_NONCE, 'nonce', false ) ) {
+        wp_send_json_error( array( 'message' => 'Unauthorized' ), 403 );
+    }
+    if ( ! function_exists( 'wc_get_order' ) ) {
+        wp_send_json_error( array( 'message' => 'WooCommerce not active' ) );
+    }
+    $order_id = intval( $_POST['order_id'] ?? 0 );
+    $order    = $order_id ? wc_get_order( $order_id ) : false;
+    if ( ! $order ) wp_send_json_error( array( 'message' => 'Order not found' ) );
+
+    // Validate against WooCommerce's own registry rather than a hard-coded
+    // list, so custom statuses work and anything unregistered is refused.
+    $status = sanitize_key( wp_unslash( $_POST['status'] ?? '' ) );
+    $status = preg_replace( '/^wc-/', '', $status );
+    $valid  = array_map( function( $s ) { return preg_replace( '/^wc-/', '', $s ); },
+                         array_keys( wc_get_order_statuses() ) );
+    if ( ! $status || ! in_array( $status, $valid, true ) ) {
+        wp_send_json_error( array( 'message' => 'Unknown order status: ' . $status ) );
+    }
+    $from = $order->get_status();
+    if ( $from === $status ) {
+        wp_send_json_success( array( 'status' => $status, 'changed' => false ) );
+    }
+
+    // update_status() runs the normal WooCommerce transition — which means the
+    // customer-facing emails for that status fire. That is the intended
+    // behaviour (this replaces doing it on the order screen), and the UI
+    // confirms before calling, but it is the reason this endpoint says who did
+    // it in the note rather than changing status silently.
+    $user = wp_get_current_user();
+    $order->update_status( $status, sprintf( 'Status changed from the Imposition queue by %s.', $user && $user->display_name ? $user->display_name : 'an administrator' ), true );
+
+    wp_send_json_success( array(
+        'status'  => $order->get_status(),
+        'label'   => wc_get_order_status_name( $order->get_status() ),
+        'changed' => true,
+        'done'    => in_array( $order->get_status(), pps_impose_done_statuses(), true ),
+    ) );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// HIDE — park an order out of the queue (no order data touched)
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'wp_ajax_pps_impose_set_hidden', function() {
+    if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( PPS_IMPOSE_NONCE, 'nonce', false ) ) {
+        wp_send_json_error( array( 'message' => 'Unauthorized' ), 403 );
+    }
+    if ( ! function_exists( 'wc_get_order' ) ) {
+        wp_send_json_error( array( 'message' => 'WooCommerce not active' ) );
+    }
+    $order_id = intval( $_POST['order_id'] ?? 0 );
+    $order    = $order_id ? wc_get_order( $order_id ) : false;
+    if ( ! $order ) wp_send_json_error( array( 'message' => 'Order not found' ) );
+
+    $hidden = ! empty( $_POST['hidden'] );
+    // Visibility only — the order's status, items and artwork are untouched, so
+    // this is always reversible and never affects the customer.
+    if ( $hidden ) $order->update_meta_data( '_pps_impose_hidden', 'yes' );
+    else           $order->delete_meta_data( '_pps_impose_hidden' );
+    $order->save();
+
+    wp_send_json_success( array( 'order_id' => $order_id, 'hidden' => $hidden ) );
 });
 
 // ═══════════════════════════════════════════════════════════════

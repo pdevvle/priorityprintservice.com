@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-08-28 10:39 UTC · IMPOSE-V1.22</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-01 03:43 UTC · IMPOSE-V1.23</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2411,13 +2411,14 @@ function rowPending(r) {
     && r.art_file_id && !UNSUPPORTED_BOOKLETS.includes(r.calc);
 }
 
-function OrderQueue({ rows, err, onLoad, busyId }) {
+function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
+  const STATUSES = (CFG && CFG.orderStatuses) || {};
   if (err) return <div style={{ color: "#f87171", fontSize: 13 }}>Order list failed: {err}</div>;
   if (!rows) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>Loading orders…</div>;
   if (!rows.length) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>No recent orders with Drive artwork found.</div>;
   return (
     <table className="imp-q">
-      <thead><tr><th>Order</th><th>Job</th><th>Spec</th><th>Artwork</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Order</th><th>Job</th><th>Spec</th><th>Artwork</th><th>Imposition</th><th>Order status</th><th></th></tr></thead>
       <tbody>
         {rows.map(r => {
           const key = r.order_id + ":" + r.item_id;
@@ -2425,6 +2426,7 @@ function OrderQueue({ rows, err, onLoad, busyId }) {
           const artOk = !!(r.art_file_id);
           const bookish = UNSUPPORTED_BOOKLETS.includes(r.calc);
           const driveErr = !r.files_listed; // Drive listing failed ≠ empty folder
+          const orderBusy = rowBusy === String(r.order_id);
           return (
             <tr key={key}>
               <td><a href={r.folder_url} target="_blank" rel="noreferrer" style={{ color: "#7ab8ff" }}>#{r.order_id}</a></td>
@@ -2436,12 +2438,29 @@ function OrderQueue({ rows, err, onLoad, busyId }) {
                 : bookish ? <span className="imp-badge warn">{r.calc.toUpperCase()} — v2</span>
                 : !specOk ? <span className="imp-badge warn">NO SPEC</span>
                 : !artOk ? <span className="imp-badge err">NO ART</span>
-                : <span className="imp-badge warn">PENDING</span>}</td>
-              <td>{specOk && artOk && !bookish &&
+                : <span className="imp-badge warn">PENDING</span>}
+                {r.hidden && <span className="imp-badge" style={{ marginLeft: 5, background: "#3a3f4a" }}>HIDDEN</span>}</td>
+              {/* Order status is a property of the ORDER, so the control repeats
+                  on every line item of a multi-item order and changing it from
+                  any of them updates them all. */}
+              <td>
+                <select value={"wc-" + r.status} disabled={orderBusy}
+                        style={{ fontSize: 12, padding: "3px 4px", maxWidth: 150 }}
+                        onChange={e => onStatus(r, e.target.value.replace(/^wc-/, ""))}>
+                  {Object.entries(STATUSES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                  {!STATUSES["wc-" + r.status] && <option value={"wc-" + r.status}>{r.status_label || r.status}</option>}
+                </select>
+              </td>
+              <td style={{ whiteSpace: "nowrap" }}>{specOk && artOk && !bookish &&
                 <button className="imp-btn sec" style={{ padding: "6px 12px", fontSize: 12 }}
                   disabled={busyId === key} onClick={() => onLoad(r)}>
                   {busyId === key ? "Working…" : r.imposed ? "Re-impose" : "Impose"}
-                </button>}</td>
+                </button>}
+                <button className="imp-btn sec" title={r.hidden ? "Put this order back on the queue" : "Park this order — visibility only, nothing about the order changes"}
+                  style={{ padding: "6px 9px", fontSize: 12, marginLeft: 6 }}
+                  disabled={orderBusy} onClick={() => onHide(r, !r.hidden)}>
+                  {orderBusy ? "…" : r.hidden ? "Unhide" : "Hide"}
+                </button></td>
             </tr>
           );
         })}
@@ -2522,6 +2541,12 @@ function App() {
   const [rows, setRows] = useState(null);                  // admin queue rows (WP mode)
   const [queueErr, setQueueErr] = useState("");
   const [bulkState, setBulkState] = useState(null);        // { done, total, current, failures[] }
+  const [showHidden, setShowHidden] = useState(false);     // widen the queue to completed + parked orders
+  const [rowBusy, setRowBusy] = useState("");              // order id whose status/hide call is in flight
+  // Row-action failures get their OWN slot. queueErr replaces the whole table
+  // (it means "the list could not load"), so reporting a failed status change
+  // through it wiped the queue the operator was working from.
+  const [actionErr, setActionErr] = useState("");
   const genSeq = useRef(0);
 
   // Fetch the order queue (WP mode only)
@@ -2529,7 +2554,7 @@ function App() {
     if (!CFG) return;
     let dead = false;
     setQueueErr("");
-    ajax("pps_impose_list", refreshKey > 0 ? { refresh: 1 } : {})
+    ajax("pps_impose_list", { ...(refreshKey > 0 ? { refresh: 1 } : {}), ...(showHidden ? { show_hidden: 1 } : {}) })
       .then(async r => { if (!r.ok) throw await ajaxFail(r, "order list"); return r.json(); })
       .then(j => {
         if (dead) return;
@@ -2538,7 +2563,52 @@ function App() {
       })
       .catch(e => !dead && setQueueErr(e.message));
     return () => { dead = true; };
-  }, [refreshKey]);
+  }, [refreshKey, showHidden]);
+
+  // ── Order status / visibility, straight from the queue ────────────────────
+  // Both act on the ORDER, so every row sharing that order_id updates. A row
+  // that leaves the work list (completed, or parked) is dropped from the view
+  // unless "show completed & hidden" is on — the queue is a work list, and a
+  // finished job staying on it is how things get imposed twice.
+  const applyToOrder = (orderId, fn) =>
+    setRows(rs => (rs || []).map(r => (r.order_id === orderId ? fn(r) : r)));
+  const dropOrder = orderId =>
+    setRows(rs => (rs || []).filter(r => r.order_id !== orderId));
+
+  async function setOrderStatus(row, status) {
+    if (status === row.status) return;
+    const label = (CFG.orderStatuses || {})["wc-" + status] || status;
+    if (!window.confirm(
+      `Move order #${row.order_id} to "${label}"?\n\n` +
+      `This is a real WooCommerce status change: it is recorded on the order and ` +
+      `WooCommerce will send whatever customer email that status triggers.`)) return;
+    setRowBusy(String(row.order_id));
+    try {
+      const r = await ajax("pps_impose_set_status", { order_id: row.order_id, status });
+      if (!r.ok) throw await ajaxFail(r, "status change");
+      const j = await r.json();
+      if (!j.success) throw new Error((j.data && j.data.message) || "status change failed");
+      const d = j.data;
+      if (d.done && !showHidden) { dropOrder(row.order_id); setNotice(`Order #${row.order_id} → ${d.label}. Off the queue.`); }
+      else { applyToOrder(row.order_id, r2 => ({ ...r2, status: d.status, status_label: d.label })); setNotice(`Order #${row.order_id} → ${d.label}.`); }
+      setActionErr("");
+    } catch (e) { setActionErr(`Order #${row.order_id}: ${e.message}`); }
+    finally { setRowBusy(""); }
+  }
+
+  async function setOrderHidden(row, hidden) {
+    setRowBusy(String(row.order_id));
+    try {
+      const r = await ajax("pps_impose_set_hidden", { order_id: row.order_id, hidden: hidden ? 1 : 0 });
+      if (!r.ok) throw await ajaxFail(r, hidden ? "hide" : "unhide");
+      const j = await r.json();
+      if (!j.success) throw new Error((j.data && j.data.message) || "hide failed");
+      if (hidden && !showHidden) { dropOrder(row.order_id); setNotice(`Order #${row.order_id} hidden. Tick “show completed & hidden” to bring it back.`); }
+      else { applyToOrder(row.order_id, r2 => ({ ...r2, hidden })); }
+      setActionErr("");
+    } catch (e) { setActionErr(`Order #${row.order_id}: ${e.message}`); }
+    finally { setRowBusy(""); }
+  }
 
   useEffect(() => {
     if (!detTrim || activeOrder) return;
@@ -2827,8 +2897,16 @@ function App() {
       {CFG && (
         <div className="imp-card" style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 10, flexWrap: "wrap" }}>
-            <span className="lbl" style={{ marginBottom: 0 }}>Recent orders with artwork on Drive</span>
-            <span style={{ display: "flex", gap: 8 }}>
+            <span className="lbl" style={{ marginBottom: 0 }}>
+              {showHidden ? "All recent orders with artwork on Drive" : "Orders still to impose"}
+            </span>
+            <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer", color: "rgba(255,255,255,.6)" }}
+                     title="Completed orders and orders you have hidden drop off the work list. Tick this to see them and put them back.">
+                <input type="checkbox" checked={showHidden} style={{ width: "auto" }}
+                       onChange={e => setShowHidden(e.target.checked)} />
+                show completed &amp; hidden
+              </label>
               {pendingCount > 0 && (
                 <button className="imp-btn" style={{ padding: "5px 12px", fontSize: 12 }}
                   disabled={!!bulkState && bulkState.done < bulkState.total} onClick={imposeAll}>
@@ -2840,7 +2918,14 @@ function App() {
               <button className="imp-btn sec" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => setRefreshKey(k => k + 1)}>Refresh</button>
             </span>
           </div>
-          <OrderQueue rows={rows} err={queueErr} onLoad={loadOrder} busyId={queueBusy} />
+          {actionErr && (
+            <div style={{ color: "#f87171", fontSize: 12.5, marginBottom: 7, display: "flex", gap: 10, alignItems: "center" }}>
+              <span>{actionErr}</span>
+              <button className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setActionErr("")}>dismiss</button>
+            </div>
+          )}
+          <OrderQueue rows={rows} err={queueErr} onLoad={loadOrder} busyId={queueBusy}
+                      onStatus={setOrderStatus} onHide={setOrderHidden} rowBusy={rowBusy} />
         </div>
       )}
 
