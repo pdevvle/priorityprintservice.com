@@ -234,6 +234,34 @@ download the imposed PDF. Useful for testing and one-off jobs.
   flip are unaffected, and the count is flagged against the priced imp exactly
   like a flat's manual grid — badge, warning, slug, excluded from the parity
   preflight. Refuses with a footprint report when the copies cannot fit.
+- **A bleed allowance is not bleed** (1.25). `hasBleed` was purely geometric —
+  the page is bigger than the trim — and said nothing about whether that region
+  contains ink. A designer very commonly sets the document up at trim+bleed and
+  then draws the art only to the trim, which produced a page the tool called
+  *"treated as bleed-inclusive"* and then said nothing more about. Worse, the
+  synthesizer **refused to fire** on such a file (`hasBleed` was true), so the
+  operator had no way to fix it either.
+
+  `detectBleedInk()` now rasterizes the band between trim and page edge at
+  72 DPI and measures ink per edge. An empty ring (<1% inked) is reported
+  outright, and — critically — `art.ownBleed` is set to **0**, because the
+  geometric allowance was reporting coverage the art does not have: `covX/covY`
+  came out at the full bleed, the fill band computed to `bleed − cov = 0`, and
+  the synth drew nothing while still logging *"bleed synthesized"*. Byte-identical
+  output with a success message is the worst possible failure here.
+
+  Cost is contained: the probe runs on every page when synthesis is on, and on
+  **page 1 only** otherwise — enough to warn, since building at bleed size and
+  not extending the art is a document-wide authoring mistake, not a per-page one.
+
+  Found on the Chandler Center booklet (2026-09-02): 8.25″ pages, 8.0″ of art,
+  a perfectly empty 0.125″ ring, and a cover designed to bleed on all four
+  sides — orange bar, full-width photograph, cream ground, every one of them
+  stopping dead at the cut line. Verified: with `addBleed:"auto"` the band
+  outside the cut goes from **0% to 100% inked**; a genuine bleed file
+  (`cpn_2x4.pdf`) is not flagged and its output is unchanged; **52 regression
+  cases across seven suites byte-identical**.
+
 - **Page orientation is part of a saddle spec** (1.21). Saddle stitch folds on
   the **height** edge, so `5.5×8.5` and `8.5×5.5` are different products — not
   one size typed two ways. The two size boxes are read as **width × height**
