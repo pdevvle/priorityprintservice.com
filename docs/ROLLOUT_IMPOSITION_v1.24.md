@@ -4,8 +4,13 @@
 
 | Site | State |
 |---|---|
-| **Staging** (`woocommerce-70867-4915293.cloudwaysapps.com`) | ✅ **Deployed at `a9d8544` and verified** |
-| **Production** (`priorityprintservice.com`) | ⛔ **BLOCKED — not deployed. See §2.** |
+| **Staging** (`woocommerce-70867-4915293.cloudwaysapps.com`) | ✅ v1.24 deployed and verified; **v1.25 reconciliation deployed** |
+| **Production** (`priorityprintservice.com`) | ⏸ Not deployed — waiting on eyes-on staging sign-off. See §2. |
+
+**v1.25** is v1.24 plus the two decisions the owner made on 2026-09-02: the
+approval-hash gate is reconciled back in as an **advisory** (imposing a
+non-approved file is allowed and flagged, never refused), and queue status
+changes are **silent** (no customer emails).
 
 ---
 
@@ -54,7 +59,7 @@ production order.
 
 ---
 
-## 2. Production — BLOCKED, do not deploy `a9d8544` as-is
+## 2. Production — do not deploy `a9d8544`; deploy v1.25 instead
 
 **The brief's premise was wrong.** It says production is on v1.8, 16 versions
 behind, and expects ~163,000–169,000 b. Production is actually:
@@ -98,36 +103,47 @@ regression the brief itself warns of.
 **No commit anywhere in the repo reconciles v1.24 with the hash gate.** The highest
 build carrying the gate is v1.12 — exactly what production runs.
 
-### The reconciliation needed before production
+### The reconciliation — done, as v1.25
 
-Small and well-localized, but it touches load paths that were restructured across
-16 versions, so it is a real change, not a mechanical patch:
+Owner's call: *"impose should be able to handle files other than what was approved
+but should advise us if not approved hash match."* So the gate came back **advisory,
+not blocking** — v1.12 refused a mismatch unless the operator ticked an override;
+v1.25 always imposes and makes the mismatch impossible to miss.
 
-- **PHP — 1 line:** add `'proof_hash' => (string) $item->get_meta( '_pps_proof_hash' )`
-  to the `pps_impose_list` item payload.
-- **Tool — 8 regions:** the `sha256Hex` helper and its `window.__ppsImpose` export,
-  plus hash checks on the manual-load, queue-load and batch paths, the
-  `manualHashState` / `hashState` UI states, the UNAPPROVED output flag, and the
-  "impose despite approval mismatch" override.
+- **PHP:** `proof_hash` added to the `pps_impose_list` payload.
+- **Tool:** `sha256Hex` + `approvalState` + `approvalNote` helpers (exported on
+  `window.__ppsImpose`); checks on the manual-drop, queue-load and bulk paths.
+- **On mismatch:** the load still succeeds; a red **"NOT THE APPROVED FILE"** banner
+  stays pinned for as long as the file is staged, showing both hash prefixes; the
+  output filename gains `_UNAPPROVED` so the flag reaches Drive and the press room;
+  a bulk run lists every flagged row in its summary.
+- **Verified** shows a green confirmation; **unverifiable** (no `crypto.subtle` on a
+  non-HTTPS admin) is reported as such and never as a false mismatch.
+- The v1.12 "impose despite approval mismatch" checkbox is gone — with mismatches no
+  longer blocking, it gated nothing.
 
-Once merged, re-run the ten-case imposition regression and the duplex-registration
-checks before deploying.
+Validation run: JSX compiles (`@babel/standalone`, pristine v1.24 as control);
+`php -l` clean; 15 unit tests over `approvalState`/`approvalNote` including the
+no-`crypto.subtle` degradation and both PHP filename contracts
+(`pps_impose_is_output_name()` and the upload allowlist) against the `_UNAPPROVED`
+suffix; every imposition-engine function (`imposePdf`, `computeLayout`, `flatGrid`,
+`flatImp`, `stickerImp`, `saddlePaginate`, `imposedFilename`, `detectTrim`,
+`sanitizePdf`, `inspectPdfThreats`, `parseManifest`) byte-identical to v1.24, so the
+ten-case geometry regression is untouched by construction.
 
 ---
 
-## 3. Open decision for the owner — carried forward, still unanswered
+## 3. Status changes are now silent — decided 2026-09-02
 
-**Should the queue change order status silently?**
+`pps_impose_set_status` no longer calls `update_status()`. It uses `set_status()` +
+`save()`, so the status is written **without** running the WooCommerce transition and
+**no customer email is sent**. The order note records the change, who made it, and
+that it was silent. The confirmation dialog in the tool says so too.
 
-`pps_impose_set_status` calls `update_status()`, which runs the real WooCommerce
-transition — so marking an order Completed from the prepress queue fires the
-customer-facing completed-order email exactly as the order screen does. The UI
-confirms first and the order note records who did it. The alternative is
-`set_status()` + `save()`, which changes status with no email.
-
-This was asked before and never answered. Decide it **before** production — a
-prepress queue quietly emailing customers is the kind of thing that is only noticed
-from the customer's side.
+Trade-off that comes with it: nothing else hooked on the transition
+(`woocommerce_order_status_*` — stock reduction, analytics, fulfilment integrations)
+runs either. Use the order screen when a customer email or those side effects are
+actually wanted.
 
 ---
 
@@ -135,7 +151,8 @@ from the customer's side.
 
 Same `pps_plugin_download_url` call with an older SHA.
 
-- Staging, to undo this deploy: tool `4ec3258`, PHP `60d4022`.
+- Staging, to undo the v1.25 deploy: tool + PHP at `a9d8544`; to go all the way
+  back, tool `4ec3258`, PHP `60d4022`.
 - Production, if it is ever deployed and needs reverting: tool `55815bd`, PHP `5a81968`
   — **not** the SHAs in the original brief, which point at the wrong line.
 
