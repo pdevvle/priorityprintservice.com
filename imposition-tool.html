@@ -69,7 +69,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-02 05:20 UTC · IMPOSE-V1.25</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-02 21:05 UTC · IMPOSE-V1.26</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1100,10 +1100,67 @@ function finalizeArtCoverage(art, bleed) {
   return art;
 }
 
+// ---- bleed-ring ink detection ---------------------------------------------
+// `hasBleed` above is purely GEOMETRIC — the page is bigger than the trim. It
+// says nothing about whether that region contains any ink, and a file can very
+// easily have a bleed allowance with nothing in it: the designer sets the
+// document up at trim+bleed and then draws the art only to the trim. The tool
+// used to call that "treated as bleed-inclusive" and say nothing more, so a job
+// that will cut white on every edge looked completely clean (Chandler Center
+// booklet, 2026-09-02: 8.25″ page, 8″ of art, a perfectly empty 0.125″ ring,
+// and a cover designed to bleed on all four sides).
+// Measures ink in the band between trim and page edge, per edge. Low DPI on
+// purpose — this only answers "is there anything out here", and it runs on
+// pages that are otherwise never rasterized.
+const RING_DPI = 72, RING_MIN_INK = 0.01;   // <1% of the band inked = empty
+async function detectBleedInk(pdfjsDoc, pnoZero, art) {
+  const page = await pdfjsDoc.getPage(pnoZero + 1);
+  const scale = RING_DPI / 72;
+  const vp = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  const td = displayRect(art.trimRaw, art.rot, art.mediaW, art.mediaH);
+  const dispH = art.rot % 180 ? art.mediaW : art.mediaH;
+  // trim rect in canvas pixels (y flipped)
+  const tx0 = td.x * scale, tx1 = (td.x + td.w) * scale;
+  const ty0 = (dispH - (td.y + td.h)) * scale, ty1 = (dispH - td.y) * scale;
+  const W = canvas.width, H = canvas.height;
+  const pad = Math.max(1, Math.round(0.012 * RING_DPI)); // skip the antialiased trim boundary
+  const frac = (x0, y0, x1, y1) => {
+    x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+    x1 = Math.min(W, Math.ceil(x1)); y1 = Math.min(H, Math.ceil(y1));
+    if (x1 - x0 < 1 || y1 - y0 < 1) return null;   // no band on this edge
+    const d = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+    let ink = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      n++;
+      if ((d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) < INK_LUM) ink++;
+    }
+    return n ? ink / n : null;
+  };
+  const edges = {
+    left:   frac(0, ty0, tx0 - pad, ty1),
+    right:  frac(tx1 + pad, ty0, W, ty1),
+    top:    frac(tx0, 0, tx1, ty0 - pad),
+    bottom: frac(tx0, ty1 + pad, tx1, H),
+  };
+  const present = {}, measured = [];
+  for (const k of ["left", "right", "top", "bottom"]) {
+    if (edges[k] === null) { present[k] = true; continue; }   // no band: nothing to judge
+    measured.push(k);
+    present[k] = edges[k] >= RING_MIN_INK;
+  }
+  const blank = measured.filter(k => !present[k]);
+  return { edges, present, blank, empty: measured.length > 0 && blank.length === measured.length };
+}
+
 function applySynthBleed(art, mode, bleed, gaps, streakEps, inset) {
   // With an inset the ring must be filled even for art that HAS bleed: pulling
   // the art in drags its bleed in with it, so the coverage falls short.
-  if (!mode || mode === "off" || (art.hasBleed && !(inset > 0))) return art;
+  if (!mode || mode === "off" || (art.hasBleed && !art.bleedEmpty && !(inset > 0))) return art;
   art.streakEps = streakEps || STREAK_EPS;
   // Art whose edges are white for more than SYNTH_MAXFIX on ALL four sides is
   // a design choice (white border, centred form), not art that fell shy of the
@@ -1674,7 +1731,32 @@ async function imposeSaddle(artBytes, spec, layout) {
       art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed);
       applyArtScale(art, userScale);
       applyArtInset(art, inset);
-      if (abm && (!art.hasBleed || inset > 0)) {
+      // A bleed ALLOWANCE is not bleed. Measure the ring whenever the page
+      // claims one — every page when synthesis is on, else page 1, which is
+      // enough to warn (building at bleed size and not extending the art is a
+      // document-wide authoring mistake, not a per-page one).
+      if (art.hasBleed && (abm || i === 0) && !art.ringChecked) {
+        art.ringChecked = true;
+        try {
+          if (!inkDoc) inkDoc = await pdfjsLib.getDocument({ data: artBytes.slice(0) }).promise;
+          const ring = await detectBleedInk(inkDoc, i, art);
+          if (ring && ring.empty) {
+            art.bleedEmpty = true;
+            // ownBleed is GEOMETRIC — it reports the allowance as coverage, so
+            // covX/covY come out at the full bleed and the synth band computes
+            // to zero width, drawing nothing. The ink really stops at the trim,
+            // so say so: coverage 0, band = the whole bleed, mirrored about the
+            // trim edge. Without this the tool reports "synthesized" and emits
+            // byte-identical output.
+            art.ownBleed = 0;
+            art.notes.push(`page is bleed-sized but the bleed area is EMPTY — the art stops at the cut line, so every edge will cut paper white. Set "Add bleed" to Auto, Mirror or Scale to fill it, or supply art extended past the trim.`);
+          } else if (ring && ring.blank.length) {
+            art.bleedEmptyEdges = ring.blank;
+            art.notes.push(`bleed is missing on the ${ring.blank.join("/")} edge(s) — art stops at the cut line there`);
+          }
+        } catch (e) { /* best-effort: never block an impose on the probe */ }
+      }
+      if (abm && (!art.hasBleed || art.bleedEmpty || inset > 0)) {
         let gaps = null;
         try {
           if (!inkDoc) inkDoc = await pdfjsLib.getDocument({ data: artBytes.slice(0) }).promise;
@@ -2089,7 +2171,29 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
         ? (spec.addBleed && spec.addBleed !== "off" ? spec.addBleed : null) : abMode(ref.pno);
       applyArtScale(art, userScale);
       applyArtInset(art, inset);
-      if (abm && (!art.hasBleed || inset > 0)) {
+      // Same bleed-ALLOWANCE-is-not-bleed probe as the booklet path.
+      if (art.hasBleed && !art.ringChecked) {
+        art.ringChecked = true;
+        const w0 = ref.gi != null ? "G" + ref.gi : ref.doc === backDoc ? "B" : "F";
+        try {
+          const ring = await detectBleedInk(await inkDocFor(w0), ref.pno, art);
+          if (ring && ring.empty) {
+            art.bleedEmpty = true;
+            // ownBleed is GEOMETRIC — it reports the allowance as coverage, so
+            // covX/covY come out at the full bleed and the synth band computes
+            // to zero width, drawing nothing. The ink really stops at the trim,
+            // so say so: coverage 0, band = the whole bleed, mirrored about the
+            // trim edge. Without this the tool reports "synthesized" and emits
+            // byte-identical output.
+            art.ownBleed = 0;
+            art.notes.push(`page is bleed-sized but the bleed area is EMPTY — the art stops at the cut line, so every edge will cut paper white. Set "Add bleed" to Auto, Mirror or Scale to fill it, or supply art extended past the trim.`);
+          } else if (ring && ring.blank.length) {
+            art.bleedEmptyEdges = ring.blank;
+            art.notes.push(`bleed is missing on the ${ring.blank.join("/")} edge(s) — art stops at the cut line there`);
+          }
+        } catch (e) { /* best-effort */ }
+      }
+      if (abm && (!art.hasBleed || art.bleedEmpty || inset > 0)) {
         const which = ref.gi != null ? "G" + ref.gi : ref.doc === backDoc ? "B" : "F";
         let gaps = null;
         if (spec.addBleedSmart !== false) {
