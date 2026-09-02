@@ -69,7 +69,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-02 21:05 UTC · IMPOSE-V1.26</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-02 23:00 UTC · IMPOSE-V1.27</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1396,16 +1396,32 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
     const mY = (F, k) => [1, 0, 0, -k, 0, F * (1 + k) * PT];   // mirrored map about y=F
     const mXY = (E, F, k1, k2) => [-k1, 0, 0, -k2, E * (1 + k1) * PT, F * (1 + k2) * PT];
     const iw = eR - eL, ih = eT - eB;   // art's own span, for the side bands
+    // SEAM overlap. The band and the placed art used to ABUT exactly on the
+    // trim edge, and two abutting fills each antialias at the shared boundary:
+    // neither covers those pixels fully, so the white underneath shows through
+    // as a hairline right on the cut line. Measured at 600 DPI on the Chandler
+    // cover: solid (22,73,156) lifting to (108,141,193) across ~0.005″.
+    // ("scale" never showed it — it enlarges one continuous placement, so no
+    // seam exists to leak through.)
+    // Fix: overlap the band across the edge, and move the mirror AXIS inward by
+    // the same amount so the overlap paints the art's own content instead of
+    // white. Mirroring about eL+SEAM maps x=eL to eL+2·SEAM — real art, a few
+    // thousandths in — where mirroring about eL would have mapped it to the
+    // blank ring. Only the outermost SEAM of art goes unrepresented in the
+    // bleed, which at 4 thou is far below any cutting tolerance.
+    const SEAM = 0.004;                       // in
+    const ox = bx > 0 ? SEAM : 0, oy = by > 0 ? SEAM : 0;
+    const aL = eL + ox, aR = eR - ox, aB = eB + oy, aT = eT - oy;   // axes, nudged inward
     const regions = bx <= 0 && by <= 0 ? [] : [
-      { r: { x: eL - bx, y: eB, w: bx, h: ih }, m: mX(eL, kx.left) },
-      { r: { x: eR, y: eB, w: bx, h: ih }, m: mX(eR, kx.right) },
-      { r: { x: eL, y: eB - by, w: iw, h: by }, m: mY(eB, ky.bottom) },
-      { r: { x: eL, y: eT, w: iw, h: by }, m: mY(eT, ky.top) },
-      { r: { x: eL - bx, y: eB - by, w: bx, h: by }, m: mXY(eL, eB, kx.left, ky.bottom) },
-      { r: { x: eR, y: eB - by, w: bx, h: by }, m: mXY(eR, eB, kx.right, ky.bottom) },
-      { r: { x: eL - bx, y: eT, w: bx, h: by }, m: mXY(eL, eT, kx.left, ky.top) },
-      { r: { x: eR, y: eT, w: bx, h: by }, m: mXY(eR, eT, kx.right, ky.top) },
-    ];
+      bx > 0 && { r: { x: eL - bx, y: eB - oy, w: bx + ox, h: ih + 2 * oy }, m: mX(aL, kx.left) },
+      bx > 0 && { r: { x: eR - ox, y: eB - oy, w: bx + ox, h: ih + 2 * oy }, m: mX(aR, kx.right) },
+      by > 0 && { r: { x: eL - ox, y: eB - by, w: iw + 2 * ox, h: by + oy }, m: mY(aB, ky.bottom) },
+      by > 0 && { r: { x: eL - ox, y: eT - oy, w: iw + 2 * ox, h: by + oy }, m: mY(aT, ky.top) },
+      bx > 0 && by > 0 && { r: { x: eL - bx, y: eB - by, w: bx + ox, h: by + oy }, m: mXY(aL, aB, kx.left, ky.bottom) },
+      bx > 0 && by > 0 && { r: { x: eR - ox, y: eB - by, w: bx + ox, h: by + oy }, m: mXY(aR, aB, kx.right, ky.bottom) },
+      bx > 0 && by > 0 && { r: { x: eL - bx, y: eT - oy, w: bx + ox, h: by + oy }, m: mXY(aL, aT, kx.left, ky.top) },
+      bx > 0 && by > 0 && { r: { x: eR - ox, y: eT - oy, w: bx + ox, h: by + oy }, m: mXY(aR, aT, kx.right, ky.top) },
+    ].filter(Boolean);
     for (const { r, m } of regions) {
       const ix = Math.max(r.x, cl.x), iy = Math.max(r.y, cl.y);
       const ix2 = Math.min(r.x + r.w, cl.x + cl.w), iy2 = Math.min(r.y + r.h, cl.y + cl.h);
