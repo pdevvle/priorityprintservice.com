@@ -16,10 +16,14 @@ const FILES = ["calc-preview-test","calc-perfect-bound","calc-coupon-book","calc
                "calc-postcard","calc-letterhead","calc-greeting-card","calc-sticker"];
 
 // Take a function declaration whole, by matching braces from its opening one, so the
-// test does not depend on whatever happens to follow it in the file.
-function extract(src, startMarker) {
+// test does not depend on whatever happens to follow it in the file. The declaration
+// is located by name rather than by exact text, so the same test runs against the JSX
+// source and against the Babel-compiled output, which drops the spaces.
+function extract(src, name, params) {
+  const startMarker = [`function ${name}(${params}) {`, `function ${name}(${params.replace(/, /g, ",")}){`]
+    .find(m => src.includes(m));
+  if (!startMarker) throw new Error("missing declaration of " + name);
   const a = src.indexOf(startMarker);
-  if (a < 0) throw new Error("missing " + startMarker);
   let depth = 0, i = a + startMarker.length - 1;
   for (; i < src.length; i++) {
     if (src[i] === "{") depth++;
@@ -37,8 +41,8 @@ const eq = (label, got, want) => {
 for (const name of FILES) {
   const src = readFileSync(`${name}.html`, "utf8");
 
-  const helper = extract(src, "function quotedDeliveryYMD(needByDate, sh) {");
-  const bizday = extract(src, "function isBusinessDay(d) {");
+  const helper = extract(src, "quotedDeliveryYMD", "needByDate, sh");
+  const bizday = extract(src, "isBusinessDay", "d");
 
   // The closure list is config-driven in the shipped file; the arithmetic under test
   // is the weekday rule, so an empty closure list isolates it.
