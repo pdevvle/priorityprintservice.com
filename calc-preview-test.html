@@ -625,6 +625,30 @@ const SHOP_CLOSURES = _CFG.closures || [
 ];
 
 // Check if a date is a business day (M-F, not a closure)
+// The delivery date recorded against the order has to be the date the customer was
+// actually shown. It used to be `config.needByDate || sh.freeDeliveryYMD` — the raw
+// contents of the date field, with no check that the value was valid, reachable, or
+// even a day the shop is open. The panel resolved the same question properly and
+// displayed something else, so the promise on screen and the date stored on the
+// order could disagree; the server now trusts this field over its own recompute, so
+// whatever lands here IS the quoted date. This mirrors the panel's `deliveryDate`
+// exactly, then refuses to emit anything that is not a working day.
+function quotedDeliveryYMD(needByDate, sh) {
+  if (!sh) return null;
+  // sh.needByFmt is non-null exactly when a picked date is valid and not too soon.
+  const picked = (sh.needByFmt && needByDate && needByDate !== sh.freeDeliveryYMD) ? needByDate : null;
+  const ymd = picked
+    || (!sh.hasDest
+        ? sh.earliestYMD
+        : ((sh.rushCost > 0 && sh.needByFmt && needByDate) ? needByDate : sh.freeDeliveryYMD));
+  // Last line of defence. A weekend or a shop closure must never reach the order,
+  // whatever the field held — a restored reorder, a stale tab, a hand-edited value.
+  // The free-delivery date is business-day arithmetic by construction.
+  const d = ymd ? new Date(ymd + "T00:00:00") : null;
+  if (!d || isNaN(d.getTime()) || !isBusinessDay(d)) return sh.freeDeliveryYMD || null;
+  return ymd;
+}
+
 function isBusinessDay(d) {
   const dow = d.getDay(); // 0=Sun, 6=Sat
   if (dow === 0 || dow === 6) return false;
@@ -5373,7 +5397,7 @@ function buildMetadata(config, result) {
     // Production schedule
     productionStartDate: sh.productionStartYMD,
     mustShipByDate: sh.mustShipYMD,
-    estimatedDeliveryDate: config.needByDate || sh.freeDeliveryYMD,
+    estimatedDeliveryDate: quotedDeliveryYMD(config.needByDate, sh),
     // Computed results
     total: result.total,
     baseTotal: result.baseTotal,
