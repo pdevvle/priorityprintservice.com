@@ -5,7 +5,7 @@
 | Site | State |
 |---|---|
 | **Staging** (`woocommerce-70867-4915293.cloudwaysapps.com`) | ✅ v1.24 deployed and verified; **v1.25 reconciliation deployed** |
-| **Production** (`priorityprintservice.com`) | ⏸ Not deployed — waiting on eyes-on staging sign-off. See §2. |
+| **Production** (`priorityprintservice.com`) | ⏸ Not deployed — rollout prepared in `ROLLOUT_IMPOSITION_PRODUCTION.md`. See §2. |
 
 **v1.25** is v1.24 plus the two decisions the owner made on 2026-09-02: the
 approval-hash gate is reconciled back in as an **advisory** (imposing a
@@ -60,6 +60,11 @@ production order.
 ---
 
 ## 2. Production — do not deploy `a9d8544`; deploy v1.25 instead
+
+> **Rollout prepared:** see **`docs/ROLLOUT_IMPOSITION_PRODUCTION.md`** for the
+> production runbook — pre-flight, pinned deploy calls, verification and rollback —
+> plus the full reconciliation audit run against production's live bytes on
+> 2026-09-02, which confirms v1.25 loses nothing production has.
 
 **The brief's premise was wrong.** It says production is on v1.8, 16 versions
 behind, and expects ~163,000–169,000 b. Production is actually:
