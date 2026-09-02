@@ -6,6 +6,11 @@ Staging is already on this build and verified.
 Ships pinned commit **`03bca5852d418ca24ffa492705338a2284fe013f`**
 on branch `claude/rollout-imposition-v1-24-gyn4li`.
 
+Pinned to `03bca58` deliberately, not to the branch tip: these are the exact bytes
+staging was deployed with and verified on. Later commits on the branch are docs only
+and leave both artifacts byte-identical, so deploying from a newer SHA is equivalent —
+but `03bca58` is the one with a verification record behind it.
+
 | File | Bytes at this SHA | Production now |
 |---|---|---|
 | `imposition-tool.html` | 241,964 | 196,017 (`IMPOSE-V1.12`) |
