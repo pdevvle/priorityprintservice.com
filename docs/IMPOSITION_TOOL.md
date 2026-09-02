@@ -234,6 +234,28 @@ download the imposed PDF. Useful for testing and one-off jobs.
   flip are unaffected, and the count is flagged against the priced imp exactly
   like a flat's manual grid — badge, warning, slug, excluded from the parity
   preflight. Refuses with a footprint report when the copies cannot fit.
+- **Seam hairline on synthesized bleed** (1.26). The mirrored/streaked band and
+  the placed art ABUTTED exactly on the trim edge. Two abutting fills each
+  antialias at the shared boundary, so neither covers those pixels fully and
+  the white underneath leaks through as a hairline sitting **right on the cut
+  line** — the worst possible place for one, since any outward drift of the
+  guillotine exposes it. Measured at 600 DPI on the Chandler cover: solid
+  `(22,73,156)` lifting to `(108,141,193)` across ~0.005″, on all four edges.
+  `scale` was immune, which is the tell: it enlarges one continuous placement,
+  so there is no seam to leak through.
+
+  Fixed by overlapping the band across the edge by `SEAM` (0.004″) **and moving
+  the mirror axis inward by the same amount**, so the overlap paints the art's
+  own content rather than the blank ring — mirroring about `eL+SEAM` maps
+  `x=eL` to `eL+2·SEAM`, a few thousandths inside the art, where mirroring about
+  `eL` mapped it to white. Only the outermost 0.004″ of art goes unrepresented
+  in the bleed, far below any cutting tolerance.
+
+  Verified: hairline lift on the four cut edges drops from **+31/+42/+64/+107
+  to +0.3…+0.7** (noise). At 300 DPI the affected fixtures are pixel-identical
+  with identical ink coverage — the change is purely sub-pixel seam geometry —
+  and the ten core regression cases are byte-identical.
+
 - **A bleed allowance is not bleed** (1.25). `hasBleed` was purely geometric —
   the page is bigger than the trim — and said nothing about whether that region
   contains ink. A designer very commonly sets the document up at trim+bleed and
