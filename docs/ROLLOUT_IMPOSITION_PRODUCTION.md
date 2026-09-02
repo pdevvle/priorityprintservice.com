@@ -1,5 +1,53 @@
 # Production rollout — Imposition v1.25
 
+## ✅ EXECUTED 2026-09-02 20:51 UTC — production is live on v1.25
+
+Owner authorised the rollout. Both files deployed pull-based at the pinned SHA and
+verified on the server copy:
+
+| File | Bytes written | Expected | Verified |
+|---|---|---|---|
+| `pps-calculators/pps-imposition.php` | 28,732 | 28,732 | ✅ 20:50:59 UTC |
+| `pps-calculators/imposition-tool.html` | 241,964 | 241,964 | ✅ 20:51:47 UTC |
+
+- Build chip on the server now reads **`BUILD 2026-09-02 05:20 UTC · IMPOSE-V1.25`**
+  (was `BUILD 2026-08-25 04:38 UTC · IMPOSE-V1.12`).
+- Server copy of the tool is **byte-identical to the pinned commit** —
+  sha256 `d72fda25f768c286660008b5` on both sides.
+- Marker counts on the server match the repo exactly: `sha256Hex` ×3,
+  `approvalState` ×5, `approvalNote` ×3, the "NOT THE APPROVED FILE" banner ×1,
+  `_UNAPPROVED` ×2, and the raster trio `embedJpg`/`embedPng`/`PPS_RASTER_DPI`
+  ×1/×1/×3. `allowHashMismatch` is gone (0), as intended.
+- PHP carries `proof_hash` in the `pps_impose_list` payload, and
+  `set_status()` + order note + `save()` — no `update_status()`, so status
+  changes from the queue are silent.
+
+**Deploy order note:** the PHP went first, then the tool — deliberately the reverse
+of §5 below. New-PHP + old-tool keeps `proof_hash` flowing so the old gate stays
+fully functional during the changeover; tool-first would have given new-tool +
+old-PHP, where the missing `proof_hash` makes every order look unbound and approval
+checking lapses entirely for those seconds.
+
+Pre-flight passed immediately before writing: both server files still 196,017 /
+20,974 b (untouched since the 2026-08-24/25 audit), no `.bak`/`.orig`/`.prehardening`
+anywhere in the plugin directory, and both raw URLs returning HTTP 200 at exactly
+241,964 / 28,732 bytes.
+
+### Still to check with eyes on production
+
+- **Order 87045** — the raster regression case. It should show artwork, not NO ART.
+- A **portrait saddle order** must read `2 × 1`, never `1 × 2`.
+- Queue renders with a status dropdown and Hide per row; completed orders drop off
+  by default and "show completed & hidden" brings them back with a HIDDEN badge;
+  the "Order metadata reference" panel expands.
+- A hash-bound order should show the green "approval hash verified" line.
+
+**Do not test a status change on a real customer order** until someone has confirmed
+the silent path behaves as wanted — it is silent, so a mistake there is invisible
+from the shop side rather than loud.
+
+---
+
 **Prepared 2026-09-02.** Target: `priorityprintservice.com` (production).
 Staging is already on this build and verified.
 

@@ -5,7 +5,7 @@
 | Site | State |
 |---|---|
 | **Staging** (`woocommerce-70867-4915293.cloudwaysapps.com`) | ✅ v1.24 deployed and verified; **v1.25 reconciliation deployed** |
-| **Production** (`priorityprintservice.com`) | ⏸ Not deployed — rollout prepared in `ROLLOUT_IMPOSITION_PRODUCTION.md`. See §2. |
+| **Production** (`priorityprintservice.com`) | ✅ **v1.25 deployed and verified 2026-09-02 20:51 UTC** — see `ROLLOUT_IMPOSITION_PRODUCTION.md`. |
 
 **v1.25** is v1.24 plus the two decisions the owner made on 2026-09-02: the
 approval-hash gate is reconciled back in as an **advisory** (imposing a
@@ -59,9 +59,9 @@ production order.
 
 ---
 
-## 2. Production — do not deploy `a9d8544`; deploy v1.25 instead
+## 2. Production — v1.25 deployed (never `a9d8544`)
 
-> **Rollout prepared:** see **`docs/ROLLOUT_IMPOSITION_PRODUCTION.md`** for the
+> **Rollout executed 2026-09-02 20:51 UTC.** see **`docs/ROLLOUT_IMPOSITION_PRODUCTION.md`** for the
 > production runbook — pre-flight, pinned deploy calls, verification and rollback —
 > plus the full reconciliation audit run against production's live bytes on
 > 2026-09-02, which confirms v1.25 loses nothing production has.
