@@ -168,7 +168,7 @@ function pps_default_config() {
             'default_transit_days'              => 4,
             'shop_timezone'                     => 'America/Phoenix',
             'shop_cutoff_hour'                  => 14,
-            'free_shipping_buffer'              => 1.5,
+            'free_shipping_buffer'              => 2,
             // Shippo integration (leave token empty to use static transit map)
             'shippo_api_token'                  => '',
             'shippo_origin_zip'                 => '85027',
