@@ -494,7 +494,7 @@ const PCF = Object.assign({
 
   proof_hardcopy_cost:35, proof_digital_cost:10, bleed_minimum:15,
   default_transit_days:4,
-  shop_timezone:"America/Phoenix", shop_cutoff_hour:14, free_shipping_buffer:1.5,
+  shop_timezone:"America/Phoenix", shop_cutoff_hour:14, free_shipping_buffer:2,
   shippo_api_token:"", shippo_origin_zip:"85027", ship_carton_lb:45, ship_text_sheets_per_carton:900, ship_card_sheets_per_carton:400,
   // Site-wide sale (0 = off). Applied on subtotal before shipping/rush.
   sale_discount_pct:0, sale_label:"Sale",
@@ -1127,7 +1127,15 @@ function calculate(c) {
   const estWeightLb=Math.round(_physSheets*(_cartonLb/_perCarton)*_shFac*10)/10;
   const estCartons=Math.max(1,Math.ceil(estWeightLb/_cartonLb));
   const productionBizDays = days;
-  const bufferedProdDays = productionBizDays * 2;
+  // Free delivery = production x buffer + ground transit. The buffer is a config
+  // knob — Config > Production > Shop Schedule > Free Ship Buffer — but it was
+  // hardcoded to 2 here while the admin field and the debug panel both reported
+  // PCF.free_shipping_buffer. Editing the field did nothing, and the debug panel
+  // stated a multiplier the engine was not using.
+  // Fractions are rounded up: addBusinessDays counts whole days, so a 4.5 would
+  // silently behave as 5 anyway. Better to say so than to let it happen.
+  const _fsBuf = Number(PCF.free_shipping_buffer) > 0 ? Number(PCF.free_shipping_buffer) : 2;
+  const bufferedProdDays = Math.ceil(productionBizDays * _fsBuf);
   const freeDeliveryBizDays = bufferedProdDays + transitDays;
   const earliestBizDays = productionBizDays + 1;
   const shopToday = getShopToday();

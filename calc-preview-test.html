@@ -501,7 +501,7 @@ const PCF = Object.assign({
   // Shipping & Rush
   shop_timezone:"America/Phoenix",  // IANA timezone — no DST in AZ
   shop_cutoff_hour:14,              // 2:00 PM — orders after this = next business day
-  free_shipping_buffer:1.5,           // multiplier on production days for free ship ETA
+  free_shipping_buffer:2,           // multiplier on production days for free ship ETA
   // Shippo integration (future) — when shippo_api_token is set, zip-based ETAs replace static transit map
   shippo_api_token:"",              // Shippo API Live Token — leave empty to use static transit map
   shippo_origin_zip:"85027", ship_carton_lb:45, ship_text_sheets_per_carton:900, ship_card_sheets_per_carton:400,        // Shop origin zip for rate/ETA lookups
@@ -1154,7 +1154,15 @@ function calculate(c) {
     && String(c.shipZip || "").replace(/[^0-9]/g, "").length >= 3;
   const productionBizDays = days;
   // Free shipping = minimum turnaround × 2 + ground transit
-  const bufferedProdDays = productionBizDays * 2;
+  // Free delivery = production x buffer + ground transit. The buffer is a config
+  // knob — Config > Production > Shop Schedule > Free Ship Buffer — but it was
+  // hardcoded to 2 here while the admin field and the debug panel both reported
+  // PCF.free_shipping_buffer. Editing the field did nothing, and the debug panel
+  // stated a multiplier the engine was not using.
+  // Fractions are rounded up: addBusinessDays counts whole days, so a 4.5 would
+  // silently behave as 5 anyway. Better to say so than to let it happen.
+  const _fsBuf = Number(PCF.free_shipping_buffer) > 0 ? Number(PCF.free_shipping_buffer) : 2;
+  const bufferedProdDays = Math.ceil(productionBizDays * _fsBuf);
   const freeDeliveryBizDays = bufferedProdDays + transitDays;
   // Minimum days are mandatory — production + 1 day overnight shipping
   const earliestBizDays = productionBizDays + 1;
