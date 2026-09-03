@@ -233,10 +233,10 @@ function pps_default_config() {
         // equivalent knob, cutter_stackheight_inches, is 3.5.
         'corners' => array(
             array( 'label' => 'No Round Cornering',                              'val' => 0,   'price' => 0 ),
-            array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 Outside 2",        'val' => 216, 'price' => 4.0 ),
-            array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 Outside 2",    'val' => 215, 'price' => 3.0 ),
-            array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 All 4",            'val' => 108, 'price' => 2.0 ),
-            array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 All 4",        'val' => 107, 'price' => 1.5 ),
+            array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 Outside 2",        'val' => 216, 'price' => 0.2 ),
+            array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 Outside 2",    'val' => 215, 'price' => 0.15 ),
+            array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 All 4",            'val' => 108, 'price' => 0.1 ),
+            array( 'label' => "\xE2\x85\x9C\" Round \xE2\x80\x94 All 4",        'val' => 107, 'price' => 0.075 ),
         ),
         'art_opts' => array(
             array( 'label' => 'Upload Art with Order',      'val' => 0.01, 'price' => 0 ),
