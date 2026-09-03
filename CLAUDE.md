@@ -199,6 +199,109 @@ Whole-file deploys are the mechanism that destroys surgical patches, so check fi
   deployed bytes are pinned to a reviewable commit, and rollback is the same call with
   a different SHA.
 
+### Concurrent sessions: the server's copy must be an ANCESTOR of yours
+
+The size check above only catches a file edited *by hand*. It does not catch the more
+common failure now that several Claude sessions run at once: the server holding a
+**real commit from somebody else's branch**. The size matches a genuine commit, the
+check passes, and the deploy silently reverts work that was live and being used.
+
+This happened on 2026-08-27. One session deployed `pps-calculators.php` from `6b75f46`
+at 22:52. That commit did not carry another session's two `require_once` lines, so
+`pps-pay-link.php` and `pps-quickbooks.php` stopped loading and `/pps/v1/pay-link`
+ceased to exist. Missive's webhook got a 404 and reported only "failed to send
+webhook"; the feature's own diagnostics stayed empty because none of its code ran. The
+outage lasted until somebody happened to GET the route. **Nothing alerted. Nothing
+logged. A paying feature was simply gone.**
+
+So before overwriting a shared PHP file, ask the question the size check does not:
+
+```bash
+SIZE=<bytes reported by pps_plugin_list_files>
+for c in $(git log --all --format=%H -100 -- <file>); do
+  [ "$(git cat-file -s $(git rev-parse $c:<file>) 2>/dev/null)" = "$SIZE" ] && echo "$c"
+done
+# then, for whatever that returns:
+git merge-base --is-ancestor <server-commit> HEAD && echo SAFE || echo "STOP — merge first"
+```
+
+- **SAFE** means the server is running something you already contain; deploying moves it
+  forward.
+- **STOP** means the server has work your branch does not. Fetch and merge that branch
+  first, verify the merged byte count equals *both* contributions, and deploy the merged
+  file. Never "fix" this by redeploying your own copy — that is the same fault pointed
+  the other way.
+- A size matching **several** commits is ambiguous; read the file and compare a hash
+  rather than guessing.
+
+### Pay Link and QuickBooks load themselves — do not "restore" the requires
+
+`pps-pay-link.php` and `pps-quickbooks.php` are **separately activated plugins**,
+listed in `active_plugins` as `pps-calculators/pps-pay-link.php` and
+`pps-calculators/pps-quickbooks.php`. This is the same pattern
+`pps-assistant.php`, `pps-assistant-webhook.php`, `pps-html-deploy.php` and
+`pps-intake.php` already use — several plugin files sharing one directory, each
+with its own `Plugin Name` header.
+
+They are NOT required from `pps-calculators.php`, and must not be. They were,
+and twice — 2026-08-27 22:52 and 2026-08-29 00:10 — another session redeployed
+that file from a branch without the two `require_once` lines. Both times the
+modules stopped existing: `/pps/v1/pay-link` 404d, Missive reported only
+"failed to send webhook", and none of the module's own diagnostics fired
+because none of its code ran. A money-taking feature was silently offline for
+hours, twice, and nothing alerted.
+
+Loading themselves is what makes that impossible: no deploy of
+`pps-calculators.php` can unload a plugin WordPress activates directly.
+
+- **Do not add `require_once` lines for them back into `pps-calculators.php`.**
+  Both files guard with `PPS_PAYLINK_LOADED` / `PPS_QBO_LOADED` and would
+  return early rather than fatal, but the guard is a safety net, not a design.
+- **If either stops working, check `active_plugins` first.** A missing entry is
+  the failure; the fix is re-adding it, not re-adding a require.
+- **Anything that must survive an unrelated deploy belongs in one of these two
+  files**, not in `pps-job-quote.php` or `pps-calculators.php`. The receipt's
+  shipping-address filter lives in `pps-pay-link.php` for exactly this reason.
+
+### Pay links tell you when they are broken — ask them first
+
+`GET /wp-json/pps/v1/pay-link` is the one-call diagnosis, unauthenticated on
+purpose:
+
+| Response | Meaning |
+|---|---|
+| `200 {"ok":true,"status":"ok"}` | Loading and able to mint. |
+| `503 {"ok":false,"status":"degraded"}` | Loading, but something it needs is missing. |
+| `404 rest_no_route` | `pps-pay-link.php` is not loading at all — check `active_plugins`. |
+
+`pps_paylink_health()` holds the checks (both `active_plugins` entries,
+`pps_quote_create()`, `pps_is_business_day()`, the line product and its
+`_virtual` flag, the shared secret). The endpoint reports *that* it is degraded
+without saying *what* is wrong; the detail goes to `admin_email` and the
+outcome log. The hourly `pps_paylink_healthcheck` cron mails **once per distinct
+failure**, not once per hour — if you add a check, keep that property.
+
+The gap it cannot close is its own absence: if the file stops loading, nothing
+in it runs, which is exactly what happened twice. Only an outside poller
+watching for any non-200 covers both shapes.
+
+### Running more than one session at a time
+
+- **One deploy lane.** Feature branches are fine; deploying from them is not. Merge into
+  the integration branch and deploy *that* commit, so production only ever receives bytes
+  from one lineage. Two branches deploying the same file is the whole problem.
+- **Split by file, not by feature.** Two sessions editing `pps-calculators.php` for
+  unrelated reasons will collide no matter how careful each is.
+- **Merge early.** A branch open all day drifts far enough that a merge stops being
+  routine. Land it while the diff is small.
+- **Say so in the handoff.** A session that deploys a shared file should record what it
+  deployed and from which SHA, so the next one can run the ancestry check without
+  archaeology.
+- **A feature that reaches production before it is merged is on loan.** Until the change
+  lives on the shared branch, every unrelated deploy of those files can take it away —
+  and the symptom will not look like a deploy problem. Prefer merging over deploying from
+  a branch; when that is not possible, treat the merge as unfinished work, not paperwork.
+
 ### Applies equally to
 
 Anything edited outside version control and relied upon: `wp_options` values that

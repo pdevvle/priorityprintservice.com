@@ -142,6 +142,15 @@ if ( file_exists( PPS_CALC_DIR . 'pps-job-quote.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-job-quote.php';
 }
 
+// Pay Link and QuickBooks are NOT loaded here. They are standalone plugins in
+// their own directories (pps-pay-link/, pps-quickbooks/), because they were
+// required from here twice and twice a redeploy of THIS file by another
+// session removed the lines and silently took a money-taking feature offline.
+// A module whose existence depends on a line in a file everybody redeploys is
+// a module that will disappear. Do not "restore" the requires: both modules
+// guard against double-loading, but the copies would be at different paths and
+// only the guard would stop a fatal.
+
 // Shared quote link → defaults blob (product + preset admin).
 if ( file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-defaults-url.php';
@@ -2735,21 +2744,30 @@ add_filter( 'woocommerce_cart_item_quantity', function( $quantity_html, $cart_it
 // BUSINESS DAY CALCULATION
 // ═══════════════════════════════════════════════════════════════
 
-function pps_add_business_days( DateTime $start, int $days ): DateTime {
+/**
+ * Is the shop open on this date?
+ *
+ * Extracted from pps_add_business_days() so nothing has to reimplement it.
+ * A second copy of this test is how the quote page ended up offering delivery
+ * on closing days: it skipped weekends and knew nothing about the holiday
+ * list. One predicate, one answer.
+ *
+ * Closures are matched as Y-m-d (a specific day) or m-d (annually recurring).
+ */
+function pps_is_business_day( DateTime $d ): bool {
+    if ( (int) $d->format( 'N' ) >= 6 ) return false;
     $closures = pps_get_closures();
+    return ! in_array( $d->format( 'Y-m-d' ), $closures, true )
+        && ! in_array( $d->format( 'm-d' ), $closures, true );
+}
+
+function pps_add_business_days( DateTime $start, int $days ): DateTime {
     $d = clone $start;
     $added = 0;
 
     while ( $added < $days ) {
         $d->modify( '+1 day' );
-        $dow = (int) $d->format( 'N' );
-        if ( $dow >= 6 ) continue;
-
-        $ymd  = $d->format( 'Y-m-d' );
-        $mmdd = $d->format( 'm-d' );
-        if ( in_array( $ymd, $closures, true ) || in_array( $mmdd, $closures, true ) ) continue;
-
-        $added++;
+        if ( pps_is_business_day( $d ) ) $added++;
     }
 
     return $d;
