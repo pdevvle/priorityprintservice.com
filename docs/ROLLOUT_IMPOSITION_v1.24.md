@@ -1,5 +1,21 @@
 # Rollout brief — Imposition v1.24 → staging → production
 
+> **DONE — superseded 2026-09-04.** Both sites now run **v1.29** at commit
+> `72847cc`, deployed pull-based and verified byte-identical to the repo.
+> Keep this file for the pre-overwrite procedure and the rollback table; do
+> **not** act on its "what ships" SHA or its open decision.
+>
+> Two things it could not have known:
+>
+> 1. **The open decision below was answered: status changes are SILENT.**
+>    Production had already been patched to `set_status()` + `save()` on
+>    2026-09-02 by the owner's decision. That is now in the repo.
+> 2. **A parallel line hand-deployed an approval-binding tool build** (also
+>    called "v1.25") to both sites on 2026-09-02. The pre-overwrite size check
+>    below is what caught it — neither server file matched any commit in this
+>    line's history. It has been merged, not overwritten. **This is the second
+>    time that check has saved a feature; run it every time.**
+
 **Written 2026-09-01. Hand this to a fresh session that has the PPS connectors
 enabled in-chat.** Everything is committed, pushed and verified; nothing is
 deployed. This is a deploy-only task.
