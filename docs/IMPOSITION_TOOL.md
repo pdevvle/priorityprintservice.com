@@ -41,6 +41,41 @@ files the result back to Drive, then reports any failures.
 
 No new Google login — it reuses the refresh token stored by `pps-gdrive.php`.
 
+#### Approval binding (is this the file the customer approved?)
+
+Orders placed since the proof-parity work carry `_pps_proof_hash` on the line
+item — the SHA-256 the calculator computed over the print-ready bytes at the
+moment of approval (written by `pps-proof-status.php`). The queue passes it
+through as `proof_hash`, and the tool hashes what Drive actually returned and
+compares:
+
+| State | Meaning | What happens |
+|---|---|---|
+| `unbound` | order predates hashing | nothing; imposes as normal |
+| `verified` | byte-for-byte the approved file | ✓ noted on load |
+| `mismatch` | **not** the approved file | red banner, and the output filename gains `_UNAPPROVED` |
+| `unverifiable` | hash present, `crypto.subtle` absent (wp-admin not on HTTPS) | warned, imposes unflagged |
+
+**A mismatch advises, it never refuses.** Prepress must be able to impose a
+file the customer never approved — a corrected re-export, a fixed bleed, a
+font substitution caught after approval. But it can't do it quietly: the flag
+rides on the *filename*, so it survives into the Drive folder and the press
+room rather than living on one screen. A manual drag-and-drop while a
+hash-bound order is loaded goes through the same check (otherwise dropping a
+file in was a silent bypass), and **Impose all pending** lists every
+mismatched row in its summary as well as flagging the file.
+
+#### Order status and Hide
+
+Each row carries an order-status dropdown and a **Hide** button. Status
+changes are **silent** (`set_status()` + `save()`): the status is written and
+an order note records who changed it, but the WooCommerce transition does not
+run, so **no customer email is sent** — a prepress queue moving a job along
+must not mail the customer as a side effect. The trade-off is that nothing
+else hooked on `woocommerce_order_status_*` runs either (stock reduction,
+analytics, fulfilment integrations); use the order screen when the transition
+— or the email — is what you actually want.
+
 ### 2. Standalone (GitHub Pages / any browser)
 
 Open `imposition-tool.html` directly (after merge:

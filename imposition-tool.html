@@ -69,7 +69,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-04 09:56 UTC · IMPOSE-V1.28</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-04 21:40 UTC · IMPOSE-V1.29</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2603,6 +2603,45 @@ function detectTrim(doc, bleed) {
 
 function sanitizeName(s) { return String(s || "").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(0, 60); }
 
+// ── Approval binding ─────────────────────────────────────────────
+// Orders placed since the proof-parity work carry _pps_proof_hash: the SHA-256
+// the calculator computed over the print-ready bytes at the moment the customer
+// approved. Before imposing we hash what Drive actually returned and compare.
+//
+// A mismatch does NOT block. Prepress must be able to impose a file the
+// customer never approved — a corrected re-export, a fixed bleed, a font
+// substitution caught after approval — so the gate ADVISES rather than refuses:
+// the mismatch is called out on load, pinned in a banner for as long as the
+// file is staged, and stamped into the output filename as UNAPPROVED so the
+// flag survives into the Drive folder and the press room.
+//
+// Returns null when the page cannot hash (no crypto.subtle — non-HTTPS admin),
+// which is reported as "unverifiable" and is distinct from a mismatch.
+async function sha256Hex(bytes) {
+  if (!(window.crypto && crypto.subtle)) return null;
+  const dig = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(dig)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Compare downloaded bytes against an order's approved hash.
+// → "unbound" (order predates hashing) | "verified" | "mismatch" | "unverifiable"
+async function approvalState(bytes, expected) {
+  const want = String(expected || "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(want)) return { state: "unbound", got: "", want: "" };
+  const got = await sha256Hex(bytes);
+  if (!got) return { state: "unverifiable", got: "", want };
+  return { state: got === want ? "verified" : "mismatch", got, want };
+}
+
+// One sentence describing a non-clean approval state, or "" when nothing to say.
+function approvalNote(a, what, orderId) {
+  if (!a || a.state === "verified" || a.state === "unbound") return "";
+  if (a.state === "unverifiable") {
+    return `⚠ Order #${orderId} carries an approval hash but this page cannot verify it (no crypto.subtle — is wp-admin on HTTPS?). `;
+  }
+  return `⚠ APPROVAL MISMATCH — "${what}" hashes ${a.got.slice(0, 12)}… but order #${orderId}'s customer approved ${a.want.slice(0, 12)}…. This is not the file they approved (replaced, re-exported, or the wrong pick). Imposing is allowed; the output will be flagged UNAPPROVED. `;
+}
+
 function imposedFilename(spec, layout) {
   const bits = ["IMPOSED"];
   // Order-<id>-i<item> lets the admin queue mark IMPOSED per line item, not
@@ -2615,7 +2654,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf };
+window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -3137,8 +3176,9 @@ function App() {
     const label = (CFG.orderStatuses || {})["wc-" + status] || status;
     if (!window.confirm(
       `Move order #${row.order_id} to "${label}"?\n\n` +
-      `This is a real WooCommerce status change: it is recorded on the order and ` +
-      `WooCommerce will send whatever customer email that status triggers.`)) return;
+      `This changes the order's status and is recorded in the order notes. ` +
+      `It is SILENT — no customer email is sent, and nothing else hooked on the ` +
+      `status transition runs. Use the order screen if the customer should be emailed.`)) return;
     setRowBusy(String(row.order_id));
     try {
       const r = await ajax("pps_impose_set_status", { order_id: row.order_id, status });
@@ -3227,15 +3267,19 @@ function App() {
               ganging ? gangFiles.map(g => ({ bytes: g.bytes, name: g.name, slots: g.slots === "" ? null : +g.slots })) : null)
       .then(res => {
         if (seq !== genSeq.current) return;
+        // An approval mismatch travels on the filename so the flag survives
+        // into the Drive folder and the press room, not just this screen.
+        const unappr = art && art.approval && art.approval.state === "mismatch";
+        const flagIt = n => unappr ? n.replace(/\.pdf$/i, "_UNAPPROVED.pdf") : n;
         // Perfect bound returns two parts, each with its own layout and its own
         // filename — the COVER and GUTS suffixes keep them apart in the order's
         // Drive folder and in the queue's IMPOSED detection.
         if (res.parts) {
           res.parts.forEach(pt => {
-            pt.filename = imposedFilename({ ...debSpec, jobName: (debSpec.jobName || "book") + "_" + pt.part.toUpperCase() }, pt.layout);
+            pt.filename = flagIt(imposedFilename({ ...debSpec, jobName: (debSpec.jobName || "book") + "_" + pt.part.toUpperCase() }, pt.layout));
           });
         } else {
-          res.filename = imposedFilename(debSpec, res.layout);
+          res.filename = flagIt(imposedFilename(debSpec, res.layout));
         }
         setResult(res);
       })
@@ -3319,9 +3363,16 @@ function App() {
         try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
       }
       catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
+      // A manual drop while a hash-bound order is active goes through the same
+      // approval check as a queue load — otherwise dragging in any file was a
+      // silent bypass that still produced a clean output filename.
+      const appr = slot === "back" ? null
+        : await approvalState(bytes, activeOrder && activeOrder.proof_hash);
       if (slot === "back") setBackArt({ bytes, name: f.name, pageCount, threats });
       else {
-        setArt({ bytes, name: f.name, pageCount, threats });
+        setArt({ bytes, name: f.name, pageCount, threats, approval: appr });
+        const aNote = approvalNote(appr, f.name, activeOrder && activeOrder.order_id);
+        if (aNote) setNotice(aNote);
         setDetTrim(det ? { w: det.w, h: det.h } : null);
         setAddBleedPages({}); // per-page overrides belong to the previous file
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
@@ -3338,8 +3389,8 @@ function App() {
             && ((+trimShort > +trimLong) !== (det.h > det.w));
           if (activeOrder) {
             // order spec is authoritative — but flag a measurement conflict loudly
-            if (differs) setNotice(`⚠ "${f.name}" measures ${det.w}×${det.h}″ (${det.method}) but the order spec is ${specL}×${specS}″ — check that this is the right file/spec before printing.`);
-            else if (flipped) setNotice(`⚠ "${f.name}" is ${det.w}×${det.h}″ (${det.h > det.w ? "portrait" : "landscape"}) but the order spec reads ${trimLong}×${trimShort}″ — saddle folds on the height edge, so imposing as-is would turn every page 90°. Swap the page width/height before printing.`);
+            if (differs) setNotice(aNote + `⚠ "${f.name}" measures ${det.w}×${det.h}″ (${det.method}) but the order spec is ${specL}×${specS}″ — check that this is the right file/spec before printing.`);
+            else if (flipped) setNotice(aNote + `⚠ "${f.name}" is ${det.w}×${det.h}″ (${det.h > det.w ? "portrait" : "landscape"}) but the order spec reads ${trimLong}×${trimShort}″ — saddle folds on the height edge, so imposing as-is would turn every page 90°. Swap the page width/height before printing.`);
           } else {
             if (isSaddle) { setTrimLong(det.w); setTrimShort(det.h); }
             else { setTrimLong(detL); setTrimShort(detS); }
@@ -3350,7 +3401,7 @@ function App() {
         // page 2 could also be notes/a proof sheet the operator must exclude.
         if (pageCount >= 2 && sides === 1 && !isSaddle) {
           setSides(2);
-          setNotice(`"${f.name}" has ${pageCount} pages — switched to 2-sided (page 1 = front, page 2 = back). Set Sides back to 1 if page 2 isn't the back.`);
+          setNotice(aNote + `"${f.name}" has ${pageCount} pages — switched to 2-sided (page 1 = front, page 2 = back). Set Sides back to 1 if page 2 isn't the back.`);
         }
       }
     }
@@ -3370,14 +3421,20 @@ function App() {
       const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
       if (!r.ok) throw await ajaxFail(r, "artwork download");
       const bytes = new Uint8Array(await r.arrayBuffer());
+      // Approval binding — checked before anything is staged so the operator
+      // sees the verdict on the same screen as the artwork. Advisory only: a
+      // mismatch still loads, it just travels flagged.
+      const appr = await approvalState(bytes, row.proof_hash);
       const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
       const pageCount = doc.getPageCount();
       let threats = [];
       try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
-      setArt({ bytes, name: row.art_file_name, pageCount, threats });
+      setArt({ bytes, name: row.art_file_name, pageCount, threats, approval: appr });
       setAddBleedPages({});
       setBackArt(null);
       let note = `Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
+      if (appr.state === "verified") note = `✓ Approval hash verified — byte-for-byte the file the customer approved. ` + note;
+      else note = approvalNote(appr, row.art_file_name, row.order_id) + note;
       try {
         const det = detectTrim(doc, +bleedIn);
         const specL = Math.max(s.trimLong, s.trimShort), specS = Math.min(s.trimLong, s.trimShort);
@@ -3418,6 +3475,7 @@ function App() {
     if (!pending.length) return;
     setBulkState({ done: 0, total: pending.length, current: "", failures: [] });
     const failures = [];
+    const advisories = [];   // imposed, but the operator must be told (approval mismatches)
     for (let i = 0; i < pending.length; i++) {
       const row = pending[i];
       const label = `#${row.order_id} ${row.job_name || row.product || ""}`.trim();
@@ -3427,8 +3485,18 @@ function App() {
         const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
         if (!r.ok) throw await ajaxFail(r, "artwork download");
         const bytes = new Uint8Array(await r.arrayBuffer());
+        // Bulk imposes a mismatched file like any other, but never quietly:
+        // the output carries UNAPPROVED and the row is listed in the summary
+        // so a headless run can't bury an unapproved file in the Drive folder.
+        const appr = await approvalState(bytes, row.proof_hash);
+        if (appr.state === "mismatch") {
+          advisories.push(`${label}: APPROVAL MISMATCH — imposed and filed as UNAPPROVED (${appr.got.slice(0, 12)}… vs approved ${appr.want.slice(0, 12)}…).`);
+        } else if (appr.state === "unverifiable") {
+          advisories.push(`${label}: carries an approval hash but this page cannot verify it (no crypto.subtle — is wp-admin on HTTPS?).`);
+        }
         const res = await imposePdf(bytes, null, s);
-        const filename = imposedFilename(s, res.layout);
+        let filename = imposedFilename(s, res.layout);
+        if (appr.state === "mismatch") filename = filename.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
         const fd = new FormData();
         fd.append("action", "pps_impose_upload");
         fd.append("nonce", CFG.nonce);
@@ -3445,6 +3513,7 @@ function App() {
     }
     setBulkState({ done: pending.length, total: pending.length, current: "", failures });
     setNotice(`Bulk impose finished: ${pending.length - failures.length}/${pending.length} filed to Drive.`
+      + (advisories.length ? ` ⚠ ${advisories.length} need${advisories.length === 1 ? "s" : ""} attention:\n` + advisories.join("\n") : "")
       + (failures.length ? " Failures listed below." : ""));
     setError(failures.join("\n"));
     setRefreshKey(k => k + 1);
@@ -3523,6 +3592,25 @@ function App() {
               sub={isSaddle ? "multi-page PDF, pages in reading order (cover = page 1) · padded to a multiple of 4 · drop the manifest .txt to autofill"
                             : "print-ready or raw PDF · page 1 = front, page 2 = back · drop the manifest .txt to autofill the spec"}
               accept=".pdf,.txt" onFiles={f => onFiles(f, "front")} fileName={art && `${art.name} (${art.pageCount}p)`} />
+            {art && art.approval && art.approval.state === "mismatch" && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }}>
+                <b style={{ color: "#ff5f7a" }}>⚠ NOT THE APPROVED FILE</b>
+                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+                  This file hashes <code>{art.approval.got.slice(0, 12)}…</code> but the customer approved <code>{art.approval.want.slice(0, 12)}…</code>.
+                  It can still be imposed — the output filename will carry <b>UNAPPROVED</b> so the flag reaches Drive and the press.
+                </div>
+              </div>
+            )}
+            {art && art.approval && art.approval.state === "unverifiable" && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#ffb454" }}>
+                ⚠ This order carries an approval hash but the page can't verify it (no crypto.subtle — is wp-admin on HTTPS?).
+              </div>
+            )}
+            {art && art.approval && art.approval.state === "verified" && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#5fd08a" }}>
+                ✓ Approval hash verified — byte-for-byte the file the customer approved.
+              </div>
+            )}
             {art && art.threats && art.threats.length > 0 && (
               <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }}>
                 <b style={{ color: "#ff5f7a" }}>⚠ ACTIVE CONTENT in this file:</b> {art.threats.join(" · ")}

@@ -354,6 +354,12 @@ add_action( 'wp_ajax_pps_impose_list', function() {
                 'folder_url'    => 'https://drive.google.com/drive/folders/' . rawurlencode( $folder_id ),
                 'art_file_id'   => $art['id'] ?? '',
                 'art_file_name' => $art['name'] ?? '',
+                // Approval binding: the SHA-256 the calculator computed over the
+                // print-ready bytes at the moment of approval. The tool hashes
+                // the file it downloads and compares — a mismatch is advisory
+                // (it still imposes, flagged UNAPPROVED), never a refusal.
+                // Empty for pre-hash orders, which impose unflagged.
+                'proof_hash'    => (string) $item->get_meta( '_pps_proof_hash' ),
                 'imposed'       => $imposed,
                 'files_listed'  => is_array( $files ),
             );
@@ -392,13 +398,25 @@ add_action( 'wp_ajax_pps_impose_set_status', function() {
         wp_send_json_success( array( 'status' => $status, 'changed' => false ) );
     }
 
-    // update_status() runs the normal WooCommerce transition — which means the
-    // customer-facing emails for that status fire. That is the intended
-    // behaviour (this replaces doing it on the order screen), and the UI
-    // confirms before calling, but it is the reason this endpoint says who did
-    // it in the note rather than changing status silently.
+    // SILENT by owner's decision (2026-09-02): set_status() + save() writes the
+    // status without running the transition, so none of WooCommerce's
+    // customer-facing status emails fire. A prepress queue is a production-floor
+    // tool — moving a job through it must not mail the customer as a side
+    // effect. Use the order screen when a customer email IS wanted.
+    //
+    // Trade-off accepted with it: anything else hooked on the transition
+    // (woocommerce_order_status_* actions — stock reduction, analytics,
+    // fulfilment integrations) also does not run. The order note below is the
+    // audit trail.
     $user = wp_get_current_user();
-    $order->update_status( $status, sprintf( 'Status changed from the Imposition queue by %s.', $user && $user->display_name ? $user->display_name : 'an administrator' ), true );
+    $order->set_status( $status );
+    $order->add_order_note( sprintf(
+        'Status changed from %s to %s in the Imposition queue by %s (silent — no customer email sent).',
+        $from,
+        $status,
+        $user && $user->display_name ? $user->display_name : 'an administrator'
+    ) );
+    $order->save();
 
     wp_send_json_success( array(
         'status'  => $order->get_status(),
