@@ -69,7 +69,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-04 09:38 UTC · IMPOSE-V1.27</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-04 09:56 UTC · IMPOSE-V1.28</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -839,6 +839,25 @@ function inspectPdfThreats(doc) {
 // embedPdf so pdf-lib's object copier never even pulls the payload objects in
 // (otherwise they linger as unreachable — inert, but visible to byte
 // scanners). Page content streams + resources are untouched → vectors intact.
+// A page with no /Contents is a perfectly legal blank — an inside front cover
+// left empty, a deliberate blank in a book block. pdf-lib will happily EMBED
+// such a page and then throw "Can't embed page with missing Contents" later,
+// when the lazy embed is materialised at flush/save. That surfaced as a job
+// the tool refused outright while the customer's file opened fine everywhere
+// else (cover_and_interior_PRINT, 2026-09-04: 52pp booklet, pages 2 and 51
+// blank). Give every content-less page an empty stream so it embeds and
+// images as the blank it is.
+function ensurePageContents(doc) {
+  let fixed = 0;
+  for (const page of doc.getPages()) {
+    const leaf = page.node;
+    if (leaf.get(PL.PDFName.of("Contents"))) continue;
+    leaf.set(PL.PDFName.of("Contents"), doc.context.register(doc.context.stream("")));
+    fixed++;
+  }
+  return fixed;
+}
+
 function stripActiveContent(doc) {
   const del = (dict, name) => { try { dict && dict.delete(PL.PDFName.of(name)); } catch (e) {} };
   const cat = doc.catalog;
@@ -863,6 +882,8 @@ async function sanitizePdf(bytes) {
   if (n < 1) throw new Error("PDF has no pages");
   const threats = inspectPdfThreats(src);
   stripActiveContent(src);
+
+  ensurePageContents(src);
   const out = await PL.PDFDocument.create();
   const embeds = await out.embedPdf(src, Array.from({ length: n }, (_, i) => i));
   // Carry the source's layer visibility onto the copy (see srcHiddenOCGRefs).
@@ -1696,6 +1717,8 @@ async function imposeSaddle(artBytes, spec, layout) {
   const bk = layout.booklet;
   const src = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
   stripActiveContent(src);
+
+  ensurePageContents(src);
   const n = src.getPageCount();
   if (n < 3) throw new Error(`Booklet artwork must be a multi-page PDF in reading order — got ${n} page(s)`);
   // ── Page ORIENTATION must match the artwork ───────────────────────────────
@@ -2154,14 +2177,27 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
   // the height edge. Perfect bound binds on the height edge too.
   const trimW = +spec.trimLong, trimH = +spec.trimShort;
   if (!(trimW >= 2 && trimH >= 2)) throw new Error("Enter page width × height (min 2″)");
-  const spine = pbSpineOf(spec);
+  // Which halves to produce. The spine only affects the COVER, so a guts-only
+  // run must not demand one — a reprint of the book block is a common job and
+  // the operator may not have measured a spine at all.
+  const part = ["guts", "cover"].includes(spec.pbPart) ? spec.pbPart : "both";
+  const wantCover = part !== "guts", wantGuts = part !== "cover";
+  const spine = wantCover ? pbSpineOf(spec) : 0;
   const bleed = isFinite(spec.bleed) && spec.bleed !== null && spec.bleed !== "" ? +spec.bleed : BLEED;
 
   const src = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
   stripActiveContent(src);
+
+  ensurePageContents(src);
   let coverB, gutsB, gutsN, assembled = false;
 
-  if (coverBytes) {
+  if (!wantCover) {
+    // Guts only: the file IS the book block, taken as-is. Splitting cover faces
+    // off it would be a guess about a file the operator has already told us is
+    // guts.
+    const g = await pbBuildGuts_all(src);
+    gutsB = g.bytes; gutsN = g.count;
+  } else if (coverBytes) {
     // Template pair: the cover file is already the flat spread.
     coverB = coverBytes;
     const cdoc = await PL.PDFDocument.load(coverBytes, { ignoreEncryption: true });
@@ -2170,13 +2206,11 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
     if (Math.abs(cw - expect) > 0.26 && Math.abs(cw - (expect + 2 * bleed)) > 0.26) {
       throw new Error(`Cover file is ${cw.toFixed(3)}″ wide but a ${trimW}×${trimH}″ book with a ${spine}″ spine needs ${expect.toFixed(3)}″ (or ${(expect + 2 * bleed).toFixed(3)}″ with bleed). Check the spine width and the cover file.`);
     }
-    const g = await pbBuildGuts_all(src);
-    gutsB = g.bytes; gutsN = g.count;
+    if (wantGuts) { const g = await pbBuildGuts_all(src); gutsB = g.bytes; gutsN = g.count; }
   } else {
     // Single reading-order file, saddle-style: split it.
     coverB = await pbBuildCover(src, trimW, trimH, spine, bleed);
-    const g = await pbBuildGuts(src);
-    gutsB = g.bytes; gutsN = g.count;
+    if (wantGuts) { const g = await pbBuildGuts(src); gutsB = g.bytes; gutsN = g.count; }
     assembled = true;
   }
 
@@ -2193,21 +2227,28 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
     jobName: (spec.jobName || "book") + "_GUTS",
   });
 
-  const cover = await imposePdf(coverB, null, coverSpec);
-  const guts  = await imposePdf(gutsB,  null, gutsSpec);
-
   const note = [];
-  note.push(`Perfect bound split into two press jobs — cover ${(2 * trimW + spine).toFixed(3)}×${trimH}″ flat (${trimW}″ + ${spine}″ spine + ${trimW}″), guts ${gutsN} page(s) at ${trimW}×${trimH}″.`);
-  if (assembled) note.push("Cover assembled from the reading-order file: outside = back|spine|front (pages last, 1); inside = inside-front|spine|inside-back (pages 2, second-to-last).");
-  else note.push("Cover taken from the supplied cover file as-is (already flat with the spine allowance).");
-  note.push("Spine is operator-entered — measure the glued book block; the quoted estimate assumes nominal caliper.");
-  cover.warnings = note.concat(cover.warnings);
-  guts.warnings  = note.concat(guts.warnings);
+  if (wantCover && wantGuts) note.push(`Perfect bound split into two press jobs — cover ${(2 * trimW + spine).toFixed(3)}×${trimH}″ flat (${trimW}″ + ${spine}″ spine + ${trimW}″), guts ${gutsN} page(s) at ${trimW}×${trimH}″.`);
+  else if (wantCover) note.push(`Perfect bound COVER only — ${(2 * trimW + spine).toFixed(3)}×${trimH}″ flat (${trimW}″ + ${spine}″ spine + ${trimW}″). No book block imposed.`);
+  else note.push(`Perfect bound GUTS only — ${gutsN} page(s) at ${trimW}×${trimH}″, taken as the book block as-is. No cover imposed, and the spine is not used.`);
+  if (wantCover) note.push(assembled
+    ? "Cover assembled from the reading-order file: outside = back|spine|front (pages last, 1); inside = inside-front|spine|inside-back (pages 2, second-to-last)."
+    : "Cover taken from the supplied cover file as-is (already flat with the spine allowance).");
+  if (wantCover) note.push("Spine is operator-entered — measure the glued book block; the quoted estimate assumes nominal caliper.");
+  if (!wantCover && coverBytes) note.push("A cover file was supplied but this is a guts-only run — it was ignored.");
 
-  return { parts: [
-    { part: "cover", label: `Cover — ${(2 * trimW + spine).toFixed(3)}×${trimH}″ flat, ${spine}″ spine`, ...cover },
-    { part: "guts",  label: `Guts — ${gutsN} pages at ${trimW}×${trimH}″`, ...guts },
-  ] };
+  const parts = [];
+  if (wantCover) {
+    const cover = await imposePdf(coverB, null, coverSpec);
+    cover.warnings = note.concat(cover.warnings);
+    parts.push({ part: "cover", label: `Cover — ${(2 * trimW + spine).toFixed(3)}×${trimH}″ flat, ${spine}″ spine`, ...cover });
+  }
+  if (wantGuts) {
+    const guts = await imposePdf(gutsB, null, gutsSpec);
+    guts.warnings = note.concat(guts.warnings);
+    parts.push({ part: "guts", label: `Guts — ${gutsN} pages at ${trimW}×${trimH}″`, ...guts });
+  }
+  return { parts };
 }
 
 // Guts when a separate cover file was supplied: the main file IS the block.
@@ -2246,12 +2287,14 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
 
   const srcFront = await PL.PDFDocument.load(gang ? gang[0].bytes : artBytes, { ignoreEncryption: true });
   stripActiveContent(srcFront);
+
+  ensurePageContents(srcFront);
   const nF = srcFront.getPageCount();
   if (nF < 1) throw new Error("Artwork PDF has no pages");
   const sides = spec.sides === 2 ? 2 : 1;
   const mode = gang ? "combo" : ["gang", "stack", "each"].includes(spec.multiMode) ? spec.multiMode : "repeat";
   const backDoc = !gang && backBytes ? await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }) : null;
-  if (backDoc) stripActiveContent(backDoc);
+  if (backDoc) { stripActiveContent(backDoc); ensurePageContents(backDoc); }
 
   // add-bleed: per-page override map (1-based page keys, main file) falls
   // back to the job-level mode; back-file pages use the job-level mode.
@@ -2287,7 +2330,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   let gangAlloc = null;
   if (mode === "combo") {
     const docs = [srcFront];
-    for (let i = 1; i < gang.length; i++) { const gd = await PL.PDFDocument.load(gang[i].bytes, { ignoreEncryption: true }); stripActiveContent(gd); docs.push(gd); }
+    for (let i = 1; i < gang.length; i++) { const gd = await PL.PDFDocument.load(gang[i].bytes, { ignoreEncryption: true }); stripActiveContent(gd); ensurePageContents(gd); docs.push(gd); }
     const total = layout.cells.length;
     const want = gang.map(g => (isFinite(+g.slots) && +g.slots > 0 ? Math.floor(+g.slots) : null));
     const explicit = want.reduce((s, v) => s + (v || 0), 0);
@@ -3024,7 +3067,8 @@ function App() {
   const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
   const [artScale, setArtScale] = useState(100);         // free scale on placed art, %
   const [creep, setCreep] = useState(0);
-  const [spine, setSpine] = useState(0.25);      // perfect bound spine width, in                 // saddle shingling total, in
+  const [spine, setSpine] = useState(0.25);      // perfect bound spine width, in
+  const [pbPart, setPbPart] = useState("both");  // both | cover | guts                 // saddle shingling total, in
   const [artInset, setArtInset] = useState(0);            // pull art off the trim (in), fill makes up the difference
   const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
   const [gangFiles, setGangFiles] = useState([]);          // manual gang combo: [{bytes,name,pageCount,slots}]
@@ -3148,10 +3192,11 @@ function App() {
     sigRepeat: isSaddle && repOn && !gridOn ? +repN || 0 : null,
     sigOrder: isSaddle ? sigOrder : null,
     spine: isPB ? +spine || 0 : null,
+    pbPart: isPB ? pbPart : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB]);
+       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -3162,8 +3207,10 @@ function App() {
       // jobs on different stock. The per-part cards below carry each layout.
       if (debSpec.calc === "perfect-bound") {
         const sp = +debSpec.spine;
-        if (!isFinite(sp) || sp <= 0) return { error: "Enter the spine width (inches) — measure the glued book block." };
-        if (sp > 3) return { error: `Spine ${sp}″ is beyond the 3″ limit — check the value is inches, not millimetres.` };
+        if (debSpec.pbPart !== "guts") {          // the spine only affects the cover
+          if (!isFinite(sp) || sp <= 0) return { error: "Enter the spine width (inches) — measure the glued book block." };
+          if (sp > 3) return { error: `Spine ${sp}″ is beyond the 3″ limit — check the value is inches, not millimetres.` };
+        }
         return { pb: true };
       }
       return { layout: computeLayout(debSpec.calc, debSpec.trimLong, debSpec.trimShort, layoutOpts(debSpec)) };
@@ -3525,23 +3572,39 @@ function App() {
               <div className="imp-card" style={{ marginTop: 10, marginBottom: 4, background: "rgba(255,255,255,.03)" }}>
                 <span className="lbl">Perfect bound — two press jobs</span>
                 <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", marginBottom: 9 }}>
-                  Imposes a <b>cover</b> (flat, back | spine | front, on cover stock) and the <b>guts</b> (book block, text stock)
-                  as two separate files. Drop a single reading-order PDF and the cover is built from pages 1, 2 and the last two;
-                  or drop the guts here and the template cover file below.
+                  A perfect-bound book images as two press jobs on different stock. Emit both, or just the half you need —
+                  a guts reprint needs no spine and no cover file. With a single reading-order PDF the cover is built from
+                  pages 1, 2 and the last two; or drop the guts here and the template cover file below.
                 </div>
-                <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-                  <Field label="Spine width (in)" style={{ flex: "0 0 130px" }}>
-                    <input type="number" step="0.0625" min="0" max="3" value={spine} onChange={e => setSpine(e.target.value)} />
-                  </Field>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)", paddingBottom: 8 }}>
-                    flat cover = <b>{(2 * (+trimLong || 0) + (+spine || 0)).toFixed(3)}</b> × {(+trimShort || 0).toFixed(3)}″
-                    <span style={{ color: "rgba(255,255,255,.38)" }}> — measure the glued block; the quote assumes nominal caliper</span>
+                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
+                  {[["both","Cover + guts"],["guts","Guts only"],["cover","Cover only"]].map(([v,t]) => (
+                    <label key={v} style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                      <input type="radio" name="pps-pbpart" checked={pbPart === v} style={{ width: "auto" }}
+                             onChange={() => setPbPart(v)} />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+                {pbPart === "guts" ? (
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)" }}>
+                    Book block only, <b>{(+trimLong || 0).toFixed(3)} × {(+trimShort || 0).toFixed(3)}″</b> — the file is taken as the
+                    block as-is. No spine needed. Use <b>Multi-page file</b> above to choose how the pages gang up.
                   </div>
-                </div>
-                <div style={{ marginTop: 4 }}>
+                ) : (
+                  <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <Field label="Spine width (in)" style={{ flex: "0 0 130px" }}>
+                      <input type="number" step="0.0625" min="0" max="3" value={spine} onChange={e => setSpine(e.target.value)} />
+                    </Field>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)", paddingBottom: 8 }}>
+                      flat cover = <b>{(2 * (+trimLong || 0) + (+spine || 0)).toFixed(3)}</b> × {(+trimShort || 0).toFixed(3)}″
+                      <span style={{ color: "rgba(255,255,255,.38)" }}> — measure the glued block; the quote assumes nominal caliper</span>
+                    </div>
+                  </div>
+                )}
+                {pbPart !== "guts" && <div style={{ marginTop: 4 }}>
                   <DropZone label="Drop COVER PDF (optional)" sub="already flat with the spine — the calculator's cover template. Leave empty for a single reading-order file."
                     accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
-                </div>
+                </div>}
               </div>
             )}
             {!isPB && spec.sides === 2 && art && (art.pageCount < 2 || multiMode !== "repeat") && (
