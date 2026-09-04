@@ -69,7 +69,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-02 22:36 UTC · IMPOSE-V1.26</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-04 09:38 UTC · IMPOSE-V1.27</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -131,9 +131,17 @@ const CALC_TYPES = [
   { val:"greeting-card", label:"Greeting Card" },
   { val:"sticker",       label:"Sticker (12×18 crack-n-peel)" },
   { val:"saddle",        label:"Saddle Stitch Booklet (signatures)" },
+  { val:"perfect-bound", label:"Perfect Bound (cover + guts, 2 files)" },
 ];
 const FLAT_CALCS = ["brochure","postcard","letterhead","greeting-card"];
-const UNSUPPORTED_BOOKLETS = ["perfect-bound","coupon"]; // saddle is supported; these need their own pagination (v2)
+const UNSUPPORTED_BOOKLETS = ["coupon"]; // saddle + perfect bound supported; coupon needs its own pagination (v2)
+// Perfect bound images as TWO separate press jobs, so it is split into two
+// internal calc types and each is run through the ordinary flat pipeline —
+// which is where bleed synthesis, duplex, marks, slug, OC preservation and the
+// preflight already live. Neither half has a priced imposition: the calculator
+// prices the book, not a sheet layout, so both place the best physical fit and
+// say so rather than pretending to a parity that was never computed.
+const PB_CALCS = ["pb-cover", "pb-guts"];
 // 12×18 crack-n-peel sticker sheet: single source for both the priced count
 // (stickerImp) and the placed grid (computeLayout) — they must never drift.
 const STICKER = { L: 17.75, S: 11.75, pitch: 0.25 };
@@ -459,6 +467,9 @@ function computeLayout(calc, trimA, trimB, opts) {
     priced = stickerImp(pieceLong, pieceShort);
     if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not fit the 12×18 sticker sheet`);
     sheet = SHEETS["12x18"];
+  } else if (PB_CALCS.includes(calc)) {
+    priced = 0;                       // sentinel: unpriced, best physical fit below
+    sheet = SHEETS["13x19"];
   } else if (FLAT_CALCS.includes(calc)) {
     priced = flatImp(pieceLong, pieceShort);
     sheet = SHEETS["13x19"];
@@ -490,6 +501,20 @@ function computeLayout(calc, trimA, trimB, opts) {
     if (!rawCol && !rawRow && grid.g < gutters[0] && gutters.length > 1) warnings.push(grid.g === 0
       ? "Butt-cut layout (no gutter) needed to fit the manual grid — adjacent pieces share cut lines, no inter-piece bleed."
       : `Gutter squeezed to ${grid.g}″ to fit the manual grid.`);
+  } else if (!priced) {
+    // Unpriced (perfect bound). Try the standard sheet, then the oversize one,
+    // and take whatever fits best. Reported as an explicit best-fit so nobody
+    // reads the count as a pricing figure.
+    const cands = ovSheet ? [ovSheet] : [SHEETS["13x19"], SHEETS["13x27.5"]];
+    let best = null;
+    for (const sh of cands) {
+      const g = bestPhysicalGrid(pieceLong, pieceShort, sh, gutters, allowedRot);
+      if (g && (!best || g.a * g.d > best.g.a * best.g.d)) best = { sh, g };
+      if (best && !opts.efficient) break;      // first sheet that holds anything wins
+    }
+    if (!best) throw new Error(`${pieceLong}×${pieceShort}″ does not fit on ${cands.map(c => c.label).join(" or ")} — check the trim size and spine.`);
+    sheet = best.sh; grid = best.g;
+    warnings.push(`${grid.a * grid.d}-up on ${sheet.label} (best physical fit — perfect bound has no priced imposition).`);
   } else if (calc === "sticker" && !ovSheet) {
     if (opts && isFinite(opts.gutter) && opts.gutter !== null && Math.abs(+opts.gutter - STICKER.pitch) > EPS) {
       warnings.push(`Sticker pitch is fixed at ${STICKER.pitch}″ by the 12×18 crack-n-peel spec — gutter override ignored.`);
@@ -563,7 +588,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     sheet, calc, pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
     colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet,
-    imp: grid.a * grid.d, pricedImp: priced, mismatch, efficient, manualGrid, warnings,
+    imp: grid.a * grid.d, pricedImp: priced || grid.a * grid.d, unpriced: !priced, mismatch, efficient, manualGrid, warnings,
     cellW, cellH,
   };
   buildCells(layout, opts);
@@ -2047,6 +2072,153 @@ async function ppsToPdfBytes(bytes, label) {
   return await doc.save();
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PERFECT BOUND — two press jobs from one order
+// ═══════════════════════════════════════════════════════════════
+// A perfect-bound book is not one imposition. The COVER is a single flat piece
+// (back | spine | front) on cover stock, and the GUTS are a book block on text
+// stock — different paper, different press run, different cutting. So the tool
+// emits two files and images each as its own job.
+//
+// Artwork arrives one of two ways, and both are supported because both are in
+// use: the calculator's own template pair (a cover file already flat with the
+// spine allowance in it, plus a guts file), or a single reading-order PDF the
+// way a saddle job arrives, from which the cover faces are lifted and the flat
+// cover is BUILT around the spine.
+//
+// Spine width is operator-entered. It is a physical property of the actual book
+// block — caliper varies by lot and the press room measures it — and a wrong
+// spine ruins every cover printed. `calcSpineInches()` in calc-perfect-bound.html
+// is the estimate the customer was quoted from; it is a starting point, not a
+// substitute for measuring.
+
+function pbSpineOf(spec) {
+  const v = +(spec && spec.spine);
+  if (!isFinite(v) || v < 0) throw new Error("Perfect bound needs a spine width (inches). Measure the glued book block — the quoted estimate is a starting point, not a substitute.");
+  if (v > 3) throw new Error(`Spine ${v}″ is beyond the 3″ limit — check the value is inches, not millimetres.`);
+  return v;
+}
+
+// Build the flat cover from four trim-size faces lifted out of a reading-order
+// file. Outside reads back|spine|front; the inside face is what you get after
+// flipping the sheet, so its left panel is the INSIDE FRONT (page 2) and its
+// right panel the inside back — get this backwards and the cover glues up with
+// the inside faces transposed.
+async function pbBuildCover(srcDoc, pw, ph, spine, bleed) {
+  const n = srcDoc.getPageCount();
+  const W = (2 * pw + spine) * PT, H = ph * PT;
+  const out = await PL.PDFDocument.create();
+  const idx = { front: 0, insideFront: 1, insideBack: n - 2, back: n - 1 };
+  const want = [idx.back, idx.front, idx.insideFront, idx.insideBack].filter(i => i >= 0 && i < n);
+  const emb = await out.embedPdf(srcDoc, want);
+  const at = i => emb[want.indexOf(i)];
+  const place = (page, srcIdx, x) => {
+    const e = at(srcIdx);
+    if (!e) return;
+    // fit-to-panel, never crop — same rule the rest of the engine uses
+    const sc = Math.min(pw * PT / e.width, ph * PT / e.height);
+    page.drawPage(e, { x: x + (pw * PT - e.width * sc) / 2, y: (H - e.height * sc) / 2,
+                       xScale: sc, yScale: sc });
+  };
+  const rightX = (pw + spine) * PT;
+  const outside = out.addPage([W, H]);
+  place(outside, idx.back, 0);
+  place(outside, idx.front, rightX);
+  const inside = out.addPage([W, H]);
+  place(inside, idx.insideFront, 0);
+  place(inside, idx.insideBack, rightX);
+  for (const pg of [outside, inside]) {
+    pg.setMediaBox(0, 0, W, H); pg.setCropBox(0, 0, W, H);
+    pg.setTrimBox(0, 0, W, H); pg.setBleedBox(0, 0, W, H);
+  }
+  return await out.save({ useObjectStreams: false });
+}
+
+// Lift the interior pages (everything but the four cover faces) into their own
+// document, so the guts run as an ordinary multipage flat job.
+async function pbBuildGuts(srcDoc) {
+  const n = srcDoc.getPageCount();
+  const idx = [];
+  for (let i = 2; i <= n - 3; i++) idx.push(i);
+  if (!idx.length) throw new Error(`A reading-order perfect bound file needs more than its 4 cover faces — got ${n} page(s).`);
+  const out = await PL.PDFDocument.create();
+  const pages = await out.copyPages(srcDoc, idx);
+  pages.forEach(pg => out.addPage(pg));
+  return { bytes: await out.save({ useObjectStreams: false }), count: idx.length };
+}
+
+async function imposePerfectBound(artBytes, coverBytes, spec) {
+  const pw = Math.max(+spec.trimLong || 0, +spec.trimShort || 0);
+  const phh = Math.min(+spec.trimLong || 0, +spec.trimShort || 0);
+  // Saddle convention: the two boxes are width × height and the spine sits on
+  // the height edge. Perfect bound binds on the height edge too.
+  const trimW = +spec.trimLong, trimH = +spec.trimShort;
+  if (!(trimW >= 2 && trimH >= 2)) throw new Error("Enter page width × height (min 2″)");
+  const spine = pbSpineOf(spec);
+  const bleed = isFinite(spec.bleed) && spec.bleed !== null && spec.bleed !== "" ? +spec.bleed : BLEED;
+
+  const src = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
+  stripActiveContent(src);
+  let coverB, gutsB, gutsN, assembled = false;
+
+  if (coverBytes) {
+    // Template pair: the cover file is already the flat spread.
+    coverB = coverBytes;
+    const cdoc = await PL.PDFDocument.load(coverBytes, { ignoreEncryption: true });
+    const c0 = cdoc.getPage(0);
+    const cw = c0.getMediaBox().width / PT, expect = 2 * trimW + spine;
+    if (Math.abs(cw - expect) > 0.26 && Math.abs(cw - (expect + 2 * bleed)) > 0.26) {
+      throw new Error(`Cover file is ${cw.toFixed(3)}″ wide but a ${trimW}×${trimH}″ book with a ${spine}″ spine needs ${expect.toFixed(3)}″ (or ${(expect + 2 * bleed).toFixed(3)}″ with bleed). Check the spine width and the cover file.`);
+    }
+    const g = await pbBuildGuts_all(src);
+    gutsB = g.bytes; gutsN = g.count;
+  } else {
+    // Single reading-order file, saddle-style: split it.
+    coverB = await pbBuildCover(src, trimW, trimH, spine, bleed);
+    const g = await pbBuildGuts(src);
+    gutsB = g.bytes; gutsN = g.count;
+    assembled = true;
+  }
+
+  const base = k => Object.assign({}, spec, {
+    calc: k, multiMode: k === "pb-guts" ? (spec.multiMode || "gang") : "repeat",
+    sides: 2, manualGrid: null, gridAcross: null, gridDown: null,
+  });
+  const coverSpec = Object.assign(base("pb-cover"), {
+    trimLong: 2 * trimW + spine, trimShort: trimH,
+    jobName: (spec.jobName || "book") + "_COVER",
+  });
+  const gutsSpec = Object.assign(base("pb-guts"), {
+    trimLong: trimW, trimShort: trimH,
+    jobName: (spec.jobName || "book") + "_GUTS",
+  });
+
+  const cover = await imposePdf(coverB, null, coverSpec);
+  const guts  = await imposePdf(gutsB,  null, gutsSpec);
+
+  const note = [];
+  note.push(`Perfect bound split into two press jobs — cover ${(2 * trimW + spine).toFixed(3)}×${trimH}″ flat (${trimW}″ + ${spine}″ spine + ${trimW}″), guts ${gutsN} page(s) at ${trimW}×${trimH}″.`);
+  if (assembled) note.push("Cover assembled from the reading-order file: outside = back|spine|front (pages last, 1); inside = inside-front|spine|inside-back (pages 2, second-to-last).");
+  else note.push("Cover taken from the supplied cover file as-is (already flat with the spine allowance).");
+  note.push("Spine is operator-entered — measure the glued book block; the quoted estimate assumes nominal caliper.");
+  cover.warnings = note.concat(cover.warnings);
+  guts.warnings  = note.concat(guts.warnings);
+
+  return { parts: [
+    { part: "cover", label: `Cover — ${(2 * trimW + spine).toFixed(3)}×${trimH}″ flat, ${spine}″ spine`, ...cover },
+    { part: "guts",  label: `Guts — ${gutsN} pages at ${trimW}×${trimH}″`, ...guts },
+  ] };
+}
+
+// Guts when a separate cover file was supplied: the main file IS the block.
+async function pbBuildGuts_all(srcDoc) {
+  const n = srcDoc.getPageCount();
+  const out = await PL.PDFDocument.create();
+  const pages = await out.copyPages(srcDoc, Array.from({ length: n }, (_, i) => i));
+  pages.forEach(pg => out.addPage(pg));
+  return { bytes: await out.save({ useObjectStreams: false }), count: n };
+}
+
 async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   // Normalize before anything reads a page box, so every path below — flats,
   // stickers, saddle, gang, ink detection — sees a PDF and nothing else changes.
@@ -2061,6 +2233,10 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   // taking a share of the cells. Ignores multiMode; qty = press sheets.
   const gang = Array.isArray(gangFiles) && gangFiles.filter(g => g && g.bytes).length >= 2
     ? gangFiles.filter(g => g && g.bytes) : null;
+  if (spec.calc === "perfect-bound") {
+    if (gang) throw new Error("Gang combo is for flats/stickers — a perfect bound book is one document");
+    return imposePerfectBound(artBytes, backBytes, spec);
+  }
   const layout = computeLayout(spec.calc, spec.trimLong, spec.trimShort, layoutOpts(spec));
   if (spec.calc === "saddle") {
     if (gang) throw new Error("Gang combo is for flats/stickers — a saddle booklet is one document");
@@ -2333,7 +2509,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     if (!getPageBox(p, "BleedBox")) issues.push(`sheet ${i + 1} missing BleedBox`);
     if (i === 0) { const th = inspectPdfThreats(check); if (th.length) issues.push(`output carries active content: ${th.join("; ")}`); }
   });
-  if (!layout.mismatch && !layout.efficient && !layout.manualGrid && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
+  if (!layout.mismatch && !layout.efficient && !layout.manualGrid && !layout.unpriced && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
   return { bytes, layout, warnings, sheets, sideReports, pageLabels, pieces: pieces.length, sheetsPerSet: D };
@@ -2847,7 +3023,8 @@ function App() {
   const [addBleed, setAddBleed] = useState("off");         // synthesize bleed for no-bleed files: off | mirror | scale
   const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
   const [artScale, setArtScale] = useState(100);         // free scale on placed art, %
-  const [creep, setCreep] = useState(0);                 // saddle shingling total, in
+  const [creep, setCreep] = useState(0);
+  const [spine, setSpine] = useState(0.25);      // perfect bound spine width, in                 // saddle shingling total, in
   const [artInset, setArtInset] = useState(0);            // pull art off the trim (in), fill makes up the difference
   const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
   const [gangFiles, setGangFiles] = useState([]);          // manual gang combo: [{bytes,name,pageCount,slots}]
@@ -2855,6 +3032,7 @@ function App() {
   const [addBleedPages, setAddBleedPages] = useState({});  // per-page mode overrides {1-based page: mode}
   const [multiMode, setMultiMode] = useState("repeat");    // multipage flat files: repeat | gang | stack
   const isSaddle = calc === "saddle";
+  const isPB = calc === "perfect-bound";   // two press jobs, so no single live layout
   const [art, setArt] = useState(null);      // { bytes, name, pageCount }
   // Trim as MEASURED off the dropped file, kept in the file's own orientation.
   // Saddle reads the two size boxes as width × height (the spine is the height
@@ -2870,7 +3048,7 @@ function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [uploadState, setUploadState] = useState("");     // "", "uploading", "done", "failed: …"
+  const [uploadState, setUploadState] = useState({});     // per output filename: "uploading" | "done" | "failed: …"
   const [activeOrder, setActiveOrder] = useState(null);   // queue row currently loaded
   const [rows, setRows] = useState(null);                  // admin queue rows (WP mode)
   const [queueErr, setQueueErr] = useState("");
@@ -2969,16 +3147,25 @@ function App() {
     gridSheet: !isSaddle && gridOn && gridSheet !== "auto" ? gridSheet : null,
     sigRepeat: isSaddle && repOn && !gridOn ? +repN || 0 : null,
     sigOrder: isSaddle ? sigOrder : null,
+    spine: isPB ? +spine || 0 : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder]);
+       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
   const layoutInfo = useMemo(() => {
     try {
       if (!(debSpec.trimLong >= 2 && debSpec.trimShort >= 2)) return { error: "Enter trim size (min 2″)" };
+      // Perfect bound has no single layout to preview — it images as two press
+      // jobs on different stock. The per-part cards below carry each layout.
+      if (debSpec.calc === "perfect-bound") {
+        const sp = +debSpec.spine;
+        if (!isFinite(sp) || sp <= 0) return { error: "Enter the spine width (inches) — measure the glued book block." };
+        if (sp > 3) return { error: `Spine ${sp}″ is beyond the 3″ limit — check the value is inches, not millimetres.` };
+        return { pb: true };
+      }
       return { layout: computeLayout(debSpec.calc, debSpec.trimLong, debSpec.trimShort, layoutOpts(debSpec)) };
     } catch (e) { return { error: e.message }; }
   }, [debSpec]);
@@ -2986,14 +3173,23 @@ function App() {
   // Auto-regenerate the imposed PDF when spec or art changes
   useEffect(() => {
     const ganging = gangFiles.length >= 2;
-    if ((!art && !ganging) || !layoutInfo.layout) { setResult(null); return; }
+    if ((!art && !ganging) || (!layoutInfo.layout && !layoutInfo.pb)) { setResult(null); return; }
     const seq = ++genSeq.current;
-    setBusy(true); setError(""); setUploadState("");
-    imposePdf(art ? art.bytes : null, debSpec.sides === 2 ? (backArt && backArt.bytes) : null, debSpec,
+    setBusy(true); setError(""); setUploadState({});
+    imposePdf(art ? art.bytes : null, (debSpec.calc === "perfect-bound" || debSpec.sides === 2) ? (backArt && backArt.bytes) : null, debSpec,
               ganging ? gangFiles.map(g => ({ bytes: g.bytes, name: g.name, slots: g.slots === "" ? null : +g.slots })) : null)
       .then(res => {
         if (seq !== genSeq.current) return;
-        res.filename = imposedFilename(debSpec, res.layout);
+        // Perfect bound returns two parts, each with its own layout and its own
+        // filename — the COVER and GUTS suffixes keep them apart in the order's
+        // Drive folder and in the queue's IMPOSED detection.
+        if (res.parts) {
+          res.parts.forEach(pt => {
+            pt.filename = imposedFilename({ ...debSpec, jobName: (debSpec.jobName || "book") + "_" + pt.part.toUpperCase() }, pt.layout);
+          });
+        } else {
+          res.filename = imposedFilename(debSpec, res.layout);
+        }
         setResult(res);
       })
       .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); } })
@@ -3116,7 +3312,7 @@ function App() {
   // ── WP queue: load an order row, fetch its artwork, impose ──
   const loadOrder = async (row) => {
     const key = row.order_id + ":" + row.item_id;
-    setQueueBusy(key); setError(""); setNotice(""); setUploadState("");
+    setQueueBusy(key); setError(""); setNotice(""); setUploadState({});
     try {
       const s = specFromRow(row);
       setItemRef(s.itemRef); setCalc(s.calc);
@@ -3147,24 +3343,25 @@ function App() {
     finally { setQueueBusy(null); }
   };
 
-  const sendToDrive = async () => {
-    if (!result || !activeOrder) return;
-    setUploadState("uploading");
+  const sendToDrive = async (res) => {
+    if (!res || !activeOrder) return;
+    const mark = v => setUploadState(u => ({ ...u, [res.filename]: v }));
+    mark("uploading");
     try {
       const fd = new FormData();
       fd.append("action", "pps_impose_upload");
       fd.append("nonce", CFG.nonce);
       fd.append("order_id", activeOrder.order_id);
-      fd.append("filename", result.filename);
-      fd.append("file", new Blob([result.bytes], { type: "application/pdf" }), result.filename);
+      fd.append("filename", res.filename);
+      fd.append("file", new Blob([res.bytes], { type: "application/pdf" }), res.filename);
       const r = await fetch(CFG.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin" });
       if (!r.ok) throw await ajaxFail(r, "upload");
       const j = await r.json();
       if (!j.success) throw new Error((j.data && j.data.message) || "upload failed");
-      setUploadState("done");
-      setNotice(`Imposed PDF filed to the order #${activeOrder.order_id} Drive folder as ${result.filename}.`);
+      mark("done");
+      setNotice(`Imposed PDF filed to the order #${activeOrder.order_id} Drive folder as ${res.filename}.`);
       setRefreshKey(k => k + 1);
-    } catch (e) { setUploadState("failed: " + e.message); }
+    } catch (e) { mark("failed: " + e.message); }
   };
 
   // Bulk: impose + file every pending row, sequentially, headless (does not
@@ -3324,7 +3521,30 @@ function App() {
                 )}
               </div>
             )}
-            {spec.sides === 2 && art && (art.pageCount < 2 || multiMode !== "repeat") && (
+            {isPB && (
+              <div className="imp-card" style={{ marginTop: 10, marginBottom: 4, background: "rgba(255,255,255,.03)" }}>
+                <span className="lbl">Perfect bound — two press jobs</span>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", marginBottom: 9 }}>
+                  Imposes a <b>cover</b> (flat, back | spine | front, on cover stock) and the <b>guts</b> (book block, text stock)
+                  as two separate files. Drop a single reading-order PDF and the cover is built from pages 1, 2 and the last two;
+                  or drop the guts here and the template cover file below.
+                </div>
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <Field label="Spine width (in)" style={{ flex: "0 0 130px" }}>
+                    <input type="number" step="0.0625" min="0" max="3" value={spine} onChange={e => setSpine(e.target.value)} />
+                  </Field>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)", paddingBottom: 8 }}>
+                    flat cover = <b>{(2 * (+trimLong || 0) + (+spine || 0)).toFixed(3)}</b> × {(+trimShort || 0).toFixed(3)}″
+                    <span style={{ color: "rgba(255,255,255,.38)" }}> — measure the glued block; the quote assumes nominal caliper</span>
+                  </div>
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  <DropZone label="Drop COVER PDF (optional)" sub="already flat with the spine — the calculator's cover template. Leave empty for a single reading-order file."
+                    accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
+                </div>
+              </div>
+            )}
+            {!isPB && spec.sides === 2 && art && (art.pageCount < 2 || multiMode !== "repeat") && (
               <div style={{ marginTop: 10 }}>
                 <DropZone label="Drop BACK side PDF" sub={multiMode !== "repeat" ? "optional — separate collated back file (page i backs piece i)" : "2-sided job but the front file has one page"}
                   accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
@@ -3371,10 +3591,10 @@ function App() {
               </select>
             </Field>
             <div style={{ display: "flex", gap: 10 }}>
-              <Field label={isSaddle ? "Page width (in)" : "Trim long (in)"} style={{ flex: 1 }}>
+              <Field label={(isSaddle || isPB) ? "Page width (in)" : "Trim long (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimLong} onChange={e => setTrimLong(e.target.value)} />
               </Field>
-              <Field label={isSaddle ? "Page height (in) — spine edge" : "Trim short (in)"} style={{ flex: 1 }}>
+              <Field label={(isSaddle || isPB) ? "Page height (in) — spine edge" : "Trim short (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
               <Field label="Bleed (in)" style={{ flex: "0 0 84px" }}>
@@ -3848,6 +4068,15 @@ function App() {
           <div className="imp-card" style={{ marginBottom: 14 }}>
             <span className="lbl">Computed layout (mirrors calculator pricing)</span>
             {layoutInfo.error && <div style={{ color: "#f87171", fontSize: 13, lineHeight: 1.5 }}>{layoutInfo.error}</div>}
+            {layoutInfo.pb && (
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,.6)", lineHeight: 1.6 }}>
+                Perfect bound images as <b>two press jobs</b> on different stock — a flat cover
+                (<b>{(2 * (+trimLong || 0) + (+spine || 0)).toFixed(3)} × {(+trimShort || 0).toFixed(3)}″</b>,
+                back | {(+spine || 0).toFixed(3)}″ spine | front) and the book block
+                (<b>{(+trimLong || 0).toFixed(3)} × {(+trimShort || 0).toFixed(3)}″</b>).
+                Each layout is shown on its own card below once the artwork is loaded.
+              </div>
+            )}
             {lay && (
               <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
                 <LayoutSchematic layout={lay} />
@@ -3893,28 +4122,40 @@ function App() {
             </div>
           )}
 
-          {result && (
+          {/* Perfect bound emits TWO press jobs (cover + guts), so the result
+              area renders one card per part. Every other calc yields one, and
+              takes the same path with a single-element list. */}
+          {(result ? (result.parts || [result]) : []).map((res, pi) => (
+            <div key={res.part || pi}>
+            {res.part && (
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "2px 0 6px" }}>
+                <span className="lbl" style={{ margin: 0, color: "#7ab8ff" }}>
+                  {res.part === "cover" ? "① Cover" : "② Guts"}
+                </span>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,.5)" }}>{res.label}</span>
+              </div>
+            )}
             <div className="imp-card" style={{ marginBottom: 14 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-                <button className="imp-btn" onClick={() => dlBytes(result.bytes, result.filename)}>⬇ Download {result.filename}</button>
+                <button className="imp-btn" onClick={() => dlBytes(res.bytes, res.filename)}>⬇ Download {res.filename}</button>
                 {CFG && activeOrder && (
-                  <button className="imp-btn" disabled={uploadState === "uploading" || uploadState === "done"} onClick={sendToDrive}>
-                    {uploadState === "uploading" ? "Uploading…" : uploadState === "done" ? "✓ Filed to Drive" : "📁 Send to order's Drive folder"}
+                  <button className="imp-btn" disabled={uploadState[res.filename] === "uploading" || uploadState[res.filename] === "done"} onClick={() => sendToDrive(res)}>
+                    {uploadState[res.filename] === "uploading" ? "Uploading…" : uploadState[res.filename] === "done" ? "✓ Filed to Drive" : "📁 Send to order's Drive folder"}
                   </button>
                 )}
                 <span style={{ fontSize: 12, color: "rgba(255,255,255,.45)" }}>
-                  {(result.bytes.length / 1048576).toFixed(2)} MB · preflight passed
+                  {(res.bytes.length / 1048576).toFixed(2)} MB · preflight passed
                 </span>
-                {uploadState.startsWith("failed") && <span style={{ color: "#f87171", fontSize: 12 }}>{uploadState}</span>}
+                {String(uploadState[res.filename] || "").startsWith("failed") && <span style={{ color: "#f87171", fontSize: 12 }}>{uploadState[res.filename]}</span>}
               </div>
-              {result.warnings.length > 0 && (
+              {res.warnings.length > 0 && (
                 <div style={{ marginBottom: 10 }}>
-                  {result.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
+                  {res.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
                 </div>
               )}
-              {result.sideReports && (
+              {res.sideReports && (
                 <div style={{ marginBottom: 10, fontSize: 11.5, color: "rgba(255,255,255,.45)", lineHeight: 1.7 }}>
-                  {result.sideReports.map((s, i) => s.side === "BOOKLET"
+                  {res.sideReports.map((s, i) => s.side === "BOOKLET"
                     ? <div key={i}>Booklet: {s.pages} pages{s.padded !== s.pages ? ` (padded to ${s.padded})` : ""} · {s.signatures} signatures on {s.forms} form{s.forms === 1 ? "" : "s"} ({s.sigMode === "repeat" ? "step and repeat" : "ganged"}: {s.formPlan.map(fm => fm.join("+")).join(", ")}) · {s.spreadsPerSide} spread{s.spreadsPerSide === 1 ? "" : "s"}/side · back {s.tumble ? "tumbled 180°" : "upright"}{s.srcRotPages ? ` · ${s.srcRotPages} source pages carried /Rotate (normalized)` : ""}</div>
                     : s.side === "COMBO"
                     ? <div key={i}>Gang combo: {s.alloc} — one sheet design, qty = press sheets</div>
@@ -3923,9 +4164,10 @@ function App() {
                     : <div key={i}>{s.side}: {s.rot ? `source /Rotate ${s.rot}° normalized · ` : ""}cell rotation {s.cellRotate}° · scale ×{typeof s.scale === "number" ? s.scale.toFixed(3) : "?"} · {s.hasBleed ? "bleed present" : s.synth ? `bleed synthesized (${s.synth})` : "no bleed"}</div>)}
                 </div>
               )}
-              <PdfPreview bytes={result.bytes} labels={result.pageLabels} />
+              <PdfPreview bytes={res.bytes} labels={res.pageLabels} />
             </div>
-          )}
+            </div>
+          ))}
           {busy && <div style={{ color: "rgba(255,255,255,.5)", fontSize: 13 }}>Imposing…</div>}
           {!art && !busy && !result && (
             <div className="imp-card" style={{ color: "rgba(255,255,255,.45)", fontSize: 13, lineHeight: 1.7 }}>
