@@ -500,6 +500,24 @@
     .approve{padding:11px 16px;font-size:13.5px;letter-spacing:.02em}
     .agree{font-size:12px}
   }
+  .pkgrow{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+  .pkgbtn{background:var(--panel);border:1px solid var(--line);color:var(--ink);padding:7px 14px;
+    border-radius:7px;cursor:pointer;font:600 12px/1 inherit}
+  .pkgbtn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  .pkgbtn:disabled{opacity:.55;cursor:default}
+  .pkgnote{font-size:11px;color:var(--dim)}
+  .pkgout{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--panel)}
+  .pkgout h4{margin:0 0 8px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim)}
+  .pkgfile{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;
+    border-bottom:1px solid var(--line);font-size:12px}
+  .pkgfile:last-child{border-bottom:none}
+  .pkgfile a{color:var(--accent);text-decoration:none;font-weight:600;white-space:nowrap}
+  .pkgfile a:hover{text-decoration:underline}
+  .pkgfile .pf{font-family:ui-monospace,Menlo,Consolas,monospace;overflow:hidden;text-overflow:ellipsis}
+  .pkghash{margin-top:10px;font-size:11px;color:var(--dim);
+    font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+  .pkgerr{color:#c0392b;font-size:12px}
+
 </style>
 </head>
 <body>
@@ -1938,6 +1956,172 @@ function runFileChecks(){
   return FILE_CHECKS.map(c => Object.assign({ id:c.id, label:c.label }, c.run(f)));
 }
 
+/* ── the proof package ───────────────────────────────────────────
+   What approving actually hands to production, built here so a real file can be
+   run end to end and the outputs looked at.
+
+   Everything comes out of composePage — the same function the proof view, the
+   thumbnails and the 3D faces already use. That is the point: the print file
+   cannot drift from what was on screen, because there is only one composition.
+   The print render differs from the screen one in size and nothing else.
+
+   Deliberately NOT zipped: a zip needs another library, and separate files mean
+   each one can be opened directly and checked. */
+
+const PRINT_DPI = 300;
+
+/* Guides drawn on the preview only. The print file carries none — they are a
+   proofing aid, and baking them in would print them. */
+function drawGuides(ctx, W, H){
+  const b = MODEL.bleed / BLEED_W * W, bT = MODEL.bleed / BLEED_H * H;
+  const sX = (MODEL.bleed + MODEL.safety) / BLEED_W * W;
+  const sY = (MODEL.bleed + MODEL.safety) / BLEED_H * H;
+  ctx.save();
+  ctx.lineWidth = Math.max(1, W / 700);
+  ctx.strokeStyle = 'rgba(220,40,40,.85)';                 // bleed edge
+  ctx.strokeRect(ctx.lineWidth/2, ctx.lineWidth/2, W - ctx.lineWidth, H - ctx.lineWidth);
+  ctx.strokeStyle = 'rgba(20,20,20,.85)';                  // trim
+  ctx.strokeRect(b, bT, W - b*2, H - bT*2);
+  ctx.setLineDash([W/90, W/90]);
+  ctx.strokeStyle = 'rgba(40,160,60,.9)';                  // safety
+  ctx.strokeRect(sX, sY, W - sX*2, H - sY*2);
+  ctx.restore();
+}
+
+function canvasToBlob(canvas, type, quality){
+  return new Promise(res => canvas.toBlob(res, type, quality));
+}
+
+/* One page of the print file, at press resolution. */
+function renderPrintPage(n){
+  const W = Math.round(BLEED_W * PRINT_DPI), H = Math.round(BLEED_H * PRINT_DPI);
+  return composePage(n, W, H);
+}
+
+async function buildPackage(){
+  await ensureLibs();
+  const { PDFDocument } = window.PDFLib;
+
+  const pages = MODEL.pages.map(p => p.n);
+  const files = [];
+
+  // ── 1. the print file ──
+  const pdf = await PDFDocument.create();
+  const perPage = [];
+  for (const n of pages){
+    const r = renderPrintPage(n);
+    // JPEG rather than PNG: a flattened photographic page as PNG runs to tens of
+    // megabytes a page, and at 300 DPI q0.94 the difference is not printable.
+    const blob  = await canvasToBlob(r.canvas, 'image/jpeg', 0.94);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const img   = await pdf.embedJpg(bytes);
+    // PDF units are points; the page is the bleed size, so trimming happens in
+    // the bindery exactly where the trim guide sits on screen.
+    const pg = pdf.addPage([BLEED_W * 72, BLEED_H * 72]);
+    pg.drawImage(img, { x:0, y:0, width:BLEED_W * 72, height:BLEED_H * 72 });
+    const mk = checkMargins(n, r);
+    perPage.push({ n, effDpi:r.effDpi, t:Object.assign({}, state.perPage[n]),
+                   src:SRCget(n).label || 'placeholder', margins:mk });
+  }
+  const pdfBytes = await pdf.save();
+  const printBlob = new Blob([pdfBytes], { type:'application/pdf' });
+  const printHash = await sha256Hex(new Uint8Array(pdfBytes));
+  files.push({ name:'PRINT_READY.pdf', blob:printBlob,
+               note:'flattened at ' + PRINT_DPI + ' DPI · ' + pages.length + ' pages · no guides' });
+
+  // ── 2. preview JPEGs, guides drawn on ──
+  const PW = 900, PH = Math.round(PW * BLEED_H / BLEED_W);
+  for (const n of pages){
+    const r = composePage(n, PW, PH);
+    const c = document.createElement('canvas');
+    c.width = PW; c.height = PH;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(r.canvas, 0, 0);
+    drawGuides(ctx, PW, PH);
+    files.push({ name:'PREVIEW_p' + String(n).padStart(2,'0') + '.jpg',
+                 blob:await canvasToBlob(c, 'image/jpeg', 0.88),
+                 note:'with bleed / trim / safety guides' });
+  }
+
+  // ── 3. the manifest ──
+  const origins = deliverables();
+  const struct  = (typeof lastStructure !== 'undefined' && lastStructure) ? lastStructure : null;
+  const L = [];
+  L.push('PPS PROOF PACKAGE — MANIFEST');
+  L.push('generated ' + new Date().toISOString());
+  L.push('');
+  L.push('DOCUMENT');
+  L.push('  bind         ' + MODEL.calc);
+  L.push('  trim         ' + MODEL.trim.w + '" x ' + MODEL.trim.h + '"');
+  L.push('  bleed        ' + MODEL.bleed + '"   safety ' + MODEL.safety + '"');
+  L.push('  page size    ' + BLEED_W + '" x ' + BLEED_H + '" (with bleed)');
+  L.push('  pages        ' + pages.length);
+  L.push('');
+  L.push('PRINT FILE');
+  L.push('  PRINT_READY.pdf');
+  L.push('  SHA-256      ' + printHash);
+  L.push('  ' + fmtBytes(pdfBytes.length) + ' at ' + PRINT_DPI + ' DPI');
+  L.push('  This hash binds the approval to these exact bytes.');
+  L.push('');
+  L.push('ORIGINAL FILES AS RECEIVED (never modified)');
+  if (origins.length){
+    origins.forEach(o => L.push('  ' + o.name + '  ' + fmtBytes(o.size) + '  sha256 ' + (o.hash || 'n/a')));
+  } else {
+    L.push('  (none uploaded — placeholder art)');
+  }
+  L.push('');
+  L.push('PER PAGE');
+  perPage.forEach(r => {
+    const t = r.t || {};
+    L.push('  page ' + r.n + '  ' + (t.behavior || 'crop') +
+           (t.behavior === 'scale' ? ' ' + t.scale + '%' : '') +
+           '  anchor ' + (t.anchor || 'Center') + '  rot ' + (t.rot || '0°') +
+           '  ' + r.effDpi + ' DPI effective  src=' + r.src);
+    if (r.margins && r.margins.known){
+      // closest is signed: negative means the type crossed the trim. Report the
+      // distance and which side of the line it is on, rounded to something a
+      // person can act on rather than a raw float.
+      const d = r.margins.closest;
+      let where = '';
+      if (d != null && isFinite(d)){
+        where = d < 0 ? ', worst ' + Math.abs(d).toFixed(3) + '" PAST the trim'
+                      : ', closest ' + d.toFixed(3) + '" from the trim';
+      }
+      L.push('        type: ' + (r.margins.cut || 0) + ' past trim, ' +
+             (r.margins.tight || 0) + ' inside safety' + where);
+    } else {
+      L.push('        type: not measurable (flat image — no text layer)');
+    }
+  });
+  if (struct){
+    L.push('');
+    L.push('PREFLIGHT (from the source PDF)');
+    Object.keys(struct).forEach(k => {
+      const v = struct[k];
+      L.push('  ' + k + ': ' + (typeof v === 'object' ? JSON.stringify(v) : v));
+    });
+  }
+  L.push('');
+  L.push('Every page above was composed by the same function that drew the proof');
+  L.push('on screen. The print file is that composition at ' + PRINT_DPI + ' DPI.');
+  files.push({ name:'MANIFEST.txt', blob:new Blob([L.join('\n')], { type:'text/plain' }),
+               note:'transforms, effective DPI, margins, hashes' });
+
+  return { files, printHash, pageCount:pages.length };
+}
+
+function renderPackage(pkg){
+  const out = document.getElementById('pkgOut');
+  out.hidden = false;
+  out.innerHTML = '<h4>Proof package · ' + pkg.pageCount + ' pages</h4>' +
+    pkg.files.map(f =>
+      '<div class="pkgfile"><span class="pf">' + f.name +
+      ' <span style="color:var(--dim);font-weight:400">· ' + f.note + '</span></span>' +
+      '<a download="' + f.name + '" href="' + URL.createObjectURL(f.blob) + '">download</a></div>'
+    ).join('') +
+    '<div class="pkghash">print file SHA-256 &middot; ' + pkg.printHash + '</div>';
+}
+
 function deliverablesHtml(){
   const origins = deliverables();
   return '<div class="deliv" id="deliv">' +
@@ -1954,7 +2138,18 @@ function deliverablesHtml(){
           '<li><span class="ofile">' + o.name + '</span> · ' + fmtBytes(o.size) +
           (o.hash ? ' · <span class="ohash" title="SHA-256 recorded on receipt, so untouched is checkable later">' +
                     o.hash.slice(0, 12) + '…</span>' : '') + '</li>').join('') + '</ul>' : '') +
-    '</div></div>';
+    '</div>' +
+    // Draft only. The real proofer builds this on approve and uploads it; here
+    // it is a button so a real file can be taken through the whole path and the
+    // outputs opened. It lives in this panel rather than beside APPROVE because
+    // anything added to the approve column widens it, and on a phone that column
+    // becomes the fixed bottom bar.
+    '<div class="pkgrow">' +
+      '<button class="pkgbtn" id="pkgBtn">Build proof package</button>' +
+      '<span class="pkgnote" id="pkgNote">Same composition the proof view uses. ' +
+        'Rebuild after any change &mdash; a package is only valid for the state it was built from.</span>' +
+    '</div><div class="pkgout" id="pkgOut" hidden></div>' +
+    '</div>';
 }
 
 /* The legend explains the guides, so it cannot outlive them: hiding guides
@@ -1968,6 +2163,25 @@ function renderLegend(){
    mockup with no guides, so neither the acknowledgement nor the button is
    actionable there — the gate would otherwise be satisfiable from a view that
    deliberately does not show what is being approved. */
+// Delegated: the deliverables panel is re-rendered on every change, so a
+// listener bound to the button itself would die with the first repaint.
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest && ev.target.closest('#pkgBtn');
+  if (!btn) return;
+  const note = document.getElementById('pkgNote');
+  btn.disabled = true; note.textContent = 'Composing ' + MODEL.pages.length + ' pages at ' + PRINT_DPI + ' DPI…';
+  try {
+    const pkg = await buildPackage();
+    renderPackage(pkg);
+    note.textContent = 'Built. Files stay in this browser — nothing is uploaded.';
+  } catch (err){
+    const out = document.getElementById('pkgOut');
+    out.hidden = false;
+    out.innerHTML = '<div class="pkgerr">Package failed: ' + (err && err.message ? err.message : err) + '</div>';
+    note.textContent = '';
+  } finally { btn.disabled = false; }
+});
+
 function renderApproval(){
   const book = state.mode === 'book';
   const agree = document.getElementById('agree');
