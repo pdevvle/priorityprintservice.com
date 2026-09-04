@@ -234,6 +234,42 @@ download the imposed PDF. Useful for testing and one-off jobs.
   flip are unaffected, and the count is flagged against the priced imp exactly
   like a flat's manual grid — badge, warning, slug, excluded from the parity
   preflight. Refuses with a footprint report when the copies cannot fit.
+- **Perfect bound** (1.27) — images as **two press jobs**, because it is two:
+  a flat **cover** (back | spine | front) on cover stock and the **guts** book
+  block on text stock. The tool emits two files, each with its own layout,
+  filename, preview and Drive upload.
+
+  - **Cover**: piece = `2 × pageWidth + spine` × `pageHeight`, 2-sided
+    (outside / inside), step-and-repeat on the sheet.
+  - **Guts**: interior pages at trim size, **ganged in order** — each cell is a
+    leaf, so a 4-up duplex sheet carries block pages 1,3,5,7 on the front and
+    2,4,6,8 on the back.
+
+  **Two input shapes, both supported**, because both are in use:
+  a single reading-order PDF (saddle-style) from which the cover is BUILT —
+  outside from pages *last* and *1*, inside from pages *2* and *second-to-last*,
+  guts from everything between — or the calculator's own template pair, where
+  the cover file already carries the spine allowance and is used as-is. A
+  supplied cover whose width does not match `2 × trim + spine` (±¼″, with or
+  without bleed) is refused with both numbers.
+
+  **Spine width is operator-entered and required.** `calcSpineInches()` in
+  `calc-perfect-bound.html` (text leaves × caliper + 2 × cover caliper + 0.005″
+  glue) is what the customer was quoted from — an estimate at nominal caliper.
+  The press room measures the glued block; a wrong spine ruins every cover
+  printed, so the tool will not guess one. Values over 3″ are refused as a
+  likely mm/inch mix-up.
+
+  **Neither half has a priced imposition** — the calculator prices the book, not
+  a sheet layout — so both place the best physical fit, are marked `unpriced`,
+  say so in the warnings, and are excluded from the parity preflight.
+
+  Verified on a stamped 40-page fixture: cover cell exactly `8.500 × 11.250″`
+  with the spine gap measuring **exactly 0.250″**; every cover cell carries
+  back+front outside and inside-front+inside-back on the reverse; **18/18 guts
+  cells back the next page** on a short-edge flip. 33 regression cases across
+  four suites byte-identical.
+
 - **Seam hairline on synthesized bleed** (1.26). The mirrored/streaked band and
   the placed art ABUTTED exactly on the trim edge. Two abutting fills each
   antialias at the shared boundary, so neither covers those pixels fully and
