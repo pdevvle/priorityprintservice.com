@@ -234,6 +234,24 @@ download the imposed PDF. Useful for testing and one-off jobs.
   flip are unaffected, and the count is flagged against the priced imp exactly
   like a flat's manual grid — badge, warning, slug, excluded from the parity
   preflight. Refuses with a footprint report when the copies cannot fit.
+- **Blank pages no longer abort the job** (1.28). A page with no `/Contents`
+  is a perfectly legal blank — an inside front cover left empty, a deliberate
+  blank in a book block. pdf-lib will happily *embed* such a page and then
+  throw **"Can't embed page with missing Contents"** later, when the lazy embed
+  is materialised at flush. So the failure surfaced far from its cause, and the
+  tool refused a whole job over a file that opened fine everywhere else
+  (`cover_and_interior_PRINT`, 2026-09-04: 52pp booklet, pages 2 and 51 blank).
+  `ensurePageContents()` now gives every content-less page an empty stream at
+  load, on every path that loads a source document — front, back, gang members
+  and the CLEAN copy. Verified: the file images 52pp → 13 signatures → 26 sheet
+  sides, and the sheet carrying the two blanks measures **0.11% ink** (marks and
+  slug only) instead of failing. 26 regression cases byte-identical.
+- **Guts only / cover only** (1.28) — `spec.pbPart` (`both` | `guts` | `cover`).
+  A book-block reprint is a common job and needs neither a cover file nor a
+  spine, so **guts-only does not ask for one** and takes the dropped file as the
+  block as-is rather than guessing which pages are covers. The multi-page
+  control chooses how the block gangs up (gang in order, cut & stack, repeat).
+  Cover-only skips the block entirely.
 - **Perfect bound** (1.27) — images as **two press jobs**, because it is two:
   a flat **cover** (back | spine | front) on cover stock and the **guts** book
   block on text stock. The tool emits two files, each with its own layout,
