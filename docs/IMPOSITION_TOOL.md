@@ -323,6 +323,62 @@ download the imposed PDF. Useful for testing and one-off jobs.
   cells back the next page** on a short-edge flip. 33 regression cases across
   four suites byte-identical.
 
+  ### Layout controls, per half (1.30)
+
+  Perfect bound gets the same manual controls saddle and flats have — manual
+  **columns × rows**, **per-gap gutters**, **fill full sheet** and a **press
+  sheet** pick — but **one set per half**. That is not a convenience: the cover
+  and the book block are different pieces on different stock, so a column count
+  that suits one is meaningless for the other, and a gap array sized for a 2×1
+  cover is simply the wrong length for a 4×2 guts grid.
+
+  ```js
+  spec.pbGrid = {
+    cover: { gridAcross: 2, gridDown: 1, colGaps: [0.75] },
+    guts:  { gridAcross: 3, gridDown: 2, gridSheet: "13x27.5" },
+  }
+  ```
+
+  Only `gridAcross`, `gridDown`, `gridSheet`, `colGaps`, `rowGaps`,
+  `fillSheet` and `gutter` are read (`pbPartOverrides()`); the whitelist exists
+  so a per-half override can never reach trim size, spine or artwork handling.
+  Anything absent stays automatic, so a half the operator never touched behaves
+  exactly as it did before these controls existed.
+
+  **The top-level grid and gutter settings no longer reach either half.** They
+  used to reach *both*, which could not work: one gap array against two
+  different grids meant at least one half fell back to the uniform gutter and
+  emitted *"custom gutters were set for a different grid"*. They are cleared
+  now, and each half takes only its own.
+
+  In the UI it is one panel with a **Cover / Guts** selector, each tab showing
+  that half's live grid and block-vs-sheet figures. Both layouts are computed
+  from the spec alone, so the feedback is there **before any file is dropped**,
+  and a half that refuses (an over-large grid) shows its error beside the
+  control that caused it rather than blanking the panel.
+
+  The manual-grid warning also stopped claiming *"pricing assumed 0-up"* on a
+  perfect-bound job — there is no priced imp to compare against, so it now says
+  the operator's grid is the only layout there is. Setting this up exposed the
+  flats' `gridSheet` press-sheet select as well, which had state and no control.
+
+  ### Orientation: the saddle trap, inherited and fixed (1.30)
+
+  Perfect bound binds on the **height** edge, so its two size boxes are
+  *width × height* exactly as saddle's are — and 5.5×8.5 is a different product
+  from 8.5×5.5. But the drop-time autodetect and the trim re-apply both tested
+  `isSaddle` only. Dropping a portrait book therefore normalised it to
+  long × short, and the tool built a **17.25″-wide cover** out of a 5.5×8.5 book
+  with every guts page turned 90° — silently, because the trim-conflict check
+  compares long/short and a swap has the identical pair.
+
+  This is the same bug saddle had in v1.21; perfect bound simply never received
+  the fix when it arrived in 1.27. Now: both paths test `isSaddle || isPB`, the
+  drop-time flip warning covers perfect bound with its own wording, and
+  `imposePerfectBound` **refuses** artwork whose page orientation contradicts
+  the spec — which also covers the wp-admin order path, where the spec is
+  authoritative and no autodetect ever runs.
+
 - **Seam hairline on synthesized bleed** (1.26). The mirrored/streaked band and
   the placed art ABUTTED exactly on the trim edge. Two abutting fills each
   antialias at the shared boundary, so neither covers those pixels fully and
