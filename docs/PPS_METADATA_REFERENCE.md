@@ -35,8 +35,8 @@ are the only keys that reach the press:
 | `sizeMode` | trim cascade gate | `"preset"` means "ignore `longEdge`/`shortEdge`". |
 | `longEdge`, `shortEdge` | trim size | Flats. Already long ≥ short. |
 | `customLong`, `customShort` | trim size | Booklets with a custom size. |
-| `sizeLabel` | trim size (last resort) **and saddle orientation** | e.g. `"8.5×11 Letter"`. The only place page orientation survives. |
-| `bindDir` | saddle orientation fallback | `"short"` \| `"long"`. |
+| `sizeLabel` | trim size (last resort) **and bound-product orientation** | e.g. `"8.5×11 Letter"`. The only place page orientation survives — saddle, perfect bound and coupon alike. |
+| `bindDir` | bound-product orientation fallback | `"short"` \| `"long"`. |
 | `sides` | 1 or 2 | Flats. Booklets are always 2. |
 | `totalQty` / `qty` / `sets[].qty` | run length | First non-zero wins; see §4. |
 | `jobName` | output filename + slug | Flats only; booklets fall back to the product name. |
@@ -55,24 +55,31 @@ are the only keys that reach the press:
 ```
 
 **That final swap is the trap.** It throws away orientation. For flats that is
-correct — a 6×4 postcard and a 4×6 postcard are the same press job. For saddle
-stitch they are different products, because **the spine sits on the height
-edge**.
+correct — a 6×4 postcard and a 4×6 postcard are the same press job. For every
+**bound** product — saddle stitch, perfect bound, coupon book — they are
+different products, because **the spine sits on the height edge**.
 
-So the client re-derives width × height for saddle only (`specFromRow`):
+So the client re-derives width × height for bound products (`specFromRow`):
 
 ```js
 let w = row.long_edge, h = row.short_edge;          // flats: long × short
-if (row.calc === "saddle") {                        // saddle: width × height
+if (isBoundCalc(row.calc)) {                        // bound: width × height
   const m = String(row.size_label).match(/([\d.]+)\s*[×x]\s*([\d.]+)/);
   if (m) { w = +m[1]; h = +m[2]; }                  // sizeLabel keeps the real order
   else if (row.bind_dir !== "short") { w = row.short_edge; h = row.long_edge; }
 }
 ```
 
+> **Until v1.31 this tested `row.calc === "saddle"`.** Perfect-bound orders
+> therefore came off the queue as long × short — landscape — and built a
+> `2 × 8.5 + spine` cover out of a 5.5×8.5 book, silently in 1.27–1.29. The
+> predicate now names the *property* (`isBoundCalc`, backed by `BOOK_CALCS`)
+> rather than the one product that happened to have it. See "Product
+> predicates" in `docs/IMPOSITION_TOOL.md`.
+
 **Consequences worth knowing at the press:**
 
-- A saddle item whose `sizeLabel` has no `×` **and** whose `bindDir` is missing
+- A bound item whose `sizeLabel` has no `×` **and** whose `bindDir` is missing
   falls through to `long × short` — i.e. **landscape**. A 5.5×8.5 booklet then
   images as 8.5×5.5: layout `1 × 2` instead of `2 × 1 rotated`, every page
   turned 90°.
@@ -98,8 +105,8 @@ if (row.calc === "saddle") {                        // saddle: width × height
 `pps_get_registry()`, a booklet order shows `NO SPEC` in the queue** even though
 its metadata is perfectly good — the calc type is the missing piece, not the size.
 
-Imposition support: flats + stickers + **saddle** are supported;
-`perfect-bound` and `coupon` refuse cleanly (`UNSUPPORTED_BOOKLETS`, v2 work).
+Imposition support: flats + stickers + **saddle** + **perfect bound** are
+supported; `coupon` refuses cleanly (`UNSUPPORTED_BOOKLETS`, v2 work).
 
 ---
 
@@ -253,7 +260,9 @@ Perfect bound is the same shape as saddle. Coupon adds `bindStyle`,
 ## 7. Things that bite
 
 1. **`long_edge`/`short_edge` in a queue row are always normalised.** Never read
-   them as width/height for a booklet. `sizeLabel` is the only orientation record.
+   them as width/height for any bound product. `sizeLabel` is the only orientation
+   record — and the recovery must key on the *property* (`isBoundCalc`), not on
+   `calc === "saddle"`, or the next bound product repeats v1.27–1.29.
 2. **Booklet metadata has no `calcType`** — a registry gap reads as `NO SPEC`.
 3. **`sets[]` is per set**, so `qty` at the top level may be absent on booklets.
 4. **`debug` is deliberately ignored** by the plugin (`pps-calculators.php:1790`)

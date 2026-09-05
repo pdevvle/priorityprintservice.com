@@ -69,7 +69,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-04 22:30 UTC · IMPOSE-V1.30</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-05 00:40 UTC · IMPOSE-V1.31</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -142,6 +142,28 @@ const UNSUPPORTED_BOOKLETS = ["coupon"]; // saddle + perfect bound supported; co
 // prices the book, not a sheet layout, so both place the best physical fit and
 // say so rather than pretending to a parity that was never computed.
 const PB_CALCS = ["pb-cover", "pb-guts"];
+// ── Product PROPERTIES, not product names ─────────────────────────────────
+// Every branch that used to test `calc === "saddle"` was really testing one of
+// two properties that saddle happened to be the only product with:
+//
+//   isBoundCalc — binds on the HEIGHT edge, so the two size boxes are
+//     width × height and orientation is part of the spec (5.5×8.5 ≠ 8.5×5.5).
+//     Governs: autodetect keeps the file's orientation, the flip warning, the
+//     queue's width/height recovery from sizeLabel, the engine's refusal.
+//   isBookCalc  — the artwork is ONE reading-order document, not N pieces.
+//     Governs: no multi-page-mode select, no "switched to 2-sided" heuristic,
+//     always duplex, quantity means books.
+//
+// Perfect bound (v1.27) had both properties and received neither behaviour,
+// because each site tested the product name. FOUR separate bugs came from that
+// one omission — orientation lost at drop, orientation lost from the order
+// queue, a manifest switching the product to saddle, and the flats' multi-page
+// mode reaching the guts so only pages 1+2 imposed. The two names index the
+// same list on purpose: a site says which property it depends on, and a new
+// bound product goes in this list and nowhere else.
+const BOOK_CALCS  = ["saddle", "perfect-bound", "coupon"];
+const isBoundCalc = calc => BOOK_CALCS.includes(calc);
+const isBookCalc  = calc => BOOK_CALCS.includes(calc);
 // 12×18 crack-n-peel sticker sheet: single source for both the priced count
 // (stickerImp) and the placed grid (computeLayout) — they must never drift.
 const STICKER = { L: 17.75, S: 11.75, pitch: 0.25 };
@@ -434,7 +456,7 @@ function computeLayout(calc, trimA, trimB, opts) {
   const warnings = [];
   let mismatch = false;
   if (UNSUPPORTED_BOOKLETS.includes(calc)) {
-    throw new Error("Perfect bound / coupon book imposition is not in v1 — flats, stickers, and saddle stitch booklets only.");
+    throw new Error("Coupon book imposition is not in v1 — it needs its own pagination. Flats, stickers, saddle stitch and perfect bound are supported.");
   }
   // Per-job bleed (default 0.125). The auto gutter ladder is bleed-derived:
   // full double bleed, single bleed, butt cut.
@@ -2285,7 +2307,13 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
   // gutter settings are cleared so they cannot silently apply to a piece they
   // were never sized for, and each half then takes its own.
   const base = (k, part) => Object.assign({}, spec, {
-    calc: k, multiMode: k === "pb-guts" ? (spec.multiMode || "gang") : "repeat",
+    // Guts are ALWAYS ganged in order — each cell a leaf, pages consecutive.
+    // This used to read spec.multiMode with a "gang" fallback, and the UI
+    // always sends the flats' select state, whose default is "repeat": from
+    // wp-admin every perfect-bound book block imposed pages 1+2 only, on every
+    // cell, with the warning buried among the notes. The harness never saw it
+    // because it omits the key and hit the fallback.
+    calc: k, multiMode: k === "pb-guts" ? "gang" : "repeat",
     sides: 2,
     manualGrid: null, gridAcross: null, gridDown: null, gridSheet: null,
     colGaps: null, rowGaps: null, fillSheet: null,
@@ -2639,7 +2667,18 @@ function parseManifest(text) {
     out.rawW = +trim[1]; out.rawH = +trim[2]; // manifest order is width × height
     out.trimLong = Math.max(+trim[1], +trim[2]); out.trimShort = Math.min(+trim[1], +trim[2]);
   }
-  if (/Booklet Specifications/i.test(text)) out.calc = "saddle";
+  // Which product. Only saddle's manifest names its binding ("Binding: Saddle
+  // Stitch"); the perfect-bound and coupon calculators write the same
+  // "Booklet Specifications" block without one. So a booklet manifest with no
+  // Binding line means "some bound product" and nothing more — it must NOT
+  // default to saddle, which is what used to switch a perfect-bound job to
+  // Saddle stitch the moment its manifest was dropped in.
+  const binding = text.match(/Binding:\s*(.+)/i);
+  if (binding) {
+    const b = binding[1].toLowerCase();
+    out.calc = /saddle/.test(b) ? "saddle" : /perfect/.test(b) ? "perfect-bound" : /coupon/.test(b) ? "coupon" : undefined;
+  }
+  if (/Booklet Specifications/i.test(text)) out.book = true;
   else if (/Brochure Specifications/i.test(text)) out.calc = "brochure";
   const sides = text.match(/Sides uploaded:\s*(.+)/);
   if (sides) out.sides = sides[1].includes("+") ? 2 : 1;
@@ -2727,7 +2766,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState };
+window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -2864,11 +2903,15 @@ async function ajaxFail(r, what) {
 }
 
 // Row → engine spec: single source for both the per-row Impose flow and the
-// bulk "Impose all pending" path. For saddle, width×height (spine = height)
-// is recovered from size_label, falling back to bind_dir orientation.
+// bulk "Impose all pending" path. For every BOUND product, width × height
+// (spine = height) is recovered from size_label, falling back to bind_dir —
+// the PHP normalises to long/short for all calcs and cannot know. This tested
+// the saddle product name until v1.31, so a perfect-bound order loaded from
+// the queue arrived landscape: silently wrong in 1.27–1.29, refused by the
+// engine guard in 1.30, and right only now.
 function specFromRow(row) {
   let w = row.long_edge, h = row.short_edge;
-  if (row.calc === "saddle") {
+  if (isBoundCalc(row.calc)) {
     const m = String(row.size_label || "").match(/([\d.]+)\s*[×x]\s*([\d.]+)/);
     if (m) { w = +m[1]; h = +m[2]; }
     else if (row.bind_dir !== "short") { w = row.short_edge; h = row.long_edge; }
@@ -2908,7 +2951,7 @@ function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
             <tr key={key}>
               <td><a href={r.folder_url} target="_blank" rel="noreferrer" style={{ color: "#7ab8ff" }}>#{r.order_id}</a></td>
               <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.job_name || r.product || "—"}</td>
-              <td style={{ fontSize: 12 }}>{r.calc || "?"} · {r.long_edge}×{r.short_edge}″ · {r.calc === "saddle" ? "booklet" : r.sides === 2 ? "2-sided" : "1-sided"} · qty {r.qty}</td>
+              <td style={{ fontSize: 12 }}>{r.calc || "?"} · {r.long_edge}×{r.short_edge}″ · {isBookCalc(r.calc) ? "booklet" : r.sides === 2 ? "2-sided" : "1-sided"} · qty {r.qty}</td>
               <td style={{ fontSize: 12 }}>{artOk ? r.art_file_name : <span style={{ color: "#f87171" }}>{driveErr ? "Drive list failed" : "none found"}</span>}</td>
               <td>{driveErr ? <span className="imp-badge err">DRIVE ERROR</span>
                 : r.imposed ? <span className="imp-badge ok">IMPOSED</span>
@@ -3027,8 +3070,8 @@ const REF_FIELDS = [
   ["sizeMode", "Trim cascade gate", "\"preset\" means ignore longEdge/shortEdge."],
   ["longEdge, shortEdge", "Trim size", "Flats. Already long ≥ short."],
   ["customLong, customShort", "Trim size", "Booklets ordered at a custom size."],
-  ["sizeLabel", "Trim size (last resort) AND saddle orientation", "e.g. \"8.5×11 Letter\". The only place page orientation survives."],
-  ["bindDir", "Saddle orientation fallback", "\"short\" or \"long\"."],
+  ["sizeLabel", "Trim size (last resort) AND bound-product orientation", "e.g. \"8.5×11 Letter\". The only place page orientation survives — saddle, perfect bound and coupon alike."],
+  ["bindDir", "Bound-product orientation fallback", "\"short\" or \"long\"."],
   ["sides", "1 or 2", "Flats. Booklets are always 2."],
   ["totalQty / qty / sets[].qty", "Run length", "First non-zero wins (see §4)."],
   ["jobName", "Output filename + slug", "Flats only; booklets fall back to the product name."],
@@ -3073,9 +3116,10 @@ function MetaRef({ onClose }) {
    then: if (long < short) swap                         →  normalised to long/short`}</pre>
       <div className="trap">
         <b>The trap.</b> That final swap throws away orientation. For flats it is correct — a 6×4 and a
-        4×6 postcard are the same press job. <b>For saddle stitch they are different products</b>, because the
-        spine sits on the height edge. So the tool re-derives width×height for saddle from <code>sizeLabel</code>,
-        falling back to <code>bindDir</code>.
+        4×6 postcard are the same press job. <b>For every bound product — saddle, perfect bound, coupon — they are
+        different products</b>, because the spine sits on the height edge. So the tool re-derives width×height for
+        bound products from <code>sizeLabel</code>, falling back to <code>bindDir</code>. (Until v1.31 this tested
+        the saddle product name, and perfect-bound orders came off the queue landscape.)
       </div>
       <div className="tip">
         <b>Check before you impose.</b> A portrait booklet must read <code>2 × 1</code> in the layout panel,
@@ -3195,6 +3239,8 @@ function App() {
   const [multiMode, setMultiMode] = useState("repeat");    // multipage flat files: repeat | gang | stack
   const isSaddle = calc === "saddle";
   const isPB = calc === "perfect-bound";   // two press jobs, so no single live layout
+  const isBound = isBoundCalc(calc);       // size boxes are width × height; orientation is part of the spec
+  const isBook = isBookCalc(calc);         // one reading-order document, always duplex, qty = books
   const [art, setArt] = useState(null);      // { bytes, name, pageCount }
   // Trim as MEASURED off the dropped file, kept in the file's own orientation.
   // Saddle reads the two size boxes as width × height (the spine is the height
@@ -3292,21 +3338,22 @@ function App() {
     // edge); everything else reads them as long × short. Normalising a bound
     // job to long/short is what silently turned a 5.5×8.5 book into an 8.5×5.5
     // one — the saddle trap of v1.21, which perfect bound inherited when it
-    // arrived in v1.27 because this line only tested isSaddle.
-    if (isSaddle || isPB) { setTrimLong(detTrim.w); setTrimShort(detTrim.h); }
+    // arrived in v1.27 because this line only tested isSaddle. It now tests the
+    // property (isBound) so the next bound product cannot repeat it.
+    if (isBound) { setTrimLong(detTrim.w); setTrimShort(detTrim.h); }
     else { setTrimLong(Math.max(detTrim.w, detTrim.h)); setTrimShort(Math.min(detTrim.w, detTrim.h)); }
-  }, [isSaddle, isPB, detTrim, activeOrder]);
+  }, [isBound, detTrim, activeOrder]);
 
   const spec = useMemo(() => ({
     calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0,
-    sides: +sides, qty: +qty || 0, sheetFlip,
+    sides: isBook ? 2 : +sides, qty: +qty || 0, sheetFlip,
     backRotate: backRotate === "auto" ? "auto" : +backRotate,
     jobName, orderRef, itemRef, marks, foldMarks, slug: slugOn, allowBestFit,
     sheet: sheetSel, sheetLong: +sheetLong || 0, sheetShort: +sheetShort || 0, sheetMargin: +sheetMargin,
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
-    bleed: +bleedIn, multiMode, addBleed, addBleedSmart, streakEps: +streakEps, artInset: +artInset || 0, artScale: +artScale || 100, creep: +creep || 0,
+    bleed: +bleedIn, multiMode: isBook ? null : multiMode, addBleed, addBleedSmart, streakEps: +streakEps, artInset: +artInset || 0, artScale: +artScale || 100, creep: +creep || 0,
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
     saddleColGaps: gapCols, saddleRowGaps: gapRows, saddleFillSheet: gapFill,
     colGaps: gapCols, rowGaps: gapRows, fillSheet: gapFill,
@@ -3324,7 +3371,7 @@ function App() {
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGrids]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGrids]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -3451,15 +3498,20 @@ function App() {
       if (/\.txt$/i.test(f.name)) {
         const t = await f.text();
         const m = parseManifest(t);
-        // saddle keeps width×height as-is (spine = height edge); flats normalize
+        // Bound products keep width × height as-is (spine = height edge);
+        // flats normalise. A booklet manifest that does not name its binding
+        // is still a bound product, so its orientation is kept either way.
+        const bound = m.calc ? isBoundCalc(m.calc) : (m.book || isBoundCalc(calc));
         if (m.trimLong) {
-          if (m.calc === "saddle") { setTrimLong(m.rawW); setTrimShort(m.rawH); }
+          if (bound) { setTrimLong(m.rawW); setTrimShort(m.rawH); }
           else { setTrimLong(m.trimLong); setTrimShort(m.trimShort); }
         }
         if (m.calc) setCalc(m.calc);
         if (m.sides) setSides(m.sides);
         if (m.jobName && !jobName) setJobName(m.jobName);
-        setNotice("Spec autofilled from manifest: " + f.name);
+        setNotice(m.book && !m.calc && !isBookCalc(calc)
+          ? `Manifest ${f.name} is for a bound product but does not say which binding — choose Saddle stitch or Perfect bound; the page size has been kept as width × height.`
+          : "Spec autofilled from manifest: " + f.name);
         continue;
       }
       if (!/\.pdf$/i.test(f.name)) { setError(`"${f.name}" is not a PDF — the imposition input must be the print-ready or raw PDF.`); continue; }
@@ -3493,22 +3545,22 @@ function App() {
           // the height edge — and a swap has the same long/short pair, so
           // `differs` cannot see it. Check it separately or a landscape entry
           // sails through and every page prints sideways.
-          const flipped = (isSaddle || isPB) && !differs
+          const flipped = isBound && !differs
             && Math.abs(det.w - det.h) > 0.03
             && ((+trimShort > +trimLong) !== (det.h > det.w));
           if (activeOrder) {
             // order spec is authoritative — but flag a measurement conflict loudly
             if (differs) setNotice(aNote + `⚠ "${f.name}" measures ${det.w}×${det.h}″ (${det.method}) but the order spec is ${specL}×${specS}″ — check that this is the right file/spec before printing.`);
-            else if (flipped) setNotice(aNote + `⚠ "${f.name}" is ${det.w}×${det.h}″ (${det.h > det.w ? "portrait" : "landscape"}) but the order spec reads ${trimLong}×${trimShort}″ — ${isPB ? "perfect bound binds" : "saddle folds"} on the height edge, so imposing as-is would turn every page 90°. Swap the page width/height before printing.`);
+            else if (flipped) setNotice(aNote + `⚠ "${f.name}" is ${det.w}×${det.h}″ (${det.h > det.w ? "portrait" : "landscape"}) but the order spec reads ${trimLong}×${trimShort}″ — this product binds on the height edge, so imposing as-is would turn every page 90°. Swap the page width/height before printing.`);
           } else {
-            if (isSaddle || isPB) { setTrimLong(det.w); setTrimShort(det.h); }   // bound: width × height
+            if (isBound) { setTrimLong(det.w); setTrimShort(det.h); }   // bound: width × height
             else { setTrimLong(detL); setTrimShort(detS); }
-            setNotice(`Trim auto-detected: ${det.w}×${det.h}″ (${det.method}).` + (pageCount > (sides === 2 ? 2 : 1) && !isSaddle ? ` File has ${pageCount} pages — set "Multi-page file" to gang or cut & stack if they're different pieces.` : ""));
+            setNotice(`Trim auto-detected: ${det.w}×${det.h}″ (${det.method}).` + (pageCount > (sides === 2 ? 2 : 1) && !isBook ? ` File has ${pageCount} pages — set "Multi-page file" to gang or cut & stack if they're different pieces.` : ""));
           }
         }
         // A 2-page file usually means front+back — switch, but say so, since
         // page 2 could also be notes/a proof sheet the operator must exclude.
-        if (pageCount >= 2 && sides === 1 && !isSaddle) {
+        if (pageCount >= 2 && sides === 1 && !isBook) {
           setSides(2);
           setNotice(aNote + `"${f.name}" has ${pageCount} pages — switched to 2-sided (page 1 = front, page 2 = back). Set Sides back to 1 if page 2 isn't the back.`);
         }
@@ -3699,6 +3751,7 @@ function App() {
             <span className="lbl">Artwork</span>
             <DropZone label="Drop artwork PDF here"
               sub={isSaddle ? "multi-page PDF, pages in reading order (cover = page 1) · padded to a multiple of 4 · drop the manifest .txt to autofill"
+                 : isBook   ? "multi-page PDF, pages in reading order (cover = page 1) — or the guts file, with the flat cover dropped below · drop the manifest .txt to autofill"
                             : "print-ready or raw PDF · page 1 = front, page 2 = back · drop the manifest .txt to autofill the spec"}
               accept=".pdf,.txt" onFiles={f => onFiles(f, "front")} fileName={art && `${art.name} (${art.pageCount}p)`} />
             {art && art.approval && art.approval.state === "mismatch" && (
@@ -3748,7 +3801,7 @@ function App() {
                 </div>
               </div>
             )}
-            {!isSaddle && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
+            {!isBook && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
               <div style={{ marginTop: 10 }}>
                 <Field label={`Multi-page file (${art.pageCount} pages)`}>
                   <select value={multiMode} onChange={e => setMultiMode(e.target.value)}>
@@ -3851,10 +3904,10 @@ function App() {
               </select>
             </Field>
             <div style={{ display: "flex", gap: 10 }}>
-              <Field label={(isSaddle || isPB) ? "Page width (in)" : "Trim long (in)"} style={{ flex: 1 }}>
+              <Field label={isBound ? "Page width (in)" : "Trim long (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimLong} onChange={e => setTrimLong(e.target.value)} />
               </Field>
-              <Field label={(isSaddle || isPB) ? "Page height (in) — spine edge" : "Trim short (in)"} style={{ flex: 1 }}>
+              <Field label={isBound ? "Page height (in) — spine edge" : "Trim short (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
               <Field label="Bleed (in)" style={{ flex: "0 0 84px" }}>
@@ -4007,7 +4060,7 @@ function App() {
               )}
             </Field>
             <div style={{ display: "flex", gap: 10 }}>
-              {!isSaddle && (
+              {!isBook && (
                 <Field label="Sides" style={{ flex: 1 }}>
                   <select value={sides} onChange={e => setSides(+e.target.value)}>
                     <option value={1}>1 — single-sided</option>
@@ -4015,11 +4068,11 @@ function App() {
                   </select>
                 </Field>
               )}
-              <Field label={isSaddle ? "Quantity (books)" : gangFiles.length >= 2 ? "Quantity (press sheets)" : multiMode === "each" ? "Quantity (per piece)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
+              <Field label={isBook ? "Quantity (books)" : gangFiles.length >= 2 ? "Quantity (press sheets)" : multiMode === "each" ? "Quantity (per piece)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
                 <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} />
               </Field>
             </div>
-            {(spec.sides === 2 || isSaddle) && (
+            {(spec.sides === 2 || isBook) && (
               <div style={{ display: "flex", gap: 10 }}>
                 <Field label="Press flips sheet on" style={{ flex: 1 }}>
                   <select value={sheetFlip} onChange={e => setSheetFlip(e.target.value)}>

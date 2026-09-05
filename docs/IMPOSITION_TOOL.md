@@ -379,6 +379,70 @@ download the imposed PDF. Useful for testing and one-off jobs.
   the spec — which also covers the wp-admin order path, where the spec is
   authoritative and no autodetect ever runs.
 
+  ### Product predicates name properties, not products (1.31)
+
+  Asked whether the 1.30 bug could recur, the honest answer was to audit every
+  `calc === "saddle"` / `isSaddle` site in the tool. It already had — three
+  more times, from the identical root:
+
+  1. **The order queue.** `specFromRow` recovered width × height from
+     `sizeLabel` for `row.calc === "saddle"` only. Every perfect-bound order
+     loaded from the queue arrived long × short — landscape — and built a
+     `2 × 8.5 + spine` cover out of a 5.5×8.5 book. Silent in 1.27–1.29;
+     refused by the 1.30 engine guard (so the operator had to swap the boxes
+     by hand on every PB order); right only now.
+  2. **The manifest.** `parseManifest` mapped any "Booklet Specifications"
+     manifest to `saddle`, because saddle was the only booklet when it was
+     written. Dropping a perfect-bound job's manifest switched the product to
+     Saddle stitch.
+  3. **The flats' multi-page mode reached the guts.** The "Multi-page file"
+     select is gated `!isSaddle`, so it rendered for perfect bound, and its
+     state — default `repeat` — went into the spec, where the guts read
+     `spec.multiMode || "gang"`. **From wp-admin, every perfect-bound book
+     block imposed pages 1+2 only, on every cell**, with the warning buried
+     among the notes. The engine harness never saw it because its specs omit
+     the key and hit the `"gang"` fallback; only driving the real UI showed
+     10 sheet sides where there had been 2.
+
+  All four bugs (counting 1.30) share one cause: `isSaddle` was standing in
+  for two *properties* that saddle was merely the only product with —
+
+  - **bound** — binds on the height edge, so the size boxes are width × height
+    and orientation is part of the spec;
+  - **book** — the artwork is one reading-order document, not N pieces, so no
+    multi-page mode, no "switched to 2-sided" heuristic, always duplex,
+    quantity means books.
+
+  The fix is structural rather than another `|| isPB`:
+
+  ```js
+  const BOOK_CALCS  = ["saddle", "perfect-bound", "coupon"];
+  const isBoundCalc = calc => BOOK_CALCS.includes(calc);
+  const isBookCalc  = calc => BOOK_CALCS.includes(calc);
+  ```
+
+  Two names over one list on purpose — a site says *which property* it depends
+  on, and the day the two sets diverge the split is already drawn. Every site
+  that was testing the product name for one of these reasons now tests the
+  property; the genuinely saddle-only branches (signature pagination, step and
+  repeat, creep, fold guides) still test `isSaddle`, which is what it should
+  mean. **A new bound product goes into `BOOK_CALCS` and nowhere else.**
+
+  Riders: the guts are hard-wired to `gang` (there is no PB control for it, so
+  nothing may leak in); the spec never carries `multiMode` or a `sides` other
+  than 2 for a book; manifests now read a `Binding:` line — the perfect-bound
+  and coupon calculators write one from this commit, and an older manifest
+  with none keeps the page size as width × height and asks for the binding
+  rather than guessing saddle. `specFromRow`, `BOOK_CALCS` and both predicates
+  are on `window.__ppsImpose` so a headless test can pin them.
+
+  A testing gotcha this turned up: the regression normaliser strips pdf-lib's
+  Info dates but **cannot see the slug's date**, which sits inside a
+  Flate-compressed content stream. A baseline generated on a different
+  calendar day is therefore a guaranteed false positive at identical byte
+  size. Regenerate the baseline same-day, from the previous build, before
+  comparing.
+
 - **Seam hairline on synthesized bleed** (1.26). The mirrored/streaked band and
   the placed art ABUTTED exactly on the trim edge. Two abutting fills each
   antialias at the shared boundary, so neither covers those pixels fully and

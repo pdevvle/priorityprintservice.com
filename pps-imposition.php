@@ -313,8 +313,10 @@ add_action( 'wp_ajax_pps_impose_list', function() {
 
             // Trim dims: flat customs carry longEdge/shortEdge; saddle customs
             // carry customLong/customShort; presets parse out of the size
-            // label ("8.5×11 …"). Client re-derives width/height for saddle
-            // (spine orientation) from size_label / bind_dir.
+            // label ("8.5×11 …"). Client re-derives width/height for every
+            // BOUND product (saddle / perfect bound / coupon — spine on the
+            // height edge) from size_label / bind_dir; the long/short pair
+            // here cannot carry orientation.
             $long = 0; $short = 0;
             if ( ( $m['sizeMode'] ?? '' ) !== 'preset' && ! empty( $m['longEdge'] ) && ! empty( $m['shortEdge'] ) ) {
                 $long  = floatval( $m['longEdge'] );
