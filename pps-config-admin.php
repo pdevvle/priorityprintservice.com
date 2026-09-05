@@ -158,6 +158,7 @@ function pps_default_config() {
             'pps_min_price_pct'                 => 0.5,
             'pps_absolute_min_price'            => 5,
             'bw_discount_rate'                  => 0.3,
+            'flat_bw_discount_rate'             => 0,      // flats: 0 = no B&W discount (owner, 2026-09-05)
             'easy_discount_rate'                => 0.05,
             'common_discount_max'               => 1500,
             'bundling_base_fee'                 => 7,
@@ -1487,7 +1488,8 @@ function pps_config_tab_production( $cfg ) {
             'easydiscount_max'       => array( 'Easy Size Cap', '$' ),
             'easy_discount_rate'     => array( 'Easy Size Rate', '×' ),
             'common_discount_max'    => array( 'Competitive Disc. (>0=on)', '' ),
-            'bw_discount_rate'       => array( 'B&W Discount', '×' ),
+            'bw_discount_rate'       => array( 'B&W Discount (booklets)', '×' ),
+            'flat_bw_discount_rate'  => array( 'B&W Discount (flats)', '×' ),
         ),
         'Site-Wide Sale' => array(
             'sale_discount_pct'      => array( 'Sale % (0 = off)', '×' ),

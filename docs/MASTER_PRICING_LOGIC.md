@@ -188,9 +188,44 @@ backend_base_rate:      10
 easydiscount_max:       0
 markup curve:           dL = 1.75 * ln(pressSheets)
 surcharge:              none — these carry no surcharge term at all
+flat_bw_discount_rate:  0  — B&W discount REMOVED on the flats, 2026-09-05
 ```
 
 Note the curve runs on `pressSheets`, not `tS` as the booklet family does.
+
+### B&W discount removed from the flats (2026-09-05)
+
+`P.discBW = allBW ? -(P.press * rate) : 0` was hardcoded at `0.3` in all five flat
+calculators — 30% off press labour whenever front and back were both greyscale. It is
+now `PCF.flat_bw_discount_rate`, **default 0**, exposed in the admin as *B&W Discount
+(flats)*. The booklets keep their own separate `bw_discount_rate: 0.3`; nothing in that
+family changed.
+
+Why: order 87145 — 700 8.5×14 double-parallel brochures, greyscale both sides on the
+cheapest uncoated stock, quoted $186.86 (26.7¢/pc). At 700 press sheets the markup curve
+is already at its 1.5 floor (`13 − 1.75·ln(700) = 1.536`), and the B&W discount then took
+another $12.25 off press labour on top. Black-only does not make the press cheaper here —
+the sheet goes through the same number of times, and at imp 1 that is one pass per piece.
+
+Measured effect, greyscale both sides, read from the rendered quantity ladder:
+
+| qty | brochure | postcard | greeting card | letterhead | sticker |
+|---|---|---|---|---|---|
+| 100 | +0.6% | +0.3% | +1.4% | +2.1% | +0.1% |
+| 500 | +1.3% | +0.6% | +3.4% | +5.0% | +0.1% |
+| 1000 | +1.7% | +0.8% | +4.8% | +7.7% | +0.1% |
+
+Nothing changes on a job with any colour on either side — `allBW` is false and the term
+was already zero. Order 87145 would now quote **$199.11** (28.4¢/pc) instead of $186.86.
+
+**Rollback:** set *B&W Discount (flats)* to `0.3` in PPS Config → Production. No deploy
+needed; the calculators read the live value.
+
+**Still open, not addressed here:** the markup floor itself. Because the curve keys on
+press sheets rather than pieces, an imp-1 size reaches the 1.5 floor at 714 pieces while
+an imp-8 size needs 5,715. `bro_yieldBonus()` claws markup back for imp > 2 but returns 0
+for imp ≤ 2, so there is no protection at the low-yield end — which is where press and
+folding cost most per piece.
 
 ### Saddle stitch booklet — `calc-preview-test.html`, `calc-modern-draft.html`
 
