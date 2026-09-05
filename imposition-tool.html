@@ -69,7 +69,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-04 21:40 UTC · IMPOSE-V1.29</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-04 22:30 UTC · IMPOSE-V1.30</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -496,7 +496,13 @@ function computeLayout(calc, trimA, trimB, opts) {
     }
     sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
     const placed = grid.a * grid.d;
-    warnings.push(`Manual grid: ${grid.a} across × ${grid.d} down = ${placed}-up on ${sheet.label}${grid.rotated ? " (pieces rotated 90°)" : ""}${placed === Math.round(priced) ? "" : ` — pricing assumed ${priced}-up, so sheet count and cost per piece will differ`}.`);
+    // The pricing clause only means something when there IS a priced imp.
+    // Perfect bound has none (priced = 0), so comparing against it would print
+    // the nonsense "pricing assumed 0-up" on every manual PB grid.
+    const pricedNote = !priced ? " — unpriced job, so the operator's grid is the only layout there is"
+                     : placed === Math.round(priced) ? ""
+                     : ` — pricing assumed ${priced}-up, so sheet count and cost per piece will differ`;
+    warnings.push(`Manual grid: ${grid.a} across × ${grid.d} down = ${placed}-up on ${sheet.label}${grid.rotated ? " (pieces rotated 90°)" : ""}${pricedNote}.`);
     if (calc === "sticker") warnings.push(`Manual grid overrides the 12×18 crack-n-peel ${STICKER.pitch}″ pitch — confirm the liner/die matches before printing.`);
     if (!rawCol && !rawRow && grid.g < gutters[0] && gutters.length > 1) warnings.push(grid.g === 0
       ? "Butt-cut layout (no gutter) needed to fit the manual grid — adjacent pieces share cut lines, no inter-piece bleed."
@@ -2115,6 +2121,46 @@ async function ppsToPdfBytes(bytes, label) {
 // is the estimate the customer was quoted from; it is a starting point, not a
 // substitute for measuring.
 
+// Cover and guts are different piece sizes on different stock, so one set of
+// layout controls cannot serve both: a 2×1 cover and a 4×2 book block do not
+// share a column count, and a gap array sized for one is simply wrong for the
+// other. Each half therefore takes its own manual grid and gutters out of
+// `spec.pbGrid = { cover: {...}, guts: {...} }`, and the top-level ones — which
+// belong to whatever single-piece job the operator last set up — never leak in.
+//
+// Whitelisted rather than merged wholesale: these are layout choices, and a
+// part override must not be able to reach trim size, spine or artwork handling.
+const PB_PART_KEYS = ["gridAcross", "gridDown", "gridSheet", "colGaps", "rowGaps", "fillSheet", "gutter"];
+function pbPartOverrides(spec, part) {
+  const src = spec && spec.pbGrid && spec.pbGrid[part];
+  const out = {};
+  if (!src) return out;
+  for (const k of PB_PART_KEYS) if (src[k] != null) out[k] = src[k];
+  return out;
+}
+
+// UI panel state → the engine keys above. Everything the operator has not set
+// stays null so pbPartOverrides skips it and the half falls back to automatic.
+function pbGridSpec(g) {
+  if (!g) return null;
+  return {
+    gridAcross: g.on ? Math.floor(+g.across) || 0 : null,
+    gridDown:   g.on ? Math.floor(+g.down)   || 0 : null,
+    gridSheet:  g.on && g.sheet && g.sheet !== "auto" ? g.sheet : null,
+    colGaps: g.cols, rowGaps: g.rows,
+    fillSheet: g.fill == null ? null : !!g.fill,
+  };
+}
+
+// The two pieces a perfect-bound job images, from the spec alone — no artwork
+// needed. The UI previews each half's layout with this before a file is loaded.
+function pbPieces(trimW, trimH, spine) {
+  return {
+    cover: { long: 2 * trimW + spine, short: trimH },
+    guts:  { long: trimW, short: trimH },
+  };
+}
+
 function pbSpineOf(spec) {
   const v = +(spec && spec.spine);
   if (!isFinite(v) || v < 0) throw new Error("Perfect bound needs a spine width (inches). Measure the glued book block — the quoted estimate is a starting point, not a substitute.");
@@ -2188,6 +2234,27 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
   const src = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
   stripActiveContent(src);
 
+  // Same trap as saddle (v1.21): perfect bound binds on the HEIGHT edge, so the
+  // two size boxes are width × height and 5.5×8.5 is a different product from
+  // 8.5×5.5. Get it backwards and the cover is built 2×8.5+spine wide — the
+  // wrong piece entirely — and every guts page turns 90°. The drop-time trim
+  // check normalises to long/short and so cannot see a swap; check it here,
+  // where the artwork's real page size is known, which also covers the wp-admin
+  // queue where the spec is authoritative and no autodetect runs.
+  try {
+    const det = detectTrim(src, bleed);
+    const sq = d => Math.abs(d.w - d.h) <= 0.03;
+    const specPortrait = trimH > trimW, srcPortrait = det.h > det.w;
+    if (!sq(det) && Math.abs(trimW - trimH) > 0.03 && specPortrait !== srcPortrait) {
+      throw new Error(
+        `Page orientation mismatch: the artwork's pages are ${det.w}×${det.h}″ (${srcPortrait ? "portrait" : "landscape"}) but the spec says ${trimW}×${trimH}″ (${specPortrait ? "portrait" : "landscape"}). ` +
+        `Perfect bound binds on the height edge, so this would ${wantCover ? `build a ${(2 * trimW + spine).toFixed(3)}″-wide cover and ` : ""}turn every page 90°. ` +
+        `Set Page width ${det.w}″ and Page height ${det.h}″ — or supply artwork that really is ${specPortrait ? "portrait" : "landscape"}.`);
+    }
+  } catch (e) {
+    if (/orientation mismatch/.test(e.message)) throw e;   // detection itself is best-effort
+  }
+
   ensurePageContents(src);
   let coverB, gutsB, gutsN, assembled = false;
 
@@ -2214,16 +2281,22 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
     assembled = true;
   }
 
-  const base = k => Object.assign({}, spec, {
+  // Layout controls are per half (see pbPartOverrides): the top-level grid and
+  // gutter settings are cleared so they cannot silently apply to a piece they
+  // were never sized for, and each half then takes its own.
+  const base = (k, part) => Object.assign({}, spec, {
     calc: k, multiMode: k === "pb-guts" ? (spec.multiMode || "gang") : "repeat",
-    sides: 2, manualGrid: null, gridAcross: null, gridDown: null,
-  });
-  const coverSpec = Object.assign(base("pb-cover"), {
-    trimLong: 2 * trimW + spine, trimShort: trimH,
+    sides: 2,
+    manualGrid: null, gridAcross: null, gridDown: null, gridSheet: null,
+    colGaps: null, rowGaps: null, fillSheet: null,
+  }, pbPartOverrides(spec, part));
+  const piece = pbPieces(trimW, trimH, spine);
+  const coverSpec = Object.assign(base("pb-cover", "cover"), {
+    trimLong: piece.cover.long, trimShort: piece.cover.short,
     jobName: (spec.jobName || "book") + "_COVER",
   });
-  const gutsSpec = Object.assign(base("pb-guts"), {
-    trimLong: trimW, trimShort: trimH,
+  const gutsSpec = Object.assign(base("pb-guts", "guts"), {
+    trimLong: piece.guts.long, trimShort: piece.guts.short,
     jobName: (spec.jobName || "book") + "_GUTS",
   });
 
@@ -3091,6 +3164,12 @@ function App() {
   const [gridAcross, setGridAcross] = useState(1);
   const [gridDown, setGridDown] = useState(1);
   const [gridSheet, setGridSheet] = useState("auto");
+  // Perfect bound images two pieces of different sizes, so it gets two
+  // independent copies of the grid + gutter settings above rather than sharing
+  // one. `pbGridPart` is only which half the shared panel is currently editing.
+  const PB_GRID0 = { on: false, across: 1, down: 1, sheet: "auto", cols: null, rows: null, fill: null };
+  const [pbGrids, setPbGrids] = useState({ cover: PB_GRID0, guts: PB_GRID0 });
+  const [pbGridPart, setPbGridPart] = useState("cover");
   // Step and repeat (saddle): duplicate each signature N× on the press sheet.
   const [repOn, setRepOn] = useState(false);
   const [sigOrder, setSigOrder] = useState("repeat");  // repeat | gang | cutstack
@@ -3209,9 +3288,14 @@ function App() {
 
   useEffect(() => {
     if (!detTrim || activeOrder) return;
-    if (isSaddle) { setTrimLong(detTrim.w); setTrimShort(detTrim.h); }   // width × height
+    // Bound products read the boxes as width × height (the spine is the height
+    // edge); everything else reads them as long × short. Normalising a bound
+    // job to long/short is what silently turned a 5.5×8.5 book into an 8.5×5.5
+    // one — the saddle trap of v1.21, which perfect bound inherited when it
+    // arrived in v1.27 because this line only tested isSaddle.
+    if (isSaddle || isPB) { setTrimLong(detTrim.w); setTrimShort(detTrim.h); }
     else { setTrimLong(Math.max(detTrim.w, detTrim.h)); setTrimShort(Math.min(detTrim.w, detTrim.h)); }
-  }, [isSaddle, detTrim, activeOrder]);
+  }, [isSaddle, isPB, detTrim, activeOrder]);
 
   const spec = useMemo(() => ({
     calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0,
@@ -3233,25 +3317,50 @@ function App() {
     sigOrder: isSaddle ? sigOrder : null,
     spine: isPB ? +spine || 0 : null,
     pbPart: isPB ? pbPart : null,
+    // Per-half layout controls. Shaped for the engine (pbPartOverrides), which
+    // ignores anything null, so a half the operator never touched behaves
+    // exactly as it did before these controls existed.
+    pbGrid: isPB ? { cover: pbGridSpec(pbGrids.cover), guts: pbGridSpec(pbGrids.guts) } : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart]);
+       gapCols, gapRows, gapFill, isSaddle, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGrids]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
   const layoutInfo = useMemo(() => {
     try {
       if (!(debSpec.trimLong >= 2 && debSpec.trimShort >= 2)) return { error: "Enter trim size (min 2″)" };
-      // Perfect bound has no single layout to preview — it images as two press
-      // jobs on different stock. The per-part cards below carry each layout.
+      // Perfect bound has no single layout — it images as two press jobs on
+      // different stock, so it gets two. Both are computed here from the spec
+      // alone (no artwork), which is what lets the grid/gutter panel show live
+      // block-vs-sheet feedback for each half before a file is ever dropped.
+      // A half that refuses keeps its error beside it rather than blanking the
+      // panel: the control that caused it must stay reachable to undo.
       if (debSpec.calc === "perfect-bound") {
         const sp = +debSpec.spine;
         if (debSpec.pbPart !== "guts") {          // the spine only affects the cover
           if (!isFinite(sp) || sp <= 0) return { error: "Enter the spine width (inches) — measure the glued book block." };
           if (sp > 3) return { error: `Spine ${sp}″ is beyond the 3″ limit — check the value is inches, not millimetres.` };
         }
-        return { pb: true };
+        const piece = pbPieces(debSpec.trimLong, debSpec.trimShort, debSpec.pbPart === "guts" ? 0 : sp);
+        const half = (part, calcKey) => {
+          const sub = Object.assign({}, debSpec, {
+            calc: calcKey, trimLong: piece[part].long, trimShort: piece[part].short,
+            manualGrid: null, gridAcross: null, gridDown: null, gridSheet: null,
+            colGaps: null, rowGaps: null, fillSheet: null,
+          }, pbPartOverrides(debSpec, part));
+          try {
+            return { layout: computeLayout(calcKey, sub.trimLong, sub.trimShort, layoutOpts(sub)) };
+          } catch (e) { return { error: e.message }; }
+        };
+        return {
+          pb: true,
+          pbLayouts: {
+            cover: debSpec.pbPart === "guts" ? null : half("cover", "pb-cover"),
+            guts:  debSpec.pbPart === "cover" ? null : half("guts", "pb-guts"),
+          },
+        };
       }
       return { layout: computeLayout(debSpec.calc, debSpec.trimLong, debSpec.trimShort, layoutOpts(debSpec)) };
     } catch (e) { return { error: e.message }; }
@@ -3384,15 +3493,15 @@ function App() {
           // the height edge — and a swap has the same long/short pair, so
           // `differs` cannot see it. Check it separately or a landscape entry
           // sails through and every page prints sideways.
-          const flipped = isSaddle && !differs
+          const flipped = (isSaddle || isPB) && !differs
             && Math.abs(det.w - det.h) > 0.03
             && ((+trimShort > +trimLong) !== (det.h > det.w));
           if (activeOrder) {
             // order spec is authoritative — but flag a measurement conflict loudly
             if (differs) setNotice(aNote + `⚠ "${f.name}" measures ${det.w}×${det.h}″ (${det.method}) but the order spec is ${specL}×${specS}″ — check that this is the right file/spec before printing.`);
-            else if (flipped) setNotice(aNote + `⚠ "${f.name}" is ${det.w}×${det.h}″ (${det.h > det.w ? "portrait" : "landscape"}) but the order spec reads ${trimLong}×${trimShort}″ — saddle folds on the height edge, so imposing as-is would turn every page 90°. Swap the page width/height before printing.`);
+            else if (flipped) setNotice(aNote + `⚠ "${f.name}" is ${det.w}×${det.h}″ (${det.h > det.w ? "portrait" : "landscape"}) but the order spec reads ${trimLong}×${trimShort}″ — ${isPB ? "perfect bound binds" : "saddle folds"} on the height edge, so imposing as-is would turn every page 90°. Swap the page width/height before printing.`);
           } else {
-            if (isSaddle) { setTrimLong(det.w); setTrimShort(det.h); }
+            if (isSaddle || isPB) { setTrimLong(det.w); setTrimShort(det.h); }   // bound: width × height
             else { setTrimLong(detL); setTrimShort(detS); }
             setNotice(`Trim auto-detected: ${det.w}×${det.h}″ (${det.method}).` + (pageCount > (sides === 2 ? 2 : 1) && !isSaddle ? ` File has ${pageCount} pages — set "Multi-page file" to gang or cut & stack if they're different pieces.` : ""));
           }
@@ -4022,62 +4131,134 @@ function App() {
                 gated on `lay` alone the control that caused it would vanish,
                 leaving no way to undo. The settings live in state, so they are
                 still editable with no layout at all. */}
-            {(lay ? (isSaddle ? !!lay.booklet : true)
-                  : (isSaddle || FLAT_CALCS.includes(calc) || calc === "sticker")) && (() => {
-              const ok = !!lay;
-              const nc = ok ? Math.max(0, lay.across - 1) : 0;
-              const nr = ok ? Math.max(0, lay.down - 1) : 0;
-              const uni = ok ? (lay.gutter || 0) : 0;
-              const effCol = (gapCols && gapCols.length === nc) ? gapCols : ((ok && lay.colGaps) || Array(nc).fill(uni));
-              const effRow = (gapRows && gapRows.length === nr) ? gapRows : ((ok && lay.rowGaps) || Array(nr).fill(uni));
-              const setCol = (i, v) => { const a = effCol.slice(); a[i] = v === "" ? 0 : +v; setGapCols(a); };
-              const setRow = (i, v) => { const a = effRow.slice(); a[i] = v === "" ? 0 : +v; setGapRows(a); };
-              const custom = gapCols || gapRows || gapFill != null;
-              const tw = ok ? lay.across * lay.cellW + effCol.reduce((x, y) => x + y, 0) : 0;
-              const th = ok ? lay.down * lay.cellH + effRow.reduce((x, y) => x + y, 0) : 0;
-              const over = ok && (tw > lay.sheet.long + 1e-6 || th > lay.sheet.short + 1e-6);
+            {(() => {
+              // Perfect bound edits ONE HALF at a time. The cover and the book
+              // block are different pieces on different stock, so they each
+              // carry their own grid, gutters and sheet; `part` is only which
+              // of the two this panel is currently pointed at.
+              const pbParts = isPB && layoutInfo.pbLayouts
+                ? ["cover", "guts"].filter(p => layoutInfo.pbLayouts[p]) : [];
+              const part = isPB ? (pbParts.includes(pbGridPart) ? pbGridPart : pbParts[0]) : null;
+              const half = part ? layoutInfo.pbLayouts[part] : null;
+              // The layout this panel describes: the PB half, or the single job.
+              const panelLay = isPB ? (half && half.layout) : lay;
+              const show = isPB ? !!part
+                : (lay ? (isSaddle ? !!lay.booklet : true)
+                       : (isSaddle || FLAT_CALCS.includes(calc) || calc === "sticker"));
+              if (!show) return null;
+              // One accessor pair over two storage shapes, so the panel below is
+              // written once. Everything else in it reads G / setG / panelLay.
+              const G = isPB ? pbGrids[part]
+                : { on: gridOn, across: gridAcross, down: gridDown, sheet: gridSheet,
+                    cols: gapCols, rows: gapRows, fill: gapFill };
+              const setG = isPB
+                ? (patch => setPbGrids(p => ({ ...p, [part]: { ...p[part], ...patch } })))
+                : (patch => {
+                    if ("on" in patch) setGridOn(patch.on);
+                    if ("across" in patch) setGridAcross(patch.across);
+                    if ("down" in patch) setGridDown(patch.down);
+                    if ("sheet" in patch) setGridSheet(patch.sheet);
+                    if ("cols" in patch) setGapCols(patch.cols);
+                    if ("rows" in patch) setGapRows(patch.rows);
+                    if ("fill" in patch) setGapFill(patch.fill);
+                  });
+              const ok = !!panelLay;
+              const nc = ok ? Math.max(0, panelLay.across - 1) : 0;
+              const nr = ok ? Math.max(0, panelLay.down - 1) : 0;
+              const uni = ok ? (panelLay.gutter || 0) : 0;
+              const effCol = (G.cols && G.cols.length === nc) ? G.cols : ((ok && panelLay.colGaps) || Array(nc).fill(uni));
+              const effRow = (G.rows && G.rows.length === nr) ? G.rows : ((ok && panelLay.rowGaps) || Array(nr).fill(uni));
+              const setCol = (i, v) => { const a = effCol.slice(); a[i] = v === "" ? 0 : +v; setG({ cols: a }); };
+              const setRow = (i, v) => { const a = effRow.slice(); a[i] = v === "" ? 0 : +v; setG({ rows: a }); };
+              const custom = G.cols || G.rows || G.fill != null;
+              const tw = ok ? panelLay.across * panelLay.cellW + effCol.reduce((x, y) => x + y, 0) : 0;
+              const th = ok ? panelLay.down * panelLay.cellH + effRow.reduce((x, y) => x + y, 0) : 0;
+              const over = ok && (tw > panelLay.sheet.long + 1e-6 || th > panelLay.sheet.short + 1e-6);
               // Changing the grid invalidates gap arrays sized to the old one.
-              const setAcross = v => { setGridAcross(v); setGapCols(null); };
-              const setDown = v => { setGridDown(v); setGapRows(null); };
-              const manualCount = (Math.floor(+gridAcross) || 0) * (Math.floor(+gridDown) || 0);
+              const setAcross = v => setG({ across: v, cols: null });
+              const setDown = v => setG({ down: v, rows: null });
+              const manualCount = (Math.floor(+G.across) || 0) * (Math.floor(+G.down) || 0);
               return (
                 <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 8, background: "rgba(255,255,255,.02)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <span className="lbl" style={{ margin: 0 }}>{isSaddle ? "Signatures per sheet, creep & gutters" : "Manual grid & gutters"}</span>
                     <span style={{ fontSize: 11, color: over ? "#f87171" : "rgba(255,255,255,.4)" }}>
-                      {ok ? `block ${tw.toFixed(2)}×${th.toFixed(2)}″ / sheet ${lay.sheet.long}×${lay.sheet.short}″${over ? " — OVERFLOW" : ""}`
+                      {ok ? `block ${tw.toFixed(2)}×${th.toFixed(2)}″ / sheet ${panelLay.sheet.long}×${panelLay.sheet.short}″${over ? " — OVERFLOW" : ""}`
                           : "layout refused — adjust or reset below"}
                     </span>
                   </div>
+                  {isPB && (
+                    <div style={{ marginBottom: 9 }}>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {pbParts.map(p => {
+                          const on = p === part;
+                          const pl = layoutInfo.pbLayouts[p] && layoutInfo.pbLayouts[p].layout;
+                          const g = pbGrids[p];
+                          return (
+                            <button key={p} type="button" className="imp-btn sec"
+                                    style={{ padding: "4px 12px", fontSize: 12, borderColor: on ? "#4ea1ff" : undefined, color: on ? "#4ea1ff" : undefined, fontWeight: on ? 700 : 400 }}
+                                    onClick={() => setPbGridPart(p)}>
+                              {p === "cover" ? "Cover" : "Guts"}
+                              <span style={{ color: "rgba(255,255,255,.4)", fontWeight: 400 }}>
+                                {" "}{pl ? `${pl.across}×${pl.down}` : "—"}{g.on ? " manual" : ""}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginTop: 5 }}>
+                        {part === "cover"
+                          ? `Editing the COVER — one flat ${panelLay ? `${panelLay.pieceLong.toFixed(3)}×${panelLay.pieceShort}″` : "back|spine|front"} piece on cover stock.`
+                          : `Editing the GUTS — the book block${panelLay ? `, ${panelLay.pieceLong}×${panelLay.pieceShort}″ pages` : ""} on text stock.`}
+                        {" "}Each half keeps its own grid, gutters and press sheet; neither inherits the other's.
+                      </div>
+                      {half && half.error && (
+                        <div style={{ fontSize: 12, color: "#f87171", marginTop: 5 }}>{half.error}</div>
+                      )}
+                    </div>
+                  )}
                   {(
                     <div style={{ marginBottom: 8 }}>
                       <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-                        <input type="checkbox" checked={gridOn} style={{ width: "auto" }}
+                        <input type="checkbox" checked={G.on} style={{ width: "auto" }}
                                onChange={e => {
                                  const on = e.target.checked;
-                                 if (on && ok) { setGridAcross(lay.across); setGridDown(lay.down); } // seed from the current layout
-                                 if (on) setRepOn(false);   // the two are alternative ways to say the same thing
-                                 setGapCols(null); setGapRows(null);
-                                 setGridOn(on);
+                                 // Seed from the layout on screen so switching to
+                                 // manual starts where automatic left off.
+                                 const seed = on && ok ? { across: panelLay.across, down: panelLay.down } : {};
+                                 if (on && !isPB) setRepOn(false);   // the two are alternative ways to say the same thing
+                                 setG({ on, cols: null, rows: null, ...seed });
                                }} />
-                        <span>{isSaddle ? "Set cells per sheet manually" : "Set columns × rows manually"} <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "how many signature slots the sheet carries (consecutive signatures fill them, unless step and repeat is on below)" : "places exactly this many"}; the count is flagged against the priced imp</span></span>
+                        <span>{isSaddle ? "Set cells per sheet manually" : "Set columns × rows manually"} <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "how many signature slots the sheet carries (consecutive signatures fill them, unless step and repeat is on below)" : "places exactly this many"}; {isPB ? "perfect bound is unpriced, so this grid is the layout" : "the count is flagged against the priced imp"}</span></span>
                       </label>
-                      {gridOn && (
+                      {G.on && (
                         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
                           <div>
                             <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>{isSaddle ? "Copies across" : "Columns (across)"}</div>
-                            <input type="number" min="1" step="1" value={gridAcross} style={{ width: 74, fontSize: 12 }}
+                            <input type="number" min="1" step="1" value={G.across} style={{ width: 74, fontSize: 12 }}
                                    onChange={e => setAcross(e.target.value)} />
                           </div>
                           <span style={{ fontSize: 13, paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
                           <div>
                             <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>{isSaddle ? "Copies down" : "Rows (down)"}</div>
-                            <input type="number" min="1" step="1" value={gridDown} style={{ width: 74, fontSize: 12 }}
+                            <input type="number" min="1" step="1" value={G.down} style={{ width: 74, fontSize: 12 }}
                                    onChange={e => setDown(e.target.value)} />
                           </div>
                           <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                            {ok ? <>on <b>{lay.sheet.label}</b> · </> : null}= <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{ok && lay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(lay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(lay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
+                            {ok ? <>on <b>{panelLay.sheet.label}</b> · </> : null}= <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{ok && panelLay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(panelLay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(panelLay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
                           </div>
+                          {!isSaddle && (
+                            <div>
+                              <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Press sheet</div>
+                              <select value={G.sheet} style={{ width: 118, fontSize: 12 }}
+                                      onChange={e => setG({ sheet: e.target.value, cols: null, rows: null })}>
+                                <option value="auto">Auto</option>
+                                <option value="13x19">13×19</option>
+                                <option value="13x27.5">13×27.5</option>
+                                <option value="12x18">12×18</option>
+                              </select>
+                            </div>
+                          )}
                         </div>
                       )}
                       {isSaddle && (
@@ -4109,7 +4290,7 @@ function App() {
                                        onChange={e => { setRepN(e.target.value); setGapCols(null); setGapRows(null); }} />
                               </div>}
                               <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                                {ok ? <>{lay.across} × {lay.down} on <b>{lay.sheet.label}</b></> : null}
+                                {ok ? <>{panelLay.across} × {panelLay.down} on <b>{panelLay.sheet.label}</b></> : null}
                               </div>
                             </div>
                           )}
@@ -4169,19 +4350,19 @@ function App() {
                   )}
                   <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
                     <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                      <input type="checkbox" checked={gapFill == null ? !!(ok && lay.fillSheet) : gapFill}
-                             onChange={e => setGapFill(e.target.checked)} style={{ width: "auto" }} />
+                      <input type="checkbox" checked={G.fill == null ? !!(ok && panelLay.fillSheet) : G.fill}
+                             onChange={e => setG({ fill: e.target.checked })} style={{ width: "auto" }} />
                       Fill full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>(place past the imageable area)</span>
                     </label>
                     {custom && (
                       <button type="button" className="imp-btn sec" style={{ padding: "3px 10px", fontSize: 12 }}
-                              onClick={() => { setGapCols(null); setGapRows(null); setGapFill(null); }}>Reset gutters</button>
+                              onClick={() => setG({ cols: null, rows: null, fill: null })}>Reset gutters</button>
                     )}
-                    {(!ok || gridOn || repOn) && (
+                    {(!ok || G.on || (!isPB && repOn)) && (
                       <button type="button" className="imp-btn sec"
                               style={{ padding: "3px 10px", fontSize: 12, borderColor: ok ? undefined : "#f87171", color: ok ? undefined : "#f87171" }}
-                              onClick={() => { setGridOn(false); setRepOn(false); setGapCols(null); setGapRows(null); setGapFill(null); }}>
-                        Back to automatic
+                              onClick={() => { if (!isPB) setRepOn(false); setG({ on: false, sheet: "auto", cols: null, rows: null, fill: null }); }}>
+                        Back to automatic{isPB ? ` (${part})` : ""}
                       </button>
                     )}
                   </div>
