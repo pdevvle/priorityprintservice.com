@@ -485,6 +485,7 @@ const PCF = Object.assign({
 
   proof_hardcopy_cost:35, proof_digital_cost:10, bleed_minimum:15,
   default_transit_days:4,
+  flat_bw_discount_rate:0,   // 0 = no B&W discount on flats
   shop_timezone:"America/Phoenix", shop_cutoff_hour:14, free_shipping_buffer:2,
   shippo_api_token:"", shippo_origin_zip:"85027", ship_carton_lb:45, ship_text_sheets_per_carton:900, ship_card_sheets_per_carton:400,
   // Site-wide sale (0 = off). Applied on subtotal before shipping/rush.
@@ -1079,7 +1080,17 @@ function calculate(c) {
 
   // BW discount
   const allBW = c.frontColor === "bw" && (sides === 1 || c.backColor === "bw");
-  P.discBW = allBW ? -(P.press * 0.3) : 0;
+  // Removed on the flats (owner decision, order 87145): an all-black job on the
+  // cheapest uncoated stock was reaching the markup floor AND taking 30% off press
+  // labour on top, which is where the 26.7c/pc oversize brochure came from. Black-only
+  // does not make the press run cheaper here — the sheet goes through the same number
+  // of times, and on a 1-up size that is one pass per piece.
+  //
+  // Kept as a config knob rather than deleted so it can be brought back from the admin
+  // without a deploy, the way the booklets already do it. Default 0 = no discount;
+  // a live config that lacks the key reads as 0 too, which is the intent.
+  const _bwRate = Number(PCF.flat_bw_discount_rate) || 0;
+  P.discBW = allBW ? -(P.press * _bwRate) : 0;
 
   // Cardstock discount — specific cardstock values only
   const csDiscVals = [0.01, 0.02, 0.03, 1.01, 1.02, 2.021, 2.022, 2.023, 2.024, 2.025, 2.01, 3.03, 3.01, 3.04, 3.02];
