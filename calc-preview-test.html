@@ -488,6 +488,10 @@ const PCF = Object.assign({
   art_pagesperhour:8, art_newdesignmodifier:0.5,
   sheetsforlowcosthardcopyproof:1500,
   minimum_turnaround_days:3,
+  // All-4 round cornering is only offered up to this page count. Past it the book
+  // is too thick to round the spine-side corners on a stitched block; only the two
+  // outside corners can be done. 0 disables the limit.
+  rc_all4_max_pages:24,
   two_staple_threshold:5.25,     // binding edge > this = auto two staple
   non_inventory_fee:35,          // surcharge for non-stock papers
   bw_discount_rate:0.3,          // press cost reduction for B&W
@@ -961,6 +965,17 @@ function calculate(c) {
   const tQ=sets.reduce((s,x)=>s+x.qty,0);
   const tP=sets.reduce((s,x)=>s+x.pages,0);
   const tS=sets.reduce((s,x)=>s+(x.qty*x.pages)/4,0)/(imp/2);
+  // All-4 cornering is a per-BOOK constraint, so it keys off the thickest book in
+  // the job, not the summed page count — with sets mothballed these are the same
+  // number, but they stop being the same the moment sets come back.
+  const _maxBookPages=sets.reduce((m,x)=>Math.max(m,x.pages||0),0);
+  const _all4Cap=Number(PCF.rc_all4_max_pages)||0;
+  const rcAll4OK=!_all4Cap||_maxBookPages<=_all4Cap;
+  // A selection that is no longer offered must not be priced either. The UI clears
+  // it on the next tick (see the rcAll4OK effect), the same way coating and vivid
+  // already behave; this makes the intervening render quote the honest number
+  // rather than a service we would have to refuse in the bindery.
+  const rcEff=(!rcAll4OK&&/all\s*4/i.test(rc.label||''))?CORNERS[0]:rc;
   if (sheetsToDays(tS) === null) return {error:["This job exceeds our online ordering capacity. Please contact us for a custom quote."],sz};
   const dL=PCF.booklet_markup_coef_tS*Math.log(tS);
   // Base markup, then 8-up bonus: imp>=8 (small saddle sizes) gets a markup boost to
@@ -1033,7 +1048,7 @@ function calculate(c) {
   // The flats have always charged half a bindery hour to set the rounder up;
   // there is no reason a booklet run is different, and without it a run of 25
   // is priced as though setup were free.
-  P.rc=rc.val>0?(approxThickness/rc.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr+(PCF.labor_bindery_hr/2):0;
+  P.rc=rcEff.val>0?(approxThickness/rcEff.price)/PCF.roundcornerperhour*PCF.labor_bindery_hr+(PCF.labor_bindery_hr/2):0;
 
   let ndc=art.val>=4?(art.price*tP)*PCF.art_newdesignmodifier:0;
   let aec=(art.val>=2&&art.val<4)?PCF.art_pagesperhour+((c.artEditPages/PCF.art_pagesperhour)*art.price):0;
@@ -1321,7 +1336,7 @@ function calculate(c) {
   const saleActive=P.discSale<-0.005;
   const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
   const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
-  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,vividOK:c.insidePaper.coatable,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
+  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,vividOK:c.insidePaper.coatable,rcAll4OK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
     shipping:{hasDest:_hasDest,estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
@@ -6036,6 +6051,14 @@ function App(){
   useEffect(()=>{if(r.coatOK===false)setCoating(0)},[r.coatOK]);
   useEffect(()=>{if(r.vividOK===false)setVividPrint(false)},[r.vividOK]);
   useEffect(()=>{if(r.q100===false)setBundling(0)},[r.q100]);
+  // Raising the page count past the cap must take an All-4 selection with it,
+  // otherwise the order carries a finish we cannot produce.
+  useEffect(()=>{
+    if(r.rcAll4OK===false){
+      const cur=CORNERS.find(x=>x.val===roundCorner);
+      if(cur&&/all\s*4/i.test(cur.label||'')) setRoundCorner(0);
+    }
+  },[r.rcAll4OK]);
   // The date field is pre-filled with the free delivery date so it never sits empty.
   // That has to stop the moment the customer picks their own, or every recalculation
   // that moves the free date — a quantity change, a different paper — silently threw
@@ -6686,7 +6709,7 @@ function App(){
             </div>
             {(_AD.rc!==false || roundCorner>0) && <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <Sel label={<RichTip tipKey="round_cornering">Round Cornering</RichTip>} badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+                <Sel label={<RichTip tipKey="round_cornering">Round Cornering</RichTip>} badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.filter(o=>r.rcAll4OK!==false||!/all\s*4/i.test(o.label||'')).map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
               </div>
               {coverArt && roundCorner > 0 && (() => {
                 const is4 = roundCorner === 108 || roundCorner === 107;

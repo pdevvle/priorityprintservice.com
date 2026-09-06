@@ -243,6 +243,7 @@ bw_discount_rate:            0.3
 easy_discount_rate:          0.05
 easydiscount_max:            0
 common_discount_max:         1500      (any value > 0 enables the discount; legacy name, not a $ cap)
+rc_all4_max_pages:           24        (0 = no cap; see below)
 markup curve:                dL = 0.295 * ln(tS)
 ```
 
@@ -250,6 +251,36 @@ These two files also declare `backend_maximummarkup: 15.2` / `backend_minimummar
 which the saved option overrides to `13` / `1.5`. The booklet engine prices off the
 `booklet_*` keys, so the `backend_*` pair is vestigial here — do not tune it expecting an
 effect on booklets.
+
+#### All-4 round cornering capped by page count (2026-09-06)
+
+`rc_all4_max_pages` (default **24**, exposed in the admin as *All-4 Corner Max*) withdraws
+the two "All 4" round-corner options once a book's page count exceeds it. `0` disables the
+cap entirely and restores the previous behaviour. The Outside-2 options are never affected
+at any page count.
+
+This is a production-capability limit, not a price knob — a saddle-stitched block that
+thick cannot be held square through four cutter passes — but it lives here because it
+changes what a quote can contain.
+
+It is enforced in three places, and all three are needed:
+
+1. the dropdown filters the All 4 options out above the cap, so they cannot be chosen;
+2. an All 4 option already selected clears itself when the page count rises past the cap;
+3. `rcEff` prices the job as *no cornering* the moment the cap is exceeded — without it
+   the render tick between (2) and the effect firing would quote a cornering charge for a
+   finish that will never be produced.
+
+Options are matched on their **label** (`/all\s*4/i`), not their `val`, so re-pointing the
+corner values in the admin config cannot silently defeat the cap. The check keys on the
+largest page count in the job rather than the sum, so it stays correct if the mothballed
+multi-set UI ever returns.
+
+**Rollback:** set *All-4 Corner Max* to `0` in PPS Config → Production. No deploy needed;
+the calculator reads the live value.
+
+Covered by `tools-roundcorner-cap-test.mjs`, which drives the rendered form (the filter and
+the auto-clear exist only there) and checks both sides of the boundary.
 
 ### Perfect bound — `calc-perfect-bound.html`
 
