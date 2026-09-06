@@ -2780,6 +2780,161 @@ function drawDashedArc(pdf, cx, cy, r, startDeg, endDeg, dashLen, gapLen) {
   }
 }
 
+/* ── the standalone proof surface (proof-ui-draft.html) ────────
+   The reorganised proofer is a separate document, not a component. Opening it
+   in a same-origin iframe rather than porting 2,000 lines of vanilla DOM into
+   this file buys three things worth more than the seam costs:
+
+     - it keeps its own pdf.js. This file loads 4.10.38 as ESM; the proofer
+       pins 3.11.174 UMD and both claim window.pdfjsLib. In one document one of
+       them loses.
+     - approval has a failure mode that has never been root-caused (2026-08-12:
+       a real multi-page PDF with an orientation mismatch took the whole
+       calculator down). A frame boundary means the worst case is a broken
+       proof, not a customer staring at a blank product page mid-order.
+     - the proofer's four test suites keep testing the artifact that actually
+       ships, instead of a port of it.
+
+   Off unless PPS_CONFIG.proofUrl is set, so this ships dark and is switched on
+   per site rather than by a deploy. */
+function ppsProofUrl(){
+  // PCF.proof_url is the admin knob (PPS Config -> Production -> New Proof
+  // URL), so turning this on is a config change rather than a plugin deploy —
+  // which matters because production's pps-calculators.php is a long way ahead
+  // of the copy in git. PPS_CONFIG.proofUrl is honoured too, for a site that
+  // would rather inject it.
+  const raw = (window.PPS_CONFIG || {}).proofUrl || (typeof PCF !== 'undefined' ? PCF.proof_url : '');
+  const u = (typeof raw === 'string') ? raw.trim() : '';
+  if (!u) return null;
+  // Same origin only. The handshake carries the customer's artwork and the
+  // hash their approval is bound to, and the proofer answers same-origin
+  // messages only — so a cross-origin URL would not work anyway. Better to
+  // fall back to the built-in proof than to open a frame that silently never
+  // completes.
+  try {
+    if (new URL(u, window.location.href).origin !== window.location.origin) {
+      console.warn('[pps] proof_url is not same-origin; using the built-in proof instead:', u);
+      return null;
+    }
+  } catch (e) { return null; }
+  return u;
+}
+
+/* Opens the proof and resolves with what the customer did:
+     { action:'approved', hash, files:[{name,blob}], pageCount }
+     { action:'escape', reason }        prepress will check the file
+     { action:'closed' }                they backed out
+   Rejects only if the proof could not be opened at all. */
+function ppsOpenProof({ url, job, files, onProgress }){
+  return new Promise((resolve, reject) => {
+    const origin = window.location.origin;
+    let done = false;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pps-proof-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.72);'
+      + 'display:flex;align-items:stretch;justify-content:center;padding:0';
+    const frame = document.createElement('iframe');
+    frame.title = 'Proof your artwork';
+    frame.setAttribute('allow', 'clipboard-write');
+    frame.style.cssText = 'width:100%;height:100%;border:0;background:var(--bp-surface,#fff)';
+    frame.src = url;
+    overlay.appendChild(frame);
+
+    // The page behind must not scroll while a modal owns the screen.
+    const prevOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+
+    const cleanup = () => {
+      window.removeEventListener('message', onMsg);
+      clearTimeout(readyTimer);
+      document.documentElement.style.overflow = prevOverflow;
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+    const finish = (v) => { if (done) return; done = true; cleanup(); resolve(v); };
+    const fail   = (e) => { if (done) return; done = true; cleanup(); reject(e); };
+
+    function onMsg(ev){
+      // Same origin AND actually from our frame: another embed on the page
+      // must not be able to approve artwork on this order's behalf.
+      if (ev.origin !== origin) return;
+      if (ev.source !== frame.contentWindow) return;
+      const m = ev.data;
+      if (!m || typeof m !== 'object') return;
+
+      if (m.type === 'pps-proof:ready'){
+        clearTimeout(readyTimer);
+        frame.contentWindow.postMessage({ type:'pps-proof:job', job, files: files || [] }, origin);
+        return;
+      }
+      if (m.type === 'pps-proof:error'){
+        fail(new Error((m.errors || ['the proof could not be opened']).join('; ')));
+        return;
+      }
+      if (m.type === 'pps-proof:approve-failed'){
+        if (onProgress) onProgress({ stage:'approve-failed', attempts:m.attempts, message:m.message });
+        return;
+      }
+      if (m.type === 'pps-proof:approved'){
+        finish({ action:'approved', hash:m.hash, pageCount:m.pageCount, files:m.files || [] });
+        return;
+      }
+      if (m.type === 'pps-proof:escape'){
+        finish({ action:'escape', reason:m.reason || 'approval failed' });
+        return;
+      }
+      if (m.type === 'pps-proof:close'){
+        finish({ action:'closed' });
+        return;
+      }
+    }
+
+    // A frame that never reports ready is a deploy problem, not a customer
+    // problem — surface it instead of leaving them looking at a grey sheet.
+    const readyTimer = setTimeout(() => {
+      fail(new Error('the proof did not load'));
+    }, 20000);
+
+    window.addEventListener('message', onMsg);
+    document.body.appendChild(overlay);
+  });
+}
+
+/* The proofer names its files for humans; the order pipeline names them for
+   the imposition tool and for Drive. This is the only place that mapping
+   lives, so a rename on either side breaks here rather than silently
+   uploading a file nothing downstream recognises. */
+function ppsProofFilesToOrder(pkgFiles, baseName){
+  const out = [];
+  let printReadyName = null;
+  (pkgFiles || []).forEach(f => {
+    const n = String(f.name || '');
+    if (n === 'PRINT_READY.pdf'){
+      printReadyName = baseName + '_print-ready.pdf';
+      out.push(new File([f.blob], printReadyName, { type:'application/pdf' }));
+    } else if (/^PREVIEW_p(\d+)\.jpg$/i.test(n)){
+      const i = n.match(/^PREVIEW_p(\d+)\.jpg$/i)[1];
+      out.push(new File([f.blob], baseName + '_preview_page_' + String(parseInt(i,10)).padStart(3,'0') + '.jpg',
+                        { type:'image/jpeg' }));
+    } else if (n === 'MANIFEST.txt'){
+      // The manifest is what marks an order as actually approved — the
+      // print-ready PDF is absent whenever the art needed no transforms.
+      out.push(new File([f.blob], baseName + '_manipulation_manifest.txt', { type:'text/plain' }));
+    }
+  });
+  return { files: out, printReadyName };
+}
+
+/* The compiled build wraps this file in an IIFE, so nothing above is reachable
+   from a test without a handle. These two are pure — a config read and a
+   rename map — and the rename is the seam most able to break in silence: get
+   it wrong and the order still completes, just without the deliverables the
+   pipeline and the imposition tool look for. Same idea as window.__ppsImpose
+   in the imposition tool. */
+if (typeof window !== "undefined") {
+  window.__ppsProof = { urlFor: ppsProofUrl, mapFiles: ppsProofFilesToOrder };
+}
+
 function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, coverColor, staffUnlocked, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug, pageTransforms, setPageTransforms, artDims, setArtDims, twoStaplesApplied }) {
   const mob = useIsMobile();
   const [rawPages, setRawPages] = useState([]);
@@ -2984,6 +3139,62 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // approval must revoke it there, not just flip the local badge. All
   // artwork-state emissions go through emitArtwork so parentApprovedRef always
   // mirrors what the parent currently believes.
+  /* Opening the standalone proofer instead of the built-in modal, when this
+     site is configured for it. Everything after approval is unchanged: the
+     same emitArtwork contract, the same file names, the same proof hash — so
+     the cart, the Drive upload and the imposition tool cannot tell which
+     surface produced the package, which is the point. */
+  const openStandaloneProof = async () => {
+    const url = ppsProofUrl();
+    if (!url) return false;
+    const raw = rawFileRef.current;
+    const fileName = raw ? raw.name : "";
+    const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
+    const job = {
+      calc: "saddle",
+      // dims is this component's own trim, from trimDims(); sz belongs to
+      // calculate() and is not in scope here. 0.125 mirrors the bleed and
+      // safety the proof modal already draws with, four lines up the file.
+      trim: { w: Number(dims.w), h: Number(dims.h) },
+      bleed: 0.125,
+      safety: 0.125,
+      pages: Number(pageCount),
+    };
+    const sources = (rawFilesRef.current && rawFilesRef.current.length)
+      ? rawFilesRef.current.slice()
+      : (raw ? [raw] : []);
+    try {
+      const r = await ppsOpenProof({ url, job, files: sources });
+      if (r.action === "approved") {
+        const { files: mapped, printReadyName } = ppsProofFilesToOrder(r.files, baseName);
+        // Originals travel too — the file as supplied is what we are trusted
+        // to keep, and it is the only thing that can settle a dispute later.
+        const originals = [];
+        const seen = new Set();
+        sources.forEach(f => {
+          const k = f.name + ":" + f.size;
+          if (seen.has(k)) return;
+          seen.add(k); originals.push(f);
+        });
+        setArtApproved(true);
+        emitArtwork({ type: "files", list: originals.concat(mapped), approved: true,
+                      proofHash: r.hash || null, proofHashOf: printReadyName || null });
+      } else if (r.action === "escape") {
+        // Deliberately NOT approved: the order goes through with the raw file
+        // and prepress is told. Better than a customer who cannot order.
+        setArtApproved(false);
+        emitArtwork({ type: "files", list: sources.slice(), approved: false,
+                      prepressReview: r.reason || "proof could not be prepared" });
+      }
+      return true;
+    } catch (err) {
+      console.error("[pps] standalone proof failed to open:", err);
+      alert("We couldn't open the proof viewer. Please try again, or continue and "
+            + "our prepress team will check your file before printing.");
+      return true;   // handled — do not also open the old modal on top of this
+    }
+  };
+
   const parentApprovedRef = useRef(false);
   const emitArtwork = (payload) => {
     parentApprovedRef.current = !!(payload && payload.approved);
@@ -4618,7 +4829,7 @@ update();
                 borderRadius: 10,
               }}>
                 <div style={{ display:"flex", borderRadius:10, overflow:"hidden", border:`1px solid ${CC.border}`, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
-                  <button type="button" onClick={() => { setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
+                  <button type="button" onClick={async () => { if (ppsProofUrl() && await openStandaloneProof()) return; setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
                     flex:1, padding:"11px 10px", fontSize:13, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
                     display:"flex", alignItems:"center", justifyContent:"center", gap:6,
                     background: artApproved && proof===0

@@ -21,12 +21,34 @@ import path from 'node:path';
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const DEPS = process.env.PPS_DEPS_DIR || path.join(HERE, 'node_modules');
 
-// Served under /vendor/ — the names the page asks for, mapped to where npm puts them.
+/* The proofer pins pdf.js 3.11.174; the calculators run 4.10.38. Those cannot
+   both live in one node_modules — installing either evicts the other, and the
+   calculator smoke test starts failing on a missing file that has nothing to do
+   with whatever you were working on. So the proofer's copies are kept in their
+   own directory:
+
+     mkdir -p proof-vendor && npm install --no-save pdfjs-dist@3.11.174 pdf-lib@1.17.1
+     cp node_modules/pdfjs-dist/build/pdf.min.js node_modules/pdfjs-dist/build/pdf.worker.min.js \
+        node_modules/pdf-lib/dist/pdf-lib.min.js proof-vendor/
+     npm install --no-save pdfjs-dist@4.10.38      # put the calculators' copy back
+
+   PPS_PROOF_VENDOR_DIR overrides the location. node_modules is still searched
+   as a fallback, so a checkout that happens to have the right versions works
+   without the extra directory. */
+const VENDOR_DIR = process.env.PPS_PROOF_VENDOR_DIR || path.join(path.dirname(DEPS), 'proof-vendor');
+
 const VENDOR = {
   'pdf.min.js':        'pdfjs-dist/build/pdf.min.js',
   'pdf.worker.min.js': 'pdfjs-dist/build/pdf.worker.min.js',
   'pdf-lib.min.js':    'pdf-lib/dist/pdf-lib.min.js',
 };
+
+// Prefer the dedicated directory, fall back to node_modules.
+async function vendorPath(name){
+  const flat = path.join(VENDOR_DIR, name);
+  try { await stat(flat); return flat; } catch { /* fall through */ }
+  return path.join(DEPS, VENDOR[name]);
+}
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -53,7 +75,7 @@ export async function serve(port = 8137, root = HERE) {
           res.writeHead(404).end('unknown vendor file: ' + key);
           return;
         }
-        file = path.join(DEPS, VENDOR[key]);
+        file = await vendorPath(key);
       } else {
         // Resolve inside root, so a traversal cannot read outside the tree.
         const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
@@ -86,13 +108,15 @@ export async function serve(port = 8137, root = HERE) {
 // "connection refused" when the libraries simply are not installed.
 export async function checkVendor() {
   const missing = [];
-  for (const [name, rel] of Object.entries(VENDOR)) {
-    try { await stat(path.join(DEPS, rel)); } catch { missing.push(name + ' (' + rel + ')'); }
+  for (const name of Object.keys(VENDOR)) {
+    const f = await vendorPath(name);
+    try { await stat(f); } catch { missing.push(name); }
   }
   if (missing.length) {
     throw new Error(
-      'missing vendored libraries under ' + DEPS + ':\n  ' + missing.join('\n  ') +
-      '\ninstall with: npm install --no-save pdfjs-dist@3.11.174 pdf-lib@1.17.1'
+      'missing proofer libraries: ' + missing.join(', ') +
+      '\nlooked in ' + VENDOR_DIR + ' and ' + DEPS +
+      '\nsee the note at the top of this file for how to populate proof-vendor/'
     );
   }
 }
