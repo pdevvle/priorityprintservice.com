@@ -207,6 +207,119 @@ const outs64 = await total();
 ok('Outside 2 still prices at 64pp', outs64 > base64,
    `$${base64.toFixed(2)} -> $${outs64.toFixed(2)}`);
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The case the checks above cannot reach: production does not use the CORNERS
+// baked into the HTML. It replaces them wholesale from wp_options, and the
+// cap shipped on 2026-09-06 keyed off the label "All 4" — so on a site whose
+// labels had been reworded, every option survived the cap and the change did
+// nothing. Everything above still passed, because it ran against the file's
+// own fallback list. These scenarios inject a config override the way PHP
+// does, which is the only way to catch that class of failure.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const scenario = async (title, corners, expect) => {
+  console.log('\n── ' + title + ' ──');
+  const p2 = await browser.newPage({ viewport: { width: 1500, height: 1100 } });
+  p2.on('pageerror', e => pageErrors.push(String(e && e.message || e)));
+  await p2.route('**/*', async route => {
+    const url = route.request().url();
+    if (url.startsWith('file://')) return route.continue();
+    if (url.includes('react-dom')) return route.fulfill({ contentType: 'application/javascript', body: REACT_DOM });
+    if (/\/react@|\/react\./.test(url)) return route.fulfill({ contentType: 'application/javascript', body: REACT });
+    if (url.includes('fonts.g'))    return route.fulfill({ contentType: 'text/css', body: '' });
+    if (url.includes('jspdf'))      return route.fulfill({ contentType: 'application/javascript', body: 'window.jspdf={jsPDF:function(){}};' });
+    if (url.includes('pdf.worker')) return route.fulfill({ contentType: 'text/javascript', body: PDFWORKER });
+    if (url.includes('pdfjs-dist')) return route.fulfill({ contentType: 'text/javascript', body: PDFJS });
+    return route.fulfill({ status: 204, body: '' });
+  });
+  // Mirrors how the plugin injects config: set before any page script runs.
+  await p2.addInitScript(c => {
+    window.PPS_CONFIG = Object.assign({}, window.PPS_CONFIG, { calc: { corners: c } });
+  }, corners);
+  await p2.goto('file://' + PAGE, { waitUntil: 'load' });
+  await p2.waitForFunction(() => /\$[\d,]+\.\d{2}/.test(document.body.innerText), null, { timeout: 25000 });
+
+  const open = async pattern => {
+    await p2.evaluate(pt => {
+      const rx = new RegExp(pt, 'i');
+      const hit = Array.from(document.querySelectorAll('div,button'))
+        .filter(e => e.childElementCount === 0 && rx.test(e.textContent || ''));
+      let el = hit[0];
+      for (let i = 0; i < 6 && el; i++) { el.click(); el = el.parentElement; }
+    }, pattern);
+    await p2.waitForTimeout(450);
+  };
+  const locate = key => p2.evaluate(k => {
+    const preds = {
+      corner: t => t.length >= 2 && t.some(x => /corner/i.test(x)),
+      pages:  t => t.length > 3 && t.every(x => /^\d+\s+Pages$/i.test(x)),
+    };
+    return Array.from(document.querySelectorAll('select'))
+      .findIndex(s => preds[k](Array.from(s.options).map(o => o.textContent.trim())));
+  }, key);
+  const need = async (key, header) => {
+    for (let i = 0; i < 3; i++) { if (await locate(key) >= 0) break; await open(header); }
+    return locate(key);
+  };
+  const setP = async v => {
+    const i = await need('pages', '^Booklet$');
+    await p2.evaluate(({ i, v }) => {
+      const set = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+      const el = document.querySelectorAll('select')[i];
+      set.call(el, String(v));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, { i, v });
+    await p2.waitForTimeout(500);
+  };
+  const labels = async () => {
+    const i = await need('corner', 'Finishing\\s*&\\s*Addons');
+    return p2.evaluate(i => Array.from(document.querySelectorAll('select')[i].options)
+      .map(o => o.textContent.trim()), i);
+  };
+
+  await setP(24);
+  const at24 = await labels();
+  await setP(28);
+  const at28 = await labels();
+  await p2.close();
+
+  ok(title + ': offered at 24pp', at24.length === corners.length,
+     'saw ' + at24.length + ' of ' + corners.length + ': ' + at24.join(' / '));
+  ok(title + ': withdrawn at 28pp', at28.length === corners.length - expect.hidden,
+     'expected ' + (corners.length - expect.hidden) + ', saw ' + at28.length + ': ' + at28.join(' / '));
+  for (const keep of expect.keeps) {
+    ok(title + ': kept "' + keep + '"', at28.some(t => t === keep),
+       'survivors: ' + at28.join(' / '));
+  }
+};
+
+// Vals intact, wording changed — the exact shape that defeated the first fix.
+await scenario('relabelled, vals intact', [
+  { label: 'No Round Cornering',            val: 0,   price: 0 },
+  { label: '1/4" Round Corners — Outside 2', val: 216, price: 0.2 },
+  { label: '3/8" Round Corners — Outside 2', val: 215, price: 0.15 },
+  { label: '1/4" 4 Round Corners',           val: 108, price: 0.1 },
+  { label: '3/8" 4 Round Corners',           val: 107, price: 0.075 },
+], { hidden: 2, keeps: ['1/4" Round Corners — Outside 2', '3/8" Round Corners — Outside 2'] });
+
+// The false-positive guard: an Outside-2 row worded so a naive /4.*corner/
+// would catch it. Vals are intact, so wording must be ignored entirely.
+await scenario('Outside 2 worded like a 4-corner option', [
+  { label: 'No Round Cornering',              val: 0,   price: 0 },
+  { label: '1/4 Round Corners — Outside 2',   val: 216, price: 0.2 },
+  { label: 'Four Corner Look — Outside 2',    val: 215, price: 0.15 },
+  { label: 'All 4',                           val: 108, price: 0.1 },
+], { hidden: 1, keeps: ['1/4 Round Corners — Outside 2', 'Four Corner Look — Outside 2'] });
+
+// Vals repointed as well: nothing authoritative left, so fall back to wording
+// rather than failing open.
+await scenario('vals repointed, wording is all that is left', [
+  { label: 'No Round Cornering',       val: 0,  price: 0 },
+  { label: 'Round — Outside 2',        val: 91, price: 0.2 },
+  { label: 'Round — All Four Corners', val: 92, price: 0.1 },
+], { hidden: 1, keeps: ['Round — Outside 2'] });
+
 ok('no uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));
 
 console.log(`\n${checks} checks, ${failed} failed`);

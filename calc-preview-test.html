@@ -492,6 +492,7 @@ const PCF = Object.assign({
   // is too thick to round the spine-side corners on a stitched block; only the two
   // outside corners can be done. 0 disables the limit.
   rc_all4_max_pages:24,
+  rc_all4_vals:"107,108",
   two_staple_threshold:5.25,     // binding edge > this = auto two staple
   non_inventory_fee:35,          // surcharge for non-stock papers
   bw_discount_rate:0.3,          // press cost reduction for B&W
@@ -853,6 +854,26 @@ const BUNDLING=_CFG.bundling||[{label:"No Bundling",val:0,price:500},{label:"Bun
 // cutter_stackheight_inches: 3.5. Outside-2 is twice the height of All-4
 // because All-4 is two passes.
 const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'¼" Round — Outside 2',val:216,price:0.2},{label:'⅜" Round — Outside 2',val:215,price:0.15},{label:'¼" Round — All 4',val:108,price:0.1},{label:'⅜" Round — All 4',val:107,price:0.075}];
+// Which corner options mean "all four corners"?
+//
+// Production replaces CORNERS wholesale from wp_options, so this cannot key off
+// the label: the wording has been changed before, and a cap that reads "All 4"
+// silently stops working the moment someone writes "4 Corners" instead. It
+// cannot key off the label alone in the other direction either — a size written
+// "1/4 Round Corners" would trip a naive /4.*corner/ and hide an Outside-2 row.
+//
+// So: the val codes are the identity (they are what the cart and PPS-Spec
+// record, and they outlive relabelling). If ANY option still carries a known
+// All-4 val we trust vals alone and ignore labels entirely — no false positives.
+// Only if the vals have been repointed too do we fall back to matching wording,
+// so the cap degrades instead of failing open.
+const RC_ALL4_VALS=String(PCF.rc_all4_vals==null?"107,108":PCF.rc_all4_vals)
+  .split(",").map(x=>Number(String(x).trim())).filter(n=>!isNaN(n));
+const RC_ALL4_LABEL=/all[\s\-_]*(4|four)\b|\b(4|four)[\s\-_]*(round[\s\-_]*)?corners?\b/i;
+const _rcValsPresent=CORNERS.some(o=>RC_ALL4_VALS.indexOf(Number(o.val))>=0);
+const isAll4Corner=o=>!!o&&(_rcValsPresent
+  ? RC_ALL4_VALS.indexOf(Number(o.val))>=0
+  : RC_ALL4_LABEL.test(String(o.label||"")));
 const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01,price:0},{label:"Email Art After Order",val:0.02,price:0},{label:"Artwork already discussed",val:0.03,price:0},{label:"I have a design in Canva",val:0.04,price:0},{label:"Artwork needs edits",val:2.01,price:75},{label:"Design from scratch",val:4.01,price:75}];
 const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
 
@@ -975,7 +996,7 @@ function calculate(c) {
   // it on the next tick (see the rcAll4OK effect), the same way coating and vivid
   // already behave; this makes the intervening render quote the honest number
   // rather than a service we would have to refuse in the bindery.
-  const rcEff=(!rcAll4OK&&/all\s*4/i.test(rc.label||''))?CORNERS[0]:rc;
+  const rcEff=(!rcAll4OK&&isAll4Corner(rc))?CORNERS[0]:rc;
   if (sheetsToDays(tS) === null) return {error:["This job exceeds our online ordering capacity. Please contact us for a custom quote."],sz};
   const dL=PCF.booklet_markup_coef_tS*Math.log(tS);
   // Base markup, then 8-up bonus: imp>=8 (small saddle sizes) gets a markup boost to
@@ -6056,7 +6077,7 @@ function App(){
   useEffect(()=>{
     if(r.rcAll4OK===false){
       const cur=CORNERS.find(x=>x.val===roundCorner);
-      if(cur&&/all\s*4/i.test(cur.label||'')) setRoundCorner(0);
+      if(isAll4Corner(cur)) setRoundCorner(0);
     }
   },[r.rcAll4OK]);
   // The date field is pre-filled with the free delivery date so it never sits empty.
@@ -6709,7 +6730,7 @@ function App(){
             </div>
             {(_AD.rc!==false || roundCorner>0) && <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <Sel label={<RichTip tipKey="round_cornering">Round Cornering</RichTip>} badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.filter(o=>r.rcAll4OK!==false||!/all\s*4/i.test(o.label||'')).map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+                <Sel label={<RichTip tipKey="round_cornering">Round Cornering</RichTip>} badge={<TurnBadge days={r.ti?.roundCorner}/>} value={roundCorner} onChange={v=>setRoundCorner(Number(v))}>{CORNERS.filter(o=>r.rcAll4OK!==false||!isAll4Corner(o)).map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
               </div>
               {coverArt && roundCorner > 0 && (() => {
                 const is4 = roundCorner === 108 || roundCorner === 107;

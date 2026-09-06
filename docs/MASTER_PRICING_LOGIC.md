@@ -271,10 +271,26 @@ It is enforced in three places, and all three are needed:
    the render tick between (2) and the effect firing would quote a cornering charge for a
    finish that will never be produced.
 
-Options are matched on their **label** (`/all\s*4/i`), not their `val`, so re-pointing the
-corner values in the admin config cannot silently defeat the cap. The check keys on the
-largest page count in the job rather than the sum, so it stays correct if the mothballed
-multi-set UI ever returns.
+Options are identified by their **`val`** — the finishing codes in `rc_all4_vals`
+(`107,108`), which are what the cart and PPS-Spec record and which outlive relabelling.
+Labels are used only as a fallback, when no option carries a known code any more, so the
+cap degrades rather than failing open. The check keys on the largest page count in the job
+rather than the sum, so it stays correct if the mothballed multi-set UI ever returns.
+
+`rc_all4_vals` is a comma list, so it is in the string allowlist in the config save
+handler; every other PCF key goes through `floatval()`, which would silently truncate it
+to `107` and drop the second option from the cap. It has no admin field for the same
+reason — a number input would corrupt it.
+
+> **The first version of this shipped broken, and it is worth knowing why.** It matched on
+> the label `/all\s*4/i`. That reads as the safer choice — labels are human-meaningful,
+> vals look like magic numbers — but production replaces `CORNERS` wholesale from
+> `wp_options`, and the live labels were worded differently from the ones in the file. So
+> the filter matched nothing, every option stayed on offer, and the cap did nothing at all
+> on the only site that mattered. The local test passed throughout, because it exercised
+> the HTML's own fallback list and never the config override. Any check that keys off
+> config-overridable data has to be tested against an injected override, not against the
+> file defaults — `tools-roundcorner-cap-test.mjs` now does that in three scenarios.
 
 **Rollback:** set *All-4 Corner Max* to `0` in PPS Config → Production. No deploy needed;
 the calculator reads the live value.
