@@ -22,7 +22,10 @@ const { chromium } = await import(PW + '/index.mjs');
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const DEPS = process.env.PPS_DEPS_DIR || path.join(HERE, 'node_modules');
 const BASE = process.env.PPS_PROOF_BASE || 'http://127.0.0.1:8137';
-const CALC = BASE + '/dist/calc-preview-test.html';
+// PPS_CALC_PATH lets this run against a build that is not dist/ — the
+// publish branch carries a separately-patched calculator, and the whole
+// point of patching in place is that it behaves identically.
+const CALC = BASE + (process.env.PPS_CALC_PATH || '/dist/calc-preview-test.html');
 
 const rd = p => readFileSync(path.join(DEPS, p), 'utf8');
 const REACT     = rd('react/umd/react.production.min.js');
@@ -30,7 +33,7 @@ const REACT_DOM = rd('react-dom/umd/react-dom.production.min.js');
 const PDFJS     = rd('pdfjs-dist/legacy/build/pdf.min.mjs');
 const PDFWORKER = rd('pdfjs-dist/legacy/build/pdf.worker.min.mjs');
 
-if (!existsSync(path.join(HERE, 'dist', 'calc-preview-test.html'))) {
+if (!process.env.PPS_CALC_PATH && !existsSync(path.join(HERE, 'dist', 'calc-preview-test.html'))) {
   console.error('compile first: BABEL_DIR=<deps> node tools-compile-calcs.mjs');
   process.exit(2);
 }
