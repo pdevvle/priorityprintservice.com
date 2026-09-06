@@ -147,6 +147,7 @@ function pps_default_config() {
             'sheetsforlowcosthardcopyproof'     => 1500,
             'minimum_turnaround_days'           => 3,
             'two_staple_threshold'              => 5.25,
+            'rc_all4_max_pages'                 => 24,
             'non_inventory_fee'                 => 35,
             'backend_base_rate'                 => 10,    // flat per-order fee for brochures
             // Outfold (PB fold-out page tipped into the spine) — Tier C aggressive defaults
@@ -1537,6 +1538,7 @@ function pps_config_tab_production( $cfg ) {
             'sets_surcharge'         => array( 'Per-Set Surcharge', '$' ),
             'bleed_minimum'          => array( 'Bleed Minimum', '$' ),
             'two_staple_threshold'   => array( '2-Staple Threshold', 'in' ),
+            'rc_all4_max_pages'      => array( 'All-4 Corner Max', 'pages' ),
         ),
         'Turnaround' => array(
             'cutterbasefee'                  => array( 'Cutter Base Fee', '$' ),
