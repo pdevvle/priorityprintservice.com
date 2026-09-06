@@ -443,6 +443,29 @@ download the imposed PDF. Useful for testing and one-off jobs.
   size. Regenerate the baseline same-day, from the previous build, before
   comparing.
 
+  ### Leaves onto the sheet — the guts' own arrangement (1.32)
+
+  Closing the `multiMode` leak in 1.31 removed the only way to step-and-repeat
+  a book block, and the guts-only card text still pointed at the select that
+  was gone. Perfect bound now has its own control, `spec.pbGutsOrder`, in the
+  **Perfect bound** card — shown whenever the guts are being produced — with
+  the same three arrangements saddle offers its signatures, applied to leaves
+  (each leaf a front/back pair; pagination into leaves is identical in all
+  three):
+
+  | `pbGutsOrder` | What lands in each cell | Run |
+  |---|---|---|
+  | `gang` (default) | consecutive leaves side by side — 4-up carries 1,3,5,7 front / 2,4,6,8 back | one sheet = one book's worth; qty = books |
+  | `repeat` | every cell the SAME leaf; one form per leaf | divides by cell count (step and repeat) |
+  | `cutstack` | the leaf list runs down the piles — 18 leaves 4-up: 1\|6\|11\|16 on sheet 1 | one cut and a drop leaves the block in order |
+
+  `pbGutsMode()` maps these onto the flat pipeline's collation modes
+  (`gang` / `each` / `stack`); the operator never sees those names, and the
+  flats' `multiMode` still cannot reach the guts. The guts part label names
+  the arrangement. Verified: 40-page block 4-up → 10 sheet sides ganged, **40**
+  step-and-repeat (20 leaves × 2 sides), 10 cut-and-stack; a spec carrying the
+  old `multiMode:"repeat"` leak still gangs.
+
 - **Seam hairline on synthesized bleed** (1.26). The mirrored/streaked band and
   the placed art ABUTTED exactly on the trim edge. Two abutting fills each
   antialias at the shared boundary, so neither covers those pixels fully and

@@ -69,7 +69,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-05 00:40 UTC · IMPOSE-V1.31</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-05 01:30 UTC · IMPOSE-V1.32</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2161,6 +2161,22 @@ function pbPartOverrides(spec, part) {
   return out;
 }
 
+// Guts arrangement: which leaf lands in which cell. Pagination into leaves is
+// identical in all three; only the placement changes.
+//   gang     (default) — consecutive leaves side by side; one sheet is one
+//                        book's worth of leaves; run = books × sheets/set.
+//   repeat             — every cell the SAME leaf, one form per leaf, run
+//                        divides by cell count (step and repeat, as saddle).
+//   cutstack           — the leaf list runs down the piles, so one cut and a
+//                        drop leaves the block in order.
+// Flat-pipeline names differ ("each" is its step-and-repeat-per-piece, "stack"
+// its cut & stack), hence the map — the operator never sees those.
+const PB_GUTS_ORDERS = ["gang", "repeat", "cutstack"];
+function pbGutsMode(spec) {
+  const o = PB_GUTS_ORDERS.includes(spec && spec.pbGutsOrder) ? spec.pbGutsOrder : "gang";
+  return o === "repeat" ? "each" : o === "cutstack" ? "stack" : "gang";
+}
+
 // UI panel state → the engine keys above. Everything the operator has not set
 // stays null so pbPartOverrides skips it and the half falls back to automatic.
 function pbGridSpec(g) {
@@ -2307,13 +2323,12 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
   // gutter settings are cleared so they cannot silently apply to a piece they
   // were never sized for, and each half then takes its own.
   const base = (k, part) => Object.assign({}, spec, {
-    // Guts are ALWAYS ganged in order — each cell a leaf, pages consecutive.
-    // This used to read spec.multiMode with a "gang" fallback, and the UI
-    // always sends the flats' select state, whose default is "repeat": from
-    // wp-admin every perfect-bound book block imposed pages 1+2 only, on every
-    // cell, with the warning buried among the notes. The harness never saw it
-    // because it omits the key and hit the fallback.
-    calc: k, multiMode: k === "pb-guts" ? "gang" : "repeat",
+    // How the LEAVES land on the sheet is the guts' own choice, carried on its
+    // own key (spec.pbGutsOrder) — never the flats' spec.multiMode, whose UI
+    // default of "repeat" once reached the guts and imposed pages 1+2 only.
+    // Same three arrangements saddle offers its signatures, mapped onto the
+    // flat pipeline's collation modes: each leaf is a front/back piece.
+    calc: k, multiMode: k === "pb-guts" ? pbGutsMode(spec) : "repeat",
     sides: 2,
     manualGrid: null, gridAcross: null, gridDown: null, gridSheet: null,
     colGaps: null, rowGaps: null, fillSheet: null,
@@ -2347,7 +2362,8 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
   if (wantGuts) {
     const guts = await imposePdf(gutsB, null, gutsSpec);
     guts.warnings = note.concat(guts.warnings);
-    parts.push({ part: "guts", label: `Guts — ${gutsN} pages at ${trimW}×${trimH}″`, ...guts });
+    const gm = pbGutsMode(gutsSpec);
+    parts.push({ part: "guts", label: `Guts — ${gutsN} pages at ${trimW}×${trimH}″ · ${gm === "each" ? "step and repeat" : gm === "stack" ? "cut and stack" : "ganged in order"}`, ...guts });
   }
   return { parts };
 }
@@ -3230,7 +3246,8 @@ function App() {
   const [artScale, setArtScale] = useState(100);         // free scale on placed art, %
   const [creep, setCreep] = useState(0);
   const [spine, setSpine] = useState(0.25);      // perfect bound spine width, in
-  const [pbPart, setPbPart] = useState("both");  // both | cover | guts                 // saddle shingling total, in
+  const [pbPart, setPbPart] = useState("both");  // both | cover | guts
+  const [pbGutsOrder, setPbGutsOrder] = useState("gang");  // gang | repeat | cutstack — leaves onto the sheet
   const [artInset, setArtInset] = useState(0);            // pull art off the trim (in), fill makes up the difference
   const [streakEps, setStreakEps] = useState(0.025);       // streak sampler: outermost sliver width stretched into the bleed
   const [gangFiles, setGangFiles] = useState([]);          // manual gang combo: [{bytes,name,pageCount,slots}]
@@ -3364,6 +3381,7 @@ function App() {
     sigOrder: isSaddle ? sigOrder : null,
     spine: isPB ? +spine || 0 : null,
     pbPart: isPB ? pbPart : null,
+    pbGutsOrder: isPB ? pbGutsOrder : null,
     // Per-half layout controls. Shaped for the engine (pbPartOverrides), which
     // ignores anything null, so a half the operator never touched behaves
     // exactly as it did before these controls existed.
@@ -3371,7 +3389,7 @@ function App() {
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGrids]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -3835,10 +3853,28 @@ function App() {
                     </label>
                   ))}
                 </div>
+                {pbPart !== "cover" && (
+                  <div style={{ marginBottom: 10, paddingBottom: 9, borderBottom: "1px dashed rgba(255,255,255,.12)" }}>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 5 }}>
+                      Leaves onto the sheet — what goes in each cell of the GUTS (pagination into leaves is the same in all three; each leaf is a front/back pair)
+                    </div>
+                    {[
+                      { v: "gang",     t: "Gang in order",   d: "consecutive leaves side by side — a 4-up sheet carries pages 1,3,5,7 on the front and 2,4,6,8 on the back. One sheet through the press is one book's worth of those leaves; quantity = books." },
+                      { v: "repeat",   t: "Step and repeat", d: "every cell is the SAME leaf, stepped across the sheet. One form per leaf; the run divides by the number of cells. Cut, then collate the lifts into books." },
+                      { v: "cutstack", t: "Cut and stack",   d: "the leaf list runs DOWN the piles — 18 leaves 4-up gives 1|6|11|16 on sheet 1. Cut the pile once, drop each lift under the one before it, and the block is already in order." },
+                    ].map(o => (
+                      <label key={o.v} style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 4 }}>
+                        <input type="radio" name="pps-pbgutsorder" checked={pbGutsOrder === o.v} style={{ width: "auto", marginTop: 3 }}
+                               onChange={() => setPbGutsOrder(o.v)} />
+                        <span><b style={{ fontWeight: 600 }}>{o.t}</b> <span style={{ color: "rgba(255,255,255,.4)" }}>— {o.d}</span></span>
+                      </label>
+                    ))}
+                  </div>
+                )}
                 {pbPart === "guts" ? (
                   <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)" }}>
                     Book block only, <b>{(+trimLong || 0).toFixed(3)} × {(+trimShort || 0).toFixed(3)}″</b> — the file is taken as the
-                    block as-is. No spine needed. Use <b>Multi-page file</b> above to choose how the pages gang up.
+                    block as-is. No spine needed. Columns, rows and gutters for the block are in <b>Manual grid &amp; gutters</b> below, on the Guts tab.
                   </div>
                 ) : (
                   <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
