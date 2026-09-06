@@ -153,6 +153,10 @@ function pps_default_config() {
             // options; the page cap identifies them by code rather than by
             // label, because the labels have been reworded before.
             'rc_all4_vals'                      => '107,108',
+            // URL of the standalone proof surface. Empty = the built-in proof
+            // modal, which is the default. Same-origin only; the calculator
+            // refuses anything else because the handshake is same-origin.
+            'proof_url'                         => '',
             'non_inventory_fee'                 => 35,
             'backend_base_rate'                 => 10,    // flat per-order fee for brochures
             // Outfold (PB fold-out page tipped into the spine) — Tier C aggressive defaults
@@ -658,6 +662,8 @@ function pps_config_render_page() {
                 if ( ! array_key_exists( $key, $cfg['pcf'] ) ) continue;
                 if ( $key === 'shop_timezone' ) {
                     $cfg['pcf'][ $key ] = sanitize_text_field( $val );
+                } elseif ( $key === 'proof_url' ) {
+                    $cfg['pcf'][ $key ] = esc_url_raw( trim( (string) $val ) );
                 } elseif ( in_array( $key, array( 'shippo_api_token', 'shippo_origin_zip', 'rc_all4_vals' ) ) ) {
                     $cfg['pcf'][ $key ] = sanitize_text_field( $val );
                 } else {
@@ -1561,6 +1567,7 @@ function pps_config_tab_production( $cfg ) {
             'sheetsforlowcosthardcopyproof'  => array( 'Low-Cost Proof Threshold', 'sheets' ),
         ),
         'Artwork' => array(
+            'proof_url'              => array( 'New Proof URL', '' ),
             'art_pagesperhour'       => array( 'Art Pages/Hour', 'pages' ),
             'art_newdesignmodifier'  => array( 'New Design Modifier', '×' ),
         ),
@@ -1583,7 +1590,7 @@ function pps_config_tab_production( $cfg ) {
         echo '<table class="pps-ss"><tbody>';
         foreach ( $fields as $key => $meta ) {
             $val  = $pcf[ $key ] ?? '';
-            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip', 'sale_label', 'question_recipient_email' ) ) ? 'text' : 'number';
+            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip', 'sale_label', 'question_recipient_email', 'proof_url' ) ) ? 'text' : 'number';
             $step = ( is_numeric( $val ) && ( is_float( $val + 0 ) || strpos( (string) $val, '.' ) !== false ) ) ? '0.001' : '1';
             echo '<tr>';
             echo '<td style="font-weight:600;white-space:nowrap;width:1%;padding-right:10px;font-size:12px">' . esc_html( $meta[0] ) . '</td>';

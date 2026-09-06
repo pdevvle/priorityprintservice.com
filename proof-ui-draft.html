@@ -9,16 +9,35 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!--
-  DRAFT / PROTOTYPE — not wired to any calculator, but no longer faked.
+  The proof surface. Standalone here, embeddable by a host.
 
-  Purpose: evaluate the reorganized proof UI before any of it is built into
-  calc-preview-test.html. Everything here now actually works: one composition
-  engine drives the proof surface, the magnifier, the thumbnails and the 3D
-  faces; the transforms really recompose the art; the issues are measured off
-  that composition rather than scripted; and you can drop your own file in.
+  One composition engine drives the proof, the magnifier, the thumbnails and
+  the 3D faces; the transforms really recompose the art; the issues are
+  measured off that composition rather than scripted; PDFs are read with pdf.js
+  and inspected with pdf-lib; and approving builds a real print file.
 
-  What is still not real: no file is ever produced, nothing is uploaded, and
-  there is no PDF path — a dropped PDF is refused rather than rasterised.
+  HOSTING. Open on its own, the page count control drives a demo job and
+  nothing leaves the browser. Given a host it becomes the proof for a specific
+  order:
+
+    in    window.PPS_PROOF_JOB = { calc, trim:{w,h}, bleed, safety, pages }
+          set before load, or posted as { type:'pps-proof:job', job, files }
+    out   PPS_PROOF_HOST(msg) if the host set one, else postMessage to parent,
+          same-origin only — these messages carry the customer's artwork and
+          the hash their approval is bound to
+
+    pps-proof:ready           the shell is up
+    pps-proof:job accepted    (silent — the proof simply shows the job)
+    pps-proof:error           the job was refused; nothing is rendered
+    pps-proof:approved        { hash, pageCount, calc, trim, files[] }
+    pps-proof:approve-failed  { attempts, message }
+    pps-proof:escape          the customer took the prepress fallback
+    pps-proof:close           close me
+
+  The host owns everything after approval: uploading the files, writing the
+  hash to the order, and the cart. This file never uploads anything itself.
+
+  What is still not wired: no calculator opens this yet.
 
   Placement semantics are taken from the shipped calculator, not invented:
     Crop     art at its own native size, cropped by the page edges
@@ -649,17 +668,67 @@ const MODEL = {
   trim: { w: 5.5, h: 8.5 },
   bleed: 0.125,
   safety: 0.125,
-  groups: [ {pages:[1]}, {pages:[2,3]}, {pages:[4,5]}, {pages:[6,7]}, {pages:[8]} ],
-  pages: [
-    { n:1, name:'front cover' },      { n:2, name:'inside front cover' },
-    { n:3, name:'' },                 { n:4, name:'' },
-    { n:5, name:'' },                 { n:6, name:'' },
-    { n:7, name:'inside back cover' },{ n:8, name:'back cover' }
-  ],
+  groups: [],
+  pages: [],
 };
 
-const BLEED_W = MODEL.trim.w + MODEL.bleed * 2;
-const BLEED_H = MODEL.trim.h + MODEL.bleed * 2;
+/* The job this proof is for.
+   Standalone, the values above are a demo job and the prototype chrome drives
+   the page count. Embedded, the host hands the same shape to applyJob() before
+   the first render, so the shell has exactly one notion of what it is proofing
+   and no path where the descriptor and the quote disagree.
+
+   These four are derived from the trim, so they cannot be const any more: a
+   job whose size arrives after load would leave them describing the demo. */
+let BLEED_W = MODEL.trim.w + MODEL.bleed * 2;
+let BLEED_H = MODEL.trim.h + MODEL.bleed * 2;
+
+function recomputeDerived(){
+  BLEED_W = MODEL.trim.w + MODEL.bleed * 2;
+  BLEED_H = MODEL.trim.h + MODEL.bleed * 2;
+  SAFE_L = (MODEL.bleed + MODEL.safety) / BLEED_W;
+  SAFE_T = (MODEL.bleed + MODEL.safety) / BLEED_H;
+  TRIM_L = MODEL.bleed / BLEED_W;
+  TRIM_T = MODEL.bleed / BLEED_H;
+}
+
+/* A job that does not describe a printable piece must be refused here, loudly.
+   Downstream everything divides by the trim or indexes the page map, so a zero
+   width or an odd page count does not fail where you could see why — it
+   produces a proof that looks plausible and is wrong, which is the one outcome
+   this whole tool exists to prevent. */
+function validateJob(job){
+  const errs = [];
+  if (!job || typeof job !== 'object') return ['no job supplied'];
+  const n = Number(job.pages);
+  const w = Number(job.trim && job.trim.w), h = Number(job.trim && job.trim.h);
+  if (!isFinite(w) || w <= 0) errs.push('trim width must be a positive number');
+  if (!isFinite(h) || h <= 0) errs.push('trim height must be a positive number');
+  if (!isFinite(n) || n < 4)  errs.push('page count must be at least 4');
+  else if (n % 2)             errs.push('page count must be even');
+  else if (job.calc === 'saddle' && n % 4)
+    errs.push('a saddle-stitched book folds in fours, so the page count must be a multiple of 4');
+  for (const k of ['bleed', 'safety']){
+    if (job[k] == null) continue;
+    const v = Number(job[k]);
+    if (!isFinite(v) || v < 0) errs.push(k + ' must be zero or a positive number');
+  }
+  return errs;
+}
+
+/* Returns [] on success, or the reasons it refused. Never half-applies: the
+   model is only touched once the job is known to be describable. */
+function applyJob(job){
+  const errs = validateJob(job);
+  if (errs.length) return errs;
+  MODEL.calc     = String(job.calc || 'saddle');
+  MODEL.trim     = { w: Number(job.trim.w), h: Number(job.trim.h) };
+  if (job.bleed  != null) MODEL.bleed  = Number(job.bleed);
+  if (job.safety != null) MODEL.safety = Number(job.safety);
+  recomputeDerived();
+  rebuildModel(Number(job.pages));
+  return [];
+}
 
 /* Resolution thresholds. Placeholder art is generated at 150 DPI, so the
    default placement sits comfortably clear of both — a warning only appears
@@ -911,8 +980,8 @@ function mapSrcBox(r, src, box){
    people to ignore the warning. Only runs of text count, which is why this
    needs a file that says where its text is — a flat raster cannot, and says so
    rather than passing quietly. */
-const SAFE_L = (MODEL.bleed + MODEL.safety) / BLEED_W, SAFE_T = (MODEL.bleed + MODEL.safety) / BLEED_H;
-const TRIM_L = MODEL.bleed / BLEED_W, TRIM_T = MODEL.bleed / BLEED_H;
+let SAFE_L = (MODEL.bleed + MODEL.safety) / BLEED_W, SAFE_T = (MODEL.bleed + MODEL.safety) / BLEED_H;
+let TRIM_L = MODEL.bleed / BLEED_W, TRIM_T = MODEL.bleed / BLEED_H;
 function checkMargins(n, r){
   const src = SRCget(n);
   if (!src.text) return { known:false, marks:[], cut:0, tight:0, closest:null };
@@ -2244,10 +2313,126 @@ document.getElementById('mag').onchange = () => { if (!document.getElementById('
 document.getElementById('hideGuides').onchange = () => { renderStage(); renderLegend(); };
 document.getElementById('undoBtn').onclick = undo;
 document.getElementById('agree').onchange = renderApproval;
-document.getElementById('approveBtn').onclick = () =>
-  alert('Prototype — no artwork is approved and no files are produced.');
-document.getElementById('closeBtn').onclick = () =>
-  alert('Prototype — this would close the proof and return to the calculator.');
+/* ── talking to whatever is hosting this proof ─────────────────
+   One function, so the transport is a detail. Hosted in an iframe we post to
+   the parent; mounted directly on the page the host sets PPS_PROOF_HOST to a
+   function; standalone there is no host and these are no-ops. Nothing else in
+   this file knows which of those is true.
+
+   Same-origin only, deliberately. The messages carry the customer's artwork
+   and the hash their approval is bound to; posting that to '*' would hand both
+   to any frame that happened to be listening. */
+function post(msg){
+  try {
+    if (typeof window.PPS_PROOF_HOST === 'function'){ window.PPS_PROOF_HOST(msg); return; }
+    if (window.parent && window.parent !== window) window.parent.postMessage(msg, window.location.origin);
+  } catch (e){ /* a host that has gone away must not break the proof */ }
+}
+
+/* Inbound: the host may hand us the job and the artwork after load rather than
+   before it, which is what an iframe has to do — it cannot set a global on a
+   document it has not created yet. */
+window.addEventListener('message', async ev => {
+  if (ev.origin !== window.location.origin) return;      // same-origin only
+  const m = ev.data;
+  if (!m || typeof m !== 'object') return;
+  if (m.type === 'pps-proof:job'){
+    const errs = bootJob(m.job);
+    if (errs.length) return;
+    if (m.files && m.files.length){
+      try { await loadArtSequence(1, Array.from(m.files)); }
+      catch (e){ post({ type:'pps-proof:error', errors:['artwork could not be read: ' + (e && e.message || e)] }); }
+    }
+  }
+});
+
+/* ── approval ──────────────────────────────────────────────────
+   The click that costs money. It builds the package, and only once that has
+   actually succeeded does it tell the host anything — approval is the hash of
+   bytes we produced, so there is no approval before there are bytes.
+
+   The escape hatch is not optional. Approval has a known failure mode that has
+   never been root-caused (a real multi-page PDF with an orientation mismatch
+   took the whole calculator down on 2026-08-12), and once checkout is gated on
+   this click, a customer who cannot get past it cannot order at all. Two
+   failures and we offer them a way through with the file as supplied, flagged
+   for prepress. Staff being told is strictly better than an order never
+   placed. */
+let approveFailures = 0;
+
+function approvalNote(msg){
+  const el = document.getElementById('pkgNote');
+  if (el) el.textContent = msg || '';
+}
+
+function offerEscapeHatch(){
+  const out = document.getElementById('pkgOut');
+  if (!out || document.getElementById('proofEscape')) return;
+  out.hidden = false;
+  const box = document.createElement('div');
+  box.id = 'proofEscape';
+  box.style.cssText = 'margin-top:10px;padding:12px 14px;border:1px solid var(--yellow-line);'
+    + 'border-radius:8px;background:var(--yellow-tint);line-height:1.5';
+  const p = document.createElement('p');
+  p.style.cssText = 'margin:0 0 10px';
+  p.textContent = 'We could not prepare your proof from this file. You can continue with the '
+    + 'file exactly as you supplied it, and our prepress team will check it for you before printing.';
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'pkgbtn';
+  b.id = 'proofEscapeBtn';
+  b.textContent = 'Continue and have prepress check my file';
+  b.onclick = () => {
+    post({ type:'pps-proof:escape',
+           reason:'approval failed ' + approveFailures + ' times',
+           attempts:approveFailures });
+    approvalNote('Sent to prepress. You can close this and finish your order.');
+    b.disabled = true;
+  };
+  box.append(p, b);
+  out.appendChild(box);
+}
+
+document.getElementById('approveBtn').onclick = async () => {
+  const btn = document.getElementById('approveBtn');
+  btn.disabled = true;
+  const wasLabel = btn.textContent;
+  btn.textContent = 'PREPARING…';
+  approvalNote('Building your print file…');
+  try {
+    const pkg = await buildPackage();
+    renderPackage(pkg);
+    approveFailures = 0;
+    btn.textContent = '✓ APPROVED';
+    approvalNote('Approved. Print file SHA-256 ' + pkg.printHash.slice(0, 12) + '…');
+    // The host owns everything after this: upload, cart metadata, the order.
+    post({ type:'pps-proof:approved',
+           hash: pkg.printHash,
+           pageCount: pkg.pageCount,
+           calc: MODEL.calc,
+           trim: { w: MODEL.trim.w, h: MODEL.trim.h },
+           files: pkg.files.map(f => ({ name:f.name, blob:f.blob, note:f.note })) });
+  } catch (err){
+    approveFailures++;
+    btn.disabled = false;
+    btn.textContent = wasLabel;
+    const out = document.getElementById('pkgOut');
+    if (out){
+      out.hidden = false;
+      const e = document.createElement('div');
+      e.className = 'pkgerr';
+      e.textContent = 'We could not prepare your proof: ' + (err && err.message ? err.message : err);
+      out.replaceChildren(e);
+    }
+    approvalNote('');
+    post({ type:'pps-proof:approve-failed',
+           attempts: approveFailures,
+           message: String(err && err.message || err) });
+    if (approveFailures >= 2) offerEscapeHatch();
+  }
+};
+
+document.getElementById('closeBtn').onclick = () => post({ type:'pps-proof:close' });
 window.addEventListener('keydown', e => {
   if (state.mode !== 'book' || state.bookMode !== 'open') return;
   if (e.key === 'ArrowRight') stepSpread(1);
@@ -2271,13 +2456,66 @@ themeBtn.onclick = () => {
 // exists. Calling renderAll here would run the rail against an empty page map.
 applyTheme(!!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
 
-document.getElementById('pageCount').onchange = e => {
-  rebuildModel(parseInt(e.target.value, 10));
-  renderAll();
-};
+/* ── boot ──────────────────────────────────────────────────────
+   Two ways in, one code path after.
 
-rebuildModel(parseInt(document.getElementById('pageCount').value, 10));
-renderAll();
+   Standalone the page count comes from the prototype control, which is how
+   the shell gets exercised across bind shapes without a calculator. Embedded,
+   the host sets window.PPS_PROOF_JOB before this file loads (or posts one, see
+   the handshake below) and that control is disabled — the page count is a term
+   of the quote, and a proof that lets you change it is a proof of a different
+   job than the one being bought. */
+const pageCountEl = document.getElementById('pageCount');
+
+function bootJob(job){
+  const errs = applyJob(job);
+  if (errs.length){ showJobRefusal(errs); return errs; }
+  if (pageCountEl){
+    pageCountEl.value = String(MODEL.pages.length);
+    pageCountEl.disabled = true;
+    pageCountEl.title = 'Set by your order';
+  }
+  renderAll();
+  return [];
+}
+
+/* A refused job must not leave the last job's proof on screen looking live. */
+function showJobRefusal(errs){
+  const host = document.querySelector('.stage') || document.body;
+  const box = document.createElement('div');
+  box.id = 'jobRefusal';
+  box.setAttribute('role', 'alert');
+  box.style.cssText = 'margin:24px;padding:16px 18px;border:1px solid #dc2626;border-radius:8px;'
+    + 'background:#fef2f2;color:#7f1d1d;font-family:var(--pps-sans);line-height:1.5;max-width:560px';
+  const h = document.createElement('div');
+  h.style.cssText = 'font-weight:700;margin-bottom:6px';
+  h.textContent = 'This proof could not be opened';
+  const ul = document.createElement('ul');
+  ul.style.cssText = 'margin:0;padding-left:18px';
+  errs.forEach(e => { const li = document.createElement('li'); li.textContent = e; ul.appendChild(li); });
+  const p = document.createElement('p');
+  p.style.cssText = 'margin:10px 0 0';
+  p.textContent = 'Nothing has been approved. Please contact us and we will set this up for you.';
+  box.append(h, ul, p);
+  host.replaceChildren(box);
+  post({ type:'pps-proof:error', errors:errs });
+}
+
+if (pageCountEl){
+  pageCountEl.onchange = e => {
+    rebuildModel(parseInt(e.target.value, 10));
+    renderAll();
+  };
+}
+
+if (window.PPS_PROOF_JOB){
+  bootJob(window.PPS_PROOF_JOB);
+} else {
+  rebuildModel(parseInt(pageCountEl.value, 10));
+  renderAll();
+}
+
+post({ type:'pps-proof:ready' });
 </script>
 </body>
 </html>
