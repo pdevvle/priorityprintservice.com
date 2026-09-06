@@ -148,6 +148,11 @@ function pps_default_config() {
             'minimum_turnaround_days'           => 3,
             'two_staple_threshold'              => 5.25,
             'rc_all4_max_pages'                 => 24,
+            // Comma list, NOT a number — see the string allowlist in the save
+            // handler. These are the finishing codes for the all-four-corners
+            // options; the page cap identifies them by code rather than by
+            // label, because the labels have been reworded before.
+            'rc_all4_vals'                      => '107,108',
             'non_inventory_fee'                 => 35,
             'backend_base_rate'                 => 10,    // flat per-order fee for brochures
             // Outfold (PB fold-out page tipped into the spine) — Tier C aggressive defaults
@@ -653,7 +658,7 @@ function pps_config_render_page() {
                 if ( ! array_key_exists( $key, $cfg['pcf'] ) ) continue;
                 if ( $key === 'shop_timezone' ) {
                     $cfg['pcf'][ $key ] = sanitize_text_field( $val );
-                } elseif ( in_array( $key, array( 'shippo_api_token', 'shippo_origin_zip' ) ) ) {
+                } elseif ( in_array( $key, array( 'shippo_api_token', 'shippo_origin_zip', 'rc_all4_vals' ) ) ) {
                     $cfg['pcf'][ $key ] = sanitize_text_field( $val );
                 } else {
                     $cfg['pcf'][ $key ] = floatval( $val );
