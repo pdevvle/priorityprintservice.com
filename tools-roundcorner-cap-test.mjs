@@ -218,7 +218,7 @@ ok('Outside 2 still prices at 64pp', outs64 > base64,
 // does, which is the only way to catch that class of failure.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const scenario = async (title, corners, expect) => {
+const scenario = async (title, corners, expect, pcf) => {
   console.log('\n── ' + title + ' ──');
   const p2 = await browser.newPage({ viewport: { width: 1500, height: 1100 } });
   p2.on('pageerror', e => pageErrors.push(String(e && e.message || e)));
@@ -234,9 +234,11 @@ const scenario = async (title, corners, expect) => {
     return route.fulfill({ status: 204, body: '' });
   });
   // Mirrors how the plugin injects config: set before any page script runs.
-  await p2.addInitScript(c => {
-    window.PPS_CONFIG = Object.assign({}, window.PPS_CONFIG, { calc: { corners: c } });
-  }, corners);
+  await p2.addInitScript(({ c, p }) => {
+    const calc = { corners: c };
+    if (p) calc.pcf = p;
+    window.PPS_CONFIG = Object.assign({}, window.PPS_CONFIG, { calc });
+  }, { c: corners, p: pcf || null });
   await p2.goto('file://' + PAGE, { waitUntil: 'load' });
   await p2.waitForFunction(() => /\$[\d,]+\.\d{2}/.test(document.body.innerText), null, { timeout: 25000 });
 
@@ -250,14 +252,15 @@ const scenario = async (title, corners, expect) => {
     }, pattern);
     await p2.waitForTimeout(450);
   };
-  const locate = key => p2.evaluate(k => {
+  const injected = corners.map(c => c.label);
+  const locate = key => p2.evaluate(({ k, injected }) => {
     const preds = {
-      corner: t => t.length >= 2 && t.some(x => /corner/i.test(x)),
+      corner: t => t.length >= 1 && t.every(x => injected.includes(x)),
       pages:  t => t.length > 3 && t.every(x => /^\d+\s+Pages$/i.test(x)),
     };
     return Array.from(document.querySelectorAll('select'))
       .findIndex(s => preds[k](Array.from(s.options).map(o => o.textContent.trim())));
-  }, key);
+  }, { k: key, injected });
   const need = async (key, header) => {
     for (let i = 0; i < 3; i++) { if (await locate(key) >= 0) break; await open(header); }
     return locate(key);
@@ -274,6 +277,7 @@ const scenario = async (title, corners, expect) => {
   };
   const labels = async () => {
     const i = await need('corner', 'Finishing\\s*&\\s*Addons');
+    if (i < 0) return [];
     return p2.evaluate(i => Array.from(document.querySelectorAll('select')[i].options)
       .map(o => o.textContent.trim()), i);
   };
@@ -319,6 +323,22 @@ await scenario('vals repointed, wording is all that is left', [
   { label: 'Round — Outside 2',        val: 91, price: 0.2 },
   { label: 'Round — All Four Corners', val: 92, price: 0.1 },
 ], { hidden: 1, keeps: ['Round — Outside 2'] });
+
+// The code list is human-edited text. A trailing comma parses to Number("") === 0,
+// and 0 is "No Round Cornering" — the first version of the parser would have
+// hidden the none option and left All 4 on offer. Every one of these must behave
+// exactly like the clean list.
+const STOCK = [
+  { label: 'No Round Cornering',      val: 0,   price: 0 },
+  { label: '1/4" Round — Outside 2',  val: 216, price: 0.2 },
+  { label: '3/8" Round — Outside 2',  val: 215, price: 0.15 },
+  { label: '1/4" Round — All 4',      val: 108, price: 0.1 },
+  { label: '3/8" Round — All 4',      val: 107, price: 0.075 },
+];
+const STOCK_KEEP = { hidden: 2, keeps: ['No Round Cornering', '1/4" Round — Outside 2', '3/8" Round — Outside 2'] };
+await scenario('code list with a trailing comma',   STOCK, STOCK_KEEP, { rc_all4_vals: '107,108,' });
+await scenario('code list with spaces',             STOCK, STOCK_KEEP, { rc_all4_vals: ' 107 , 108 ' });
+await scenario('code list emptied (label fallback)', STOCK, STOCK_KEEP, { rc_all4_vals: '' });
 
 ok('no uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));
 
