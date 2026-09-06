@@ -39,7 +39,38 @@
   table.imp-q th { text-align:left; padding:8px 10px; color:rgba(255,255,255,.45); font-size:11px; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid rgba(255,255,255,.08); }
   table.imp-q td { padding:9px 10px; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:middle; }
   .lbl { font-size:11px; font-weight:700; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.5px; margin-bottom:5px; display:block; }
-  @media(max-width:980px){ .imp-cols{flex-direction:column} }
+  /* ── 1.33 layout: controls accordion left, job strip + viewport right ── */
+  .imp-app { padding:10px 14px 40px; }
+  .imp-shell { display:flex; gap:14px; align-items:flex-start; }
+  .imp-side { flex:0 0 400px; min-width:340px; position:sticky; top:8px; max-height:calc(100vh - 16px); overflow:auto;
+              background:#1a1d23; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px; }
+  .imp-side-h { font-size:14px; font-weight:700; padding:4px 6px 10px; display:flex; align-items:center; justify-content:space-between; }
+  .imp-acc { border:1px solid rgba(255,255,255,.08); border-radius:10px; margin-bottom:8px; background:#1e2128; }
+  .imp-acc-h { width:100%; display:flex; align-items:center; gap:8px; background:none; border:0; color:#e8eaf0;
+               font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.5px; padding:11px 12px; cursor:pointer; text-align:left; }
+  .imp-acc-h:hover { background:rgba(255,255,255,.03); }
+  .imp-acc.open .imp-acc-h { border-bottom:1px solid rgba(255,255,255,.08); }
+  .imp-acc-h .chev { margin-left:auto; color:rgba(255,255,255,.4); font-size:11px; }
+  .imp-acc-b { padding:12px 12px 4px; }
+  .imp-acc-b .lbl { margin-top:2px; }
+  .imp-main { flex:1; min-width:0; }
+  .imp-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:#1a1d23; border:1px solid rgba(255,255,255,.08);
+                 border-radius:12px; padding:8px 12px; margin:12px 0; }
+  .imp-toolbar .grp { display:flex; gap:4px; align-items:center; padding-right:10px; margin-right:2px; border-right:1px solid rgba(255,255,255,.1); }
+  .imp-toolbar .grp:last-child { border-right:0; }
+  .imp-toolbar .tb { padding:5px 10px; font-size:12px; }
+  .imp-toolbar .tb.on { border-color:#4ea1ff; color:#4ea1ff; }
+  .imp-view { background:#0f1216; border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden; }
+  .imp-strip { overflow-x:auto; overflow-y:hidden; padding:14px 18px 14px; display:flex; gap:34px; align-items:flex-start; min-height:280px; }
+  .imp-sheet { flex:0 0 auto; display:grid; grid-template-columns:auto auto; grid-template-rows:auto auto; }
+  .imp-sheet .corner { width:22px; height:18px; }
+  .imp-sheet .ruler-t, .imp-sheet .ruler-l { display:block; }
+  .imp-sheet canvas { display:block; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.55); }
+  .imp-sheet .ph { background:#fff; opacity:.9; }
+  .imp-sheet .cap { grid-column:2; font-size:11px; color:rgba(255,255,255,.55); font-weight:700; letter-spacing:.5px; margin:7px 0 0; white-space:nowrap; }
+  .imp-report { margin-top:12px; }
+  .imp-report summary { cursor:pointer; font-size:12px; font-weight:700; color:rgba(255,255,255,.55); text-transform:uppercase; letter-spacing:.5px; }
+  @media(max-width:980px){ .imp-shell{flex-direction:column} .imp-side{position:static;max-height:none;flex:auto;width:100%} }
   /* Metadata reference — a lookup sheet folded into the tool, so the operator
      never has to leave the queue to find out what a field means. */
   .imp-ref { font-size:12.5px; line-height:1.55; color:rgba(255,255,255,.78); }
@@ -69,7 +100,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-05 01:30 UTC · IMPOSE-V1.32</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-06 08:30 UTC · IMPOSE-V1.33</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2355,12 +2386,14 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
 
   const parts = [];
   if (wantCover) {
-    const cover = await imposePdf(coverB, null, coverSpec);
+    // imposeCore, not imposePdf: the wrapper runs the specialty passes once for
+    // the whole job (greyscale on the reading-order source, slipsheets per part).
+    const cover = await imposeCore(coverB, null, coverSpec);
     cover.warnings = note.concat(cover.warnings);
     parts.push({ part: "cover", label: `Cover — ${(2 * trimW + spine).toFixed(3)}×${trimH}″ flat, ${spine}″ spine`, ...cover });
   }
   if (wantGuts) {
-    const guts = await imposePdf(gutsB, null, gutsSpec);
+    const guts = await imposeCore(gutsB, null, gutsSpec);
     guts.warnings = note.concat(guts.warnings);
     const gm = pbGutsMode(gutsSpec);
     parts.push({ part: "guts", label: `Guts — ${gutsN} pages at ${trimW}×${trimH}″ · ${gm === "each" ? "step and repeat" : gm === "stack" ? "cut and stack" : "ganged in order"}`, ...guts });
@@ -2377,7 +2410,142 @@ async function pbBuildGuts_all(srcDoc) {
   return { bytes: await out.save({ useObjectStreams: false }), count: n };
 }
 
+// ── Specialty: page lists, forced greyscale, slipsheets ───────────────────
+// "1, 3-5, 8" → [1,3,4,5,8]; clamped to [1,max] when max is given.
+function parsePageList(txt, max) {
+  const out = new Set();
+  String(txt || "").split(/[,\s]+/).forEach(tok => {
+    if (!tok) return;
+    const m = tok.match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) return;
+    let a = +m[1], b = m[2] ? +m[2] : a;
+    if (b < a) [a, b] = [b, a];
+    for (let k = a; k <= b; k++) if (k >= 1 && (!max || k <= max)) out.add(k);
+  });
+  return [...out].sort((x, y) => x - y);
+}
+
+// Force listed SOURCE pages to greyscale. Vector recolouring would have to
+// rewrite every colour operator, colour space, shading and image in the page
+// (and everything they reach), so the page is rasterised instead: pdf.js at
+// 300 DPI, converted to luminance, and re-embedded as a DeviceGray image that
+// exactly fills the original MediaBox. DeviceGray separates to the K plate
+// only, so the page "exports as CMYK greyscale" on the RIP. Boxes, /Rotate and
+// page size are untouched; downstream never knows the difference. The cost is
+// that those pages are no longer vector — said plainly in the warning.
+const GREY_DPI = 300, GREY_MAX_PX = 40e6;
+async function forceGreyPagesBytes(bytes, pages) {
+  const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+  const n = doc.getPageCount();
+  const want = pages.filter(p => p >= 1 && p <= n);
+  if (!want.length) return { bytes, note: `Force greyscale: no listed page exists in the ${n}-page file — nothing changed.` };
+  const pdfjs = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+  for (const pno of want) {
+    const page = doc.getPage(pno - 1);
+    const mb = page.getMediaBox();
+    const src = await pdfjs.getPage(pno);
+    let scale = GREY_DPI / 72;
+    const v0 = src.getViewport({ scale, rotation: 0 });
+    if (v0.width * v0.height > GREY_MAX_PX) scale *= Math.sqrt(GREY_MAX_PX / (v0.width * v0.height));
+    const vp = src.getViewport({ scale, rotation: 0 });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await src.render({ canvasContext: ctx, viewport: vp }).promise;
+    const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const g = new Uint8Array(canvas.width * canvas.height);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) g[j] = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114 + 0.5) | 0;
+    const img = doc.context.register(doc.context.flateStream(g, {
+      Type: "XObject", Subtype: "Image", Width: canvas.width, Height: canvas.height, ColorSpace: "DeviceGray", BitsPerComponent: 8,
+    }));
+    const content = `q ${mb.width} 0 0 ${mb.height} ${mb.x} ${mb.y} cm /ImG Do Q`;
+    page.node.set(PL.PDFName.of("Contents"), doc.context.register(doc.context.stream(content)));
+    page.node.set(PL.PDFName.of("Resources"), doc.context.obj({ XObject: { ImG: img } }));
+    page.node.delete(PL.PDFName.of("Annots"));
+  }
+  return {
+    bytes: await doc.save({ useObjectStreams: false }),
+    note: `Force greyscale: page${want.length === 1 ? "" : "s"} ${want.join(", ")} rasterised at ${GREY_DPI} DPI as DeviceGray (K only) — no longer vector on those pages.`,
+  };
+}
+
+// Insert full-size slipsheets into an imposed output. Sheet numbers refer to
+// the PHYSICAL sheets of the output (sheet 1 = its first front/back pair on a
+// duplex job); a slipsheet is one physical sheet, so it is one page on a
+// simplex job and two on a duplex job, the design on both faces. Solid
+// designs are a single DeviceCMYK fill so they separate cleanly; a custom
+// upload is embedded as a page and fitted to the sheet.
+const SLIP_DESIGNS = { C: [1, 0, 0, 0], M: [0, 1, 0, 0], Y: [0, 0, 1, 0], K: [0, 0, 0, 1] };
+async function insertSlipsheets(bytes, slip, duplex, labels) {
+  const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+  const n = doc.getPageCount(), per = duplex ? 2 : 1, sheets = Math.ceil(n / per);
+  const targets = parsePageList(slip.sheets, sheets);
+  if (!targets.length) return { bytes, labels, note: `Slipsheet: no valid sheet number in "${slip.sheets || ""}" (output has ${sheets} sheet${sheets === 1 ? "" : "s"}) — nothing inserted.` };
+  const { width, height } = doc.getPage(0).getSize();
+  let custom = null;
+  if (slip.design === "custom") {
+    if (!slip.customBytes) throw new Error("Slipsheet design is Custom Upload but no file was chosen.");
+    const cd = await PL.PDFDocument.load(await ppsToPdfBytes(slip.customBytes, "slipsheet"), { ignoreEncryption: true });
+    stripActiveContent(cd); ensurePageContents(cd);
+    const idx = cd.getPageCount() >= 2 ? [0, 1] : [0];
+    custom = await doc.embedPdf(cd, idx);
+  }
+  const designLabel = slip.design === "custom" ? `custom (${slip.customName || "upload"})` : `solid ${slip.design}`;
+  const newLabels = Array.isArray(labels) ? labels.slice() : null;
+  const draw = (page, face) => {
+    if (custom) {
+      const emb = custom[face] || custom[0];
+      const sc = Math.min(width / emb.width, height / emb.height);
+      page.drawPage(emb, { x: (width - emb.width * sc) / 2, y: (height - emb.height * sc) / 2, width: emb.width * sc, height: emb.height * sc });
+    } else {
+      const [c, m, y, k] = SLIP_DESIGNS[slip.design] || SLIP_DESIGNS.K;
+      page.drawRectangle({ x: 0, y: 0, width, height, color: PL.cmyk(c, m, y, k) });
+    }
+  };
+  // Highest sheet first, so earlier insertion points are still valid.
+  for (const sNo of targets.slice().sort((a, b) => b - a)) {
+    const at = slip.when === "after" ? Math.min(n, sNo * per) : (sNo - 1) * per;
+    for (let face = per - 1; face >= 0; face--) {
+      const pg = doc.insertPage(at, [width, height]);
+      draw(pg, face);
+      if (newLabels) newLabels.splice(at, 0, `SLIPSHEET ${per === 2 ? (face === 0 ? "FRONT" : "BACK") + " " : ""}— ${designLabel.toUpperCase()} (${slip.when} sheet ${sNo})`);
+    }
+  }
+  return {
+    bytes: await doc.save({ useObjectStreams: false }),
+    labels: newLabels,
+    note: `Slipsheet (${designLabel}) inserted ${slip.when} sheet${targets.length === 1 ? "" : "s"} ${targets.join(", ")} — ${targets.length} physical sheet${targets.length === 1 ? "" : "s"} added (${targets.length * per} side${targets.length * per === 1 ? "" : "s"}); not counted in the run figures above.`,
+  };
+}
+
+// Public entry: specialty pre/post-processing around the core imposition.
+//   greyPages → applied to the SOURCE artwork before anything reads it, so every
+//               product path (flats, saddle, both PB halves) sees grey pages.
+//   slip      → applied to each OUTPUT part after preflight, so the physical
+//               sheet count the operator typed refers to the imposed sheets.
 async function imposePdf(artBytes, backBytes, spec, gangFiles) {
+  let greyNote = null;
+  const grey = parsePageList(spec.greyPages);
+  if (grey.length && artBytes) {
+    const r = await forceGreyPagesBytes(await ppsToPdfBytes(artBytes, "front"), grey);
+    artBytes = r.bytes; greyNote = r.note;
+  }
+  const res = await imposeCore(artBytes, backBytes, spec, gangFiles);
+  const parts = res.parts || [res];
+  const duplex = spec.sides === 2 || isBookCalc(spec.calc);
+  for (const p of parts) {
+    if (greyNote) p.warnings = [greyNote, ...(p.warnings || [])];
+    if (spec.slip && spec.slip.on) {
+      const r = await insertSlipsheets(p.bytes, spec.slip, duplex, p.pageLabels);
+      p.bytes = r.bytes; if (r.labels) p.pageLabels = r.labels;
+      p.warnings = [...(p.warnings || []), r.note];
+    }
+  }
+  return res;
+}
+
+async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   // Normalize before anything reads a page box, so every path below — flats,
   // stickers, saddle, gang, ink detection — sees a PDF and nothing else changes.
   artBytes = await ppsToPdfBytes(artBytes, "front");
@@ -2819,9 +2987,9 @@ function DropZone({ label, sub, accept, onFiles, fileName }) {
 }
 
 // SVG schematic of the layout — instant feedback before the PDF preview lands
-function LayoutSchematic({ layout }) {
+function LayoutSchematic({ layout, pxPerIn }) {
   if (!layout) return null;
-  const s = layout.sheet, scale = 320 / s.long;
+  const s = layout.sheet, scale = pxPerIn || 320 / s.long;
   const W = s.long * scale, H = s.short * scale;
   return (
     <svg width={W} height={H} style={{ display: "block", background: "#fff", borderRadius: 4 }}>
@@ -2855,42 +3023,130 @@ function LayoutSchematic({ layout }) {
   );
 }
 
-function PdfPreview({ bytes, labels }) {
-  const holderRef = useRef(null);
+
+// Collapsible section for the controls column. Children unmount when closed;
+// every setting lives in App state, so nothing is lost by collapsing.
+function Acc({ id, title, open, onToggle, badge, children }) {
+  return (
+    <section className={"imp-acc" + (open ? " open" : "")} data-sec={id}>
+      <button type="button" className="imp-acc-h" onClick={onToggle} aria-expanded={open}>
+        <span>{title}</span>{badge}
+        <span className="chev">{open ? "▼" : "▶"}</span>
+      </button>
+      {open && <div className="imp-acc-b">{children}</div>}
+    </section>
+  );
+}
+
+// Inch rulers for one sheet at the current zoom. Whole inches labelled,
+// halves and quarters ticked.
+function RulerT({ inches, px }) {
+  const W = inches * px, ticks = [];
+  for (let q = 0; q <= inches * 4 + 1e-6; q++) {
+    const x = q / 4 * px, whole = q % 4 === 0, half = q % 2 === 0;
+    ticks.push(<line key={q} x1={x} y1={18} x2={x} y2={whole ? 6 : half ? 10 : 13} stroke="rgba(255,255,255,.55)" strokeWidth="1" />);
+    if (whole && q > 0 && px >= 18) ticks.push(<text key={"t" + q} x={x + 2} y={9} fontSize="8" fill="rgba(255,255,255,.55)">{q / 4}</text>);
+  }
+  return <svg className="ruler-t" width={W} height={18} style={{ background: "#181b21" }}>{ticks}</svg>;
+}
+function RulerL({ inches, px }) {
+  const H = inches * px, ticks = [];
+  for (let q = 0; q <= inches * 4 + 1e-6; q++) {
+    const y = q / 4 * px, whole = q % 4 === 0, half = q % 2 === 0;
+    ticks.push(<line key={q} x1={22} y1={y} x2={whole ? 10 : half ? 14 : 17} y2={y} stroke="rgba(255,255,255,.55)" strokeWidth="1" />);
+    if (whole && q > 0 && px >= 18) ticks.push(<text key={"t" + q} x={2} y={y - 2} fontSize="8" fill="rgba(255,255,255,.55)">{q / 4}</text>);
+  }
+  return <svg className="ruler-l" width={22} height={H} style={{ background: "#181b21" }}>{ticks}</svg>;
+}
+
+// One sheet side in the viewport: rendered by pdf.js when it scrolls into
+// view (a 40-side job must not rasterise all 40 up front), with a correctly
+// sized placeholder so the horizontal scrollbar is honest from the start.
+function SheetSide({ pdf, index, px, label, rulers, root }) {
+  const [dims, setDims] = useState(null);     // inches
+  const canvasRef = useRef(null), holderRef = useRef(null);
+  const [visible, setVisible] = useState(index < 3);
   useEffect(() => {
-    if (!bytes || !holderRef.current) return;
-    let cancelled = false;
-    const holder = holderRef.current;
-    holder.innerHTML = "";
-    (async () => {
-      try {
-        const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
-        const maxRender = 8;
-        if (pdf.numPages > maxRender) {
-          const note = document.createElement("div");
-          note.style.cssText = "font-size:12px;color:rgba(255,255,255,.5);margin-bottom:8px";
-          note.textContent = `Previewing the first ${maxRender} of ${pdf.numPages} sheet sides — the downloaded PDF contains all of them.`;
-          holder.appendChild(note);
-        }
-        for (let i = 1; i <= Math.min(pdf.numPages, maxRender) && !cancelled; i++) {
-          const page = await pdf.getPage(i);
-          const vp0 = page.getViewport({ scale: 1 });
-          const scale = Math.min(760 / vp0.width, 2);
-          const vp = page.getViewport({ scale });
-          const canvas = document.createElement("canvas");
-          canvas.width = vp.width; canvas.height = vp.height;
-          canvas.style.cssText = "width:100%;height:auto;border-radius:6px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);margin-bottom:10px";
-          const cap = document.createElement("div");
-          cap.style.cssText = "font-size:11px;color:rgba(255,255,255,.45);margin:0 0 4px 2px;font-weight:700;letter-spacing:.5px";
-          cap.textContent = (labels && labels[i - 1]) || (i === 1 ? "SHEET SIDE 1 — FRONT" : "SHEET SIDE 2 — BACK");
-          if (!cancelled) { holder.appendChild(cap); holder.appendChild(canvas); }
-          await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
-        }
-      } catch (e) { holder.innerHTML = '<div style="color:#f87171;font-size:12px">Preview render failed: ' + e.message + '</div>'; }
-    })();
-    return () => { cancelled = true; };
-  }, [bytes]);
-  return <div ref={holderRef} />;
+    let dead = false;
+    pdf.getPage(index + 1).then(pg => { if (!dead) { const v = pg.getViewport({ scale: 1 }); setDims({ w: v.width / 72, h: v.height / 72, pg }); } });
+    return () => { dead = true; };
+  }, [pdf, index]);
+  useEffect(() => {
+    if (visible || !holderRef.current || !("IntersectionObserver" in window)) { if (!("IntersectionObserver" in window)) setVisible(true); return; }
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) setVisible(true); }, { root: root && root.current, rootMargin: "0px 600px" });
+    io.observe(holderRef.current);
+    return () => io.disconnect();
+  }, [visible, root]);
+  useEffect(() => {
+    if (!visible || !dims || !canvasRef.current) return;
+    let dead = false;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const scale = px / 72 * dpr;
+    const vp = dims.pg.getViewport({ scale });
+    const c = canvasRef.current;
+    c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    c.style.width = (dims.w * px) + "px"; c.style.height = (dims.h * px) + "px";
+    const task = dims.pg.render({ canvasContext: c.getContext("2d"), viewport: vp });
+    task.promise.catch(() => {});
+    return () => { dead = true; try { task.cancel(); } catch (e) {} };
+  }, [visible, dims, px]);
+  const w = dims ? dims.w * px : 400, h = dims ? dims.h * px : 280;
+  return (
+    <div className="imp-sheet" ref={holderRef}>
+      {rulers && dims ? <div className="corner" /> : <div style={{ width: 0 }} />}
+      {rulers && dims ? <RulerT inches={dims.w} px={px} /> : <div />}
+      {rulers && dims ? <RulerL inches={dims.h} px={px} /> : <div />}
+      {visible && dims ? <canvas ref={canvasRef} /> : <div className="ph" style={{ width: w, height: h }} />}
+      <div className="cap">{label || `SHEET SIDE ${index + 1}`}</div>
+    </div>
+  );
+}
+
+// The sheets viewport: every side of the active output part laid left to
+// right in a horizontal strip, rulers on each, one zoom for all. With no
+// output yet it shows the live layout schematic at the same scale, so the
+// operator sees the sheet they are about to make.
+function SheetViewport({ res, layout, zoom, setZoom, rulers, fit }) {
+  const stripRef = useRef(null);
+  const [pdf, setPdf] = useState(null);
+  const [width, setWidth] = useState(1000);
+  useEffect(() => {
+    if (!stripRef.current || !("ResizeObserver" in window)) return;
+    const ro = new ResizeObserver(es => { for (const e of es) setWidth(e.contentRect.width); });
+    ro.observe(stripRef.current);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    let dead = false;
+    setPdf(null);
+    if (!res || !res.bytes) return;
+    pdfjsLib.getDocument({ data: res.bytes.slice(0) }).promise.then(d => { if (!dead) setPdf(d); else d.destroy(); });
+    return () => { dead = true; };
+  }, [res && res.bytes]);
+  // Fit: the sheet's long edge from the layout (or 19″ until one exists).
+  const sheetLong = (res && res.layout && res.layout.sheet.long) || (layout && layout.sheet.long) || 19;
+  const px = zoom || Math.max(8, (width - 36 - 34 * (fit - 1) - 22 * fit) / (fit * sheetLong));
+  const n = pdf ? pdf.numPages : 0;
+  return (
+    <div className="imp-view">
+      <div className="imp-strip" ref={stripRef}>
+        {pdf ? Array.from({ length: n }, (_, i) => (
+          <SheetSide key={(res && res.filename) + ":" + i} pdf={pdf} index={i} px={px} rulers={rulers} root={stripRef}
+                     label={res.pageLabels && res.pageLabels[i]} />
+        )) : layout ? (
+          <div className="imp-sheet">
+            {rulers ? <div className="corner" /> : <div />}
+            {rulers ? <RulerT inches={layout.sheet.long} px={px} /> : <div />}
+            {rulers ? <RulerL inches={layout.sheet.short} px={px} /> : <div />}
+            <LayoutSchematic layout={layout} pxPerIn={px} />
+            <div className="cap">LAYOUT PREVIEW — {layout.sheet.label} · drop artwork to impose</div>
+          </div>
+        ) : (
+          <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13, padding: 30 }}>No layout yet — enter a finished size, or load an order.</div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function dlBytes(bytes, name) {
@@ -3285,6 +3541,20 @@ function App() {
   // through it wiped the queue the operator was working from.
   const [actionErr, setActionErr] = useState("");
   const [refOpen, setRefOpen] = useState(false);           // metadata reference panel
+  // 1.33 layout: which accordion sections are open, the sheet viewport, and
+  // the two specialty features.
+  const [secOpen, setSecOpen] = useState({ general: true, layout: true, product: true, bleed: false, specialty: false, marks: false });
+  const toggleSec = k => setSecOpen(o => ({ ...o, [k]: !o[k] }));
+  const [queueOpen, setQueueOpen] = useState(true);
+  const [zoom, setZoom] = useState(null);                  // px per inch; null = fit two sheets
+  const [rulers, setRulers] = useState(true);
+  const [viewPart, setViewPart] = useState(0);             // perfect bound: which part the viewport shows
+  const [greyPagesTxt, setGreyPagesTxt] = useState("");    // force greyscale on these source pages
+  const [slipOn, setSlipOn] = useState(false);
+  const [slipWhen, setSlipWhen] = useState("before");
+  const [slipSheets, setSlipSheets] = useState("");
+  const [slipDesign, setSlipDesign] = useState("K");       // C | M | Y | K | custom
+  const [slipCustom, setSlipCustom] = useState(null);      // { bytes, name }
   const genSeq = useRef(0);
 
   // Fetch the order queue (WP mode only)
@@ -3382,6 +3652,9 @@ function App() {
     spine: isPB ? +spine || 0 : null,
     pbPart: isPB ? pbPart : null,
     pbGutsOrder: isPB ? pbGutsOrder : null,
+    greyPages: greyPagesTxt.trim() || null,
+    slip: slipOn ? { on: true, when: slipWhen, sheets: slipSheets, design: slipDesign,
+                     customBytes: slipCustom && slipCustom.bytes, customName: slipCustom && slipCustom.name } : null,
     // Per-half layout controls. Shaped for the engine (pbPartOverrides), which
     // ignores anything null, so a half the operator never touched behaves
     // exactly as it did before these controls existed.
@@ -3389,7 +3662,7 @@ function App() {
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -3705,10 +3978,31 @@ function App() {
     ? (lay.pricedImp < 2 || lay.imp === lay.pricedImp)   // imp:1 presets legitimately move to the 27.5 sheet
     : lay.imp === Math.round(lay.pricedImp));
 
+  const partsOut = result ? (result.parts || [result]) : [];
+  const viewIdx = Math.min(viewPart, Math.max(0, partsOut.length - 1));
+  const viewRes = partsOut[viewIdx] || null;
+  const viewLay = viewRes ? viewRes.layout
+    : isPB && layoutInfo.pbLayouts ? ((layoutInfo.pbLayouts[viewIdx === 1 ? "guts" : "cover"] || layoutInfo.pbLayouts.cover || layoutInfo.pbLayouts.guts || {}).layout || null)
+    : lay;
+  const parityBadge = lay ? (lay.booklet
+    ? (lay.stepRepeat ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>STEP &amp; REPEAT {lay.stepRepeat}× — PRICED {lay.pricedImp} PAGES/SIDE</span>
+      : lay.manualGrid ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>MANUAL {lay.booklet.spreadsPerSide}/SIDE — PRICED {lay.pricedImp} PAGES/SIDE</span>
+      : lay.efficient ? <span className="imp-badge ok">13×27.5 EFFICIENT — PRICED {lay.pricedImp}/SIDE</span>
+      : lay.fillSheet ? <span className="imp-badge warn">FULL-SHEET FILL — PAST IMAGEABLE AREA</span>
+      : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}/SIDE`}</span>)
+    : (lay.manualGrid ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>MANUAL GRID {lay.across}×{lay.down} — PRICED {lay.pricedImp}-UP</span>
+      : lay.efficient ? <span className={"imp-badge " + (lay.imp >= lay.pricedImp ? "ok" : "warn")}>13×27.5 EFFICIENT — PRICED {lay.pricedImp}-UP/13×19</span>
+      : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}-UP`}</span>)) : null;
+  const sheetSummary = lay ? (lay.booklet
+    ? `${lay.sheet.label} · spreads ${lay.across} × ${lay.down}${lay.rotated ? " (rot)" : ""} = ${lay.booklet.spreadsPerSide}/side · gutter ${lay.gutter}″`
+    : `${lay.sheet.label} · grid ${lay.across} × ${lay.down}${lay.rotated ? " (rot)" : ""} = ${lay.imp}-up · gutter ${lay.gutter}″${spec.qty > 0 ? ` · ${Math.ceil(spec.qty / lay.imp)} sheets` : ""}`) : "";
+  const showProduct = isPB || !isSaddle;
+  const fitCount = 2;
+
   return (
-    <div style={{ maxWidth: 1220, margin: "0 auto", padding: "18px 16px 60px" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 20, margin: 0 }}>🖨️ PPS Imposition Tool</h1>
+    <div className="imp-app">
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+        <h1 style={{ fontSize: 18, margin: 0 }}>🖨️ PPS Imposition Tool</h1>
         <span style={{ fontSize: 12, color: "rgba(255,255,255,.4)" }}>
           vector-preserving sheetwise step-and-repeat · {CFG ? "connected to WooCommerce + Google Drive" : "standalone mode (drag & drop)"}
         </span>
@@ -3717,240 +4011,36 @@ function App() {
           {refOpen ? "− " : "+ "}Order metadata reference
         </button>
       </div>
-
       {refOpen && <MetaRef onClose={() => setRefOpen(false)} />}
 
-      {CFG && CFG.gdrive === false && (
-        <div className="imp-card" style={{ marginBottom: 16, borderColor: "rgba(239,68,68,.4)" }}>
-          <div style={{ fontSize: 13, color: "#f87171" }}>
-            Google Drive is not connected — connect it under <b>PPS Calculators → Google Drive</b>. The order queue, artwork downloads, and uploads will fail until then.
-          </div>
-        </div>
-      )}
-      {CFG && (
-        <div className="imp-card" style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 10, flexWrap: "wrap" }}>
-            <span className="lbl" style={{ marginBottom: 0 }}>
-              {showHidden ? "All recent orders with artwork on Drive" : "Orders still to impose"}
-            </span>
-            <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer", color: "rgba(255,255,255,.6)" }}
-                     title="Completed orders and orders you have hidden drop off the work list. Tick this to see them and put them back.">
-                <input type="checkbox" checked={showHidden} style={{ width: "auto" }}
-                       onChange={e => setShowHidden(e.target.checked)} />
-                show completed &amp; hidden
-              </label>
-              {pendingCount > 0 && (
-                <button className="imp-btn" style={{ padding: "5px 12px", fontSize: 12 }}
-                  disabled={!!bulkState && bulkState.done < bulkState.total} onClick={imposeAll}>
-                  {bulkState && bulkState.done < bulkState.total
-                    ? `Imposing ${bulkState.done + 1}/${bulkState.total}… ${bulkState.current}`
-                    : `⚡ Impose all pending (${pendingCount})`}
-                </button>
-              )}
-              <button className="imp-btn sec" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => setRefreshKey(k => k + 1)}>Refresh</button>
+      <div className="imp-shell">
+        {/* ══ LEFT — imposition controls (accordion) ══ */}
+        <aside className="imp-side">
+          <div className="imp-side-h">
+            <span>Imposition controls</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)", fontWeight: 400 }}>
+              <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }}
+                      onClick={() => setSecOpen({ general: true, layout: true, product: true, bleed: true, specialty: true, marks: true })}>all</button>{" "}
+              <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }}
+                      onClick={() => setSecOpen({ general: false, layout: false, product: false, bleed: false, specialty: false, marks: false })}>none</button>
             </span>
           </div>
-          {actionErr && (
-            <div style={{ color: "#f87171", fontSize: 12.5, marginBottom: 7, display: "flex", gap: 10, alignItems: "center" }}>
-              <span>{actionErr}</span>
-              <button className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setActionErr("")}>dismiss</button>
-            </div>
-          )}
-          <OrderQueue rows={rows} err={queueErr} onLoad={loadOrder} busyId={queueBusy}
-                      onStatus={setOrderStatus} onHide={setOrderHidden} rowBusy={rowBusy} />
-        </div>
-      )}
 
-      <div className="imp-cols" style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-        {/* ── Left: job setup ── */}
-        <div style={{ flex: "0 0 340px", minWidth: 300 }}>
-          <div className="imp-card" style={{ marginBottom: 14 }}>
-            <span className="lbl">Artwork</span>
-            <DropZone label="Drop artwork PDF here"
-              sub={isSaddle ? "multi-page PDF, pages in reading order (cover = page 1) · padded to a multiple of 4 · drop the manifest .txt to autofill"
-                 : isBook   ? "multi-page PDF, pages in reading order (cover = page 1) — or the guts file, with the flat cover dropped below · drop the manifest .txt to autofill"
-                            : "print-ready or raw PDF · page 1 = front, page 2 = back · drop the manifest .txt to autofill the spec"}
-              accept=".pdf,.txt" onFiles={f => onFiles(f, "front")} fileName={art && `${art.name} (${art.pageCount}p)`} />
-            {art && art.approval && art.approval.state === "mismatch" && (
-              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }}>
-                <b style={{ color: "#ff5f7a" }}>⚠ NOT THE APPROVED FILE</b>
-                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
-                  This file hashes <code>{art.approval.got.slice(0, 12)}…</code> but the customer approved <code>{art.approval.want.slice(0, 12)}…</code>.
-                  It can still be imposed — the output filename will carry <b>UNAPPROVED</b> so the flag reaches Drive and the press.
-                </div>
-              </div>
-            )}
-            {art && art.approval && art.approval.state === "unverifiable" && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "#ffb454" }}>
-                ⚠ This order carries an approval hash but the page can't verify it (no crypto.subtle — is wp-admin on HTTPS?).
-              </div>
-            )}
-            {art && art.approval && art.approval.state === "verified" && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "#5fd08a" }}>
-                ✓ Approval hash verified — byte-for-byte the file the customer approved.
-              </div>
-            )}
-            {art && art.threats && art.threats.length > 0 && (
-              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }}>
-                <b style={{ color: "#ff5f7a" }}>⚠ ACTIVE CONTENT in this file:</b> {art.threats.join(" · ")}
-                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
-                  The imposed output strips all of it. Avoid opening the original in a PDF viewer — use the CLEAN copy.
-                </div>
-              </div>
-            )}
-            {backArt && backArt.threats && backArt.threats.length > 0 && (
-              <div style={{ marginTop: 6, fontSize: 12, color: "#ff5f7a" }}>⚠ Back file active content: {backArt.threats.join(" · ")}</div>
-            )}
-            {art && (
-              <div style={{ marginTop: 8 }}>
-                <button type="button" className="imp-btn sec" disabled={cleanBusy} onClick={makeCleanCopy}>
-                  {cleanBusy ? "Sanitizing…" : "⬇ CLEAN 1:1 copy (sanitized)"}
-                </button>
-                {CFG && activeOrder && (
-                  <button type="button" className="imp-btn sec" style={{ marginLeft: 8 }} disabled={cleanBusy} onClick={sendCleanToDrive}>
-                    🧼 File CLEAN copy to order's Drive folder
-                  </button>
-                )}
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
-                  Keeps every page's artwork 1:1 (any size, any product — works even when imposition refuses) but strips
-                  scripts, auto-run actions, attachments, and form fields. Note: form fields/annotations lose their visible
-                  appearance too.
-                </div>
-              </div>
-            )}
-            {!isBook && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
-              <div style={{ marginTop: 10 }}>
-                <Field label={`Multi-page file (${art.pageCount} pages)`}>
-                  <select value={multiMode} onChange={e => setMultiMode(e.target.value)}>
-                    <option value="repeat">Repeat single design (page 1{spec.sides === 2 ? "+2" : ""} only)</option>
-                    <option value="gang">Gang pages in order (different pieces per sheet)</option>
-                    <option value="stack">Cut &amp; stack (piles collate after cutting)</option>
-                    <option value="each">Repeat each page (full sheet per piece)</option>
-                  </select>
-                </Field>
-                {spec.sides === 2 && multiMode !== "repeat" && !backArt && (
-                  <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginTop: -6, marginBottom: 8 }}>
-                    2-sided collated: pages read front/back interleaved (p1=front of piece 1, p2=its back, …) — or drop a separate back file below.
-                  </div>
-                )}
-              </div>
-            )}
-            {isPB && (
-              <div className="imp-card" style={{ marginTop: 10, marginBottom: 4, background: "rgba(255,255,255,.03)" }}>
-                <span className="lbl">Perfect bound — two press jobs</span>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", marginBottom: 9 }}>
-                  A perfect-bound book images as two press jobs on different stock. Emit both, or just the half you need —
-                  a guts reprint needs no spine and no cover file. With a single reading-order PDF the cover is built from
-                  pages 1, 2 and the last two; or drop the guts here and the template cover file below.
-                </div>
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
-                  {[["both","Cover + guts"],["guts","Guts only"],["cover","Cover only"]].map(([v,t]) => (
-                    <label key={v} style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                      <input type="radio" name="pps-pbpart" checked={pbPart === v} style={{ width: "auto" }}
-                             onChange={() => setPbPart(v)} />
-                      {t}
-                    </label>
-                  ))}
-                </div>
-                {pbPart !== "cover" && (
-                  <div style={{ marginBottom: 10, paddingBottom: 9, borderBottom: "1px dashed rgba(255,255,255,.12)" }}>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 5 }}>
-                      Leaves onto the sheet — what goes in each cell of the GUTS (pagination into leaves is the same in all three; each leaf is a front/back pair)
-                    </div>
-                    {[
-                      { v: "gang",     t: "Gang in order",   d: "consecutive leaves side by side — a 4-up sheet carries pages 1,3,5,7 on the front and 2,4,6,8 on the back. One sheet through the press is one book's worth of those leaves; quantity = books." },
-                      { v: "repeat",   t: "Step and repeat", d: "every cell is the SAME leaf, stepped across the sheet. One form per leaf; the run divides by the number of cells. Cut, then collate the lifts into books." },
-                      { v: "cutstack", t: "Cut and stack",   d: "the leaf list runs DOWN the piles — 18 leaves 4-up gives 1|6|11|16 on sheet 1. Cut the pile once, drop each lift under the one before it, and the block is already in order." },
-                    ].map(o => (
-                      <label key={o.v} style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 4 }}>
-                        <input type="radio" name="pps-pbgutsorder" checked={pbGutsOrder === o.v} style={{ width: "auto", marginTop: 3 }}
-                               onChange={() => setPbGutsOrder(o.v)} />
-                        <span><b style={{ fontWeight: 600 }}>{o.t}</b> <span style={{ color: "rgba(255,255,255,.4)" }}>— {o.d}</span></span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-                {pbPart === "guts" ? (
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)" }}>
-                    Book block only, <b>{(+trimLong || 0).toFixed(3)} × {(+trimShort || 0).toFixed(3)}″</b> — the file is taken as the
-                    block as-is. No spine needed. Columns, rows and gutters for the block are in <b>Manual grid &amp; gutters</b> below, on the Guts tab.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-                    <Field label="Spine width (in)" style={{ flex: "0 0 130px" }}>
-                      <input type="number" step="0.0625" min="0" max="3" value={spine} onChange={e => setSpine(e.target.value)} />
-                    </Field>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)", paddingBottom: 8 }}>
-                      flat cover = <b>{(2 * (+trimLong || 0) + (+spine || 0)).toFixed(3)}</b> × {(+trimShort || 0).toFixed(3)}″
-                      <span style={{ color: "rgba(255,255,255,.38)" }}> — measure the glued block; the quote assumes nominal caliper</span>
-                    </div>
-                  </div>
-                )}
-                {pbPart !== "guts" && <div style={{ marginTop: 4 }}>
-                  <DropZone label="Drop COVER PDF (optional)" sub="already flat with the spine — the calculator's cover template. Leave empty for a single reading-order file."
-                    accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
-                </div>}
-              </div>
-            )}
-            {!isPB && spec.sides === 2 && art && (art.pageCount < 2 || multiMode !== "repeat") && (
-              <div style={{ marginTop: 10 }}>
-                <DropZone label="Drop BACK side PDF" sub={multiMode !== "repeat" ? "optional — separate collated back file (page i backs piece i)" : "2-sided job but the front file has one page"}
-                  accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
-              </div>
-            )}
-            {!isSaddle && (
-              <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 10 }}>
-                <span className="lbl">Gang combo — multiple designs on one sheet</span>
-                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginBottom: 6 }}>
-                  Add 2+ same-trim PDFs and each takes a share of the {lay ? `${lay.cells.length} cells` : "cells"} — blank slots = split evenly,
-                  or set counts per file. Each design uses its page 1{spec.sides === 2 ? " + page 2 (back)" : ""}.
-                  Qty = press sheets. Pieces fill contiguous blocks in reading order for clean cutting.
-                </div>
-                <input type="file" multiple accept=".pdf" onChange={e => { addGangFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
-                {gangFiles.length > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    {gangFiles.map((g, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 4 }}>
-                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name} ({g.pageCount}p)</span>
-                        <input type="number" min="1" placeholder="auto" value={g.slots} style={{ width: 58 }}
-                               title="cells for this design (blank = even split)"
-                               onChange={e => setGangFiles(prev => prev.map((x, j) => j === i ? { ...x, slots: e.target.value } : x))} />
-                        <button type="button" className="imp-btn sec" style={{ padding: "2px 8px" }}
-                                onClick={() => setGangFiles(prev => prev.filter((_, j) => j !== i))}>✕</button>
-                      </div>
-                    ))}
-                    {gangFiles.length === 1 && <div style={{ fontSize: 11, color: "#e91e63" }}>Add at least one more file to gang — with one file use the normal drop zone.</div>}
-                    {gangFiles.length >= 2 && (
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>
-                        Gang combo active — the main drop zone, multi-page mode, and separate back file are ignored.
-                        <button type="button" className="imp-btn sec" style={{ marginLeft: 8, padding: "2px 8px" }} onClick={() => setGangFiles([])}>clear gang</button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="imp-card">
-            <Field label="Product / calculator">
+          <Acc id="general" title="General settings" open={secOpen.general} onToggle={() => toggleSec("general")}>
+            <Field label="Product layout type">
               <select value={calc} onChange={e => setCalc(e.target.value)}>
                 {CALC_TYPES.map(c => <option key={c.val} value={c.val}>{c.label}</option>)}
               </select>
             </Field>
             <div style={{ display: "flex", gap: 10 }}>
-              <Field label={isBound ? "Page width (in)" : "Trim long (in)"} style={{ flex: 1 }}>
+              <Field label={isBound ? "Finished size — page width (in)" : "Finished size — long (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimLong} onChange={e => setTrimLong(e.target.value)} />
               </Field>
-              <Field label={isBound ? "Page height (in) — spine edge" : "Trim short (in)"} style={{ flex: 1 }}>
+              <Field label={isBound ? "Page height (in) — spine edge" : "Short (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
-              <Field label="Bleed (in)" style={{ flex: "0 0 84px" }}>
-                <input type="number" step="0.0625" min="0" max="0.5" value={bleedIn} onChange={e => setBleedIn(e.target.value)} />
-              </Field>
             </div>
-            <Field label="Parent sheet">
+            <Field label="Sheet size">
               <select value={sheetSel} onChange={e => setSheetSel(e.target.value)}>
                 <option value="auto">Auto — the product's own press sheet</option>
                 <option value="13x19">13×19</option>
@@ -3989,154 +4079,33 @@ function App() {
                 </div>
               )}
             </Field>
-            <Field label="Add bleed (files with none)">
-              <select value={addBleed} onChange={e => setAddBleed(e.target.value)}
-                      style={addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w))
-                             ? { outline: "2px solid #e91e63" } : undefined}>
-                <option value="off">Off — use file as-is</option>
-                <option value="auto">Auto (text-safe) — mirror, streak where text is near trim</option>
-                <option value="mirror">Mirror edges outward (content at trim stays put)</option>
-                <option value="scale">Scale art up to bleed (shrinks safety margin)</option>
-                <option value="streak">Streak edges (stretch edge sliver — nothing readable)</option>
-              </select>
-              {addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w)) && (
-                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 3 }}>
-                  This file has no bleed — cut lines may show paper white. Auto is the safe default fix: it mirrors
-                  clean edges and streaks edges with nearby text. Scale suits photo collages and faces
-                  (a mirror would visibly reflect people at the edges).
-                </div>
-              )}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 8, flexWrap: "wrap" }}>
-                <b style={{ fontWeight: 600 }}>Scale art:</b>
-                <input type="number" step="1" min="25" max="400" value={artScale} style={{ width: 74 }}
-                       onChange={e => setArtScale(e.target.value)} />
-                <span>% of placed size</span>
-                {+artScale !== 100 && (
-                  <span style={{ color: "rgba(255,255,255,.5)" }}>
-                    — {+artScale > 100 ? "grows past the trim (clipped to the cell)" : "pulls in from the trim; needs a bleed fill to cover the gap"}
-                  </span>
-                )}
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, flexWrap: "wrap" }}>
-                <b style={{ fontWeight: 600 }}>Pull art off trim:</b>
-                <input type="number" step="0.03125" min="0" max="0.5" value={artInset}
-                       style={{ width: 70, outline: +artInset > 0 && addBleed === "scale" ? "2px solid #e91e63" : undefined }}
-                       onChange={e => setArtInset(e.target.value)} />
-                ″ minimum on every edge
-                {+artInset > 0 && (() => {
-                  const W = Math.max(+trimLong || 0, +trimShort || 0), H = Math.min(+trimLong || 0, +trimShort || 0);
-                  if (!(H > 0)) return null;
-                  const f = 1 - 2 * (+artInset) / H;
-                  return (
-                    <span style={{ color: f > 0.5 ? "rgba(255,255,255,.5)" : "#f87171" }}>
-                      — art ×{f.toFixed(4)} ({(100 - f * 100).toFixed(2)}% smaller): pulls in {(W * (1 - f) / 2).toFixed(3)}″ across, {(H * (1 - f) / 2).toFixed(3)}″ down;
-                      fill band becomes {((W * (1 - f) / 2) + (+bleedIn || 0)).toFixed(3)}″
-                    </span>
-                  );
-                })()}
-              </div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 2 }}>
-                For art whose text crowds the cut. Shrinks the art so content backs away from the trim, then the
-                bleed fill above covers the gap it opens — out from the art's new edge to past the cut. Scale is
-                uniform (art is never distorted), so the value is a guaranteed <i>minimum</i>: the long edge pulls
-                in proportionally further. Needs a fill mode — Auto, Mirror or Streak, not Scale.
-              </div>
-              {+artInset > 0 && addBleed === "scale" && (
-                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
-                  “Scale art up to bleed” re-expands the art to the bleed box, undoing the pull-off. Use Auto, Mirror or Streak.
-                </div>
-              )}
-              {+artInset > 0 && addBleed === "off" && (
-                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
-                  With Add bleed off, the gap the pull-off opens would print as paper white inside the trim. Set a fill mode.
-                </div>
-              )}
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, cursor: "pointer" }}>
-                <input type="checkbox" checked={addBleedSmart} onChange={e => setAddBleedSmart(e.target.checked)} />
-                Smart edge detect — if the art stops just short of trim (≤3/16″), pre-scale so the synthesized
-                bleed never amplifies the white sliver; big white margins are respected as design.
-              </label>
-              {(["auto", "streak"].includes(addBleed) || Object.values(addBleedPages).some(v => v === "auto" || v === "streak")) && (
-                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 4 }}>
-                  Streak sampler: outermost
-                  <input type="number" step="0.005" min="0.005" max="0.25" value={streakEps}
-                         style={{ width: 64 }} onChange={e => setStreakEps(e.target.value)} />
-                  ″ of art stretched into the bleed (smaller = purer edge color, larger = softer smear)
-                </div>
-              )}
-              {art && art.pageCount > 1 && gangFiles.length < 2 && (addBleed !== "off" || Object.keys(addBleedPages).length > 0
-                || (result && (result.warnings || []).some(w => /no bleed/i.test(w)))) && (
-                <div style={{ marginTop: 6 }}>
-                  <div style={{ fontSize: 11, color: "#777", marginBottom: 3 }}>
-                    Per-page override (blank = job setting "{addBleed}"):
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 120, overflowY: "auto" }}>
-                    {Array.from({ length: Math.min(art.pageCount, 64) }, (_, i) => (
-                      <label key={i} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11,
-                                              border: "1px solid #ddd", borderRadius: 4, padding: "1px 4px" }}>
-                        p{i + 1}
-                        <select value={addBleedPages[i + 1] || ""} style={{ fontSize: 11, padding: "1px 2px" }}
-                                onChange={e => setAddBleedPages(prev => {
-                                  const next = { ...prev };
-                                  if (e.target.value) next[i + 1] = e.target.value; else delete next[i + 1];
-                                  return next;
-                                })}>
-                          <option value=""></option>
-                          <option value="off">off</option>
-                          <option value="auto">auto</option>
-                          <option value="mirror">mirror</option>
-                          <option value="scale">scale</option>
-                          <option value="streak">streak</option>
-                        </select>
-                      </label>
-                    ))}
-                  </div>
-                  {art.pageCount > 64 && <div style={{ fontSize: 11, color: "#777" }}>overrides limited to the first 64 pages</div>}
-                </div>
-              )}
-            </Field>
-            <div style={{ display: "flex", gap: 10 }}>
-              {!isBook && (
-                <Field label="Sides" style={{ flex: 1 }}>
-                  <select value={sides} onChange={e => setSides(+e.target.value)}>
-                    <option value={1}>1 — single-sided</option>
-                    <option value={2}>2 — double-sided</option>
-                  </select>
-                </Field>
-              )}
+
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+              <Field label="Duplexed sheets" style={{ flex: "0 0 150px" }}>
+                <label style={{ fontSize: 13, display: "flex", gap: 7, alignItems: "center", cursor: isBook ? "default" : "pointer", padding: "8px 0" }}>
+                  <input type="checkbox" checked={isBook ? true : sides === 2} disabled={isBook} style={{ width: "auto" }}
+                         onChange={e => setSides(e.target.checked ? 2 : 1)} />
+                  {isBook ? "always (book)" : sides === 2 ? "2-sided" : "1-sided"}
+                </label>
+              </Field>
               <Field label={isBook ? "Quantity (books)" : gangFiles.length >= 2 ? "Quantity (press sheets)" : multiMode === "each" ? "Quantity (per piece)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
                 <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} />
               </Field>
             </div>
-            {(spec.sides === 2 || isBook) && (
-              <div style={{ display: "flex", gap: 10 }}>
-                <Field label="Press flips sheet on" style={{ flex: 1 }}>
-                  <select value={sheetFlip} onChange={e => setSheetFlip(e.target.value)}>
-                    <option value="short">Short edge (default — Fiery SEF)</option>
-                    <option value="long">Long edge</option>
-                  </select>
-                </Field>
-                {!isSaddle && (
-                  <Field label="Back rotation" style={{ flex: 1 }}>
-                    <select value={backRotate} onChange={e => setBackRotate(e.target.value)}>
-                      <option value="auto">Auto (register with front)</option>
-                      <option value="0">Force none</option>
-                      <option value="180">Force 180° (tumble)</option>
-                    </select>
-                  </Field>
-                )}
-              </div>
-            )}
             <div style={{ display: "flex", gap: 10 }}>
-              <Field label="Job name" style={{ flex: 1 }}>
-                <input type="text" value={jobName} onChange={e => setJobName(e.target.value)} placeholder="slug line" />
+              <Field label="Name" style={{ flex: 1 }}>
+                <input type="text" value={jobName} onChange={e => setJobName(e.target.value)} placeholder="job name — filename + slug" />
               </Field>
               <Field label="Order #" style={{ flex: "0 0 90px" }}>
                 <input type="text" value={orderRef} onChange={e => setOrderRef(e.target.value)} />
               </Field>
             </div>
+          </Acc>
+
+          <Acc id="layout" title="Layout settings" open={secOpen.layout} onToggle={() => toggleSec("layout")}
+               badge={lay && lay.manualGrid ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>MANUAL</span> : null}>
             <div style={{ display: "flex", gap: 10 }}>
-              <Field label="Layout position" style={{ flex: 1 }}>
+              <Field label="Layout position offset" style={{ flex: 1 }}>
                 <select value={offsetMode} onChange={e => setOffsetMode(e.target.value)}>
                   <option value="jog">Jog lower-right 0.5″ (back: lower-left)</option>
                   <option value="center">Centered</option>
@@ -4208,18 +4177,36 @@ function App() {
                 })}
               </div>
             )}
+
+            {(spec.sides === 2 || isBook) && (
+              <div style={{ display: "flex", gap: 10 }}>
+                <Field label="Press flips sheet on" style={{ flex: 1 }}>
+                  <select value={sheetFlip} onChange={e => setSheetFlip(e.target.value)}>
+                    <option value="short">Short edge (default — Fiery SEF)</option>
+                    <option value="long">Long edge</option>
+                  </select>
+                </Field>
+                {!isSaddle && (
+                  <Field label="Back rotation" style={{ flex: 1 }}>
+                    <select value={backRotate} onChange={e => setBackRotate(e.target.value)}>
+                      <option value="auto">Auto (register with front)</option>
+                      <option value="0">Force none</option>
+                      <option value="180">Force 180° (tumble)</option>
+                    </select>
+                  </Field>
+                )}
+              </div>
+            )}
             {(FLAT_CALCS.includes(calc) || isSaddle) && (
               <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 8 }}>
                 <input type="checkbox" checked={efficient} onChange={e => setEfficient(e.target.checked)} style={{ width: "auto" }} />
                 <span>Lay out on 13×27.5 (efficient mode) <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "more signature copies per sheet" : "multiple expands to fill the 27″ axis"}</span></span>
               </label>
             )}
-            {/* Render whenever a layout resolved OR the operator has a manual
-                override switched on. That second case is the important one: an
-                over-large grid makes computeLayout throw, and if the panel were
-                gated on `lay` alone the control that caused it would vanish,
-                leaving no way to undo. The settings live in state, so they are
-                still editable with no layout at all. */}
+            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 10 }}>
+              <input type="checkbox" checked={allowBestFit} onChange={e => setAllowBestFit(e.target.checked)} style={{ width: "auto" }} />
+              <span>Allow best physical fit if the priced imp can't be placed <span style={{ color: "rgba(255,255,255,.4)" }}>(mismatch is flagged on sheet + slug)</span></span>
+            </label>
             {(() => {
               // Perfect bound edits ONE HALF at a time. The cover and the book
               // block are different pieces on different stock, so they each
@@ -4458,7 +4445,312 @@ function App() {
                 </div>
               );
             })()}
-            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+
+          </Acc>
+
+          {showProduct && (
+            <Acc id="product" title={isPB ? "Perfect bound — two press jobs" : "Product settings"} open={secOpen.product} onToggle={() => toggleSec("product")}>
+            {!isBook && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
+              <div style={{ marginTop: 10 }}>
+                <Field label={`Multi-page file (${art.pageCount} pages)`}>
+                  <select value={multiMode} onChange={e => setMultiMode(e.target.value)}>
+                    <option value="repeat">Repeat single design (page 1{spec.sides === 2 ? "+2" : ""} only)</option>
+                    <option value="gang">Gang pages in order (different pieces per sheet)</option>
+                    <option value="stack">Cut &amp; stack (piles collate after cutting)</option>
+                    <option value="each">Repeat each page (full sheet per piece)</option>
+                  </select>
+                </Field>
+                {spec.sides === 2 && multiMode !== "repeat" && !backArt && (
+                  <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginTop: -6, marginBottom: 8 }}>
+                    2-sided collated: pages read front/back interleaved (p1=front of piece 1, p2=its back, …) — or drop a separate back file below.
+                  </div>
+                )}
+              </div>
+            )}
+            {isPB && (
+              <div style={{ marginTop: 4 }}>
+                <span className="lbl">Perfect bound — two press jobs</span>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", marginBottom: 9 }}>
+                  A perfect-bound book images as two press jobs on different stock. Emit both, or just the half you need —
+                  a guts reprint needs no spine and no cover file. With a single reading-order PDF the cover is built from
+                  pages 1, 2 and the last two; or drop the guts here and the template cover file below.
+                </div>
+                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
+                  {[["both","Cover + guts"],["guts","Guts only"],["cover","Cover only"]].map(([v,t]) => (
+                    <label key={v} style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                      <input type="radio" name="pps-pbpart" checked={pbPart === v} style={{ width: "auto" }}
+                             onChange={() => setPbPart(v)} />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+                {pbPart !== "cover" && (
+                  <div style={{ marginBottom: 10, paddingBottom: 9, borderBottom: "1px dashed rgba(255,255,255,.12)" }}>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 5 }}>
+                      Leaves onto the sheet — what goes in each cell of the GUTS (pagination into leaves is the same in all three; each leaf is a front/back pair)
+                    </div>
+                    {[
+                      { v: "gang",     t: "Gang in order",   d: "consecutive leaves side by side — a 4-up sheet carries pages 1,3,5,7 on the front and 2,4,6,8 on the back. One sheet through the press is one book's worth of those leaves; quantity = books." },
+                      { v: "repeat",   t: "Step and repeat", d: "every cell is the SAME leaf, stepped across the sheet. One form per leaf; the run divides by the number of cells. Cut, then collate the lifts into books." },
+                      { v: "cutstack", t: "Cut and stack",   d: "the leaf list runs DOWN the piles — 18 leaves 4-up gives 1|6|11|16 on sheet 1. Cut the pile once, drop each lift under the one before it, and the block is already in order." },
+                    ].map(o => (
+                      <label key={o.v} style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 4 }}>
+                        <input type="radio" name="pps-pbgutsorder" checked={pbGutsOrder === o.v} style={{ width: "auto", marginTop: 3 }}
+                               onChange={() => setPbGutsOrder(o.v)} />
+                        <span><b style={{ fontWeight: 600 }}>{o.t}</b> <span style={{ color: "rgba(255,255,255,.4)" }}>— {o.d}</span></span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {pbPart === "guts" ? (
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)" }}>
+                    Book block only, <b>{(+trimLong || 0).toFixed(3)} × {(+trimShort || 0).toFixed(3)}″</b> — the file is taken as the
+                    block as-is. No spine needed. Columns, rows and gutters for the block are in <b>Manual grid &amp; gutters</b> below, on the Guts tab.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <Field label="Spine width (in)" style={{ flex: "0 0 130px" }}>
+                      <input type="number" step="0.0625" min="0" max="3" value={spine} onChange={e => setSpine(e.target.value)} />
+                    </Field>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)", paddingBottom: 8 }}>
+                      flat cover = <b>{(2 * (+trimLong || 0) + (+spine || 0)).toFixed(3)}</b> × {(+trimShort || 0).toFixed(3)}″
+                      <span style={{ color: "rgba(255,255,255,.38)" }}> — measure the glued block; the quote assumes nominal caliper</span>
+                    </div>
+                  </div>
+                )}
+                {pbPart !== "guts" && <div style={{ marginTop: 4 }}>
+                  <DropZone label="Drop COVER PDF (optional)" sub="already flat with the spine — the calculator's cover template. Leave empty for a single reading-order file."
+                    accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
+                </div>}
+              </div>
+            )}
+            {!isPB && spec.sides === 2 && art && (art.pageCount < 2 || multiMode !== "repeat") && (
+              <div style={{ marginTop: 10 }}>
+                <DropZone label="Drop BACK side PDF" sub={multiMode !== "repeat" ? "optional — separate collated back file (page i backs piece i)" : "2-sided job but the front file has one page"}
+                  accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
+              </div>
+            )}
+            {!isSaddle && (
+              <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 10 }}>
+                <span className="lbl">Gang combo — multiple designs on one sheet</span>
+                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginBottom: 6 }}>
+                  Add 2+ same-trim PDFs and each takes a share of the {lay ? `${lay.cells.length} cells` : "cells"} — blank slots = split evenly,
+                  or set counts per file. Each design uses its page 1{spec.sides === 2 ? " + page 2 (back)" : ""}.
+                  Qty = press sheets. Pieces fill contiguous blocks in reading order for clean cutting.
+                </div>
+                <input type="file" multiple accept=".pdf" onChange={e => { addGangFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
+                {gangFiles.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    {gangFiles.map((g, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 4 }}>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name} ({g.pageCount}p)</span>
+                        <input type="number" min="1" placeholder="auto" value={g.slots} style={{ width: 58 }}
+                               title="cells for this design (blank = even split)"
+                               onChange={e => setGangFiles(prev => prev.map((x, j) => j === i ? { ...x, slots: e.target.value } : x))} />
+                        <button type="button" className="imp-btn sec" style={{ padding: "2px 8px" }}
+                                onClick={() => setGangFiles(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                      </div>
+                    ))}
+                    {gangFiles.length === 1 && <div style={{ fontSize: 11, color: "#e91e63" }}>Add at least one more file to gang — with one file use the normal drop zone.</div>}
+                    {gangFiles.length >= 2 && (
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>
+                        Gang combo active — the main drop zone, multi-page mode, and separate back file are ignored.
+                        <button type="button" className="imp-btn sec" style={{ marginLeft: 8, padding: "2px 8px" }} onClick={() => setGangFiles([])}>clear gang</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            </Acc>
+          )}
+
+          <Acc id="bleed" title="Bleed settings" open={secOpen.bleed} onToggle={() => toggleSec("bleed")}
+               badge={addBleed !== "off" ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>{addBleed.toUpperCase()}</span> : null}>
+            <Field label="Bleed (in)" style={{ maxWidth: 140 }}>
+              <input type="number" step="0.0625" min="0" max="0.5" value={bleedIn} onChange={e => setBleedIn(e.target.value)} />
+            </Field>
+            <Field label="Add bleed (files with none)">
+              <select value={addBleed} onChange={e => setAddBleed(e.target.value)}
+                      style={addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w))
+                             ? { outline: "2px solid #e91e63" } : undefined}>
+                <option value="off">Off — use file as-is</option>
+                <option value="auto">Auto (text-safe) — mirror, streak where text is near trim</option>
+                <option value="mirror">Mirror edges outward (content at trim stays put)</option>
+                <option value="scale">Scale art up to bleed (shrinks safety margin)</option>
+                <option value="streak">Streak edges (stretch edge sliver — nothing readable)</option>
+              </select>
+              {addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w)) && (
+                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 3 }}>
+                  This file has no bleed — cut lines may show paper white. Auto is the safe default fix: it mirrors
+                  clean edges and streaks edges with nearby text. Scale suits photo collages and faces
+                  (a mirror would visibly reflect people at the edges).
+                </div>
+              )}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 8, flexWrap: "wrap" }}>
+                <b style={{ fontWeight: 600 }}>Scale art:</b>
+                <input type="number" step="1" min="25" max="400" value={artScale} style={{ width: 74 }}
+                       onChange={e => setArtScale(e.target.value)} />
+                <span>% of placed size</span>
+                {+artScale !== 100 && (
+                  <span style={{ color: "rgba(255,255,255,.5)" }}>
+                    — {+artScale > 100 ? "grows past the trim (clipped to the cell)" : "pulls in from the trim; needs a bleed fill to cover the gap"}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, flexWrap: "wrap" }}>
+                <b style={{ fontWeight: 600 }}>Pull art off trim:</b>
+                <input type="number" step="0.03125" min="0" max="0.5" value={artInset}
+                       style={{ width: 70, outline: +artInset > 0 && addBleed === "scale" ? "2px solid #e91e63" : undefined }}
+                       onChange={e => setArtInset(e.target.value)} />
+                ″ minimum on every edge
+                {+artInset > 0 && (() => {
+                  const W = Math.max(+trimLong || 0, +trimShort || 0), H = Math.min(+trimLong || 0, +trimShort || 0);
+                  if (!(H > 0)) return null;
+                  const f = 1 - 2 * (+artInset) / H;
+                  return (
+                    <span style={{ color: f > 0.5 ? "rgba(255,255,255,.5)" : "#f87171" }}>
+                      — art ×{f.toFixed(4)} ({(100 - f * 100).toFixed(2)}% smaller): pulls in {(W * (1 - f) / 2).toFixed(3)}″ across, {(H * (1 - f) / 2).toFixed(3)}″ down;
+                      fill band becomes {((W * (1 - f) / 2) + (+bleedIn || 0)).toFixed(3)}″
+                    </span>
+                  );
+                })()}
+              </div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 2 }}>
+                For art whose text crowds the cut. Shrinks the art so content backs away from the trim, then the
+                bleed fill above covers the gap it opens — out from the art's new edge to past the cut. Scale is
+                uniform (art is never distorted), so the value is a guaranteed <i>minimum</i>: the long edge pulls
+                in proportionally further. Needs a fill mode — Auto, Mirror or Streak, not Scale.
+              </div>
+              {+artInset > 0 && addBleed === "scale" && (
+                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
+                  “Scale art up to bleed” re-expands the art to the bleed box, undoing the pull-off. Use Auto, Mirror or Streak.
+                </div>
+              )}
+              {+artInset > 0 && addBleed === "off" && (
+                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
+                  With Add bleed off, the gap the pull-off opens would print as paper white inside the trim. Set a fill mode.
+                </div>
+              )}
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={addBleedSmart} onChange={e => setAddBleedSmart(e.target.checked)} />
+                Smart edge detect — if the art stops just short of trim (≤3/16″), pre-scale so the synthesized
+                bleed never amplifies the white sliver; big white margins are respected as design.
+              </label>
+              {(["auto", "streak"].includes(addBleed) || Object.values(addBleedPages).some(v => v === "auto" || v === "streak")) && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 4 }}>
+                  Streak sampler: outermost
+                  <input type="number" step="0.005" min="0.005" max="0.25" value={streakEps}
+                         style={{ width: 64 }} onChange={e => setStreakEps(e.target.value)} />
+                  ″ of art stretched into the bleed (smaller = purer edge color, larger = softer smear)
+                </div>
+              )}
+              {art && art.pageCount > 1 && gangFiles.length < 2 && (addBleed !== "off" || Object.keys(addBleedPages).length > 0
+                || (result && (result.warnings || []).some(w => /no bleed/i.test(w)))) && (
+                <div style={{ marginTop: 6 }}>
+                  <div style={{ fontSize: 11, color: "#777", marginBottom: 3 }}>
+                    Per-page override (blank = job setting "{addBleed}"):
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 120, overflowY: "auto" }}>
+                    {Array.from({ length: Math.min(art.pageCount, 64) }, (_, i) => (
+                      <label key={i} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11,
+                                              border: "1px solid #ddd", borderRadius: 4, padding: "1px 4px" }}>
+                        p{i + 1}
+                        <select value={addBleedPages[i + 1] || ""} style={{ fontSize: 11, padding: "1px 2px" }}
+                                onChange={e => setAddBleedPages(prev => {
+                                  const next = { ...prev };
+                                  if (e.target.value) next[i + 1] = e.target.value; else delete next[i + 1];
+                                  return next;
+                                })}>
+                          <option value=""></option>
+                          <option value="off">off</option>
+                          <option value="auto">auto</option>
+                          <option value="mirror">mirror</option>
+                          <option value="scale">scale</option>
+                          <option value="streak">streak</option>
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                  {art.pageCount > 64 && <div style={{ fontSize: 11, color: "#777" }}>overrides limited to the first 64 pages</div>}
+                </div>
+              )}
+            </Field>
+
+          </Acc>
+
+          <Acc id="specialty" title="Specialty settings" open={secOpen.specialty} onToggle={() => toggleSec("specialty")}
+               badge={(greyPagesTxt.trim() || slipOn) ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>ON</span> : null}>
+            <Field label="Force greyscale print on pages">
+              <input type="text" value={greyPagesTxt} onChange={e => setGreyPagesTxt(e.target.value)} placeholder="e.g. 3, 5-8  (source page numbers)" />
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                Listed pages of the artwork are rasterised at 300 DPI and re-embedded as DeviceGray, so they separate to the K plate only.
+                Those pages are no longer vector. {art ? `File has ${art.pageCount} page${art.pageCount === 1 ? "" : "s"}.` : ""}
+              </div>
+            </Field>
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
+              <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 8 }}>
+                <input type="checkbox" checked={slipOn} onChange={e => setSlipOn(e.target.checked)} style={{ width: "auto" }} />
+                <b>Insert slipsheet</b>
+              </label>
+              {slipOn && (
+                <div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+                    <Field label="When" style={{ flex: "0 0 110px" }}>
+                      <select value={slipWhen} onChange={e => setSlipWhen(e.target.value)}>
+                        <option value="before">Before</option>
+                        <option value="after">After</option>
+                      </select>
+                    </Field>
+                    <Field label="Sheet(s) — imposed output" style={{ flex: 1 }}>
+                      <input type="text" value={slipSheets} onChange={e => setSlipSheets(e.target.value)} placeholder="e.g. 1, 5, 10-12" />
+                    </Field>
+                  </div>
+                  <Field label="Slipsheet design">
+                    <select value={slipDesign} onChange={e => setSlipDesign(e.target.value)}>
+                      <option value="C">Solid C</option>
+                      <option value="M">Solid M</option>
+                      <option value="Y">Solid Y</option>
+                      <option value="K">Solid K</option>
+                      <option value="custom">Custom upload…</option>
+                    </select>
+                    {slipDesign === "custom" && (
+                      <div style={{ marginTop: 6 }}>
+                        <input type="file" accept=".pdf,.jpg,.jpeg,.png"
+                               onChange={async e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; if (!f) return;
+                                                      setSlipCustom({ bytes: new Uint8Array(await f.arrayBuffer()), name: f.name }); }} />
+                        {slipCustom && <div style={{ fontSize: 11.5, color: "#4ade80", marginTop: 3 }}>{slipCustom.name} — page 1 on the front, page 2 (if any) on the back, fitted to the sheet</div>}
+                      </div>
+                    )}
+                  </Field>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+                    Sheet numbers are the <b>physical sheets of the imposed output</b> (sheet 1 = the first front/back pair on a duplex job).
+                    A slipsheet is one physical sheet — both faces carry the design on a duplex job — and is not counted in the run figures.
+                  </div>
+                </div>
+              )}
+            </div>
+            {art && (
+              <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 10, marginBottom: 8 }}>
+                <span className="lbl">Sanitized copy</span>
+                <button type="button" className="imp-btn sec" disabled={cleanBusy} onClick={makeCleanCopy}>
+                  {cleanBusy ? "Sanitizing…" : "⬇ CLEAN 1:1 copy (sanitized)"}
+                </button>
+                {CFG && activeOrder && (
+                  <button type="button" className="imp-btn sec" style={{ marginLeft: 8 }} disabled={cleanBusy} onClick={sendCleanToDrive}>
+                    🧼 File CLEAN copy to order's Drive folder
+                  </button>
+                )}
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                  Keeps every page 1:1 but strips scripts, auto-run actions, attachments and form fields (their visible appearance too).
+                </div>
+              </div>
+            )}
+          </Acc>
+
+          <Acc id="marks" title="Markings settings" open={secOpen.marks} onToggle={() => toggleSec("marks")}>
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", fontSize: 13, marginBottom: 8 }}>
               <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
                 <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
                 Crop / trim marks
@@ -4473,22 +4765,189 @@ function App() {
                 <input type="checkbox" checked={slugOn} onChange={e => setSlugOn(e.target.checked)} style={{ width: "auto" }} />
                 Slug line
               </label>
-              <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
-                independent — all drawn inside the printable area, as space allows
-              </span>
             </div>
-            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
-              <input type="checkbox" checked={allowBestFit} onChange={e => setAllowBestFit(e.target.checked)} style={{ width: "auto" }} />
-              <span>Allow best physical fit if the priced imp can't be placed <span style={{ color: "rgba(255,255,255,.4)" }}>(mismatch is flagged on sheet + slug)</span></span>
-            </label>
-          </div>
-        </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginBottom: 10 }}>
+              Independent switches — all drawn inside the printable area, as space allows.
+            </div>
+          </Acc>
+        </aside>
 
-        {/* ── Right: layout + preview + output ── */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="imp-card" style={{ marginBottom: 14 }}>
-            <span className="lbl">Computed layout (mirrors calculator pricing)</span>
-            {layoutInfo.error && <div style={{ color: "#f87171", fontSize: 13, lineHeight: 1.5 }}>{layoutInfo.error}</div>}
+        {/* ══ RIGHT — job source, viewport tools, sheets ══ */}
+        <div className="imp-main">
+          {CFG && CFG.gdrive === false && (
+            <div className="imp-card" style={{ marginBottom: 12, borderColor: "rgba(239,68,68,.4)" }}>
+              <div style={{ fontSize: 13, color: "#f87171" }}>
+                Google Drive is not connected — connect it under <b>PPS Calculators → Google Drive</b>. The order queue, artwork downloads, and uploads will fail until then.
+              </div>
+            </div>
+          )}
+          <div className="imp-card" style={{ marginBottom: 0 }}>
+            {CFG && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 10, flexWrap: "wrap" }}>
+                  <button type="button" className="imp-btn sec" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setQueueOpen(v => !v)}>
+                    {queueOpen ? "▼" : "▶"} {showHidden ? "All recent orders with artwork on Drive" : "Orders still to impose"}{rows ? ` (${rows.length})` : ""}
+                  </button>
+                  <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer", color: "rgba(255,255,255,.6)" }}
+                           title="Completed orders and orders you have hidden drop off the work list. Tick this to see them and put them back.">
+                      <input type="checkbox" checked={showHidden} style={{ width: "auto" }}
+                             onChange={e => setShowHidden(e.target.checked)} />
+                      show completed &amp; hidden
+                    </label>
+                    {pendingCount > 0 && (
+                      <button className="imp-btn" style={{ padding: "5px 12px", fontSize: 12 }}
+                        disabled={!!bulkState && bulkState.done < bulkState.total} onClick={imposeAll}>
+                        {bulkState && bulkState.done < bulkState.total
+                          ? `Imposing ${bulkState.done + 1}/${bulkState.total}… ${bulkState.current}`
+                          : `⚡ Impose all pending (${pendingCount})`}
+                      </button>
+                    )}
+                    <button className="imp-btn sec" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => setRefreshKey(k => k + 1)}>Refresh</button>
+                  </span>
+                </div>
+                {actionErr && (
+                  <div style={{ color: "#f87171", fontSize: 12.5, marginBottom: 7, display: "flex", gap: 10, alignItems: "center" }}>
+                    <span>{actionErr}</span>
+                    <button className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setActionErr("")}>dismiss</button>
+                  </div>
+                )}
+                {queueOpen && (
+                  <div style={{ maxHeight: 260, overflow: "auto" }}>
+                    <OrderQueue rows={rows} err={queueErr} onLoad={loadOrder} busyId={queueBusy}
+                                onStatus={setOrderStatus} onHide={setOrderHidden} rowBusy={rowBusy} />
+                  </div>
+                )}
+                {activeOrder && (
+                  <div style={{ fontSize: 12, color: "#7ab8ff", marginTop: 6 }}>
+                    Loaded order #{activeOrder.order_id} · {activeOrder.job_name || activeOrder.product} · {activeOrder.art_file_name}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+              <div style={{ flex: 2, minWidth: 260 }}>
+                <DropZone label={CFG ? "Drop artwork PDF here (manual job)" : "Drop artwork PDF here"}
+                  sub={isSaddle ? "multi-page PDF, pages in reading order (cover = page 1) · padded to a multiple of 4 · drop the manifest .txt to autofill"
+                     : isBook   ? "multi-page PDF, pages in reading order (cover = page 1) — or the guts file, with the flat cover in the product section · drop the manifest .txt to autofill"
+                                : "print-ready or raw PDF · page 1 = front, page 2 = back · drop the manifest .txt to autofill the spec"}
+                  accept=".pdf,.txt" onFiles={f => onFiles(f, "front")} fileName={art && `${art.name} (${art.pageCount}p)`} />
+              </div>
+              {(backArt || (!isPB && spec.sides === 2 && art && (art.pageCount < 2 || multiMode !== "repeat")) || (isPB && pbPart !== "guts")) && (
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <DropZone label={isPB ? "Drop COVER PDF (optional)" : "Drop BACK side PDF"}
+                    sub={isPB ? "already flat with the spine — the calculator's cover template" : multiMode !== "repeat" ? "optional — separate collated back file (page i backs piece i)" : "2-sided job but the front file has one page"}
+                    accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
+                </div>
+              )}
+            </div>
+            {art && art.approval && art.approval.state === "mismatch" && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }}>
+                <b style={{ color: "#ff5f7a" }}>⚠ NOT THE APPROVED FILE</b>
+                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+                  This file hashes <code>{art.approval.got.slice(0, 12)}…</code> but the customer approved <code>{art.approval.want.slice(0, 12)}…</code>.
+                  It can still be imposed — the output filename will carry <b>UNAPPROVED</b> so the flag reaches Drive and the press.
+                </div>
+              </div>
+            )}
+            {art && art.approval && art.approval.state === "unverifiable" && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#ffb454" }}>
+                ⚠ This order carries an approval hash but the page can't verify it (no crypto.subtle — is wp-admin on HTTPS?).
+              </div>
+            )}
+            {art && art.approval && art.approval.state === "verified" && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#5fd08a" }}>
+                ✓ Approval hash verified — byte-for-byte the file the customer approved.
+              </div>
+            )}
+            {art && art.threats && art.threats.length > 0 && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }}>
+                <b style={{ color: "#ff5f7a" }}>⚠ ACTIVE CONTENT in this file:</b> {art.threats.join(" · ")}
+                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+                  The imposed output strips all of it. Avoid opening the original in a PDF viewer — use the CLEAN copy.
+                </div>
+              </div>
+            )}
+            {backArt && backArt.threats && backArt.threats.length > 0 && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#ff5f7a" }}>⚠ Back file active content: {backArt.threats.join(" · ")}</div>
+            )}
+            {art && (
+              <div style={{ marginTop: 8 }}>
+                <button type="button" className="imp-btn sec" disabled={cleanBusy} onClick={makeCleanCopy}>
+                  {cleanBusy ? "Sanitizing…" : "⬇ CLEAN 1:1 copy (sanitized)"}
+                </button>
+                {CFG && activeOrder && (
+                  <button type="button" className="imp-btn sec" style={{ marginLeft: 8 }} disabled={cleanBusy} onClick={sendCleanToDrive}>
+                    🧼 File CLEAN copy to order's Drive folder
+                  </button>
+                )}
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                  Keeps every page's artwork 1:1 (any size, any product — works even when imposition refuses) but strips
+                  scripts, auto-run actions, attachments, and form fields. Note: form fields/annotations lose their visible
+                  appearance too.
+                </div>
+              </div>
+            )}
+
+          </div>
+
+          {/* ── Viewport control tools ── */}
+          <div className="imp-toolbar">
+            <div className="grp">
+              <button type="button" className={"imp-btn sec tb" + (zoom == null ? " on" : "")} onClick={() => setZoom(null)} title="Fit two sheets across">Fit 2</button>
+              <button type="button" className="imp-btn sec tb" onClick={() => setZoom(z => Math.max(6, (z || 40) / 1.25))} title="Zoom out">−</button>
+              <button type="button" className="imp-btn sec tb" onClick={() => setZoom(z => Math.min(400, (z || 40) * 1.25))} title="Zoom in">+</button>
+              <button type="button" className={"imp-btn sec tb" + (zoom === 96 ? " on" : "")} onClick={() => setZoom(96)} title="1 inch = 96 px">100%</button>
+              <button type="button" className={"imp-btn sec tb" + (rulers ? " on" : "")} onClick={() => setRulers(r => !r)}>Rulers</button>
+            </div>
+            {partsOut.length > 1 && (
+              <div className="grp">
+                {partsOut.map((p, i) => (
+                  <button key={p.part || i} type="button" className={"imp-btn sec tb" + (i === viewIdx ? " on" : "")} onClick={() => setViewPart(i)}>
+                    {p.part === "cover" ? "① Cover" : p.part === "guts" ? "② Guts" : `Part ${i + 1}`}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="grp" style={{ fontSize: 12, color: "rgba(255,255,255,.55)", gap: 8 }}>
+              {parityBadge}
+              <span>{sheetSummary}</span>
+              {layoutInfo.error && <span style={{ color: "#f87171" }}>{layoutInfo.error}</span>}
+              {busy && <span style={{ color: "#7ab8ff" }}>Imposing…</span>}
+            </div>
+            {viewRes && (
+              <div className="grp" style={{ marginLeft: "auto", borderRight: 0 }}>
+                <button className="imp-btn tb" style={{ fontWeight: 700 }} onClick={() => dlBytes(viewRes.bytes, viewRes.filename)}>⬇ Download {viewRes.filename}</button>
+                {CFG && activeOrder && (
+                  <button className="imp-btn tb" disabled={uploadState[viewRes.filename] === "uploading" || uploadState[viewRes.filename] === "done"} onClick={() => sendToDrive(viewRes)}>
+                    {uploadState[viewRes.filename] === "uploading" ? "Uploading…" : uploadState[viewRes.filename] === "done" ? "✓ Filed to Drive" : "📁 Send to order's Drive folder"}
+                  </button>
+                )}
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>{(viewRes.bytes.length / 1048576).toFixed(2)} MB · preflight passed</span>
+                {String(uploadState[viewRes.filename] || "").startsWith("failed") && <span style={{ color: "#f87171", fontSize: 12 }}>{uploadState[viewRes.filename]}</span>}
+              </div>
+            )}
+          </div>
+
+          {(notice || error) && (
+            <div className="imp-card" style={{ marginBottom: 12, padding: "10px 14px", borderColor: error ? "rgba(239,68,68,.4)" : "rgba(34,197,94,.3)" }}>
+              <div style={{ fontSize: 13, color: error ? "#f87171" : "#4ade80", lineHeight: 1.5, whiteSpace: "pre-line" }}>{error || notice}</div>
+            </div>
+          )}
+
+          {/* ── Sheets viewport ── */}
+          {viewRes && viewRes.label && (
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", margin: "0 0 6px 2px" }}>
+              <span className="lbl" style={{ display: "inline", color: "#7ab8ff", marginRight: 8 }}>{viewRes.part === "cover" ? "① Cover" : "② Guts"}</span>{viewRes.label}
+            </div>
+          )}
+          <SheetViewport res={viewRes} layout={viewLay} zoom={zoom} setZoom={setZoom} rulers={rulers} fit={fitCount} />
+
+          {/* ── Job report ── */}
+          <details className="imp-report" open={!!(viewRes && viewRes.warnings && viewRes.warnings.length)}>
+            <summary>Job report{viewRes && viewRes.warnings && viewRes.warnings.length ? ` — ${viewRes.warnings.length} note${viewRes.warnings.length === 1 ? "" : "s"}` : ""}</summary>
+            <div className="imp-card" style={{ marginTop: 8 }}>
+            
             {layoutInfo.pb && (
               <div style={{ fontSize: 13, color: "rgba(255,255,255,.6)", lineHeight: 1.6 }}>
                 Perfect bound images as <b>two press jobs</b> on different stock — a flat cover
@@ -4535,40 +4994,10 @@ function App() {
                 </div>
               </div>
             )}
-          </div>
 
-          {(notice || error) && (
-            <div className="imp-card" style={{ marginBottom: 14, borderColor: error ? "rgba(239,68,68,.4)" : "rgba(34,197,94,.3)" }}>
-              <div style={{ fontSize: 13, color: error ? "#f87171" : "#4ade80", lineHeight: 1.5, whiteSpace: "pre-line" }}>{error || notice}</div>
-            </div>
-          )}
-
-          {/* Perfect bound emits TWO press jobs (cover + guts), so the result
-              area renders one card per part. Every other calc yields one, and
-              takes the same path with a single-element list. */}
-          {(result ? (result.parts || [result]) : []).map((res, pi) => (
-            <div key={res.part || pi}>
-            {res.part && (
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "2px 0 6px" }}>
-                <span className="lbl" style={{ margin: 0, color: "#7ab8ff" }}>
-                  {res.part === "cover" ? "① Cover" : "② Guts"}
-                </span>
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,.5)" }}>{res.label}</span>
-              </div>
-            )}
-            <div className="imp-card" style={{ marginBottom: 14 }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-                <button className="imp-btn" onClick={() => dlBytes(res.bytes, res.filename)}>⬇ Download {res.filename}</button>
-                {CFG && activeOrder && (
-                  <button className="imp-btn" disabled={uploadState[res.filename] === "uploading" || uploadState[res.filename] === "done"} onClick={() => sendToDrive(res)}>
-                    {uploadState[res.filename] === "uploading" ? "Uploading…" : uploadState[res.filename] === "done" ? "✓ Filed to Drive" : "📁 Send to order's Drive folder"}
-                  </button>
-                )}
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,.45)" }}>
-                  {(res.bytes.length / 1048576).toFixed(2)} MB · preflight passed
-                </span>
-                {String(uploadState[res.filename] || "").startsWith("failed") && <span style={{ color: "#f87171", fontSize: 12 }}>{uploadState[res.filename]}</span>}
-              </div>
+              {partsOut.map((res, pi) => (
+                <div key={res.part || pi} style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 8 }}>
+                  {res.part && <div style={{ fontSize: 12, color: "#7ab8ff", fontWeight: 700, marginBottom: 4 }}>{res.part === "cover" ? "① Cover" : "② Guts"} — {res.label}</div>}
               {res.warnings.length > 0 && (
                 <div style={{ marginBottom: 10 }}>
                   {res.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
@@ -4585,19 +5014,18 @@ function App() {
                     : <div key={i}>{s.side}: {s.rot ? `source /Rotate ${s.rot}° normalized · ` : ""}cell rotation {s.cellRotate}° · scale ×{typeof s.scale === "number" ? s.scale.toFixed(3) : "?"} · {s.hasBleed ? "bleed present" : s.synth ? `bleed synthesized (${s.synth})` : "no bleed"}</div>)}
                 </div>
               )}
-              <PdfPreview bytes={res.bytes} labels={res.pageLabels} />
+
+                </div>
+              ))}
+              {!art && !busy && !result && (
+                <div style={{ color: "rgba(255,255,255,.45)", fontSize: 13, lineHeight: 1.7 }}>
+                  Drop an artwork PDF (or load an order) to generate the imposed press sheets. The engine places source pages as vector
+                  XObjects, locates art by TrimBox, fits to trim without cropping, hard-clips every cell, and step-and-repeats the exact
+                  count the customer was priced on.
+                </div>
+              )}
             </div>
-            </div>
-          ))}
-          {busy && <div style={{ color: "rgba(255,255,255,.5)", fontSize: 13 }}>Imposing…</div>}
-          {!art && !busy && !result && (
-            <div className="imp-card" style={{ color: "rgba(255,255,255,.45)", fontSize: 13, lineHeight: 1.7 }}>
-              Drop an artwork PDF to generate the imposed press sheet.
-              The engine places source pages as vector XObjects (never rasterized),
-              locates art by TrimBox, fits to trim without cropping, hard-clips
-              every cell, and step-and-repeats the exact count the customer was priced on.
-            </div>
-          )}
+          </details>
         </div>
       </div>
     </div>

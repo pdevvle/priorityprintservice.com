@@ -443,6 +443,79 @@ download the imposed PDF. Useful for testing and one-off jobs.
   size. Regenerate the baseline same-day, from the previous build, before
   comparing.
 
+  ### Workspace layout (1.33)
+
+  Rebuilt to the owner's wireframe (`Imp_tool_layout.pdf`, 2026-09-06):
+
+  - **Left — Imposition controls**, a sticky accordion: General (product,
+    finished size, sheet size, duplexed, name, quantity, order #) · Layout
+    (position offset, gutter, piece pattern, orientation, flip edge, back
+    rotation, efficient mode, best-fit, then the manual grid / per-gap gutters
+    / creep / signature panel) · Product (multi-page mode, perfect-bound
+    parts + spine + leaves order + cover drop, back file, gang combo — only
+    when the product has any) · Bleed (bleed, add-bleed, scale, pull-off,
+    smart, streak, per-page) · Specialty (below) · Markings (crop marks, fold
+    guides, slug). Sections unmount when collapsed; every setting lives in
+    App state, so nothing is lost. "all" / "none" open or close the lot.
+  - **Right, top — job strip**: in wp-admin the order queue (collapsible,
+    scrolls inside 260px) and the loaded-order line; always the artwork drop
+    zone, with the cover/back drop beside it when the product wants one, and
+    the approval / active-content notices under them.
+  - **Viewport toolbar**: Fit 2 (two sheets across the strip, the default) ·
+    − / + · 100% (96 px per inch) · Rulers; Cover/Guts tabs when the output
+    has two parts; the parity badge and a one-line sheet summary; Download
+    and Send-to-Drive for the part on screen.
+  - **Sheets viewport**: every side of the active part in one horizontal
+    strip, each with inch rulers on both axes. Sides are rasterised by pdf.js
+    only as they scroll into view (a 40-side job must not render 40 canvases
+    up front); placeholders are pre-sized from the page box so the scrollbar
+    is honest before anything renders. With no output yet the strip shows the
+    live layout schematic at the same zoom.
+  - **Job report** (collapsible, opens itself when there are notes): layout
+    figures, warnings and side reports, per part.
+
+  Two deliberate departures from the wireframe: rulers are drawn per sheet
+  rather than as one fixed pair (alignment is then trivial and every sheet
+  carries them), and there is a sixth **Product** section, because the
+  saddle / perfect-bound / multi-page / gang-combo controls had no home in
+  the five drawn.
+
+  ### Specialty settings (1.33)
+
+  Both run in the `imposePdf` wrapper around `imposeCore`, so every product
+  path gets them once. (`imposePerfectBound`'s halves call `imposeCore`
+  directly — calling the wrapper ran both passes twice, caught by the test:
+  two yellow slipsheets and a note printed twice.)
+
+  **Force greyscale print on pages** — `spec.greyPages`, e.g. `"3, 5-8"`,
+  numbering the **source** artwork's pages. Vector recolouring would mean
+  rewriting every colour operator, colour space, shading and image the page
+  reaches, so each listed page is instead rasterised by pdf.js at 300 DPI
+  (capped at 40 MP), converted to luminance and re-embedded as a single
+  **DeviceGray** image that exactly fills the original MediaBox. DeviceGray
+  separates to the K plate only — "exports as CMYK greyscale" on the RIP.
+  Boxes and `/Rotate` are untouched, annotations dropped (their appearances
+  are in the raster), and the warning says plainly that those pages are no
+  longer vector. For perfect bound the numbers refer to the reading-order
+  file, so page 2 lands in the cover half as the inside front.
+
+  **Insert slipsheet** — `spec.slip = { on, when: "before"|"after",
+  sheets: "1, 5, 10-12", design: "C"|"M"|"Y"|"K"|"custom", customBytes }`.
+  Sheet numbers are the **physical sheets of the imposed output** (on a
+  duplex job sheet 1 = output pages 1–2). A slipsheet is one physical sheet:
+  one page on simplex, two on duplex with the design on both faces. Solids
+  are one `DeviceCMYK` rectangle so they separate cleanly; a custom upload
+  is sanitised, embedded and fitted to the sheet (page 1 front, page 2 back
+  when present). Sheets are inserted highest-first so earlier indices stay
+  valid; page labels are spliced to match, so the viewport captions read
+  `SLIPSHEET FRONT — SOLID K (before sheet 1)`. Numbers that do not exist
+  are reported, never guessed. Slipsheets are not counted in the run
+  figures.
+
+  Verified: DeviceGray XObjects on exactly the listed pages and none other;
+  solid K/C/Y sheets at the requested positions, both faces; the regression,
+  PB and PB-part suites unchanged with both features off.
+
   ### Leaves onto the sheet — the guts' own arrangement (1.32)
 
   Closing the `multiMode` leak in 1.31 removed the only way to step-and-repeat
