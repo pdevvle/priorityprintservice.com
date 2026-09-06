@@ -867,8 +867,14 @@ const CORNERS=_CFG.corners||[{label:"No Round Cornering",val:0,price:0},{label:'
 // All-4 val we trust vals alone and ignore labels entirely — no false positives.
 // Only if the vals have been repointed too do we fall back to matching wording,
 // so the cap degrades instead of failing open.
+//
+// Empty tokens are dropped and 0 is never a code. Number("") is 0, and 0 is
+// "No Round Cornering" — so a trailing comma ("107,108,") would otherwise hide
+// the none option above the cap, leave All 4 on offer, and have the auto-clear
+// select the very option it just hid.
 const RC_ALL4_VALS=String(PCF.rc_all4_vals==null?"107,108":PCF.rc_all4_vals)
-  .split(",").map(x=>Number(String(x).trim())).filter(n=>!isNaN(n));
+  .split(",").map(x=>String(x).trim()).filter(x=>x!=="")
+  .map(Number).filter(n=>!isNaN(n)&&n!==0);
 const RC_ALL4_LABEL=/all[\s\-_]*(4|four)\b|\b(4|four)[\s\-_]*(round[\s\-_]*)?corners?\b/i;
 const _rcValsPresent=CORNERS.some(o=>RC_ALL4_VALS.indexOf(Number(o.val))>=0);
 const isAll4Corner=o=>!!o&&(_rcValsPresent
