@@ -225,13 +225,21 @@ function pps_default_config() {
             array( 'label' => 'Bundle in 50s',   'val' => 1500, 'price' => 50 ),
             array( 'label' => 'Bundle in 100s',  'val' => 3000, 'price' => 100 ),
         ),
-        // `price` here is the LIFT HEIGHT IN INCHES that goes through the corner
-        // rounder in one cycle — it divides, unlike every other finishing
-        // option's price, so a smaller number makes the job dearer. It was
-        // 0.2/0.15/0.1/0.075, which is thinner than a single 48pp booklet and
-        // charged about three cycles per book. Rescaled x20. All 4 stays half
-        // the height of Outside 2 because it is two passes. The guillotine's
-        // equivalent knob, cutter_stackheight_inches, is 3.5.
+        // `price` here is NOT a price. It is a divisor in the cornering formula
+        // (thickness / price), so unlike every other finishing option a SMALLER
+        // number makes the job DEARER. Treat it as a cost knob, not a physical
+        // measurement.
+        //
+        // The values below are the long-standing ones. They were briefly raised
+        // x20 on the theory that they represented a lift height in inches; that
+        // was wrong and has been reverted. Raising them flattens the volume
+        // curve until cornering costs nearly the same per piece at 1,000 as at
+        // 25, which is the opposite of what a setup-dominated finishing step
+        // should do. If you change them, re-read the corner section of
+        // docs/MASTER_PRICING_LOGIC.md first and check the per-unit curve still
+        // falls with quantity.
+        //
+        // All 4 sits at half of Outside 2 because it is two passes.
         'corners' => array(
             array( 'label' => 'No Round Cornering',                              'val' => 0,   'price' => 0 ),
             array( 'label' => "\xC2\xBC\" Round \xE2\x80\x94 Outside 2",        'val' => 216, 'price' => 0.2 ),
