@@ -89,6 +89,26 @@ add_action( 'wp_ajax_pps_impose_app', function() {
     ), JSON_HEX_TAG );
     $inject = '<script>window.PPS_IMPOSE_CFG = ' . $cfg . ';</script>';
     $html   = str_replace( '</head>', $inject . "\n</head>", $html );
+    // Serve the runtime libraries from the plugin, not from public CDNs. The
+    // tool is prepress infrastructure: if unpkg or cdnjs is slow, blocked by
+    // an office firewall, or simply down, the queue must still open. The
+    // standalone (GitHub Pages) copy keeps the CDN tags; only this wp-admin
+    // stream is rewritten, and only when the vendored file exists.
+    $vendor_dir = PPS_CALC_DIR . 'imposition-vendor/';
+    $vendor_url = PPS_CALC_URL . 'imposition-vendor/';
+    $vendored = array(
+        'https://unpkg.com/react@18.3.1/umd/react.production.min.js'                  => 'react.production.min.js',
+        'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js'          => 'react-dom.production.min.js',
+        'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js'                     => 'babel.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'          => 'pdf.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'   => 'pdf.worker.min.js',
+        'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js'                        => 'pdf-lib.min.js',
+    );
+    foreach ( $vendored as $cdn => $file ) {
+        if ( file_exists( $vendor_dir . $file ) ) {
+            $html = str_replace( $cdn, esc_url( $vendor_url . $file . '?v=' . filemtime( $vendor_dir . $file ) ), $html );
+        }
+    }
     header( 'Content-Type: text/html; charset=utf-8' );
     header( 'X-Frame-Options: SAMEORIGIN' );
     echo $html;

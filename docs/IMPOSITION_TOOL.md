@@ -458,7 +458,9 @@ download the imposed PDF. Useful for testing and one-off jobs.
   | 5 | **Marks, fold guides and slug in RGB black.** Through the RIP's colour management that is rich black — four plates under a 0.5 pt line, fringing exactly where the guillotine runs. | `0 0 0 RG` operators | `grayscale(0)` — `0 G` / `0 g`, K plate only |
   | 6 | **Slug never stated the duplex flip edge** the Fiery job must be set to; a wrong choice turns every back 180°. | — | `DUPLEX SHORT-EDGE FLIP` / `DUPLEX LONG-EDGE FLIP` / `SIMPLEX` in the slug |
 
-  Preflight added, because these arrive from customers weekly:
+  Preflight added for conditions that Fiery handles differently from the
+  browser (no frequency is claimed — these are the ones found in fixtures and
+  in the files that had already gone wrong):
 
   - **Non-embedded fonts**, listed by name. The standard 14 are only noted
     (Fiery has them); anything else — Arial, Calibri, a brand face — is
@@ -490,6 +492,40 @@ download the imposed PDF. Useful for testing and one-off jobs.
   colour operators and the new slug token are normalised. Fixture gotcha:
   pymupdf draws with a top-left origin, so its "0.5″ from the corner" square
   is at the top; a hand-written PDF uses PDF coordinates (bottom-left).
+
+  ### Second pass — fool-proofing (1.35)
+
+  Asked to go round again. Everything below was provoked with a fixture and
+  measured, in the same harness as 1.34; the engine's content streams are
+  otherwise unchanged from v1.29 (the only regression diff is pymupdf splitting
+  the new slug token `(13in)` when it extracts text — geometry identical).
+
+  | # | Fault | Measured / verified | Fix |
+  |---|---|---|---|
+  | 1 | **Inherited page boxes ignored.** A CropBox/TrimBox/BleedBox written on the `/Pages` node (Quark, some print drivers) applies to every page, but the tool read the page dict directly and saw none. | inherited 6×4 CropBox on an 8.5×11 MediaBox imposed as the full 8.5×11, slug area and all | `getPageBox()` reads through `getInheritableAttribute`. Verified: zero magenta (slug-area) pixels in the output; render identical to the same crop set on the page itself. |
+  | 2 | **A TrimBox outside the page was trusted.** Some exporters leave a stale TrimBox from a different layout. | TrimBox at (8.33, 8.33)″ on a 6.25×4.25″ page → art located off-page | Rejected with a note ("lies outside the page — ignored; located by page size instead") and the size heuristics take over. |
+  | 3 | **JPEG EXIF orientation ignored.** Phone photos store pixels sideways and a tag says "rotate to view"; pdf-lib embeds the stored pixels. The tool auto-rotates to fit the cell, so orientation 6 and 8 (which differ by 180°) came out 180° apart — a duplex piece registers head-to-foot against its back. | orientation 6 and 8 fixtures produced opposite results | `jpegOrientation()` reads IFD0 tag 0x0112; when ≠ 1 the image is decoded with `createImageBitmap({imageOrientation:"from-image"})` and re-encoded upright (q 0.95); the note says so. Untagged files are embedded byte-for-byte, so a **CMYK JPEG keeps its CMYK** — verified: 100 % C background and 100 % K square render as cyan and black, not inverted. |
+  | 4 | **Raster resolution never checked.** A 600×400 px JPEG placed at 6×4″ is 100 DPI and prints soft; the tool assumed 300 and said nothing. | — | Effective DPI computed against the size the piece prints at, in whichever orientation it is placed; under 200 DPI warns with the number. |
+  | 5 | **Output ink guard.** The generic form of the encrypted-file failure: any future silent embed failure would again produce sheets with no ink and no message. | 16-page all-blank saddle: every side < 0.05 % ink in the art area | After imposition every side of every part is rendered at 24 DPI (well under a second for a 40-side job) and the art area (middle 80 %, so marks and slug don't count) is measured. All sides empty while the source's first page has ink → **refuses**; some sides empty → warning listing them; all empty and the source blank too → "this file may be empty" warning. |
+  | 6 | **Gang-combo sizes unchecked.** A gang file of a different trim was fit-scaled into its cell without comment. | — | Each gang file's first page is surveyed; a size that matches neither trim nor trim + bleed in either orientation is flagged. |
+  | 7 | **`/UserUnit` ignored silently.** Rare, but a page declaring scaled units measures wrong in points. | — | Warned when present and ≠ 1. |
+  | 8 | **Slug flip token was ambiguous** to an operator setting the Fiery job. | — | Now `DUPLEX FLIP ON SHORT (13in) EDGE` — names the edge and its length on the chosen parent sheet. |
+  | 9 | **Expired admin session read as "Unauthorized".** WordPress nonces expire after 12–24 h; a queue tab left open overnight failed every action with a message that suggested a permissions problem. | — | `ajaxFail()` maps 401/403 to "the admin session or its security token has expired — reload this page". |
+  | 10 | **Perfect bound from a single file with < 4 pages** built a cover from pages that don't exist. | — | Refused with the page count and the two alternatives (separate files, or Guts only). |
+  | 11 | **The tool depended on two public CDNs at run time** (unpkg, cdnjs). A slow or blocked CDN meant the prepress queue would not open at all. | — | The six runtime libraries are vendored in `imposition-vendor/` (react 18.3.1, react-dom 18.3.1, @babel/standalone 7.26.9, pdf.js 3.11.174 + worker, pdf-lib 1.17.1 — the same bytes the regression harness has run against since August). `pps_impose_app` rewrites each CDN URL to the plugin copy **only when that file exists on the server**, with `filemtime` cache-busting; the standalone Pages copy keeps the CDN tags. Deploying the tool now means deploying the directory too (below). |
+
+  Found in review before it shipped: the new guard declared a second
+  `INK_DPI`, which under Babel's const→var rewrite would have silently dropped
+  the bleed-ink detector from 144 to 24 DPI. Renamed `GUARD_DPI`. Also the
+  source is now parsed once for fonts, sizes and UserUnit rather than three
+  times, and a raster note can no longer leak from one job into the next.
+
+  Verified in the harness: inherited crop (fixture `fx_inherit`), stale
+  TrimBox (`fx_badtrim2`), EXIF 6 and 8 land identically (`fx_exif6/8.jpg`),
+  CMYK JPEG colours (`fx_cmyk.jpg`), 100 DPI warning (`fx_lowres.jpg`),
+  all-blank saddle warns and does not throw (`fx_blank16`), gang size
+  warning, one-page 2-sided flat still refused, UI smoke (accordion, viewport,
+  greyscale, slipsheet, download) clean, all 1.34 fixtures unchanged.
 
   ### Workspace layout (1.33)
 
@@ -969,9 +1005,12 @@ books may need shingling allowance later.
 
 1. Merge to `pps-pricing-config` (Pages serves the standalone tool from the
    branch root — `.nojekyll` already handles the Babel/Liquid issue).
-2. Copy `imposition-tool.html`, `pps-imposition.php`, and the updated
-   `pps-calculators.php` into the live plugin directory (the usual
-   plugin-file deploy flow / `pps_plugin_write_file`).
+2. Deploy `imposition-tool.html`, `pps-imposition.php` **and the six files in
+   `imposition-vendor/`** into the live plugin directory, pull-based
+   (`pps_plugin_download_url` against a raw URL pinned to the commit). The
+   vendor files only need re-deploying when a library version changes; if any
+   is missing on the server the wp-admin stream falls back to the CDN tag for
+   that file.
 3. Requirements on the site: Drive connected in **PPS Calculators → Google
    Drive**, WooCommerce active. The Imposition submenu appears under PPS
    Calculators for admins (`manage_options`).
