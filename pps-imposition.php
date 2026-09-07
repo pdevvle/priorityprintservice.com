@@ -81,6 +81,11 @@ add_action( 'wp_ajax_pps_impose_app', function() {
         'sizePresets'   => $size_presets,
         'orderStatuses' => $statuses,          // { 'wc-processing': 'Processing', … }
         'doneStatuses'  => pps_impose_done_statuses(),
+        // The imposed PDF comes back through admin-ajax as an ordinary form
+        // POST, so PHP's upload limits apply; tell the tool so it can refuse
+        // with the real reason instead of the "Unauthorized" a truncated POST
+        // produces (the nonce is lost with the rest of the body).
+        'maxUpload'     => (int) wp_max_upload_size(),
     ), JSON_HEX_TAG );
     $inject = '<script>window.PPS_IMPOSE_CFG = ' . $cfg . ';</script>';
     $html   = str_replace( '</head>', $inject . "\n</head>", $html );
@@ -512,8 +517,21 @@ add_action( 'wp_ajax_pps_impose_upload', function() {
     $folder_id = $order->get_meta( '_pps_gdrive_folder_id' );
     if ( ! $folder_id ) wp_send_json_error( array( 'message' => 'Order has no Drive folder' ) );
 
+    if ( ! empty( $_FILES['file']['error'] ) ) {
+        $codes = array(
+            UPLOAD_ERR_INI_SIZE  => 'the file exceeds PHP upload_max_filesize (' . size_format( wp_max_upload_size() ) . ')',
+            UPLOAD_ERR_FORM_SIZE => 'the file exceeds the form limit',
+            UPLOAD_ERR_PARTIAL   => 'the upload was cut off part-way',
+            UPLOAD_ERR_NO_FILE   => 'no file was sent',
+            UPLOAD_ERR_NO_TMP_DIR => 'the server has no temp directory',
+            UPLOAD_ERR_CANT_WRITE => 'the server could not write the temp file',
+            UPLOAD_ERR_EXTENSION => 'a PHP extension blocked the upload',
+        );
+        $why = $codes[ (int) $_FILES['file']['error'] ] ?? ( 'upload error ' . (int) $_FILES['file']['error'] );
+        wp_send_json_error( array( 'message' => 'Upload rejected: ' . $why . '.' ) );
+    }
     if ( empty( $_FILES['file'] ) || ! is_uploaded_file( $_FILES['file']['tmp_name'] ) ) {
-        wp_send_json_error( array( 'message' => 'No file received' ) );
+        wp_send_json_error( array( 'message' => 'No file received — if the PDF is large, PHP may have dropped the whole POST (post_max_size ' . ini_get( 'post_max_size' ) . ').' ) );
     }
     // IMPOSED_ = press-ready sheet layout; CLEAN_ = 1:1 sanitized copy of the
     // customer file (active content stripped) — safe for staff to open.

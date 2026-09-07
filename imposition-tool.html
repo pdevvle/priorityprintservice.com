@@ -100,7 +100,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-06 08:30 UTC · IMPOSE-V1.33</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-06 12:00 UTC · IMPOSE-V1.34</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -818,6 +818,74 @@ function computeSaddleLayout(pw, ph, opts) {
 // ═══════════════════════════════════════════════════════════════
 
 // Low-level page box reader — robust across pdf-lib versions.
+// ── Page geometry as a viewer or RIP sees it ──────────────────────────────
+// pdf-lib embeds a page as a Form XObject whose BBox is [0 0 w h] of the
+// MediaBox and whose matrix is identity. Two very common source files break
+// that assumption silently: a MediaBox whose origin is not (0,0) — Acrobat
+// crops and several exporters write [-9 -9 621 801] — puts the art off by the
+// origin and clips it at the BBox; and a CropBox smaller than the MediaBox
+// (a page with slug/registration area) images the slug area and measures the
+// page at the wrong size, so the art is scaled to fit. Measured on fixtures:
+// −0.257″/−2.38″ offset on the first, 2.8 M pixels of slug printed and the art
+// scaled ×0.47 on the second.
+//
+// Everything that measures or embeds a source page goes through pageBox():
+// the CropBox intersected with the MediaBox when a CropBox is present and
+// smaller, else the MediaBox — WITH its real origin — and embedPageBox()
+// hands pdf-lib that exact rectangle so the form's origin is the box corner.
+function pageBox(page) {
+  const m = page.getMediaBox();
+  let box = { x: m.x, y: m.y, w: m.width, h: m.height };
+  const cb = getPageBox(page, "CropBox");
+  if (cb) {
+    const x0 = Math.max(box.x, cb.x), y0 = Math.max(box.y, cb.y);
+    const x1 = Math.min(box.x + box.w, cb.x + cb.w), y1 = Math.min(box.y + box.h, cb.y + cb.h);
+    if (x1 - x0 > 1 && y1 - y0 > 1 && (x1 - x0 < box.w - 0.5 || y1 - y0 < box.h - 0.5 || x0 !== box.x || y0 !== box.y))
+      box = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  return box;
+}
+function bboxOf(b) { return { left: b.x, bottom: b.y, right: b.x + b.w, top: b.y + b.h }; }
+async function embedPageBox(out, page, label) {
+  try { return await out.embedPage(page, bboxOf(pageBox(page))); }
+  catch (e) { throw new Error(`${label || "page"}: could not be embedded (${e.message}) — the page is malformed; re-export it.`); }
+}
+
+// pdf-lib builds the form from the page's Contents and Resources only, so a
+// page-level transparency /Group — InDesign and Illustrator set one on every
+// page that uses blend modes, soft masks or opacity — is dropped. Without it
+// the RIP composites the form's blends against the sheet rather than inside
+// the page's own isolated group, which can shift colour where Multiply /
+// Screen / opacity meet the page edge or each other. The copier has already
+// brought the Group dict into `out`; embedPage is lazy, so this runs after a
+// flush, exactly as the optional-content carry does.
+async function carryGroups(out, embeds) {
+  await out.flush();
+  for (const e of embeds) {
+    try {
+      const leaf = e && e.embedder && e.embedder.page;
+      const g = leaf && leaf.get(PL.PDFName.of("Group"));
+      if (!g) continue;
+      const form = out.context.lookup(e.ref);
+      if (form && form.dict && !form.dict.has(PL.PDFName.of("Group"))) form.dict.set(PL.PDFName.of("Group"), g);
+    } catch (err) { /* best-effort */ }
+  }
+}
+
+// Every source load goes through here. pdf-lib parses an encrypted file
+// (ignoreEncryption) but never decrypts it: the content streams are copied
+// still-encrypted, the imposed sheets carry gibberish streams, and the RIP
+// prints blank or errors. Measured: an owner-password file imposed with ZERO
+// ink and nine "syntax error in content stream" faults, no warning. So refuse
+// at load, by name, with what to do about it.
+async function loadPdf(bytes, what) {
+  const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+  if (doc.isEncrypted) {
+    throw new Error(`"${what || "This file"}" is encrypted (an owner/permissions password). The browser cannot decrypt it, so its pages would impose as garbage and Fiery would print blank sheets. Remove the security first — Acrobat: File → Properties → Security → No Security (or re-export from the source) — then drop it again.`);
+  }
+  return doc;
+}
+
 function getPageBox(page, name) {
   try {
     let v = page.node.get(PL.PDFName.of(name));
@@ -936,7 +1004,7 @@ function stripActiveContent(doc) {
 // fresh document — page count, size, display rotation, and Trim/Bleed boxes
 // preserved; catalog/annotation payloads left behind.
 async function sanitizePdf(bytes) {
-  const src = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+  const src = await loadPdf(bytes, "artwork");
   const n = src.getPageCount();
   if (n < 1) throw new Error("PDF has no pages");
   const threats = inspectPdfThreats(src);
@@ -944,7 +1012,14 @@ async function sanitizePdf(bytes) {
 
   ensurePageContents(src);
   const out = await PL.PDFDocument.create();
-  const embeds = await out.embedPdf(src, Array.from({ length: n }, (_, i) => i));
+  // 1:1 — the whole MediaBox with its TRUE origin (pdf-lib's default assumes
+  // 0,0 and would shift any cropped-origin page); the CropBox is copied across
+  // relative to it, so a viewer shows the copy exactly as it showed the source.
+  const embeds = [];
+  for (let i = 0; i < n; i++) {
+    const sp = src.getPage(i), m = sp.getMediaBox();
+    embeds.push(await out.embedPage(sp, { left: m.x, bottom: m.y, right: m.x + m.width, top: m.y + m.height }));
+  }
   // Carry the source's layer visibility onto the copy (see srcHiddenOCGRefs).
   // embedPdf is lazy — the copied XObjects only exist after flush(), so the
   // per-page hidden names are noted now and resolved against the copy later.
@@ -961,7 +1036,8 @@ async function sanitizePdf(bytes) {
     p.drawPage(embeds[i]);
     if (rot) p.setRotation(PL.degrees(rot));
     p.setMediaBox(0, 0, mb.width, mb.height);
-    p.setCropBox(0, 0, mb.width, mb.height);
+    const cb = getPageBox(sp, "CropBox");
+    if (cb) p.setCropBox(cb.x - mb.x, cb.y - mb.y, cb.w, cb.h); else p.setCropBox(0, 0, mb.width, mb.height);
     const tb = getPageBox(sp, "TrimBox");
     if (tb) p.setTrimBox(tb.x - mb.x, tb.y - mb.y, tb.w, tb.h);
     const bb = getPageBox(sp, "BleedBox");
@@ -970,6 +1046,7 @@ async function sanitizePdf(bytes) {
   out.setTitle("CLEAN sanitized copy");
   out.setProducer("PPS Auto-Imposition Tool");
   out.setCreator("PPS Auto-Imposition Tool");
+  await carryGroups(out, embeds);
   if (ocPending.length) {
     await out.flush();
     collectPendingOC(out, ocPending, ocAcc);
@@ -987,8 +1064,8 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed) {
   const B = isFinite(bleed) ? bleed : BLEED;
   const notes = [];
   const rot = ((page.getRotation().angle % 360) + 360) % 360;
-  const mb = page.getMediaBox();
-  const W = mb.width, H = mb.height;
+  const mb = pageBox(page);                    // CropBox ∩ MediaBox, real origin
+  const W = mb.w, H = mb.h;
   const rel = b => ({ x: b.x - mb.x, y: b.y - mb.y, w: b.w, h: b.h });
 
   let trimRaw = null;
@@ -1603,7 +1680,10 @@ function freeRun(x, y, dx, dy, maxLen, P, obstacles) {
 function drawMarks(page, layout, cells) {
   const P = boundRect(layout);
   const obstacles = cells.map(c => c.clip);
-  const black = PL.rgb(0, 0, 0);
+  // DeviceGray 0 → the K plate only. RGB black went through the RIP's colour
+  // management as rich black — four plates under a 0.5 pt cut mark, fringing
+  // at exactly the line the guillotine follows.
+  const black = PL.grayscale(0);
   const gap = layout.bleed;
   const mark = (x, y, dx, dy) => {
     const len = freeRun(x, y, dx, dy, MARK_LEN, P, obstacles);
@@ -1660,10 +1740,11 @@ function drawSlug(page, layout, font, info, cells) {
     (info.artScale && info.artScale !== 1) ? `ART ${(info.artScale * 100).toFixed(2)}%` : null,
     info.creep ? `CREEP ${info.creep}in total (this sig ${(info.creepAt || 0).toFixed(4)}in)` : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
+    info.duplex === false ? "SIMPLEX" : info.flip ? `DUPLEX ${String(info.flip).toUpperCase()}-EDGE FLIP` : null,
     info.date,
   ].filter(Boolean);
   page.drawText(parts.join("  ·  "), {
-    x: spot.x * PT, y: spot.y * PT, size: 6, font, color: PL.rgb(0, 0, 0),
+    x: spot.x * PT, y: spot.y * PT, size: 6, font, color: PL.grayscale(0),
     maxWidth: spot.w * PT,
   });
   return true;
@@ -1746,7 +1827,7 @@ function drawFoldMarks(page, layout, cells) {
     const len = freeRun(x, y, dx, dy, MARK_LEN, P, obstacles);
     if (len >= MARK_MIN) page.drawLine({
       start: { x: x * PT, y: y * PT }, end: { x: (x + dx * len) * PT, y: (y + dy * len) * PT },
-      thickness: 0.5, color: PL.rgb(0, 0, 0), dashArray: [2, 2],
+      thickness: 0.5, color: PL.grayscale(0), dashArray: [2, 2],
     });
   };
   for (const c of cells) {
@@ -1774,7 +1855,7 @@ function marksOf(spec) {
 async function imposeSaddle(artBytes, spec, layout) {
   const warnings = [...layout.warnings];
   const bk = layout.booklet;
-  const src = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
+  const src = await loadPdf(artBytes, "artwork");
   stripActiveContent(src);
 
   ensurePageContents(src);
@@ -1810,7 +1891,8 @@ async function imposeSaddle(artBytes, spec, layout) {
 
   const out = await PL.PDFDocument.create();
   const font = await out.embedFont(PL.StandardFonts.Helvetica);
-  const embeds = await out.embedPdf(src, Array.from({ length: n }, (_, i) => i));
+  const embeds = [];
+  for (let i = 0; i < n; i++) embeds.push(await embedPageBox(out, src.getPage(i), `page ${i + 1}`));
   const ocSrc = srcHiddenOCGRefs(src);
   const ocAcc = { all: new Map(), off: new Map() };
   const ocPending = ocSrc.any
@@ -1844,11 +1926,11 @@ async function imposeSaddle(artBytes, spec, layout) {
   const artCache = new Map(); // pages with identical geometry share one resolution
   for (let i = 0; i < n; i++) {
     const p = src.getPage(i);
-    const mb = p.getMediaBox();
+    const mb = pageBox(p);
     const abm = abMode(i);
     // per-page synth (mode or ink gaps) breaks geometry sharing — key by page
     const key = abm ? `p${i}`
-      : `${p.getRotation().angle}|${mb.x},${mb.y},${mb.width},${mb.height}|${JSON.stringify(getPageBox(p, "TrimBox"))}|${JSON.stringify(getPageBox(p, "BleedBox"))}`;
+      : `${p.getRotation().angle}|${mb.x},${mb.y},${mb.w},${mb.h}|${JSON.stringify(getPageBox(p, "TrimBox"))}|${JSON.stringify(getPageBox(p, "BleedBox"))}`;
     let art = artCache.get(key);
     if (!art) {
       art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed);
@@ -2019,6 +2101,7 @@ async function imposeSaddle(artBytes, spec, layout) {
       if (showFold) drawFoldMarks(page, layout, cells);
       if (showSlug) {
         const placed = drawSlug(page, layout, font, {
+          duplex: true, flip: spec.sheetFlip || "short",
           side: label + (sheetsPerForm ? ` · run ${sheetsPerForm} sheets` : ""),
           orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
           artScale: userScale, creep, creepAt: creepShift(creep, sigs[sigs.length - 1], S),
@@ -2031,6 +2114,7 @@ async function imposeSaddle(artBytes, spec, layout) {
     }
   }
 
+  await carryGroups(out, embeds);
   if (ocPending.length) {
     await out.flush();   // materialise the copied XObjects before reading them
     collectPendingOC(out, ocPending, ocAcc);
@@ -2248,7 +2332,8 @@ async function pbBuildCover(srcDoc, pw, ph, spine, bleed) {
   const out = await PL.PDFDocument.create();
   const idx = { front: 0, insideFront: 1, insideBack: n - 2, back: n - 1 };
   const want = [idx.back, idx.front, idx.insideFront, idx.insideBack].filter(i => i >= 0 && i < n);
-  const emb = await out.embedPdf(srcDoc, want);
+  const emb = [];
+  for (const i of want) emb.push(await embedPageBox(out, srcDoc.getPage(i), `page ${i + 1}`));
   const at = i => emb[want.indexOf(i)];
   const place = (page, srcIdx, x) => {
     const e = at(srcIdx);
@@ -2258,6 +2343,7 @@ async function pbBuildCover(srcDoc, pw, ph, spine, bleed) {
     page.drawPage(e, { x: x + (pw * PT - e.width * sc) / 2, y: (H - e.height * sc) / 2,
                        xScale: sc, yScale: sc });
   };
+  await carryGroups(out, emb);
   const rightX = (pw + spine) * PT;
   const outside = out.addPage([W, H]);
   place(outside, idx.back, 0);
@@ -2300,7 +2386,7 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
   const spine = wantCover ? pbSpineOf(spec) : 0;
   const bleed = isFinite(spec.bleed) && spec.bleed !== null && spec.bleed !== "" ? +spec.bleed : BLEED;
 
-  const src = await PL.PDFDocument.load(artBytes, { ignoreEncryption: true });
+  const src = await loadPdf(artBytes, "artwork");
   stripActiveContent(src);
 
   // Same trap as saddle (v1.21): perfect bound binds on the HEIGHT edge, so the
@@ -2336,9 +2422,9 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
   } else if (coverBytes) {
     // Template pair: the cover file is already the flat spread.
     coverB = coverBytes;
-    const cdoc = await PL.PDFDocument.load(coverBytes, { ignoreEncryption: true });
+    const cdoc = await loadPdf(coverBytes, "cover file");
     const c0 = cdoc.getPage(0);
-    const cw = c0.getMediaBox().width / PT, expect = 2 * trimW + spine;
+    const cw = pageBox(c0).w / PT, expect = 2 * trimW + spine;
     if (Math.abs(cw - expect) > 0.26 && Math.abs(cw - (expect + 2 * bleed)) > 0.26) {
       throw new Error(`Cover file is ${cw.toFixed(3)}″ wide but a ${trimW}×${trimH}″ book with a ${spine}″ spine needs ${expect.toFixed(3)}″ (or ${(expect + 2 * bleed).toFixed(3)}″ with bleed). Check the spine width and the cover file.`);
     }
@@ -2435,14 +2521,14 @@ function parsePageList(txt, max) {
 // that those pages are no longer vector — said plainly in the warning.
 const GREY_DPI = 300, GREY_MAX_PX = 40e6;
 async function forceGreyPagesBytes(bytes, pages) {
-  const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+  const doc = await loadPdf(bytes, "artwork");
   const n = doc.getPageCount();
   const want = pages.filter(p => p >= 1 && p <= n);
   if (!want.length) return { bytes, note: `Force greyscale: no listed page exists in the ${n}-page file — nothing changed.` };
   const pdfjs = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
   for (const pno of want) {
     const page = doc.getPage(pno - 1);
-    const mb = page.getMediaBox();
+    const mb = pageBox(page);                  // pdf.js renders the CropBox view — draw the raster over the same box
     const src = await pdfjs.getPage(pno);
     let scale = GREY_DPI / 72;
     const v0 = src.getViewport({ scale, rotation: 0 });
@@ -2459,7 +2545,7 @@ async function forceGreyPagesBytes(bytes, pages) {
     const img = doc.context.register(doc.context.flateStream(g, {
       Type: "XObject", Subtype: "Image", Width: canvas.width, Height: canvas.height, ColorSpace: "DeviceGray", BitsPerComponent: 8,
     }));
-    const content = `q ${mb.width} 0 0 ${mb.height} ${mb.x} ${mb.y} cm /ImG Do Q`;
+    const content = `q ${mb.w} 0 0 ${mb.h} ${mb.x} ${mb.y} cm /ImG Do Q`;
     page.node.set(PL.PDFName.of("Contents"), doc.context.register(doc.context.stream(content)));
     page.node.set(PL.PDFName.of("Resources"), doc.context.obj({ XObject: { ImG: img } }));
     page.node.delete(PL.PDFName.of("Annots"));
@@ -2486,7 +2572,7 @@ async function insertSlipsheets(bytes, slip, duplex, labels) {
   let custom = null;
   if (slip.design === "custom") {
     if (!slip.customBytes) throw new Error("Slipsheet design is Custom Upload but no file was chosen.");
-    const cd = await PL.PDFDocument.load(await ppsToPdfBytes(slip.customBytes, "slipsheet"), { ignoreEncryption: true });
+    const cd = await loadPdf(await ppsToPdfBytes(slip.customBytes, "slipsheet"), slip.customName || "slipsheet design");
     stripActiveContent(cd); ensurePageContents(cd);
     const idx = cd.getPageCount() >= 2 ? [0, 1] : [0];
     custom = await doc.embedPdf(cd, idx);
@@ -2519,22 +2605,161 @@ async function insertSlipsheets(bytes, slip, duplex, labels) {
   };
 }
 
+// ── Source preflight: fonts, page sizes, spreads ─────────────────────────
+// Fonts that are not embedded are substituted by the RIP. Fiery has the
+// standard 14 (Helvetica, Times, Courier, Symbol, ZapfDingbats), so those only
+// get a note; anything else — Arial, Calibri, a brand face — is replaced by a
+// different font with different widths, and lines re-wrap on the press.
+const STD14 = /^(Helvetica|Times|Courier|Symbol|ZapfDingbats)/;
+function inspectFonts(doc) {
+  const seen = new Set(), missing = new Map(), std = new Set();
+  const visitRes = (res, depth) => {
+    if (!res || depth > 4) return;
+    const fonts = asDict(res.lookup ? res.lookup(PL.PDFName.of("Font")) : null);
+    if (fonts) for (const [, v] of fonts.entries()) {
+      const key = v && v.toString ? v.toString() : String(v);
+      if (seen.has(key)) continue; seen.add(key);
+      const f = asDict(res.context.lookup(v)); if (!f) continue;
+      let fd = null, sub = f.lookup(PL.PDFName.of("Subtype"));
+      let base = f.lookup(PL.PDFName.of("BaseFont")); base = base && base.decodeText ? base.decodeText() : (base ? String(base).replace(/^\//, "") : "?");
+      if (sub && String(sub) === "/Type0") {
+        const desc = f.context.lookup(f.get(PL.PDFName.of("DescendantFonts")));
+        const d0 = desc && desc.lookup ? asDict(desc.lookup(0)) : null;
+        fd = d0 ? asDict(d0.context.lookup(d0.get(PL.PDFName.of("FontDescriptor")))) : null;
+      } else if (sub && String(sub) === "/Type3") {
+        continue;                                    // glyphs are inline procedures — always "embedded"
+      } else {
+        fd = asDict(f.context.lookup(f.get(PL.PDFName.of("FontDescriptor"))));
+      }
+      const embedded = !!(fd && (fd.has(PL.PDFName.of("FontFile")) || fd.has(PL.PDFName.of("FontFile2")) || fd.has(PL.PDFName.of("FontFile3"))));
+      if (embedded) continue;
+      const name = String(base).replace(/^[A-Z]{6}\+/, "");
+      if (STD14.test(name)) std.add(name); else missing.set(name, true);
+    }
+    const xo = asDict(res.lookup ? res.lookup(PL.PDFName.of("XObject")) : null);
+    if (xo) for (const [, v] of xo.entries()) {
+      const key = "x" + (v && v.toString ? v.toString() : String(v));
+      if (seen.has(key)) continue; seen.add(key);
+      const st = res.context.lookup(v);
+      const d = st && st.dict ? st.dict : null;
+      if (d && String(d.lookup(PL.PDFName.of("Subtype"))) === "/Form") visitRes(asDict(d.context.lookup(d.get(PL.PDFName.of("Resources")))), depth + 1);
+    }
+  };
+  for (const pg of doc.getPages()) { try { visitRes(pageResources(pg.node), 0); } catch (e) { /* best-effort */ } }
+  return { missing: [...missing.keys()], std: [...std] };
+}
+function fontNotes(doc, what) {
+  const out = [];
+  try {
+    const r = inspectFonts(doc);
+    if (r.missing.length) out.push(`${what}: fonts NOT EMBEDDED — ${r.missing.slice(0, 8).join(", ")}${r.missing.length > 8 ? ` +${r.missing.length - 8} more` : ""}. Fiery will substitute a different face with different widths, so text can re-wrap or change on the press. Ask for a PDF with all fonts embedded (PDF/X-4, or “embed all fonts” on export).`);
+    if (r.std.length) out.push(`${what}: standard fonts not embedded (${r.std.join(", ")}) — the RIP has these; appearance may differ slightly from the customer's screen.`);
+  } catch (e) { /* best-effort */ }
+  return out;
+}
+
+// Page-size survey against the spec. A page that differs from page 1 is
+// scaled to fit silently downstream, so name the pages. A file whose pages
+// are ~2× the trim width is almost always an export as reader SPREADS — the
+// most common way a customer's booklet arrives wrong — and the tool can split
+// it rather than bounce it.
+function pageSizeSurvey(doc, spec) {
+  const bound = isBoundCalc(spec.calc);
+  const tw = bound ? +spec.trimLong : Math.max(+spec.trimLong, +spec.trimShort);
+  const th = bound ? +spec.trimShort : Math.min(+spec.trimLong, +spec.trimShort);
+  const sizes = doc.getPages().map(pg => {
+    const b = pageBox(pg), rot = ((pg.getRotation().angle % 360) + 360) % 360;
+    const w = (rot % 180 ? b.h : b.w) / PT, h = (rot % 180 ? b.w : b.h) / PT;
+    return { w: Math.round(w * 1000) / 1000, h: Math.round(h * 1000) / 1000 };
+  });
+  const near = (a, b, tol) => Math.abs(a - b) <= tol;
+  const isSpread = sz => tw > 0 && th > 0 && (near(sz.w, 2 * tw, 0.3) || near(sz.w, 2 * tw + 2 * BLEED, 0.3)) && (near(sz.h, th, 0.3) || near(sz.h, th + 2 * BLEED, 0.3));
+  const spreadIdx = sizes.map((z, i) => isSpread(z) ? i : -1).filter(i => i >= 0);
+  const first = sizes[0];
+  const differing = sizes.map((z, i) => (i && (!near(z.w, first.w, 0.05) || !near(z.h, first.h, 0.05))) ? i : -1).filter(i => i >= 0);
+  return { sizes, spreadIdx, spreads: sizes.length > 0 && spreadIdx.length >= Math.max(1, Math.ceil(sizes.length / 2)), differing, tw, th };
+}
+function sizeNotes(survey, what) {
+  const out = [];
+  if (survey.differing.length) {
+    const list = survey.differing.slice(0, 6).map(i => `p${i + 1} ${survey.sizes[i].w}×${survey.sizes[i].h}″`).join(", ");
+    out.push(`${what}: ${survey.differing.length} page${survey.differing.length === 1 ? "" : "s"} differ from page 1 (${survey.sizes[0].w}×${survey.sizes[0].h}″): ${list}${survey.differing.length > 6 ? " …" : ""} — each is fit-to-trim scaled (a landscape page is turned 90° into a portrait slot). Check they are meant to be.`);
+  }
+  return out;
+}
+// Split 2-page reader spreads into single pages: each spread-sized page becomes
+// its left half then its right half (embedPage with a half-width box); other
+// pages are copied whole. Reader order is assumed (page 1 may stand alone as
+// the cover; then 2|3, 4|5, …), which is how InDesign's "Spreads" export reads.
+async function splitSpreadsBytes(bytes, spec) {
+  const src = await loadPdf(bytes, "artwork");
+  const survey = pageSizeSurvey(src, spec);
+  if (!survey.spreadIdx.length) return { bytes, note: null, count: src.getPageCount() };
+  const out = await PL.PDFDocument.create();
+  const spreadSet = new Set(survey.spreadIdx);
+  let made = 0;
+  for (let i = 0; i < src.getPageCount(); i++) {
+    const pg = src.getPage(i);
+    if (!spreadSet.has(i) || (((pg.getRotation().angle % 360) + 360) % 360) % 180 !== 0) {
+      const [c] = await out.copyPages(src, [i]); out.addPage(c); continue;
+    }
+    const b = pageBox(pg);
+    for (const half of [0, 1]) {
+      const bb = { x: b.x + half * b.w / 2, y: b.y, w: b.w / 2, h: b.h };
+      const emb = await out.embedPage(pg, bboxOf(bb));
+      const np = out.addPage([bb.w, bb.h]);
+      np.drawPage(emb, { x: 0, y: 0 });
+      made++;
+    }
+  }
+  return {
+    bytes: await out.save({ useObjectStreams: false }),
+    count: out.getPageCount(),
+    note: `Spreads split: ${survey.spreadIdx.length} spread page${survey.spreadIdx.length === 1 ? "" : "s"} (${survey.sizes[survey.spreadIdx[0]].w}×${survey.sizes[survey.spreadIdx[0]].h}″) cut into ${made} single pages at the centre line — reader order assumed (left page first). Any bleed the spread had is kept on its three outer edges only; the spine side has none.`,
+  };
+}
+
 // Public entry: specialty pre/post-processing around the core imposition.
 //   greyPages → applied to the SOURCE artwork before anything reads it, so every
 //               product path (flats, saddle, both PB halves) sees grey pages.
 //   slip      → applied to each OUTPUT part after preflight, so the physical
 //               sheet count the operator typed refers to the imposed sheets.
 async function imposePdf(artBytes, backBytes, spec, gangFiles) {
+  const pre = [];
+  // Source preflight — on the bytes as dropped, before any pass rewrites them.
+  if (artBytes) {
+    artBytes = await ppsToPdfBytes(artBytes, "front");
+    const doc = await loadPdf(artBytes, "artwork");
+    pre.push(...fontNotes(doc, "artwork"));
+    const survey = pageSizeSurvey(doc, spec);
+    if (survey.spreads) {
+      if (spec.splitSpreads) {
+        const r = await splitSpreadsBytes(artBytes, spec);
+        artBytes = r.bytes; if (r.note) pre.push(r.note);
+      } else {
+        const z = survey.sizes[survey.spreadIdx[0]];
+        const msg = `This file looks like 2-PAGE SPREADS: ${survey.spreadIdx.length} of ${survey.sizes.length} pages are ${z.w}×${z.h}″ — two ${survey.tw}×${survey.th}″ pages side by side. Imposed as-is each spread would be scaled into one page. Tick “Split 2-page spreads” (reader order: page 1 alone, then 2|3, 4|5 …), or ask for a single-page export.`;
+        if (isBookCalc(spec.calc)) throw new Error(msg);
+        pre.push("⚠ " + msg);
+      }
+    } else {
+      pre.push(...sizeNotes(survey, "artwork"));
+    }
+  }
+  if (backBytes) {
+    try { pre.push(...fontNotes(await loadPdf(await ppsToPdfBytes(backBytes, "back"), "back file"), "back file")); } catch (e) { /* reported by the core load */ }
+  }
   let greyNote = null;
   const grey = parsePageList(spec.greyPages);
   if (grey.length && artBytes) {
-    const r = await forceGreyPagesBytes(await ppsToPdfBytes(artBytes, "front"), grey);
+    const r = await forceGreyPagesBytes(artBytes, grey);
     artBytes = r.bytes; greyNote = r.note;
   }
   const res = await imposeCore(artBytes, backBytes, spec, gangFiles);
   const parts = res.parts || [res];
   const duplex = spec.sides === 2 || isBookCalc(spec.calc);
   for (const p of parts) {
+    if (pre.length) p.warnings = [...pre, ...(p.warnings || [])];
     if (greyNote) p.warnings = [greyNote, ...(p.warnings || [])];
     if (spec.slip && spec.slip.on) {
       const r = await insertSlipsheets(p.bytes, spec.slip, duplex, p.pageLabels);
@@ -2570,7 +2795,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   }
   const warnings = [...layout.warnings];
 
-  const srcFront = await PL.PDFDocument.load(gang ? gang[0].bytes : artBytes, { ignoreEncryption: true });
+  const srcFront = await loadPdf(gang ? gang[0].bytes : artBytes, gang ? gang[0].name : "artwork");
   stripActiveContent(srcFront);
 
   ensurePageContents(srcFront);
@@ -2578,7 +2803,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   if (nF < 1) throw new Error("Artwork PDF has no pages");
   const sides = spec.sides === 2 ? 2 : 1;
   const mode = gang ? "combo" : ["gang", "stack", "each"].includes(spec.multiMode) ? spec.multiMode : "repeat";
-  const backDoc = !gang && backBytes ? await PL.PDFDocument.load(backBytes, { ignoreEncryption: true }) : null;
+  const backDoc = !gang && backBytes ? await loadPdf(backBytes, "back file") : null;
   if (backDoc) { stripActiveContent(backDoc); ensurePageContents(backDoc); }
 
   // add-bleed: per-page override map (1-based page keys, main file) falls
@@ -2615,7 +2840,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   let gangAlloc = null;
   if (mode === "combo") {
     const docs = [srcFront];
-    for (let i = 1; i < gang.length; i++) { const gd = await PL.PDFDocument.load(gang[i].bytes, { ignoreEncryption: true }); stripActiveContent(gd); ensurePageContents(gd); docs.push(gd); }
+    for (let i = 1; i < gang.length; i++) { const gd = await loadPdf(gang[i].bytes, gang[i].name || `gang file ${i + 1}`); stripActiveContent(gd); ensurePageContents(gd); docs.push(gd); }
     const total = layout.cells.length;
     const want = gang.map(g => (isFinite(+g.slots) && +g.slots > 0 ? Math.floor(+g.slots) : null));
     const explicit = want.reduce((s, v) => s + (v || 0), 0);
@@ -2735,7 +2960,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
       else if (key === keyOf(pieces[0].front)) art.notes.forEach(n => warnings.push("front: " + n));
       else if (sides === 2 && pieces[0].back && key === keyOf(pieces[0].back)) art.notes.forEach(n => warnings.push("back: " + n));
       else if (art.scale !== 1) scaledPages++;
-      const [embedded] = await out.embedPdf(ref.doc, [ref.pno]);
+      const embedded = await embedPageBox(out, ref.doc.getPage(ref.pno), `${keyOf(ref)}`);
       // Layer visibility, per source document (gang files each bring their own).
       const ocSrc = ocSrcFor(ref.doc);
       if (ocSrc.any) ocPending.push({ ref: embedded.ref, srcRes: pageResources(ref.doc.getPage(ref.pno).node), hidden: ocSrc.hidden });
@@ -2791,6 +3016,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
       if (showMarks) drawMarks(page, layout, cellsForMarks);
       if (showSlug) {
         const placed = drawSlug(page, layout, font, {
+          duplex: sides === 2, flip: sides === 2 ? (spec.sheetFlip || "short") : null,
           side: label, orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0, artScale: userScale,
           qty: spec.qty, sheets, date: dateStr,
         }, cellsForMarks);
@@ -2814,6 +3040,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   if (mode === "combo") sideReports.push({ side: "COMBO", pieces: pieces.length, sheetsPerSet: 1, modeName: "gang combo", alloc: gang.map((g, i) => `${g.name} ×${gangAlloc[i]}`).join(" · ") });
   else if (mode !== "repeat") sideReports.push({ side: "COLLATED", pieces: pieces.length, sheetsPerSet: D, modeName: mode });
 
+  await carryGroups(out, [...embedCache.values()]);
   if (ocPending.length) {
     await out.flush();   // materialise the copied XObjects before reading them
     collectPendingOC(out, ocPending, ocAcc);
@@ -2881,14 +3108,14 @@ function detectTrim(doc, bleed) {
   const page = doc.getPage(0);
   const rotSwap = (((page.getRotation().angle % 360) + 360) % 360) % 180 !== 0;
   const dims = (w, h) => rotSwap ? { w: h / PT, h: w / PT } : { w: w / PT, h: h / PT };
-  const mb = page.getMediaBox();
+  const mb = pageBox(page);
   const tb = getPageBox(page, "TrimBox");
-  if (tb && (Math.abs(tb.w - mb.width) > 1 || Math.abs(tb.h - mb.height) > 1)) {
+  if (tb && (Math.abs(tb.w - mb.w) > 1 || Math.abs(tb.h - mb.h) > 1)) {
     const d = dims(tb.w, tb.h);
     return { w: r16(d.w), h: r16(d.h), method: "embedded TrimBox" };
   }
   const b = isFinite(bleed) ? +bleed : BLEED;
-  const media = dims(mb.width, mb.height);
+  const media = dims(mb.w, mb.h);
   const inset = { w: media.w - 2 * b, h: media.h - 2 * b };
   const nice = v => Math.abs(v * 2 - Math.round(v * 2)) < 0.02 ? 2 : Math.abs(v * 4 - Math.round(v * 4)) < 0.02 ? 1 : 0;
   if (b > 0 && inset.w >= 1 && inset.h >= 1 && nice(inset.w) + nice(inset.h) > nice(media.w) + nice(media.h)) {
@@ -3550,6 +3777,7 @@ function App() {
   const [rulers, setRulers] = useState(true);
   const [viewPart, setViewPart] = useState(0);             // perfect bound: which part the viewport shows
   const [greyPagesTxt, setGreyPagesTxt] = useState("");    // force greyscale on these source pages
+  const [splitSpreads, setSplitSpreads] = useState(false); // cut 2-page reader spreads into single pages
   const [slipOn, setSlipOn] = useState(false);
   const [slipWhen, setSlipWhen] = useState("before");
   const [slipSheets, setSlipSheets] = useState("");
@@ -3653,6 +3881,7 @@ function App() {
     pbPart: isPB ? pbPart : null,
     pbGutsOrder: isPB ? pbGutsOrder : null,
     greyPages: greyPagesTxt.trim() || null,
+    splitSpreads,
     slip: slipOn ? { on: true, when: slipWhen, sheets: slipSheets, design: slipDesign,
                      customBytes: slipCustom && slipCustom.bytes, customName: slipCustom && slipCustom.name } : null,
     // Per-half layout controls. Shaped for the engine (pbPartOverrides), which
@@ -3662,7 +3891,7 @@ function App() {
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, splitSpreads, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -3776,7 +4005,7 @@ function App() {
       if (!/\.pdf$/i.test(f.name)) { setError(`"${f.name}" is not a PDF`); continue; }
       const bytes = new Uint8Array(await f.arrayBuffer());
       let pageCount = 0;
-      try { pageCount = (await PL.PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount(); }
+      try { pageCount = (await loadPdf(bytes, f.name)).getPageCount(); }
       catch (e) { setError(`"${f.name}" could not be parsed as a PDF: ` + e.message); continue; }
       added.push({ bytes, name: f.name, pageCount, slots: "" });
     }
@@ -3809,7 +4038,7 @@ function App() {
       const bytes = new Uint8Array(await f.arrayBuffer());
       let pageCount = 0, det = null, threats = [];
       try {
-        const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+        const doc = await loadPdf(bytes, f.name);
         pageCount = doc.getPageCount();
         try { det = detectTrim(doc, +bleedIn); } catch (e2) { /* detection is best-effort */ }
         try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
@@ -3877,7 +4106,7 @@ function App() {
       // sees the verdict on the same screen as the artwork. Advisory only: a
       // mismatch still loads, it just travels flagged.
       const appr = await approvalState(bytes, row.proof_hash);
-      const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+      const doc = await loadPdf(bytes, row.art_file_name || "artwork");
       const pageCount = doc.getPageCount();
       let threats = [];
       try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
@@ -3899,7 +4128,17 @@ function App() {
     finally { setQueueBusy(null); }
   };
 
+  // The upload goes through admin-ajax as a normal form POST, so PHP's
+  // post_max_size / upload_max_filesize apply. Past them PHP drops the whole
+  // POST — nonce included — and the endpoint answers "Unauthorized", which is
+  // the wrong diagnosis. PHP tells the tool its limit (CFG.maxUpload); check
+  // here and say the real reason.
+  const overUploadLimit = bytes => CFG && CFG.maxUpload > 0 && bytes.length > CFG.maxUpload
+    ? `${(bytes.length / 1048576).toFixed(1)} MB is over the server's ${(CFG.maxUpload / 1048576).toFixed(0)} MB upload limit (PHP upload_max_filesize / post_max_size). Download it and file it to Drive by hand, or raise the limit in the hosting panel.`
+    : null;
   const sendToDrive = async (res) => {
+    const over = overUploadLimit(res.bytes);
+    if (over) { setUploadState(u => ({ ...u, [res.filename]: "failed: " + over })); setError(over); return; }
     if (!res || !activeOrder) return;
     const mark = v => setUploadState(u => ({ ...u, [res.filename]: v }));
     mark("uploading");
@@ -4448,8 +4687,12 @@ function App() {
 
           </Acc>
 
-          {showProduct && (
-            <Acc id="product" title={isPB ? "Perfect bound — two press jobs" : "Product settings"} open={secOpen.product} onToggle={() => toggleSec("product")}>
+          <Acc id="product" title={isPB ? "Perfect bound — two press jobs" : "Product settings"} open={secOpen.product} onToggle={() => toggleSec("product")}>
+            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 10 }}>
+              <input type="checkbox" checked={splitSpreads} onChange={e => setSplitSpreads(e.target.checked)} style={{ width: "auto", marginTop: 3 }} />
+              <span>Split 2-page spreads into single pages <span style={{ color: "rgba(255,255,255,.4)" }}>— for a file exported as reader spreads (page 1 alone, then 2|3, 4|5 …). Each spread-sized page is cut at its centre line. Bound products refuse a spreads file until this is ticked.</span></span>
+            </label>
+            {showProduct && (<div>
             {!isBook && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
               <div style={{ marginTop: 10 }}>
                 <Field label={`Multi-page file (${art.pageCount} pages)`}>
@@ -4563,8 +4806,8 @@ function App() {
               </div>
             )}
 
-            </Acc>
-          )}
+            </div>)}
+          </Acc>
 
           <Acc id="bleed" title="Bleed settings" open={secOpen.bleed} onToggle={() => toggleSec("bleed")}
                badge={addBleed !== "off" ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>{addBleed.toUpperCase()}</span> : null}>

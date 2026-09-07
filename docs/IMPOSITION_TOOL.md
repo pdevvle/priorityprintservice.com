@@ -443,6 +443,54 @@ download the imposed PDF. Useful for testing and one-off jobs.
   size. Regenerate the baseline same-day, from the previous build, before
   comparing.
 
+  ### Print-safety audit — browser PDF → Fiery → Ricoh 7200x (1.34)
+
+  The question asked was: what in this browser-side pipeline would print wrong
+  or fail on the press? Suspicions were turned into fixtures that provoke
+  them, and the engine was measured against each. Findings, in order of harm:
+
+  | # | Fault | Measured before | Fix |
+  |---|---|---|---|
+  | 1 | **Encrypted source imposed as garbage, silently.** pdf-lib parses an owner-password file (`ignoreEncryption`) but never decrypts; the streams are copied still-encrypted. | 0 ink on every cell, nine "syntax error in content stream" faults, no warning — Fiery prints blank or errors | `loadPdf()` on every source path (drop, queue, back file, gang, cover, slipsheet design, CLEAN) refuses by file name with the Acrobat steps to remove security |
+  | 2 | **MediaBox origin ≠ (0,0).** pdf-lib's form BBox is `[0 0 w h]`, so an Acrobat-cropped page (`[-9 -9 621 801]`) is offset by its origin and clipped at the BBox. | red square −0.257″ / −2.38″ from where the cell said; right bleed lost | `pageBox()` + `embedPageBox()`: the exact box, with its origin, is handed to `embedPage`; all measurement uses the same box |
+  | 3 | **CropBox ignored.** A page carrying slug/registration area outside its CropBox was measured at the MediaBox size. | 2.8 M pixels of slug printed on the sheet; art scaled ×0.47 | same — the box is CropBox ∩ MediaBox when a CropBox is present |
+  | 4 | **Transparency `/Group` dropped** from the form XObject. Blend modes and opacity in the page then composite against the sheet, not inside the page's own isolated group. | `/Group` absent on the output form | `carryGroups()` copies the page's Group onto the form after flush; `/Group` and `/Multiply` verified present in the output |
+  | 5 | **Marks, fold guides and slug in RGB black.** Through the RIP's colour management that is rich black — four plates under a 0.5 pt line, fringing exactly where the guillotine runs. | `0 0 0 RG` operators | `grayscale(0)` — `0 G` / `0 g`, K plate only |
+  | 6 | **Slug never stated the duplex flip edge** the Fiery job must be set to; a wrong choice turns every back 180°. | — | `DUPLEX SHORT-EDGE FLIP` / `DUPLEX LONG-EDGE FLIP` / `SIMPLEX` in the slug |
+
+  Preflight added, because these arrive from customers weekly:
+
+  - **Non-embedded fonts**, listed by name. The standard 14 are only noted
+    (Fiery has them); anything else — Arial, Calibri, a brand face — is
+    warned, because the RIP substitutes a different face with different
+    widths and lines re-wrap on the press. Walks page and form resources.
+  - **Mixed page sizes**, listed by page with what the tool does to each
+    (fit-to-trim scaled; a landscape page turned 90° into a portrait slot).
+  - **2-page spreads** — pages ≈ 2 × trim width. A bound product is refused
+    with a plain message rather than imposing each spread scaled into one
+    page; flats get the warning. **Split 2-page spreads** (Product section,
+    `spec.splitSpreads`) cuts each spread-sized page at its centre line into
+    two pages via `embedPage` with half-width boxes, reader order assumed
+    (page 1 alone, then 2|3, 4|5 …). Verified: 8 spreads → 16 pages → the
+    expected 8 sheet sides.
+  - **Upload size** — the imposed PDF returns through admin-ajax as a form
+    POST, so PHP's `post_max_size` applies; past it PHP drops the whole body,
+    nonce included, and the endpoint says "Unauthorized". PHP now injects
+    `maxUpload` (`wp_max_upload_size()`), the tool refuses with the real
+    reason, and `pps_impose_upload` names `$_FILES` error codes.
+
+  Not changed, and why: pattern matrices inside embedded forms follow the
+  form matrix per the PDF spec, so gradients land correctly on Adobe PDF
+  Print Engine RIPs; unbalanced `q`/`Q` in a customer's content stream cannot
+  leak because `Do` saves and restores state around a form; annotations are
+  not part of an embedded page (pdf-lib copies Contents and Resources only),
+  which is right for print — form fields and links are stripped anyway.
+
+  Regression: every suite unchanged from v1.29 once the deliberate K-only
+  colour operators and the new slug token are normalised. Fixture gotcha:
+  pymupdf draws with a top-left origin, so its "0.5″ from the corner" square
+  is at the top; a hand-written PDF uses PDF coordinates (bottom-left).
+
   ### Workspace layout (1.33)
 
   Rebuilt to the owner's wireframe (`Imp_tool_layout.pdf`, 2026-09-06):
