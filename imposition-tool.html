@@ -100,7 +100,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-06 12:00 UTC · IMPOSE-V1.34</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-07 23:59 UTC · IMPOSE-V1.35</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -888,7 +888,13 @@ async function loadPdf(bytes, what) {
 
 function getPageBox(page, name) {
   try {
-    let v = page.node.get(PL.PDFName.of(name));
+    // Inheritable: a CropBox/TrimBox/BleedBox set on the /Pages node applies to
+    // every page under it (Quark and some print drivers write them there).
+    // A direct read missed those entirely — measured: an inherited 6×4 CropBox
+    // on an 8.5×11 MediaBox imposed as the full 8.5×11, slug area and all.
+    let v = typeof page.node.getInheritableAttribute === "function"
+      ? page.node.getInheritableAttribute(PL.PDFName.of(name))
+      : page.node.get(PL.PDFName.of(name));
     if (!v) return null;
     v = page.node.context.lookup(v);
     if (!v || typeof v.lookup !== "function" || (v.size ? v.size() : 0) !== 4) return null;
@@ -1069,7 +1075,14 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed) {
   const rel = b => ({ x: b.x - mb.x, y: b.y - mb.y, w: b.w, h: b.h });
 
   let trimRaw = null;
-  const tb = getPageBox(page, "TrimBox");
+  let tb = getPageBox(page, "TrimBox");
+  if (tb) {
+    const r = rel(tb);
+    if (r.x < -1 || r.y < -1 || r.x + r.w > W + 1 || r.y + r.h > H + 1 || r.w < 36 || r.h < 36) {
+      notes.push(`embedded TrimBox [${(tb.w / PT).toFixed(2)}×${(tb.h / PT).toFixed(2)}″ at ${(r.x / PT).toFixed(2)},${(r.y / PT).toFixed(2)}] lies outside the page — ignored; located by page size instead`);
+      tb = null;
+    }
+  }
   if (tb && (Math.abs(tb.w - W) > 1 || Math.abs(tb.h - H) > 1)) {
     trimRaw = rel(tb); notes.push("art located by embedded TrimBox");
   }
@@ -1740,7 +1753,7 @@ function drawSlug(page, layout, font, info, cells) {
     (info.artScale && info.artScale !== 1) ? `ART ${(info.artScale * 100).toFixed(2)}%` : null,
     info.creep ? `CREEP ${info.creep}in total (this sig ${(info.creepAt || 0).toFixed(4)}in)` : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
-    info.duplex === false ? "SIMPLEX" : info.flip ? `DUPLEX ${String(info.flip).toUpperCase()}-EDGE FLIP` : null,
+    info.duplex === false ? "SIMPLEX" : info.flip ? `DUPLEX FLIP ON ${String(info.flip).toUpperCase()} (${info.flip === "long" ? layout.sheet.long : layout.sheet.short}in) EDGE` : null,
     info.date,
   ].filter(Boolean);
   page.drawText(parts.join("  ·  "), {
@@ -2210,6 +2223,49 @@ function layoutOpts(spec) {
 // calculators use to size a raster upload, so the imposed sheet matches the
 // proof the customer approved rather than inventing a second convention.
 const PPS_RASTER_DPI = 300;
+// JPEG EXIF orientation (tag 0x0112 in IFD0). Phone photos are stored sideways
+// with this tag telling the viewer to rotate; pdf-lib embeds the stored pixels
+// as-is, so without this a portrait phone shot imposes landscape.
+function jpegOrientation(bytes) {
+  try {
+    const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    if (b[0] !== 0xFF || b[1] !== 0xD8) return 1;
+    let i = 2;
+    while (i + 4 < b.length) {
+      if (b[i] !== 0xFF) return 1;
+      const marker = b[i + 1], len = (b[i + 2] << 8) | b[i + 3];
+      if (marker === 0xE1 && b[i + 4] === 0x45 && b[i + 5] === 0x78 && b[i + 6] === 0x69 && b[i + 7] === 0x66) {
+        const t = i + 10;                                   // TIFF header
+        const le = b[t] === 0x49;
+        const u16 = o => le ? b[o] | (b[o + 1] << 8) : (b[o] << 8) | b[o + 1];
+        const u32 = o => le ? (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0 : ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
+        const ifd = t + u32(t + 4), n = u16(ifd);
+        for (let k = 0; k < n; k++) {
+          const e = ifd + 2 + k * 12;
+          if (u16(e) === 0x0112) return u16(e + 8) || 1;
+        }
+        return 1;
+      }
+      if (marker === 0xDA) return 1;                        // start of scan — no EXIF
+      i += 2 + len;
+    }
+  } catch (e) { /* fall through */ }
+  return 1;
+}
+// Rotate a JPEG's stored pixels into its EXIF-upright orientation via the
+// browser's decoder (which applies EXIF itself) and re-encode. Only used when
+// the tag says so — an untagged file is embedded byte-for-byte, keeping a CMYK
+// JPEG's CMYK.
+async function uprightJpeg(bytes) {
+  const bmp = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }), { imageOrientation: "from-image" });
+  const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
+  c.getContext("2d").drawImage(bmp, 0, 0);
+  const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.95));
+  return new Uint8Array(await blob.arrayBuffer());
+}
+// Last raster wrapped, for the resolution check downstream (pixels vs the
+// size the piece will actually print at).
+let lastRaster = null;
 function ppsSniff(bytes) {
   const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   if (b.length > 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return "pdf";
@@ -2229,12 +2285,18 @@ async function ppsToPdfBytes(bytes, label) {
   if (kind !== "jpg" && kind !== "png") {
     throw new Error("The " + label + " artwork is not a PDF, JPEG or PNG and cannot be imposed.");
   }
+  let rotated = false;
+  if (kind === "jpg") {
+    const o = jpegOrientation(bytes);
+    if (o !== 1 && typeof createImageBitmap === "function") { bytes = await uprightJpeg(bytes); rotated = o; }
+  }
   const doc = await PL.PDFDocument.create();
   const img = kind === "jpg" ? await doc.embedJpg(bytes) : await doc.embedPng(bytes);
   const wPt = (img.width / PPS_RASTER_DPI) * 72;
   const hPt = (img.height / PPS_RASTER_DPI) * 72;
   const page = doc.addPage([wPt, hPt]);
   page.drawImage(img, { x: 0, y: 0, width: wPt, height: hPt });
+  lastRaster = { label, kind, px: img.width, py: img.height, rotated };
   return await doc.save();
 }
 
@@ -2431,6 +2493,7 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
     if (wantGuts) { const g = await pbBuildGuts_all(src); gutsB = g.bytes; gutsN = g.count; }
   } else {
     // Single reading-order file, saddle-style: split it.
+    if (src.getPageCount() < 4) throw new Error(`Perfect bound from a single file needs at least 4 pages (front, inside front, inside back, back) — this file has ${src.getPageCount()}. Drop the guts and the cover as separate files, or choose Guts only.`);
     coverB = await pbBuildCover(src, trimW, trimH, spine, bleed);
     if (wantGuts) { const g = await pbBuildGuts(src); gutsB = g.bytes; gutsN = g.count; }
     assembled = true;
@@ -2719,6 +2782,51 @@ async function splitSpreadsBytes(bytes, spec) {
   };
 }
 
+// Ink fraction of one page of a PDF at 24 DPI (pdf.js). Used for the output
+// ink guard and to tell "blank by design" from "did not embed".
+const GUARD_DPI = 24;
+async function inkFraction(bytes, pageIndex) {
+  const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+  try {
+    const page = await pdf.getPage(pageIndex + 1);
+    const vp = page.getViewport({ scale: GUARD_DPI / 72 });
+    const c = document.createElement("canvas"); c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let ink = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { n++; if ((d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) < INK_LUM) ink++; }
+    return n ? ink / n : 0;
+  } finally { try { pdf.destroy(); } catch (e) {} }
+}
+async function emptySides(bytes) {
+  const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+  const empty = [];
+  try {
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const vp = page.getViewport({ scale: GUARD_DPI / 72 });
+      const c = document.createElement("canvas"); c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
+      // Marks and slug are ink too, so "empty" means the ART area is empty:
+      // ignore a thin border where marks live and look at the middle 80%.
+      let ink = 0, n = 0;
+      const x0 = c.width * 0.1, x1 = c.width * 0.9, y0 = c.height * 0.1, y1 = c.height * 0.9;
+      for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) {
+        if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+        const k = (y * c.width + x) * 4; n++;
+        if ((d[k] * 0.299 + d[k + 1] * 0.587 + d[k + 2] * 0.114) < INK_LUM) ink++;
+      }
+      if (n && ink / n < 0.0005) empty.push(i);
+    }
+    return { total: pdf.numPages, empty };
+  } finally { try { pdf.destroy(); } catch (e) {} }
+}
+
 // Public entry: specialty pre/post-processing around the core imposition.
 //   greyPages → applied to the SOURCE artwork before anything reads it, so every
 //               product path (flats, saddle, both PB halves) sees grey pages.
@@ -2726,11 +2834,21 @@ async function splitSpreadsBytes(bytes, spec) {
 //               sheet count the operator typed refers to the imposed sheets.
 async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   const pre = [];
+  lastRaster = null;                                    // never inherit a previous job's raster note
+  let frontRaster = null;
   // Source preflight — on the bytes as dropped, before any pass rewrites them.
+  // The source is parsed ONCE here (fonts, sizes, UserUnit) — a 50 MB booklet
+  // must not be parsed three times for three notes.
   if (artBytes) {
     artBytes = await ppsToPdfBytes(artBytes, "front");
+    frontRaster = lastRaster; lastRaster = null;
     const doc = await loadPdf(artBytes, "artwork");
     pre.push(...fontNotes(doc, "artwork"));
+    try {
+      // UserUnit scales a page's units; nothing here honours it, so say so.
+      const uu = doc.getPage(0).node.get(PL.PDFName.of("UserUnit"));
+      if (uu && typeof uu.asNumber === "function" && Math.abs(uu.asNumber() - 1) > 1e-6) pre.push(`⚠ artwork declares /UserUnit ${uu.asNumber()} (page units scaled) — the tool measures in points and ignores it; check the detected size.`);
+    } catch (e) { /* best-effort */ }
     const survey = pageSizeSurvey(doc, spec);
     if (survey.spreads) {
       if (spec.splitSpreads) {
@@ -2746,9 +2864,43 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       pre.push(...sizeNotes(survey, "artwork"));
     }
   }
+  // Raster artwork: the wrapper assumed 300 DPI when it sized the page; what
+  // matters is the pixels against the size the piece PRINTS at.
+  const rasterNote = (r, w, h) => {
+    if (!r) return null;
+    // Effective DPI = the tighter axis, in whichever orientation the image is
+    // placed (the placement picks the better fit, so take the larger of the two).
+    const eff = Math.max(Math.min(r.px / w, r.py / h), Math.min(r.px / h, r.py / w));
+    const rot = r.rotated ? ` EXIF orientation ${r.rotated} applied (image re-encoded upright).` : "";
+    if (eff < 200) return `${r.label} artwork is a ${r.px}×${r.py} px ${r.kind.toUpperCase()} — about ${Math.round(eff)} DPI at ${w}×${h}″. Below 200 DPI it prints soft; 300 is the target.${rot}`;
+    return rot ? `${r.label} artwork: ${r.px}×${r.py} px ${r.kind.toUpperCase()} (~${Math.round(eff)} DPI at ${w}×${h}″).${rot}` : null;
+  };
+  const tw = isBoundCalc(spec.calc) ? +spec.trimLong : Math.max(+spec.trimLong, +spec.trimShort);
+  const th = isBoundCalc(spec.calc) ? +spec.trimShort : Math.min(+spec.trimLong, +spec.trimShort);
+  if (frontRaster) { const n = rasterNote(frontRaster, tw, th); if (n) pre.push(n); }
   if (backBytes) {
-    try { pre.push(...fontNotes(await loadPdf(await ppsToPdfBytes(backBytes, "back"), "back file"), "back file")); } catch (e) { /* reported by the core load */ }
+    try {
+      const bb = await ppsToPdfBytes(backBytes, "back");
+      if (lastRaster) { const n = rasterNote(lastRaster, tw, th); if (n) pre.push(n); lastRaster = null; }
+      pre.push(...fontNotes(await loadPdf(bb, "back file"), "back file"));
+    } catch (e) { /* reported by the core load */ }
   }
+  // Gang combo files must be the same trim; a smaller or larger one is
+  // fit-scaled into the cell, which is never what was meant.
+  if (Array.isArray(gangFiles) && gangFiles.length >= 2) {
+    for (const g of gangFiles) {
+      if (!g || !g.bytes) continue;
+      try {
+        const gb = await ppsToPdfBytes(g.bytes, g.name || "gang");
+        const sv = pageSizeSurvey(await loadPdf(gb, g.name || "gang file"), spec);
+        const z = sv.sizes[0];
+        const near = (a, b) => Math.abs(a - b) <= 0.3;
+        const fits = (near(z.w, tw) && near(z.h, th)) || (near(z.w, th) && near(z.h, tw)) || (near(z.w, tw + 2 * BLEED) && near(z.h, th + 2 * BLEED)) || (near(z.w, th + 2 * BLEED) && near(z.h, tw + 2 * BLEED));
+        if (!fits) pre.push(`⚠ gang file "${g.name}" is ${z.w}×${z.h}″ but the job is ${tw}×${th}″ — it will be fit-scaled into its cells. Gang combos need same-size pieces.`);
+      } catch (e) { /* reported by the core load */ }
+    }
+  }
+  lastRaster = null;                                    // gang-file conversions above must not leak a note
   let greyNote = null;
   const grey = parsePageList(spec.greyPages);
   if (grey.length && artBytes) {
@@ -2758,8 +2910,26 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   const res = await imposeCore(artBytes, backBytes, spec, gangFiles);
   const parts = res.parts || [res];
   const duplex = spec.sides === 2 || isBookCalc(spec.calc);
+  // Output ink guard — the generic form of the encrypted-file failure: if the
+  // source has ink and the imposed output has none on ANY side, something
+  // between the two silently produced nothing. Rendered at 24 DPI, so a
+  // 40-side job costs well under a second.
+  let srcInk = null;
+  try { srcInk = artBytes ? await inkFraction(artBytes, 0) : null; } catch (e) { srcInk = null; }
   for (const p of parts) {
-    if (pre.length) p.warnings = [...pre, ...(p.warnings || [])];
+    p.warnings = [...pre, ...(p.warnings || [])];
+    try {
+      const empties = await emptySides(p.bytes);
+      if (empties.total > 0 && empties.empty.length === empties.total && srcInk !== null && srcInk <= 0.002) {
+        p.warnings.push(`⚠ Every sheet side renders with no ink, and the artwork's first page is blank too — this file may be empty. Check it before it goes to press.`);
+      }
+      if (empties.total > 0 && empties.empty.length === empties.total && srcInk > 0.002) {
+        throw new Error(`Imposition produced ${empties.total} sheet side${empties.total === 1 ? "" : "s"} with NO INK while the artwork's first page has ink. The file did not embed correctly — nothing was written to Drive. Try the CLEAN copy, or re-export the PDF (Acrobat: Save As → Optimized, or Print to PDF).`);
+      }
+      if (empties.empty.length && empties.empty.length < empties.total) {
+        p.warnings.push(`Sheet side${empties.empty.length === 1 ? "" : "s"} ${empties.empty.slice(0, 12).join(", ")}${empties.empty.length > 12 ? " …" : ""} render${empties.empty.length === 1 ? "s" : ""} with no ink — fine if those source pages are blank; if not, the page did not embed.`);
+      }
+    } catch (e) { if (/NO INK/.test(e.message)) throw e; /* render failures are not verdicts */ }
     if (greyNote) p.warnings = [greyNote, ...(p.warnings || [])];
     if (spec.slip && spec.slip.on) {
       const r = await insertSlipsheets(p.bytes, spec.slip, duplex, p.pageLabels);
@@ -2879,6 +3049,10 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
     for (let i = 0; i < Math.ceil(nF / 2); i++) pieces.push({ front: { doc: srcFront, pno: 2 * i }, back: 2 * i + 1 < nF ? { doc: srcFront, pno: 2 * i + 1 } : null });
   } else {
     for (let i = 0; i < nF; i++) pieces.push({ front: { doc: srcFront, pno: i }, back: null });
+  }
+  if (sides === 2 && !gang) {
+    const noBack = pieces.filter(p => !p.back).length;
+    if (noBack) warnings.push(`⚠ 2-sided job but ${noBack === pieces.length ? (pieces.length === 1 ? "the piece has" : "all " + pieces.length + " pieces have") : noBack + " of " + pieces.length + " pieces have"} no back page — ${noBack === 1 ? "its back prints" : "those backs print"} BLANK. Drop a back file, or set Sides to 1 if this is single-sided.`);
   }
 
   const imp = layout.imp;
@@ -3398,6 +3572,7 @@ function ajax(action, params, opts) {
 async function ajaxFail(r, what) {
   let msg = "";
   try { const j = await r.json(); msg = (j && j.data && j.data.message) || ""; } catch (e) { /* not JSON */ }
+  if (r.status === 403 || r.status === 401) return new Error(`${what} failed: the admin session or its security token has expired — reload this page and try again.${msg && !/Unauthorized/i.test(msg) ? " (" + msg + ")" : ""}`);
   return new Error(`${what} failed (HTTP ${r.status}${msg ? ": " + msg : ""})`);
 }
 
