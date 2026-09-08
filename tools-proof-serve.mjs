@@ -25,12 +25,9 @@ const DEPS = process.env.PPS_DEPS_DIR || path.join(HERE, 'node_modules');
    both live in one node_modules — installing either evicts the other, and the
    calculator smoke test starts failing on a missing file that has nothing to do
    with whatever you were working on. So the proofer's copies are kept in their
-   own directory:
+   own directory, populated once by:
 
-     mkdir -p proof-vendor && npm install --no-save pdfjs-dist@3.11.174 pdf-lib@1.17.1
-     cp node_modules/pdfjs-dist/build/pdf.min.js node_modules/pdfjs-dist/build/pdf.worker.min.js \
-        node_modules/pdf-lib/dist/pdf-lib.min.js proof-vendor/
-     npm install --no-save pdfjs-dist@4.10.38      # put the calculators' copy back
+     node tools-proof-vendor.mjs           # and --check to see what is there
 
    PPS_PROOF_VENDOR_DIR overrides the location. node_modules is still searched
    as a fallback, so a checkout that happens to have the right versions works
