@@ -68,30 +68,23 @@
      with them, keyed off the same data-pps-theme attribute the calculator
      toggles, so the proof does not stay white when everything around it is
      not. */
-  .ackbox{border:1px solid var(--yellow-line);background:var(--yellow-tint);
-    border-radius:8px;padding:9px 11px;margin-bottom:8px;line-height:1.45}
-  .ackbox .acktitle{font-weight:700;font-size:12px;margin-bottom:4px}
-  .ackbox label{display:flex;gap:8px;align-items:flex-start;font-size:12px;cursor:pointer}
-  .ackbox input{margin-top:2px;flex-shrink:0}
-  .liability{margin:8px 0 0;font-size:11px;line-height:1.5;color:var(--bp-faint);max-width:46ch}
-  .approvewrap.locked .ackbox{opacity:.5}
   :root{
     --pps-display:'Montserrat','Segoe UI','Helvetica Neue',Arial,sans-serif;
     --pps-sans:'Work Sans','Segoe UI','Helvetica Neue',Arial,sans-serif;
     --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
     --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#64748b;
-    --bp-btn:#f1f4f8; --bp-info:#1d4ed8; --bp-warn:#92400e;
+    --bp-btn:#f1f4f8; --bp-info:#1d4ed8; --bp-warn:#92400e; --bp-scrim:rgba(15,23,42,.55);
     --bp-page:#f6f7f9;
-    --cyan:#007eff; --magenta:#d1246a; --green:#38a169;
+    --cyan:#007eff; --magenta:#d1246a; --green:#38a169; --bp-red:#b91c1c;
     --magenta-tint:#fce8ef; --cyan-tint:#e0edff; --yellow-tint:#fef5e0; --yellow-line:#f0a830;
     --rail:376px;
   }
   :root[data-pps-theme="dark"]{
     --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
     --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
-    --bp-btn:#0f151d; --bp-info:#60a5fa; --bp-warn:#f0a830;
+    --bp-btn:#0f151d; --bp-info:#60a5fa; --bp-warn:#f0a830; --bp-scrim:rgba(2,6,12,.66);
     --bp-page:#0d1117;
-    --magenta:#f0578f; --green:#5bc98a;
+    --magenta:#f0578f; --green:#5bc98a; --bp-red:#f87171;
     --magenta-tint:#2a1420; --cyan-tint:#12243a; --yellow-tint:#2a2113; --yellow-line:#6b5320;
   }
   *{box-sizing:border-box}
@@ -154,6 +147,18 @@
   .approvewrap.locked{opacity:.5}
   .approvewrap.locked .agree label{cursor:not-allowed}
   .approverow{display:flex;align-items:center;gap:9px}
+  /* The checkpoint, in the calculator's warning card: yellow hairline on the
+     yellow tint, the same pairing the banner and the tight-margin issue use, so
+     "look at this" reads the same everywhere in the product. */
+  .ackbox{border:1px solid var(--yellow-line);background:var(--yellow-tint);
+    border-radius:10px;padding:9px 11px;margin-bottom:8px;line-height:1.45;
+    box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
+  .ackbox .acktitle{font-family:var(--pps-display);font-weight:700;font-size:11px;
+    letter-spacing:.05em;text-transform:uppercase;color:var(--bp-warn);margin-bottom:5px}
+  .ackbox label{display:flex;gap:8px;align-items:flex-start;font-size:12px;cursor:pointer;color:var(--bp-ink)}
+  .ackbox input{margin-top:2px;flex-shrink:0;accent-color:var(--yellow-line)}
+  .approvewrap.locked .ackbox{opacity:.5}
+  .liability{margin:8px 0 0;font-size:11px;line-height:1.5;color:var(--bp-faint);max-width:46ch}
   @keyframes bp-approve-shimmer{ from{background-position:150% 0} to{background-position:-50% 0} }
   .approve{display:inline-flex;align-items:center;justify-content:center;
            padding:13px 23px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
@@ -163,9 +168,30 @@
            background-size:300% 100%;animation:bp-approve-shimmer 2.9s linear infinite;
            box-shadow:0 3px 14px rgba(0,126,255,.4);
            transition:transform .15s ease,box-shadow .15s ease}
-  .approve:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 5px 18px rgba(0,126,255,.45)}
+  .approve:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 8px 22px rgba(0,126,255,.5);
+                                animation:bp-approve-shimmer 1.5s linear infinite}
+  .approve:active:not(:disabled){transform:translateY(0);box-shadow:0 2px 8px rgba(0,126,255,.4)}
   .approve:disabled{background:var(--bp-btn);color:var(--bp-faint);border:1px solid var(--bp-line);
                     animation:none;box-shadow:none;cursor:not-allowed}
+  /* Once both gates are satisfied the button is the one thing to press, so it
+     takes the calculator's expanding ring on top of the sweep. Only then — an
+     always-pulsing control is decoration, not a nudge. */
+  @keyframes bp-approve-pulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(0,126,255,.42),0 2px 10px rgba(0,126,255,.32)}
+    50%{box-shadow:0 0 0 7px rgba(0,126,255,0),0 2px 10px rgba(0,126,255,.32)}
+  }
+  .approve.nudge:not(:disabled){animation:bp-approve-shimmer 2.9s linear infinite,
+                                          bp-approve-pulse 2.4s ease-in-out infinite}
+  /* Approved is a status, not a button: flat green, no lift, no pointer. */
+  .approve.done,.approve.done:disabled{background:#16a34a;color:#fff;border:none;
+    animation:none;cursor:default;box-shadow:0 2px 10px rgba(22,163,74,.28);transform:none}
+  /* Shortening the duration would strand the sweep mid-gradient as a pale band
+     across the button, so motion off means a flat brand fill instead. */
+  @media (prefers-reduced-motion: reduce){
+    .approve,.approve.nudge:not(:disabled),.approve:hover:not(:disabled){
+      background:var(--cyan);background-size:auto;animation:none}
+    .approve.done,.approve.done:disabled{background:#16a34a}
+  }
   .closebtn{width:36px;height:36px;min-width:36px;flex-shrink:0;border-radius:50%;border:1px solid var(--bp-line);
             background:var(--bp-btn);color:var(--bp-dim);font-size:16px;line-height:1;cursor:pointer;
             display:flex;align-items:center;justify-content:center;font-family:inherit;
@@ -203,7 +229,7 @@
             box-shadow:0 0 0 1px rgba(255,255,255,.45) inset}
   .typemark.cut{border-color:var(--magenta);border-width:2px}
   .lens{position:absolute;width:190px;height:190px;border-radius:50%;overflow:hidden;pointer-events:none;
-        border:2px solid rgba(15,23,42,.55);box-shadow:0 6px 22px rgba(0,0,0,.3);background:#fff;z-index:5}
+        border:2px solid var(--bp-scrim);box-shadow:0 6px 22px rgba(0,0,0,.3);background:#fff;z-index:5}
   .lens canvas{position:absolute;left:0;top:0}
   .issues{width:262px;flex-shrink:0;display:flex;flex-direction:column;gap:12px;padding-top:6px}
   .issue{display:flex;gap:8px;font-size:11.5px;line-height:1.5;color:var(--magenta)}
@@ -532,23 +558,37 @@
     .approve{padding:11px 16px;font-size:13.5px;letter-spacing:.02em}
     .agree{font-size:12px}
   }
+  /* ── the deliverables panel ───────────────────────────────────
+     This block was written against --panel/--line/--ink/--dim/--accent, none of
+     which this page has ever defined, so every rule below silently fell back to
+     the browser default: an unbordered, unstyled panel in the middle of an
+     otherwise finished proof. It now uses the same tokens as everything else and
+     the calculator's card language — surface, hairline, 12px radius, and the
+     uppercase micro-heading the view group already uses. */
   .pkgrow{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
-  .pkgbtn{background:var(--panel);border:1px solid var(--line);color:var(--ink);padding:7px 14px;
-    border-radius:7px;cursor:pointer;font:600 12px/1 inherit}
-  .pkgbtn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  .pkgbtn{background:var(--bp-btn);border:1px solid var(--bp-line);color:var(--bp-dim);
+    padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit;
+    font-size:12px;font-weight:600;transition:all .2s}
+  .pkgbtn:hover:not(:disabled){background:rgba(0,126,255,.1);border-color:var(--cyan);color:var(--cyan)}
   .pkgbtn:disabled{opacity:.55;cursor:default}
-  .pkgnote{font-size:11px;color:var(--dim)}
-  .pkgout{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--panel)}
-  .pkgout h4{margin:0 0 8px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim)}
-  .pkgfile{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;
-    border-bottom:1px solid var(--line);font-size:12px}
+  .pkgnote{font-size:11px;color:var(--bp-faint);line-height:1.5}
+  .pkgout{margin-top:10px;border:1px solid var(--bp-line);border-radius:12px;padding:12px 14px;
+    background:var(--bp-surface);box-shadow:0 1px 2px rgba(16,24,40,.05)}
+  .pkgout h4{margin:0 0 9px;font-family:var(--pps-display);font-size:11px;font-weight:700;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--bp-faint)}
+  .pkgfile{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0;
+    border-bottom:1px solid var(--bp-line);font-size:12px;color:var(--bp-ink)}
   .pkgfile:last-child{border-bottom:none}
-  .pkgfile a{color:var(--accent);text-decoration:none;font-weight:600;white-space:nowrap}
+  .pkgfile a{color:var(--cyan);text-decoration:none;font-weight:600;white-space:nowrap}
   .pkgfile a:hover{text-decoration:underline}
   .pkgfile .pf{font-family:ui-monospace,Menlo,Consolas,monospace;overflow:hidden;text-overflow:ellipsis}
-  .pkghash{margin-top:10px;font-size:11px;color:var(--dim);
+  .pkghash{margin-top:10px;padding-top:9px;border-top:1px solid var(--bp-line);
+    font-size:11px;color:var(--bp-faint);
     font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
-  .pkgerr{color:#c0392b;font-size:12px}
+  /* A failed package is the one thing in this panel that must not be missed. */
+  .pkgerr{color:var(--bp-red);font-size:12px;line-height:1.5;font-weight:600;
+    border:1px solid var(--bp-red);border-radius:10px;padding:9px 11px;
+    background:var(--magenta-tint)}
 
 </style>
 </head>
@@ -2360,7 +2400,12 @@ function renderApproval(){
   }
 
   const acked = !flagged || ack.checked;
-  document.getElementById('approveBtn').disabled = book || !agree.checked || !acked;
+  const btn   = document.getElementById('approveBtn');
+  const ready = !book && agree.checked && acked;
+  btn.disabled = !ready;
+  // Ring only when pressing it is the next thing to do. Never once approved —
+  // that is a status, and a pulsing status is noise.
+  btn.classList.toggle('nudge', ready && !btn.classList.contains('done'));
   wrap.title = book ? 'Switch to the Proof view to approve artwork.'
              : (!acked ? 'Confirm the flagged items above to enable approval.' : '');
 }
@@ -2527,6 +2572,8 @@ document.getElementById('approveBtn').onclick = async () => {
     renderPackage(pkg);
     approveFailures = 0;
     btn.textContent = '✓ APPROVED';
+    btn.classList.remove('nudge');
+    btn.classList.add('done');
     approvalNote('Approved. Print file SHA-256 ' + pkg.printHash.slice(0, 12) + '…');
     // The host owns everything after this: upload, cart metadata, the order.
     post({ type:'pps-proof:approved',
@@ -2539,6 +2586,7 @@ document.getElementById('approveBtn').onclick = async () => {
     approveFailures++;
     btn.disabled = false;
     btn.textContent = wasLabel;
+    btn.classList.remove('done');
     const out = document.getElementById('pkgOut');
     if (out){
       out.hidden = false;
