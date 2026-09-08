@@ -28,7 +28,40 @@ ck('renders without errors', errs.length===0, errs[0]||'');
 // ── the shell, carried forward from earlier rounds ──
 ck('approve disabled until agree', await p.evaluate(()=>document.getElementById('approveBtn').disabled===true));
 await p.click('#agree'); await p.waitForTimeout(200);
-ck('approve enables after agree', await p.evaluate(()=>document.getElementById('approveBtn').disabled===false));
+
+// ── the checkpoint ──
+// Agreeing is not enough on its own when preflight flagged something. Approval
+// releases a job to production, so this surface must not be the easier way past
+// the acknowledgment the built-in modal has always required.
+const flagged = await p.evaluate(()=>!document.getElementById('ackBox').hidden);
+ck('the default job flags something, so the checkpoint is live', flagged,
+   flagged ? '' : 'nothing flagged — this case is not exercising the gate');
+ck('agree alone does NOT unlock approve while something is flagged',
+   await p.evaluate(()=>document.getElementById('approveBtn').disabled===true));
+ck('the box says what was found and where', await p.evaluate(()=>
+   /\d+\s+(problem|to check)/.test(document.getElementById('ackTitle').textContent||'')),
+   await p.evaluate(()=>document.getElementById('ackTitle').textContent));
+ck('and the wording commits the customer, not us', await p.evaluate(()=>
+   /reviewed these/i.test(document.getElementById('ackText').textContent||'')));
+await p.click('#ackIssues'); await p.waitForTimeout(200);
+ck('approve enables once both are ticked',
+   await p.evaluate(()=>document.getElementById('approveBtn').disabled===false));
+ck('un-ticking the acknowledgment locks it again', await p.evaluate(async ()=>{
+  document.getElementById('ackIssues').click();
+  await new Promise(r=>setTimeout(r,120));
+  const locked = document.getElementById('approveBtn').disabled===true;
+  document.getElementById('ackIssues').click();
+  await new Promise(r=>setTimeout(r,120));
+  return locked;}));
+ck('the responsibility sentence sits with the button', await p.evaluate(()=>
+   /accept this proof as final/i.test(document.getElementById('liability').textContent||'')
+   && /customer's responsibility/i.test(document.getElementById('liability').textContent||'')));
+// The gate must read the whole job, not the page on screen: a clean cover in
+// front of you says nothing about page 5.
+ck('the gate scans every page, not the selected one', await p.evaluate(()=>{
+  const f = jobFlags();
+  return f.pages.length === 0 || f.pages.some(n => n !== state.selected) || MODEL.pages.length === 1;}),
+   await p.evaluate(()=>JSON.stringify(jobFlags().pages)));
 ck('page rows rendered', await p.evaluate(()=>document.querySelectorAll('#rail .acc').length)===9, 'want 9 (whole file + 8 pages)');
 ck('filmstrip groups', await p.evaluate(()=>document.querySelectorAll('#stripBottom .grp').length)===5);
 ck('agree is NOT inside the disclaimer note', await p.evaluate(()=>!document.querySelector('.note .agree')));
@@ -227,6 +260,8 @@ ck('returning to Proof restores the gate and the proof disclaimer', await p.eval
   [...document.querySelectorAll('#modes button')].find(b=>b.dataset.mode==='proof').click();
   await new Promise(r=>setTimeout(r,300));
   const t=document.getElementById('note').innerText;
+  // approve is enabled here only because the acknowledgment above is still
+  // ticked; 3D must not have quietly cleared it on the way back.
   return document.getElementById('agree').disabled===false
       && document.getElementById('approveBtn').disabled===false
       && /Hardcopy Proof/.test(t) && !/Finished-product mockup/.test(t);}));
