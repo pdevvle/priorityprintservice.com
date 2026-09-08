@@ -40,7 +40,15 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `ups-zone-map-seed.json` | UPS Ground transit days by 3-digit ZIP prefix (1000 entries) |
 | `docs/GO_LIVE_RUNBOOK.md` | The 3.0 go-live: staging de-bloat (Phase 0), selective order-table pull live→staging, freeze-window sequence, auto-increment fix, staging→production push, verification. HPOS confirmed on live. **Read before any go-live or cross-site DB work.** |
 | `docs/PPS_3.1_WC11_PLAN.md` | **The release after go-live**: WooCommerce 11 + Action Scheduler 4.0 update for both sites, compatibility test matrix (Drive/AS artwork pipeline is the top risk), default-on feature postures (POS, abandoned-cart stays OFF), hardening riders. Binding rule it carries: **version freeze — no WC/WP/plugin updates on either site during the go-live window**; WC 11 lands in 3.1, both sites together. |
+| `proof-ui-draft.html` | **The new proof surface.** Standalone document, embeddable by a host — see "Proofing" below. Vanilla JS, its own pdf.js/pdf-lib, its own four test suites. Not a component: the calculator frames it. |
+| `pps-html-deploy.php` | How calculators actually reach production. Watches `wp-content/plugins/pps-calculators/_pending_html/`; the next WP request copies `*.html` into `wp-content/uploads/pps-calculators/`, updates the registry, archives the source under `_pending_html/_archive/`, and logs to `wp_options['pps_html_deploy_log_v2']`. Also hosts the Bulk Upload admin page (`admin.php?page=pps-bulk-upload`). |
+| `pps-proof-status.php` | Makes `SelfApproved` mean someone signed off in the proofer, rather than "did not buy a staff proof". Rewrites only that token in PPS-Spec, adds a `PPS-Proof` item meta, notes the order when artwork arrived unapproved. **On staging, NOT in `active_plugins` on either site** — until it is activated, every order still reads `SelfApproved`. |
+| `pps-delivery-date-guard.php` | Floors `_pps_delivery_date` at priority 99 and suppresses pi-edd on registry products. **Never deployed** — the pi-edd plugin is still active on both sites, so the server-side cause of a weekend delivery date is unaddressed. |
+| `tools-proof-serve.mjs` | Harness for the proofer's suites. They cannot run over `file://` (pdf.js needs a real origin), so this serves the tree on 127.0.0.1:8137 and the pinned libraries under `/vendor/`. Populate `proof-vendor/` with `tools-proof-vendor.mjs` first. |
+| `tools-proof-vendor.mjs` | One command to install the proofer's pinned pdf.js/pdf-lib into `proof-vendor/` and restore the calculators' pdf.js afterwards. The two majors cannot share one `node_modules`. |
+| `tools-proof-ui-draft-test.mjs`, `-preflight-`, `-mobile-`, `tools-proof-embed-test.mjs`, `tools-proof-integration-test.mjs` | The proofer's five suites: engine, PDF preflight, touch layout, the host seam, and the calculator round trip. Run all five after any proofer change. |
 | `pps-theme/` | Custom WordPress theme replacing Astra Pro — owns site chrome, typography, color tokens, WooCommerce shell. Stays out of the calculator plugin's way. `pps-theme/preview.html` is a Pages-served standalone preview of the header. |
+| `designer/` | **Spike.** Print-first layout editor (Vite + React + TS) — the document *is* a product; press-PDF export with CMYK, bleed/trim boxes and subset font embedding. Unlike the calculators this is a real build, not a single inline-Babel HTML. `dist/` is committed for Pages. **Read `docs/DESIGNER_SPIKE.md` before touching it** — it records what's proven vs faked and the next steps in order. Run `cd designer && npm test` after any change to `src/export/pdf.ts`. |
 
 ## Shared Components (in each calculator HTML)
 - `PCF` — pricing constants object, overridable via PPS_CONFIG.calc
@@ -85,6 +93,64 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 - v1 scope: flat calcs (brochure/postcard/letterhead/greeting-card) + stickers (step-and-repeat, 1–2 sides) **and saddle stitch booklets** (printer-spread signature pagination, spine gets no bleed, auto-tumble per press flip edge, cover slug-labelled; saddle preset imp table embedded — authoritative over calcCustomImp). Perfect-bound/coupon refuse cleanly (v2). No creep compensation yet.
 - Known pricing quirk: custom long-narrow flats (long edge ~9.5–12.5″, small short edge) can price an imp that can't physically fit 2-across on 18.5″ usable; tool refuses unless the operator ticks "allow best physical fit" (result is flagged MISMATCH in UI + slug). Details in `docs/IMPOSITION_TOOL.md`.
 - Output: `IMPOSED_Order-<id>_<job>_<trim>_<imp>up_<sheet>.pdf` filed into the same Drive order folder; the admin queue shows an IMPOSED badge when one exists.
+
+## Proofing — two surfaces, one of them dark
+
+There are currently **two** proof UIs, and which one a customer sees is a config
+value, not a code path you can read off the file.
+
+- **The built-in modal** in each calculator. This is what every site uses today.
+- **`proof-ui-draft.html`**, the reorganised surface. Wired to the saddle
+  calculator, off unless **PPS Config → Production → New Proof URL**
+  (`PCF.proof_url`) is set to its same-origin uploads URL. Blank is off.
+
+The switch is an admin knob rather than a constant because production's
+`pps-calculators.php` is far enough ahead of git that adding a `PPS_CONFIG` key
+there would mean surgery on a file that cannot be safely redeployed.
+
+### Why it is framed rather than ported
+
+`ppsOpenProof()` opens it in a same-origin iframe. Three reasons, in the order
+they cost you:
+
+1. Approval has a failure that was never root-caused — on 2026-08-12 a real
+   multi-page PDF with an orientation mismatch took the whole calculator down.
+   A frame boundary makes the worst case a broken proof, not a customer on a
+   blank product page mid-order.
+2. The calculators load pdf.js 4.10.38 as ESM; the proofer pins 3.11.174 UMD.
+   Both claim `window.pdfjsLib`. In one document, one of them loses.
+3. The proofer's suites keep testing the artifact that ships, not a port of it.
+
+### The handshake
+
+Same-origin only — these messages carry the customer's artwork and the hash
+their approval is bound to. In: `window.PPS_PROOF_JOB` before load, or a posted
+`pps-proof:job` after it. Out: `ready`, `error`, `approved`, `approve-failed`,
+`escape`, `close`. The host owns everything after approval — upload, order
+metadata, cart. The proofer never uploads anything itself.
+
+`ppsProofFilesToOrder()` is the only place the proofer's human file names become
+the pipeline's (`PRINT_READY.pdf` → `<base>_print-ready.pdf`, and so on). **The
+manifest is the approval marker, not the print-ready PDF** — art needing no
+transforms legitimately produces no PDF.
+
+### Not finished — do not enable the knob until these are closed
+
+- **The approval checkpoint is missing.** The built-in modal disables Approve
+  until every preflight flag is acknowledged, and prints the responsibility
+  sentence beside the button. The new surface does neither: its checkbox says
+  only "I understand and agree", and a hard error such as type past the trim
+  does not block approval. Enabling the knob as-is removes a gate that was
+  built deliberately (see the composition-engine note above).
+- **The escape hatch tells nobody.** After two failed approvals the customer is
+  offered "continue and prepress will check this", which emits `prepressReview`
+  on the artwork payload — and nothing reads it. Not the parent, not the server.
+  Such an order is indistinguishable from one where the proof was never opened.
+- **Per-slot uploads never reach it.** The handler forwards `rawFilesRef` only,
+  so a customer who uploaded pages individually gets an empty proof.
+- **Only the saddle calculator is wired.** The other seven still use the modal.
+- The "I don't have bleeds" answer reaches neither surface; both detect bleed
+  from the art and ignore the selection.
 
 ## PHP Plugin Key Features
 - **Presets** (`wp_options['pps_presets']`): each row publishes a public URL at `/{slug}/` (root-level, no prefix) that renders the appropriate calculator with `PPS_CONFIG.defaults` populated. Individual rewrite rules are registered per preset slug (not a wildcard). Routing via `pps_preset` query var; virtual `WP_Post` injected via `the_posts`; calculator HTML rendered via `the_content` filter. Cart line items capture `_pps_preset_slug` for analytics. Preset CRUD lives in pps-presets-admin.php. All URL redirects (e.g. old `/booklets/*` paths) are managed in Rank Math, never in PHP or .htaccess.
@@ -296,6 +362,22 @@ Sequencing across lanes: **code before the content that depends on it**
   marker) — edit the source and rebuild. The `</script>`-inside-Babel rule
   below still applies to SOURCE, and the tool refuses to emit any output that
   contains a literal close tag.
+- **Getting a calculator onto production** is a separate step from Pages, and is
+  not automatic. Drop the file into `wp-content/plugins/pps-calculators/_pending_html/`
+  — pull-based, `pps_plugin_download_url` against a `raw.githubusercontent.com`
+  URL pinned to a commit — then make any request to the site. `pps-html-deploy.php`
+  copies it into `wp-content/uploads/pps-calculators/`, updates the registry
+  (only `uploaded` moves on an overwrite, so product assignments survive),
+  archives the source, and logs the byte count to
+  `wp_options['pps_html_deploy_log_v2']`. Verify there, and against
+  `pps_uploads_list_files` — not by fetching the page, which the sandbox proxy
+  blocks.
+- **A deployed calculator is not necessarily the one being served.** The plugin
+  extracts the inline script to `uploads/pps-calculators/js/<name>-<md5-10>.js`
+  and enqueues it by that content hash, so a new build is a new URL and the
+  script itself can never go stale. The *page* embedding that URL can: WP Rocket,
+  Cloudflare and Cloudways all cache it. Logged-in admins bypass those; customers
+  do not. After deploying, purge, then confirm the page references the new hash.
 - Do NOT push to `website` — it's unrelated to the preview.
 - **Preview URLs** (served by GitHub Pages from `pps-pricing-config`):
   - https://pdevvle.github.io/priorityprintservice.com/calc-preview-test.html (saddle stitch)
@@ -309,6 +391,8 @@ Sequencing across lanes: **code before the content that depends on it**
   2. Flip repo visibility. This is the action that matters — while the repo is public, everything is readable on github.com regardless of what Pages serves, **including full history**, so deleting a file from HEAD does not unpublish it.
   3. Only then is the older dummy-swap dance unnecessary. Legacy restore path, if used: `git checkout pps-real-backup -- <files>`
   - Until then, treat every branch as public: don't commit pricing figures, strategy, or credentials anywhere in the repo.
+
+- Go private protocol: replace files with dummies, flip repo to private. Restore: `git checkout pps-real-backup -- <files>`
 
 ## Retired branches
 
