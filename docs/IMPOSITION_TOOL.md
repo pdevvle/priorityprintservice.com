@@ -512,7 +512,7 @@ download the imposed PDF. Useful for testing and one-off jobs.
   | 8 | **Slug flip token was ambiguous** to an operator setting the Fiery job. | — | Now `DUPLEX FLIP ON SHORT (13in) EDGE` — names the edge and its length on the chosen parent sheet. |
   | 9 | **Expired admin session read as "Unauthorized".** WordPress nonces expire after 12–24 h; a queue tab left open overnight failed every action with a message that suggested a permissions problem. | — | `ajaxFail()` maps 401/403 to "the admin session or its security token has expired — reload this page". |
   | 10 | **Perfect bound from a single file with < 4 pages** built a cover from pages that don't exist. | — | Refused with the page count and the two alternatives (separate files, or Guts only). |
-  | 11 | **The tool depended on two public CDNs at run time** (unpkg, cdnjs). A slow or blocked CDN meant the prepress queue would not open at all. | — | The six runtime libraries are vendored in `imposition-vendor/` (react 18.3.1, react-dom 18.3.1, @babel/standalone 7.26.9, pdf.js 3.11.174 + worker, pdf-lib 1.17.1 — the same bytes the regression harness has run against since August). `pps_impose_app` rewrites each CDN URL to the plugin copy **only when that file exists on the server**, with `filemtime` cache-busting; the standalone Pages copy keeps the CDN tags. Deploying the tool now means deploying the directory too (below). |
+  | 11 | **The tool depended on two public CDNs at run time** (unpkg, cdnjs). A slow or blocked CDN meant the prepress queue would not open at all. | — | The six runtime libraries are vendored in `imposition-vendor/` (react 18.3.1, react-dom 18.3.1, @babel/standalone 7.26.9, pdf.js 3.11.174 + worker, pdf-lib 1.17.1 — the same bytes the regression harness has run against since August). `pps_impose_app` rewrites each CDN URL to the plugin copy **only when that file is present at the pinned size**, with `filemtime` cache-busting; the standalone Pages copy keeps the CDN tags. The server directory is **self-provisioned**: the deploy tooling cannot create a sub-directory (`pps_plugin_download_url`/`write_file` refuse a path whose directory does not exist — hit on the first staging deploy), so `pps_impose_vendor_provision()` makes it on first load and fetches each file from its pinned URL, keeping it only if the **SHA-256 and byte count match the constants in `pps_impose_vendor_map()`** (unit-tested with a stubbed WordPress: a tampered response writes nothing and backs off for an hour; a dead network backs off; steady state fetches nothing). Deploy is still two files. |
 
   Found in review before it shipped: the new guard declared a second
   `INK_DPI`, which under Babel's const→var rewrite would have silently dropped
@@ -1005,12 +1005,16 @@ books may need shingling allowance later.
 
 1. Merge to `pps-pricing-config` (Pages serves the standalone tool from the
    branch root — `.nojekyll` already handles the Babel/Liquid issue).
-2. Deploy `imposition-tool.html`, `pps-imposition.php` **and the six files in
-   `imposition-vendor/`** into the live plugin directory, pull-based
-   (`pps_plugin_download_url` against a raw URL pinned to the commit). The
-   vendor files only need re-deploying when a library version changes; if any
-   is missing on the server the wp-admin stream falls back to the CDN tag for
-   that file.
+2. Deploy `imposition-tool.html` and `pps-imposition.php` into the live
+   plugin directory, pull-based (`pps_plugin_download_url` against a raw URL
+   pinned to the commit). The `imposition-vendor/` directory is **not
+   deployed by hand** — the plugin creates and fills it on the first load of
+   the imposition page, verifying each library against the SHA-256 pinned in
+   `pps_impose_vendor_map()`; until a file is present the page uses the CDN
+   tag for it. After the first load, `pps_plugin_list_files` should show the
+   six files plus `index.html` under `pps-calculators/imposition-vendor/`.
+   Bumping a library version = new file in the repo's `imposition-vendor/`,
+   new URL in the tool, new hash/size in the map, one commit.
 3. Requirements on the site: Drive connected in **PPS Calculators → Google
    Drive**, WooCommerce active. The Imposition submenu appears under PPS
    Calculators for admins (`manage_options`).

@@ -93,20 +93,15 @@ add_action( 'wp_ajax_pps_impose_app', function() {
     // tool is prepress infrastructure: if unpkg or cdnjs is slow, blocked by
     // an office firewall, or simply down, the queue must still open. The
     // standalone (GitHub Pages) copy keeps the CDN tags; only this wp-admin
-    // stream is rewritten, and only when the vendored file exists.
+    // stream is rewritten, and only for a vendored file that is present and
+    // the right size. pps_impose_vendor_provision() fills the directory.
     $vendor_dir = PPS_CALC_DIR . 'imposition-vendor/';
     $vendor_url = PPS_CALC_URL . 'imposition-vendor/';
-    $vendored = array(
-        'https://unpkg.com/react@18.3.1/umd/react.production.min.js'                  => 'react.production.min.js',
-        'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js'          => 'react-dom.production.min.js',
-        'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js'                     => 'babel.min.js',
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'          => 'pdf.min.js',
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'   => 'pdf.worker.min.js',
-        'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js'                        => 'pdf-lib.min.js',
-    );
-    foreach ( $vendored as $cdn => $file ) {
-        if ( file_exists( $vendor_dir . $file ) ) {
-            $html = str_replace( $cdn, esc_url( $vendor_url . $file . '?v=' . filemtime( $vendor_dir . $file ) ), $html );
+    pps_impose_vendor_provision( $vendor_dir );
+    foreach ( pps_impose_vendor_map() as $cdn => $lib ) {
+        $path = $vendor_dir . $lib['file'];
+        if ( file_exists( $path ) && filesize( $path ) === $lib['bytes'] ) {
+            $html = str_replace( $cdn, esc_url( $vendor_url . $lib['file'] . '?v=' . filemtime( $path ) ), $html );
         }
     }
     header( 'Content-Type: text/html; charset=utf-8' );
@@ -114,6 +109,68 @@ add_action( 'wp_ajax_pps_impose_app', function() {
     echo $html;
     wp_die();
 });
+
+// ═══════════════════════════════════════════════════════════════
+// VENDORED RUNTIME (react, react-dom, babel, pdf.js + worker, pdf-lib)
+// ═══════════════════════════════════════════════════════════════
+// The six libraries the tool loads are pinned by URL, byte size AND SHA-256.
+// The reference copies live in the repo (imposition-vendor/ — the same bytes
+// the headless regression harness runs against). The server copy is
+// self-provisioned: the deploy tooling cannot create a sub-directory, so on
+// the first load of the imposition page PHP makes the directory and fetches
+// each file from its pinned CDN URL, keeping it only if the hash matches.
+// A file that fails (network, hash) is not written and the page falls back
+// to the CDN tag for that one file; a failed attempt is not retried for an
+// hour so a blocked CDN cannot slow every page load.
+//
+// Changing a library version means: new file in imposition-vendor/ in the
+// repo, new URL in imposition-tool.html, new hash/size here — same commit.
+function pps_impose_vendor_map() {
+    return array(
+        'https://unpkg.com/react@18.3.1/umd/react.production.min.js' => array(
+            'file' => 'react.production.min.js', 'bytes' => 10751,
+            'sha256' => 'd949f1c3687aedadcedac85261865f29b17cd273997e7f6b2bfc53b2f9d4c4dd' ),
+        'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js' => array(
+            'file' => 'react-dom.production.min.js', 'bytes' => 131835,
+            'sha256' => '35f4f974f4b2bcd44da73963347f8952e341f83909e4498227d4e26b98f66f0d' ),
+        'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js' => array(
+            'file' => 'babel.min.js', 'bytes' => 3015411,
+            'sha256' => 'f94a254a8ff8019c28fcc560090860ea0918f30b5484a47eba1ef63c8dab1880' ),
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js' => array(
+            'file' => 'pdf.min.js', 'bytes' => 320004,
+            'sha256' => '5b5799e6f8c680663207ac5b42ee14eed2a406fa7af48f50c154f0c0b1566946' ),
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js' => array(
+            'file' => 'pdf.worker.min.js', 'bytes' => 1087212,
+            'sha256' => 'feabdf309770ed24bba31a5467836cdc8cf639c705af27d52b585b041bb8527b' ),
+        'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js' => array(
+            'file' => 'pdf-lib.min.js', 'bytes' => 525099,
+            'sha256' => '0f9a5cad07941f0826586c94e089d89b918c46e5c17cf2d5a3c6f666e3bc694f' ),
+    );
+}
+
+function pps_impose_vendor_provision( $dir ) {
+    $map     = pps_impose_vendor_map();
+    $missing = array();
+    foreach ( $map as $cdn => $lib ) {
+        $path = $dir . $lib['file'];
+        if ( ! file_exists( $path ) || filesize( $path ) !== $lib['bytes'] ) $missing[ $cdn ] = $lib;
+    }
+    if ( ! $missing ) return;
+    if ( get_transient( 'pps_impose_vendor_backoff' ) ) return;
+    if ( ! wp_mkdir_p( $dir ) ) { set_transient( 'pps_impose_vendor_backoff', 1, HOUR_IN_SECONDS ); return; }
+    if ( ! file_exists( $dir . 'index.html' ) ) {
+        @file_put_contents( $dir . 'index.html', "<!-- directory guard: the imposition tool's vendored runtime libraries live here; nothing to index. -->\n" );
+    }
+    $failed = 0;
+    foreach ( $missing as $cdn => $lib ) {
+        $r = wp_remote_get( $cdn, array( 'timeout' => 30, 'redirection' => 3 ) );
+        if ( is_wp_error( $r ) || 200 !== (int) wp_remote_retrieve_response_code( $r ) ) { $failed++; continue; }
+        $body = wp_remote_retrieve_body( $r );
+        if ( strlen( $body ) !== $lib['bytes'] || hash( 'sha256', $body ) !== $lib['sha256'] ) { $failed++; continue; }
+        if ( false === @file_put_contents( $dir . $lib['file'], $body ) ) { $failed++; continue; }
+    }
+    if ( $failed ) set_transient( 'pps_impose_vendor_backoff', 1, HOUR_IN_SECONDS );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // DRIVE HELPERS (read side — upload reuses pps_gdrive_upload_file)
