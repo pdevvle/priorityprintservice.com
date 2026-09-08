@@ -127,7 +127,21 @@ console.log('\n── approving returns the package to the host ──');
     const blob = await new Promise(r => c.toBlob(r, 'image/png'));
     await loadArtSequence(1, [new File([blob], 'art.png', { type:'image/png' })]);
   });
-  await page.evaluate(() => { document.getElementById('agree').checked = true; renderApproval(); });
+  // Both gates: agreeing, and acknowledging whatever preflight flagged. Setting
+  // .checked directly does not fire onchange, hence the explicit renderApproval.
+  const gate = await page.evaluate(() => {
+    document.getElementById('agree').checked = true;
+    renderApproval();
+    const blocked = document.getElementById('approveBtn').disabled;
+    const flagged = !document.getElementById('ackBox').hidden;
+    if (flagged) document.getElementById('ackIssues').checked = true;
+    renderApproval();
+    return { flagged, blockedBeforeAck: blocked,
+             open: !document.getElementById('approveBtn').disabled };
+  });
+  ok('agreeing alone does not unlock approve when something is flagged',
+     !gate.flagged || gate.blockedBeforeAck, JSON.stringify(gate));
+  ok('acknowledging opens it', gate.open, JSON.stringify(gate));
   await page.click('#approveBtn');
   await page.waitForFunction(
     () => window.__posts.some(m => m.type === 'pps-proof:approved' || m.type === 'pps-proof:approve-failed'),
@@ -182,7 +196,12 @@ console.log('\n── approval that cannot succeed still leaves a way out ──
   // Break package building the way a bad file would, without needing one.
   await page.evaluate(() => {
     window.buildPackage = async () => { throw new Error('synthetic failure'); };
-    document.getElementById('agree').checked = true; renderApproval();
+    document.getElementById('agree').checked = true;
+    renderApproval();
+    // Past the checkpoint first — this scenario is about what happens after
+    // approval is legitimately attempted, not about the gate.
+    if (!document.getElementById('ackBox').hidden) document.getElementById('ackIssues').checked = true;
+    renderApproval();
   });
   for (let i = 0; i < 2; i++) {
     await page.click('#approveBtn');

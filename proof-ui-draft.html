@@ -68,6 +68,13 @@
      with them, keyed off the same data-pps-theme attribute the calculator
      toggles, so the proof does not stay white when everything around it is
      not. */
+  .ackbox{border:1px solid var(--yellow-line);background:var(--yellow-tint);
+    border-radius:8px;padding:9px 11px;margin-bottom:8px;line-height:1.45}
+  .ackbox .acktitle{font-weight:700;font-size:12px;margin-bottom:4px}
+  .ackbox label{display:flex;gap:8px;align-items:flex-start;font-size:12px;cursor:pointer}
+  .ackbox input{margin-top:2px;flex-shrink:0}
+  .liability{margin:8px 0 0;font-size:11px;line-height:1.5;color:var(--bp-faint);max-width:46ch}
+  .approvewrap.locked .ackbox{opacity:.5}
   :root{
     --pps-display:'Montserrat','Segoe UI','Helvetica Neue',Arial,sans-serif;
     --pps-sans:'Work Sans','Segoe UI','Helvetica Neue',Arial,sans-serif;
@@ -448,10 +455,16 @@
     /* the gate follows the thumb to the bottom of the screen, where it is
        reachable without scrolling back up past the artwork */
     .approvewrap{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;
-                 flex-direction:row;align-items:center;justify-content:space-between;gap:10px;
+                 flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;
                  background:var(--bp-surface);border-top:1px solid var(--bp-line);
                  padding:9px 12px calc(9px + env(safe-area-inset-bottom,0px));
                  box-shadow:0 -3px 14px rgba(15,23,42,.10)}
+    /* Both run full width above the agree/approve row, in the order they must be
+       read: what was found, what you are accepting, then the button. The
+       responsibility sentence appears nowhere else on the page — the proof note
+       is about proof types — so it cannot be dropped on a small screen. */
+    .approvewrap .ackbox{flex:0 0 100%;order:-2;margin:0}
+    .approvewrap .liability{flex:0 0 100%;order:-1;margin:0;max-width:none;font-size:10.5px}
     .approvewrap.locked{opacity:1;background:var(--bp-surface-2)}
     .agree{font-size:12.5px;flex:1;min-width:0}
     .agree label{white-space:normal}
@@ -603,10 +616,20 @@
       </div>
 
       <div class="approvewrap" id="approveWrap">
+        <!-- Shown only when something was actually found. An empty box that
+             always says "0 issues" trains people to click past it. -->
+        <div class="ackbox" id="ackBox" hidden>
+          <div class="acktitle" id="ackTitle"></div>
+          <label><input type="checkbox" id="ackIssues">
+            <span id="ackText"></span></label>
+        </div>
         <div class="agree">
           <label><input type="checkbox" id="agree"> I understand and agree</label>
           <span class="req" id="agreeReq">(required)</span>
         </div>
+        <p class="liability" id="liability">By approving, you accept this proof as final.
+          We print exactly the approved file — errors in approved artwork (spelling,
+          layout, images, colour choices) are the customer's responsibility.</p>
         <div class="approverow">
           <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
         </div>
@@ -2171,6 +2194,20 @@ async function buildPackage(){
     });
   }
   L.push('');
+  L.push('APPROVAL');
+  const _f = jobFlags();
+  if (_f.errors + _f.warns === 0){
+    L.push('  preflight    nothing flagged');
+  } else {
+    L.push('  preflight    ' + _f.errors + ' problem(s), ' + _f.warns + ' to check'
+           + (_f.pages.length ? ' on page(s) ' + _f.pages.join(', ') : ''));
+    L.push('  acknowledged ' + (document.getElementById('ackIssues').checked
+           ? 'yes — the customer confirmed these and asked to print as-is'
+           : 'NO — this should not have been approvable'));
+    _f.all.forEach(i => L.push('    [' + i.level + ']' + (i.n ? ' p' + i.n : ' file') + ' ' + i.text));
+  }
+  L.push('  terms        proof accepted as final; errors in approved artwork are the customer\'s');
+  L.push('');
   L.push('Every page above was composed by the same function that drew the proof');
   L.push('on screen. The print file is that composition at ' + PRINT_DPI + ' DPI.');
   files.push({ name:'MANIFEST.txt', blob:new Blob([L.join('\n')], { type:'text/plain' }),
@@ -2251,15 +2288,81 @@ document.addEventListener('click', async (ev) => {
   } finally { btn.disabled = false; }
 });
 
+/* Everything flagged across the WHOLE job, not the page on screen.
+   renderIssues() reports the selected page, which is right for the panel and
+   wrong for the gate: a customer looking at a clean cover would otherwise
+   approve a book whose page 5 has type running past the trim. Cached so a
+   render pass does not recompose every page repeatedly. */
+let _flagCache = null;
+function invalidateFlags(){ _flagCache = null; }
+
+function jobFlags(){
+  if (_flagCache) return _flagCache;
+  const pages = [];
+  MODEL.pages.forEach(pg => {
+    analyze(pg.n).forEach(i => {
+      if (i.level === 'error' || i.level === 'warn') pages.push({ n:pg.n, ...i });
+    });
+  });
+  // The file-level preflight counts too — a missing font or a spot colour is
+  // not visible on the proof surface at all.
+  let file = [];
+  try {
+    file = (typeof runFileChecks === 'function' ? runFileChecks() : [])
+      .filter(c => c.state === 'fail' || c.state === 'warn')
+      .map(c => ({ n:null, level:c.state === 'fail' ? 'error' : 'warn', text:c.label || c.title || 'file check' }));
+  } catch (e) { file = []; }
+
+  const all = pages.concat(file);
+  _flagCache = {
+    all,
+    errors: all.filter(i => i.level === 'error').length,
+    warns:  all.filter(i => i.level === 'warn').length,
+    pages:  Array.from(new Set(pages.map(i => i.n))).sort((a,b) => a-b),
+  };
+  return _flagCache;
+}
+
 function renderApproval(){
   const book = state.mode === 'book';
   const agree = document.getElementById('agree');
   const wrap  = document.getElementById('approveWrap');
+  const ackBx = document.getElementById('ackBox');
+  const ack   = document.getElementById('ackIssues');
+
   agree.disabled = book;
   wrap.classList.toggle('locked', book);
   document.getElementById('agreeReq').textContent = book ? '(Proof view only)' : '(required)';
-  document.getElementById('approveBtn').disabled = book || !agree.checked;
-  wrap.title = book ? 'Switch to the Proof view to approve artwork.' : '';
+
+  /* The checkpoint. The built-in modal has always required an explicit
+     acknowledgment before Approve unlocks when preflight flagged anything, and
+     approval is what releases a job to production — so this surface cannot be
+     the easier way past it. Silence when nothing was found; a demand for a
+     second, deliberate click when something was. */
+  const f = jobFlags();
+  const flagged = f.errors + f.warns;
+  ackBx.hidden = !flagged;
+  ack.disabled = book;
+  if (flagged){
+    const bits = [];
+    if (f.errors) bits.push(f.errors + (f.errors === 1 ? ' problem' : ' problems'));
+    if (f.warns)  bits.push(f.warns + ' to check');
+    const where = f.pages.length
+      ? ' on page' + (f.pages.length === 1 ? ' ' : 's ') + f.pages.join(', ')
+      : '';
+    document.getElementById('ackTitle').textContent =
+      bits.join(' and ') + where + '.';
+    document.getElementById('ackText').textContent = f.errors
+      ? 'I have reviewed these and want them printed as they are.'
+      : 'I have reviewed these.';
+  } else {
+    ack.checked = false;
+  }
+
+  const acked = !flagged || ack.checked;
+  document.getElementById('approveBtn').disabled = book || !agree.checked || !acked;
+  wrap.title = book ? 'Switch to the Proof view to approve artwork.'
+             : (!acked ? 'Confirm the flagged items above to enable approval.' : '');
 }
 
 function renderChrome(){
@@ -2278,10 +2381,29 @@ function renderChrome(){
     b.classList.toggle('on', b.dataset.book === state.bookMode));
 }
 
+/* On a phone the approve bar is fixed to the bottom of the screen, so the
+   document has to end above it. Nothing reserved that space — it happened to
+   clear while the bar was two controls tall, and adding the acknowledgment and
+   the responsibility sentence buried the last rail row behind it. Measuring
+   beats reserving a constant: the next thing added to the bar cannot silently
+   break it again. */
+function reserveForApproveBar(){
+  const wrap = document.getElementById('approveWrap');
+  if (!wrap) return;
+  const fixed = getComputedStyle(wrap).position === 'fixed';
+  document.body.style.paddingBottom = fixed
+    ? Math.ceil(wrap.getBoundingClientRect().height + 16) + 'px'
+    : '';
+}
+
 function renderAll(){
+  // Anything that changes the composition goes through here, so this is the one
+  // place the flag cache must be dropped. One recomputation per render pass.
+  invalidateFlags();
   renderChrome(); renderNote(); renderStage(); renderIssues(); renderStrip();
   if (state.mode !== 'book') renderRail();
   renderLegend(); renderApproval();
+  reserveForApproveBar();
 }
 
 /* Rotating a phone changes every one of those sizes, so recompose rather than
@@ -2289,7 +2411,7 @@ function renderAll(){
 let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { hideLens(); renderStage(); }, 140);
+  resizeTimer = setTimeout(() => { hideLens(); renderStage(); reserveForApproveBar(); }, 140);
 });
 
 document.getElementById('modes').onclick = e => {
@@ -2313,6 +2435,7 @@ document.getElementById('mag').onchange = () => { if (!document.getElementById('
 document.getElementById('hideGuides').onchange = () => { renderStage(); renderLegend(); };
 document.getElementById('undoBtn').onclick = undo;
 document.getElementById('agree').onchange = renderApproval;
+document.getElementById('ackIssues').onchange = renderApproval;
 /* ── talking to whatever is hosting this proof ─────────────────
    One function, so the transport is a detail. Hosted in an iframe we post to
    the parent; mounted directly on the page the host sets PPS_PROOF_HOST to a
