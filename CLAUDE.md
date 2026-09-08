@@ -41,7 +41,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `docs/GO_LIVE_RUNBOOK.md` | The 3.0 go-live: staging de-bloat (Phase 0), selective order-table pull live→staging, freeze-window sequence, auto-increment fix, staging→production push, verification. HPOS confirmed on live. **Read before any go-live or cross-site DB work.** |
 | `docs/PPS_3.1_WC11_PLAN.md` | **The release after go-live**: WooCommerce 11 + Action Scheduler 4.0 update for both sites, compatibility test matrix (Drive/AS artwork pipeline is the top risk), default-on feature postures (POS, abandoned-cart stays OFF), hardening riders. Binding rule it carries: **version freeze — no WC/WP/plugin updates on either site during the go-live window**; WC 11 lands in 3.1, both sites together. |
 | `proof-ui-draft.html` | **The new proof surface.** Standalone document, embeddable by a host — see "Proofing" below. Vanilla JS, its own pdf.js/pdf-lib, its own four test suites. Not a component: the calculator frames it. |
-| `pps-html-deploy.php` | How calculators actually reach production. Watches `wp-content/plugins/pps-calculators/_pending_html/`; the next WP request copies `*.html` into `wp-content/uploads/pps-calculators/`, updates the registry, archives the source under `_pending_html/_archive/`, and logs to `wp_options['pps_html_deploy_log_v2']`. Also hosts the Bulk Upload admin page (`admin.php?page=pps-bulk-upload`). |
+| `pps-html-deploy.php` | How calculators actually reach production. Also owns retention (v1.5.0): after each deploy it prunes superseded extracted scripts and trims the deploy archive. Accepts `calc-*.html` plus `proof-ui-draft.html` — an explicit list, because this directory is writable by a deploy tool.  Watches `wp-content/plugins/pps-calculators/_pending_html/`; the next WP request copies `*.html` into `wp-content/uploads/pps-calculators/`, updates the registry, archives the source under `_pending_html/_archive/`, and logs to `wp_options['pps_html_deploy_log_v2']`. Also hosts the Bulk Upload admin page (`admin.php?page=pps-bulk-upload`). |
 | `pps-proof-status.php` | Makes `SelfApproved` mean someone signed off in the proofer, rather than "did not buy a staff proof". Rewrites only that token in PPS-Spec, adds a `PPS-Proof` item meta, notes the order when artwork arrived unapproved. **On staging, NOT in `active_plugins` on either site** — until it is activated, every order still reads `SelfApproved`. |
 | `pps-delivery-date-guard.php` | Floors `_pps_delivery_date` at priority 99 and suppresses pi-edd on registry products. **Never deployed** — the pi-edd plugin is still active on both sites, so the server-side cause of a weekend delivery date is unaddressed. |
 | `tools-proof-serve.mjs` | Harness for the proofer's suites. They cannot run over `file://` (pdf.js needs a real origin), so this serves the tree on 127.0.0.1:8137 and the pinned libraries under `/vendor/`. Populate `proof-vendor/` with `tools-proof-vendor.mjs` first. |
@@ -372,6 +372,16 @@ Sequencing across lanes: **code before the content that depends on it**
   `wp_options['pps_html_deploy_log_v2']`. Verify there, and against
   `pps_uploads_list_files` — not by fetching the page, which the sandbox proxy
   blocks.
+- **Retention runs on deploy, and nothing else prunes.** Two directories used to
+  grow without limit — the extracted scripts in uploads (about eight per release)
+  and `_pending_html/_archive` (one run per deploy). Since 1.5.0 a successful
+  deploy prunes both: scripts must be BOTH beyond the newest
+  `PPS_HTML_DEPLOY_KEEP_SCRIPTS` (5) for their calculator AND older than
+  `PPS_HTML_DEPLOY_SCRIPT_MIN_AGE` (14 days) before they go, because the page
+  referencing one can outlive it in a cache; the archive keeps the newest
+  `PPS_HTML_DEPLOY_KEEP_ARCHIVES` (20) dated runs. Losing a script is
+  self-healing anyway — the extractor writes it back on the next uncached
+  render. `tools-html-deploy-retention-test.php` is the gate.
 - **A deployed calculator is not necessarily the one being served.** The plugin
   extracts the inline script to `uploads/pps-calculators/js/<name>-<md5-10>.js`
   and enqueues it by that content hash, so a new build is a new URL and the
