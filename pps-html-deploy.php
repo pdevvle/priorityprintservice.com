@@ -2,7 +2,7 @@
 /**
  * Plugin Name: PPS HTML Deploy
  * Description: File-system-based deploy capability for PPS calculator HTML files. Co-loaded as both an activatable plugin AND a sub-module required from pps-calculators.php. Used by the priority-print MCP.
- * Version: 1.4.0
+ * Version: 1.5.0
  * Author: Priority Print Service
  *
  * Drop calc-*.html into wp-content/plugins/pps-calculators/_pending_html/
@@ -93,6 +93,41 @@ if ( ! defined( 'PPS_HTML_DEPLOY_ATTACH_OPTION' ) ) {
     define( 'PPS_HTML_DEPLOY_ATTACH_OPTION', 'pps_html_deploy_pending_attachments' );
 }
 
+/* Retention. Nothing used to remove anything, so two directories grew without
+   limit: the extracted per-build scripts in uploads (about eight new files per
+   release, 120 of them and 35 MB by 2026-09) and the deploy archive here in the
+   plugin directory (268 entries). Neither is read by anything at runtime once
+   superseded.
+
+   The scripts need care rather than a blanket age rule, because the page that
+   references one can be cached for longer than the file has existed. Two
+   conditions must BOTH hold before a script is removed: it is beyond the newest
+   few for its calculator, and it is older than the longest plausible page-cache
+   life. Even then the loss is self-healing — pps_enqueue_calc_app_file() writes
+   the file back on the next uncached render if it is missing — so this is
+   belt-and-braces on something that already recovers. */
+if ( ! defined( 'PPS_HTML_DEPLOY_KEEP_SCRIPTS' ) ) {
+    define( 'PPS_HTML_DEPLOY_KEEP_SCRIPTS', 5 );
+}
+if ( ! defined( 'PPS_HTML_DEPLOY_SCRIPT_MIN_AGE' ) ) {
+    define( 'PPS_HTML_DEPLOY_SCRIPT_MIN_AGE', 14 * DAY_IN_SECONDS );
+}
+if ( ! defined( 'PPS_HTML_DEPLOY_KEEP_ARCHIVES' ) ) {
+    define( 'PPS_HTML_DEPLOY_KEEP_ARCHIVES', 20 );
+}
+
+/* Filenames this deploy path will accept.
+   `calc-*.html` is the calculators. proof-ui-draft.html is the standalone proof
+   surface, which is not a calculator and would otherwise be REJECTED here — it
+   has to reach the same uploads directory because the calculator frames it and
+   the handshake is same-origin. An explicit list rather than a looser pattern:
+   this directory is writable by a deploy tool, and "anything ending .html" is
+   how an unrelated file ends up being served from it. */
+function pps_html_deploy_name_ok( $filename ) {
+    if ( preg_match( '/^calc-[a-z0-9-]+\.html$/i', $filename ) ) return true;
+    return in_array( strtolower( $filename ), array( 'proof-ui-draft.html' ), true );
+}
+
 add_action( 'plugins_loaded', 'pps_html_deploy_run', 5 );
 
 function pps_html_deploy_log_append( $entry ) {
@@ -103,6 +138,107 @@ function pps_html_deploy_log_append( $entry ) {
         $log = array_slice( $log, -PPS_HTML_DEPLOY_LOG_CAP );
     }
     update_option( PPS_HTML_DEPLOY_LOG_OPTION, $log, false );
+}
+
+/**
+ * Which entries should go, given "keep the newest N" and "never touch anything
+ * younger than $min_age"?
+ *
+ * Split out and pure so the policy can be tested without a filesystem — the
+ * decision is the part worth being sure about; unlink() is not.
+ *
+ * @param array $files  path => mtime
+ * @return array paths to remove
+ */
+function pps_html_deploy_prunable( $files, $keep, $min_age, $now ) {
+    if ( ! is_array( $files ) || ! $files ) return array();
+    arsort( $files );                       // newest first, by mtime
+    $out  = array();
+    $rank = 0;
+    foreach ( $files as $path => $mtime ) {
+        $rank++;
+        if ( $rank <= $keep ) continue;                 // recent enough to matter
+        if ( ( $now - (int) $mtime ) < $min_age ) continue;  // too young to be safe
+        $out[] = $path;
+    }
+    return $out;
+}
+
+/**
+ * Remove superseded extracted scripts for one calculator.
+ *
+ * Matched by the exact shape pps_enqueue_calc_app_file() writes —
+ * <base>-<10 hex>.js — rather than a `<base>-*` glob, so a calculator whose
+ * name is a prefix of another's can never prune its neighbour's files.
+ */
+function pps_html_deploy_prune_scripts( $dest_dir, $base ) {
+    $dir = trailingslashit( $dest_dir ) . 'js';
+    if ( ! is_dir( $dir ) ) return 0;
+
+    $found = glob( $dir . '/' . $base . '-*.js' );
+    if ( ! is_array( $found ) || ! $found ) return 0;
+
+    $re    = '/^' . preg_quote( $base, '/' ) . '-[0-9a-f]{10}\.js$/';
+    $files = array();
+    foreach ( $found as $f ) {
+        if ( ! preg_match( $re, basename( $f ) ) ) continue;
+        $m = @filemtime( $f );
+        if ( $m !== false ) $files[ $f ] = $m;
+    }
+
+    $gone = 0;
+    foreach ( pps_html_deploy_prunable( $files, PPS_HTML_DEPLOY_KEEP_SCRIPTS,
+                                        PPS_HTML_DEPLOY_SCRIPT_MIN_AGE, time() ) as $path ) {
+        if ( @unlink( $path ) ) $gone++;
+    }
+    return $gone;
+}
+
+/**
+ * Trim the deploy archive to the most recent runs.
+ *
+ * Run directories are named Y-m-d-His, so a lexical sort is chronological and
+ * this does not need to stat anything. Only regular files directly inside a run
+ * are removed; anything unexpected leaves the directory alone rather than
+ * recursing somewhere it was not meant to go.
+ */
+function pps_html_deploy_prune_archive( $keep = null ) {
+    if ( $keep === null ) $keep = PPS_HTML_DEPLOY_KEEP_ARCHIVES;
+    if ( ! is_dir( PPS_HTML_DEPLOY_ARCHIVE_DIR ) ) return 0;
+
+    $all = glob( PPS_HTML_DEPLOY_ARCHIVE_DIR . '/*', GLOB_ONLYDIR );
+    if ( ! is_array( $all ) ) return 0;
+
+    // Only dated run directories are candidates, and only they count toward the
+    // budget. Counting anything else would let one stray directory push a real
+    // archive run over the edge and delete it.
+    $dirs = array();
+    foreach ( $all as $d ) {
+        if ( preg_match( '/^\d{4}-\d{2}-\d{2}-\d{6}$/', basename( $d ) ) ) $dirs[] = $d;
+    }
+    if ( count( $dirs ) <= $keep ) return 0;
+
+    sort( $dirs );
+    $drop = array_slice( $dirs, 0, count( $dirs ) - $keep );
+
+    $gone = 0;
+    foreach ( $drop as $d ) {
+        $kids  = glob( $d . '/*' );
+        $clean = true;
+        if ( is_array( $kids ) ) {
+            foreach ( $kids as $k ) {
+                if ( ! is_file( $k ) ) { $clean = false; continue; }
+                if ( ! @unlink( $k ) ) $clean = false;
+            }
+        }
+        // .htaccess and friends are not caught by glob's default.
+        foreach ( array( '.htaccess', '.DS_Store' ) as $hidden ) {
+            $h = $d . '/' . $hidden;
+            if ( is_file( $h ) && ! @unlink( $h ) ) $clean = false;
+        }
+        if ( $clean && @rmdir( $d ) ) $gone++;
+    }
+    return $gone;
 }
 
 function pps_html_deploy_run() {
@@ -154,7 +290,7 @@ function pps_html_deploy_run() {
             'via'      => 'fs',
         );
 
-        if ( ! preg_match( '/^calc-[a-z0-9-]+\.html$/i', $filename ) ) {
+        if ( ! pps_html_deploy_name_ok( $filename ) ) {
             $entry['error'] = 'invalid filename';
             pps_html_deploy_log_append( $entry );
             @rename( $src, $archive_run_dir . '/REJECTED-' . $filename );
@@ -205,6 +341,10 @@ function pps_html_deploy_run() {
 
         @rename( $src, $archive_run_dir . '/' . $filename );
 
+        // This build supersedes the ones before it, so the scripts extracted
+        // from those can go. Deliberately after the copy succeeded.
+        pps_html_deploy_prune_scripts( $dest_dir, pathinfo( $filename, PATHINFO_FILENAME ) );
+
         $entry['bytes'] = $size;
         $entry['ok']    = true;
         pps_html_deploy_log_append( $entry );
@@ -233,7 +373,7 @@ function pps_html_deploy_run() {
             pps_html_deploy_log_append( $entry );
             continue;
         }
-        if ( ! preg_match( '/^calc-[a-z0-9-]+\.html$/i', $filename ) ) {
+        if ( ! pps_html_deploy_name_ok( $filename ) ) {
             $entry['error'] = 'invalid filename';
             pps_html_deploy_log_append( $entry );
             wp_delete_attachment( $attach_id, true );
@@ -286,6 +426,8 @@ function pps_html_deploy_run() {
 
         wp_delete_attachment( $attach_id, true );
 
+        pps_html_deploy_prune_scripts( $dest_dir, pathinfo( $filename, PATHINFO_FILENAME ) );
+
         $entry['bytes'] = $size;
         $entry['ok']    = true;
         pps_html_deploy_log_append( $entry );
@@ -298,6 +440,8 @@ function pps_html_deploy_run() {
     } else {
         update_option( PPS_CALC_OPTION, $reg, false );
     }
+
+    pps_html_deploy_prune_archive();
 
     delete_transient( PPS_HTML_DEPLOY_LOCK );
 }
