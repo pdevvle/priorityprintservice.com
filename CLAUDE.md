@@ -136,12 +136,13 @@ transforms legitimately produces no PDF.
 
 ### Not finished — do not enable the knob until these are closed
 
-- **The approval checkpoint is missing.** The built-in modal disables Approve
-  until every preflight flag is acknowledged, and prints the responsibility
-  sentence beside the button. The new surface does neither: its checkbox says
-  only "I understand and agree", and a hard error such as type past the trim
-  does not block approval. Enabling the knob as-is removes a gate that was
-  built deliberately (see the composition-engine note above).
+- ~~The approval checkpoint is missing.~~ **Closed 2026-09-08.** Approve now
+  requires a second, explicit acknowledgment whenever anything is flagged, and
+  the responsibility sentence sits with the button — it appears nowhere else on
+  the page, so do not remove it on small screens. The gate reads `jobFlags()`,
+  which scans **every page plus the file-level preflight**, not the page on
+  screen: a clean cover in front of you says nothing about page 5. The
+  acknowledgment is recorded in the manifest.
 - **The escape hatch tells nobody.** After two failed approvals the customer is
   offered "continue and prepress will check this", which emits `prepressReview`
   on the artwork payload — and nothing reads it. Not the parent, not the server.

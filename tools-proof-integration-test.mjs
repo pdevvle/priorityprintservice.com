@@ -196,7 +196,21 @@ console.log('\n── the calculator opens the proofer and gets an approval back
     ok('the page count is locked to the order', job.locked === true);
 
     // Approve, and let the calculator receive it.
-    await frame.evaluate(() => { document.getElementById('agree').checked = true; renderApproval(); });
+    // The checkpoint applies inside the frame too — the calculator cannot be a
+    // way around it.
+    const gate = await frame.evaluate(() => {
+      document.getElementById('agree').checked = true;
+      renderApproval();
+      const blocked = document.getElementById('approveBtn').disabled;
+      const flagged = !document.getElementById('ackBox').hidden;
+      if (flagged) document.getElementById('ackIssues').checked = true;
+      renderApproval();
+      return { flagged, blockedBeforeAck: blocked,
+               open: !document.getElementById('approveBtn').disabled };
+    });
+    ok('the checkpoint is enforced through the frame as well',
+       !gate.flagged || gate.blockedBeforeAck, JSON.stringify(gate));
+    ok('and opens once acknowledged', gate.open, JSON.stringify(gate));
     await frame.evaluate(() => document.getElementById('approveBtn').click());
 
     const closed = await page.waitForFunction(
