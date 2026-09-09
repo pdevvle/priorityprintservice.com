@@ -112,6 +112,23 @@ ck('close is the outermost element, past APPROVE', await p.evaluate(()=>{
   const c=document.getElementById('closeBtn'), tb=document.querySelector('.topbar');
   return tb.lastElementChild===c
       && c.getBoundingClientRect().left > document.getElementById('approveBtn').getBoundingClientRect().left;}));
+// Owner's requirement, 2026-09-09: at a full desktop width the bar is one strip,
+// mode toggle through to the button. This viewport is 1500, which is the width
+// the single-row layout starts at. Overlap rather than equal tops, because the
+// note is a paragraph and the things beside it are not.
+ck('the whole bar is one row, mode toggle to APPROVE', await p.evaluate(()=>{
+  const r=s=>document.querySelector(s).getBoundingClientRect();
+  const boxes=['#modes','#viewGroup','.note','#approveBtn','#closeBtn'].map(r);
+  const top=Math.max(...boxes.map(b=>b.top)), bot=Math.min(...boxes.map(b=>b.bottom));
+  return bot>top;}),
+  await p.evaluate(()=>['#modes','#viewGroup','.note','#approveBtn','#closeBtn']
+    .map(s=>{const b=document.querySelector(s).getBoundingClientRect();
+             return s+' '+Math.round(b.top)+'-'+Math.round(b.bottom);}).join('  ')));
+// And the note is still a paragraph on that row, not a column of single words —
+// which is what buying the single line by squeezing it would produce.
+ck('the disclaimer keeps a readable measure on that row', await p.evaluate(()=>
+  document.querySelector('.note').getBoundingClientRect().width >= 380),
+  await p.evaluate(()=>Math.round(document.querySelector('.note').getBoundingClientRect().width)+'px'));
 ck('no "center spread" caption under any thumbnail', await p.evaluate(()=>
   ![...document.querySelectorAll('#stripBottom .pg')].some(e=>/spread/i.test(e.textContent))));
 ck('all filmstrip cells identical box', await p.evaluate(()=>{

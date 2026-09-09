@@ -121,25 +121,49 @@
   .header{border-bottom:1px solid var(--bp-line);padding:12px 18px 9px;background:var(--bp-surface);
           border-radius:16px 16px 0 0;flex-shrink:0}
   .topbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-  /* Two rows, placed rather than left to wrap. Flex put the approve column on a
-     line of its own with 300px of nothing beside it the moment the note was
-     allowed the width it needed; naming the areas puts the legend in that gap
-     and costs the header nothing. */
+  /* Placed rather than left to wrap. Flex put the approve column on a line of
+     its own with 300px of nothing beside it the moment the note was allowed the
+     width it needed, so the areas are named.
+     Two rows here; the single row the owner asked for is below, at the width
+     where it actually fits. Everything around the note is trimmed to what it
+     needs either way — the note takes the leftovers and sets the height of the
+     bar, so a pixel saved anywhere else is a line off the tallest thing in the
+     header. */
   @media (min-width:901px){
-    .topbar{display:grid;align-items:center;column-gap:12px;row-gap:9px;
+    .topbar{display:grid;align-items:center;column-gap:10px;row-gap:8px;
             grid-template-columns:auto auto minmax(0,1fr) auto auto;
             grid-template-areas:
-              "mode  view   note    note note"
-              "guide guide  guide   gate close"}
+              "mode  view   note    note  note"
+              "guide guide  guide   gate  close"}
     #modes{grid-area:mode;justify-self:start}
     #viewGroup,#bookGroup{grid-area:view}
     .disclose{grid-area:note}
-    #legendBar{grid-area:guide;margin-top:0;align-self:end}
+    #legendBar{grid-area:guide;margin-top:0;justify-self:start}
     .approvewrap{grid-area:gate}
-    #closeBtn{grid-area:close;align-self:end}
+    #closeBtn{grid-area:close;align-self:center}
   }
-  .viewgroup{display:flex;align-items:center;gap:8px;border:1px solid var(--bp-line);border-radius:10px;
-             padding:6px 12px;background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
+  /* One strip, toggle to button (owner's call, 2026-09-09) — but only where the
+     disclaimer still has room to be a paragraph. Below this the same five items
+     leave it about 230px, which is six lines in a 44px-tall row: the single line
+     would be bought by making the most important text on the page unreadable,
+     so it falls back to two rows instead. */
+  @media (min-width:1500px){
+    .topbar{grid-template-areas:
+              "mode  view   note    gate  close"
+              "guide guide  guide   guide guide"}
+    #legendBar{justify-self:start}
+  }
+  /* The other end of the same argument: on a narrow desktop window the note is
+     squeezed to about 330px sharing row one, which is six lines. It gets a row
+     of its own instead — same three-band structure, just stacked further. */
+  @media (min-width:901px) and (max-width:1179px){
+    .topbar{grid-template-areas:
+              "mode  view   view    view  view"
+              "note  note   note    note  note"
+              "guide guide  guide   gate  close"}
+  }
+  .viewgroup{display:flex;align-items:center;gap:7px;border:1px solid var(--bp-line);border-radius:10px;
+             padding:6px 10px;background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
   .viewgroup > .lbl{font-family:var(--pps-display);font-weight:700;font-size:11px;letter-spacing:.06em;
                     text-transform:uppercase;color:var(--bp-faint);margin-right:2px}
   .vsep{width:1px;align-self:stretch;background:var(--bp-line)}
@@ -156,7 +180,7 @@
   .fitbtn:hover:not(.on){color:var(--cyan);border-color:var(--cyan)}
   .fitbtn.on{background:var(--cyan);border-color:var(--cyan);color:#fff;
              box-shadow:0 1px 2px rgba(0,126,255,.35)}
-  .zoomslider{-webkit-appearance:none;appearance:none;width:92px;height:4px;border-radius:3px;
+  .zoomslider{-webkit-appearance:none;appearance:none;width:80px;height:4px;border-radius:3px;
               background:var(--bp-line);cursor:pointer;margin:0;padding:0}
   .zoomslider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;
     border-radius:50%;background:var(--cyan);border:2px solid var(--bp-surface);cursor:pointer;
@@ -169,7 +193,7 @@
            font-variant-numeric:tabular-nums}
   .modes{display:flex;gap:3px;padding:3px;border-radius:10px;border:1px solid var(--bp-line);
          background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
-  .modes button{padding:6px 15px;border:none;border-radius:7px;background:transparent;color:var(--bp-dim);
+  .modes button{padding:6px 13px;border:none;border-radius:7px;background:transparent;color:var(--bp-dim);
                 font-size:11.5px;font-weight:500;font-family:inherit;cursor:pointer;
                 transition:all .18s cubic-bezier(.4,0,.2,1)}
   .modes button:hover:not(.on){color:var(--cyan)}
@@ -224,7 +248,7 @@
      the action it describes, without the button being buried under a paragraph. */
   .liability{grid-column:1;justify-self:start;align-self:end;
     margin:0;font-size:10px;line-height:1.4;color:var(--bp-faint);
-    max-width:46ch;text-align:left}
+    max-width:36ch;text-align:left}
   @keyframes bp-approve-shimmer{ from{background-position:150% 0} to{background-position:-50% 0} }
   .approve{display:inline-flex;align-items:center;justify-content:center;
            padding:13px 23px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
@@ -725,7 +749,6 @@
       </div>
 
       <div class="viewgroup" id="viewGroup">
-        <span class="lbl">View</span>
         <!-- Fit is a state, not a size, so it is a button; everything else is a
              continuum and gets a slider rather than six arbitrary stops. -->
         <button type="button" class="fitbtn on" id="zoomFit">Fit</button>
@@ -741,7 +764,6 @@
       <!-- 3D takes the same slot: zoom, magnifier and guides have nothing to
            act on there, so they are replaced rather than greyed out. -->
       <div class="viewgroup" id="bookGroup" hidden>
-        <span class="lbl">View</span>
         <div class="modes small" id="bookModes">
           <button class="on" data-book="closed">Cover</button>
           <button data-book="open">Pages</button>
