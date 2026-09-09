@@ -62,7 +62,7 @@
   /* ── the calculator's skin ────────────────────────────────────
      Tokens, type and control shapes lifted from calc-preview-test.html rather
      than approximated, so this reads as the same product and not a mockup of
-     one. Process colours are the press inks the calculator names: cyan
+     one. Process colors are the press inks the calculator names: cyan
      #007eff, magenta #d1246a, yellow #f0a830 — the magenta here was a brighter
      #ec008c, which is not an ink anyone mixes. The dark palette comes along
      with them, keyed off the same data-pps-theme attribute the calculator
@@ -209,10 +209,30 @@
             transition:all .2s;align-self:flex-end;margin-bottom:3px}
   .closebtn:hover{background:rgba(0,126,255,.12);border-color:var(--cyan);color:var(--cyan)}
 
-  /* legend: the smallest thing that still explains four colours */
-  .legendbar{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-top:7px;font-size:10px;
-             color:var(--bp-faint);line-height:1}
-  .lgitem{display:inline-flex;align-items:center;gap:5px;font-weight:700;white-space:nowrap}
+  /* legend: the smallest thing that still explains four colors */
+  .legendbar{position:relative;display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-top:7px;
+             font-size:10px;color:var(--bp-faint);line-height:1}
+  /* Every one of these four lines is jargon. The colours were explained; what
+     the line is FOR was not, and that is the part a customer needs before they
+     can act on "type is inside the safety margin". Hover or keyboard focus —
+     a native title= is too slow to find and never appears on a touch device,
+     so the item is a real button and a tap opens it too. */
+  .lgitem{position:relative;display:inline-flex;align-items:center;gap:5px;font-weight:700;
+          white-space:nowrap;font-family:inherit;font-size:inherit;color:inherit;
+          background:none;border:0;padding:0;margin:0;cursor:help;line-height:1}
+  .lgitem:focus-visible{outline:2px solid var(--cyan);outline-offset:3px;border-radius:3px}
+  .lgtip{position:absolute;top:calc(100% + 8px);left:-6px;z-index:30;width:252px;
+         white-space:normal;text-align:left;font-weight:400;font-size:11px;line-height:1.5;
+         background:var(--bp-surface);color:var(--bp-dim);border:1px solid var(--bp-line);
+         border-radius:10px;padding:9px 11px;
+         box-shadow:0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.18);
+         opacity:0;visibility:hidden;transform:translateY(-3px);pointer-events:none;
+         transition:opacity .14s ease,transform .14s ease,visibility .14s}
+  .lgtip b{display:block;color:var(--bp-ink);font-weight:700;margin-bottom:3px;
+           font-size:11.5px;letter-spacing:normal}
+  .lgitem:hover .lgtip,.lgitem:focus-visible .lgtip,.lgitem.open .lgtip{
+    opacity:1;visibility:visible;transform:none}
+  @media (prefers-reduced-motion:reduce){ .lgtip{transition:none;transform:none} }
   .swatch{width:16px;height:0;flex-shrink:0}
 
   /* ── body ────────────────────────────────────────────────── */
@@ -544,6 +564,12 @@
     .knurl{width:34px;height:34px}          /* thumb-sized, not cursor-sized */
     .navbtn{width:38px;height:38px}
     .legendbar{gap:9px;font-size:9.5px}
+    /* The shell is overflow:visible here, so a 252px tip hanging off the right
+       of the last item widens the document and the whole page starts scrolling
+       sideways. Anchored to the bar instead of the item, it spans the width it
+       has and cannot stick out of either side. */
+    .lgitem{position:static}
+    .lgtip{left:0;right:0;width:auto}
   }
 
   /* Short and wide — a phone on its side. Height is the scarce dimension, so
@@ -695,10 +721,10 @@
     </div>
 
     <div class="legendbar" id="legendBar">
-      <span class="lgitem" style="color:#ef4444"><span class="swatch" style="border-top:2px solid #ef4444"></span>Bleed</span>
-      <span class="lgitem" style="color:var(--bp-ink)"><span class="swatch" style="border-top:2px dashed currentColor"></span>Trim</span>
-      <span class="lgitem" style="color:var(--green)"><span class="swatch" style="border-top:2px dashed #38a169"></span>Safety</span>
-      <span class="lgitem" style="color:#3b82f6"><span class="swatch" style="border-top:2px solid #3b82f6"></span>Bound edge</span>
+      <button type="button" class="lgitem" data-tip="bleed" style="color:#ef4444"><span class="swatch" style="border-top:2px solid #ef4444"></span>Bleed<span class="lgtip" role="tooltip"></span></button>
+      <button type="button" class="lgitem" data-tip="trim" style="color:var(--bp-ink)"><span class="swatch" style="border-top:2px dashed currentColor"></span>Trim<span class="lgtip" role="tooltip"></span></button>
+      <button type="button" class="lgitem" data-tip="safety" style="color:var(--green)"><span class="swatch" style="border-top:2px dashed #38a169"></span>Safety<span class="lgtip" role="tooltip"></span></button>
+      <button type="button" class="lgitem" data-tip="bound" style="color:#3b82f6"><span class="swatch" style="border-top:2px solid #3b82f6"></span>Bound edge<span class="lgtip" role="tooltip"></span></button>
     </div>
   </div>
 
@@ -830,7 +856,7 @@ const ANCHOR_GRID = { key:'anchor', cells:ANCHORS };
 const BEHAVIORS = {
   crop:    { label:'Crop',    subs:[ { type:'grid', title:'Crop Anchor: which reference point for art', ...ANCHOR_GRID } ] },
   fill:    { label:'Fill',    subs:[ { type:'grid', title:'Fill Anchor: which reference point for art', ...ANCHOR_GRID } ] },
-  fit:     { label:'Fit',     subs:[ { type:'note',  note:'No options — the whole page is fitted inside the trim, so some paper may show at two edges.' } ] },
+  fit:     { label:'Fit',     subs:[ { type:'note',  note:'No options — the whole file is fitted inside the page, so paper may show at two edges and there will be no bleed.' } ] },
   stretch: { label:'Stretch', subs:[ { type:'note',  note:'No options — art is stretched to fill the page. Proportions will change.' } ] },
   scale:   { label:'Scale',   subs:[ { type:'slider', key:'scale', title:'Size', min:50, max:200, step:0.5 },
                                      { type:'grid', title:'Scale Anchor: which reference point for art', ...ANCHOR_GRID } ] },
@@ -989,13 +1015,22 @@ function composePage(n, W, H){
   const inW = quarter ? src.inH : src.inW, inH = quarter ? src.inW : src.inH;
 
   const pxPerIn = W / BLEED_W;
+  /* Crop sizes the art against the BLEED box, not the trim.
+     Most art arrives at trim size. Placed 1:1 on a bleed-sized page it left a
+     white ring the press cannot print — every page came back flagged "art
+     doesn't fill bleed area", which is the calculator telling the customer off
+     for a decision the composition made. So crop scales up just enough to cover
+     the bleed and no further: art that already carries bleed, or is larger than
+     the page, keeps its native size and is genuinely cropped, which is what
+     "crop" means. Scale multiplies the same baseline, so 100% still equals crop. */
+  const bleedCover = Math.max(1, BLEED_W / inW, BLEED_H / inH);
   let drawW, drawH;
   switch (t.behavior){
     case 'stretch': drawW = W; drawH = H; break;
     case 'fit':  { const s = Math.min(W/sw, H/sh); drawW = sw*s; drawH = sh*s; break; }
     case 'fill': { const s = Math.max(W/sw, H/sh); drawW = sw*s; drawH = sh*s; break; }
-    case 'scale': drawW = inW * pxPerIn * (t.scale/100); drawH = inH * pxPerIn * (t.scale/100); break;
-    default:      drawW = inW * pxPerIn;                 drawH = inH * pxPerIn;           // crop, native
+    case 'scale': { const s = pxPerIn * bleedCover * (t.scale/100); drawW = inW*s; drawH = inH*s; break; }
+    default:      { const s = pxPerIn * bleedCover; drawW = inW*s; drawH = inH*s; }        // crop, to bleed
   }
 
   // Anchor. Fit and stretch never crop, so they are always centred whatever
@@ -1793,7 +1828,7 @@ function ensureLibs(){
 
    The two halves depend on each other. Flattening in a browser is only a safe
    thing to do because the original survives it: if the rasteriser drops a page,
-   shifts a colour or gets a transform wrong, there is something to go back to.
+   shifts a color or gets a transform wrong, there is something to go back to.
 
    What the ORIGINAL is not, is the file to print. The file to print is the
    flattened one, because that is the one the customer looked at and approved.
@@ -1873,8 +1908,8 @@ async function readPdfStructure(bytes){
     fonts.entries().forEach(([, ref]) => inspectFont(dictOf(ref), 0));
   });
 
-  /* Spot colours. A Separation or DeviceN colorant is an ink of its own; on a
-     four-colour press it gets converted, and the customer's Pantone does not
+  /* Spot colors. A Separation or DeviceN colorant is an ink of its own; on a
+     four-color press it gets converted, and the customer's Pantone does not
      come back. Worth naming rather than discovering on the sheet. */
   const spots = new Set();
   doc.getPages().forEach(pg => {
@@ -2068,13 +2103,13 @@ const FILE_CHECKS = [
             '. A font that is not in the file is substituted at the press, and the substitute reflows the type. Re-export with fonts embedded, or outline them.' }
         : { state:'pass', text:'Every font used is carried inside the file.' };
     }},
-  { id:'spots', label:'Colour', run(f){
+  { id:'spots', label:'Color', run(f){
       if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE +
-        ' Whatever is sent, it prints with CMYK inks, and bright screen colours come out duller.' };
+        ' Whatever is sent, it prints with CMYK inks, and bright screen colors come out duller.' };
       return f.spots.length
-        ? { state:'warn', text:'Spot colours in the file: ' + f.spots.join(', ') +
-            '. This is a four-colour press, so each one is converted to CMYK and will not match the swatch.' }
-        : { state:'pass', text:'No spot colours — everything prints from the four process inks.' };
+        ? { state:'warn', text:'Spot colors in the file: ' + f.spots.join(', ') +
+            '. This is a four-color press, so each one is converted to CMYK and will not match the swatch.' }
+        : { state:'pass', text:'No spot colors — everything prints from the four process inks.' };
     }},
   { id:'layers', label:'Hidden layers', run(f){
       if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
@@ -2328,7 +2363,53 @@ function deliverablesHtml(){
 function renderLegend(){
   const guidesOff = document.getElementById('hideGuides').checked;
   document.getElementById('legendBar').hidden = !(state.mode === 'proof' && !guidesOff);
+  renderLegendTips();
 }
+
+/* What each guide is FOR, in the customer's terms and with this job's actual
+   measurements — the numbers come from MODEL so a job posted by the host cannot
+   leave the legend describing a different piece. */
+function legendTip(kind){
+  const b = MODEL.bleed, s = MODEL.safety, t = MODEL.trim;
+  switch (kind){
+    case 'bleed': return ['Bleed line — ' + b + '" outside the trim',
+      'Any background or image meant to reach the edge of the finished page has to run '
+      + 'all the way out to this red line. Pages are cut in a stack and the blade drifts '
+      + 'slightly, so art that stops at the trim leaves a white sliver on some copies.'];
+    case 'trim':  return ['Trim line — the finished ' + t.w + '" × ' + t.h + '" page',
+      'Where the paper is actually cut. This is the size you ordered and the size the '
+      + 'customer holds. Everything outside it is cut off and thrown away.'];
+    case 'safety':return ['Safety margin — ' + s + '" inside the trim',
+      'Keep text, logos and anything you cannot afford to lose inside this green line. '
+      + 'Because the cut moves a little, type closer to the edge than this can end up '
+      + 'touching it or being clipped.'];
+    default:      return ['Bound edge — where the pages are stitched',
+      'This edge folds into the spine and is stapled. Content close to it curves away '
+      + 'from the reader and is hard to see, so keep anything that matters clear of it.'];
+  }
+}
+function renderLegendTips(){
+  document.querySelectorAll('#legendBar .lgitem').forEach(el => {
+    const tip = el.querySelector('.lgtip');
+    if (!tip) return;
+    const [head, body] = legendTip(el.dataset.tip);
+    tip.innerHTML = '<b></b>';
+    tip.firstChild.textContent = head;
+    tip.appendChild(document.createTextNode(body));
+    el.setAttribute('aria-label', head + '. ' + body);
+  });
+}
+/* Hover and focus cover mouse and keyboard; a touch device has neither, so a tap
+   latches it open and the next tap anywhere closes it. */
+document.getElementById('legendBar').addEventListener('click', e => {
+  const item = e.target.closest('.lgitem');
+  document.querySelectorAll('#legendBar .lgitem.open').forEach(o => { if (o !== item) o.classList.remove('open'); });
+  if (item) item.classList.toggle('open');
+});
+document.addEventListener('click', e => {
+  if (e.target.closest('#legendBar')) return;
+  document.querySelectorAll('#legendBar .lgitem.open').forEach(o => o.classList.remove('open'));
+});
 
 /* Approval is a statement about the PROOF. In 3D you are looking at a trimmed
    mockup with no guides, so neither the acknowledgement nor the button is
@@ -2369,7 +2450,7 @@ function jobFlags(){
       if (i.level === 'error' || i.level === 'warn') pages.push({ n:pg.n, ...i });
     });
   });
-  // The file-level preflight counts too — a missing font or a spot colour is
+  // The file-level preflight counts too — a missing font or a spot color is
   // not visible on the proof surface at all.
   let file = [];
   try {
