@@ -77,6 +77,10 @@
     --bp-page:#f6f7f9;
     --cyan:#007eff; --magenta:#d1246a; --green:#38a169; --bp-red:#b91c1c;
     --magenta-tint:#fce8ef; --cyan-tint:#e0edff; --yellow-tint:#fef5e0; --yellow-line:#f0a830;
+    /* the note once it has been agreed to — lighter than the tint it replaces,
+       in BOTH skins, which var(--bp-surface) is not: on dark that is #161b22,
+       darker than the pink it was meant to calm down */
+    --note-agreed:#ffffff;
     --rail:376px;
   }
   :root[data-pps-theme="dark"]{
@@ -86,6 +90,7 @@
     --bp-page:#0d1117;
     --magenta:#f0578f; --green:#5bc98a; --bp-red:#f87171;
     --magenta-tint:#2a1420; --cyan-tint:#12243a; --yellow-tint:#2a2113; --yellow-line:#6b5320;
+    --note-agreed:#242c37;
   }
   *{box-sizing:border-box}
   /* the control groups set display:flex, which would otherwise beat [hidden] */
@@ -115,8 +120,25 @@
   /* ── header ──────────────────────────────────────────────── */
   .header{border-bottom:1px solid var(--bp-line);padding:12px 18px 9px;background:var(--bp-surface);
           border-radius:16px 16px 0 0;flex-shrink:0}
-  .topbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-  .viewgroup{display:flex;align-items:center;gap:9px;border:1px solid var(--bp-line);border-radius:10px;
+  .topbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  /* Two rows, placed rather than left to wrap. Flex put the approve column on a
+     line of its own with 300px of nothing beside it the moment the note was
+     allowed the width it needed; naming the areas puts the legend in that gap
+     and costs the header nothing. */
+  @media (min-width:901px){
+    .topbar{display:grid;align-items:center;column-gap:12px;row-gap:9px;
+            grid-template-columns:auto auto minmax(0,1fr) auto auto;
+            grid-template-areas:
+              "mode  view   note    note note"
+              "guide guide  guide   gate close"}
+    #modes{grid-area:mode;justify-self:start}
+    #viewGroup,#bookGroup{grid-area:view}
+    .disclose{grid-area:note}
+    #legendBar{grid-area:guide;margin-top:0;align-self:end}
+    .approvewrap{grid-area:gate}
+    #closeBtn{grid-area:close;align-self:end}
+  }
+  .viewgroup{display:flex;align-items:center;gap:8px;border:1px solid var(--bp-line);border-radius:10px;
              padding:6px 12px;background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
   .viewgroup > .lbl{font-family:var(--pps-display);font-weight:700;font-size:11px;letter-spacing:.06em;
                     text-transform:uppercase;color:var(--bp-faint);margin-right:2px}
@@ -126,6 +148,25 @@
   .zoom{border:none;background:transparent;font-size:12.5px;cursor:pointer;padding:3px 4px;
         color:var(--bp-ink);font-family:inherit;font-weight:500}
   .zoom:hover{color:var(--cyan)}
+  /* Fit is a state; every other zoom is a point on a continuum. Six arbitrary
+     stops in a dropdown made you guess which one you wanted and then go back. */
+  .fitbtn{border:1px solid var(--bp-line);background:var(--bp-surface);color:var(--bp-dim);
+          font-family:inherit;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:7px;
+          cursor:pointer;transition:all .18s cubic-bezier(.4,0,.2,1)}
+  .fitbtn:hover:not(.on){color:var(--cyan);border-color:var(--cyan)}
+  .fitbtn.on{background:var(--cyan);border-color:var(--cyan);color:#fff;
+             box-shadow:0 1px 2px rgba(0,126,255,.35)}
+  .zoomslider{-webkit-appearance:none;appearance:none;width:92px;height:4px;border-radius:3px;
+              background:var(--bp-line);cursor:pointer;margin:0;padding:0}
+  .zoomslider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;
+    border-radius:50%;background:var(--cyan);border:2px solid var(--bp-surface);cursor:pointer;
+    box-shadow:0 1px 3px rgba(16,24,40,.3)}
+  .zoomslider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--cyan);
+    border:2px solid var(--bp-surface);cursor:pointer;box-shadow:0 1px 3px rgba(16,24,40,.3)}
+  .zoomslider:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+  /* Fixed width, or the group jiggles as the number goes 25% -> 100% -> Fit. */
+  .zoomval{font-size:11.5px;font-weight:600;color:var(--bp-dim);width:34px;text-align:right;
+           font-variant-numeric:tabular-nums}
   .modes{display:flex;gap:3px;padding:3px;border-radius:10px;border:1px solid var(--bp-line);
          background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
   .modes button{padding:6px 15px;border:none;border-radius:7px;background:transparent;color:var(--bp-dim);
@@ -134,24 +175,38 @@
   .modes button:hover:not(.on){color:var(--cyan)}
   .modes button.on{background:var(--cyan);color:#fff;font-weight:600;box-shadow:0 1px 2px rgba(0,126,255,.35)}
   .modes.small button{padding:5px 12px;font-size:11px}
-  .disclose{flex:1;min-width:300px;max-width:560px}
-  .note{border:1px solid var(--magenta);background:var(--magenta-tint);border-radius:10px;padding:9px 12px;
-        font-size:11.5px;line-height:1.5;color:var(--bp-ink)}
+  /* No cap: the note is the widest thing in the bar and it earns it. Boxed at
+     560px it ran to five lines beside a five-line approve column; given the room
+     the row already had, the same words are two. */
+  .disclose{flex:1 1 380px;min-width:270px}
+  .note{border:1px solid var(--magenta);background:var(--magenta-tint);border-radius:10px;padding:9px 13px;
+        font-size:11.5px;line-height:1.5;color:var(--bp-ink);
+        transition:background .2s ease,border-color .2s ease}
   .note a{color:var(--magenta);font-weight:600}
-  /* The gate lives with the button it gates, not inside the text it refers to.
-     It is a grid rather than a column because a five-row stack in the corner of
-     a toolbar is what made this header 260px tall and pushed the artwork off
-     the fold: the two ticks are narrow rows, and the small print sits BESIDE
-     the button on the last row instead of above it. */
-  .approvewrap{display:grid;grid-template-columns:auto auto;column-gap:12px;row-gap:5px;
-               justify-items:end;align-items:end;margin-left:auto}
-  .agree{display:flex;align-items:center;gap:7px;font-size:12.5px;
-         grid-column:1/-1;justify-self:stretch;padding-left:12px}
-  .agree label{cursor:pointer;display:flex;gap:7px;align-items:center;font-weight:600;white-space:nowrap}
+  /* Agreed to, so it stops shouting. Not neutral — the terms still apply and the
+     box is still the terms — just no longer a demand. */
+  .note.agreed{background:var(--note-agreed);border-color:var(--bp-line)}
+  .note.agreed a{color:var(--cyan)}
+  /* The agreement is part of the note now (owner's call, 2026-09-09): it reads
+     as the last sentence of the thing being agreed to rather than as a separate
+     hurdle beside the button. Inline so it closes the paragraph instead of
+     opening a new row. */
+  .agree{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;
+         margin-left:10px;white-space:nowrap;vertical-align:baseline}
+  .agree label{cursor:pointer;display:inline-flex;gap:7px;align-items:center;font-weight:700;white-space:nowrap}
   .agree input{margin:0;cursor:pointer;width:16px;height:16px;accent-color:var(--magenta)}
   .agree .req{font-size:11px;color:var(--bp-faint)}
+  .note.agreed .agree input{accent-color:var(--cyan)}
+  /* The rest of the gate still lives with the button it gates. It is a grid
+     rather than a column because a five-row stack in the corner of a toolbar is
+     what made this header 260px tall and pushed the artwork off the fold: the
+     tick is a narrow row, and the small print sits BESIDE the button on the last
+     row instead of above it. */
+  .approvewrap{display:grid;grid-template-columns:auto auto;column-gap:12px;row-gap:5px;
+               justify-items:end;align-items:end;margin-left:auto}
   .approvewrap.locked{opacity:.5}
-  .approvewrap.locked .agree label{cursor:not-allowed}
+  .note .agree.off{opacity:.5}
+  .note .agree.off label{cursor:not-allowed}
   .approverow{display:flex;align-items:center;gap:9px;grid-column:2}
   /* The checkpoint. It sits beside the button it gates, which is the most
      valuable strip on the page — so it gets an amber rule and one line of text,
@@ -507,6 +562,7 @@
     #closeBtn{grid-column:2;grid-row:1;align-self:center;margin-bottom:0}
     #viewGroup,#bookGroup{grid-column:1/-1;flex-wrap:wrap;row-gap:6px;border-radius:12px}
     .disclose{grid-column:1/-1;max-width:none;min-width:0}
+    #legendBar{grid-column:1/-1;margin-top:0}
     .note{font-size:11px;line-height:1.45}
 
     /* the gate follows the thumb to the bottom of the screen, where it is
@@ -525,9 +581,11 @@
     .approvewrap .ackbox label{white-space:normal;align-items:flex-start}
     .approvewrap .liability{flex:0 0 100%;order:-1;margin:0;max-width:none;font-size:10.5px}
     .approvewrap.locked{opacity:1;background:var(--bp-surface-2)}
-    .agree{font-size:12.5px;flex:1;min-width:0}
+    /* The agreement rides with the note, which is full width here — so it gets
+       its own line at the end of that box rather than trying to sit inline after
+       a paragraph that is already wrapping. */
+    .agree{display:flex;font-size:12.5px;margin:7px 0 0;white-space:normal}
     .agree label{white-space:normal}
-    .agree .req{display:none}
     .approve{padding:11px 20px;font-size:14px}
 
     /* A sticky element only sticks while its own parent is in view, so .main
@@ -659,16 +717,23 @@
   <!-- ══ HEADER ══ -->
   <div class="header">
     <div class="topbar">
+      <!-- Which surface you are looking at is the first decision, so it is the
+           first control: top left, before anything that acts on it. -->
+      <div class="modes" id="modes">
+        <button class="on" data-mode="proof">Proof</button>
+        <button data-mode="book">3D Preview</button>
+      </div>
+
       <div class="viewgroup" id="viewGroup">
         <span class="lbl">View</span>
-        <label class="chk" for="zoom">Zoom</label>
-        <select class="zoom" id="zoom">
-          <option value="fit" selected>Fit</option>
-          <option value="25">25%</option><option value="50">50%</option><option value="75">75%</option>
-          <option value="100">100%</option><option value="150">150%</option><option value="200">200%</option>
-        </select>
+        <!-- Fit is a state, not a size, so it is a button; everything else is a
+             continuum and gets a slider rather than six arbitrary stops. -->
+        <button type="button" class="fitbtn on" id="zoomFit">Fit</button>
+        <input type="range" class="zoomslider" id="zoom" min="25" max="200" step="5" value="100"
+               aria-label="Zoom">
+        <span class="zoomval" id="zoomVal">Fit</span>
         <span class="vsep"></span>
-        <label class="chk"><input type="checkbox" id="mag"> Magnifying Glass</label>
+        <label class="chk"><input type="checkbox" id="mag"> Magnifier</label>
         <span class="vsep"></span>
         <label class="chk"><input type="checkbox" id="hideGuides"> Hide Guides</label>
       </div>
@@ -685,13 +750,29 @@
         <button class="zoom" id="resetView" title="Return the book to its starting angle">Reset view</button>
       </div>
 
-      <div class="modes" id="modes">
-        <button class="on" data-mode="proof">Proof</button>
-        <button data-mode="book">3D Preview</button>
+      <!-- The agreement sits inside the note it is an agreement to (owner's
+           call, 2026-09-09 — it used to live beside APPROVE). Ticking it lightens
+           the box, so "I have read this" is legible across the room. The note
+           text is written by renderNote, which replaces its own span rather than
+           the whole box, or it would take the checkbox with it. -->
+      <div class="disclose">
+        <div class="note" id="note">
+          <span id="noteText"></span>
+          <span class="agree">
+            <label><input type="checkbox" id="agree"> I understand and agree</label>
+            <span class="req" id="agreeReq">(required)</span>
+          </span>
+        </div>
       </div>
 
-      <div class="disclose">
-        <div class="note" id="note"></div>
+      <!-- In the bar, not under it: giving the note the width it wanted left a
+           half-empty second row, and the legend is exactly the short wide thing
+           that belongs in it. -->
+      <div class="legendbar" id="legendBar">
+        <button type="button" class="lgitem" data-tip="bleed" style="color:#ef4444"><span class="swatch" style="border-top:2px solid #ef4444"></span>Bleed<span class="lgtip" role="tooltip"></span></button>
+        <button type="button" class="lgitem" data-tip="trim" style="color:var(--bp-ink)"><span class="swatch" style="border-top:2px dashed currentColor"></span>Trim<span class="lgtip" role="tooltip"></span></button>
+        <button type="button" class="lgitem" data-tip="safety" style="color:var(--green)"><span class="swatch" style="border-top:2px dashed #38a169"></span>Safety<span class="lgtip" role="tooltip"></span></button>
+        <button type="button" class="lgitem" data-tip="bound" style="color:#3b82f6"><span class="swatch" style="border-top:2px solid #3b82f6"></span>Bound edge<span class="lgtip" role="tooltip"></span></button>
       </div>
 
       <div class="approvewrap" id="approveWrap">
@@ -701,10 +782,6 @@
           <div class="acktitle" id="ackTitle"></div>
           <label><input type="checkbox" id="ackIssues">
             <span id="ackText"></span></label>
-        </div>
-        <div class="agree">
-          <label><input type="checkbox" id="agree"> I understand and agree</label>
-          <span class="req" id="agreeReq">(required)</span>
         </div>
         <p class="liability" id="liability">By approving you accept this proof as final. We
           print exactly the approved file; errors in approved artwork are the
@@ -720,12 +797,6 @@
       <button class="closebtn" id="closeBtn" title="Close proof" aria-label="Close proof">&#10005;</button>
     </div>
 
-    <div class="legendbar" id="legendBar">
-      <button type="button" class="lgitem" data-tip="bleed" style="color:#ef4444"><span class="swatch" style="border-top:2px solid #ef4444"></span>Bleed<span class="lgtip" role="tooltip"></span></button>
-      <button type="button" class="lgitem" data-tip="trim" style="color:var(--bp-ink)"><span class="swatch" style="border-top:2px dashed currentColor"></span>Trim<span class="lgtip" role="tooltip"></span></button>
-      <button type="button" class="lgitem" data-tip="safety" style="color:var(--green)"><span class="swatch" style="border-top:2px dashed #38a169"></span>Safety<span class="lgtip" role="tooltip"></span></button>
-      <button type="button" class="lgitem" data-tip="bound" style="color:#3b82f6"><span class="swatch" style="border-top:2px solid #3b82f6"></span>Bound edge<span class="lgtip" role="tooltip"></span></button>
-    </div>
   </div>
 
   <!-- ══ BODY ══ -->
@@ -1244,6 +1315,21 @@ function renderStage(){
       '%;width:'+(m.w*100)+'%;height:'+(m.h*100)+'%"></div>').join('') + '</div>');
   sheet.insertBefore(r.canvas, sheet.firstChild);
   attachSheetHandlers(sheet, r);
+  syncZoomReadout();
+}
+
+/* In Fit the readout is still a number: "Fit" is already written on the lit
+   button, and a customer judging what they see needs to know which way it is off
+   from 100%. The slider tracks it too, so dragging starts from where the page
+   actually is rather than jumping to wherever it was last left. */
+function syncZoomReadout(){
+  const sheet = document.getElementById('sheet');
+  if (!sheet) return;
+  const shown = sheet.getBoundingClientRect().width;
+  if (!(shown > 0)) return;
+  const pct = Math.round(shown / (BLEED_W * 96) * 100);
+  document.getElementById('zoomVal').textContent = pct + '%';
+  if (state.zoom === 'fit') document.getElementById('zoom').value = Math.min(200, Math.max(25, pct));
 }
 
 /* Magnifier: the lens shows the SAME composition at 3x, so it can never
@@ -1498,7 +1584,8 @@ function renderNote(){
   const tail = state.bookMode === 'closed'
     ? ' Drag the cover to turn the book.'
     : ' Use &#8249; &#8250; or the arrow keys to step through spreads.';
-  document.getElementById('note').innerHTML = book ? NOTE_BOOK + tail : NOTE_PROOF;
+  // Only the text, never the box: the agreement checkbox lives in there too.
+  document.getElementById('noteText').innerHTML = book ? NOTE_BOOK + tail : NOTE_PROOF;
 }
 
 function renderIssues(){
@@ -2478,7 +2565,14 @@ function renderApproval(){
 
   agree.disabled = book;
   wrap.classList.toggle('locked', book);
-  document.getElementById('agreeReq').textContent = book ? '(Proof view only)' : '(required)';
+  document.getElementById('agreeReq').textContent =
+    book ? '(Proof view only)' : agree.checked ? '' : '(required)';
+  // The box lightens once it has been agreed to: the loud pink is a demand, and
+  // a demand that has been met should stop shouting.
+  document.getElementById('note').classList.toggle('agreed', agree.checked && !book);
+  // The agreement is inside the note, so it cannot ride the approve column's
+  // locked state in 3D — it gets its own.
+  agree.closest('.agree').classList.toggle('off', book);
 
   /* The checkpoint. The built-in modal has always required an explicit
      acknowledgment before Approve unlocks when preflight flagged anything, and
@@ -2613,7 +2707,17 @@ document.getElementById('resetView').onclick = () => {
   const s = bookScene();
   if (s){ s.style.transition = ''; applyRot(); }
 };
-document.getElementById('zoom').onchange = e => { state.zoom = e.target.value; renderStage(); };
+/* Zoom is Fit or a percentage, and the two are one control: dragging the slider
+   leaves Fit, pressing Fit returns to it. `state.zoom` keeps its old contract —
+   the string 'fit' or a number — so sheetSize() and the resize observer are
+   unchanged. `input` rather than `change` so the page tracks the thumb. */
+function setZoom(v){
+  state.zoom = v;
+  document.getElementById('zoomFit').classList.toggle('on', v === 'fit');
+  renderStage();                       // which calls syncZoomReadout for us
+}
+document.getElementById('zoom').oninput = e => setZoom(e.target.value);
+document.getElementById('zoomFit').onclick = () => setZoom('fit');
 document.getElementById('mag').onchange = () => { if (!document.getElementById('mag').checked) hideLens(); };
 document.getElementById('hideGuides').onchange = () => { renderStage(); renderLegend(); };
 document.getElementById('undoBtn').onclick = undo;

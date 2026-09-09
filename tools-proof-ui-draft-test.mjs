@@ -78,16 +78,36 @@ ck('the gate scans every page, not the selected one', await p.evaluate(()=>{
 // that had been un-ticked behind its back.
 ck('page rows rendered', await p.evaluate(()=>document.querySelectorAll('#rail .acc').length)===9, 'want 9 (whole file + 8 pages)');
 ck('filmstrip groups', await p.evaluate(()=>document.querySelectorAll('#stripBottom .grp').length)===5);
-ck('agree is NOT inside the disclaimer note', await p.evaluate(()=>!document.querySelector('.note .agree')));
+// Reversed on the owner's instruction, 2026-09-09. It used to be the opposite
+// assertion — the gate beside the button, not inside the text — but reading the
+// terms and accepting them in one box beats reading them here and accepting
+// them over there.
+ck('agree sits INSIDE the disclaimer it agrees to', await p.evaluate(()=>
+  !!document.querySelector('.note .agree input#agree')));
+ck('ticking it lightens the box, and un-ticking puts it back', await p.evaluate(async ()=>{
+  const n=document.getElementById('note'), a=document.getElementById('agree');
+  const bg=()=>getComputedStyle(n).backgroundColor;
+  const lum=c=>{const m=c.match(/[\d.]+/g).map(Number); return (m[0]+m[1]+m[2])/3;};
+  const was=a.checked;
+  a.checked=false; a.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,320));
+  const demanding=bg();
+  a.checked=true;  a.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,320));
+  const settled=bg();
+  a.checked=was;   a.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,320));
+  return lum(settled)>lum(demanding) && n.classList.contains('agreed')===was;}),
+  await p.evaluate(()=>getComputedStyle(document.getElementById('note')).backgroundColor));
 ck('full disclaimer text is still present, unabridged', await p.evaluate(()=>{
   const t=document.querySelector('.note').innerText.replace(/\s+/g,' ');
   return /Online proof approval is best for expediency/.test(t)
       && /request and purchase a Hardcopy Proof/.test(t)
       && /unsure about the template markings/.test(t)
       && /request a Professional Digital Proof/.test(t);}));
-ck('agree sits directly above APPROVE and close', await p.evaluate(()=>{
-  const ar=document.querySelector('.approvewrap .agree').getBoundingClientRect();
-  return ar.bottom<=document.getElementById('approveBtn').getBoundingClientRect().top+1;}));
+// It no longer sits directly above APPROVE — it is in the note — but it must
+// still be read before the button is reached, and both must be on screen at once.
+ck('agree is read before APPROVE, and both are visible together', await p.evaluate(()=>{
+  const ar=document.querySelector('.note .agree').getBoundingClientRect();
+  const br=document.getElementById('approveBtn').getBoundingClientRect();
+  return ar.bottom<=br.bottom+1 && ar.top>=0 && br.bottom<=window.innerHeight+1;}));
 ck('close is the outermost element, past APPROVE', await p.evaluate(()=>{
   const c=document.getElementById('closeBtn'), tb=document.querySelector('.topbar');
   return tb.lastElementChild===c
@@ -234,17 +254,29 @@ ck('undo empties out and then disables itself', await p.evaluate(async ()=>{
 
 // ── zoom ──
 await openPage(1); await p.waitForTimeout(250);
-ck('zoom changes the rendered sheet size', await p.evaluate(async ()=>{
+// Fit is a button and everything else is a slider (owner's call, 2026-09-09) —
+// six arbitrary stops in a dropdown made you guess and then go back.
+ck('the slider changes the rendered sheet size', await p.evaluate(async ()=>{
   const w=()=>document.getElementById('sheet').getBoundingClientRect().width;
-  const z=document.getElementById('zoom');
-  z.value='fit'; z.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,180));
+  const z=document.getElementById('zoom'), f=document.getElementById('zoomFit');
+  f.click(); await new Promise(r=>setTimeout(r,180));
   const fit=w();
-  z.value='200'; z.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,180));
+  z.value='200'; z.dispatchEvent(new Event('input')); await new Promise(r=>setTimeout(r,180));
   const big=w();
-  z.value='25'; z.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,180));
+  z.value='25'; z.dispatchEvent(new Event('input')); await new Promise(r=>setTimeout(r,180));
   const small=w();
-  z.value='fit'; z.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,180));
-  return big>fit && small<fit;}));
+  f.click(); await new Promise(r=>setTimeout(r,180));
+  return big>fit && small<fit && Math.abs(w()-fit)<2;}));
+ck('dragging leaves Fit, and Fit takes it back', await p.evaluate(async ()=>{
+  const z=document.getElementById('zoom'), f=document.getElementById('zoomFit');
+  z.value='150'; z.dispatchEvent(new Event('input')); await new Promise(r=>setTimeout(r,180));
+  const left = !f.classList.contains('on') && state.zoom==='150';
+  f.click(); await new Promise(r=>setTimeout(r,180));
+  return left && f.classList.contains('on') && state.zoom==='fit';}));
+// A readout that says "Fit" next to a button that says "Fit" tells you nothing.
+ck('the readout is a percentage even in Fit, so you know which way you are off',
+  await p.evaluate(()=>/^\d+%$/.test(document.getElementById('zoomVal').textContent)),
+  await p.evaluate(()=>document.getElementById('zoomVal').textContent));
 ck('the stage scrolls rather than the page', await p.evaluate(()=>
   getComputedStyle(document.getElementById('stage')).overflow==='auto'));
 

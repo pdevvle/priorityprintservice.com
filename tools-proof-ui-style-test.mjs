@@ -209,6 +209,35 @@ console.log('\n── the dark skin is a different skin ──');
   });
   ok('every surface token flips', pair.light !== pair.dark, pair.light + '  vs  ' + pair.dark);
   ok('and the page itself goes dark', pair.body !== 'rgb(246, 247, 249)', pair.body);
+
+  // "Agreed" lightens the note. The obvious implementation — reuse --bp-surface
+  // — is lighter than the pink tint in the light skin and DARKER than it in the
+  // dark one, which is the same bug in reverse and invisible unless both are
+  // measured.
+  const lift = await page.evaluate(async () => {
+    const lum = c => { const m = c.match(/[\d.]+/g).map(Number); return (m[0]+m[1]+m[2])/3; };
+    const n = document.getElementById('note'), a = document.getElementById('agree');
+    // The fill is transitioned, so reading it the same tick returns a colour
+    // part-way between the two and the comparison is meaningless.
+    const settle = () => new Promise(r => setTimeout(r, 340));
+    const read = async () => {
+      a.checked = false; renderApproval(); await settle();
+      const off = getComputedStyle(n).backgroundColor;
+      a.checked = true;  renderApproval(); await settle();
+      const on  = getComputedStyle(n).backgroundColor;
+      a.checked = false; renderApproval(); await settle();
+      return { off, on, lifts: lum(on) > lum(off) };
+    };
+    document.documentElement.setAttribute('data-pps-theme', 'light');
+    const light = await read();
+    document.documentElement.setAttribute('data-pps-theme', 'dark');
+    const dark = await read();
+    document.documentElement.setAttribute('data-pps-theme', 'light');
+    return { light, dark };
+  });
+  ok('agreeing lightens the note in light', lift.light.lifts,
+     lift.light.off + ' -> ' + lift.light.on);
+  ok('and in dark too', lift.dark.lifts, lift.dark.off + ' -> ' + lift.dark.on);
 }
 
 ok('no uncaught page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
