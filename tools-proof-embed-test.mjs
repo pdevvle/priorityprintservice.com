@@ -127,6 +127,12 @@ console.log('\n── approving returns the package to the host ──');
     const blob = await new Promise(r => c.toBlob(r, 'image/png'));
     await loadArtSequence(1, [new File([blob], 'art.png', { type:'image/png' })]);
   });
+  // loadArtSequence hands off to an Image that decodes later, so awaiting it
+  // proves nothing about whether the art has landed. That used to be invisible:
+  // the demo pages were flagged anyway, so the gate was ticked either way. They
+  // are clean now, so the flag genuinely arrives after — wait for the art.
+  await page.waitForFunction(() => uploads.has(1), null, { timeout:15000 });
+  await page.waitForTimeout(300);
   // Both gates: agreeing, and acknowledging whatever preflight flagged. Setting
   // .checked directly does not fire onchange, hence the explicit renderApproval.
   const gate = await page.evaluate(() => {

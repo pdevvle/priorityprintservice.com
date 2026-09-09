@@ -33,6 +33,15 @@ await p.click('#agree'); await p.waitForTimeout(200);
 // Agreeing is not enough on its own when preflight flagged something. Approval
 // releases a job to production, so this surface must not be the easier way past
 // the acknowledgment the built-in modal has always required.
+//
+// The default job used to flag every page on its own, because Crop sized the art
+// against the trim and left a white ring in the bleed. Crop sizes against the
+// bleed now, so a clean job is genuinely clean and the gate has to be given
+// something to catch. Fit is the honest way to produce one: it letterboxes the
+// art, which really does leave no bleed. Page 5 rather than the selected page,
+// so this still proves the gate reads the whole job.
+await p.evaluate(()=>{ state.perPage[5].behavior='fit'; cache.clear(); renderAll(); });
+await p.waitForTimeout(250);
 const flagged = await p.evaluate(()=>!document.getElementById('ackBox').hidden);
 ck('the default job flags something, so the checkpoint is live', flagged,
    flagged ? '' : 'nothing flagged — this case is not exercising the gate');
@@ -62,6 +71,11 @@ ck('the gate scans every page, not the selected one', await p.evaluate(()=>{
   const f = jobFlags();
   return f.pages.length === 0 || f.pages.some(n => n !== state.selected) || MODEL.pages.length === 1;}),
    await p.evaluate(()=>JSON.stringify(jobFlags().pages)));
+// Page 5 deliberately stays under-filled for the rest of the run. Reverting it
+// made the whole job clean for a moment, and renderApproval clears the
+// acknowledgment when there is nothing left to acknowledge — so a later check
+// that a flag re-appearing does not silently re-lock approve was testing a box
+// that had been un-ticked behind its back.
 ck('page rows rendered', await p.evaluate(()=>document.querySelectorAll('#rail .acc').length)===9, 'want 9 (whole file + 8 pages)');
 ck('filmstrip groups', await p.evaluate(()=>document.querySelectorAll('#stripBottom .grp').length)===5);
 ck('agree is NOT inside the disclaimer note', await p.evaluate(()=>!document.querySelector('.note .agree')));
@@ -107,11 +121,29 @@ ck('hiding guides still hides the legend', await p.evaluate(()=>{
 await openPage(1); await p.waitForTimeout(300);
 ck('the proof surface is a composed canvas, not an <img>', await p.evaluate(()=>
   !!document.querySelector('#sheet canvas') && !document.querySelector('#sheet img')));
+// Crop sizes against the BLEED box, not the trim. Art arrives at trim size far
+// more often than not; sized 1:1 onto a bleed-sized page it left a white ring
+// the press cannot print and flagged every page for it, which is the tool
+// blaming the customer for a decision the composition made.
 const cropCorner = await probe(0.003,0.003,0.012,0.008);
-ck('Crop places art at native size, so paper shows in the bleed', cropCorner>230,
+ck('Crop sizes the art to the bleed, so the corner is ink and not paper', cropCorner<230,
   'top-left luminance '+cropCorner+' (paper is 255)');
+ck('so trim-sized art raises no bleed issue on its own', await p.evaluate(()=>
+  !/doesn.t fill bleed/.test(document.getElementById('issuePanel').innerText)));
+
+// Under-filling is now something the customer has to ask for. Scaling below
+// 100% is the honest way to produce it — Fit cannot be relied on here, because
+// this page and this art are nearly the same shape and it letterboxes by less
+// than a pixel at the corner.
+await p.selectOption('.behavior select','scale'); await p.waitForTimeout(300);
+await p.evaluate(()=>{ state.perPage[1].scale = 80; cache.clear(); renderAll(); });
+await p.waitForTimeout(350);
+const shrunkCorner = await probe(0.003,0.003,0.012,0.008);
+ck('scaled under 100% the art no longer reaches the bleed', shrunkCorner>230,
+  'top-left luminance '+shrunkCorner);
 ck('and that is reported as a bleed issue, measured not scripted', await p.evaluate(()=>
   /doesn.t fill bleed/.test(document.getElementById('issuePanel').innerText)));
+await p.evaluate(()=>{ state.perPage[1].scale = 100; cache.clear(); renderAll(); });
 
 await p.selectOption('.behavior select','fill'); await p.waitForTimeout(350);
 const fillCorner = await probe(0.003,0.003,0.012,0.008);
@@ -128,10 +160,15 @@ ck('a clean page shows no findings and no reassurance', await p.evaluate(()=>{
       && !/no problem|looks good|all clear|ready to print|✓/i.test(el.innerHTML);}),
   await p.evaluate(()=>JSON.stringify(document.getElementById('issuePanel').innerText.slice(0,60))));
 
-// the anchor actually moves the art
-await p.selectOption('.behavior select','crop'); await p.waitForTimeout(300);
+// The anchor actually moves the art. Tested under Scale rather than Crop: crop
+// now covers the page, so the art overhangs by about 3% and an anchor cannot be
+// seen at the corner. Scaled down, paper is exposed on every side and the
+// anchor's effect is unambiguous.
+await p.selectOption('.behavior select','scale'); await p.waitForTimeout(300);
+await p.evaluate(()=>{ state.perPage[1].scale = 60; cache.clear(); renderAll(); });
+await p.waitForTimeout(350);
 const centred = { top: await probe(0.4,0.003,0.2,0.008), bottom: await probe(0.4,0.989,0.2,0.008) };
-ck('Crop centred leaves paper at BOTH top and bottom', centred.top>230 && centred.bottom>230,
+ck('Scaled and centred, paper shows at BOTH top and bottom', centred.top>230 && centred.bottom>230,
   JSON.stringify(centred));
 await p.evaluate(()=>[...document.querySelectorAll('.anchorgrid .apt')].find(e=>e.title==='Top').click());
 await p.waitForTimeout(350);
@@ -144,6 +181,10 @@ const brAnchored = { top: await probe(0.4,0.003,0.2,0.008), left: await probe(0.
 ck('anchoring Bottom Right leaves paper at top and left', brAnchored.top>230 && brAnchored.left>230,
   JSON.stringify(brAnchored));
 await p.evaluate(()=>[...document.querySelectorAll('.anchorgrid .apt')].find(e=>e.title==='Center').click());
+await p.waitForTimeout(300);
+// Back to the default composition for everything below.
+await p.selectOption('.behavior select','crop'); await p.waitForTimeout(300);
+await p.evaluate(()=>{ state.perPage[1].scale = 100; cache.clear(); renderAll(); });
 await p.waitForTimeout(300);
 
 // ── one engine feeds every surface ──
@@ -525,17 +566,28 @@ ck('the lit cell is never one of the dead ones', await p.evaluate(()=>{
   const on=document.querySelector('.anchorgrid .apt.on');
   return !!on && !on.disabled;}));
 // Fill is cover, so it always makes one axis match exactly: the anchor there
-// is a one-dimensional choice however the file is shaped. All nine points are
-// only reachable under Crop and Scale, which place at native size.
+// is a one-dimensional choice however the file is shaped. Crop is cover against
+// the bleed now, so it is one-dimensional for the same reason — Scale below
+// 100% is what leaves the art smaller than the page in both directions and puts
+// all nine points in reach.
 await mkfile('D',1400,1400,'#6b3fa0');
 ck('under Fill the anchor is always one-dimensional, whatever the file', await p.evaluate(async ()=>{
   loadArtSequence(4,[window.__f.D]);          // a square file, not landscape
   await new Promise(r=>setTimeout(r,800));
   return [...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).length===3;}),
   await p.evaluate(()=>[...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).length+' live'));
-ck('Crop can reach all nine, because it places at native size', await p.evaluate(async ()=>{
+ck('Crop is one-dimensional too, because it covers the bleed', await p.evaluate(async ()=>{
   const sel=document.querySelector('.behavior select');
   sel.value='crop'; sel.dispatchEvent(new Event('change'));
+  await new Promise(r=>setTimeout(r,600));
+  return [...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).length===3;}),
+  await p.evaluate(()=>[...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).length+' live'));
+ck('Scale under 100% can reach all nine, because the art is then smaller than the page',
+  await p.evaluate(async ()=>{
+  const sel=document.querySelector('.behavior select');
+  sel.value='scale'; sel.dispatchEvent(new Event('change'));
+  await new Promise(r=>setTimeout(r,300));
+  state.perPage[state.selected].scale=60; cache.clear(); renderAll();
   await new Promise(r=>setTimeout(r,600));
   return [...document.querySelectorAll('.anchorgrid .apt')].filter(e=>!e.disabled).length===9
       && /in both directions/.test(document.querySelector('.axisnote').textContent);}),
@@ -563,7 +615,11 @@ ck('type well inside the margin raises nothing', await p.evaluate(()=>{
   return !a.some(i=>['tight','cut','nomargin'].includes(i.kind)) && (a.marks||[]).length===0;}),
   JSON.stringify(await kinds()));
 
-await setTx({behavior:'scale', scale:112}); await p.waitForTimeout(350);
+// 106, not the 112 this used to be: Scale is a multiple of Crop, and Crop now
+// covers the bleed rather than placing at trim size, so the same percentage
+// enlarges the art by about 6% more than it used to and pushed this run clean
+// over the trim. Same geometry on the page, different number to ask for it.
+await setTx({behavior:'scale', scale:106}); await p.waitForTimeout(350);
 const tight = await kinds();
 ck('type inside the safety margin is a warning, not an error',
   tight.kinds.includes('tight') && !tight.kinds.includes('cut') && tight.marks===1 && tight.cut===0,
