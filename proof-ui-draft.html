@@ -115,7 +115,7 @@
   /* ── header ──────────────────────────────────────────────── */
   .header{border-bottom:1px solid var(--bp-line);padding:12px 18px 9px;background:var(--bp-surface);
           border-radius:16px 16px 0 0;flex-shrink:0}
-  .topbar{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+  .topbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
   .viewgroup{display:flex;align-items:center;gap:9px;border:1px solid var(--bp-line);border-radius:10px;
              padding:6px 12px;background:var(--bp-btn);box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
   .viewgroup > .lbl{font-family:var(--pps-display);font-weight:700;font-size:11px;letter-spacing:.06em;
@@ -138,27 +138,38 @@
   .note{border:1px solid var(--magenta);background:var(--magenta-tint);border-radius:10px;padding:9px 12px;
         font-size:11.5px;line-height:1.5;color:var(--bp-ink)}
   .note a{color:var(--magenta);font-weight:600}
-  /* the gate lives with the button it gates, not inside the text it refers to */
-  .approvewrap{display:flex;flex-direction:column;gap:7px;align-items:flex-end;margin-left:auto}
-  .agree{display:flex;align-items:center;gap:7px;font-size:13.5px}
+  /* The gate lives with the button it gates, not inside the text it refers to.
+     It is a grid rather than a column because a five-row stack in the corner of
+     a toolbar is what made this header 260px tall and pushed the artwork off
+     the fold: the two ticks are narrow rows, and the small print sits BESIDE
+     the button on the last row instead of above it. */
+  .approvewrap{display:grid;grid-template-columns:auto auto;column-gap:12px;row-gap:5px;
+               justify-items:end;align-items:end;margin-left:auto}
+  .agree{display:flex;align-items:center;gap:7px;font-size:12.5px;
+         grid-column:1/-1;justify-self:stretch;padding-left:12px}
   .agree label{cursor:pointer;display:flex;gap:7px;align-items:center;font-weight:600;white-space:nowrap}
   .agree input{margin:0;cursor:pointer;width:16px;height:16px;accent-color:var(--magenta)}
   .agree .req{font-size:11px;color:var(--bp-faint)}
   .approvewrap.locked{opacity:.5}
   .approvewrap.locked .agree label{cursor:not-allowed}
-  .approverow{display:flex;align-items:center;gap:9px}
-  /* The checkpoint, in the calculator's warning card: yellow hairline on the
-     yellow tint, the same pairing the banner and the tight-margin issue use, so
-     "look at this" reads the same everywhere in the product. */
-  .ackbox{border:1px solid var(--yellow-line);background:var(--yellow-tint);
-    border-radius:10px;padding:9px 11px;margin-bottom:8px;line-height:1.45;
-    box-shadow:inset 0 1px 2px rgba(16,24,40,.04)}
-  .ackbox .acktitle{font-family:var(--pps-display);font-weight:700;font-size:11px;
-    letter-spacing:.05em;text-transform:uppercase;color:var(--bp-warn);margin-bottom:5px}
-  .ackbox label{display:flex;gap:8px;align-items:flex-start;font-size:12px;cursor:pointer;color:var(--bp-ink)}
-  .ackbox input{margin-top:2px;flex-shrink:0;accent-color:var(--yellow-line)}
+  .approverow{display:flex;align-items:center;gap:9px;grid-column:2}
+  /* The checkpoint. It sits beside the button it gates, which is the most
+     valuable strip on the page — so it gets an amber rule and one line of text,
+     not a filled card with a shouting uppercase heading. A boxed alert here
+     out-shouted the artwork, the note and the button all at once. */
+  .ackbox{grid-column:1/-1;justify-self:stretch;border-left:3px solid var(--yellow-line);
+    padding:0 0 0 9px;line-height:1.45;text-align:left}
+  .ackbox .acktitle{font-size:11px;font-weight:600;color:var(--bp-warn)}
+  .ackbox label{display:flex;gap:7px;align-items:center;font-size:11.5px;cursor:pointer;
+    color:var(--bp-dim);white-space:nowrap}
+  .ackbox input{flex-shrink:0;accent-color:var(--yellow-line);margin:0}
   .approvewrap.locked .ackbox{opacity:.5}
-  .liability{margin:8px 0 0;font-size:11px;line-height:1.5;color:var(--bp-faint);max-width:46ch}
+  /* Small print, and it should look like small print — it is a term, not a
+     warning. It shares the button's row so the sentence is still read next to
+     the action it describes, without the button being buried under a paragraph. */
+  .liability{grid-column:1;justify-self:start;align-self:end;
+    margin:0;font-size:10px;line-height:1.4;color:var(--bp-faint);
+    max-width:46ch;text-align:left}
   @keyframes bp-approve-shimmer{ from{background-position:150% 0} to{background-position:-50% 0} }
   .approve{display:inline-flex;align-items:center;justify-content:center;
            padding:13px 23px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
@@ -209,7 +220,7 @@
   .main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;padding:14px 16px;gap:14px}
   .stagewrap{flex:1;display:flex;gap:16px;align-items:flex-start;min-height:0}
   .stage{flex:1;min-width:0;display:flex;align-items:flex-start;justify-content:center;
-         max-height:560px;overflow:auto;padding:2px}
+         max-height:100%;overflow:auto;padding:2px}
   .stage.center{align-items:center}
   .sheet{position:relative;background:#fff;border-radius:2px;flex-shrink:0;
          box-shadow:0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.18)}
@@ -481,6 +492,7 @@
     /* the gate follows the thumb to the bottom of the screen, where it is
        reachable without scrolling back up past the artwork */
     .approvewrap{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;
+                 display:flex;
                  flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;
                  background:var(--bp-surface);border-top:1px solid var(--bp-line);
                  padding:9px 12px calc(9px + env(safe-area-inset-bottom,0px));
@@ -489,7 +501,8 @@
        read: what was found, what you are accepting, then the button. The
        responsibility sentence appears nowhere else on the page — the proof note
        is about proof types — so it cannot be dropped on a small screen. */
-    .approvewrap .ackbox{flex:0 0 100%;order:-2;margin:0}
+    .approvewrap .ackbox{flex:0 0 100%;order:-2;margin:0;justify-self:auto}
+    .approvewrap .ackbox label{white-space:normal;align-items:flex-start}
     .approvewrap .liability{flex:0 0 100%;order:-1;margin:0;max-width:none;font-size:10.5px}
     .approvewrap.locked{opacity:1;background:var(--bp-surface-2)}
     .agree{font-size:12.5px;flex:1;min-width:0}
@@ -667,9 +680,9 @@
           <label><input type="checkbox" id="agree"> I understand and agree</label>
           <span class="req" id="agreeReq">(required)</span>
         </div>
-        <p class="liability" id="liability">By approving, you accept this proof as final.
-          We print exactly the approved file — errors in approved artwork (spelling,
-          layout, images, colour choices) are the customer's responsibility.</p>
+        <p class="liability" id="liability">By approving you accept this proof as final. We
+          print exactly the approved file; errors in approved artwork are the
+          customer's responsibility.</p>
         <div class="approverow">
           <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
         </div>
@@ -1127,7 +1140,18 @@ function anchorLive(cell, axes){
 function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 
 /* ── the proof surface ──────────────────────────────────────── */
-const FIT_H = 470;                                   // the "Fit" height, desktop
+/* "Fit" was a hard 470px, which was the right number for the header this page
+   had when it was written. Compacting the header just moved the slack into a
+   grey void under the artwork, so fit now measures the space it is fitting.
+   Bounded at both ends: a squashed window still gets a readable page, and a tall
+   one does not blow the sheet up past what the filmstrip leaves room for. */
+const FIT_H_MIN = 360, FIT_H_MAX = 760;
+function fitH(){
+  const wrap = document.querySelector('.stagewrap');
+  const h = wrap ? wrap.clientHeight - 6 : 0;
+  if (!(h > 0)) return 470;
+  return Math.max(FIT_H_MIN, Math.min(FIT_H_MAX, Math.round(h)));
+}
 const narrow = () => window.innerWidth <= 900;
 
 /* "Fit" has to mean fit the space there actually is. On a phone that is a
@@ -1141,7 +1165,8 @@ function sheetSize(){
     // a share of the height. On a short one (a phone on its side) it is not
     // pinned and the controls sit beside it, so it can have much more.
     const share = window.innerHeight <= 560 ? 0.70 : 0.42;
-    let H = narrow() ? Math.max(180, Math.min(FIT_H, Math.round(window.innerHeight * share))) : FIT_H;
+    const fit = fitH();
+    let H = narrow() ? Math.max(180, Math.min(fit, Math.round(window.innerHeight * share))) : fit;
     let W = Math.round(H * BLEED_W / BLEED_H);
     if (W > availW){ W = availW; H = Math.round(W * BLEED_H / BLEED_W); }
     return { W, H };
@@ -2390,11 +2415,17 @@ function renderApproval(){
     const where = f.pages.length
       ? ' on page' + (f.pages.length === 1 ? ' ' : 's ') + f.pages.join(', ')
       : '';
+    // Plain sentence, not a headline. "8 PROBLEMS ON PAGES 1,2,3,4,5,6,7,8" in
+    // bold caps was the loudest thing on the page, and on a job where every page
+    // is flagged it is also the least useful phrasing.
+    const many = f.pages.length > 3;
     document.getElementById('ackTitle').textContent =
-      bits.join(' and ') + where + '.';
+      bits.join(' and ') + (many ? ' across ' + f.pages.length + ' pages' : where) + '.';
+    // One line, because it sits on one line. The long form wrapped to three and
+    // turned a tick box into a paragraph.
     document.getElementById('ackText').textContent = f.errors
-      ? 'I have reviewed these and want them printed as they are.'
-      : 'I have reviewed these.';
+      ? 'I have reviewed these and want them printed as-is'
+      : 'I have reviewed these';
   } else {
     ack.checked = false;
   }
@@ -2458,6 +2489,32 @@ window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => { hideLens(); renderStage(); reserveForApproveBar(); }, 140);
 });
+
+/* The window is not the only thing that changes the space "Fit" is fitting: the
+   filmstrip and the issue column arrive after the first paint, and the header
+   changes height when the checkpoint appears. Sizing the sheet once left it
+   overflowing a stage that had since shrunk. Re-render only when the fitted
+   height actually moves, so this cannot chase its own tail. */
+if (typeof ResizeObserver === 'function'){
+  let lastFit = 0;
+  const wrap = document.querySelector('.stagewrap');
+  if (wrap) new ResizeObserver(() => {
+    if (state.mode !== 'proof' || state.zoom !== 'fit') return;
+    // Two ways this fires on something that cannot be composed: the stage has
+    // been taken out of the document (a host that reuses this page as its shell
+    // empties the body, and a detached box reports height 0), and a job arriving
+    // from the host rebuilds MODEL — itself a resize — before the per-page
+    // transforms are repopulated.
+    if (!wrap.isConnected || !(wrap.clientHeight > 0)) return;
+    if (!document.getElementById('stage') || !document.getElementById('sheet')) return;
+    if (!state.perPage[state.selected]) return;
+    const f = fitH();
+    if (Math.abs(f - lastFit) < 3) return;
+    lastFit = f;
+    hideLens();
+    renderStage();
+  }).observe(wrap);
+}
 
 document.getElementById('modes').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
