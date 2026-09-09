@@ -106,7 +106,7 @@ const c1 = await checks();
 ck('a standard-14 font is reported as not embedded', c1.fonts==='fail', JSON.stringify(c1));
 ck('and it names the face', /Helvetica/.test(await textOf('fonts')), await textOf('fonts'));
 ck('a page built to the ordered size passes', c1.size==='pass', await textOf('size'));
-ck('no spot colours, no layers, no interactive content',
+ck('no spot colors, no layers, no interactive content',
   c1.spots==='pass' && c1.layers==='pass' && c1.interactive==='pass', JSON.stringify(c1));
 ck('page count for the binding is checked without any file', c1.pages==='pass');
 
@@ -126,7 +126,7 @@ await reset();
 await attach({name:'spot', at:1, spot:true});
 await p.waitForTimeout(400);
 ck('a Separation colorant is found and named', (await checks()).spots==='warn', await textOf('spots'));
-ck('and it says it will be converted', /converted to CMYK|four-colour press/i.test(await textOf('spots')));
+ck('and it says it will be converted', /converted to CMYK|four-color press/i.test(await textOf('spots')));
 
 await reset();
 await attach({name:'layered', at:1, layers:true});

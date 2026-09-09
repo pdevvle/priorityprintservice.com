@@ -51,6 +51,13 @@ for (const d of DEVICES){
     document.getElementById('sheet').getBoundingClientRect().height < window.innerHeight*0.80),
     await p.evaluate(()=>Math.round(document.getElementById('sheet').getBoundingClientRect().height)+'px of '+window.innerHeight));
 
+  // Crop covers the bleed now, so the demo job is clean and the issues panel has
+  // nothing to show. Under 100% the art genuinely stops short of the bleed —
+  // a real finding rather than one the harness typed in.
+  await p.evaluate(()=>{ const t=state.perPage[state.selected];
+    t.behavior='scale'; t.scale=80; cache.clear(); renderAll(); });
+  await p.waitForTimeout(300);
+
   // 3. the three things that must survive the squeeze
   ck(d.name+': the issues panel is NOT hidden', await p.evaluate(()=>{
     const el=document.getElementById('issuePanel');

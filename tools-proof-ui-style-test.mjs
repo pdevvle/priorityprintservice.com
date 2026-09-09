@@ -109,7 +109,7 @@ console.log('\n── the palette is the calculator\'s, not an approximation ─
   ok('light tokens agree', drift.length === 0,
      drift.map(n => n + ': proof ' + mine[n] + ' vs calc ' + calcLight[n]).join('; '));
 
-  // --bp-on-dark is the calculator's muted-white-on-dark text colour. The proof
+  // --bp-on-dark is the calculator's muted-white-on-dark text color. The proof
   // has no white-on-dark text of its own, and carrying a token nothing uses is
   // how a palette starts collecting fossils — so it is exempt, by name, rather
   // than by weakening the check.
