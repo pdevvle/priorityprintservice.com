@@ -100,7 +100,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-11 03:53 UTC · IMPOSE-V1.36</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-11 22:16 UTC · IMPOSE-V1.36</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -151,6 +151,7 @@ function marginOf(spec) {
 // printable area moves. Returned as-is when the margin is null or unchanged.
 // This is what makes the margin box work on AUTO and the preset sheets — it
 // used to apply only under "Custom size…", so on 13×19 it did nothing at all.
+function sheetMarginOf(sheet) { return Math.round((sheet.long - sheet.usableLong) / 2 * 1000) / 1000; }
 function withMargin(sheet, m) {
   if (!sheet || m == null || !isFinite(m)) return sheet;
   const own = (sheet.long - sheet.usableLong) / 2;
@@ -317,14 +318,12 @@ function printableRect(sheet) {
   return { x0: mx, y0: my, x1: sheet.long - mx, y1: sheet.short - my };
 }
 
-// The full sheet edge (0,0)-(long,short). Used only when layout.fillSheet is
-// set — small saddle books that gang across the whole sheet for guillotine
-// cutting deliberately spill past the imageable area (see computeSaddleLayout).
-function fullSheetRect(sheet) { return { x0: 0, y0: 0, x1: sheet.long, y1: sheet.short }; }
-
-// The bound the block is placed/clamped within: printable image area normally,
-// full sheet in fill mode.
-function boundRect(layout) { return layout.fillSheet ? fullSheetRect(layout.sheet) : printableRect(layout.sheet); }
+// The bound the block is placed/clamped within. Fill mode used to be the bare
+// sheet edge, which is why "Fill full sheet" ignored a typed margin (owner
+// report, 1.36): the margin IS the operator's statement of what to keep
+// clear, so fill mode centres the block inside it too — a 0″ margin is the
+// whole sheet, and that is how a guillotine layout says so explicitly.
+function boundRect(layout) { return printableRect(layout.sheet); }
 
 // Per-gap gutter arrays for a layout: explicit layout.colGaps/rowGaps when set
 // (individual gutters), otherwise the uniform scalar layout.gutter filled in.
@@ -483,8 +482,7 @@ function fitManualGrid(a, d, pieceLong, pieceShort, sheets, gutters, allowedRot,
   const rgOK = rowGaps && rowGaps.length === d - 1 ? rowGaps : null;
   let best = null;
   for (const sh of sheets) {
-    const bw = fillSheet ? sh.long : sh.usableLong;
-    const bh = fillSheet ? sh.short : sh.usableShort;
+    const bw = sh.usableLong, bh = sh.usableShort;   // inside the margin, fill mode or not
     for (const rotated of (allowedRot || [false, true])) {
       const w = rotated ? pieceShort : pieceLong, h = rotated ? pieceLong : pieceShort;
       for (const g of (gutters || GUTTERS)) {
@@ -572,7 +570,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
     if (!res.ok) {
       const b = res.best;
-      throw new Error(`Manual ${manual.a}×${manual.d} grid of ${pieceLong}×${pieceShort}″ needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} ${fillSheet ? "sheet" : "printable area"} is ${b.bw}×${b.bh}″. Reduce columns/rows or gutters${fillSheet ? "" : ", or tick “fill full sheet” to use the whole sheet"}.`);
+      throw new Error(`Manual ${manual.a}×${manual.d} grid of ${pieceLong}×${pieceShort}″ needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″. Reduce columns/rows or gutters, or lower the imageable margin (0″ = the whole sheet).`);
     }
     sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
     const placed = grid.a * grid.d;
@@ -667,6 +665,8 @@ function computeLayout(calc, trimA, trimB, opts) {
   const totalW = grid.a * cellW + sum(cgA), totalH = grid.d * cellH + sum(rgA);
   if (totalW > sheet.long + EPS || totalH > sheet.short + EPS)
     throw new Error(`Gutters make the ${grid.a}×${grid.d} layout ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ — larger than the ${sheet.label} sheet. Reduce gutters or pieces.`);
+  if (fillSheet && (totalW > sheet.usableLong + EPS || totalH > sheet.usableShort + EPS))
+    throw new Error(`Fill full sheet: the ${grid.a}×${grid.d} block is ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ but the ${sheet.label} inside its ${sheetMarginOf(sheet)}″ margin is ${sheet.usableLong}×${sheet.usableShort}″. Lower the imageable margin (0″ = the whole sheet) or reduce gutters/pieces.`);
   if (!fillSheet && (totalW > sheet.usableLong + EPS || totalH > sheet.usableShort + EPS))
     warnings.push(`Block ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ is larger than the printable area (${sheet.usableLong}×${sheet.usableShort}″) — the outer edges will not image. Tick “fill full sheet” only if this sheet is being guillotine-cut.`);
 
@@ -737,7 +737,7 @@ function computeSaddleLayout(pw, ph, opts) {
                               opts && opts.saddleColGaps, opts && opts.saddleRowGaps, !!(opts && opts.saddleFillSheet));
     if (!res.ok) {
       const b = res.best;
-      throw new Error(`Manual ${manual.a}×${manual.d} of a ${spreadW}×${spreadH}″ spread needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} ${(opts && opts.saddleFillSheet) ? "sheet" : "printable area"} is ${b.bw}×${b.bh}″. Reduce copies or gutters${(opts && opts.saddleFillSheet) ? "" : ", or tick “fill full sheet”"}.`);
+      throw new Error(`Manual ${manual.a}×${manual.d} of a ${spreadW}×${spreadH}″ spread needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″. Reduce copies or gutters, or lower the imageable margin (0″ = the whole sheet).`);
     }
     sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
     const c = grid.a * grid.d;
@@ -817,6 +817,8 @@ function computeSaddleLayout(pw, ph, opts) {
   const totalW = grid.a * cellW + sum(cgA), totalH = grid.d * cellH + sum(rgA);
   if (totalW > sheet.long + EPS || totalH > sheet.short + EPS)
     throw new Error(`Gutters make the ${grid.a}×${grid.d} layout ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ — larger than the ${sheet.label} sheet. Reduce gutters or copies.`);
+  if (fillSheet && (totalW > sheet.usableLong + EPS || totalH > sheet.usableShort + EPS))
+    throw new Error(`Fill full sheet: the ${grid.a}×${grid.d} block is ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ but the ${sheet.label} inside its ${sheetMarginOf(sheet)}″ margin is ${sheet.usableLong}×${sheet.usableShort}″. Lower the imageable margin (0″ = the whole sheet) or reduce gutters/copies.`);
 
   if (!colGaps && !rowGaps && grid.a * grid.d > 1) warnings.push(grid.g === 0
     ? "Spreads butt (default) — one cut line between signatures, interior bleed cropped at it. Set a Gutter to space them instead."
@@ -4480,7 +4482,7 @@ function App() {
     ? (lay.stepRepeat ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>STEP &amp; REPEAT {lay.stepRepeat}× — PRICED {lay.pricedImp} PAGES/SIDE</span>
       : lay.manualGrid ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>MANUAL {lay.booklet.spreadsPerSide}/SIDE — PRICED {lay.pricedImp} PAGES/SIDE</span>
       : lay.efficient ? <span className="imp-badge ok">13×27.5 EFFICIENT — PRICED {lay.pricedImp}/SIDE</span>
-      : lay.fillSheet ? <span className="imp-badge warn">FULL-SHEET FILL — PAST IMAGEABLE AREA</span>
+      : lay.fillSheet ? <span className="imp-badge warn">FULL-SHEET FILL — {sheetMarginOf(lay.sheet)}″ MARGIN</span>
       : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}/SIDE`}</span>)
     : (lay.manualGrid ? <span className={"imp-badge " + (lay.imp === Math.round(lay.pricedImp) ? "ok" : "warn")}>MANUAL GRID {lay.across}×{lay.down} — PRICED {lay.pricedImp}-UP</span>
       : lay.efficient ? <span className={"imp-badge " + (lay.imp >= lay.pricedImp ? "ok" : "warn")}>13×27.5 EFFICIENT — PRICED {lay.pricedImp}-UP/13×19</span>
@@ -4611,7 +4613,7 @@ function App() {
                   <div className="imp-sheetline" style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: -2, marginBottom: 10 }}>
                     Sheet <b style={{ color: "rgba(255,255,255,.8)" }}>{shL ? shL.label : `${dims[0]}×${dims[1]}`}</b>
                     {" · "}prints <b style={{ color: "rgba(255,255,255,.8)" }}>{printable}″</b> inside a {m}″ margin
-                    {fillOn ? <span style={{ color: "#fbbf24" }}> · fill mode — the block may run past it</span> : null}
+                    {fillOn ? <span style={{ color: "#fbbf24" }}> · fill mode — block centred inside that margin; set it to 0 for the whole sheet</span> : null}
                     {sheetSel !== "auto" && <span> · physical sheet only; the priced imp stays what the calculator quoted</span>}
                   </div>
 
@@ -4619,7 +4621,7 @@ function App() {
                     {fillOn ? (
                       <Field label="Layout position" style={{ flex: 1 }}>
                         <div style={{ fontSize: 12.5, padding: "8px 0", color: "rgba(255,255,255,.55)" }}>
-                          Centred on the full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>— fill mode places past the imageable area, so no jog/offset applies{isPB ? " to this half" : ""}.</span>
+                          Centred inside the margin <span style={{ color: "rgba(255,255,255,.4)" }}>— fill mode centres the block, so no jog/offset applies{isPB ? " to this half" : ""}; the imageable margin above is the only edge kept clear.</span>
                         </div>
                       </Field>
                     ) : (
@@ -4921,8 +4923,8 @@ function App() {
                   )}
                   <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginBottom: 7 }}>
                     {isSaddle
-                      ? "Set the gutter between each signature column/row independently. Turn on “fill full sheet” to allow gutters that push the layout past the imageable area (guillotine cutting)."
-                      : "Set the gutter between each column/row independently. Turn on “fill full sheet” to allow a block that runs past the imageable area (guillotine cutting) — it centres on the sheet instead of jogging."}
+                      ? "Set the gutter between each signature column/row independently. “Fill full sheet” centres the block inside the imageable margin instead of jogging it to a corner — set the margin to 0 to use the whole sheet (guillotine cutting)."
+                      : "Set the gutter between each column/row independently. “Fill full sheet” centres the block inside the imageable margin instead of jogging it to a corner — set the margin to 0 to use the whole sheet (guillotine cutting)."}
                   </div>
                   {(nc > 0 || nr > 0) ? (
                     <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -4960,7 +4962,7 @@ function App() {
                     <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
                       <input type="checkbox" checked={G.fill == null ? !!(ok && panelLay.fillSheet) : G.fill}
                              onChange={e => setG({ fill: e.target.checked })} style={{ width: "auto" }} />
-                      Fill full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>(place past the imageable area)</span>
+                      Fill full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>(centre the block; keeps the imageable margin clear — 0″ = whole sheet)</span>
                     </label>
                     {custom && (
                       <button type="button" className="imp-btn sec" style={{ padding: "3px 10px", fontSize: 12 }}
@@ -5523,7 +5525,7 @@ function App() {
                         : lay.efficient
                         ? <span className="imp-badge ok">13×27.5 EFFICIENT — PRICED {lay.pricedImp}/SIDE</span>
                         : lay.fillSheet
-                        ? <span className="imp-badge warn">FULL-SHEET FILL {lay.across}×{lay.down} — PAST IMAGEABLE AREA</span>
+                        ? <span className="imp-badge warn">FULL-SHEET FILL {lay.across}×{lay.down} — CENTRED, {sheetMarginOf(lay.sheet)}″ MARGIN</span>
                         : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}/SIDE`}</span>}
                     </div>
                   ) : (
@@ -5533,7 +5535,7 @@ function App() {
                         : lay.efficient
                         ? <span className={"imp-badge " + (lay.imp >= lay.pricedImp ? "ok" : "warn")}>13×27.5 EFFICIENT — PRICED {lay.pricedImp}-UP/13×19</span>
                         : <span className={"imp-badge " + (parityOk ? "ok" : "err")}>{parityOk ? "MATCHES PRICED IMP" : `MISMATCH — PRICED ${lay.pricedImp}-UP`}</span>}
-                      {lay.fillSheet && <span className="imp-badge warn" style={{ marginLeft: 6 }}>FULL-SHEET FILL — PAST IMAGEABLE AREA</span>}
+                      {lay.fillSheet && <span className="imp-badge warn" style={{ marginLeft: 6 }}>FULL-SHEET FILL — CENTRED, {sheetMarginOf(lay.sheet)}″ MARGIN</span>}
                     </div>
                   )}
                   <div>Gutter: <b>{lay.gutter}″</b>{lay.gutter === 0 ? " (butt-cut)" : ""}</div>
