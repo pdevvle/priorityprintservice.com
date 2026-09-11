@@ -3183,6 +3183,11 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       bleed: 0.125,
       safety: 0.125,
       pages: Number(pageCount),
+      // The press simulation travels with the job. gsFor() greys these pages on
+      // this surface; the proofer must grey the same ones, or the customer
+      // approves colour they are not going to get.
+      insideColor: insideColor === "bw" ? "bw" : "color",
+      coverColor:  coverColor  === "bw" ? "bw" : "color",
     };
     const sources = (rawFilesRef.current && rawFilesRef.current.length)
       ? rawFilesRef.current.slice()

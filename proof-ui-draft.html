@@ -863,6 +863,11 @@ const MODEL = {
   trim: { w: 5.5, h: 8.5 },
   bleed: 0.125,
   safety: 0.125,
+  // How each part prints. 'color' or 'bw'. The cover is pages 1, 2, N-1 and N,
+  // the same four the calculator's isCoverPage() names — a proof that greys a
+  // different set from the modal would be arguing with the thing it replaces.
+  insideColor: 'color',
+  coverColor: 'color',
   groups: [],
   pages: [],
 };
@@ -908,6 +913,13 @@ function validateJob(job){
     const v = Number(job[k]);
     if (!isFinite(v) || v < 0) errs.push(k + ' must be zero or a positive number');
   }
+  // A misspelt colour mode would fall through to "colour" and the customer
+  // would approve a colour proof of a greyscale job — the exact mistake this
+  // surface exists to prevent, so it is a refusal and not a default.
+  for (const k of ['insideColor', 'coverColor']){
+    if (job[k] == null) continue;
+    if (job[k] !== 'color' && job[k] !== 'bw') errs.push(k + " must be 'color' or 'bw'");
+  }
   return errs;
 }
 
@@ -920,9 +932,36 @@ function applyJob(job){
   MODEL.trim     = { w: Number(job.trim.w), h: Number(job.trim.h) };
   if (job.bleed  != null) MODEL.bleed  = Number(job.bleed);
   if (job.safety != null) MODEL.safety = Number(job.safety);
+  MODEL.insideColor = job.insideColor === 'bw' ? 'bw' : 'color';
+  MODEL.coverColor  = job.coverColor  === 'bw' ? 'bw' : 'color';
   recomputeDerived();
   rebuildModel(Number(job.pages));
   return [];
+}
+
+/* ── the press simulation ─────────────────────────────────────
+   A greyscale page is shown greyscale everywhere the customer looks — sheet,
+   lens, thumbnails, the 3D book — and in the preview JPEGs that record what
+   they approved. It is NOT baked into PRINT_READY.pdf: that stays colour and
+   the press prints it greyscale, exactly as the calculator's own modal does.
+   Order 87154 (2026-09-11) is why the previews are included: greyscale
+   interiors approved grey on screen, page 28 filed in colour. */
+function pageIsGrey(n){
+  const N = MODEL.pages.length;
+  const cover = n === 1 || n === 2 || n === N - 1 || n === N;
+  return (cover ? MODEL.coverColor : MODEL.insideColor) === 'bw';
+}
+function greyFilterFor(n){ return pageIsGrey(n) ? 'grayscale(1)' : 'none'; }
+/* Pixel arithmetic rather than ctx.filter, so it cannot depend on the browser
+   supporting canvas filters. Rec.709 luma — what CSS grayscale(1) computes,
+   so the file matches the screen. */
+function bakeGreyscale(ctx, w, h){
+  const id = ctx.getImageData(0, 0, w, h), d = id.data;
+  for (let k = 0; k < d.length; k += 4){
+    const y = 0.2126 * d[k] + 0.7152 * d[k + 1] + 0.0722 * d[k + 2];
+    d[k] = d[k + 1] = d[k + 2] = y;
+  }
+  ctx.putImageData(id, 0, 0);
 }
 
 /* Resolution thresholds. Placeholder art is generated at 150 DPI, so the
@@ -1336,6 +1375,7 @@ function renderStage(){
       '<div class="typemark'+(m.level === 'cut' ? ' cut' : '')+'" style="left:'+(m.x*100)+'%;top:'+(m.y*100)+
       '%;width:'+(m.w*100)+'%;height:'+(m.h*100)+'%"></div>').join('') + '</div>');
   sheet.insertBefore(r.canvas, sheet.firstChild);
+  r.canvas.style.filter = greyFilterFor(state.selected);
   attachSheetHandlers(sheet, r);
   syncZoomReadout();
 }
@@ -1402,6 +1442,7 @@ function showLens(sheet, r, fx, fy, px, py){
 
   const lc = document.createElement('canvas');
   lc.width = LENS; lc.height = LENS;
+  lc.style.filter = greyFilterFor(state.selected);
   const ctx = lc.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0,0,LENS,LENS);
   // Source window in composed pixels: the lens covers LENS/zoom display px.
@@ -1508,7 +1549,7 @@ function renderBook(sheet){
     const depth = Math.max(2, MODEL.pages.length * 0.3), half = depth / 2;
     const edge = 'repeating-linear-gradient(0deg,#f5f0e8 0px,#e8e0d4 1px,#f0ebe3 2px)';
     const face = (n, cls, radius) => '<div class="bpface '+cls+'" style="width:'+W+'px;height:'+H+'px;'+
-      'background-image:url('+trimmedFace(n, W*2)+');background-size:cover;background-color:#f8f5f0;border-radius:'+radius+'"></div>';
+      'background-image:url('+trimmedFace(n, W*2)+');background-size:cover;background-color:#f8f5f0;border-radius:'+radius+';filter:'+greyFilterFor(n)+'"></div>';
     html +=
       '<div class="bpscene" id="bpscene" style="transform:rotateX('+state.rot.x+'deg) rotateY('+state.rot.y+'deg)">' +
         '<div class="bpclosed" style="width:'+W+'px;height:'+H+'px;--half-depth:'+half+'px">' +
@@ -1525,7 +1566,7 @@ function renderBook(sheet){
     const lp = INTERIOR[state.spread * 2], rp = INTERIOR[state.spread * 2 + 1];
     const leaf = (n, side) => n
       ? '<div class="bppage '+side+'" style="width:'+W+'px;height:'+H+'px;left:'+(side === 'left' ? 0 : W)+'px">' +
-          '<img src="'+trimmedFace(n, W*2)+'" alt=""><div class="bpshadow'+(side === 'left' ? 'l' : 'r')+'"></div>' +
+          '<img src="'+trimmedFace(n, W*2)+'" alt="" style="filter:'+greyFilterFor(n)+'"><div class="bpshadow'+(side === 'left' ? 'l' : 'r')+'"></div>' +
           '<span class="bppagenum">'+n+'</span></div>'
       : '';
     html +=
@@ -1646,7 +1687,7 @@ function renderStrip(){
       const d = document.createElement('div');
       d.className = 'pg' + (isSel(n) ? ' sel' : '') + (up ? ' hasart' : '');
       d.title = up ? up.label : 'No file on this page yet — drop one here';
-      d.innerHTML = '<div class="thumb" style="background-image:url('+thumb+')"></div>' +
+      d.innerHTML = '<div class="thumb" style="background-image:url('+thumb+');filter:'+greyFilterFor(n)+'"></div>' +
                     '<div class="cap"><span class="n">P'+n+'</span>' + (p.name ? '<br>'+p.name : '') + '</div>' +
                     (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'">!</span>' : '') +
                     '<button class="pgup" title="' + (up ? 'Replace the file on page ' : 'Add a file to page ') + n +
@@ -2338,10 +2379,11 @@ async function buildPackage(){
     c.width = PW; c.height = PH;
     const ctx = c.getContext('2d');
     ctx.drawImage(r.canvas, 0, 0);
+    if (pageIsGrey(n)) bakeGreyscale(ctx, PW, PH);
     drawGuides(ctx, PW, PH);
     files.push({ name:'PREVIEW_p' + String(n).padStart(2,'0') + '.jpg',
                  blob:await canvasToBlob(c, 'image/jpeg', 0.88),
-                 note:'with bleed / trim / safety guides' });
+                 note:(pageIsGrey(n) ? 'greyscale, as approved on screen · ' : '') + 'with bleed / trim / safety guides' });
   }
 
   // ── 3. the manifest ──
@@ -2357,6 +2399,10 @@ async function buildPackage(){
   L.push('  bleed        ' + MODEL.bleed + '"   safety ' + MODEL.safety + '"');
   L.push('  page size    ' + BLEED_W + '" x ' + BLEED_H + '" (with bleed)');
   L.push('  pages        ' + pages.length);
+  L.push('  inside print ' + (MODEL.insideColor === 'bw' ? 'greyscale' : 'full color'));
+  L.push('  cover print  ' + (MODEL.coverColor  === 'bw' ? 'greyscale' : 'full color'));
+  if (MODEL.insideColor === 'bw' || MODEL.coverColor === 'bw')
+    L.push('  greyscale pages are rendered greyscale in the previews, as approved on screen; PRINT_READY.pdf keeps its colour and the press prints it greyscale');
   L.push('');
   L.push('PRINT FILE');
   L.push('  PRINT_READY.pdf');

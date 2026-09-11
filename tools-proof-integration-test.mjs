@@ -156,6 +156,20 @@ console.log('\n── the calculator opens the proofer and gets an approval back
   ok('the calculator has a file input to upload through', uploaded > 0, String(uploaded) + ' inputs');
   await page.waitForTimeout(2500);
 
+  // Greyscale interiors. The pill is inside "Printing & Paper", collapsed and
+  // unmounted until opened. What matters is that the choice crosses the frame
+  // boundary: the proofer must grey the same pages the modal would have.
+  const greyPicked = await page.evaluate(async () => {
+    const h = [...document.querySelectorAll('button[aria-expanded="false"]')].find(x => /Printing & Paper/.test(x.textContent || ''));
+    h && h.click();
+    await new Promise(r => setTimeout(r, 400));
+    const b = [...document.querySelectorAll('button')].filter(x => x.textContent.trim() === 'Greyscale')[0];
+    if (!b) return false;
+    b.click(); return true;
+  });
+  ok('Inside Printing set to Greyscale', greyPicked);
+  await page.waitForTimeout(600);
+
   // Open the proof the way the customer does.
   // Match the magnifier button specifically. "Proof" alone also matches the
   // "Artwork & Proofing" section header, which sits earlier in the document —
@@ -185,6 +199,7 @@ console.log('\n── the calculator opens the proofer and gets an approval back
     const job = await frame.evaluate(() => ({
       calc: MODEL.calc, trim: MODEL.trim, pages: MODEL.pages.length,
       locked: document.getElementById('pageCount').disabled,
+      insideColor: MODEL.insideColor, coverColor: MODEL.coverColor,
     }));
     // The calculator's defaults are 5.5x8.5 / 8pp; the point is that these came
     // across the boundary rather than being the proofer's own defaults by luck,
@@ -194,6 +209,16 @@ console.log('\n── the calculator opens the proofer and gets an approval back
     ok('the trim came from the calculator', job.trim.w > 0 && job.trim.h > 0,
        job.trim.w + 'x' + job.trim.h);
     ok('the page count is locked to the order', job.locked === true);
+    ok('the print modes crossed the boundary: greyscale inside, colour cover',
+       job.insideColor === 'bw' && job.coverColor === 'color', JSON.stringify({ i: job.insideColor, c: job.coverColor }));
+    const greyed = await frame.evaluate(() => {
+      const f = () => document.querySelector('#sheet canvas').style.filter;
+      state.selected = 3; renderAll(); const p3 = f();
+      state.selected = 1; renderAll(); const p1 = f();
+      return { p1, p3 };
+    });
+    ok('and the proofer greys an interior page but not the cover',
+       greyed.p3 === 'grayscale(1)' && greyed.p1 === 'none', JSON.stringify(greyed));
 
     // Approve, and let the calculator receive it.
     // The checkpoint applies inside the frame too — the calculator cannot be a

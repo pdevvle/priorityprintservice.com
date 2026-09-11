@@ -48,7 +48,10 @@ const errors = [];
 // A job deliberately unlike the demo (5.5x8.5, 8pp) in every field that
 // matters, so anything still reading the default is visible as a wrong number
 // rather than hiding behind a coincidence.
-const JOB = { calc:'saddle', trim:{ w:8.5, h:11 }, bleed:0.25, safety:0.25, pages:12 };
+// Greyscale interiors on a colour cover — the shape of order 87154, whose
+// preview of page 28 came out in colour from the built-in modal.
+const JOB = { calc:'saddle', trim:{ w:8.5, h:11 }, bleed:0.25, safety:0.25, pages:12,
+              insideColor:'bw', coverColor:'color' };
 
 async function open(job, opts = {}) {
   const page = await browser.newPage({ viewport:{ width:1500, height:1100 } });
@@ -101,6 +104,8 @@ for (const [why, bad, expect] of [
   ['odd page count',    { calc:'saddle', trim:{ w:8.5, h:11 }, pages:7 }, /even|multiple/i],
   ['not a multiple of 4', { calc:'saddle', trim:{ w:8.5, h:11 }, pages:10 }, /multiple of 4/i],
   ['too few pages',     { calc:'saddle', trim:{ w:8.5, h:11 }, pages:2 },  /at least 4/i],
+  // A misspelt colour mode must not quietly become "colour".
+  ['bad colour mode',   { calc:'saddle', trim:{ w:8.5, h:11 }, pages:8, insideColor:'grey' }, /insideColor.*'color' or 'bw'/],
 ]) {
   const page = await open(bad);
   const p = await posts(page);
@@ -126,13 +131,36 @@ console.log('\n── approving returns the package to the host ──');
     x.fillStyle = '#0f172a'; x.fillRect(80, 80, 300, 60);
     const blob = await new Promise(r => c.toBlob(r, 'image/png'));
     await loadArtSequence(1, [new File([blob], 'art.png', { type:'image/png' })]);
+    // The same coloured art on an interior page, so greyscale has something to
+    // act on there — the placeholder pages are near-grey already.
+    await loadArtSequence(3, [new File([blob], 'art3.png', { type:'image/png' })]);
   });
   // loadArtSequence hands off to an Image that decodes later, so awaiting it
   // proves nothing about whether the art has landed. That used to be invisible:
   // the demo pages were flagged anyway, so the gate was ticked either way. They
   // are clean now, so the flag genuinely arrives after — wait for the art.
-  await page.waitForFunction(() => uploads.has(1), null, { timeout:15000 });
+  await page.waitForFunction(() => uploads.has(1) && uploads.has(3), null, { timeout:15000 });
   await page.waitForTimeout(300);
+
+  // ── the press simulation, on every surface the customer looks at ──
+  const grey = await page.evaluate(() => {
+    const filt = () => document.querySelector('#sheet canvas').style.filter;
+    const thumb = n => [...document.querySelectorAll('#stripBottom .pg')]
+      .find(e => new RegExp('P' + n + '(\\D|$)').test(e.querySelector('.n').textContent))
+      .querySelector('.thumb').style.filter;
+    state.selected = 1; renderAll(); const p1 = filt();
+    state.selected = 3; renderAll(); const p3 = filt();
+    return { p1, p3, t1: thumb(1), t3: thumb(3), t12: thumb(12),
+             printIsColour: (() => { const c = renderPrintPage(3).canvas;
+               const d = c.getContext('2d').getImageData(c.width/2|0, c.height/2|0, 1, 1).data;
+               return Math.max(d[0],d[1],d[2]) - Math.min(d[0],d[1],d[2]) > 30; })() };
+  });
+  ok('the cover (page 1) shows in colour', grey.p1 === 'none', grey.p1);
+  ok('an interior page (page 3) shows greyscale', grey.p3 === 'grayscale(1)', grey.p3);
+  ok('the filmstrip agrees, page by page', grey.t1 === 'none' && grey.t3 === 'grayscale(1)' && grey.t12 === 'none',
+     JSON.stringify({ t1: grey.t1, t3: grey.t3, t12: grey.t12 }));
+  ok('but the PRINT composition of that page stays colour', grey.printIsColour === true);
+  await page.evaluate(() => { state.selected = 1; renderAll(); });
   // Both gates: agreeing, and acknowledging whatever preflight flagged. Setting
   // .checked directly does not fire onchange, hence the explicit renderApproval.
   const gate = await page.evaluate(() => {
@@ -168,6 +196,29 @@ console.log('\n── approving returns the package to the host ──');
     ok('the print file is not empty',
        ((app.files || []).find(f => f.name === 'PRINT_READY.pdf') || {}).size > 1000);
     ok('approval reports this job\'s page count', app.pageCount === 12, String(app.pageCount));
+
+    // The previews record what was approved — greyscale included. The print
+    // file does not — it stays colour for the press.
+    const chroma = await page.evaluate(async () => {
+      const m = window.__posts.find(x => x.type === 'pps-proof:approved');
+      const sample = async name => {
+        const f = m.files.find(x => x.name === name); if (!f) return null;
+        const bmp = await createImageBitmap(f.blob);
+        const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+        const x = c.getContext('2d'); x.drawImage(bmp, 0, 0);
+        // centre region, clear of the coloured guide lines at the edges
+        const d = x.getImageData(c.width*0.3|0, c.height*0.3|0, c.width*0.4|0, c.height*0.4|0).data;
+        let maxd = 0;
+        for (let k = 0; k < d.length; k += 4) maxd = Math.max(maxd, Math.max(d[k],d[k+1],d[k+2]) - Math.min(d[k],d[k+1],d[k+2]));
+        return maxd;
+      };
+      return { p01: await sample('PREVIEW_p01.jpg'), p03: await sample('PREVIEW_p03.jpg'),
+               manifest: await m.files.find(x => x.name === 'MANIFEST.txt').blob.text() };
+    });
+    ok('PREVIEW_p01 (cover) is colour', chroma.p01 !== null && chroma.p01 > 40, 'chroma ' + chroma.p01);
+    ok('PREVIEW_p03 (interior) is greyscale', chroma.p03 !== null && chroma.p03 <= 8, 'chroma ' + chroma.p03);
+    ok('the manifest records the print modes', /inside print greyscale/.test(chroma.manifest) && /cover print  full color/.test(chroma.manifest));
+    ok('and says the print file keeps its colour', /PRINT_READY\.pdf keeps its colour/.test(chroma.manifest));
   }
 
   // The hash must be of the bytes the host was handed — not of anything else.
