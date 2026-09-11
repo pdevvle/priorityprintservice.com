@@ -3116,6 +3116,24 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // reconcile pads or trims displayPages to exactly pageCount anyway.
   const isCoverPage = (i) => i === 0 || i === 1 || i === pageCount - 2 || i === pageCount - 1;
   const gsFor = (i) => ((isCoverPage(i) ? coverColor : insideColor) === "bw") ? "grayscale(1)" : "none";
+  // The same simulation, baked. gsFor() is a CSS filter on the <img> the
+  // customer looks at; anything that leaves the browser as pixels — the preview
+  // JPEGs in the approval package — has to carry the conversion itself, or the
+  // deliverable whose whole job is to record "what the customer saw" records
+  // something else. Order 87154 (2026-09-11): greyscale interiors approved grey
+  // on screen, page 28 filed in Drive in full colour. Pixel arithmetic rather
+  // than ctx.filter so it cannot depend on the browser supporting canvas
+  // filters; Rec.709 luma, which is what CSS grayscale(1) computes. The print
+  // file is deliberately NOT touched — it stays colour and the press prints it
+  // greyscale, exactly as before.
+  const bakeGreyscale = (ctx, w, h) => {
+    const id = ctx.getImageData(0, 0, w, h), d = id.data;
+    for (let k = 0; k < d.length; k += 4) {
+      const y = 0.2126 * d[k] + 0.7152 * d[k + 1] + 0.0722 * d[k + 2];
+      d[k] = d[k + 1] = d[k + 2] = y;
+    }
+    ctx.putImageData(id, 0, 0);
+  };
 
   // ── Orientation mismatch detection ──
   const needsRotation = useMemo(() => {
@@ -3621,6 +3639,7 @@ update();
             pc.width = img.naturalWidth; pc.height = img.naturalHeight;
             const pctx = pc.getContext("2d");
             pctx.drawImage(img, 0, 0);
+            if (gsFor(i) !== "none") bakeGreyscale(pctx, pc.width, pc.height);
             drawGuides(pctx, pc.width, pc.height, i);
             pc.toBlob(resolve, "image/jpeg", 0.85);
           };
@@ -3660,6 +3679,7 @@ update();
         pc.width = prevW; pc.height = prevH;
         const pctx = pc.getContext("2d");
         pctx.drawImage(c, 0, 0, prevW, prevH);
+        if (gsFor(i) !== "none") bakeGreyscale(pctx, prevW, prevH);
         drawGuides(pctx, prevW, prevH, i);
         const prevBlob = await new Promise(res => pc.toBlob(res, "image/jpeg", 0.85));
         previewBlobs.push(prevBlob);
@@ -3725,6 +3745,8 @@ update();
       `Bleed margin: ${BLEED}″ per side`,
       `Binding: Saddle Stitch`,
       `Page count (with padding): ${totalPages}`,
+      `Inside printing: ${insideColor === "bw" ? "Greyscale" : "Full color"}`,
+      `Cover printing: ${coverColor === "bw" ? "Greyscale" : "Full color"}`,
       "",
       "── Customer Transforms (summary) ──",
       `Fit mode: ${txSummaryFit}`,
@@ -3739,7 +3761,10 @@ update();
       usedRawFile
         ? `2. Print-ready PDF: SKIPPED — raw file is already print-ready (no transforms, no page reconciliation, no replaced pages)`
         : `2. Print-ready PDF: ${totalPages} pages at ${DPI} DPI, ${bleedW}″ × ${bleedH}″, JPEG quality 0.95`,
-      `3. Screen previews: ${previewBlobs.filter(b => b).length} page images at 150 DPI, JPEG quality 0.85`,
+      `3. Screen previews: ${previewBlobs.filter(b => b).length} page images at 150 DPI, JPEG quality 0.85`
+        + ((insideColor === "bw" || coverColor === "bw")
+            ? " — greyscale pages rendered greyscale, as approved on screen; the print file keeps its colour and the press prints it greyscale"
+            : ""),
       `4. This manifest`,
       "",
       "── Approval Binding ──",
