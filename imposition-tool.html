@@ -100,7 +100,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-07 23:59 UTC · IMPOSE-V1.35</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-11 03:53 UTC · IMPOSE-V1.36</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -138,6 +138,27 @@ function customSheet(a, b, margin) {
   return { key: `custom${t(L)}x${t(S)}`, label: `${t(L)}×${t(S)} custom`, long: L, short: S,
            usableLong: L - 2 * m, usableShort: S - 2 * m, custom: true, margin: m };
 }
+// The operator's imageable margin, or null for "use the sheet's own" (0.25″ on
+// every stock sheet). An empty box means default, never 0 — clearing the field
+// while typing must not silently make the whole sheet printable.
+function marginOf(spec) {
+  const v = spec && spec.sheetMargin;
+  if (v === "" || v == null || !isFinite(+v)) return null;
+  return Math.max(0, +v);
+}
+// A stock sheet with a different imageable margin: same key and label (the
+// slug, filename and every `sheet.key === …` rule still see 13×19), only the
+// printable area moves. Returned as-is when the margin is null or unchanged.
+// This is what makes the margin box work on AUTO and the preset sheets — it
+// used to apply only under "Custom size…", so on 13×19 it did nothing at all.
+function withMargin(sheet, m) {
+  if (!sheet || m == null || !isFinite(m)) return sheet;
+  const own = (sheet.long - sheet.usableLong) / 2;
+  if (Math.abs(m - own) < EPS) return sheet;
+  if (2 * m >= Math.min(sheet.long, sheet.short)) throw new Error(`A ${m}″ imageable margin leaves no printable area on a ${sheet.label} sheet.`);
+  const t = n => Math.round(n * 1000) / 1000;
+  return Object.assign({}, sheet, { usableLong: t(sheet.long - 2 * m), usableShort: t(sheet.short - 2 * m), margin: m });
+}
 // Operator override of the parent sheet. Returns null for "auto" (the product's
 // own press sheet). NOTE this changes only the PHYSICAL sheet — the priced imp
 // is still whatever the calculator quoted, so any resulting difference is
@@ -145,14 +166,14 @@ function customSheet(a, b, margin) {
 function sheetOverrideOf(spec) {
   const k = spec && spec.sheet;
   if (!k || k === "auto") return null;
-  if (k !== "custom") return SHEETS[k] || null;
+  const m = marginOf(spec);
+  if (k !== "custom") return SHEETS[k] ? withMargin(SHEETS[k], m) : null;
   const L = +spec.sheetLong, S = +spec.sheetShort;
   if (!(L >= 3 && S >= 3)) throw new Error("Custom parent sheet needs both dimensions (minimum 3″).");
   if (L > SHEET_MAX || S > SHEET_MAX) throw new Error(`Custom parent sheet is capped at ${SHEET_MAX}″.`);
-  const m = spec.sheetMargin === "" || spec.sheetMargin == null ? SHEET_MARGIN : +spec.sheetMargin;
-  if (!(m >= 0)) throw new Error("Imageable margin must be 0″ or more.");
-  if (2 * m >= Math.min(L, S)) throw new Error(`A ${m}″ imageable margin leaves no printable area on a ${L}×${S}″ sheet.`);
-  return customSheet(L, S, m);
+  const mm = m == null ? SHEET_MARGIN : m;
+  if (2 * mm >= Math.min(L, S)) throw new Error(`A ${mm}″ imageable margin leaves no printable area on a ${L}×${S}″ sheet.`);
+  return customSheet(L, S, mm);
 }
 
 const CALC_TYPES = [
@@ -493,6 +514,12 @@ function computeLayout(calc, trimA, trimB, opts) {
   // full double bleed, single bleed, butt cut.
   const bleed = opts && isFinite(opts.bleed) && opts.bleed !== null ? Math.min(Math.max(+opts.bleed, 0), 0.5) : BLEED;
   if (Math.abs(bleed - BLEED) > EPS) warnings.push(`Bleed override: ${bleed}″ per side (default ${BLEED}″).`);
+  // Stock sheets carry the operator's imageable margin (withMargin is a no-op
+  // at the default 0.25″), so a margin typed on an AUTO or preset sheet moves
+  // the printable area exactly as it does on a custom one.
+  const SM = opts && opts.sheetMargin != null ? opts.sheetMargin : null;
+  const SH = k => withMargin(SHEETS[k], SM);
+  if (SM != null && Math.abs(SM - SHEET_MARGIN) > EPS) warnings.push(`Imageable margin ${SM}″ (default ${SHEET_MARGIN}″) — marks, slug and the jog all follow the smaller/larger printable area.`);
   const autoGutters = bleed > 0 ? [2 * bleed, bleed, 0] : [0];
   // Gutter override: a fixed value replaces the auto policy everywhere
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : autoGutters;
@@ -519,14 +546,14 @@ function computeLayout(calc, trimA, trimB, opts) {
   if (calc === "sticker") {
     priced = stickerImp(pieceLong, pieceShort);
     if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not fit the 12×18 sticker sheet`);
-    sheet = SHEETS["12x18"];
+    sheet = SH("12x18");
   } else if (PB_CALCS.includes(calc)) {
     priced = 0;                       // sentinel: unpriced, best physical fit below
-    sheet = SHEETS["13x19"];
+    sheet = SH("13x19");
   } else if (FLAT_CALCS.includes(calc)) {
     priced = flatImp(pieceLong, pieceShort);
-    sheet = SHEETS["13x19"];
-    if (priced < 1) { priced = flatImp(pieceLong, pieceShort, 27); sheet = SHEETS["13x27.5"]; } // calculators' two-sheet rule
+    sheet = SH("13x19");
+    if (priced < 1) { priced = flatImp(pieceLong, pieceShort, 27); sheet = SH("13x27.5"); } // calculators' two-sheet rule
     if (priced < 1) throw new Error(`${pieceLong}×${pieceShort}″ does not image on any press sheet`);
   } else {
     throw new Error(`Unknown calc type "${calc}"`);
@@ -540,8 +567,8 @@ function computeLayout(calc, trimA, trimB, opts) {
 
   if (manual) {
     const cands = ovSheet ? [ovSheet]
-                : opts && opts.manualSheet && SHEETS[opts.manualSheet] ? [SHEETS[opts.manualSheet]]
-                : calc === "sticker" ? [SHEETS["12x18"]] : [SHEETS["13x19"], SHEETS["13x27.5"]];
+                : opts && opts.manualSheet && SHEETS[opts.manualSheet] ? [SH(opts.manualSheet)]
+                : calc === "sticker" ? [SH("12x18")] : [SH("13x19"), SH("13x27.5")];
     const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
     if (!res.ok) {
       const b = res.best;
@@ -564,7 +591,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     // Unpriced (perfect bound). Try the standard sheet, then the oversize one,
     // and take whatever fits best. Reported as an explicit best-fit so nobody
     // reads the count as a pricing figure.
-    const cands = ovSheet ? [ovSheet] : [SHEETS["13x19"], SHEETS["13x27.5"]];
+    const cands = ovSheet ? [ovSheet] : [SH("13x19"), SH("13x27.5")];
     let best = null;
     for (const sh of cands) {
       const g = bestPhysicalGrid(pieceLong, pieceShort, sh, gutters, allowedRot);
@@ -593,7 +620,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     // Efficient mode: re-lay the piece on the oversize sheet (or on whatever
     // parent the operator forced) and let the multiple expand to fill it.
     // The pricing basis stays the product's own imp — this saves press passes.
-    const effSheet = ovSheet || SHEETS["13x27.5"];
+    const effSheet = ovSheet || SH("13x27.5");
     if (opts && opts.efficient && priced >= 2 && (ovSheet || sheet.key === "13x19")) {
       sheet = effSheet;
       grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot);
@@ -662,20 +689,23 @@ function computeSaddleLayout(pw, ph, opts) {
   let mismatch = false;
   const bleed = opts && isFinite(opts.bleed) && opts.bleed !== null ? Math.min(Math.max(+opts.bleed, 0), 0.5) : BLEED;
   if (Math.abs(bleed - BLEED) > EPS) warnings.push(`Bleed override: ${bleed}″ per side (default ${BLEED}″).`);
+  const SM = opts && opts.sheetMargin != null ? opts.sheetMargin : null;
+  const SH = k => withMargin(SHEETS[k], SM);
+  if (SM != null && Math.abs(SM - SHEET_MARGIN) > EPS) warnings.push(`Imageable margin ${SM}″ (default ${SHEET_MARGIN}″) — marks, slug and the jog all follow the smaller/larger printable area.`);
   const { imp, source } = resolveSaddleImp(pw, ph);
   if (imp < 1) throw new Error(`${pw}×${ph}″ pages do not image on any press sheet (imp=${imp})`);
   const spreadW = 2 * pw, spreadH = ph; // spine vertical in spread space
   const spL = Math.max(spreadW, spreadH), spS = Math.min(spreadW, spreadH);
   let sheet, target, efficient = false;
   if (imp >= 2) {
-    sheet = SHEETS["13x19"];
+    sheet = SH("13x19");
     target = Math.floor(imp / 2);
     if (imp % 2) { mismatch = true; warnings.push(`MISMATCH: priced ${imp} pages/side is odd — placing ${target} whole spread(s) (${target * 2} pages/side). Review pricing for this size.`); }
   } else {
     // imp:1 presets (12×12, 11×8.5 L, 12×9 L): the open spread only fits the
     // 13×27.5 oversize sheet, 1 spread per side — same page throughput the
     // pricing assumes (1 page per 13×19-side equivalent).
-    sheet = SHEETS["13x27.5"];
+    sheet = SH("13x27.5");
     target = 1;
     warnings.push("Open spread requires the 13×27.5 oversize sheet (1 spread per side).");
   }
@@ -702,7 +732,7 @@ function computeSaddleLayout(pw, ph, opts) {
   if (manual) {
     if (manual.a * manual.d > MANUAL_GRID_MAX)
       throw new Error(`Manual grid ${manual.a}×${manual.d} = ${manual.a * manual.d} signature copies exceeds the ${MANUAL_GRID_MAX}-cell limit.`);
-    const cands = ovSheet ? [ovSheet] : [SHEETS["13x19"], SHEETS["13x27.5"]];
+    const cands = ovSheet ? [ovSheet] : [SH("13x19"), SH("13x27.5")];
     const res = fitManualGrid(manual.a, manual.d, spL, spS, cands, gutters, [false, true],
                               opts && opts.saddleColGaps, opts && opts.saddleRowGaps, !!(opts && opts.saddleFillSheet));
     if (!res.ok) {
@@ -725,7 +755,7 @@ function computeSaddleLayout(pw, ph, opts) {
   if (!grid && repN >= 1) {
     if (repN > MANUAL_GRID_MAX)
       throw new Error(`Step and repeat ${repN} copies exceeds the ${MANUAL_GRID_MAX}-cell limit.`);
-    const cands = ovSheet ? [ovSheet] : [SHEETS["13x19"], SHEETS["13x27.5"]];
+    const cands = ovSheet ? [ovSheet] : [SH("13x19"), SH("13x27.5")];
     let hit = null;
     for (const sh of cands) {
       const g = bestGridForCount(repN, spL, spS, sh, gutters);
@@ -742,7 +772,7 @@ function computeSaddleLayout(pw, ph, opts) {
 
   // Efficient mode — the oversize sheet, or whatever parent was forced.
   if (!grid && opts && opts.efficient) {
-    const effSheet = ovSheet || SHEETS["13x27.5"];
+    const effSheet = ovSheet || SH("13x27.5");
     const effGrid = bestPhysicalGrid(spL, spS, effSheet, gutters);
     if (effGrid && effGrid.a * effGrid.d > target) {
       sheet = effSheet; grid = effGrid; efficient = true;
@@ -2180,6 +2210,10 @@ async function imposeSaddle(artBytes, spec, layout) {
 // spec: { calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate,
 //         jobName, orderRef, marks }
 // artBytes: front (+back on page 2) PDF. backBytes: optional separate back PDF.
+// Gap boxes hold what the operator typed (strings), because a controlled
+// number input that is coerced on every keystroke eats the decimal point:
+// React rewrites "0." to "0" and the value never sticks. Coerce once, here.
+const gapNum = v => Math.max(0, +v || 0);
 function layoutOpts(spec) {
   return {
     allowBestFit: !!spec.allowBestFit,
@@ -2191,8 +2225,8 @@ function layoutOpts(spec) {
     forceRotated: spec.forceRotated || "auto",
     bleed: isFinite(spec.bleed) && spec.bleed !== null && spec.bleed !== "" ? +spec.bleed : null,
     // Saddle signature gutters: manual per-gap overrides + full-sheet flag.
-    saddleColGaps: Array.isArray(spec.saddleColGaps) ? spec.saddleColGaps : null,
-    saddleRowGaps: Array.isArray(spec.saddleRowGaps) ? spec.saddleRowGaps : null,
+    saddleColGaps: Array.isArray(spec.saddleColGaps) ? spec.saddleColGaps.map(gapNum) : null,
+    saddleRowGaps: Array.isArray(spec.saddleRowGaps) ? spec.saddleRowGaps.map(gapNum) : null,
     saddleFillSheet: spec.saddleFillSheet == null ? null : !!spec.saddleFillSheet,
     // Manual grid (flats/stickers): operator-set columns × rows, optional press
     // sheet, plus the shared per-gap gutter arrays / full-sheet flag.
@@ -2204,8 +2238,9 @@ function layoutOpts(spec) {
     sigRepeat: isFinite(+spec.sigRepeat) && +spec.sigRepeat >= 1 ? Math.floor(+spec.sigRepeat) : null,
     // Parent-sheet override (throws on an unusable custom size).
     sheetOverride: sheetOverrideOf(spec),
-    colGaps: Array.isArray(spec.colGaps) ? spec.colGaps : null,
-    rowGaps: Array.isArray(spec.rowGaps) ? spec.rowGaps : null,
+    sheetMargin: marginOf(spec),
+    colGaps: Array.isArray(spec.colGaps) ? spec.colGaps.map(gapNum) : null,
+    rowGaps: Array.isArray(spec.rowGaps) ? spec.rowGaps.map(gapNum) : null,
     fillSheet: spec.fillSheet == null ? null : !!spec.fillSheet,
   };
 }
@@ -2335,6 +2370,10 @@ function pbPartOverrides(spec, part) {
   const out = {};
   if (!src) return out;
   for (const k of PB_PART_KEYS) if (src[k] != null) out[k] = src[k];
+  // The half's own press sheet IS its parent-sheet override — it used to be
+  // honoured only inside a manual grid and only when the job-level sheet was
+  // "auto", so picking 13×27.5 for the guts alone did nothing.
+  if (out.gridSheet && SHEETS[out.gridSheet]) out.sheet = out.gridSheet;
   return out;
 }
 
@@ -2361,7 +2400,7 @@ function pbGridSpec(g) {
   return {
     gridAcross: g.on ? Math.floor(+g.across) || 0 : null,
     gridDown:   g.on ? Math.floor(+g.down)   || 0 : null,
-    gridSheet:  g.on && g.sheet && g.sheet !== "auto" ? g.sheet : null,
+    gridSheet:  g.sheet && g.sheet !== "auto" ? g.sheet : null,   // the half's press sheet, manual grid or not
     colGaps: g.cols, rowGaps: g.rows,
     fillSheet: g.fill == null ? null : !!g.fill,
   };
@@ -4039,7 +4078,7 @@ function App() {
     sides: isBook ? 2 : +sides, qty: +qty || 0, sheetFlip,
     backRotate: backRotate === "auto" ? "auto" : +backRotate,
     jobName, orderRef, itemRef, marks, foldMarks, slug: slugOn, allowBestFit,
-    sheet: sheetSel, sheetLong: +sheetLong || 0, sheetShort: +sheetShort || 0, sheetMargin: +sheetMargin,
+    sheet: sheetSel, sheetLong: +sheetLong || 0, sheetShort: +sheetShort || 0, sheetMargin,
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
@@ -4107,6 +4146,39 @@ function App() {
       return { layout: computeLayout(debSpec.calc, debSpec.trimLong, debSpec.trimShort, layoutOpts(debSpec)) };
     } catch (e) { return { error: e.message }; }
   }, [debSpec]);
+
+  // Custom gap arrays are sized to a grid. When the grid on screen changes
+  // shape underneath them (efficient mode, a sheet or trim change, a gutter
+  // pick) the engine has to ignore a wrong-length array — it did, and the typed
+  // values silently vanished from the boxes while the "custom" state stayed
+  // on. Resize instead: keep what was typed by position, pad with the layout's
+  // own gutter, and the next pass places exactly what the boxes show.
+  const resizeGaps = (arr, n, fill) => {
+    if (!Array.isArray(arr) || arr.length === n) return arr;
+    const out = arr.slice(0, n);
+    while (out.length < n) out.push(fill);
+    return n ? out : null;
+  };
+  useEffect(() => {
+    if (isPB) {
+      const pl = layoutInfo.pbLayouts; if (!pl) return;
+      setPbGrids(p => {
+        let next = p, changed = false;
+        for (const part of ["cover", "guts"]) {
+          const L = pl[part] && pl[part].layout; if (!L) continue;
+          const g = p[part];
+          const cols = resizeGaps(g.cols, Math.max(0, L.across - 1), L.gutter || 0);
+          const rows = resizeGaps(g.rows, Math.max(0, L.down - 1), L.gutter || 0);
+          if (cols !== g.cols || rows !== g.rows) { if (!changed) { next = { ...p }; changed = true; } next[part] = { ...g, cols, rows }; }
+        }
+        return changed ? next : p;
+      });
+    } else if (layoutInfo.layout) {
+      const L = layoutInfo.layout;
+      setGapCols(c => resizeGaps(c, Math.max(0, L.across - 1), L.gutter || 0));
+      setGapRows(r => resizeGaps(r, Math.max(0, L.down - 1), L.gutter || 0));
+    }
+  }, [layoutInfo, isPB]);
 
   // Auto-regenerate the imposed PDF when spec or art changes
   useEffect(() => {
@@ -4393,7 +4465,13 @@ function App() {
     : lay.imp === Math.round(lay.pricedImp));
 
   const partsOut = result ? (result.parts || [result]) : [];
-  const viewIdx = Math.min(viewPart, Math.max(0, partsOut.length - 1));
+  const viewIdx = partsOut.length ? Math.min(viewPart, partsOut.length - 1) : viewPart;
+  // Part tabs: the imposed parts once there is a result, otherwise the live
+  // perfect-bound halves — so the half being edited in the layout panel is the
+  // half on screen BEFORE artwork is dropped, not always the cover.
+  const viewTabs = partsOut.length > 1 ? partsOut.map(p => p.part)
+    : isPB && layoutInfo.pbLayouts ? ["cover", "guts"].filter(p => layoutInfo.pbLayouts[p]) : [];
+  const showPart = (i, name) => { setViewPart(i); if (name === "cover" || name === "guts") setPbGridPart(name); };
   const viewRes = partsOut[viewIdx] || null;
   const viewLay = viewRes ? viewRes.layout
     : isPB && layoutInfo.pbLayouts ? ((layoutInfo.pbLayouts[viewIdx === 1 ? "guts" : "cover"] || layoutInfo.pbLayouts.cover || layoutInfo.pbLayouts.guts || {}).layout || null)
@@ -4454,46 +4532,6 @@ function App() {
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
             </div>
-            <Field label="Sheet size">
-              <select value={sheetSel} onChange={e => setSheetSel(e.target.value)}>
-                <option value="auto">Auto — the product's own press sheet</option>
-                <option value="13x19">13×19</option>
-                <option value="13x27.5">13×27.5 (oversize)</option>
-                <option value="12x18">12×18 crack-n-peel</option>
-                <option value="custom">Custom size…</option>
-              </select>
-              {sheetSel === "custom" && (
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 6, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet long (in)</div>
-                    <input type="number" step="0.25" min="3" max="60" value={sheetLong} style={{ width: 84 }}
-                           onChange={e => setSheetLong(e.target.value)} />
-                  </div>
-                  <span style={{ paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
-                  <div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet short (in)</div>
-                    <input type="number" step="0.25" min="3" max="60" value={sheetShort} style={{ width: 84 }}
-                           onChange={e => setSheetShort(e.target.value)} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Imageable margin (in)</div>
-                    <input type="number" step="0.0625" min="0" value={sheetMargin} style={{ width: 96 }}
-                           onChange={e => setSheetMargin(e.target.value)} />
-                  </div>
-                  <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                    prints {(Math.max(+sheetLong || 0, +sheetShort || 0) - 2 * (+sheetMargin || 0)).toFixed(2)}×
-                    {(Math.min(+sheetLong || 0, +sheetShort || 0) - 2 * (+sheetMargin || 0)).toFixed(2)}″
-                  </div>
-                </div>
-              )}
-              {sheetSel !== "auto" && (
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
-                  Changes the physical sheet only — the priced imp stays what the calculator quoted, so a count that
-                  no longer fits is flagged rather than silently changed. Marks and slug follow the new imageable area.
-                </div>
-              )}
-            </Field>
-
             <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <Field label="Duplexed sheets" style={{ flex: "0 0 150px" }}>
                 <label style={{ fontSize: 13, display: "flex", gap: 7, alignItems: "center", cursor: isBook ? "default" : "pointer", padding: "8px 0" }}>
@@ -4518,26 +4556,106 @@ function App() {
 
           <Acc id="layout" title="Layout settings" open={secOpen.layout} onToggle={() => toggleSec("layout")}
                badge={lay && lay.manualGrid ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>MANUAL</span> : null}>
-            <div style={{ display: "flex", gap: 10 }}>
-              <Field label="Layout position offset" style={{ flex: 1 }}>
-                <select value={offsetMode} onChange={e => setOffsetMode(e.target.value)}>
-                  <option value="jog">Jog lower-right 0.5″ (back: lower-left)</option>
-                  <option value="center">Centered</option>
-                  <option value="custom">Custom offset…</option>
-                </select>
-              </Field>
-              <Field label="Gutter" style={{ flex: "0 0 110px" }}>
-                <select value={gutterMode} onChange={e => setGutterMode(e.target.value)}>
-                  <option value="auto">{isSaddle ? "Butt (default)" : "Auto"}</option>
-                  <option value="0">0″ (butt)</option>
-                  <option value="0.125">0.125″</option>
-                  <option value="0.25">0.25″</option>
-                  <option value="0.375">0.375″</option>
-                  <option value="0.5">0.5″</option>
-                </select>
-              </Field>
-            </div>
-            {offsetMode === "custom" && (
+            {(() => {
+              // What the rest of this section is pointed at: the one job, or the
+              // perfect-bound half the grid panel below is editing. Written once
+              // here so the sheet, gutter and offset rows all agree.
+              const pbParts = isPB && layoutInfo.pbLayouts ? ["cover", "guts"].filter(p => layoutInfo.pbLayouts[p]) : [];
+              const part = isPB ? (pbParts.includes(pbGridPart) ? pbGridPart : pbParts[0]) : null;
+              const tLay = isPB ? (part && layoutInfo.pbLayouts[part] && layoutInfo.pbLayouts[part].layout) : lay;
+              const tG = isPB ? (part ? pbGrids[part] : null)
+                              : { cols: gapCols, rows: gapRows, fill: gapFill };
+              const customGaps = !!(tG && (tG.cols || tG.rows));
+              const fillOn = tG && tG.fill != null ? !!tG.fill : !!(tLay && tLay.fillSheet);
+              const clearGaps = () => isPB
+                ? setPbGrids(p => ({ cover: { ...p.cover, cols: null, rows: null }, guts: { ...p.guts, cols: null, rows: null } }))
+                : (setGapCols(null), setGapRows(null));
+              const shL = tLay ? tLay.sheet : null;
+              const m = marginOf({ sheetMargin }) == null ? SHEET_MARGIN : marginOf({ sheetMargin });
+              const dims = shL ? [shL.long, shL.short]
+                : sheetSel === "custom" ? [Math.max(+sheetLong || 0, +sheetShort || 0), Math.min(+sheetLong || 0, +sheetShort || 0)]
+                : SHEETS[sheetSel] ? [SHEETS[sheetSel].long, SHEETS[sheetSel].short] : [19, 13];
+              const printable = shL ? `${shL.usableLong}×${shL.usableShort}` : `${(dims[0] - 2 * m).toFixed(2)}×${(dims[1] - 2 * m).toFixed(2)}`;
+              return (
+                <>
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+                    <Field label={isPB ? "Press sheet (job default — each half can pick its own below)" : "Press sheet"} style={{ flex: "1 1 200px", marginBottom: 8 }}>
+                      <select value={sheetSel} onChange={e => setSheetSel(e.target.value)}>
+                        <option value="auto">Auto — the product's own press sheet</option>
+                        <option value="13x19">13×19</option>
+                        <option value="13x27.5">13×27.5 (oversize)</option>
+                        <option value="12x18">12×18 crack-n-peel</option>
+                        <option value="custom">Custom size…</option>
+                      </select>
+                    </Field>
+                    <Field label="Imageable margin (in)" style={{ flex: "0 0 110px", marginBottom: 8 }}>
+                      <input type="number" step="0.0625" min="0" value={sheetMargin} placeholder={String(SHEET_MARGIN)}
+                             onChange={e => setSheetMargin(e.target.value)} />
+                    </Field>
+                  </div>
+                  {sheetSel === "custom" && (
+                    <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 8, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet long (in)</div>
+                        <input type="number" step="0.25" min="3" max="60" value={sheetLong} style={{ width: 84 }}
+                               onChange={e => setSheetLong(e.target.value)} />
+                      </div>
+                      <span style={{ paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
+                      <div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet short (in)</div>
+                        <input type="number" step="0.25" min="3" max="60" value={sheetShort} style={{ width: 84 }}
+                               onChange={e => setSheetShort(e.target.value)} />
+                      </div>
+                    </div>
+                  )}
+                  <div className="imp-sheetline" style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: -2, marginBottom: 10 }}>
+                    Sheet <b style={{ color: "rgba(255,255,255,.8)" }}>{shL ? shL.label : `${dims[0]}×${dims[1]}`}</b>
+                    {" · "}prints <b style={{ color: "rgba(255,255,255,.8)" }}>{printable}″</b> inside a {m}″ margin
+                    {fillOn ? <span style={{ color: "#fbbf24" }}> · fill mode — the block may run past it</span> : null}
+                    {sheetSel !== "auto" && <span> · physical sheet only; the priced imp stays what the calculator quoted</span>}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    {fillOn ? (
+                      <Field label="Layout position" style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12.5, padding: "8px 0", color: "rgba(255,255,255,.55)" }}>
+                          Centred on the full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>— fill mode places past the imageable area, so no jog/offset applies{isPB ? " to this half" : ""}.</span>
+                        </div>
+                      </Field>
+                    ) : (
+                      <Field label="Layout position offset" style={{ flex: 1 }}>
+                        <select value={offsetMode} onChange={e => setOffsetMode(e.target.value)}>
+                          <option value="jog">Jog lower-right 0.5″ (back: lower-left)</option>
+                          <option value="center">Centered</option>
+                          <option value="custom">Custom offset…</option>
+                        </select>
+                      </Field>
+                    )}
+                    {customGaps ? (
+                      <Field label="Gutter" style={{ flex: "0 0 150px" }}>
+                        <div style={{ fontSize: 12.5, padding: "6px 0", display: "flex", gap: 8, alignItems: "center" }}>
+                          <span>custom per gap</span>
+                          <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }}
+                                  onClick={clearGaps}>uniform</button>
+                        </div>
+                      </Field>
+                    ) : (
+                      <Field label="Gutter" style={{ flex: "0 0 110px" }}>
+                        <select value={gutterMode} onChange={e => { setGutterMode(e.target.value); clearGaps(); }}>
+                          <option value="auto">{isSaddle ? "Butt (default)" : "Auto"}</option>
+                          <option value="0">0″ (butt)</option>
+                          <option value="0.125">0.125″</option>
+                          <option value="0.25">0.25″</option>
+                          <option value="0.375">0.375″</option>
+                          <option value="0.5">0.5″</option>
+                        </select>
+                      </Field>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+            {offsetMode === "custom" && !(isPB ? false : (gapFill != null ? gapFill : !!(lay && lay.fillSheet))) && (
               <div style={{ display: "flex", gap: 10 }}>
                 <Field label="From right edge (in)" style={{ flex: 1 }}>
                   <input type="number" step="0.125" min="0" value={offsetRight} onChange={e => setOffsetRight(e.target.value)} />
@@ -4658,11 +4776,13 @@ function App() {
               const uni = ok ? (panelLay.gutter || 0) : 0;
               const effCol = (G.cols && G.cols.length === nc) ? G.cols : ((ok && panelLay.colGaps) || Array(nc).fill(uni));
               const effRow = (G.rows && G.rows.length === nr) ? G.rows : ((ok && panelLay.rowGaps) || Array(nr).fill(uni));
-              const setCol = (i, v) => { const a = effCol.slice(); a[i] = v === "" ? 0 : +v; setG({ cols: a }); };
-              const setRow = (i, v) => { const a = effRow.slice(); a[i] = v === "" ? 0 : +v; setG({ rows: a }); };
+              // Keep the typed text: coercing here turned "0." into 0 under the
+              // operator's cursor (React number-input rewrite). layoutOpts coerces.
+              const setCol = (i, v) => { const a = effCol.slice(); a[i] = v; setG({ cols: a }); };
+              const setRow = (i, v) => { const a = effRow.slice(); a[i] = v; setG({ rows: a }); };
               const custom = G.cols || G.rows || G.fill != null;
-              const tw = ok ? panelLay.across * panelLay.cellW + effCol.reduce((x, y) => x + y, 0) : 0;
-              const th = ok ? panelLay.down * panelLay.cellH + effRow.reduce((x, y) => x + y, 0) : 0;
+              const tw = ok ? panelLay.across * panelLay.cellW + effCol.reduce((x, y) => x + gapNum(y), 0) : 0;
+              const th = ok ? panelLay.down * panelLay.cellH + effRow.reduce((x, y) => x + gapNum(y), 0) : 0;
               const over = ok && (tw > panelLay.sheet.long + 1e-6 || th > panelLay.sheet.short + 1e-6);
               // Changing the grid invalidates gap arrays sized to the old one.
               const setAcross = v => setG({ across: v, cols: null });
@@ -4687,7 +4807,7 @@ function App() {
                           return (
                             <button key={p} type="button" className="imp-btn sec"
                                     style={{ padding: "4px 12px", fontSize: 12, borderColor: on ? "#4ea1ff" : undefined, color: on ? "#4ea1ff" : undefined, fontWeight: on ? 700 : 400 }}
-                                    onClick={() => setPbGridPart(p)}>
+                                    onClick={() => { setPbGridPart(p); setViewPart(p === "guts" && pbParts.length > 1 ? 1 : 0); }}>
                               {p === "cover" ? "Cover" : "Guts"}
                               <span style={{ color: "rgba(255,255,255,.4)", fontWeight: 400 }}>
                                 {" "}{pl ? `${pl.across}×${pl.down}` : "—"}{g.on ? " manual" : ""}
@@ -4701,6 +4821,16 @@ function App() {
                           ? `Editing the COVER — one flat ${panelLay ? `${panelLay.pieceLong.toFixed(3)}×${panelLay.pieceShort}″` : "back|spine|front"} piece on cover stock.`
                           : `Editing the GUTS — the book block${panelLay ? `, ${panelLay.pieceLong}×${panelLay.pieceShort}″ pages` : ""} on text stock.`}
                         {" "}Each half keeps its own grid, gutters and press sheet; neither inherits the other's.
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 7 }}>
+                        <span style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>Press sheet for the {part}</span>
+                        <select value={G.sheet || "auto"} style={{ width: 150, fontSize: 12 }}
+                                onChange={e => setG({ sheet: e.target.value, cols: null, rows: null })}>
+                          <option value="auto">{sheetSel === "auto" ? "Auto (13×19, then 13×27.5)" : "Job default (above)"}</option>
+                          <option value="13x19">13×19</option>
+                          <option value="13x27.5">13×27.5</option>
+                          <option value="12x18">12×18</option>
+                        </select>
                       </div>
                       {half && half.error && (
                         <div style={{ fontSize: 12, color: "#f87171", marginTop: 5 }}>{half.error}</div>
@@ -4737,18 +4867,6 @@ function App() {
                           <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
                             {ok ? <>on <b>{panelLay.sheet.label}</b> · </> : null}= <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{ok && panelLay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(panelLay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(panelLay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
                           </div>
-                          {!isSaddle && (
-                            <div>
-                              <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Press sheet</div>
-                              <select value={G.sheet} style={{ width: 118, fontSize: 12 }}
-                                      onChange={e => setG({ sheet: e.target.value, cols: null, rows: null })}>
-                                <option value="auto">Auto</option>
-                                <option value="13x19">13×19</option>
-                                <option value="13x27.5">13×27.5</option>
-                                <option value="12x18">12×18</option>
-                              </select>
-                            </div>
-                          )}
                         </div>
                       )}
                       {isSaddle && (
@@ -5318,11 +5436,11 @@ function App() {
               <button type="button" className={"imp-btn sec tb" + (zoom === 96 ? " on" : "")} onClick={() => setZoom(96)} title="1 inch = 96 px">100%</button>
               <button type="button" className={"imp-btn sec tb" + (rulers ? " on" : "")} onClick={() => setRulers(r => !r)}>Rulers</button>
             </div>
-            {partsOut.length > 1 && (
+            {viewTabs.length > 1 && (
               <div className="grp">
-                {partsOut.map((p, i) => (
-                  <button key={p.part || i} type="button" className={"imp-btn sec tb" + (i === viewIdx ? " on" : "")} onClick={() => setViewPart(i)}>
-                    {p.part === "cover" ? "① Cover" : p.part === "guts" ? "② Guts" : `Part ${i + 1}`}
+                {viewTabs.map((name, i) => (
+                  <button key={name || i} type="button" className={"imp-btn sec tb" + (i === viewIdx ? " on" : "")} onClick={() => showPart(i, name)}>
+                    {name === "cover" ? "① Cover" : name === "guts" ? "② Guts" : `Part ${i + 1}`}
                   </button>
                 ))}
               </div>
@@ -5363,7 +5481,12 @@ function App() {
 
           {/* ── Job report ── */}
           <details className="imp-report" open={!!(viewRes && viewRes.warnings && viewRes.warnings.length)}>
-            <summary>Job report{viewRes && viewRes.warnings && viewRes.warnings.length ? ` — ${viewRes.warnings.length} note${viewRes.warnings.length === 1 ? "" : "s"}` : ""}</summary>
+            <summary>Job report{(() => {
+              const n = viewRes && viewRes.warnings ? viewRes.warnings.length
+                : layoutInfo.pbLayouts ? ["cover", "guts"].reduce((k, p) => k + (layoutInfo.pbLayouts[p] && layoutInfo.pbLayouts[p].layout ? layoutInfo.pbLayouts[p].layout.warnings.length : 0), 0)
+                : lay ? lay.warnings.length : 0;
+              return n ? ` — ${n} note${n === 1 ? "" : "s"}` : "";
+            })()}</summary>
             <div className="imp-card" style={{ marginTop: 8 }}>
             
             {layoutInfo.pb && (
@@ -5373,6 +5496,17 @@ function App() {
                 back | {(+spine || 0).toFixed(3)}″ spine | front) and the book block
                 (<b>{(+trimLong || 0).toFixed(3)} × {(+trimShort || 0).toFixed(3)}″</b>).
                 Each layout is shown on its own card below once the artwork is loaded.
+                {!result && layoutInfo.pbLayouts && ["cover", "guts"].filter(p => layoutInfo.pbLayouts[p]).map(p => {
+                  const h = layoutInfo.pbLayouts[p], L = h.layout;
+                  return (
+                    <div key={p} style={{ marginTop: 6 }}>
+                      <span style={{ color: "#7ab8ff", fontWeight: 700 }}>{p === "cover" ? "① Cover" : "② Guts"}</span>
+                      {L ? <> — <b>{L.sheet.label}</b>, {L.across} × {L.down}{L.rotated ? " (rotated 90°)" : ""} = {L.imp}-up, gutter {L.gutter}″{L.fillSheet ? ", full-sheet fill" : ""}</> : null}
+                      {h.error && <div style={{ color: "#f87171", fontSize: 12 }}>✕ {h.error}</div>}
+                      {L && L.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {lay && (

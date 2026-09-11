@@ -527,6 +527,27 @@ download the imposed PDF. Useful for testing and one-off jobs.
   warning, one-page 2-sided flat still refused, UI smoke (accordion, viewport,
   greyscale, slipsheet, download) clean, all 1.34 fixtures unchanged.
 
+  ### Sheet margin and gutters that stick (1.36)
+
+  Reported: "in certain scenarios the sheet margin and gutters don't stick,
+  and the preview doesn't capture my customisation". Every scenario below was
+  reproduced in the headless UI harness (`ui_gut.mjs`) before it was fixed.
+
+  | # | What happened | Why | Fix |
+  |---|---|---|---|
+  | 1 | **Imageable margin did nothing** unless the press sheet was "Custom size…". On Auto or 13×19 the box was not even shown. | `sheetOverrideOf()` applied `sheetMargin` only in the custom branch; stock sheets carried a fixed 0.25″. | `marginOf()` + `withMargin()`: the margin is its own control and applies to **every** sheet — auto, preset, custom — through a per-call `SH(key)` lookup inside `computeLayout` / `computeSaddleLayout`. Same key and label, only the printable area moves, so every `sheet.key === "13x19"` rule and the slug/filename are untouched. An **empty box means default**, never 0. A non-default margin is reported in the notes. |
+  | 2 | **A typed gutter lost its decimal point.** Typing `0.375` into a gap box produced `0` then `0.375` only if pasted. | The boxes coerced on every keystroke; React rewrites a controlled number input whose partial text (`0.`) does not equal the coerced value, so the caret's text was replaced under the operator. | Gap arrays hold what was typed; `layoutOpts()` coerces once (`gapNum`). Verified by typing character by character. |
+  | 3 | **Custom gaps vanished when the grid changed shape** (efficient mode, a sheet or trim change), and the panel stayed in "custom" state with a Reset button and nothing to reset. | The engine (correctly) ignores a gap array of the wrong length and warned "set for a different grid"; the UI kept the stale array. | The UI **resizes** the array to the layout on screen — values kept by position, padded with the layout's own gutter — for the job or for each PB half. No more silent drop, no stale warning after it settles. |
+  | 4 | **The Gutter select was dead once per-gap gutters existed**, and changing it did nothing visible. | Per-gap arrays override the uniform value. | While custom gaps are set the select is **replaced** by "custom per gap · uniform"; the uniform button clears the arrays and brings the select back, and picking a Gutter value clears them too and seeds the boxes. One control at a time. |
+  | 5 | **Two press-sheet selects** (General → Sheet size, and "Press sheet" inside the manual grid panel) — the first silently overrode the second. | Two paths into one engine key. | The manual-grid select is gone for flats/stickers; the single **Press sheet** now lives at the top of Layout settings with the margin beside it and a live line "Sheet 13×19 · prints 18.5×12.5″ inside a 0.25″ margin". |
+  | 6 | **Perfect bound: the guts' press sheet was ignored** unless a manual grid was on AND the job-level sheet was Auto. | `pbGridSpec` emitted `gridSheet` only when `g.on`; the engine consulted it only as a manual-grid candidate. | Each half's sheet is that half's parent-sheet override, always (`pbPartOverrides` sets `sheet`). The select sits in the half's header, manual grid or not; "Job default" falls back to the job-level pick. |
+  | 7 | **Perfect bound: editing the guts while the preview showed the cover** — the customisation "wasn't captured" because a different half was on screen. Before artwork there were no Cover/Guts tabs at all. | Viewport part and panel part were separate state. | They are one selection: the panel's Cover/Guts buttons switch the viewport, the toolbar tabs switch the panel, and the tabs exist before artwork (from the live layouts). The job report lists each half's sheet, grid and notes live, so a refused half is explained before a file is dropped. |
+  | 8 | **Layout position offset shown in fill mode**, where it is ignored (fill centres on the full sheet). | — | Replaced by a one-line note while fill is on; back when it is off. |
+
+  Engine output at the default margin is byte-identical to v1.35 across every
+  suite (flats, saddle, PB, PB grid, print-safety fixtures) — the margin path
+  is a no-op until the box is changed.
+
   ### Workspace layout (1.33)
 
   Rebuilt to the owner's wireframe (`Imp_tool_layout.pdf`, 2026-09-06):
