@@ -1132,19 +1132,25 @@ function calculate(c) {
   const eT=(art.val>=2&&art.val<4)?Math.ceil((c.artEditPages/PCF.art_pagesperhour)/2):0;
   const bT=(!artWork&&bld.val>0)?Math.floor(bld.val*tP)/12:0;
   const pE=c.proof>=3?Math.ceil(pT+3.01):0;
-  // ── Human-touch day (owner rule 2026-07-29) ──
-  // Anything that needs a person in the loop before we can print costs a day:
-  // emailing art in later, "already discussed", handing us a Canva link, or asking
-  // for a manual digital proof. Ranges rather than equality because these vals come
-  // from admin config as floats.
-  //   art 0.02 email-after · 0.03 already-discussed · 0.04 Canva
+  // ── Human-touch day (owner rule 2026-07-29, amended 2026-09-11) ──
+  // Art that is not here yet costs a day, because a person has to chase it
+  // before we can print: emailing it in after the order, or handing us a Canva
+  // link. So does asking for a manual digital proof.
+  //   art 0.02 email-after · 0.04 Canva
   //   proof 0.01 manual digital proof
   // Deliberately NOT charged: 0.01 upload-with-order and proof 0 approve-online —
   // the fully self-serve path stays the fastest route, at no adder. Design-from-
   // scratch (4.01) and hardcopy (3.01) already carry their own day terms.
+  // And NOT 0.03 "already discussed" (owner, 2026-09-11): by the time a customer
+  // picks that, the file is already with us and agreed, so there is nothing to
+  // wait for. It was charging a day on the strength of sitting between 0.02 and
+  // 0.04 in a contiguous band — which is why the list is now explicit.
+  // Tolerances rather than equality because these vals come from admin config
+  // as floats.
   // Capped at one day total, not one per dimension: the rule is "+1 day to their
   // turnaround", so picking both a Canva link and a manual proof still costs one.
-  const humanArt   = (art.val > 0.015 && art.val < 0.045) ? 1 : 0;
+  const ART_HUMAN_DAY = [0.02, 0.04];
+  const humanArt   = ART_HUMAN_DAY.some(v => Math.abs(art.val - v) < 0.005) ? 1 : 0;
   const humanProof = (c.proof > 0 && c.proof < 3) ? 1 : 0;
   const hT = Math.min(1, humanArt + humanProof);
   const artT=dT+(pE+dT)+eT+bT;
@@ -5689,8 +5695,19 @@ function uploadWithProgress(url, formData, onProgress) {
       try { body = JSON.parse(xhr.responseText); } catch (e) { parsed = false; }
       if (xhr.status === 413) {
         resolve({ success: false, data: "PPS_TOO_LARGE", ppsCode: "size" });
-      } else if (body === -1 || body === 0 || xhr.status === 403) {
+      } else if (body === -1 || body === 0) {
+        // A nonce WordPress itself rejected: admin-ajax answers that, and only
+        // that, with a bare -1. Recoverable — mint a fresh one and resend.
         resolve({ success: false, data: "PPS_STALE_NONCE", ppsCode: "nonce" });
+      } else if (xhr.status === 403) {
+        // A 403 that is NOT admin-ajax's -1 never reached WordPress: something
+        // in front of it refused the request — a WAF, a proxy, a corporate
+        // firewall, a VPN. Telling that customer to reload the page (2026-09-11)
+        // sent them round a loop for a request that was never going to arrive,
+        // through three browsers and a private window, because none of that
+        // changes the bytes being refused. It is not recoverable here, so it
+        // does not get the nonce's retry and it does not get the nonce's advice.
+        resolve({ success: false, data: "PPS_BLOCKED", ppsCode: "blocked" });
       } else if (!parsed) {
         reject(new Error("Invalid server response (HTTP " + xhr.status + ")"));
       } else if (xhr.status < 200 || xhr.status >= 300) {
@@ -5812,6 +5829,10 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
           let reason = (data && data.data) || "the server gave no reason";
           if (reason === "PPS_STALE_NONCE") reason = "this page was open longer than the session allows, and refreshing it did not help. Please reload the page and try again.";
           else if (reason === "PPS_TOO_LARGE") reason = "the file is larger than this site accepts in a single upload. Please compress the PDF, or send it to us and we'll attach it.";
+          // Named as what it is, and pointed at the only thing that actually
+          // helps. Reloading cannot fix a request that is being refused before
+          // it arrives, and "try again" on the same connection just repeats it.
+          else if (reason === "PPS_BLOCKED") reason = "the upload was blocked before it reached us — usually a VPN, a company network or security software sitting in between. Reloading will not help. Try a different network (a phone on mobile data is the quickest test), or email the file to us and we'll attach it to your order.";
           if (isPrimary) {
             alert("Artwork upload failed: " + reason + "\nPlease try again.");
             return;
