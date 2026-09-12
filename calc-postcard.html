@@ -2278,7 +2278,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       }
       setApproved(false);
       if (onArtwork) onArtwork({ type: "files", list: [file] });
-    } catch (e) { console.error("File processing failed:", e); }
+    } catch (e) { console.error("File processing failed:", e); alert("We couldn't read that file: " + ((e && e.message) || e) + "\n\nPlease try a PDF, JPG or PNG, or send the file to us and we'll attach it to your order."); }
     setLoading(false);
   }
 
@@ -3037,7 +3037,7 @@ generate();
             background: dropHover ? CC.tint : CC.track,
             cursor: "pointer", textAlign: "center", transition: "all .15s",
           }}>
-          <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif" onChange={e => processFile(e.target.files)} style={{ display: "none" }} />
+          <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => processFile(e.target.files)} style={{ display: "none" }} />
           <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: CC.dark }}>
             {loading ? "Processing..." : "Drop your artwork here or click to upload"}
@@ -3152,7 +3152,7 @@ generate();
                   const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
                   setArt({ dataUrl, file, dims });
                   setApproved(false);
-                } catch (e) { console.error("Slot file processing failed:", e); }
+                } catch (e) { console.error("Slot file processing failed:", e); alert("We couldn't read that file: " + ((e && e.message) || e) + "\n\nPlease try a PDF, JPG or PNG, or send the file to us and we'll attach it to your order."); }
               };
               return (
                 <div key={s} style={{ position: "relative" }}>
@@ -3187,7 +3187,7 @@ generate();
                       <div style={{ fontSize: 10, color: CC.light }}>Drop or click</div>
                     </div>
                   )}
-                  <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif" onChange={e => { const f = e.target.files?.[0]; if (f) handleSlotFile(f); e.target.value = ""; }} style={{ display: "none" }} />
+                  <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => { const f = e.target.files?.[0]; if (f) handleSlotFile(f); e.target.value = ""; }} style={{ display: "none" }} />
                 </div>
               );
             })}
@@ -3265,7 +3265,8 @@ generate();
                       pkg.previewBlobs.forEach((b, i) => {
                         if (b) files.push(new File([b], `${baseName}_preview_${sideNames[i] || ("side_" + (i+1))}.jpg`, { type: "image/jpeg" }));
                       });
-                      if (pkg.previewHtmlBlob) files.push(new File([pkg.previewHtmlBlob], baseName + "_preview.html", { type: "text/html" }));
+                      // _preview.html stays local (download only): the server does not accept
+                      // .html, and on perfect-bound that refusal blocked every order (2026-09-12).
                       files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
                       onArtwork({ type: "files", list: files, approved: true });
                     }
@@ -3728,7 +3729,7 @@ generate();
 // ═══════════════════════════════════════════════════════════════
 function Panel({ result, compact, debugUnlocked, expanded, onToggleExpand, coupon, totalRef }) {
   if(!result)return compact?null:<div style={ST.pnl}><p style={{color:CC.light,textAlign:"center",fontSize:14,margin:0,padding:"40px 20px"}}>Configure your postcards to see pricing</p></div>;
-  if(result.error?.length>0)return compact?null:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
+  if(result.error?.length>0)return compact?<div style={{padding:"6px 10px",fontSize:12,lineHeight:1.35,color:"#b91c1c",fontWeight:600}}>{result.error[0]}</div>:<div style={ST.pnl}><div style={{padding:20}}>{result.error.map((e,i)=><p key={i} style={{color:CC.red,fontSize:13,margin:"0 0 8px"}}>{e}</p>)}</div></div>;
   const{total,baseTotal,perUnit,days,qty:tQ,bd,grouped,shipping:sh,saleActive,saleAmount,saleLabel,totalWithoutSale}=result;
   const hasRush=sh&&sh.rushCost>0;
   // Before a destination is entered the free-ground date is a guess on a guess —
@@ -4321,18 +4322,33 @@ function uploadWithProgress(url, formData, onProgress) {
   });
 }
 
-async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress, couponCode) {
+// Fresh nonces, minted for whoever the browser actually is.
+//
+// The page-baked nonces are right for the visitor the page was rendered for;
+// they only go stale when the page is older than the nonce tick (~12h) — a
+// cached guest page, or a tab left open overnight. Until 2026-09-12 every submit
+// threw the baked value away and took one from /wp-json/pps/v1/nonces instead,
+// and a REST request without an X-WP-Nonce header runs as user 0, so every
+// LOGGED-IN customer (every checkout creates an account and signs the customer
+// in for 14 days) got guest nonces that admin-ajax then refused. Now the baked
+// nonce is tried first; this is asked only after a rejection, and it asks
+// admin-ajax (which honours the login cookie) before falling back to REST for
+// servers that do not have that action yet.
+async function ppsFreshNonces(PPS) {
+  const root = (PPS.ajaxUrl || "").replace(/wp-admin\/admin-ajax\.php.*$/, "") || "/";
+  const tryUrl = async (url) => {
+    const r = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j && typeof j === "object" && (j.cart || j.upload)) ? j : null;
+  };
+  try { const j = await tryUrl(PPS.ajaxUrl + (PPS.ajaxUrl.indexOf("?") >= 0 ? "&" : "?") + "action=pps_nonces&_=" + Date.now()); if (j) return j; } catch (_e) {}
+  try { const j = await tryUrl(root + "wp-json/pps/v1/nonces"); if (j) return j; } catch (_e) {}
+  return null;
+}
+
+async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles, onProgress, couponCode, referenceFiles) {
   const PPS = window.PPS_CONFIG || {};
-  // Cached product pages can outlive the WordPress nonce tick (~12h), and the
-  // nonces ride inside that cached HTML. Refresh just before submit so an aged
-  // page still checks out; on any failure keep the baked values.
-  if (PPS.ajaxUrl) {
-    try {
-      const _nroot = (PPS.ajaxUrl || "").replace(/wp-admin\/admin-ajax\.php.*$/, "");
-      const _nr = await fetch((_nroot || "/") + "wp-json/pps/v1/nonces", { credentials: "same-origin" });
-      if (_nr.ok) { const _nj = await _nr.json(); if (_nj && _nj.cart) { PPS.cartNonce = _nj.cart; if (_nj.upload) PPS.uploadNonce = _nj.upload; } }
-    } catch (_e) {}
-  }
 
   // ── Standalone mode: download artwork + order summary as a zip-like package ──
   if (!PPS.ajaxUrl) {
@@ -4366,78 +4382,89 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
 
   // ── Server mode ──
   let artworkPath = "";
+  // Every successfully uploaded deliverable as { path, name } — the full
+  // approval package, sent to the cart so all of it lands in the order's
+  // Google Drive folder (not just the raw file kept in artworkPath).
   const uploadedFiles = [];
+  const _mb = (n) => (n / 1048576).toFixed(1) + "MB";
 
+  // The upload list: the customer's artwork first (primary), then generated
+  // deliverables, then any reference files they attached. Only the primary
+  // is allowed to stop the order; everything after it is best-effort.
+  const queue = [];
   if (artFiles.type === "files") {
-    const total_files = artFiles.list.length;
-    for (let fi = 0; fi < total_files; fi++) {
-      const file = artFiles.list[fi];
-      // The first file is the customer's raw artwork — required, becomes the
-      // order's artwork reference. Later entries are supplementary deliverables
-      // (front + back sheets, etc.); failures on them are logged but don't
-      // block checkout.
-      const isPrimary = fi === 0;
-      try {
-        // Refuse a file the server physically cannot accept, naming the real
-        // limit, rather than letting PHP drop the POST and reporting nothing.
-        const _mb = (n) => (n / 1048576).toFixed(1) + "MB";
-        if (PPS.maxUpload && file.size > PPS.maxUpload) {
-          if (isPrimary) {
-            alert("That file is " + _mb(file.size) + ", and this site accepts up to " + _mb(PPS.maxUpload) + " per upload.\n\nPlease compress the PDF, or send it to us and we'll attach it to your order.");
-            return;
-          }
-          try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — ${_mb(file.size)} exceeds the ${_mb(PPS.maxUpload)} server limit.`); } catch (e) {}
-          continue;
-        }
-        const sendOnce = () => {
-          const fd = new FormData();
-          fd.append("action", "pps_upload_artwork");
-          fd.append("nonce", PPS.uploadNonce);
-          fd.append("artwork", file, file.name);
-          return uploadWithProgress(PPS.ajaxUrl, fd, (pct) => {
-            if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct });
-          });
-        };
-        if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct: 0 });
-        let data = await sendOnce();
-        // A rejected nonce is recoverable: the page was simply open longer than
-        // the nonce tick, or served from a cache older than it. Mint a fresh one
-        // and send again before bothering the customer.
-        if (data && data.ppsCode === "nonce") {
-          try {
-            const _nroot = (PPS.ajaxUrl || "").replace(/wp-admin\/admin-ajax\.php.*$/, "");
-            const _nr = await fetch((_nroot || "/") + "wp-json/pps/v1/nonces", { credentials: "same-origin", cache: "no-store" });
-            if (_nr.ok) {
-              const _nj = await _nr.json();
-              if (_nj && _nj.upload) { PPS.uploadNonce = _nj.upload; data = await sendOnce(); }
-            }
-          } catch (_e) {}
-        }
-        if (data.success && data.data && data.data.path) {
-          if (!artworkPath) artworkPath = data.data.path;
-          uploadedFiles.push({ path: data.data.path, name: file.name });
-        } else {
-          let reason = (data && data.data) || "the server gave no reason";
-          if (reason === "PPS_STALE_NONCE") reason = "this page was open longer than the session allows, and refreshing it did not help. Please reload the page and try again.";
-          else if (reason === "PPS_TOO_LARGE") reason = "the file is larger than this site accepts in a single upload. Please compress the PDF, or send it to us and we'll attach it.";
-          // Named as what it is, and pointed at the only thing that actually
-          // helps. Reloading cannot fix a request that is being refused before
-          // it arrives, and "try again" on the same connection just repeats it.
-          else if (reason === "PPS_BLOCKED") reason = "the upload was blocked before it reached us — usually a VPN, a company network or security software sitting in between. Reloading will not help. Try a different network (a phone on mobile data is the quickest test), or email the file to us and we'll attach it to your order.";
-          if (isPrimary) {
-            alert("Artwork upload failed: " + reason + "\nPlease try again.");
-            return;
-          }
-          try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload rejected: ${reason}`); } catch (e) {}
-        }
-      } catch (err) {
+    artFiles.list.forEach((file, i) => queue.push({ file, primary: i === 0, kind: i === 0 ? "artwork" : "deliverable" }));
+  }
+  // Reference files rode along in the UI for months and were never sent
+  // anywhere (audit 2026-09-12). They upload as supplementary deliverables,
+  // prefixed so prepress can tell them from the artwork.
+  for (const rf of (referenceFiles || [])) {
+    if (rf && rf.name) queue.push({ file: new File([rf], "reference_" + rf.name, { type: rf.type }), primary: false, kind: "reference" });
+  }
+
+  const total_files = queue.length;
+  for (let fi = 0; fi < total_files; fi++) {
+    const { file, primary: isPrimary } = queue[fi];
+    try {
+      // Refuse a file the server physically cannot accept, naming the real
+      // limit, rather than letting PHP drop the POST and reporting nothing.
+      if (PPS.maxUpload && file.size > PPS.maxUpload) {
         if (isPrimary) {
-          alert("Artwork upload error: " + err.message + "\nPlease try again.");
+          alert("That file is " + _mb(file.size) + ", and this site accepts up to " + _mb(PPS.maxUpload) + " per upload.\n\nPlease compress the PDF, or send it to us and we'll attach it to your order.");
           return;
         }
-        try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload error: ${err.message}`); } catch (e) {}
+        try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — ${_mb(file.size)} exceeds the ${_mb(PPS.maxUpload)} server limit.`); } catch (e) {}
+        continue;
       }
+      const sendOnce = () => {
+        const fd = new FormData();
+        fd.append("action", "pps_upload_artwork");
+        fd.append("nonce", PPS.uploadNonce);
+        fd.append("artwork", file, file.name);
+        return uploadWithProgress(PPS.ajaxUrl, fd, (pct) => {
+          if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct });
+        });
+      };
+      if (onProgress) onProgress({ phase: "upload", fileIdx: fi, fileCount: total_files, fileName: file.name, pct: 0 });
+      let data = await sendOnce();
+      // A rejected nonce is recoverable: the page was open longer than the nonce
+      // tick, or served from a cache older than it. Mint a fresh one — for the
+      // identity the browser actually has — and send again before bothering the
+      // customer.
+      if (data && data.ppsCode === "nonce") {
+        const fresh = await ppsFreshNonces(PPS);
+        if (fresh && fresh.upload) {
+          PPS.uploadNonce = fresh.upload;
+          if (fresh.cart) PPS.cartNonce = fresh.cart;
+          data = await sendOnce();
+        }
+      }
+      if (data && data.success && data.data && data.data.path) {
+        if (isPrimary || !artworkPath) { if (!artworkPath) artworkPath = data.data.path; }
+        uploadedFiles.push({ path: data.data.path, name: file.name });
+      } else {
+        let reason = (data && data.data) || "the server gave no reason";
+        if (reason === "PPS_STALE_NONCE") reason = "this page's session has expired and could not be renewed. Please reload the page and try again.";
+        else if (reason === "PPS_TOO_LARGE") reason = "the file is larger than this site accepts in a single upload. Please compress the PDF, or send it to us and we'll attach it.";
+        // Named as what it is, and pointed at the only thing that actually
+        // helps. Reloading cannot fix a request that is being refused before
+        // it arrives, and "try again" on the same connection just repeats it.
+        else if (reason === "PPS_BLOCKED") reason = "the upload was blocked before it reached us — usually a VPN, a company network or security software sitting in between. Reloading will not help. Try a different network (a phone on mobile data is the quickest test), or email the file to us and we'll attach it to your order.";
+        if (isPrimary) {
+          alert("Artwork upload failed: " + reason + "\nPlease try again.");
+          return;
+        }
+        try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload rejected: ${reason}`); } catch (e) {}
+      }
+    } catch (err) {
+      if (isPrimary) {
+        alert("Artwork upload error: " + err.message + "\nPlease try again.");
+        return;
+      }
+      try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload error: ${err.message}`); } catch (e) {}
     }
+  }
+  if (artFiles.type === "files") {
     if (!artworkPath) {
       alert("Artwork upload failed: the artwork file could not be uploaded.\nPlease try again.");
       return;
@@ -4449,32 +4476,67 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
 
   // Add to cart
   try {
-    const fd = new FormData();
-    fd.append("action", "pps_add_to_cart");
-    fd.append("nonce", PPS.cartNonce);
-    fd.append("product_id", PPS.productId);
-    const _pstr = total.toFixed(2);
-    fd.append("pps_price", _pstr);
-    // Payload integrity — both are revalidated server-side in pps_ajax_add_to_cart
-    // and neither participates in pricing.
-    fd.append("pps_tier", "retail");
-    fd.append("pps_lock", (function(s){var h=0;for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))>>>0;}return h.toString(36);})(_pstr + "|" + PPS.productId));
-    fd.append("pps_rush", rushCost.toFixed(2));
-    fd.append("pps_summary", summary);
-    fd.append("pps_metadata", metadata);
-    const parsed = JSON.parse(metadata);
-    fd.append("pps_biz_days", String(parsed.requestedBizDays || parsed.freeDeliveryBizDays || 5));
-    if (artworkPath) fd.append("pps_artwork_path", artworkPath);
-    if (uploadedFiles.length) fd.append("pps_artwork_files", JSON.stringify(uploadedFiles));
-    // Woo validates and applies the code for real at cart level; this only carries it.
-    if (couponCode) fd.append("pps_coupon", couponCode);
-
-    const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: fd });
-    const data = await resp.json();
-    if (data.success) {
+    const buildForm = () => {
+      const fd = new FormData();
+      fd.append("action", "pps_add_to_cart");
+      fd.append("nonce", PPS.cartNonce);
+      fd.append("product_id", PPS.productId);
+      // Preset URLs may render without a product binding on older server builds;
+      // the handler resolves the product from the slug.
+      if (PPS.presetSlug) fd.append("pps_preset_slug", PPS.presetSlug);
+      const _pstr = total.toFixed(2);
+      fd.append("pps_price", _pstr);
+      // Payload integrity — both are revalidated server-side in pps_ajax_add_to_cart
+      // and neither participates in pricing.
+      fd.append("pps_tier", "retail");
+      if (couponCode) fd.append("pps_coupon", couponCode);
+      fd.append("pps_lock", (function(s){var h=0;for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))>>>0;}return h.toString(36);})(_pstr + "|" + PPS.productId));
+      fd.append("pps_rush", rushCost.toFixed(2));
+      fd.append("pps_summary", summary);
+      fd.append("pps_metadata", metadata);
+      const parsed = JSON.parse(metadata);
+      fd.append("pps_biz_days", String(parsed.requestedBizDays || parsed.freeDeliveryBizDays || 5));
+      if (artworkPath) fd.append("pps_artwork_path", artworkPath);
+      if (uploadedFiles.length) fd.append("pps_artwork_files", JSON.stringify(uploadedFiles));
+      // Approval binding: SHA-256 of the print-ready bytes the customer approved.
+      // PHP stores it as _pps_proof_hash; the imposition tool refuses on mismatch.
+      // Posted ONLY if the exact deliverable it covers (proofHashOf) actually
+      // uploaded — the print-ready file is a tolerated-failure supplementary
+      // (size cap, server hiccup), and an order must never carry a hash that no
+      // file in its Drive folder can match.
+      if (artFiles.type === "files" && artFiles.proofHash && artFiles.proofHashOf
+          && uploadedFiles.some(f => f.name === artFiles.proofHashOf)) {
+        fd.append("pps_proof_hash", artFiles.proofHash);
+      }
+      return fd;
+    };
+    // Classify like the uploader does: admin-ajax answers a rejected nonce with a
+    // bare -1 (recoverable), any other 403 never reached WordPress, and a body
+    // that is not JSON is a server or proxy error page.
+    const post = async () => {
+      const resp = await fetch(PPS.ajaxUrl, { method: "POST", credentials: "same-origin", body: buildForm() });
+      let body = null, parsed = true;
+      try { body = JSON.parse(await resp.text()); } catch (e) { parsed = false; }
+      if (body === -1 || body === 0) return { code: "nonce", status: resp.status };
+      if (resp.status === 403) return { code: "blocked", status: resp.status };
+      if (!parsed) return { code: "unparsed", status: resp.status };
+      return { code: "ok", status: resp.status, body };
+    };
+    let r = await post();
+    if (r.code === "nonce") {
+      const fresh = await ppsFreshNonces(PPS);
+      if (fresh && fresh.cart) { PPS.cartNonce = fresh.cart; if (fresh.upload) PPS.uploadNonce = fresh.upload; r = await post(); }
+    }
+    if (r.code === "ok" && r.body && r.body.success) {
       window.location.href = PPS.cartUrl;
+    } else if (r.code === "nonce") {
+      alert("This page's session has expired and could not be renewed.\nPlease reload the page and try again — your selections will be kept where possible.");
+    } else if (r.code === "blocked") {
+      alert("Your order was blocked before it reached us — usually a VPN, a company network or security software sitting in between. Reloading will not help. Try a different network (a phone on mobile data is the quickest test), or call us and we'll take the order by phone.");
+    } else if (r.code === "unparsed") {
+      alert("The server sent back something we couldn't read (HTTP " + r.status + "). Please try again in a moment, or call us and we'll take the order by phone.");
     } else {
-      alert("Error: " + (data.data || "Could not add to cart."));
+      alert("Error: " + ((r.body && r.body.data) || "Could not add to cart."));
     }
   } catch (err) {
     alert("Network error: " + err.message);
@@ -5224,6 +5286,14 @@ function App() {
     // hardcopy proofs are approved by STAFF after the order — gating those on
     // an Approve button that never renders made paid-proofing uploads
     // impossible to order.
+    // "Upload Art with Order" with nothing attached went straight to checkout
+    // (audit 2026-09-12: 9 of 45 recent orders arrived with no upload and no
+    // note). A file whose read failed leaves the same state, so this is also
+    // where a silent extraction failure finally becomes visible.
+    if (Math.abs(Number(artwork) - 0.01) < 0.005 && (!artFiles || artFiles.type === "none")) {
+      alert("Please add your artwork file before ordering.\n\nIf you'd rather send it later, choose \"Email Art After Order\" under the artwork options.");
+      return;
+    }
     if (artFiles && artFiles.type === "files" && !artFiles.approved && proof === 0) {
       alert("Please approve your artwork proof before ordering.\n\n"
         + "Open the proof in Artwork & Proofing, check your artwork against the bleed, "
@@ -5247,7 +5317,7 @@ function App() {
     const summary  = buildSummary(config, result);
     const metadata = buildMetadata(config, result);
     const rushCost = result.shipping?.rushCost || 0;
-    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress, coupon&&coupon.code?coupon.code:"");
+    await submitToWooCommerce(result.total, summary, metadata, rushCost, artFiles, setUploadProgress, coupon&&coupon.code?coupon.code:"", referenceFiles);
     // If still here (standalone mode), re-enable
     setUploadProgress(null);
     setSubmitting(false);
@@ -5562,7 +5632,7 @@ function App() {
                 </div>
                 <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,padding:"10px",borderRadius:6,border:`2px dashed ${CC.border}`,cursor:"pointer",background:"#fff",fontSize:12,fontWeight:600,color:CC.mid}}>
                   <span>Choose Files</span>
-                  <input type="file" multiple accept=".pdf,.ai,.psd,.tif,.tiff,.jpg,.jpeg,.png,.doc,.docx,.zip" onChange={e=>{
+                  <input type="file" multiple accept=".pdf,.ai,.eps,.tif,.tiff,.jpg,.jpeg,.png,.txt" onChange={e=>{
                     const files=Array.from(e.target.files||[]);
                     if(files.length) setReferenceFiles(prev=>[...prev,...files.map(f=>({name:f.name,size:f.size,file:f}))]);
                     e.target.value="";

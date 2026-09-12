@@ -36,7 +36,11 @@ if ( ! function_exists( 'pps_cart_price_floor_compute' ) ) {
         if ( ! $product ) return $abs_min;
         $regular = floatval( $product->get_regular_price() );
         if ( $regular <= 0 ) return $abs_min;
-        return max( $abs_min, $regular * $min_pct );
+        // The smaller of the two — the same correction as the in-tree handler.
+        // max() here refused genuine qty-25 flat orders once regular_price started
+        // carrying the qty-10 quote (audit 2026-09-12); the materials floor in
+        // pps-calculators.php is the one that scales with the job.
+        return min( $abs_min, $regular * $min_pct );
     }
 }
 

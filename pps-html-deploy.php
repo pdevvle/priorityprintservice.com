@@ -443,6 +443,17 @@ function pps_html_deploy_run() {
 
     pps_html_deploy_prune_archive();
 
+    // A new build is a new script URL, but the PAGE that embeds the URL is what
+    // WP Rocket caches (24h lifespan, desktop and mobile). Until now nothing
+    // purged it, so a fix reached guests up to a day after it reached staff.
+    if ( function_exists( 'rocket_clean_domain' ) ) {
+        rocket_clean_domain();
+        pps_html_deploy_log_append( array(
+            'time'  => current_time( 'mysql' ),
+            'event' => 'page-cache-purged',
+        ) );
+    }
+
     delete_transient( PPS_HTML_DEPLOY_LOCK );
 }
 
@@ -580,6 +591,14 @@ function pps_bulk_upload_handle() {
 
         if ( $filename === '' || strtolower( pathinfo( $filename, PATHINFO_EXTENSION ) ) !== 'html' ) {
             $row['note'] = 'not a .html file — skipped';
+            $results[]   = $row;
+            continue;
+        }
+        // Same name rule as the file-system path. Without it the 2026-09-03 bulk
+        // release (browser-mangled names: calcbrochure.html …) created eight
+        // orphan registry rows that no product could ever resolve to.
+        if ( ! pps_html_deploy_name_ok( $filename ) ) {
+            $row['note'] = 'not an accepted calculator filename (expected calc-*.html or proof-ui-draft.html) — skipped';
             $results[]   = $row;
             continue;
         }

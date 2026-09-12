@@ -62,8 +62,36 @@ function pps_purge_page_cache() {
     }
 }
 
+/**
+ * A few seconds after load, if the calculator's libraries never arrived, put a
+ * plain sentence where the calculator should be. Only fires when React or
+ * ReactDOM is absent — a rendered calculator is never touched.
+ */
+function pps_calc_boot_watchdog_js() {
+    return "(function(){function chk(){if(window.React&&window.ReactDOM)return;"
+        . "if(document.getElementById('pps-boot-notice'))return;"
+        . "var d=document.createElement('div');d.id='pps-boot-notice';"
+        . "d.setAttribute('role','alert');"
+        . "d.style.cssText='margin:16px 0;padding:14px 16px;border:1px solid #e0a800;background:#fff8e1;color:#333;font:15px/1.5 system-ui,sans-serif;border-radius:6px';"
+        . "d.innerHTML='<strong>The pricing calculator did not load.</strong> A script it needs was blocked before it reached your browser \\u2014 usually a company network, a VPN or a browser extension. Try a different network or browser, or call us and we will quote it for you.';"
+        . "var host=document.querySelector('.single-product .product')||document.querySelector('.woocommerce')||document.body;"
+        . "host.insertBefore(d,host.firstChild);}"
+        . "if(document.readyState==='complete'){setTimeout(chk,10000);}else{window.addEventListener('load',function(){setTimeout(chk,10000);});}})();";
+}
+
 function pps_get_public_config() {
     $cfg = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
+    // The admin page accepts any JSON shape. A list that arrives as a string or
+    // a number (papers, page counts, artwork options…) throws inside the
+    // calculator at module scope and every product page goes blank, so drop
+    // such a value and let the calculator's embedded default stand instead.
+    $defaults = function_exists( 'pps_default_config' ) ? pps_default_config() : array();
+    foreach ( $defaults as $k => $dv ) {
+        if ( is_array( $dv ) && array_key_exists( $k, $cfg ) && ! is_array( $cfg[ $k ] ) ) {
+            error_log( '[pps] config key "' . $k . '" is not a list; ignoring it so the calculator can boot' );
+            unset( $cfg[ $k ] );
+        }
+    }
     if ( isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ) {
         $cfg['pcf']['shippo_enabled'] = ! empty( $cfg['pcf']['shippo_api_token'] );
         unset(
@@ -141,6 +169,15 @@ if ( file_exists( PPS_CALC_DIR . 'pps-job-invoice.php' ) ) {
 if ( file_exists( PPS_CALC_DIR . 'pps-job-quote.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-job-quote.php';
 }
+
+// Pay Link and QuickBooks are NOT loaded here. They are standalone plugins in
+// their own directories (pps-pay-link/, pps-quickbooks/), because they were
+// required from here twice and twice a redeploy of THIS file by another
+// session removed the lines and silently took a money-taking feature offline.
+// A module whose existence depends on a line in a file everybody redeploys is
+// a module that will disappear. Do not "restore" the requires: both modules
+// guard against double-loading, but the copies would be at different paths and
+// only the guard would stop a fatal.
 
 // Shared quote link → defaults blob (product + preset admin).
 if ( file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
@@ -849,6 +886,11 @@ add_action( 'wp', function() {
     add_action( 'wp_enqueue_scripts', function() {
         wp_enqueue_script( 'pps-react', 'https://unpkg.com/react@18.3.1/umd/react.production.min.js', array(), '18.3.1', true );
         wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
+        // Boot watchdog. React, ReactDOM and jsPDF come from one CDN with no
+        // fallback; a network that blocks it (corporate allow-lists, some
+        // extensions) leaves the product area blank — the native buy box is
+        // hidden by CSS — and the customer with nothing to read. Say so.
+        wp_add_inline_script( 'pps-react', pps_calc_boot_watchdog_js(), 'before' );
         // pdf.js 4.x is ESM-only; the handle survives as an inline loader so the
         // pps-babel dependency chain is unchanged. See pps_pdfjs_loader_js().
         wp_register_script( 'pps-pdfjs', false, array(), '4.10.38', true );
@@ -910,6 +952,19 @@ add_action( 'wp', function() {
         $excluded[] = '/unpkg\.com/jspdf';
         $excluded[] = '/cdnjs\.cloudflare\.com/ajax/libs/pdf\.js';
         $excluded[] = 'pps-calculator';
+        return $excluded;
+    } );
+    // Keep WP Rocket's MINIFIER off the app file too. The exclusion above only
+    // governs Delay JS (which is off); with Minify JS on and no exclusion the
+    // extracted app script was being re-minified for every logged-out visitor,
+    // and the minifier's quote pairing loses sync on nested template literals —
+    // strings came out with their spaces removed (sticker: 22 of them), and one
+    // unlucky build would blank the calculator for guests while it worked for
+    // logged-in staff (audit 2026-09-12). The build is already minified.
+    add_filter( 'rocket_exclude_js', function( $excluded ) {
+        $excluded[] = '/wp-content/uploads/pps-calculators/js/(.*).js';
+        $excluded[] = 'unpkg.com/react(.*)';
+        $excluded[] = 'unpkg.com/jspdf(.*)';
         return $excluded;
     } );
     add_filter( 'rocket_lazyload_excluded_attributes', function( $excluded ) {
@@ -1271,6 +1326,14 @@ add_action( 'wp', function() {
                     );
                 }
             }
+        } elseif ( function_exists( 'WC' ) && WC()->session ) {
+            // A plain visit to the product page ends any edit that was started and
+            // abandoned (the Cancel link just goes to the cart). Otherwise the key
+            // sits in the session and the customer's next ordinary add of this
+            // product silently deletes the line they were editing.
+            if ( WC()->session->get( 'pps_edit_key_' . $product_id ) ) {
+                WC()->session->set( 'pps_edit_key_' . $product_id, null );
+            }
         }
 
         // ── Config ──
@@ -1347,8 +1410,27 @@ add_action( 'wp_ajax_nopriv_pps_upload_artwork', 'pps_ajax_upload_artwork' );
 function pps_ajax_upload_artwork() {
     check_ajax_referer( 'pps_upload_artwork', 'nonce' );
 
-    if ( empty( $_FILES['artwork'] ) || $_FILES['artwork']['error'] !== UPLOAD_ERR_OK ) {
+    if ( empty( $_FILES['artwork'] ) ) {
         wp_send_json_error( 'No file received.' );
+    }
+    // PHP reports WHY an upload did not arrive; collapsing every code into
+    // "No file received." hid a file over the ini limit, a dropped connection
+    // and a full disk behind the same sentence (audit 2026-09-12).
+    $up_err = (int) $_FILES['artwork']['error'];
+    if ( $up_err !== UPLOAD_ERR_OK ) {
+        $too_big = 'The file is larger than this server accepts in one upload ('
+            . size_format( wp_max_upload_size() ) . '). Please compress it, or send it to us and we will attach it to your order.';
+        $messages = array(
+            UPLOAD_ERR_INI_SIZE   => $too_big,
+            UPLOAD_ERR_FORM_SIZE  => $too_big,
+            UPLOAD_ERR_PARTIAL    => 'The upload was cut off before the whole file arrived — usually a dropped connection. Please try again.',
+            UPLOAD_ERR_NO_FILE    => 'No file received.',
+            UPLOAD_ERR_NO_TMP_DIR => 'The server could not store the upload (no temporary folder). Please email the file to us and we will attach it to your order.',
+            UPLOAD_ERR_CANT_WRITE => 'The server could not write the upload to disk. Please email the file to us and we will attach it to your order.',
+            UPLOAD_ERR_EXTENSION  => 'The upload was stopped by a server extension. Please email the file to us and we will attach it to your order.',
+        );
+        error_log( sprintf( '[pps] artwork upload refused by PHP: code=%d name=%s', $up_err, (string) ( $_FILES['artwork']['name'] ?? '' ) ) );
+        wp_send_json_error( $messages[ $up_err ] ?? ( 'No file received (upload error ' . $up_err . ').' ) );
     }
 
     $file = $_FILES['artwork'];
@@ -1489,6 +1571,29 @@ add_filter( 'upload_mimes', function( $mimes ) {
 
 add_action( 'wp_ajax_pps_add_to_cart', 'pps_ajax_add_to_cart' );
 add_action( 'wp_ajax_nopriv_pps_add_to_cart', 'pps_ajax_add_to_cart' );
+
+// ── Fresh nonces, minted for the caller's ACTUAL identity ──
+// The REST route at /pps/v1/nonces mints them too, but a REST request that
+// carries a login cookie and no X-WP-Nonce header runs as user 0 (core's
+// rest_cookie_check_errors), so every logged-in customer got guest nonces that
+// admin-ajax then refused: uploads died with the "page was open too long"
+// alert and add-to-cart with "Could not add to cart." Every checkout creates
+// an account and signs the customer in for 14 days, so that was every
+// returning customer (audit 2026-09-12). admin-ajax honours the cookie the
+// way the handlers that verify these nonces do, and its response is not
+// readable cross-origin (no CORS headers), so nothing leaks that a page on
+// another site could use. The calculators call this only after a nonce is
+// rejected, never pre-emptively.
+add_action( 'wp_ajax_pps_nonces', 'pps_ajax_nonces' );
+add_action( 'wp_ajax_nopriv_pps_nonces', 'pps_ajax_nonces' );
+function pps_ajax_nonces() {
+    nocache_headers();
+    wp_send_json( array(
+        'cart'   => wp_create_nonce( 'pps_add_to_cart' ),
+        'upload' => wp_create_nonce( 'pps_upload_artwork' ),
+        'user'   => is_user_logged_in() ? 1 : 0,
+    ) );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // QUOTE QUESTION FORM — AJAX handler
@@ -2011,6 +2116,11 @@ function pps_ajax_add_to_cart() {
     check_ajax_referer( 'pps_add_to_cart', 'nonce' );
 
     $product_id = intval( $_POST['product_id'] ?? 0 );
+    // Preset URLs render without a product binding on older builds; resolve the
+    // product from the preset slug rather than refusing the order.
+    if ( ! $product_id && ! empty( $_POST['pps_preset_slug'] ) && function_exists( 'pps_preset_product_id_for_slug' ) ) {
+        $product_id = pps_preset_product_id_for_slug( wp_unslash( $_POST['pps_preset_slug'] ) );
+    }
     $price      = floatval( $_POST['pps_price'] ?? 0 );
     $rush       = floatval( $_POST['pps_rush'] ?? 0 );
     // WordPress slashes $_POST on every request (magic-quotes emulation) and
@@ -2068,7 +2178,14 @@ function pps_ajax_add_to_cart() {
         $regular = floatval( $product->get_regular_price() );
         if ( $regular > 0 ) {
             $pct_floor    = $regular * $min_pct;
-            $allowed_min  = max( $absolute_min, $pct_floor );
+            // The SMALLER of the two, as the note above has always said. This was
+            // max() — and once "Price at these defaults" started writing the qty-10
+            // quote into regular_price, half of a $75 rack-card product ($37.50) sat
+            // above every legitimate qty-25 small-size quote ($25–$37), so real
+            // orders were refused with "Price below product floor" (audit
+            // 2026-09-12). The materials floor below is what actually scales with
+            // the job; this one only has to stop the penny checkout.
+            $allowed_min  = min( $absolute_min, $pct_floor );
             if ( $price < $allowed_min ) {
                 if ( function_exists( 'error_log' ) ) {
                     error_log( sprintf(
@@ -2117,6 +2234,12 @@ function pps_ajax_add_to_cart() {
         'pps_metadata' => $metadata,
         'pps_biz_days' => $biz_days,
         'pps_hash'     => $config_hash,
+        // WCPA's category-scoped forms overlap five registry products. Its
+        // validation is bypassed because this add never goes through the form,
+        // but its cart hooks still run and attach empty form data — which is
+        // what refuses a cart quantity edit with "Field … is required". WCPA
+        // honours this flag (process.php: `if (isset($cart_item_data['wcpaIgnore']))`).
+        'wcpaIgnore'   => true,
     );
 
     // Artwork: direct relative path from upload endpoint
@@ -2213,7 +2336,20 @@ function pps_ajax_add_to_cart() {
             'coupon_failed'  => ( $coupon_code !== '' && $coupon_applied === '' ) ? $coupon_code : '',
         ) );
     } else {
-        wp_send_json_error( 'Could not add to cart.' );
+        // WooCommerce (or a validation filter — the price-floor plugin, WCPA, the
+        // spec-less-line guard) refused the add and said why in a notice the
+        // calculator never sees. Hand the reason back instead of a bare failure;
+        // the notice would otherwise surface later as a stray banner on /cart/.
+        $why = '';
+        if ( function_exists( 'wc_get_notices' ) ) {
+            foreach ( (array) wc_get_notices( 'error' ) as $n ) {
+                $txt = is_array( $n ) ? (string) ( $n['notice'] ?? '' ) : (string) $n;
+                $txt = trim( wp_strip_all_tags( $txt ) );
+                if ( $txt !== '' ) { $why = $txt; break; }
+            }
+            if ( function_exists( 'wc_clear_notices' ) ) wc_clear_notices();
+        }
+        wp_send_json_error( $why !== '' ? 'Could not add to cart: ' . $why : 'Could not add to cart.' );
     }
 }
 
@@ -2238,9 +2374,12 @@ function pps_ajax_add_to_cart() {
  *
  * Products not in the registry are WCPA's or plain WooCommerce's and are untouched.
  */
-add_filter( 'woocommerce_add_to_cart_validation', function( $passed, $product_id, $quantity = 1, $variation_id = 0 ) {
+add_filter( 'woocommerce_add_to_cart_validation', function( $passed, $product_id, $quantity = 1, $variation_id = 0, $variations = array(), $cart_item_data = array() ) {
     if ( ! $passed ) return $passed;
     if ( ! empty( $GLOBALS['pps_internal_add_to_cart'] ) ) return $passed;   // the calculator's own add
+    // A line that already carries a specification is a calculator line being put
+    // back — a shared-cart link, a session restore — not a spec-less add.
+    if ( is_array( $cart_item_data ) && ( isset( $cart_item_data['pps_metadata'] ) || isset( $cart_item_data['pps_legacy_unit_price'] ) ) ) return $passed;
 
     $calc = pps_get_calculator_for_product( $product_id );
     if ( ! $calc ) return $passed;                                          // WCPA or plain Woo product
@@ -2253,7 +2392,7 @@ add_filter( 'woocommerce_add_to_cart_validation', function( $passed, $product_id
         $link ? '<a href="' . esc_url( $link ) . '">Open the calculator</a>' : 'Open its product page'
     ), 'error' );
     return false;
-}, 10, 4 );
+}, 10, 6 );
 
 /**
  * Sweep out spec-less calculator lines that predate the guard above.
@@ -2735,21 +2874,30 @@ add_filter( 'woocommerce_cart_item_quantity', function( $quantity_html, $cart_it
 // BUSINESS DAY CALCULATION
 // ═══════════════════════════════════════════════════════════════
 
-function pps_add_business_days( DateTime $start, int $days ): DateTime {
+/**
+ * Is the shop open on this date?
+ *
+ * Extracted from pps_add_business_days() so nothing has to reimplement it.
+ * A second copy of this test is how the quote page ended up offering delivery
+ * on closing days: it skipped weekends and knew nothing about the holiday
+ * list. One predicate, one answer.
+ *
+ * Closures are matched as Y-m-d (a specific day) or m-d (annually recurring).
+ */
+function pps_is_business_day( DateTime $d ): bool {
+    if ( (int) $d->format( 'N' ) >= 6 ) return false;
     $closures = pps_get_closures();
+    return ! in_array( $d->format( 'Y-m-d' ), $closures, true )
+        && ! in_array( $d->format( 'm-d' ), $closures, true );
+}
+
+function pps_add_business_days( DateTime $start, int $days ): DateTime {
     $d = clone $start;
     $added = 0;
 
     while ( $added < $days ) {
         $d->modify( '+1 day' );
-        $dow = (int) $d->format( 'N' );
-        if ( $dow >= 6 ) continue;
-
-        $ymd  = $d->format( 'Y-m-d' );
-        $mmdd = $d->format( 'm-d' );
-        if ( in_array( $ymd, $closures, true ) || in_array( $mmdd, $closures, true ) ) continue;
-
-        $added++;
+        if ( pps_is_business_day( $d ) ) $added++;
     }
 
     return $d;
@@ -5108,6 +5256,19 @@ add_action( 'wp', function() {
         $excluded[] = 'pps-calculator';
         return $excluded;
     } );
+    // Keep WP Rocket's MINIFIER off the app file too. The exclusion above only
+    // governs Delay JS (which is off); with Minify JS on and no exclusion the
+    // extracted app script was being re-minified for every logged-out visitor,
+    // and the minifier's quote pairing loses sync on nested template literals —
+    // strings came out with their spaces removed (sticker: 22 of them), and one
+    // unlucky build would blank the calculator for guests while it worked for
+    // logged-in staff (audit 2026-09-12). The build is already minified.
+    add_filter( 'rocket_exclude_js', function( $excluded ) {
+        $excluded[] = '/wp-content/uploads/pps-calculators/js/(.*).js';
+        $excluded[] = 'unpkg.com/react(.*)';
+        $excluded[] = 'unpkg.com/jspdf(.*)';
+        return $excluded;
+    } );
     add_filter( 'rocket_lazyload_excluded_attributes', function( $excluded ) {
         $excluded[] = 'class*="bp-modal"';
         $excluded[] = 'class*="bp-scene"';
@@ -5125,6 +5286,44 @@ add_action( 'wp', function() {
  * Extracts <style> and <script type="text/babel"> from the calculator HTML
  * via the existing pps_parse_calculator_html() helper.
  */
+/**
+ * The WooCommerce product a preset sells through.
+ *
+ * A preset row may name one explicitly (`product_id`); otherwise it is the first
+ * PUBLISHED product the preset's calculator is registered to. "Published" matters:
+ * the registry still lists a deleted, a trashed and a private product, and an
+ * unsellable id here would fail at checkout instead of at the cart.
+ */
+function pps_preset_product_id( $preset, $filename ) {
+    $explicit = intval( $preset['product_id'] ?? 0 );
+    if ( $explicit && function_exists( 'wc_get_product' ) ) {
+        $p = wc_get_product( $explicit );
+        if ( $p && $p->get_status() === 'publish' ) return $explicit;
+    }
+    $reg = function_exists( 'pps_get_registry' ) ? pps_get_registry() : array();
+    $ids = array_filter( array_map( 'intval', explode( ',', (string) ( $reg[ $filename ]['products'] ?? '' ) ) ) );
+    foreach ( $ids as $id ) {
+        $p = function_exists( 'wc_get_product' ) ? wc_get_product( $id ) : null;
+        if ( $p && $p->get_status() === 'publish' ) return $id;
+    }
+    return 0;
+}
+
+/** Same resolution, from a posted preset slug (the add-to-cart fallback). */
+function pps_preset_product_id_for_slug( $slug ) {
+    $slug = sanitize_key( $slug );
+    if ( $slug === '' ) return 0;
+    $presets = get_option( 'pps_presets', array() );
+    if ( is_string( $presets ) ) {
+        $decoded = json_decode( $presets, true );
+        if ( is_array( $decoded ) ) $presets = $decoded;
+    }
+    $preset = is_array( $presets ) ? ( $presets[ $slug ] ?? null ) : null;
+    if ( ! is_array( $preset ) || empty( $preset['calc'] ) ) return 0;
+    $filename = pps_get_filename_for_calc_type( $preset['calc'] );
+    return $filename ? pps_preset_product_id( $preset, $filename ) : 0;
+}
+
 function pps_render_preset_calculator( $preset ) {
     $filename = pps_get_filename_for_calc_type( $preset['calc'] );
     if ( ! $filename ) return '';
@@ -5142,12 +5341,12 @@ function pps_render_preset_calculator( $preset ) {
         'cartNonce'   => wp_create_nonce( 'pps_add_to_cart' ),
         'uploadNonce' => wp_create_nonce( 'pps_upload_artwork' ),
         'maxUpload'   => (int) wp_max_upload_size(),
-        // No productId — preset render does not target a single WC product.
-        // The cart layer should fall back to a calc-type → product map; that
-        // mapping is wired in a follow-up PR alongside per-line preset slug
-        // capture in order meta. For now the preset-URL calculator renders
-        // and computes prices but add-to-cart goes through the existing
-        // calculator's own product binding (when present).
+        // The product this preset sells through. Without it the calculator posted
+        // product_id=undefined and every add-to-cart from a preset URL answered
+        // "Invalid product or price." — after the artwork had already uploaded
+        // (audit 2026-09-12: all four live presets, all in the sitemap). The
+        // handler also resolves it server-side from pps_preset_slug as a fallback.
+        'productId'   => pps_preset_product_id( $preset, $filename ),
         'presetSlug'  => $preset['slug'],
     );
 
