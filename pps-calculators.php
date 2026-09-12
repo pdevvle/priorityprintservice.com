@@ -50,6 +50,18 @@ function pps_get_closures() {
  * config is emitted to the browser (window.PPS_CONFIG). Server-side callers
  * (e.g. the Shippo REST proxies) keep using pps_get_config() for the real token.
  */
+/**
+ * Purge the page cache after saving anything that is baked into cached HTML —
+ * pricing tables (pps_calc_config), presets, tooltips. Without this, cached
+ * product pages keep quoting pre-edit rates until the cache expires on its
+ * own (QA finding, 2026-08-09). No-op when WP Rocket is absent.
+ */
+function pps_purge_page_cache() {
+    if ( function_exists( 'rocket_clean_domain' ) ) {
+        rocket_clean_domain();
+    }
+}
+
 function pps_get_public_config() {
     $cfg = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
     if ( isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ) {
@@ -90,6 +102,14 @@ if ( file_exists( PPS_CALC_DIR . 'pps-imposition.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-imposition.php';
 }
 
+// Loaded here as well as being separately activatable. The category wizard in
+// pps-term-shortcodes.php submits through the shared intake pipeline, so a deactivated
+// PPS Intake would stop recording quote requests from every category page. Its own
+// co-load guard makes the double-load harmless.
+if ( file_exists( PPS_CALC_DIR . 'pps-intake.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-intake.php';
+}
+
 // Shippo integration test runner. Loaded only while its trigger option is set, which
 // costs one autoloaded option read per request and keeps a diagnostic that makes live
 // API calls out of the normal request path.
@@ -101,6 +121,71 @@ if ( file_exists( PPS_CALC_DIR . 'pps-imposition.php' ) ) {
 if ( file_exists( PPS_CALC_DIR . 'pps-shippo-test.php' )
      && '' !== (string) get_option( 'pps_shippo_test_trigger', '' ) ) {
     require_once PPS_CALC_DIR . 'pps-shippo-test.php';
+}
+
+// Single-source product-family facts + homepage card shortcodes.
+// Guarded so this file deploys safely ahead of (or without) that one.
+if ( file_exists( PPS_CALC_DIR . 'pps-featured-cards.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-featured-cards.php';
+}
+
+// Jobs sold over email — create a payable order + payment link, which lands in
+// the customer's /reorders history once paid.
+// Guarded so this file deploys safely ahead of (or without) that one.
+if ( file_exists( PPS_CALC_DIR . 'pps-job-invoice.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-job-invoice.php';
+}
+
+// Quote links: the job without the customer, filled in by whoever opens it.
+// Loaded after the invoice module, whose helpers it uses.
+if ( file_exists( PPS_CALC_DIR . 'pps-job-quote.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-job-quote.php';
+}
+
+// Pay Link and QuickBooks are NOT loaded here. They are standalone plugins in
+// their own directories (pps-pay-link/, pps-quickbooks/), because they were
+// required from here twice and twice a redeploy of THIS file by another
+// session removed the lines and silently took a money-taking feature offline.
+// A module whose existence depends on a line in a file everybody redeploys is
+// a module that will disappear. Do not "restore" the requires: both modules
+// guard against double-loading, but the copies would be at different paths and
+// only the guard would stop a fatal.
+
+// Shared quote link → defaults blob (product + preset admin).
+if ( file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-defaults-url.php';
+}
+
+// "Which products do the calculators own?" — answered once, for the Merchant
+// Center feed, llms.txt and the admin diagnostics. Retires the registry-ID
+// parse that used to be copy-pasted at :242, :448 and :1102.
+if ( file_exists( PPS_CALC_DIR . 'pps-catalog.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-catalog.php';
+}
+
+// Paper report: which open jobs sit on stock we don't inventory. Depends on
+// pps-config-admin.php for the inventoried test.
+if ( file_exists( PPS_CALC_DIR . 'pps-paper-report.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-paper-report.php';
+}
+
+// /pps-product-feed.xml for Google Merchant Center. Depends on pps-catalog.php.
+if ( file_exists( PPS_CALC_DIR . 'pps-product-feed.php' )
+     && file_exists( PPS_CALC_DIR . 'pps-catalog.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-product-feed.php';
+}
+
+// Daily Places API refresh of the Business Profile rating the LocalBusiness
+// schema mirrors. Inert until a key and Place ID are configured.
+if ( file_exists( PPS_CALC_DIR . 'pps-gbp-sync.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-gbp-sync.php';
+}
+
+// One-screen product creation from a quote link, plus the calculator-binding
+// dropdown on the product editor. Needs the URL parser.
+if ( file_exists( PPS_CALC_DIR . 'pps-spawn-product.php' )
+     && file_exists( PPS_CALC_DIR . 'pps-defaults-url.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-spawn-product.php';
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -159,12 +244,77 @@ function pps_save_registry( $reg ) {
 }
 
 /**
+ * Parse a registry row's product-ID string.
+ *
+ * The registry stores IDs as a free-form comma/space separated string because
+ * it is edited by hand in a textarea, so every reader has to tolerate stray
+ * whitespace, trailing commas and duplicates. This used to be re-implemented
+ * inline at each call site, with each copy quietly disagreeing about
+ * duplicates and zeros.
+ *
+ * Lives here rather than in pps-catalog.php because callers below are core and
+ * that file is loaded behind a file_exists guard.
+ *
+ * @param string $products_str
+ * @return int[] Unique, positive, in the order first seen.
+ */
+function pps_registry_product_ids( $products_str ) {
+    $ids = array_map( 'intval', preg_split( '/[\s,]+/', (string) $products_str ) );
+    $ids = array_filter( $ids, function ( $id ) { return $id > 0; } );
+    return array_values( array_unique( $ids ) );
+}
+
+/**
+ * The delivery date the customer was actually shown, formatted for display.
+ *
+ * The cart and the order item both used to recompute this as "now + N business days",
+ * which disagreed with the calculator for three separate reasons: it counted from the
+ * moment the page was viewed rather than when the quote was made (so the date drifted
+ * every day the cart sat there), it ignored the 2pm production cutoff that the engine
+ * applies, and it ignored a date the customer had explicitly asked for. That is where
+ * the three different delivery dates on one checkout screen came from.
+ *
+ * The calculator already resolved all of that and put the answer in the metadata as
+ * `estimatedDeliveryDate` (Y-m-d). Reading it back is not merely more accurate — it is
+ * the only version the customer ever agreed to.
+ *
+ * The recompute survives as a fallback for cart items and orders created before the
+ * field existed.
+ *
+ * @param string $metadata_json The line item's pps_metadata.
+ * @param int    $biz_days      Business-day count, for the legacy fallback.
+ * @return string|null Formatted date, or null if neither source yields one.
+ */
+function pps_quoted_delivery_date( $metadata_json, $biz_days ) {
+    $tz  = 'America/Phoenix';
+    if ( function_exists( 'pps_get_config' ) ) {
+        $cfg = pps_get_config();
+        $tz  = $cfg['pcf']['shop_timezone'] ?? $tz;
+    }
+    $zone = new DateTimeZone( $tz );
+
+    $meta = json_decode( (string) $metadata_json, true );
+    $ymd  = is_array( $meta ) ? trim( (string) ( $meta['estimatedDeliveryDate'] ?? '' ) ) : '';
+    if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) ) {
+        $d = DateTime::createFromFormat( 'Y-m-d|', $ymd, $zone );
+        // createFromFormat accepts out-of-range parts by rolling them over, so a
+        // malformed date can parse into a real but wrong one. Round-tripping it is
+        // what catches that.
+        if ( $d && $d->format( 'Y-m-d' ) === $ymd ) return $d->format( 'l, M j, Y' );
+    }
+
+    $biz_days = (int) $biz_days;
+    if ( $biz_days <= 0 ) return null;
+    return pps_add_business_days( new DateTime( 'now', $zone ), $biz_days )->format( 'l, M j, Y' );
+}
+
+/**
  * Find calculator filename assigned to a product ID.
  */
 function pps_get_calculator_for_product( $product_id ) {
     $reg = pps_get_registry();
     foreach ( $reg as $filename => $meta ) {
-        $ids = array_map( 'intval', array_filter( preg_split( '/[\s,]+/', $meta['products'] ?? '' ) ) );
+        $ids = pps_registry_product_ids( $meta['products'] ?? '' );
         if ( in_array( (int) $product_id, $ids, true ) ) {
             return $filename;
         }
@@ -370,7 +520,7 @@ function pps_admin_page() {
                 $filepath     = trailingslashit( $dir ) . $filename;
                 $filesize     = file_exists( $filepath ) ? size_format( filesize( $filepath ) ) : '—';
                 $has_products = ! empty( trim( $products_str ) );
-                $product_ids  = array_filter( array_map( 'intval', preg_split( '/[\s,]+/', $products_str ) ) );
+                $product_ids  = pps_registry_product_ids( $products_str );
             ?>
                 <div class="pps-card">
                     <div class="pps-card-head">
@@ -443,6 +593,105 @@ function pps_admin_page() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+/**
+ * The pdf.js loader + upload preflight, shared by both embed paths.
+ *
+ * pdf.js 4.x is ES-modules-only, so the old classic-script enqueue cannot load it; this
+ * inline loader dynamic-imports it and publishes window.pdfjsLib, the global the
+ * calculator code already uses. One function rather than two copies, because the
+ * product-page and preset-URL embeds carried duplicate 3.11 enqueues and had already
+ * started to drift in whitespace.
+ *
+ * The calculator HTML files carry their own identical copy in their <head> for the
+ * GitHub Pages previews; the WP embeds never read that head, which is why this exists.
+ * If the blob changes in the HTML files, change it here in the same commit.
+ *
+ * Why 4.10.38: 3.11.174 silently dropped an entire transparency group from a customer
+ * PDF, so the approval proof was missing a block the press would print (2026-08-04).
+ * 4.10.38 is the version that was verified against that exact file.
+ */
+function pps_pdfjs_loader_js() {
+    return <<<'PPSPDFJS'
+/* pdf.js 4.x ships as ES modules only, so the classic-script global is gone. This
+   loader dynamic-imports it at parse time -- the fetch is warm before anyone can pick a
+   file -- and publishes it at window.pdfjsLib, the name every use site already resolves.
+   Use sites await window.__ppsPdfJs first, so a slow network delays the first upload
+   instead of breaking it.
+   Why 4.x at all: 3.11.174 silently dropped an entire transparency group from a
+   customer PDF -- the proof rendered without a block the press would print. 4.10.38 is
+   pinned because it is the version verified against that file. The legacy build is
+   deliberate: customers proof on phones whose Safari the modern build has dropped.
+   Two mirrors, both exact npm layouts, full prefixes as literals so the offline test
+   harness can string-replace them with vendored copies. */
+(function () {
+  var MIRRORS = [
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/",
+    "https://unpkg.com/pdfjs-dist@4.10.38/legacy/build/"
+  ];
+  function attempt(i) {
+    if (i >= MIRRORS.length) return Promise.reject(new Error("pdf.js could not be loaded from any CDN"));
+    return import(MIRRORS[i] + "pdf.min.mjs").then(function (m) {
+      m.GlobalWorkerOptions.workerSrc = MIRRORS[i] + "pdf.worker.min.mjs";
+      window.pdfjsLib = m;
+      return m;
+    }, function () { return attempt(i + 1); });
+  }
+  window.__ppsPdfJs = attempt(0);
+  window.__ppsPdfJs.catch(function (e) { console.error("[pps]", e); });
+})();
+
+/* Preflight, not gatekeeping: names the constructs in an uploaded PDF that a browser
+   preview is known to fumble -- pdf.js is a viewer, not a prepress RIP, and
+   transparency is exactly where the two part company. Reads the operator lists the
+   renderer builds anyway (they are cached and reused by the page renders that follow),
+   so the scan costs almost nothing. Never throws: a preflight that can break an upload
+   is worse than no preflight. Results accumulate in window.PPS_PDF_RISKS keyed by
+   upload slot; the proof modal renders the union. */
+window.PPS_PDF_RISKS = {};
+window.ppsPdfRisks = function () {
+  var o = window.PPS_PDF_RISKS, out = [], k, i, r;
+  for (k in o) { r = o[k] || []; for (i = 0; i < r.length; i++) if (out.indexOf(r[i]) < 0) out.push(r[i]); }
+  return out;
+};
+window.ppsAnalyzePdfRisks = async function (doc) {
+  var risks = [];
+  var add = function (x) { if (risks.indexOf(x) < 0) risks.push(x); };
+  try {
+    var OPS = window.pdfjsLib.OPS;
+    var limit = Math.min(doc.numPages, 40);   // enough pages to decide; bounded on purpose
+    for (var i = 1; i <= limit; i++) {
+      var pg = await doc.getPage(i);
+      var list = await pg.getOperatorList();
+      for (var k = 0; k < list.fnArray.length; k++) {
+        var f = list.fnArray[k], a = list.argsArray[k];
+        if (f === OPS.beginGroup) add("transparency groups");
+        else if (f === OPS.shadingFill) add("gradients");
+        else if (f === OPS.setGState && a && Array.isArray(a[0])) {
+          for (var e = 0; e < a[0].length; e++) {
+            var ent = a[0][e]; if (!Array.isArray(ent)) continue;
+            var key = ent[0], val = ent[1];
+            if (key === "SMask" && val) add("soft masks");
+            else if (key === "BM" && val && !/^(Normal|Compatible|source-over)$/i.test(String(val && val.name || val))) add("blend modes");
+            else if ((key === "ca" || key === "CA") && val > 0 && val < 1) add("partial transparency");
+          }
+        } else if (f === OPS.setFont && a && typeof a[0] === "string") {
+          try {
+            var fnt = pg.commonObjs.get(a[0]);
+            // The standard-14 faces are never embedded by design and substitute the
+            // same way in every renderer; flagging them would banner every quick-tool
+            // PDF and teach people to ignore the warning.
+            if (fnt && fnt.missingFile && !/^(Helvetica|Times|Courier|Arial|Symbol|ZapfDingbats)/i.test(String(fnt.name || ""))) add("non-embedded fonts");
+          } catch (e2) {}
+        }
+      }
+      if (risks.length >= 4) break;
+    }
+  } catch (e3) {}
+  return risks;
+};
+PPSPDFJS;
+}
+
 // FRONTEND: EMBED CALCULATOR ON PRODUCT PAGES (direct, no iframe)
 // ═══════════════════════════════════════════════════════════════
 
@@ -455,6 +704,7 @@ function pps_parse_calculator_html( $html ) {
     $parts = array(
         'styles'   => '',
         'app_code' => '',
+        'compiled' => false,
     );
 
     // <style>...</style> block
@@ -462,12 +712,124 @@ function pps_parse_calculator_html( $html ) {
         $parts['styles'] = $m[1];
     }
 
-    // <script type="text/babel">...</script> app code
+    // App code: either the JSX source block, or the precompiled plain-script
+    // block tools-compile-calcs.mjs emits (identified by its marker comment).
+    // Matching ONLY text/babel is how the compiled deploy rendered an empty
+    // calculator on every product page (round-3 QA blocker): no match, no app.
     if ( preg_match( '/<script type="text\/babel">(.*)<\/script>/s', $html, $m ) ) {
         $parts['app_code'] = trim( $m[1] );
+    } elseif ( preg_match( '/<script>(\/\* compiled by tools-compile-calcs\.mjs.*)<\/script>/s', $html, $m ) ) {
+        $parts['app_code'] = trim( $m[1] );
+        $parts['compiled'] = true;
     }
 
     return $parts;
+}
+
+/**
+ * True when the uploaded calculator file is a precompiled build (no
+ * in-browser Babel needed). Read the head only; cached per path.
+ */
+function pps_calc_file_is_compiled( $filepath ) {
+    static $cache = array();
+    if ( ! isset( $cache[ $filepath ] ) ) {
+        // Full read, not a head-sniff: the compile marker sits at the app
+        // <script>, tens of KB in past the styles — an 8KB sniff missed it,
+        // which is why compiled pages kept enqueuing Babel (round-4 QA).
+        $body = (string) file_get_contents( $filepath );
+        $cache[ $filepath ] = ( strpos( $body, 'tools-compile-calcs.mjs' ) !== false );
+    }
+    return $cache[ $filepath ];
+}
+
+/**
+ * Serve a compiled calculator's app code as a real enqueued file instead of a
+ * giant inline <script>. Round-4 QA found the inline form dies twice over:
+ * executed synchronously it runs ~26 scripts before React exists
+ * ("ReferenceError: React is not defined" — text/babel used to defer it, a
+ * plain script tag does not), and WP Rocket's minifier deletes 400KB+ inline
+ * blocks from the cached page outright. A dependency-ordered footer enqueue
+ * fixes the ordering; an external file survives the minifier (and the
+ * existing 'pps-calculator' Rocket exclusion covers its URL); the page sheds
+ * ~450KB of HTML. Content-hashed filename = immutable, browser-cacheable.
+ * Returns false if the file can't be written, so callers can fall back.
+ */
+function pps_enqueue_calc_app_file( $filepath, $app_code ) {
+    $hash = substr( md5( $app_code ), 0, 10 );
+    $base = preg_replace( '/\.html$/', '', basename( $filepath ) );
+    $dir  = trailingslashit( pps_upload_dir() ) . 'js';
+    $file = $dir . '/' . $base . '-' . $hash . '.js';
+
+    if ( ! file_exists( $file ) ) {
+        if ( ! file_exists( $dir ) ) {
+            wp_mkdir_p( $dir );
+            @file_put_contents( $dir . '/index.php', '<?php // Silence is golden.' );
+        }
+        // Write-then-rename so a concurrent request never serves a half file.
+        $tmp = $file . '.' . wp_generate_password( 6, false ) . '.tmp';
+        if ( false === @file_put_contents( $tmp, $app_code ) ) return false;
+        if ( ! @rename( $tmp, $file ) ) { @unlink( $tmp ); return false; }
+    }
+
+    $upload = wp_upload_dir();
+    $url    = str_replace(
+        trailingslashit( $upload['basedir'] ),
+        trailingslashit( $upload['baseurl'] ),
+        $file
+    );
+    wp_enqueue_script(
+        'pps-calc-app',
+        $url,
+        array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ),
+        $hash,
+        true
+    );
+    return true;
+}
+
+/**
+ * Exempt the calculator script stack from Cloudflare Rocket Loader.
+ *
+ * Production sits behind Cloudflare (staging does not), and Rocket Loader
+ * re-orders/re-executes scripts, which breaks the React → ReactDOM → app
+ * dependency chain the external-file enqueue exists to guarantee. Observed
+ * live 2026-08-13 as a commit-phase removeChild NotFoundError on proof
+ * approval (coupon calculator, production only). data-cfasync="false" is
+ * honored by Rocket Loader wherever the zone is managed, so this needs no
+ * Cloudflare dashboard access and leaves Rocket Loader on for the rest of
+ * the site. The WP Rocket exclusions elsewhere in this file are a different
+ * product and do NOT cover this.
+ */
+add_filter( 'script_loader_tag', function ( $tag, $handle ) {
+    static $pps_handles = array(
+        'pps-react'     => 1,
+        'pps-react-dom' => 1,
+        'pps-pdfjs'     => 1,
+        'pps-jspdf'     => 1,
+        'pps-babel'     => 1,
+        'pps-calc-app'  => 1,
+    );
+    if ( isset( $pps_handles[ $handle ] ) && false === strpos( $tag, 'data-cfasync' ) ) {
+        $tag = str_replace( '<script ', '<script data-cfasync="false" ', $tag );
+    }
+    return $tag;
+}, 10, 2 );
+
+/**
+ * Compiled-ness of the calculator serving the CURRENT request (product page
+ * or preset URL) — used to skip the Babel Standalone enqueue, ~3MB of decoded
+ * JS that compiled pages never execute.
+ */
+function pps_current_calc_is_compiled() {
+    $filename = '';
+    if ( ! empty( $GLOBALS['pps_active_preset'] ) && function_exists( 'pps_get_filename_for_calc_type' ) ) {
+        $filename = pps_get_filename_for_calc_type( $GLOBALS['pps_active_preset']['calc'] );
+    } elseif ( function_exists( 'is_product' ) && is_product() ) {
+        $filename = pps_get_calculator_for_product( get_queried_object_id() );
+    }
+    if ( ! $filename ) return false;
+    $filepath = trailingslashit( pps_upload_dir() ) . $filename;
+    return file_exists( $filepath ) && pps_calc_file_is_compiled( $filepath );
 }
 
 add_action( 'wp', function() {
@@ -496,14 +858,19 @@ add_action( 'wp', function() {
     add_action( 'wp_enqueue_scripts', function() {
         wp_enqueue_script( 'pps-react', 'https://unpkg.com/react@18.3.1/umd/react.production.min.js', array(), '18.3.1', true );
         wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
-        wp_enqueue_script( 'pps-pdfjs', 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
-        wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
+        // pdf.js 4.x is ESM-only; the handle survives as an inline loader so the
+        // pps-babel dependency chain is unchanged. See pps_pdfjs_loader_js().
+        wp_register_script( 'pps-pdfjs', false, array(), '4.10.38', true );
+        wp_enqueue_script( 'pps-pdfjs' );
+        wp_add_inline_script( 'pps-pdfjs', pps_pdfjs_loader_js() );
         // jsPDF — for generating print-ready PDFs. Pre-loading via wp_enqueue_script
         // removes the runtime <script> injection in the calc HTML, which was a
         // DOM-mutation source contributing to React removeChild errors.
         wp_enqueue_script( 'pps-jspdf', 'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js', array(), '2.5.1', true );
-        // Babel must load after React so transpiled code can find it
-        wp_enqueue_script( 'pps-babel', 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
+        // Babel only for JSX-source builds; compiled pages skip ~3MB of dead JS.
+        if ( ! pps_current_calc_is_compiled() ) {
+            wp_enqueue_script( "pps-babel", 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
+        }
     });
 
     // ── Kill WC's gallery slider / lightbox / zoom on calc product pages ──
@@ -576,6 +943,26 @@ add_action( 'wp', function() {
     // callback. We emit our own .pps-gallery markup at the same hook so the
     // calc still renders directly below. Anyone hooked into the WC gallery
     // classes finds nothing to enhance.
+    // ── Bound the parallax ──
+    // .pps-gallery is position:sticky. Its containing block used to be the whole
+    // product container, so it stayed pinned at top:0 for the entire page and
+    // showed through every block below that lacked an opaque background — the
+    // photo reappearing in strips behind the trust badges and the description.
+    // The 2026-08-12 pass treated that by listing containers to paint white,
+    // but the list was Astra-era and pps-theme's wrappers are not in it, so the
+    // leak came back the moment the theme changed.
+    //
+    // A sticky element cannot escape its parent's box. Wrapping the gallery and
+    // the calculator in one stage ends the pinning exactly where the calculator
+    // ends, which is the only place the parallax was ever meant to reach. No
+    // class list to keep in sync with whatever theme is installed.
+    add_action( 'woocommerce_before_single_product_summary', function() {
+        echo '<div class="pps-stage">';
+    }, 19 );
+    add_action( 'woocommerce_before_single_product_summary', function() {
+        echo '</div>';
+    }, 26 );
+
     remove_action( 'woocommerce_before_single_product_summary', 'woocommerce_show_product_images', 20 );
     add_action( 'woocommerce_before_single_product_summary', function() use ( $product_id ) {
         $product = wc_get_product( $product_id );
@@ -626,6 +1013,11 @@ add_action( 'wp', function() {
         .single-product .entry-content,
         .single-product main { overflow: visible !important; }
 
+        /* The stage is the sticky gallery's containing block: the parallax runs
+           from the top of the gallery to the bottom of the calculator and stops
+           there, because a sticky child cannot be pushed past its parent. */
+        .pps-stage { position: relative; overflow: visible; }
+
         .pps-gallery {
             position: sticky;
             top: 0;
@@ -635,6 +1027,48 @@ add_action( 'wp', function() {
             padding: 0;
             overflow: hidden;
         }
+        /* Everything BELOW the calculator must also cover the sticky gallery.
+           Only #pps-calculator-wrap used to carry the overlay, so the gallery —
+           pinned at top:0 — showed through the description, tabs and Site
+           Builder blocks further down the page. That is the "image floating
+           over the description" and the "collapsing the description doesn't
+           hide it" reports (2026-08-12): the gallery was bleeding through,
+           the description was never the problem. */
+        .single-product .woocommerce-tabs,
+        .single-product .wc-tabs-wrapper,
+        .single-product .woocommerce-Tabs-panel,
+        .single-product .ast-single-product-tabs,
+        .single-product .related,
+        .single-product .up-sells,
+        .single-product .cross-sells,
+        .single-product .ast-advanced-hook-markup,
+        .single-product .site-footer {
+            position: relative;
+            z-index: 1;
+            background: #fff;
+        }
+
+        /* The description tab is full-bleed, so on a wide monitor the copy runs
+           the entire viewport — 200+ characters a line, which nobody reads.
+           Cap it at the same 1200px the rest of the site's content uses, and
+           hold the prose itself to a normal measure inside that. */
+        .single-product .woocommerce-Tabs-panel,
+        .single-product .woocommerce-tabs .panel,
+        .single-product .wc-tab {
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+            padding-left: 24px;
+            padding-right: 24px;
+            box-sizing: border-box;
+        }
+        .single-product .woocommerce-Tabs-panel p,
+        .single-product .woocommerce-Tabs-panel li,
+        .single-product .woocommerce-tabs .panel p,
+        .single-product .woocommerce-tabs .panel li {
+            max-width: 80ch;
+        }
+
         /* Parallax overlay — the calc wrap slides up over the sticky gallery. */
         #pps-calculator-wrap {
             position: relative !important;
@@ -720,6 +1154,11 @@ add_action( 'wp', function() {
             'cartUrl'     => wc_get_cart_url(),
             'cartNonce'   => wp_create_nonce( 'pps_add_to_cart' ),
             'uploadNonce' => wp_create_nonce( 'pps_upload_artwork' ),
+            // What PHP will actually accept in one POST. Without it the
+            // calculator cannot tell an oversized file from a stale nonce:
+            // both arrive as admin-ajax's bare "-1", which is what produced
+            // the "Artwork upload failed: Unknown error" report.
+            'maxUpload'   => (int) wp_max_upload_size(),
             'productId'   => $product_id,
         );
 
@@ -732,7 +1171,7 @@ add_action( 'wp', function() {
         // per key, but code-shipped defaults always ride along — otherwise a new
         // default tooltip never reaches sites whose pps_tooltips option was
         // seeded before it existed.
-        $tips = array_merge( pps_default_tooltips(), (array) get_option( 'pps_tooltips', array() ) );
+        $tips = pps_get_tooltips();
         if ( ! empty( $tips ) ) {
             $config['tips'] = $tips;
         }
@@ -786,7 +1225,7 @@ add_action( 'wp', function() {
                 if ( ! $bt_file ) continue;
                 $bt_reg = pps_get_registry();
                 if ( ! isset( $bt_reg[ $bt_file ]['products'] ) ) continue;
-                $bt_ids = array_map( 'intval', array_filter( preg_split( '/[\s,]+/', $bt_reg[ $bt_file ]['products'] ) ) );
+                $bt_ids = pps_registry_product_ids( $bt_reg[ $bt_file ]['products'] );
                 if ( empty( $bt_ids ) ) continue;
                 $bt_url = get_permalink( $bt_ids[0] );
                 if ( $bt_url ) {
@@ -805,6 +1244,29 @@ add_action( 'wp', function() {
                 WC()->session->set( 'pps_edit_key_' . $product_id, $edit_key );
                 $config['editMode'] = true;
 
+                // Rebuild the restore payload from the cart session instead of
+                // trusting a URL to carry it (the Edit Specs link is now a bare
+                // token). Same whitelist as every other reorder path; encoded
+                // the same way, so the calculators' PPS_CONFIG.reorder reader
+                // is none the wiser.
+                $edit_meta = json_decode( (string) ( WC()->cart->get_cart()[ $edit_key ]['pps_metadata'] ?? '' ), true );
+                if ( is_array( $edit_meta ) ) {
+                    $edit_fields = function_exists( 'pps_reorder_field_whitelist' )
+                        ? pps_reorder_field_whitelist()
+                        : array( 'sizeLabel', 'qty', 'sides', 'paper', 'shipState' );
+                    $edit_cfg = array();
+                    foreach ( $edit_fields as $ek ) {
+                        if ( isset( $edit_meta[ $ek ] ) ) $edit_cfg[ $ek ] = $edit_meta[ $ek ];
+                    }
+                    if ( ! empty( WC()->cart->get_cart()[ $edit_key ]['pps_artwork_path'] ) ) {
+                        $edit_cfg['artworkPath']     = WC()->cart->get_cart()[ $edit_key ]['pps_artwork_path'];
+                        $edit_cfg['artworkFilename'] = basename( WC()->cart->get_cart()[ $edit_key ]['pps_artwork_path'] );
+                    }
+                    if ( $edit_cfg ) {
+                        $config['reorder'] = rtrim( strtr( base64_encode( wp_json_encode( $edit_cfg ) ), '+/', '-_' ), '=' );
+                    }
+                }
+
                 // Pass existing artwork info so calculator can display it
                 $edit_item = WC()->cart->get_cart()[ $edit_key ];
                 if ( ! empty( $edit_item['pps_artwork_path'] ) ) {
@@ -821,7 +1283,7 @@ add_action( 'wp', function() {
         }
 
         // ── Config ──
-        echo '<script>window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+        echo '<script data-cfasync="false">window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
 
         // ── Edit mode banner + button text override ──
         if ( ! empty( $config['editMode'] ) ) {
@@ -830,15 +1292,20 @@ add_action( 'wp', function() {
                 <span><strong>Edit Mode</strong> — Update your specs below, then click the button to save changes.</span>
                 <a href="' . esc_url( wc_get_cart_url() ) . '" style="margin-left:auto;color:#fff;opacity:0.8;font-size:12px;text-decoration:underline">Cancel</a>
             </div>';
-            echo '<script>
+            echo '<script data-cfasync="false">
             (function(){
+                // The calculators say "Add to Order", not "Add to cart", so this matched
+                // nothing and the button kept its append-sounding label through the whole
+                // edit flow. The cart item IS replaced -- pps_ajax_add_to_cart removes the
+                // old key after the new line succeeds -- but nothing on screen said so,
+                // which is a reasonable thing to refuse to click.
                 var observer = new MutationObserver(function(){
                     var btns = document.querySelectorAll("#pps-calculator-wrap button");
                     btns.forEach(function(b){
-                        if (b.textContent.match(/add to cart/i) && !b.dataset.ppsEdited) {
-                            b.textContent = b.textContent.replace(/add to cart/i, "Update Cart");
-                            b.dataset.ppsEdited = "1";
-                        }
+                        if (b.dataset.ppsEdited) return;
+                        if (!/add to (cart|order)/i.test(b.textContent)) return;
+                        b.textContent = b.textContent.replace(/add to (cart|order)/i, "Update Order");
+                        b.dataset.ppsEdited = "1";
                     });
                 });
                 observer.observe(document.body, {childList:true, subtree:true});
@@ -865,8 +1332,16 @@ add_action( 'wp', function() {
         echo '</div>';
 
         // ── App code ──
+        // JSX source ships inline as text/babel (Babel Standalone defers it).
+        // Compiled builds enqueue an external dependency-ordered file; the
+        // inline fallback is wrapped in DOMContentLoaded so it can never run
+        // ahead of the footer-loaded React (round-4 QA blocker).
         if ( $parts['app_code'] ) {
-            echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+            if ( empty( $parts['compiled'] ) ) {
+                echo '<script data-cfasync="false" type="text/babel">' . $parts['app_code'] . '</script>';
+            } elseif ( ! pps_enqueue_calc_app_file( $filepath, $parts['app_code'] ) ) {
+                echo '<script data-cfasync="false">document.addEventListener("DOMContentLoaded",function(){' . $parts['app_code'] . "\n});</script>";
+            }
         }
     }, 25 );
 });
@@ -1009,7 +1484,7 @@ function pps_ajax_upload_artwork() {
 // manifest is a plain-text file; some security plugins (e.g. AIOS) strip
 // text/plain from the allowed-mime list, which would make wp_check_filetype()
 // return an empty type (and any wp_handle_upload/media path reject the file).
-// Registering it guarantees .txt is recognised as text/plain site-wide.
+// Registering it guarantees .txt is recognized as text/plain site-wide.
 add_filter( 'upload_mimes', function( $mimes ) {
     if ( empty( $mimes['txt'] ) ) {
         $mimes['txt'] = 'text/plain';
@@ -1030,8 +1505,10 @@ add_action( 'wp_ajax_nopriv_pps_add_to_cart', 'pps_ajax_add_to_cart' );
 //
 // Customer fills in name/email/phone/question while viewing a quote.
 // Calculator JS posts the current calc state + a re-open URL. We email
-// the staff (admin_email by default; override via pps_question_recipient
-// option) and send a confirmation back to the customer. Honeypot + rate
+// the staff (PCF question_recipient_email → pps_question_recipient option →
+// WooCommerce from-address; the WP admin email is deliberately NOT in the
+// chain except as an unreachable-recipient last resort — owner rule
+// 2026-08-25) and send a confirmation back to the customer. Honeypot + rate
 // limit prevent the obvious bot floods. Reuses the pps_add_to_cart nonce
 // since the calculator already has it loaded.
 
@@ -1204,7 +1681,11 @@ function pps_ajax_quote_question() {
     }
 
     // ── Compose staff email ──
-    // Recipient resolution: PCF (admin-editable) → legacy option → WP admin_email.
+    // Recipient resolution: PCF (admin-editable) → legacy option → WooCommerce
+    // from-address. Owner rule (2026-08-25): the WP admin email is a personal
+    // mailbox and must NOT receive site inquiry notifications — it remains only
+    // as the very last resort, because a form whose notification silently goes
+    // nowhere is worse than one that reaches the wrong inbox.
     $recipient = '';
     if ( function_exists( 'pps_get_config' ) ) {
         $cfg = pps_get_config();
@@ -1213,6 +1694,10 @@ function pps_ajax_quote_question() {
     }
     if ( ! $recipient ) {
         $cand = get_option( 'pps_question_recipient', '' );
+        if ( is_email( $cand ) ) $recipient = $cand;
+    }
+    if ( ! $recipient ) {
+        $cand = get_option( 'woocommerce_email_from_address', '' );
         if ( is_email( $cand ) ) $recipient = $cand;
     }
     if ( ! $recipient ) $recipient = get_option( 'admin_email' );
@@ -1348,7 +1833,7 @@ function pps_ajax_quote_question() {
  * docs/MASTER_PRICING_LOGIC.md.
  *
  * Fails OPEN by design: any input it cannot resolve authoritatively (custom trim,
- * unknown stock, unrecognised calculator) returns null and the check is skipped. A
+ * unknown stock, unrecognized calculator) returns null and the check is skipped. A
  * false rejection at add-to-cart costs a real sale; a missed check costs margin.
  *
  * @return float|null Floor in dollars, or null when it cannot be determined.
@@ -1653,6 +2138,15 @@ function pps_ajax_add_to_cart() {
         $cart_item_data['pps_artwork_path'] = $artwork_path;
     }
 
+    // Approval binding: SHA-256 the calculator computed over the print-ready
+    // bytes the customer approved. Strict 64-hex or dropped — this is a
+    // production gate (the imposition tool refuses on mismatch), so a malformed
+    // value must vanish rather than half-match.
+    $proof_hash = strtolower( sanitize_text_field( wp_unslash( $_POST['pps_proof_hash'] ?? '' ) ) );
+    if ( preg_match( '/^[0-9a-f]{64}$/', $proof_hash ) ) {
+        $cart_item_data['pps_proof_hash'] = $proof_hash;
+    }
+
     // Full approval package: every uploaded deliverable (raw + print-ready PDF +
     // preview pages + manifest) as an array of { path, name }. The raw file is
     // also kept in pps_artwork_path above for reorder/back-compat.
@@ -1681,9 +2175,17 @@ function pps_ajax_add_to_cart() {
         wp_send_json_error( 'Cart not available.' );
     }
 
+    // Tells the spec-less-line guard below that this add is the calculator's own.
+    $GLOBALS['pps_internal_add_to_cart'] = true;
     $cart_item_key = WC()->cart->add_to_cart( $product_id, 1, 0, array(), $cart_item_data );
+    unset( $GLOBALS['pps_internal_add_to_cart'] );
 
     if ( $cart_item_key ) {
+        // Carry the delivery address the customer just typed into the checkout session,
+        // so the address block on /checkout/ agrees with the "Ship to:" on the line item
+        // instead of showing a second, older address from their account.
+        pps_prefill_customer_shipping( $metadata );
+
         // Edit mode: now safe to remove old item since new one succeeded
         if ( $edit_key ) {
             WC()->cart->remove_cart_item( $edit_key );
@@ -1724,12 +2226,83 @@ function pps_ajax_add_to_cart() {
     }
 }
 
+/**
+ * A calculator product may only enter the cart through the calculator.
+ *
+ * Every product in the registry carries a placeholder catalogue price — a penny, in the
+ * case of Letterhead — because its real price is whatever the calculator works out from
+ * the spec. WooCommerce's own Add to cart button does not know that. Pressed from a shop
+ * archive, a related-products strip, a stale `?add-to-cart=` link or a search result, it
+ * puts a spec-less line on the cart at the placeholder price, and that line is
+ * checkout-able.
+ *
+ * It has already happened on staging: a stray $0.01 "Letterhead" line sat in the cart,
+ * pushed the subtotal a penny past the calculator's quote (which read as a rounding bug
+ * in the pricing engine and is not one), and — being a non-virtual product — switched
+ * WooCommerce's shipping machinery back on for a cart that is otherwise entirely
+ * virtual, which is where the third, contradictory delivery date at checkout came from.
+ *
+ * The order-side price floor above cannot catch this: the placeholder price IS the
+ * product's regular price, so a penny clears a floor defined as a fraction of it.
+ *
+ * Products not in the registry are WCPA's or plain WooCommerce's and are untouched.
+ */
+add_filter( 'woocommerce_add_to_cart_validation', function( $passed, $product_id, $quantity = 1, $variation_id = 0 ) {
+    if ( ! $passed ) return $passed;
+    if ( ! empty( $GLOBALS['pps_internal_add_to_cart'] ) ) return $passed;   // the calculator's own add
+
+    $calc = pps_get_calculator_for_product( $product_id );
+    if ( ! $calc ) return $passed;                                          // WCPA or plain Woo product
+
+    $product = wc_get_product( $product_id );
+    $link    = $product ? get_permalink( $product_id ) : '';
+    wc_add_notice( sprintf(
+        /* translators: %s: link to the product's calculator page */
+        'This product is priced from its specification. %s to choose your options and get a price.',
+        $link ? '<a href="' . esc_url( $link ) . '">Open the calculator</a>' : 'Open its product page'
+    ), 'error' );
+    return false;
+}, 10, 4 );
+
+/**
+ * Sweep out spec-less calculator lines that predate the guard above.
+ *
+ * The guard stops new ones. It does nothing about the line already sitting in a session
+ * cart from before it existed — which is a live problem rather than a hypothetical, that
+ * being exactly how the stray $0.01 Letterhead survived across a staging session.
+ *
+ * Removal is the only sound outcome: the line carries no specification, so there is
+ * nothing to produce and no price that means anything. Silently dropping it would be
+ * worse than leaving it, so it says so.
+ */
+add_action( 'woocommerce_cart_loaded_from_session', function( $cart ) {
+    if ( is_admin() && ! wp_doing_ajax() ) return;
+    $dropped = array();
+
+    foreach ( $cart->get_cart() as $key => $item ) {
+        if ( isset( $item['pps_metadata'] ) || isset( $item['pps_legacy_unit_price'] ) ) continue;
+        $pid = (int) ( $item['product_id'] ?? 0 );
+        if ( ! $pid || ! pps_get_calculator_for_product( $pid ) ) continue;
+
+        $product   = $item['data'] ?? null;
+        $dropped[] = $product && is_a( $product, 'WC_Product' ) ? $product->get_name() : 'an item';
+        $cart->remove_cart_item( $key );
+    }
+
+    if ( $dropped && function_exists( 'wc_add_notice' ) ) {
+        wc_add_notice( sprintf(
+            '%s was removed from your cart: it had no specification, so it could not be priced or produced. Please configure it on its product page.',
+            esc_html( implode( ', ', array_unique( $dropped ) ) )
+        ), 'notice' );
+    }
+}, 20 );
+
 // ═══════════════════════════════════════════════════════════════
 // CART: SESSION PERSISTENCE
 // ═══════════════════════════════════════════════════════════════
 
 add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $values ) {
-    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path', 'pps_artwork_files' );
+    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path', 'pps_artwork_files', 'pps_proof_hash' );
     foreach ( $keys as $k ) {
         if ( isset( $values[ $k ] ) ) {
             $cart_item[ $k ] = $values[ $k ];
@@ -1760,18 +2333,18 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
     if ( ! isset( $cart_item['pps_summary'] ) ) return $data;
 
     // buildSummary() emits one line per chosen option, and rendering them verbatim turned
-    // a cart row into a dozen table rows — six of them labelled "Configuration", because
+    // a cart row into a dozen table rows — six of them labeled "Configuration", because
     // a line with no colon had nothing to split on and fell back to that word. Group them
     // instead: the headline spec, the two paper facts, and one row carrying every
     // finishing choice. Same information, a third of the height, no repeated labels.
     $headline = '';
-    $labelled = array();
+    $labeled = array();
     $options  = array();
 
     foreach ( array_filter( array_map( 'trim', explode( "\n", $cart_item['pps_summary'] ) ) ) as $line ) {
         $parts = explode( ':', $line, 2 );
         if ( count( $parts ) === 2 ) {
-            $labelled[ trim( $parts[0] ) ] = trim( $parts[1] );
+            $labeled[ trim( $parts[0] ) ] = trim( $parts[1] );
         } elseif ( $headline === '' ) {
             $headline = $line;   // size · quantity · pages · job name — always first
         } else {
@@ -1784,38 +2357,53 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
     }
     // Paper first, because it is what a customer double-checks on a print order.
     foreach ( array( 'Inside', 'Cover' ) as $paper_key ) {
-        if ( isset( $labelled[ $paper_key ] ) ) {
-            $data[] = array( 'key' => $paper_key, 'value' => $labelled[ $paper_key ] );
-            unset( $labelled[ $paper_key ] );
+        if ( isset( $labeled[ $paper_key ] ) ) {
+            $data[] = array( 'key' => $paper_key, 'value' => $labeled[ $paper_key ] );
+            unset( $labeled[ $paper_key ] );
         }
     }
     if ( $options ) {
         $data[] = array( 'key' => 'Finishing', 'value' => implode( ' · ', $options ) );
     }
     // Whatever else carried its own label — Rush, Ship to, Standard delivery.
-    foreach ( $labelled as $label => $value ) {
+    foreach ( $labeled as $label => $value ) {
         $data[] = array( 'key' => $label, 'value' => $value );
     }
 
-    if ( isset( $cart_item['pps_biz_days'] ) ) {
-        $tz = 'America/Phoenix';
-        if ( function_exists( 'pps_get_config' ) ) {
-            $cfg = pps_get_config();
-            $tz  = $cfg['pcf']['shop_timezone'] ?? $tz;
-        }
-        $delivery = pps_add_business_days(
-            new DateTime( 'now', new DateTimeZone( $tz ) ),
-            intval( $cart_item['pps_biz_days'] )
-        );
+    $delivery = pps_quoted_delivery_date(
+        $cart_item['pps_metadata'] ?? '',
+        intval( $cart_item['pps_biz_days'] ?? 0 )
+    );
+    if ( $delivery !== null ) {
         $data[] = array(
             'key'     => 'Estimated Delivery',
-            'value'   => $delivery->format( 'l, M j, Y' ),
-            'display' => '<strong style="color:#46882c">' . $delivery->format( 'l, M j, Y' ) . '</strong>',
+            'value'   => $delivery,
+            'display' => '<strong style="color:#46882c">' . esc_html( $delivery ) . '</strong>',
         );
     }
 
     return $data;
 }, 10, 2 );
+
+// WCPA (still active for non-registry products) also filters this hook and
+// emits its form-field labels — valueless — on registry products it does not
+// own ("Booklet Finished Size:", "Insides Print Color:", …). Scrub
+// empty-valued rows off PPS items late, after every plugin has added its
+// rows. WCPA-owned products are untouched: they carry no pps_summary.
+add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
+    if ( ! isset( $cart_item['pps_summary'] ) || ! is_array( $data ) ) return $data;
+    return array_values( array_filter( $data, function( $row ) {
+        if ( ! is_array( $row ) ) return true;
+        // Any WCPA row is foreign on a PPS item (systems never share products) —
+        // including the literal 'wcpa_empty_label' placeholder keys the blocks
+        // checkout surfaced. Kill by key prefix, then kill anything valueless.
+        $key = strtolower( trim( (string) ( $row['key'] ?? ( $row['name'] ?? '' ) ) ) );
+        if ( strpos( $key, 'wcpa' ) === 0 ) return false;
+        $value   = trim( (string) ( $row['value'] ?? '' ) );
+        $display = trim( wp_strip_all_tags( (string) ( $row['display'] ?? '' ) ) );
+        return $value !== '' || $display !== '';
+    } ) );
+}, 999, 2 );
 
 // ═══════════════════════════════════════════════════════════════
 // CART & CHECKOUT: SKIN
@@ -1863,18 +2451,34 @@ add_action( 'wp_enqueue_scripts', function () {
    of it. This turns each line into a card: art, name and specs on the left, money on the
    right, specs as quiet supporting text rather than a table of their own. */
 
-/* Page layout is left to the theme. An earlier version set float/width on the cart form
-   and the totals column; Astra's own rules won on the real site, so all that achieved
-   was making the mock disagree with production. The card below now sizes itself from
-   whatever width it is given. */
-.pps-cart form.woocommerce-cart-form { container-type: inline-size; }
+/* ── Give the form a width before anything else ──────────────────────────────
+   Astra lays the cart out as a flex row. Its first item carries no width of its own, so
+   it is free to shrink to min-content — and it did: on staging the form and table
+   measured 239px inside a 619px column inside a 910px row, which squeezed the name cell
+   to nothing and rendered "Low Cost Brochure Printing" one character per line.
 
-/* ── The line-item table, rebuilt as cards ───────────────────────────────── */
+   flex-grow on the column makes it claim the row's free space; width:100% on the form
+   makes it fill the column. Both are inert if the theme ever stops using flex here, so
+   this is safe to state unconditionally. min-width:0 is the companion rule — without it
+   a flex item refuses to shrink below its content, which is how long spec strings push
+   the table wider than the page. */
+.pps-cart .ast-cart-non-sticky { flex: 1 1 auto; min-width: 0; }
+.pps-cart form.woocommerce-cart-form {
+  display: block; width: 100%; max-width: 100%; min-width: 0; flex: 1 1 auto;
+}
+
+/* ── The line-item table, rebuilt as cards ─────────────────────────────────
+   Table layout is dropped entirely. Every row below is a grid, so the table algorithm
+   was contributing nothing but a min-content floor that fought the column it sat in —
+   which is the other half of the collapse above. As blocks they simply fill their
+   parent, and a long spec string can no longer widen the page. */
 .pps-cart table.cart,
 .pps-cart table.shop_table.cart {
-  border: 0; background: none; border-collapse: separate; border-spacing: 0 12px;
+  display: block; width: 100%; max-width: 100%; border: 0; background: none;
 }
-.pps-cart table.cart thead { display: none; }   /* column headers mean nothing once rows are cards */
+.pps-cart table.cart > tbody { display: block; width: 100%; }
+.pps-cart table.cart > thead { display: none; }  /* column headers mean nothing once rows are cards */
+.pps-cart table.cart > tbody > tr { display: block; width: 100%; }
 
 .pps-cart table.cart tr.cart_item {
   display: grid;
@@ -1893,14 +2497,17 @@ add_action( 'wp_enqueue_scripts', function () {
     "thumb name money";
   align-items: start;
   gap: 0 18px;
+  margin: 0 0 12px;          /* replaces border-spacing, which a block table ignores */
   background: #fff;
   border: 1px solid #e6e9ee;
   border-radius: 14px;
   padding: 18px 20px;
+  box-sizing: border-box;
   box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
 }
 .pps-cart table.cart tr.cart_item > td {
-  border: 0; padding: 0; background: none; vertical-align: top;
+  display: block; border: 0; padding: 0; background: none; vertical-align: top;
+  min-width: 0;              /* a grid item defaults to min-content; long specs overflowed */
 }
 
 .pps-cart tr.cart_item td.product-thumbnail { grid-area: thumb; }
@@ -2025,10 +2632,12 @@ add_action( 'wp_enqueue_scripts', function () {
   font-size: 15px; font-weight: 700; letter-spacing: .01em;
 }
 
-/* ── Narrow container: the card becomes two rows, money under the name ──────
-   A container query, not a viewport one: the failure that prompted this was a cart
-   form occupying a third of a 1400px page. The viewport was wide; the card was not. */
-@container (max-width: 520px) {
+/* ── Narrow viewport: the card becomes two rows, money under the name ────────
+   This was a container query against the cart form. `container-type: inline-size` also
+   means "size this element as if it had no contents", which is precisely the property
+   that lets a flex parent squeeze it to nothing — the same failure this file now exists
+   to fix, re-introduced by the fix's own tooling. A viewport query cannot do that. */
+@media (max-width: 860px) {
   .pps-cart table.cart tr.cart_item {
     grid-template-columns: 60px minmax(0, 1fr) auto;
     /* Quantity and unit price share one line beneath the name; the line total gets its
@@ -2052,22 +2661,47 @@ add_action( 'wp_enqueue_scripts', function () {
 
 @media (max-width: 640px) {
   .pps-cart table.cart tr.cart_item {
-    grid-template-columns: 60px minmax(0, 1fr) auto;
     grid-template-areas:
       "thumb name remove"
       "price qty  qty"
       "money money money";
-    padding: 14px 15px; gap: 0 14px;
   }
-  .pps-cart tr.cart_item td.product-thumbnail img { width: 60px; }
-  .pps-cart tr.cart_item td.product-subtotal {
-    text-align: left; margin-top: 12px; padding-top: 12px;
-    border-top: 1px solid #f0f2f5;
-  }
-  .pps-cart tr.cart_item td.product-subtotal { justify-self: start; }
-  .pps-cart tr.cart_item dl.variation { grid-template-columns: 1fr; gap: 0; }
-  .pps-cart tr.cart_item dl.variation dt { margin-top: 6px; }
+  .pps-cart tr.cart_item td.product-price { justify-self: start; }
 }
+
+/* Round-3 QA: the theme's "Have a coupon?" toggle handler stopped binding,
+   leaving div.coupon at display:none with no way for a customer to enter a
+   code. Keep the field permanently open — pure CSS, so there is no race with
+   whatever theme handler may or may not attach. The toggle text becomes an
+   inert label above an already-open field, which reads fine. */
+.pps-cart div.coupon {
+  display: block !important;
+  height: auto !important;
+  overflow: visible !important;
+  opacity: 1 !important;
+}
+
+/* Round-5 QA / owner: the theme's "Have a coupon?" toggle is dead UI — its
+   handler never binds, while the always-visible #ast-coupon-code field is the
+   one that works. Delete the dead pair outright rather than leaving two
+   coupon inputs, one of which ignores clicks. */
+.pps-cart .wc-proceed-to-checkout p[tabindex="0"],
+.pps-cart div.coupon {
+  display: none !important;
+}
+
+/* Owner screenshot 2026-08-10: at wide viewports the theme floats the totals
+   column beside the items and our form width leaves it a ~1ch sliver, so the
+   delivery estimate rendered one letter per line. Stack the collaterals
+   full-width below the items instead — no float math to collapse. */
+.pps-cart .cart-collaterals,
+.pps-cart .cart_totals {
+  float: none !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  clear: both;
+}
+.pps-cart .cart-collaterals { max-width: 720px; margin-top: 18px; }
 CSS
     );
 }, 20 );
@@ -2082,39 +2716,13 @@ add_filter( 'woocommerce_cart_item_name', function( $name, $cart_item, $cart_ite
     $product = wc_get_product( $cart_item['product_id'] );
     if ( ! $product ) return $name;
 
-    $full = json_decode( $cart_item['pps_metadata'], true );
-    if ( ! $full ) return $name;
-
-    // Build reorder config (same fields as My Account reorder)
-    $reorder_fields = array(
-        'sizeLabel', 'customLong', 'customShort', 'bindDir',
-        'sets', 'insideColor', 'coverColor',
-        'insidePaper', 'insidePaperType',
-        'coverMode', 'coverPaper', 'coverPaperType',
-        'twoStaple', 'vividPrint',
-        'coating', 'bundling', 'roundCorner',
-        'artwork', 'artEditPages', 'bleed', 'proof',
-        'shipState',
-    );
-    $reorder_config = array();
-    foreach ( $reorder_fields as $key ) {
-        if ( isset( $full[ $key ] ) ) $reorder_config[ $key ] = $full[ $key ];
-    }
-
-    // Include quantity if present
-    if ( isset( $full['qty'] ) ) $reorder_config['qty'] = $full['qty'];
-
-    // Include artwork file info for edit mode
-    if ( ! empty( $cart_item['pps_artwork_path'] ) ) {
-        $reorder_config['artworkPath'] = $cart_item['pps_artwork_path'];
-        $reorder_config['artworkFilename'] = basename( $cart_item['pps_artwork_path'] );
-    }
-
-    $encoded = rtrim( strtr( base64_encode( json_encode( $reorder_config ) ), '+/', '-_' ), '=' );
-    $url = add_query_arg( array(
-        'pps_reorder'  => $encoded,
-        'pps_edit_key' => $cart_item_key,
-    ), $product->get_permalink() );
+    // Token only. The restore payload used to travel in the URL as base64
+    // (round-5 QA: a 1,425-character query string carrying shipState/shipZip
+    // into access logs, history and Referer headers). The cart session holds
+    // the full metadata under this key, so the render path now rebuilds the
+    // payload server-side — see the pps_edit_key branch in the product config
+    // build, which injects PPS_CONFIG.reorder from the cart item.
+    $url = add_query_arg( 'pps_edit_key', $cart_item_key, $product->get_permalink() );
 
     $name .= ' <a href="' . esc_url( $url ) . '" style="display:inline-block;margin-left:8px;font-size:12px;color:#007eff;text-decoration:none;border:1px solid #007eff;padding:2px 8px;border-radius:3px;white-space:nowrap">✏️ Edit Specs</a>';
 
@@ -2136,21 +2744,30 @@ add_filter( 'woocommerce_cart_item_quantity', function( $quantity_html, $cart_it
 // BUSINESS DAY CALCULATION
 // ═══════════════════════════════════════════════════════════════
 
-function pps_add_business_days( DateTime $start, int $days ): DateTime {
+/**
+ * Is the shop open on this date?
+ *
+ * Extracted from pps_add_business_days() so nothing has to reimplement it.
+ * A second copy of this test is how the quote page ended up offering delivery
+ * on closing days: it skipped weekends and knew nothing about the holiday
+ * list. One predicate, one answer.
+ *
+ * Closures are matched as Y-m-d (a specific day) or m-d (annually recurring).
+ */
+function pps_is_business_day( DateTime $d ): bool {
+    if ( (int) $d->format( 'N' ) >= 6 ) return false;
     $closures = pps_get_closures();
+    return ! in_array( $d->format( 'Y-m-d' ), $closures, true )
+        && ! in_array( $d->format( 'm-d' ), $closures, true );
+}
+
+function pps_add_business_days( DateTime $start, int $days ): DateTime {
     $d = clone $start;
     $added = 0;
 
     while ( $added < $days ) {
         $d->modify( '+1 day' );
-        $dow = (int) $d->format( 'N' );
-        if ( $dow >= 6 ) continue;
-
-        $ymd  = $d->format( 'Y-m-d' );
-        $mmdd = $d->format( 'm-d' );
-        if ( in_array( $ymd, $closures, true ) || in_array( $mmdd, $closures, true ) ) continue;
-
-        $added++;
+        if ( pps_is_business_day( $d ) ) $added++;
     }
 
     return $d;
@@ -2168,14 +2785,19 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
     $item->add_meta_data( '_pps_summary', $values['pps_summary'] ?? '', true );
     $item->add_meta_data( '_pps_rush', $values['pps_rush'] ?? 0, true );
 
-    // Snapshot delivery date at checkout moment
+    // The date the customer was quoted, not a fresh count from checkout time. Both are
+    // usually the same day; they diverge exactly when it matters — a cart left overnight,
+    // an order placed after the 2pm cutoff, or a delivery date the customer chose.
     $tz = 'America/Phoenix';
     if ( function_exists( 'pps_get_config' ) ) {
         $cfg = pps_get_config();
         $tz  = $cfg['pcf']['shop_timezone'] ?? $tz;
     }
-    $biz_days = intval( $values['pps_biz_days'] ?? 5 );
-    $delivery = pps_add_business_days( new DateTime( 'now', new DateTimeZone( $tz ) ), $biz_days );
+    $biz_days  = intval( $values['pps_biz_days'] ?? 5 );
+    $quoted    = pps_quoted_delivery_date( $values['pps_metadata'] ?? '', $biz_days );
+    $delivery  = $quoted !== null
+        ? new DateTime( $quoted, new DateTimeZone( $tz ) )
+        : pps_add_business_days( new DateTime( 'now', new DateTimeZone( $tz ) ), $biz_days );
 
     $item->add_meta_data( '_pps_delivery_date', $delivery->format( 'Y-m-d' ), true );
 
@@ -2210,6 +2832,13 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         }
     }
 
+    // Approval binding: SHA-256 of the print-ready bytes the customer approved
+    // on screen. The imposition tool hashes the file it is about to impose and
+    // refuses on mismatch — what was approved is what prints.
+    if ( ! empty( $values['pps_proof_hash'] ) && preg_match( '/^[0-9a-f]{64}$/', (string) $values['pps_proof_hash'] ) ) {
+        $item->add_meta_data( '_pps_proof_hash', (string) $values['pps_proof_hash'], true );
+    }
+
     // Visible in order emails
     $item->add_meta_data( 'Estimated Delivery', $delivery->format( 'l, M j, Y' ), true );
     $item->add_meta_data( 'Order Summary', $values['pps_summary'] ?? '', true );
@@ -2221,7 +2850,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         $sets     = is_array( $full['sets'] ?? null ) ? $full['sets'] : array();
         $totalQty = array_sum( array_column( $sets, 'qty' ) );
         $totalPg  = array_sum( array_column( $sets, 'pages' ) );
-        $size     = $full['sizeLabel'] ?? 'Unknown';
+        $size     = pps_spec_size_label( $full );
         $iPaper   = is_array( $full['insidePaper'] ?? null ) ? ( $full['insidePaper']['label'] ?? '' ) : '';
         $iColor   = ( $full['insideColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
         $proof    = ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' );
@@ -2229,7 +2858,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         $days     = intval( $full['days'] ?? $biz_days );
         $sets_ct  = count( $sets );
 
-        // Cover stock and colour are priced and printed separately from the inside, so a
+        // Cover stock and color are priced and printed separately from the inside, so a
         // spec that names only the inside paper is a spec production cannot work from.
         $cPaper = is_array( $full['coverPaper'] ?? null ) ? ( $full['coverPaper']['label'] ?? '' ) : '';
         $cColor = ( $full['coverColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
@@ -2240,7 +2869,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         // Finishing choices live in the metadata as numeric config values, not labels —
         // coating 750 means nothing on a job ticket. buildSummary() has already resolved
         // every one of them to the words the customer chose, so take them from there:
-        // the labelled lines are facts we already have, the rest are the add-ons.
+        // the labeled lines are facts we already have, the rest are the add-ons.
         $addons = array();
         $seen_headline = false;
         foreach ( array_filter( array_map( 'trim', explode( "\n", (string) ( $values['pps_summary'] ?? '' ) ) ) ) as $line ) {
@@ -2377,9 +3006,42 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     // A mixed cart containing a genuinely shippable product has a real WooCommerce
     // shipping address, entered at checkout. That one is authoritative — never
     // overwrite it with a calculator's copy.
-    if ( trim( (string) $order->get_shipping_address_1() ) !== '' ) return false;
+    //
+    // Note this is a flag rather than an early return. It used to return here, which
+    // also skipped the weight and carton meta below — and once the session prefill
+    // started putting the calculator's address on the order before this runs, that
+    // "already has an address" branch became the common case, silently taking the
+    // packing figures with it.
+    // Why this is not simply "the order already has an address":
+    //
+    // Every calculator product is virtual, deliberately, so WooCommerce's own
+    // shipping machinery stays out of the cart. But a virtual cart renders no
+    // shipping section at checkout, so the customer is never shown those fields
+    // — and WC_Checkout fills the order's shipping address by copying billing.
+    // That copy is not a destination anybody chose; it is the cardholder's
+    // address wearing the shipping fields. Treating it as authoritative is what
+    // sent order 87032's Denver job to the buyer's house in Texas.
+    //
+    // So defer only to an address that could actually have been typed at
+    // checkout: one belonging to a genuinely shippable, non-calculator item.
+    // On a calculator-only order the address the customer entered in the
+    // calculator is the only destination they were ever offered, and it wins.
+    $has_shippable_non_calc_item = false;
+    foreach ( $order->get_items() as $probe_item ) {
+        if ( $probe_item->get_meta( '_pps_metadata' ) ) continue;   // calculator line
+        $probe_product = $probe_item->get_product();
+        if ( $probe_product && ! $probe_product->is_virtual() ) {
+            $has_shippable_non_calc_item = true;
+            break;
+        }
+    }
+
+    $keep_existing_address = $has_shippable_non_calc_item
+        && trim( (string) $order->get_shipping_address_1() ) !== '';
 
     $addr = null;
+    $all_dests = array();
+    $quote_ctx = array();
     $weight = 0.0;
     $cartons = 0;
 
@@ -2394,8 +3056,6 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
         $weight  += (float) ( $meta['estWeightLb'] ?? 0 );
         $cartons += (int) ( $meta['estCartons'] ?? 0 );
 
-        if ( $addr !== null ) continue;   // first usable address wins
-
         $a = isset( $meta['shipAddr'] ) && is_array( $meta['shipAddr'] ) ? $meta['shipAddr'] : array();
         // State lives alongside shipAddr rather than inside it — the calculator collects
         // it separately because it drives the transit map. ZIP is mirrored in both.
@@ -2408,6 +3068,33 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
         // authoritative to a fulfilment tool and silently ships to the wrong place,
         // whereas empty fields fall back to billing, which is at least a whole address.
         if ( $street === '' || $city === '' || $state === '' || $zip === '' ) continue;
+
+        // Kept for the mismatch note: what the customer was quoted, and against
+        // which destination, so the operator can judge the cost/date impact.
+        // Record EVERY line's destination, not only the first. A WooCommerce order
+        // carries exactly one shipping address, so two lines bound for two places
+        // cannot both be honored — and until this was recorded, the second one
+        // was dropped without trace while its weight was still added to the
+        // consignment. Detected after the loop and flagged for a human, because
+        // splitting an order into two shipments is an operator's decision.
+        $dest_key = strtoupper( preg_replace( '/[^A-Za-z0-9]/', '', $street . $city . $state ) )
+                  . '|' . substr( preg_replace( '/[^0-9]/', '', $zip ), 0, 5 );
+        if ( ! isset( $all_dests[ $dest_key ] ) ) {
+            $all_dests[ $dest_key ] = trim(
+                trim( (string) ( $a['name'] ?? '' ) . ' ' . (string) ( $a['company'] ?? '' ) )
+                . ' — ' . $street . ', ' . $city . ', ' . $state . ' ' . $zip
+                . '  [' . $item->get_name() . ']'
+            );
+        }
+
+        if ( $addr !== null ) continue;   // first usable address wins
+
+        $quote_ctx = array(
+            'transitDays' => isset( $meta['transitDays'] ) ? (int) $meta['transitDays'] : null,
+            'rushCost'    => isset( $meta['rushCost'] ) ? (float) $meta['rushCost'] : null,
+            'delivery'    => trim( (string) ( $meta['estimatedDeliveryDate'] ?? '' ) ),
+            'needBy'      => trim( (string) ( $meta['needByDate'] ?? '' ) ),
+        );
 
         $addr = array(
             'street1' => $street,
@@ -2430,7 +3117,69 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     if ( $weight > 0 )  $order->update_meta_data( '_pps_est_weight_lb', round( $weight, 2 ) );
     if ( $cartons > 0 ) $order->update_meta_data( '_pps_est_cartons', $cartons );
 
-    if ( $addr === null ) {
+    // One order, one shipping address — so if the lines disagree about where they
+    // are going, no address choice below can be right for all of them.
+    if ( count( $all_dests ) > 1 && ! $order->get_meta( '_pps_multi_destination' ) ) {
+        $order->add_order_note( wp_strip_all_tags(
+            "⚠ THIS ORDER HAS " . count( $all_dests ) . " DIFFERENT DELIVERY ADDRESSES — it cannot ship as one.\n\n"
+            . implode( "\n", array_map( function ( $d ) { return '  • ' . $d; }, array_values( $all_dests ) ) )
+            . "\n\nA WooCommerce order holds one shipping address, so only the first is on the order; "
+            . "the rest are recorded here and nowhere else. The packing weight and carton count are the "
+            . "SUM of all lines, so they describe one consignment that does not exist. "
+            . "Split this into separate shipments before rating or labelling."
+        ) );
+        $order->update_meta_data( '_pps_multi_destination', count( $all_dests ) );
+        $order->save();
+    }
+
+    if ( $addr === null || $keep_existing_address ) {
+        // Order 87032 shipped this bug into daylight: a customer buying for a
+        // colleague entered the real ship-to in the calculator, then checkout's
+        // "ship to same address as billing" default overwrote it with their own.
+        // The correct destination survived only in _pps_metadata, where nobody
+        // looks until a parcel goes to the wrong person.
+        //
+        // Until the address flow itself is fixed, refuse to discard it silently:
+        // when the two disagree on where the parcel is going, say so on the order.
+        if ( $addr !== null && $keep_existing_address && ! $order->get_meta( '_pps_ship_mismatch' ) ) {
+            $norm_zip = function ( $z ) { return substr( preg_replace( '/[^0-9]/', '', (string) $z ), 0, 5 ); };
+            $same = $norm_zip( $addr['zip'] ) === $norm_zip( $order->get_shipping_postcode() )
+                 && strtoupper( $addr['state'] ) === strtoupper( (string) $order->get_shipping_state() );
+
+            if ( ! $same ) {
+                $calc_line = trim( $addr['name'] . ( $addr['company'] !== '' ? ' · ' . $addr['company'] : '' ) )
+                    . ' — ' . $addr['street1']
+                    . ( $addr['street2'] !== '' ? ', ' . $addr['street2'] : '' )
+                    . ', ' . $addr['city'] . ', ' . $addr['state'] . ' ' . $addr['zip'];
+
+                $order_line = trim( $order->get_shipping_first_name() . ' ' . $order->get_shipping_last_name() )
+                    . ' — ' . $order->get_shipping_address_1()
+                    . ', ' . $order->get_shipping_city()
+                    . ', ' . $order->get_shipping_state() . ' ' . $order->get_shipping_postcode();
+
+                $note = "⚠ SHIPPING ADDRESS MISMATCH — confirm before this ships.\n\n"
+                      . "Ships to (WooCommerce / Shippo):\n  " . $order_line . "\n\n"
+                      . "Destination entered in the calculator:\n  " . $calc_line . "\n\n"
+                      . "WooCommerce defaults to \"ship to same address as billing\", so a customer "
+                      . "ordering for someone else can have their own address silently replace the "
+                      . "destination they entered. The calculator's copy is above; it was not applied.";
+
+                if ( ! empty( $quote_ctx['transitDays'] ) || ! empty( $quote_ctx['rushCost'] ) ) {
+                    $note .= "\n\nQuoted against the calculator's destination:"
+                          . ( $quote_ctx['transitDays'] !== null ? " transit " . $quote_ctx['transitDays'] . " day(s);" : '' )
+                          . ( $quote_ctx['rushCost'] ? " rush " . wc_price( $quote_ctx['rushCost'] ) . ";" : '' )
+                          . ( $quote_ctx['delivery'] !== '' ? " estimated delivery " . $quote_ctx['delivery'] . ";" : '' )
+                          . ( $quote_ctx['needBy'] !== '' ? " need-by " . $quote_ctx['needBy'] . ";" : '' )
+                          . " Shipping cost and dates were calculated for that address, not the one above.";
+                }
+
+                $order->add_order_note( wp_strip_all_tags( $note ) );
+                $order->update_meta_data( '_pps_ship_mismatch', $calc_line );
+                $order->save();
+                return false;
+            }
+        }
+
         if ( $weight > 0 || $cartons > 0 ) $order->save();
         return false;
     }
@@ -2480,6 +3229,92 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     return true;
 }
 
+/**
+ * Prefill the checkout address from the calculator, at add-to-cart.
+ *
+ * pps_apply_calculator_shipping_address() above repairs the ORDER, after checkout. This
+ * is the other half of the same problem: what the customer READS on the checkout page,
+ * before any order exists.
+ *
+ * Without it they see the delivery address they typed into the calculator on the line
+ * item ("Ship to: TX 78701") and, a few inches away, whatever WooCommerce remembered
+ * from their account ("Scottsdale, AZ 85262") — two ship-tos on one screen with nothing
+ * saying which one the job follows. It follows the calculator's: that is the address the
+ * quote was priced and the transit time calculated against.
+ *
+ * So the calculator's address wins outright rather than filling only blanks. A saved
+ * profile address is older than something the customer typed a minute ago, and leaving
+ * the stale one in place is the bug being fixed. It is still theirs to edit at checkout.
+ *
+ * Billing is left alone — that is the cardholder's address and frequently not the
+ * delivery one, which is the whole reason these are separate fields.
+ *
+ * Side effect worth knowing: for a logged-in customer, WC_Customer::save() writes
+ * through to their saved account shipping address. That is what WooCommerce itself does
+ * with an address typed at checkout, and it is what makes the block checkout (a separate
+ * request reading WC()->customer) agree with the classic one. If it should instead be
+ * scoped to this cart only, drop the save() and prefill via woocommerce_checkout_get_value
+ * — that covers classic checkout but not blocks.
+ *
+ * @param string $metadata_json The line item's pps_metadata, as posted.
+ * @return bool True when the session was updated.
+ */
+function pps_prefill_customer_shipping( $metadata_json ) {
+    if ( ! function_exists( 'WC' ) || ! WC()->customer ) return false;
+
+    $meta = json_decode( (string) $metadata_json, true );
+    if ( ! is_array( $meta ) ) return false;
+
+    $a = isset( $meta['shipAddr'] ) && is_array( $meta['shipAddr'] ) ? $meta['shipAddr'] : array();
+    // State sits alongside shipAddr rather than inside it — the calculator collects it
+    // separately because it drives the transit map. ZIP is mirrored in both.
+    $street = trim( (string) ( $a['street1'] ?? '' ) );
+    $city   = trim( (string) ( $a['city'] ?? '' ) );
+    $state  = trim( (string) ( $a['state'] ?? $meta['shipState'] ?? '' ) );
+    $zip    = trim( (string) ( $a['zip'] ?? $meta['shipZip'] ?? '' ) );
+
+    // Same rule as the order-side writer: a half address looks authoritative and ships
+    // to the wrong place, where an empty one at least prompts the customer to type it.
+    if ( $street === '' || $city === '' || $state === '' || $zip === '' ) return false;
+
+    $name  = trim( (string) ( $a['name'] ?? '' ) );
+    if ( $name !== '' ) {
+        // Split on the last space so "Mary Anne Van Der Berg" keeps its surname intact.
+        $cut   = strrpos( $name, ' ' );
+        $first = $cut === false ? $name : trim( substr( $name, 0, $cut ) );
+        $last  = $cut === false ? ''    : trim( substr( $name, $cut + 1 ) );
+        WC()->customer->set_shipping_first_name( $first );
+        WC()->customer->set_shipping_last_name( $last );
+    }
+    WC()->customer->set_shipping_company( trim( (string) ( $a['company'] ?? '' ) ) );
+    WC()->customer->set_shipping_address_1( $street );
+    WC()->customer->set_shipping_address_2( trim( (string) ( $a['street2'] ?? '' ) ) );
+    WC()->customer->set_shipping_city( $city );
+    WC()->customer->set_shipping_state( $state );
+    WC()->customer->set_shipping_postcode( $zip );
+    // The calculator prices US ground transit only and has no country field. Stated
+    // rather than left blank, because a blank country makes an address unrateable.
+    WC()->customer->set_shipping_country( 'US' );
+    // Mirror into billing: the checkout form's visible fields are the billing
+    // set, and without this they sit empty and the state control falls back to
+    // the store base (Arizona) — a mis-selection waiting to be submitted. Same
+    // trade-off as above for logged-in customers: the typed address wins.
+    if ( $name !== '' ) {
+        WC()->customer->set_billing_first_name( $first );
+        WC()->customer->set_billing_last_name( $last );
+    }
+    WC()->customer->set_billing_company( trim( (string) ( $a['company'] ?? '' ) ) );
+    WC()->customer->set_billing_address_1( $street );
+    WC()->customer->set_billing_address_2( trim( (string) ( $a['street2'] ?? '' ) ) );
+    WC()->customer->set_billing_city( $city );
+    WC()->customer->set_billing_state( $state );
+    WC()->customer->set_billing_postcode( $zip );
+    WC()->customer->set_billing_country( 'US' );
+    WC()->customer->save();
+
+    return true;
+}
+
 // Classic checkout, block checkout, and the admin "create order" screen. Each fires
 // once the line items exist, which is what this reads from.
 add_action( 'woocommerce_checkout_order_processed', 'pps_apply_calculator_shipping_address', 20, 1 );
@@ -2504,6 +3339,15 @@ function pps_order_meta_box( $post_or_order ) {
     $order = ( $post_or_order instanceof WP_Post )
         ? wc_get_order( $post_or_order->ID )
         : $post_or_order;
+
+    if ( $order && $order->get_meta( '_pps_multi_destination' ) ) {
+        echo '<div style="margin:0 0 10px;padding:8px 10px;border-left:4px solid #d63638;background:#fcf0f1">'
+           . '<strong>⚠ ' . esc_html( (string) $order->get_meta( '_pps_multi_destination' ) )
+           . ' different delivery addresses on this order.</strong><br>'
+           . 'The order header carries only the first. Check each line\'s "Ship to" below and split the '
+           . 'shipment before rating or labelling — the header address is wrong for at least one line.'
+           . '</div>';
+    }
 
     if ( ! $order ) { echo '<p>Order not found.</p>'; return; }
 
@@ -2540,6 +3384,28 @@ function pps_order_meta_box( $post_or_order ) {
                . esc_html( number_format( $w, 2 ) ) . ' lb · '
                . esc_html( $c ) . ' carton' . ( $c === 1 ? '' : 's' )
                . ' <span style="color:#666;font-weight:400">— calculated, not weighed</span></p>';
+        }
+
+        // Where THIS line is going. The order carries one shipping address, so on a
+        // multi-destination order it is right for one line and wrong for the others —
+        // and the packer had no way to see that. Printed against the line's own
+        // shipment estimate, which is the figure it actually belongs to.
+        if ( is_array( $ship_meta ) ) {
+            $sa = isset( $ship_meta['shipAddr'] ) && is_array( $ship_meta['shipAddr'] ) ? $ship_meta['shipAddr'] : array();
+            $line_street = trim( (string) ( $sa['street1'] ?? '' ) );
+            $line_city   = trim( (string) ( $sa['city'] ?? '' ) );
+            $line_state  = trim( (string) ( $sa['state'] ?? $ship_meta['shipState'] ?? '' ) );
+            $line_zip    = trim( (string) ( $sa['zip'] ?? $ship_meta['shipZip'] ?? '' ) );
+            if ( $line_street !== '' && $line_city !== '' ) {
+                $who = trim( trim( (string) ( $sa['name'] ?? '' ) ) . ( ! empty( $sa['company'] ) ? ' · ' . $sa['company'] : '' ) );
+                $line_two = trim( (string) ( $sa['street2'] ?? '' ) );
+                echo '<p style="margin:0 0 6px"><strong>Ship to:</strong> '
+                   . ( $who !== '' ? esc_html( $who ) . ' — ' : '' )
+                   . esc_html( $line_street )
+                   . ( $line_two !== '' ? ', ' . esc_html( $line_two ) : '' )
+                   . ', ' . esc_html( $line_city ) . ', ' . esc_html( $line_state ) . ' ' . esc_html( $line_zip )
+                   . '</p>';
+            }
         }
 
         // Artwork: Drive-aware renderer if available, else local fallback
@@ -2594,12 +3460,141 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
     $hidden[] = '_pps_delivery_date';
     $hidden[] = '_pps_artwork_path';
     $hidden[] = '_pps_artwork_files';
+    $hidden[] = '_pps_proof_hash';
     return $hidden;
 });
+
+/**
+ * The size as production needs to read it.
+ *
+ * A custom trim stored `sizeLabel` as the literal string "Custom Size", and both
+ * the Order Summary and PPS-Spec printed exactly that — so order #87005 reached
+ * the shop as "Custom Size | 800qty | 12pg" with no dimensions anywhere on the
+ * ticket. Unmakeable. Name the inches instead, keeping the word Custom because a
+ * custom trim takes a different imposition path and production needs to know.
+ *
+ * Handles both vocabularies: booklets store customLong/customShort, flats store
+ * longEdge/shortEdge.
+ */
+function pps_spec_size_label( array $full ) {
+    $label = trim( (string) ( $full['sizeLabel'] ?? '' ) );
+    $is_custom = ( stripos( $label, 'custom' ) !== false )
+              || ( ( $full['sizeMode'] ?? '' ) === 'custom' );
+    if ( ! $is_custom ) return $label !== '' ? $label : 'Unknown';
+
+    $a = $full['customShort'] ?? $full['shortEdge'] ?? null;
+    $b = $full['customLong']  ?? $full['longEdge']  ?? null;
+    if ( ! is_numeric( $a ) || ! is_numeric( $b ) ) {
+        return $label !== '' ? $label : 'Unknown';
+    }
+    $w = min( (float) $a, (float) $b );
+    $h = max( (float) $a, (float) $b );
+    $fmt = static function( $n ) {
+        return rtrim( rtrim( number_format( (float) $n, 2, '.', '' ), '0' ), '.' );
+    };
+    return 'Custom ' . $fmt( $w ) . '×' . $fmt( $h ) . '"';
+}
 
 // ═══════════════════════════════════════════════════════════════
 // PER-PRODUCT DEFAULTS (WooCommerce Product Editor)
 // ═══════════════════════════════════════════════════════════════
+
+/**
+ * The schema lowPrice for the product currently being viewed: the quoted price
+ * at its own defaults when set, else the fallback.
+ *
+ * Kept as a formatted string because schema.org offers want a string and the
+ * surrounding array is built with literals.
+ */
+function pps_product_defaults_low_price( $fallback = '50' ) {
+    $pid = function_exists( 'get_queried_object_id' ) ? get_queried_object_id() : 0;
+    if ( ! $pid ) return $fallback;
+    $f = pps_product_price_facts( $pid );
+    return $f['effective'] !== null ? number_format( $f['effective'], 2, '.', '' ) : $fallback;
+}
+
+/**
+ * The single price answer for a product. Both the Product schema and the
+ * Merchant Center feed call this, so the two cannot disagree.
+ *
+ * ── Why this function exists ──
+ *
+ * Google does not fill in the calculator to discover a price. It reads the
+ * page's structured data. So the comparison Merchant Center actually performs
+ * is *feed vs. your own Product schema* — not feed vs. the number a human sees.
+ *
+ * That makes it dangerously easy to publish a mismatch: the schema reads
+ * _pps_defaults_price while WooCommerce's price element reads _price, and
+ * nothing kept the two in step. A product whose Woo price was edited by hand
+ * after its defaults were quoted would advertise one number and mark up
+ * another, and the first anyone would hear of it is an item disapproval.
+ *
+ * Three numbers, deliberately kept distinct:
+ *
+ *   quoted     _pps_defaults_price — what the calculator quotes for this
+ *              product's own default configuration. The number that means
+ *              something; set from a share link.
+ *   regular    _regular_price — the list price WooCommerce renders.
+ *   sale       An active sale price, or null. get_price() collapses this into
+ *              regular, which is why it cannot be used on its own.
+ *
+ * `effective` is what a customer pays today, and is what both the schema and
+ * the feed's advertised price reflect. Because both read it from here, they
+ * cannot disagree with each other — which is the only consistency Google
+ * actually checks.
+ *
+ * `publishable` therefore asks one question: is there a price at all? Whether
+ * that price is high or low, and whether it matches the stored quote, is not
+ * this function's business — the owner's instruction is that the product's own
+ * price goes out and where it lands it lands.
+ *
+ * `agrees` is kept as information only. A product whose stored quote and whose
+ * WooCommerce price differ is worth a look, but it is a housekeeping note, not
+ * a reason to withhold a sellable product.
+ *
+ * @param int $product_id
+ * @return array{quoted:?float,regular:?float,sale:?float,effective:?float,agrees:bool,publishable:bool}
+ */
+function pps_product_price_facts( $product_id ) {
+    $out = array(
+        'quoted' => null, 'regular' => null, 'sale' => null,
+        'effective' => null, 'agrees' => false, 'publishable' => false,
+    );
+
+    $product_id = (int) $product_id;
+    if ( ! $product_id ) return $out;
+
+    $q = get_post_meta( $product_id, '_pps_defaults_price', true );
+    if ( $q !== '' && $q !== null ) {
+        $q = (float) $q;
+        if ( $q > 0 && $q < 1000000 ) $out['quoted'] = round( $q, 2 );
+    }
+
+    if ( function_exists( 'wc_get_product' ) ) {
+        $product = wc_get_product( $product_id );
+        if ( $product ) {
+            $r = $product->get_regular_price();
+            if ( $r !== '' && $r !== null && (float) $r > 0 ) $out['regular'] = round( (float) $r, 2 );
+
+            // is_on_sale() is the only reliable test — a sale price can be set
+            // but scheduled for a window that is not open yet.
+            if ( $product->is_on_sale() ) {
+                $s = $product->get_sale_price();
+                if ( $s !== '' && $s !== null && (float) $s > 0 ) $out['sale'] = round( (float) $s, 2 );
+            }
+        }
+    }
+
+    $out['effective'] = $out['sale'] !== null ? $out['sale'] : $out['regular'];
+
+    $out['agrees'] = ( $out['quoted'] !== null && $out['regular'] !== null
+                       && abs( $out['quoted'] - $out['regular'] ) < 0.01 );
+
+    // One question: is there a price? Nothing here judges the number.
+    $out['publishable'] = ( $out['effective'] !== null && $out['effective'] > 0 );
+
+    return $out;
+}
 
 /**
  * Add a "PPS Defaults" tab to the WooCommerce product data panel.
@@ -2622,6 +3617,27 @@ add_action( 'woocommerce_product_data_panels', function() {
     ?>
     <div id="pps_defaults_data" class="panel woocommerce_options_panel" style="padding:12px 20px">
         <p style="color:#666;font-size:12px">Set default calculator values for this product. Leave blank to use the global defaults. URL parameters override these.</p>
+
+        <?php
+        // ── Apply-from-quote-link ──────────────────────────────────────
+        // Configure the job in the calculator, hit "Copy link", paste here.
+        // Beats hand-writing JSON: the calculator guarantees the exact paper
+        // values, the × in size labels and the enum spellings.
+        $last_src = get_post_meta( $post->ID, '_pps_defaults_source', true );
+        ?>
+        <p class="form-field" style="border-top:1px solid #eee;padding-top:12px">
+            <label for="pps_defaults_url">Apply from quote link</label>
+            <input type="url" id="pps_defaults_url" name="pps_defaults_url" value=""
+                   placeholder="https://priorityprintservice.com/product/…?size=5.5×8.5&amp;qty=100&amp;pages=8…"
+                   style="width:100%;max-width:640px" />
+            <span class="description" style="display:block;margin-left:0">
+                Configure the job in the calculator, click <strong>Copy link</strong>, paste it here and save.
+                Applied once on save, then cleared. Fields below override anything the link sets.
+                <?php if ( $last_src ) : ?>
+                    <br><em style="color:#777">Last applied: <?php echo esc_html( wp_trim_words( $last_src, 14, '…' ) ); ?></em>
+                <?php endif; ?>
+            </span>
+        </p>
         <?php
         $fields = array(
             'productType'     => array( 'label' => 'Product Type', 'placeholder' => 'letterhead (derivative calc mode)' ),
@@ -2642,6 +3658,42 @@ add_action( 'woocommerce_product_data_panels', function() {
             echo '<p class="form-field"><label for="pps_d_' . $key . '">' . esc_html( $f['label'] ) . '</label>';
             echo '<input type="' . $type . '" id="pps_d_' . $key . '" name="pps_defaults[' . $key . ']" value="' . esc_attr( $val ) . '" placeholder="' . esc_attr( $f['placeholder'] ) . '" style="width:300px" /></p>';
         }
+
+        // ── Advanced: anything the eleven fields above can't express ──
+        // The runtime has always accepted arbitrary keys (the reader
+        // json_decodes a string value); only this form was the ceiling.
+        $known    = array_keys( $fields );
+        $extra    = array_diff_key( is_array( $defaults ) ? $defaults : array(), array_flip( $known ) );
+        $extra_js = $extra ? wp_json_encode( $extra, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) : '';
+        ?>
+        <p class="form-field" style="border-top:1px solid #eee;padding-top:12px">
+            <label for="pps_defaults_extra">Advanced defaults (JSON)</label>
+            <textarea id="pps_defaults_extra" name="pps_defaults_extra" rows="5" style="width:100%;max-width:640px;font-family:monospace"
+                      placeholder='{"vividPrint": true, "bundling": 750, "customLong": 8.5, "customShort": 5.5}'><?php echo esc_textarea( $extra_js ); ?></textarea>
+            <span class="description" style="display:block;margin-left:0">
+                Any calculator default the fields above don't cover. Keys are case-sensitive
+                (<code>sizeLabel</code>, not <code>sizelabel</code>). Fields above win on conflict.
+            </span>
+        </p>
+        <?php
+        // ── Display price at these defaults ──
+        // Woo's own price field drives shop cards and Product schema. What the
+        // customer is actually charged is always recomputed at add-to-cart from
+        // pps_price, so this is a display/"from" figure and can never overcharge.
+        $quoted = get_post_meta( $post->ID, '_pps_defaults_price', true );
+        ?>
+        <p class="form-field">
+            <label for="pps_defaults_price">Price at these defaults</label>
+            <input type="number" step="0.01" min="0" id="pps_defaults_price" name="pps_defaults_price"
+                   value="<?php echo esc_attr( $quoted ); ?>" placeholder="109.04" style="width:300px" />
+            <span class="description" style="display:block;margin-left:0">
+                Sets the product's regular price, so the catalogue card and Product schema quote
+                the configuration this page actually lands on. Filled automatically if the pasted
+                quote link carries a total. <strong>Display only</strong> — the charged price is
+                always recalculated at add-to-cart.
+            </span>
+        </p>
+        <?php
         ?>
     </div>
     <?php
@@ -2650,14 +3702,80 @@ add_action( 'woocommerce_product_data_panels', function() {
 add_action( 'woocommerce_process_product_meta', function( $post_id ) {
     if ( ! current_user_can( 'edit_products' ) ) return;
     if ( ! isset( $_POST['pps_defaults'] ) ) return;
-    $raw = array_map( 'sanitize_text_field', $_POST['pps_defaults'] );
-    // Strip empty values so they fall through to global defaults
-    $clean = array_filter( $raw, function( $v ) { return $v !== ''; } );
-    if ( ! empty( $clean ) ) {
-        update_post_meta( $post_id, '_pps_defaults', $clean );
+
+    // Three sources, increasing precedence, so what you can see always wins
+    // over what you can't:
+    //   1. a pasted quote link   (bulk, from the calculator)
+    //   2. the advanced JSON box (anything the named fields can't express)
+    //   3. the named fields      (visible in the form)
+    $merged     = array();
+    $notice     = '';
+    $source_url = '';
+    $url_price  = null;
+
+    if ( ! empty( $_POST['pps_defaults_url'] ) && function_exists( 'pps_defaults_from_url' ) ) {
+        $source_url = esc_url_raw( wp_unslash( $_POST['pps_defaults_url'] ) );
+        $parsed     = pps_defaults_from_url( $source_url );
+        if ( ! empty( $parsed['defaults'] ) ) $merged = $parsed['defaults'];
+        if ( $parsed['price'] !== null )      $url_price = $parsed['price'];
+        $notice = pps_defaults_url_summary( $parsed );
+    }
+
+    if ( ! empty( $_POST['pps_defaults_extra'] ) ) {
+        $extra = json_decode( trim( wp_unslash( $_POST['pps_defaults_extra'] ) ), true );
+        if ( is_array( $extra ) ) {
+            if ( function_exists( 'pps_sanitize_defaults_blob' ) ) $extra = pps_sanitize_defaults_blob( $extra );
+            $merged = array_merge( $merged, $extra );
+        } elseif ( $notice === '' ) {
+            $notice = 'Advanced defaults ignored — that JSON did not parse.';
+        }
+    }
+
+    $named = array_filter(
+        array_map( 'sanitize_text_field', (array) $_POST['pps_defaults'] ),
+        function( $v ) { return $v !== ''; }
+    );
+    $merged = array_merge( $merged, $named );
+
+    if ( ! empty( $merged ) ) {
+        update_post_meta( $post_id, '_pps_defaults', $merged );
     } else {
         delete_post_meta( $post_id, '_pps_defaults' );
     }
+
+    // Keep the link that produced this, for the audit trail the DB otherwise
+    // has no record of. Not re-applied on later saves — the field is one-shot.
+    if ( $source_url ) update_post_meta( $post_id, '_pps_defaults_source', $source_url );
+    if ( $notice )     set_transient( 'pps_defaults_notice_' . $post_id, $notice, 60 );
+
+    // Display price. An explicitly typed value wins over one carried in the
+    // link, so the operator can always correct it.
+    $typed = isset( $_POST['pps_defaults_price'] ) ? trim( wp_unslash( $_POST['pps_defaults_price'] ) ) : '';
+    $price = $typed !== '' ? floatval( $typed ) : ( $url_price !== null ? $url_price : null );
+    if ( $price !== null && $price > 0 && $price < 1000000 ) {
+        $price = round( $price, 2 );
+        update_post_meta( $post_id, '_pps_defaults_price', $price );
+        // Woo's own fields — these drive the catalogue card and Product schema.
+        // Harmless to the cart: pps_price overrides at add-to-cart every time.
+        update_post_meta( $post_id, '_regular_price', $price );
+        update_post_meta( $post_id, '_price', $price );
+    } elseif ( $typed === '' && $url_price === null ) {
+        delete_post_meta( $post_id, '_pps_defaults_price' );
+    }
+} );
+
+/**
+ * Surface what a pasted quote link actually applied, so the operator sees the
+ * result rather than having to diff the form against the calculator.
+ */
+add_action( 'admin_notices', function() {
+    global $post;
+    if ( ! $post || ! isset( $post->ID ) ) return;
+    $notice = get_transient( 'pps_defaults_notice_' . $post->ID );
+    if ( ! $notice ) return;
+    delete_transient( 'pps_defaults_notice_' . $post->ID );
+    echo '<div class="notice notice-info is-dismissible"><p><strong>PPS Defaults:</strong> '
+       . esc_html( $notice ) . '</p></div>';
 } );
 
 // ═══════════════════════════════════════════════════════════════
@@ -2676,17 +3794,21 @@ add_filter( 'woocommerce_my_account_my_orders_actions', function( $actions, $ord
         $full = json_decode( $metadata_json, true );
         if ( ! $full ) continue;
 
-        $reorder_fields = array(
-            'sizeLabel', 'customLong', 'customShort', 'bindDir',
-            'sets',
-            'insideColor', 'coverColor',
-            'insidePaper', 'insidePaperType',
-            'coverMode', 'coverPaper', 'coverPaperType',
-            'twoStaple', 'vividPrint',
-            'coating', 'bundling', 'roundCorner',
-            'artwork', 'artEditPages', 'bleed', 'proof',
-            'shipState',
-        );
+        // Shared list (pps-reorder.php) so this copy can't drift; inline fallback
+        // only if the reorder module isn't loaded.
+        $reorder_fields = function_exists( 'pps_reorder_field_whitelist' )
+            ? pps_reorder_field_whitelist()
+            : array(
+                'sizeLabel', 'customLong', 'customShort', 'bindDir',
+                'sets',
+                'insideColor', 'coverColor',
+                'insidePaper', 'insidePaperType',
+                'coverMode', 'coverPaper', 'coverPaperType',
+                'twoStaple', 'vividPrint',
+                'coating', 'bundling', 'roundCorner',
+                'artwork', 'artEditPages', 'bleed', 'proof',
+                'shipState',
+            );
         $reorder_config = array();
         foreach ( $reorder_fields as $key ) {
             if ( isset( $full[ $key ] ) ) {
@@ -2879,6 +4001,30 @@ add_action( 'rest_api_init', function() {
     // WooCommerce at cart level in pps_ajax_add_to_cart(), which also means cart,
     // checkout, order emails and the admin screen render it natively for free.
     // A tampered client can therefore only lie to itself: Woo re-validates at checkout.
+    // Fresh nonces on demand. The nonces baked into PPS_CONFIG ride inside
+    // page-cached HTML, and once the cache outlives the nonce tick (~12h) an
+    // aged page's add-to-cart starts failing. The calculators call this just
+    // before submit and swap the baked values for live ones. Public on
+    // purpose: a nonce is minted for the caller's own session cookie and
+    // grants nothing by itself.
+    register_rest_route( 'pps/v1', '/nonces', array(
+        'methods'             => 'GET',
+        'permission_callback' => '__return_true',
+        'callback'            => function () {
+            // Never let this response be cached. A nonce is bound to the
+            // caller's identity, so a cached copy would hand one user another
+            // user's token — which verifies as a mismatch and fails exactly
+            // the way the baked-in nonce already does. That would make the
+            // retry path useless for the case it exists to fix: a customer
+            // who logged in after the page was rendered.
+            nocache_headers();
+            return array(
+                'cart'   => wp_create_nonce( 'pps_add_to_cart' ),
+                'upload' => wp_create_nonce( 'pps_upload_artwork' ),
+            );
+        },
+    ) );
+
     register_rest_route( 'pps/v1', '/coupon/preview', array(
         'methods'             => 'POST',
         // Public: guests are most customers, and they need to see the effect too.
@@ -3176,45 +4322,49 @@ function pps_default_tooltips() {
         'vivid' => array(
             'title' => 'Enhanced Vivid Printing',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'Our vivid print mode runs your job through an enhanced print profile that produces richer blacks, more saturated colors, and sharper detail. Great for photography-heavy pieces and marketing materials.' ),
-                array( 'type' => 'text', 'value' => 'Adds approximately 1 day per 2,500 sheets to turnaround. Cost is roughly equivalent to a second press pass.' ),
+                array( 'type' => 'text', 'value' => 'Every job receives high quality printing, but enhanced vivid mode increases color saturation and contrast. It is best used for high-density art on gloss paper.' ),
             ),
         ),
         'coating' => array(
-            'title' => 'UV Cover Coating',
+            'title' => 'UV Coating',
             'content' => array(
                 array( 'type' => 'text', 'value' => 'A liquid UV coating applied after printing. Enhances durability, color vibrancy, and provides a professional finish.' ),
                 array( 'type' => 'text', 'value' => 'UV Gloss: High-shine reflective finish that makes colors pop. UV Matte: Soft, non-reflective finish with a velvety feel.' ),
                 array( 'type' => 'text', 'value' => 'Requires a glossy or coated paper. Cannot be applied to uncoated stocks.' ),
             ),
         ),
+        'cover_coating' => array(
+            'title' => 'UV Cover Coating',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Additional coating applied to the outside of the front and back cover sheets. This will retexture the printing from the paper\'s default finish.' ),
+                array( 'type' => 'text', 'value' => 'UV Matte adds a distinctive roughness that reduces glare. UV Gloss greatly increases sheen and color saturation with a mirror-like coating.' ),
+            ),
+        ),
         'bundling' => array(
             'title' => 'Bundling',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'Pieces are counted and bundled in your chosen quantity using kraft paper or shrink wrap. Keeps your order organized and protected during shipping and storage.' ),
-                array( 'type' => 'text', 'value' => 'Available for orders of 100+ pieces. Bundle sizes: 25, 50, or 100 per bundle.' ),
+                array( 'type' => 'text', 'value' => 'Bundling in quantities within the same package. We make no guarantee as to what material is used for the bundling; whether rubber bands, plastic bands, paper bands, or paper or plastic wrapping.' ),
+                array( 'type' => 'text', 'value' => 'If you have particular needs, be sure to request a quote before placing an order.' ),
             ),
         ),
         'round_cornering' => array(
             'title' => 'Round Cornering',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'Rounds the corners of your finished piece for a softer, modern look. Available in two radius sizes and two corner configurations.' ),
-                array( 'type' => 'text', 'value' => 'Outside 2: rounds the two corners on the open (non-spine) edge. All 4: rounds every corner including the spine side.' ),
-                array( 'type' => 'text', 'value' => '1/4" radius is subtle and professional. 3/8" radius is more pronounced and playful.' ),
+                array( 'type' => 'text', 'value' => 'Rounded corners add a distinctive appeal. Choose from two sizes, narrow and wide corner.' ),
+                array( 'type' => 'text', 'value' => 'In the case of booklets, a wider radius works best with greater page counts.' ),
             ),
         ),
         'perforation' => array(
             'title' => 'Perforation',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'A line of small holes punched through the paper, allowing a section to be torn off cleanly. Common for reply cards, coupons, and tear-off tabs.' ),
-                array( 'type' => 'text', 'value' => 'Available for select sizes. Perforation lines run parallel to the fold or binding edge.' ),
+                array( 'type' => 'text', 'value' => 'Adds perforations to the sheet(s) to make them easier to tear.' ),
             ),
         ),
         'outfold' => array(
             'title' => 'Fold-Out Page (Outfold)',
             'content' => array(
-                array( 'type' => 'text', 'value' => 'An extra panel that folds out from the booklet, like a brochure insert inside the book. Printed full color on both sides.' ),
-                array( 'type' => 'text', 'value' => 'Adds both printing cost (full color) and folding labor. Available as single or double fold-out.' ),
+                array( 'type' => 'text', 'value' => 'An outfold is like having a brochure within the book. It is specially-sized, folded and then inserted before binding. Excellent for diagrams and schematics.' ),
+                array( 'type' => 'text', 'value' => 'The design of these is intricate, so feel free to reach out before or after placing your order.' ),
             ),
         ),
         'perfect_binding' => array(
@@ -3245,6 +4395,17 @@ function pps_default_tooltips() {
                 array( 'type' => 'text', 'value' => '70lb Uncoated: Clean, natural feel. Best for text-heavy content. 80lb Matte: Smooth with slight sheen. Good all-purpose choice. 100lb Gloss: Shiny, vibrant colors. Best for photo-heavy content.' ),
             ),
         ),
+        // Lives here so booklet calculators deliver it without a database row —
+        // it previously existed only in wp_options and rendered nothing when that
+        // option was stored as a JSON string.
+        'page_count' => array(
+            'title' => 'How to Count Booklet Pages',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Count pages, not sheets. Each folded sheet holds 4 pages — front and back of each half — and the front and back covers each count as a page.' ),
+                array( 'type' => 'text', 'value' => 'Saddle-stitch booklets must be a multiple of 4 pages. If your file isn\'t divisible by 4, blank pages are added to reach the next multiple.' ),
+                array( 'type' => 'image', 'src' => 'https://priorityprintservice.com/wp-content/uploads/2025/05/how-to-count-booklet-pages.webp', 'alt' => 'Animated guide to counting saddle-stitch booklet pages' ),
+            ),
+        ),
         'paper_cardstock' => array(
             'title' => 'Cardstock',
             'content' => array(
@@ -3252,7 +4413,164 @@ function pps_default_tooltips() {
                 array( 'type' => 'text', 'value' => '80lb Cardstock: Light card, good for self-mailers. 14pt C1S: One glossy side, one uncoated — premium cover stock. 16pt C2S: Glossy both sides, thick and sturdy.' ),
             ),
         ),
+        // ── Per-stock paper descriptions ──
+        // Canonical copy lives in docs/PAPER_CATALOG.md — edit there first, mirror here
+        // and in each calculator's PAPER_DESC map. Keys follow the category-shortcode
+        // slug rule: paper_text_/paper_cs_ + lowercased label, spaces → underscores.
+        'paper_text_70lb_uncoated_opaque_text' => array(
+            'title' => '70lb Uncoated Opaque Text',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Classic uncoated paper with a natural feel that\'s easy to write on. Crisp text and a soft, non-reflective look — letterhead, inserts, forms, and reading-heavy pages.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_text_80lb_matte_text' => array(
+            'title' => '80lb Matte Text',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Smooth coated sheet with a soft, glare-free finish. Richer color than uncoated without the shine — the all-purpose choice for brochures and flyers.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_text_100lb_gloss_text' => array(
+            'title' => '100lb Gloss Text',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Shiny coated sheet that makes photos and color pop. The standard for marketing brochures, catalogs, and mailers.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_text_60lb_offset_smooth_opaque' => array(
+            'title' => '60lb Offset Smooth Opaque',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Light uncoated sheet with good opacity for its weight. Economical for manuals, workbooks, and text-heavy booklets.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_text_80lb_offset_smooth_opaque' => array(
+            'title' => '80lb Offset Smooth Opaque',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Sturdy uncoated sheet with excellent opacity. The uncoated feel with less show-through — workbooks, journals, and premium text pages.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_text_80lb_gloss_factory_coated' => array(
+            'title' => '80lb Gloss Factory Coated',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Lightweight gloss sheet with vivid color reproduction. A thinner, economical alternative to 100lb gloss for catalogs and mailers.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_text_100lb_matte_factory_coated' => array(
+            'title' => '100lb Matte Factory Coated',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Heavy matte sheet with a refined, low-glare surface. Upscale brochures, art books, and photography that shouldn\'t shine.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_text_linen' => array(
+            'title' => 'Linen',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Premium stock with a woven linen texture you can feel. Distinctive for invitations, stationery, and fine-dining menus.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 4 production days.' ),
+            ),
+        ),
+        'paper_cs_80lb_opaque_uncoated' => array(
+            'title' => '80lb Opaque Uncoated Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Our lightest cardstock, uncoated and easy to write on. Greeting cards, reply cards, and covers that fold cleanly.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_cs_80lb_matte_cardstock' => array(
+            'title' => '80lb Matte Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Light cardstock with a smooth matte coating. A soft, modern look for covers and cards.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_cs_100lb_gloss_cardstock' => array(
+            'title' => '100lb Gloss Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Mid-weight cardstock with a glossy face that makes color punchy. Covers, postcards, and hang tags.' ),
+                array( 'type' => 'text', 'value' => 'In our standing inventory — best for quick turnaround, small quantities, and hardcopy proofs.' ),
+            ),
+        ),
+        'paper_cs_14pt_gloss_c1s' => array(
+            'title' => '14pt Gloss C1S',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Thick card, gloss-coated on one side with an uncoated back that\'s easy to write on. The postcard standard (C1S = coated one side).' ),
+                array( 'type' => 'text', 'value' => 'Special-order size — typically adds about 1 production day.' ),
+            ),
+        ),
+        'paper_cs_16pt_coated_c2s' => array(
+            'title' => '16pt Coated C2S',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Our heaviest everyday card, gloss-coated both sides (C2S). Substantial, premium feel for business cards, postcards, and covers.' ),
+                array( 'type' => 'text', 'value' => 'Special-order size — typically adds about 1 production day.' ),
+            ),
+        ),
+        'paper_cs_80lb_gloss_factory_coated' => array(
+            'title' => '80lb Gloss Factory Coated Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Light, flexible cardstock with a gloss coat on both sides. Economical covers and cards with vivid color.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_cs_100lb_matte_factory_coated' => array(
+            'title' => '100lb Matte Factory Coated Cardstock',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Mid-weight matte card with an elegant, glare-free surface. Book covers and upscale cards.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_cs_12pt_c2s_factory_coated' => array(
+            'title' => '12pt C2S Factory Coated',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Flexible coated card, thinner than 14pt. Tickets, tags, and lightweight postcards.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_cs_14pt_c2s_factory_coated' => array(
+            'title' => '14pt C2S Factory Coated',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Thick card gloss-coated both sides for all-over shine. Postcards and covers that want gloss front and back.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
+        'paper_cs_18pt_c1s_factory_gloss' => array(
+            'title' => '18pt C1S Factory Gloss',
+            'content' => array(
+                array( 'type' => 'text', 'value' => 'Our most rigid card — gloss front, uncoated writable back. Heavy-duty hang tags, counter cards, and premium postcards.' ),
+                array( 'type' => 'text', 'value' => 'Factory-ordered from the mill — typically adds about 2 production days.' ),
+            ),
+        ),
     );
+}
+
+/**
+ * The tooltip set every surface should read: code defaults with saved entries
+ * layered on top.
+ *
+ * Two failure modes this guards, both seen on staging 2026-08-09:
+ *
+ * 1. The MCP wp_update_option endpoint can serialise an array payload as a JSON
+ *    *string*. A plain (array) cast on that yields array( 0 => '{"…"}' ), which
+ *    ships the whole blob to the front end under a numeric key and delivers not
+ *    one real entry. pps_get_registry() carries the same tolerance for the same
+ *    reason. Decoding here also means the admin Tooltips tab (which writes a
+ *    native array) and the MCP path agree.
+ * 2. Callers that read the raw option get only what is in the database, so a key
+ *    that lives solely in pps_default_tooltips() renders no tooltip at all. The
+ *    category-page shortcodes did exactly this, which is why clearing stale DB
+ *    keys took their "?" icons with them.
+ */
+function pps_get_tooltips() {
+    $saved = get_option( 'pps_tooltips', array() );
+    if ( is_string( $saved ) ) {
+        $decoded = json_decode( $saved, true );
+        $saved   = is_array( $decoded ) ? $decoded : array();
+    }
+    if ( ! is_array( $saved ) ) $saved = array();
+    return array_merge( pps_default_tooltips(), $saved );
 }
 
 /**
@@ -3299,6 +4617,7 @@ add_action( 'wp_ajax_pps_save_tooltips', function() {
     }
 
     update_option( 'pps_tooltips', $clean, false );
+    pps_purge_page_cache();
     wp_send_json_success( 'Saved ' . count( $clean ) . ' tooltips.' );
 } );
 
@@ -3627,7 +4946,21 @@ function pps_save_preset( $slug, $data ) {
  *  - Arrays → recursed
  *  - Objects / closures / resources → dropped (json_decode never produces these,
  *    but defense in depth)
- *  - Keys → sanitize_key
+ *  - Keys → charset-restricted, CASE PRESERVED
+ *
+ * Keys must keep their case. This used to run sanitize_key(), which
+ * lowercases — so every camelCase default saved through the Presets admin
+ * form silently became unreadable: `sizeLabel` stored as `sizelabel`,
+ * `insidePaperType` as `insidepapertype`. The calculator JS reads
+ * PPS_CONFIG.defaults by exact key, so those presets loaded with an empty
+ * form and no error anywhere. (The one live preset row, `letterhead`, kept
+ * its camelCase only because it was written straight to the option rather
+ * than through the form.) Fixed 2026-08-12.
+ *
+ * The charset restriction is what actually provides the safety here — these
+ * keys are emitted into a JSON blob, never into SQL or markup — so
+ * [A-Za-z0-9_-] with everything else stripped is both safe and lossless for
+ * every real field name.
  *
  * Cap: 200 keys total at any depth to prevent admin-side DoS.
  */
@@ -3637,7 +4970,8 @@ function pps_sanitize_defaults_blob( $data, &$key_count = null ) {
     $out = array();
     foreach ( $data as $k => $v ) {
         if ( $key_count++ > 200 ) break;
-        $clean_key = is_int( $k ) ? $k : sanitize_key( (string) $k );
+        $clean_key = is_int( $k ) ? $k : preg_replace( '/[^A-Za-z0-9_\-]/', '', (string) $k );
+        if ( $clean_key === '' ) continue;  // key sanitised to nothing — drop, don't store under ''
         if ( is_array( $v ) ) {
             $out[ $clean_key ] = pps_sanitize_defaults_blob( $v, $key_count );
         } elseif ( is_string( $v ) ) {
@@ -3758,11 +5092,16 @@ add_action( 'wp_enqueue_scripts', function() {
     if ( empty( $GLOBALS['pps_active_preset'] ) ) return;
     wp_enqueue_script( 'pps-react',     'https://unpkg.com/react@18.3.1/umd/react.production.min.js', array(), '18.3.1', true );
     wp_enqueue_script( 'pps-react-dom', 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', array( 'pps-react' ), '18.3.1', true );
-    wp_enqueue_script( 'pps-pdfjs',     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', array(), '3.11.174', true );
-    wp_add_inline_script( 'pps-pdfjs', "pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';" );
+    // Same ESM loader as the product-page embed; see pps_pdfjs_loader_js().
+    wp_register_script( 'pps-pdfjs', false, array(), '4.10.38', true );
+    wp_enqueue_script( 'pps-pdfjs' );
+    wp_add_inline_script( 'pps-pdfjs', pps_pdfjs_loader_js() );
     // jsPDF — pre-loaded to avoid the runtime script injection in the calc HTML
     wp_enqueue_script( 'pps-jspdf',     'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js', array(), '2.5.1', true );
-    wp_enqueue_script( 'pps-babel',     'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
+    // Babel only for JSX-source builds; compiled pages skip ~3MB of dead JS.
+    if ( ! pps_current_calc_is_compiled() ) {
+        wp_enqueue_script( "pps-babel", 'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js', array( 'pps-react', 'pps-react-dom', 'pps-pdfjs', 'pps-jspdf' ), '7.26.9', true );
+    }
 } );
 
 // ── External-JS hardening on preset URLs (mirrors the product-page logic) ──
@@ -3820,6 +5159,7 @@ function pps_render_preset_calculator( $preset ) {
         'cartUrl'     => function_exists( 'wc_get_cart_url' ) ? wc_get_cart_url() : home_url( '/cart/' ),
         'cartNonce'   => wp_create_nonce( 'pps_add_to_cart' ),
         'uploadNonce' => wp_create_nonce( 'pps_upload_artwork' ),
+        'maxUpload'   => (int) wp_max_upload_size(),
         // No productId — preset render does not target a single WC product.
         // The cart layer should fall back to a calc-type → product map; that
         // mapping is wired in a follow-up PR alongside per-line preset slug
@@ -3875,7 +5215,7 @@ function pps_render_preset_calculator( $preset ) {
     // Build output buffer — we have to return a string, not echo.
     ob_start();
 
-    echo '<script>window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+    echo '<script data-cfasync="false">window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
 
     // Scoped styles (mirror existing logic at line ~537)
     if ( $parts['styles'] ) {
@@ -3893,8 +5233,14 @@ function pps_render_preset_calculator( $preset ) {
     echo '<div id="pps-calculator-root"></div>';
     echo '</div>';
 
+    // Same split as the product path: external enqueue for compiled builds,
+    // DOMContentLoaded-wrapped inline as the write-failure fallback.
     if ( $parts['app_code'] ) {
-        echo '<script type="text/babel">' . $parts['app_code'] . '</script>';
+        if ( empty( $parts['compiled'] ) ) {
+            echo '<script data-cfasync="false" type="text/babel">' . $parts['app_code'] . '</script>';
+        } elseif ( ! pps_enqueue_calc_app_file( $filepath, $parts['app_code'] ) ) {
+            echo '<script data-cfasync="false">document.addEventListener("DOMContentLoaded",function(){' . $parts['app_code'] . "\n});</script>";
+        }
     }
 
     return ob_get_clean();
@@ -4782,7 +6128,11 @@ add_action( 'wp_head', function() {
         'offers'      => array(
             '@type'           => 'AggregateOffer',
             'priceCurrency'   => get_woocommerce_currency(),
-            'lowPrice'        => '50',
+            // Quote the configuration this page actually lands on when the
+            // product carries one ("Price at these defaults" in the PPS
+            // Defaults tab). The 50 fallback is a placeholder from before
+            // per-product defaults existed and understates most products.
+            'lowPrice'        => pps_product_defaults_low_price( '50' ),
             'highPrice'       => '5000',
             'offerCount'      => '1',
             'availability'    => 'https://schema.org/InStock',
@@ -5333,9 +6683,37 @@ add_action( 'template_redirect', function() {
     header( 'Cache-Control: public, max-age=86400' );
 
     echo "# {$name}\n";
-    echo "> Full-service commercial print shop in Phoenix, AZ specializing in custom saddle-stitch booklet printing with online instant pricing.\n\n";
+    echo "> Full-service commercial print shop in Phoenix, AZ. Booklets, brochures, postcards, letterhead, greeting cards, stickers and coupon books, all priced instantly online.\n\n";
+
+    // ── Services ──
+    // Driven off the registry rather than hardcoded. The previous version
+    // named only saddle stitch, so the other seven calculators were invisible
+    // to every answer engine — and it would have gone stale again the next
+    // time a product family was added.
     echo "## Services\n";
-    echo "- Custom saddle-stitch (stapled) booklet printing\n";
+    $svc_labels = array(
+        'saddle'        => 'Saddle-stitch (stapled) booklet printing',
+        'perfect-bound' => 'Perfect bound book printing (square spine)',
+        'coupon'        => 'Coupon book printing with numbered, perforated tear-out coupons',
+        'brochure'      => 'Brochure and flat printing with 9 fold styles',
+        'postcard'      => 'Postcard printing',
+        'letterhead'    => 'Letterhead printing, including linen stocks',
+        'greeting-card' => 'Greeting card printing',
+        'sticker'       => 'Sticker and label printing',
+    );
+    $svc_seen = array();
+    if ( function_exists( 'pps_catalog' ) ) {
+        foreach ( pps_catalog() as $row ) {
+            if ( $row['calc'] !== '' ) $svc_seen[ $row['calc'] ] = true;
+        }
+    }
+    // If the catalog could not be resolved at all (WooCommerce not loaded,
+    // empty registry), fall back to listing everything rather than emitting a
+    // Services section with no services in it — a silently empty list is worse
+    // than the hardcoded one this replaced.
+    foreach ( $svc_labels as $slug => $label ) {
+        if ( ! $svc_seen || isset( $svc_seen[ $slug ] ) ) echo "- {$label}\n";
+    }
     echo "- Full color and greyscale digital printing\n";
     echo "- Paper stocks: text weight (70lb-100lb) and cardstock (80lb-18pt)\n";
     echo "- UV Gloss and UV Matte cover coating\n";
@@ -5351,6 +6729,40 @@ add_action( 'template_redirect', function() {
     echo "## Contact\n";
     echo "- Website: {$url}\n";
     echo "- Email: {$email}\n";
+
+    // ── Products ──
+    // The from-price is the point. "What does a print shop charge for X" is
+    // the question an answer engine is usually trying to resolve, and being
+    // the source that states it plainly is most of how you get cited.
+    if ( function_exists( 'pps_catalog' ) ) {
+        $catalog = pps_catalog();
+        if ( ! empty( $catalog ) ) {
+            echo "\n## Products\n";
+            uasort( $catalog, function ( $a, $b ) { return strcasecmp( $a['title'], $b['title'] ); } );
+            foreach ( $catalog as $row ) {
+                echo "\n### {$row['title']}\n";
+                echo "- URL: {$row['url']}\n";
+                // Two different numbers, labeled as such. The defaults price is
+                // what this page quotes on arrival; the floor is the cheapest
+                // the calculator can be driven to. Calling the first one "from"
+                // would be wrong in both directions.
+                $floor = function_exists( 'pps_calc_min_price' ) ? pps_calc_min_price( $row['file'] ) : null;
+                if ( $floor !== null ) {
+                    echo '- From: $' . number_format( $floor, 2 ) . " (lowest configuration)\n";
+                }
+                if ( $row['price_ok'] ) {
+                    echo '- This page as configured: $' . number_format( $row['price'], 2 ) . "\n";
+                }
+                $spec = pps_catalog_spec_line( $row['defaults'] );
+                if ( $spec !== '' ) echo "- Configured by default as: {$spec}\n";
+                $blurb = $row['short'] !== '' ? $row['short'] : $row['description'];
+                if ( $blurb !== '' ) {
+                    echo '- ' . ( function_exists( 'mb_substr' ) ? mb_substr( $blurb, 0, 300 ) : substr( $blurb, 0, 300 ) ) . "\n";
+                }
+                echo "- Instant online pricing, no quote request required\n";
+            }
+        }
+    }
 
     // Presets section — explicit catalog of preset URLs so AI search engines
     // have a structured list. Each entry: ## title, URL, description.
