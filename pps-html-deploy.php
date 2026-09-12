@@ -446,16 +446,38 @@ function pps_html_deploy_run() {
     // A new build is a new script URL, but the PAGE that embeds the URL is what
     // WP Rocket caches (24h lifespan, desktop and mobile). Until now nothing
     // purged it, so a fix reached guests up to a day after it reached staff.
-    if ( function_exists( 'rocket_clean_domain' ) ) {
+    // NOT called here: this runs at plugins_loaded priority 5 and WP Rocket
+    // wires the functions rocket_clean_domain() leans on at priority 10 — the
+    // first attempt (2026-09-12) fataled the request that ran the deploy. The
+    // purge is queued for `init`, once everything is loaded.
+    $GLOBALS['pps_html_deploy_purge_pending'] = true;
+
+    delete_transient( PPS_HTML_DEPLOY_LOCK );
+}
+
+/**
+ * Purge the page cache after a deploy — on `init`, when WP Rocket is whole.
+ * Anything it throws is logged, never allowed to take the request down.
+ */
+function pps_html_deploy_purge_page_cache() {
+    if ( empty( $GLOBALS['pps_html_deploy_purge_pending'] ) ) return;
+    unset( $GLOBALS['pps_html_deploy_purge_pending'] );
+    if ( ! function_exists( 'rocket_clean_domain' ) ) return;
+    try {
         rocket_clean_domain();
         pps_html_deploy_log_append( array(
             'time'  => current_time( 'mysql' ),
             'event' => 'page-cache-purged',
         ) );
+    } catch ( \Throwable $e ) {
+        pps_html_deploy_log_append( array(
+            'time'  => current_time( 'mysql' ),
+            'event' => 'page-cache-purge-failed',
+            'error' => substr( $e->getMessage(), 0, 200 ),
+        ) );
     }
-
-    delete_transient( PPS_HTML_DEPLOY_LOCK );
 }
+add_action( 'init', 'pps_html_deploy_purge_page_cache', 99 );
 
 // ═══════════════════════════════════════════════════════════════
 // BULK CALCULATOR UPLOAD  (PPS Calculators → Bulk Upload)
