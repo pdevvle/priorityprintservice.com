@@ -65,7 +65,8 @@ function extract(html, name) {
 }
 
 // ── a browser small enough to hold in one hand ──────────────────────────────
-class FakeFile { constructor(parts, name, opts = {}) { this.parts = parts; this.name = name; this.type = opts.type || ''; this.size = parts.reduce((n, p) => n + (p.size || (p.length || 0)), 0) || 1; } }
+class FakeBlob {}
+class FakeFile extends FakeBlob { constructor(parts, name, opts = {}) { super(); this.parts = parts; this.name = name; this.type = opts.type || ''; this.size = parts.reduce((n, p) => n + (p.size || (p.length || 0)), 0) || 1; } }
 class FakeFormData { constructor() { this.m = new Map(); } append(k, v, n) { this.m.set(k, n !== undefined ? { v, n } : v); } get(k) { const x = this.m.get(k); return x && x.v !== undefined && x.n !== undefined ? x : x; } has(k) { return this.m.has(k); } }
 const resp = (status, body) => ({ ok: status >= 200 && status < 300, status, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)), json: async () => (typeof body === 'string' ? JSON.parse(body) : body) });
 
@@ -113,8 +114,8 @@ function makeWorld(opts) {
 }
 
 function load(code, w) {
-  const fn = new Function('window', 'fetch', 'FormData', 'File', 'alert', 'uploadWithProgress', 'console', 'Date', code);
-  return fn(w.window, w.fetch, w.FormData, w.File, w.alert, w.uploadWithProgress, { warn() {}, error() {}, log() {} }, Date);
+  const fn = new Function('window', 'fetch', 'FormData', 'File', 'Blob', 'alert', 'uploadWithProgress', 'console', 'Date', code);
+  return fn(w.window, w.fetch, w.FormData, w.File, FakeBlob, w.alert, w.uploadWithProgress, { warn() {}, error() {}, log() {} }, Date);
 }
 
 const art = (names) => ({ type: 'files', list: names.map(n => new FakeFile(['x'], n, { type: 'application/pdf' })), approved: true });
@@ -225,6 +226,36 @@ async function scenarios(name, code) {
     ok('S10 reference files upload after the artwork, prefixed', w.log.some(l => l === 'UPLOAD reference_brief.pdf nonce=upBaked'), w.log.join(' | '));
   }
 
+  // S12 — reference files arrive as { name, size, file } records (that is what the
+  // UI stores); the bytes uploaded must be the file's, not the record's.
+  {
+    let seen = null; const uploadedBlobs = [];
+    const w = makeWorld({ validUpload: 'upBaked', validCart: 'cartBaked', adminNonces: {}, restNonces: {}, cartScript: (fd) => { seen = fd; return null; },
+                          uploadScript: (fd) => { uploadedBlobs.push(fd.m.get('artwork').v); return null; } });
+    const { submitToWooCommerce } = load(code, w);
+    const inner = new FakeFile(['brief-bytes'], 'brief.pdf', { type: 'application/pdf' });
+    const refs = [{ name: 'brief.pdf', size: 11, file: inner }, { name: 'ghost.pdf', size: 1 }];
+    await submitToWooCommerce(100, 's', meta, 0, art(['art.pdf']), null, '', refs);
+    const ref = uploadedBlobs.find(b => b.name === 'reference_brief.pdf');
+    ok('S12 a reference record uploads the file inside it, not the record', !!ref && ref.parts[0] === inner, ref ? String(ref.parts[0] && ref.parts[0].name) : 'no reference upload');
+    ok('S12 and a record with no file is skipped, not uploaded as text', !uploadedBlobs.some(b => b.name === 'reference_ghost.pdf'));
+  }
+
+  // S13 — a reorder that reuses its artwork and adds a reference must still list
+  // the artwork, because the Drive filer prefers pps_artwork_files over the raw path.
+  {
+    let seen = null;
+    const w = makeWorld({ validUpload: 'upBaked', validCart: 'cartBaked', adminNonces: {}, restNonces: {}, cartScript: (fd) => { seen = fd; return null; } });
+    const { submitToWooCommerce } = load(code, w);
+    const refs = [{ name: 'notes.pdf', size: 3, file: new FakeFile(['n'], 'notes.pdf', { type: 'application/pdf' }) }];
+    await submitToWooCommerce(100, 's', meta, 0, { type: 'existing', path: 'pps-artwork/2026/08/old.pdf' }, null, '', refs);
+    const files = seen ? JSON.parse(seen.m.get('pps_artwork_files')) : [];
+    ok('S13 existing artwork + reference: the artwork path is posted', seen && seen.m.get('pps_artwork_path') === 'pps-artwork/2026/08/old.pdf');
+    ok('S13 and the package list leads with the artwork, then the reference',
+       files.length === 2 && files[0].path === 'pps-artwork/2026/08/old.pdf' && files[1].name === 'reference_notes.pdf', JSON.stringify(files));
+    ok('S13 and the order still lands in the cart', w.window.location.href.endsWith('/cart/'));
+  }
+
   // S11 — a primary failure still stops everything, with the server's words.
   {
     const w = makeWorld({ validUpload: 'upBaked', validCart: 'cartBaked', adminNonces: {}, restNonces: {},
@@ -244,6 +275,7 @@ for (const f of srcs) {
   ok(f + ': the .html preview is never queued for upload', !/_preview\.html", \{ type: "text\/html" \}\)\);/.test(s) || /calc-preview-test|calc-coupon-book/.test(f));
   ok(f + ': isPrimary is declared where it is used', /primary: isPrimary \} = queue\[fi\]/.test(s));
   ok(f + ': "Upload Art with Order" without a file is stopped', /Please add your artwork file before ordering/.test(s));
+  ok(f + ': a file that cannot be read is reported to the customer', /We couldn't read that file/.test(s) || /Couldn't read \$\{f0\.name\}/.test(s));
   ok(f + ': the mobile bar shows the first pricing error', !/return compact\s*\?\s*null\s*:\s*<div style=\{ST\.pnl\}><div style=\{\{\s*padding:\s*20\s*\}\}>\{result\.error/.test(s));
   ok(f + ': the picker offers only what the server and the browser accept', !/accept="\.pdf,image\/\*"/.test(s) && !/accept="\.pdf,\.jpg,\.jpeg,\.png,\.tiff,\.tif"/.test(s));
 }

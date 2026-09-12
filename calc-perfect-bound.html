@@ -5402,7 +5402,9 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
   // anywhere (audit 2026-09-12). They upload as supplementary deliverables,
   // prefixed so prepress can tell them from the artwork.
   for (const rf of (referenceFiles || [])) {
-    if (rf && rf.name) queue.push({ file: new File([rf], "reference_" + rf.name, { type: rf.type }), primary: false, kind: "reference" });
+    // The reference list holds { name, size, file } records, not File objects.
+    const blob = rf && (rf.file instanceof Blob ? rf.file : (rf instanceof Blob ? rf : null));
+    if (blob && rf.name) queue.push({ file: new File([blob], "reference_" + rf.name, { type: blob.type }), primary: false, kind: "reference" });
   }
 
   const total_files = queue.length;
@@ -5475,6 +5477,11 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
     if (onProgress) onProgress({ phase: "cart", pct: 100 });
   } else if (artFiles.type === "existing") {
     artworkPath = artFiles.path;
+    // The Drive filer takes pps_artwork_files when it is present and only falls
+    // back to the raw path when it is not. A reorder that reuses its artwork and
+    // adds a reference file must therefore list the artwork too, or Drive would
+    // receive the reference and not the job.
+    if (uploadedFiles.length) uploadedFiles.unshift({ path: artFiles.path, name: artFiles.name || String(artFiles.path).split("/").pop() });
   }
 
   // Add to cart
