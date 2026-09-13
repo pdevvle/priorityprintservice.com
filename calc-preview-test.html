@@ -4462,15 +4462,41 @@ update();
     const idx = activeSlotRef.current;
     if (idx < 0) return;
 
-    if (file.type === "application/pdf") {
-      // PDF dropped on a slot — extract all pages, replace everything
-      processFiles([file]);
-      return;
-    }
+    let dataUrl, imgDims, srcDims = null;
 
-    // Single image → insert/replace at slot index
-    const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
-    const imgDims = await new Promise((res, rej) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => rej(new Error("this image format cannot be shown in a browser (TIFF and HEIC are the usual ones). Please export it as PNG, JPG or PDF")); img.src = dataUrl; });
+    if (file.type === "application/pdf") {
+      // A ONE-PAGE PDF dropped on a page slot is that page's artwork. It used to
+      // go straight to processFiles, which replaces the WHOLE book — so the
+      // second single-page PDF wiped the first and only one ever stuck, which is
+      // what "it will allow 1 page to upload, but then not accept the others"
+      // was (staging, 2026-09-13). The damage did not stop at the calculator:
+      // slotFilesRef was never written either, so the proof received art for one
+      // page and nothing for the other seven.
+      // A genuinely multi-page PDF still means the whole book.
+      let ex;
+      try {
+        ex = await extractPdfPages(file);
+      } catch (err) {
+        setUploadError(`Couldn't read ${file.name}: ${err?.message || "the file may be corrupt or password-protected"}. Try re-exporting as PDF or PNG.`);
+        return;
+      }
+      if (ex.pages.length !== 1) { processFiles([file]); return; }
+      dataUrl = ex.pages[0].dataUrl;
+      imgDims = { w: ex.dims.wPx, h: ex.dims.hPx };
+      // A PDF states its size in points, so the page size is known rather than
+      // inferred from pixels at an assumed 300 DPI.
+      srcDims = { wIn: ex.dims.wIn, hIn: ex.dims.hIn, wPx: ex.dims.wPx, hPx: ex.dims.hPx, source: "pdf" };
+    } else {
+      // Single image → insert/replace at slot index
+      dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
+      try {
+        imgDims = await new Promise((res, rej) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => rej(new Error("this image format cannot be shown in a browser (TIFF and HEIC are the usual ones). Please export it as PNG, JPG or PDF")); img.src = dataUrl; });
+      } catch (err) {
+        setUploadError(`Couldn't read ${file.name}: ${err?.message || "the file could not be opened"}`);
+        return;
+      }
+    }
+    setUploadError("");
 
     const newPage = { dataUrl, label: pageLabel(idx, pageCount) };
 
@@ -4495,11 +4521,13 @@ update();
       });
       next[idx] = newPage;
 
-      // Update dims from first real image if we don't have them yet
+      // Update dims from first real page if we don't have them yet
       if (!artDims && imgDims.w > 0) {
-        const wIn = parseFloat((imgDims.w / 300).toFixed(3));
-        const hIn = parseFloat((imgDims.h / 300).toFixed(3));
-        setArtDims({ wIn, hIn, wPx: imgDims.w, hPx: imgDims.h, source: "image" });
+        setArtDims(srcDims || {
+          wIn: parseFloat((imgDims.w / 300).toFixed(3)),
+          hIn: parseFloat((imgDims.h / 300).toFixed(3)),
+          wPx: imgDims.w, hPx: imgDims.h, source: "image",
+        });
       }
       return next;
     });

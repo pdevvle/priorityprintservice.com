@@ -49,9 +49,30 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-nonce-strategy-test.mjs`, `tools-order-gates-test.mjs` | Ordering-path gates (2026-09-12 audit). The first runs the SHIPPED `submitToWooCommerce` out of every compiled calculator under a fake browser: baked nonce first, admin-ajax refresh on `-1`, REST fallback, reload message, WAF 403 named as a block, preset slug posted, reference files as supplementary deliverables, a refused supplementary never aborting (the perfect-bound `.html` bug). The second drives the saddle harness: "Upload Art with Order" with no file is stopped, and the mobile bar shows the pricing error instead of a dead button. Run both after touching any calculator's submit path or Panel. |
 | `tools-proof-serve.mjs` | Harness for the proofer's suites. They cannot run over `file://` (pdf.js needs a real origin), so this serves the tree on 127.0.0.1:8137 and the pinned libraries under `/vendor/`. Populate `proof-vendor/` with `tools-proof-vendor.mjs` first. |
 | `tools-proof-vendor.mjs` | One command to install the proofer's pinned pdf.js/pdf-lib into `proof-vendor/` and restore the calculators' pdf.js afterwards. The two majors cannot share one `node_modules`. |
+| `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
+| `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
 | `tools-proof-ui-draft-test.mjs`, `-preflight-`, `-mobile-`, `-style-`, `tools-proof-embed-test.mjs`, `tools-proof-integration-test.mjs` | The proofer's six suites: engine, PDF preflight, touch layout, **design parity**, the host seam, and the calculator round trip. Run all six after any proofer change. The style suite reads the palette out of `calc-preview-test.html` rather than copying it, so the two documents cannot drift apart, and it fails any rule whose `var()` does not resolve — which is how a whole panel once rendered unstyled without anyone noticing. |
 | `pps-theme/` | Custom WordPress theme replacing Astra Pro — owns site chrome, typography, color tokens, WooCommerce shell. Stays out of the calculator plugin's way. `pps-theme/preview.html` is a Pages-served standalone preview of the header. |
 | `designer/` | **Spike.** Print-first layout editor (Vite + React + TS) — the document *is* a product; press-PDF export with CMYK, bleed/trim boxes and subset font embedding. Unlike the calculators this is a real build, not a single inline-Babel HTML. `dist/` is committed for Pages. **Read `docs/DESIGNER_SPIKE.md` before touching it** — it records what's proven vs faked and the next steps in order. Run `cd designer && npm test` after any change to `src/export/pdf.ts`. |
+
+## Per-page slot uploads
+
+"Upload pages individually" is a grid of page slots; a file dropped on one is
+that page's artwork, and the original File is kept in `slotFilesRef` so full
+quality rides to the order and to the proofer as `slots`.
+
+**A single-page PDF on a slot belongs to that slot.** Until 2026-09-13
+`handleSlotFile()` sent *any* PDF to `processFiles()`, which replaces the whole
+book — so the second single-page PDF wiped the first, only one ever stuck, and
+`slotFilesRef` was never written, which meant the proof got art for one page and
+nothing for the rest. Single-page PDFs are what design tools export, so this was
+the common case, not an edge one. A genuinely multi-page PDF still replaces the
+book; that is a different intent.
+
+Affected saddle and coupon-book, which shared the code. Perfect bound already
+took page 1 only; the five flats have front/back sheet slots and were always
+right. `tools-slot-upload-test.mjs` is the gate, and it runs against both the
+saddle and coupon builds.
 
 ## Shared Components (in each calculator HTML)
 - `PCF` — pricing constants object, overridable via PPS_CONFIG.calc
@@ -160,6 +181,24 @@ transforms legitimately produces no PDF.
   genuinely sequential — they used to fire and forget, which is why a second
   batch could not be layered on the first. The slot files also ride to the order
   named `page_NNN_<name>`. `tools-proof-slots-test.mjs` is the gate.
+- ~~Unsupplied pages were filled with the demo booklet.~~ **Closed 2026-09-13**
+  (found on staging). `SRCget()` drew the prototype's fake Capoeira programme on
+  any page with no upload — and `buildPackage()` renders every page into
+  PRINT_READY.pdf, so the approval hash bound to it and the press would have
+  printed it. `applyJob()` now sets `MODEL.hosted`, and a hosted job gets a white
+  page plus one error-level `noart` finding per empty page (which trips the
+  acknowledgment gate) and a BLANK PAGES section in the manifest. Standalone
+  keeps the placeholder — without it there is nothing to look at.
+  `tools-proof-blank-pages-test.mjs` is the gate.
+- ~~Approve went silent for tens of seconds.~~ **Closed 2026-09-13.** It renders
+  every page at 300 DPI, encodes a JPEG each, assembles a PDF and then does the
+  previews, nearly all of it blocking the main thread; the button said
+  PREPARING… and the page stopped responding, which reads as a crash. There is
+  now a determinate bar, the stage in words, and the percentage on the button —
+  and, the half that is easy to forget, **a yielded frame before each long block
+  so the readout actually paints**. A failure names the step it stopped at, in
+  the message and in `pps-proof:approve-failed`.
+  `tools-proof-progress-test.mjs` is the gate.
 - **Only the saddle calculator is wired.** The other seven still use the modal.
 - **The knob does not exist on either server yet.** `proof_url` lives in the
   repo's `pps-config-admin.php` only; production is running a copy without it

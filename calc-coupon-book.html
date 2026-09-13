@@ -3923,16 +3923,34 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     const idx = activeSlotRef.current;
     if (idx < 0) return;
 
-    if (file.type === "application/pdf") {
-      // PDF dropped on a slot — extract all pages, replace everything
-      processFiles([file]);
-      return;
-    }
+    let dataUrl, imgDims, srcDims = null;
 
-    // Single image → insert/replace at slot index
-    const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
-    if (!dataUrl) return;
-    const imgDims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+    if (file.type === "application/pdf") {
+      // A ONE-PAGE PDF dropped on a page slot is that page's artwork. It used to
+      // go straight to processFiles, which replaces the WHOLE book — so the
+      // second single-page PDF wiped the first and only one ever stuck
+      // (reported on the saddle from staging, 2026-09-13; this calculator
+      // carried the identical code). A genuinely multi-page PDF still means the
+      // whole book.
+      let ex;
+      try {
+        ex = await extractPdfPages(file);
+      } catch (err) {
+        alert(`Couldn't read ${file.name}: ${(err && err.message) || "the file may be corrupt or password-protected"}.\n\nTry re-exporting it as PDF or PNG.`);
+        return;
+      }
+      if (ex.pages.length !== 1) { processFiles([file]); return; }
+      dataUrl = ex.pages[0].dataUrl;
+      imgDims = { w: ex.dims.wPx, h: ex.dims.hPx };
+      // A PDF states its size in points, so the page size is known rather than
+      // inferred from pixels at an assumed 300 DPI.
+      srcDims = { wIn: ex.dims.wIn, hIn: ex.dims.hIn, wPx: ex.dims.wPx, hPx: ex.dims.hPx, source: "pdf" };
+    } else {
+      // Single image → insert/replace at slot index
+      dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
+      if (!dataUrl) return;
+      imgDims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+    }
 
     const newPage = { dataUrl, label: pageLabel(idx, pageCount) };
 
@@ -3954,11 +3972,13 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       });
       next[idx] = newPage;
 
-      // Update dims from first real image if we don't have them yet
+      // Update dims from first real page if we don't have them yet
       if (!artDims && imgDims.w > 0) {
-        const wIn = parseFloat((imgDims.w / 300).toFixed(3));
-        const hIn = parseFloat((imgDims.h / 300).toFixed(3));
-        setArtDims({ wIn, hIn, wPx: imgDims.w, hPx: imgDims.h, source: "image" });
+        setArtDims(srcDims || {
+          wIn: parseFloat((imgDims.w / 300).toFixed(3)),
+          hIn: parseFloat((imgDims.h / 300).toFixed(3)),
+          wPx: imgDims.w, hPx: imgDims.h, source: "image",
+        });
       }
       return next;
     });
@@ -4273,8 +4293,12 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         {displayPages.map((p, i) => {
           const isEmpty = p.isBlank;
           const isUserPage = !isEmpty;
+          // data-pps-dropzone marks a real drop target across the family — the
+          // saddle's window-level handler uses it to tell a genuine drop from
+          // one to swallow, and the slot suites find the tiles by it. These
+          // tiles are drop targets, so they carry it too.
           return (
-            <div key={i} style={{ position:"relative", textAlign:"center" }}
+            <div key={i} data-pps-dropzone="1" style={{ position:"relative", textAlign:"center" }}
               onDragOver={e => { e.preventDefault(); e.currentTarget.style.outline = `2px solid ${CK.cyan}`; }}
               onDragLeave={e => { e.currentTarget.style.outline = "none"; }}
               onDrop={e => { e.currentTarget.style.outline = "none"; handleSlotDrop(e, i); }}>
