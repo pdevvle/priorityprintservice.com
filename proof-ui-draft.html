@@ -282,6 +282,16 @@
       background:var(--cyan);background-size:auto;animation:none}
     .approve.done,.approve.done:disabled{background:#16a34a}
   }
+  /* The work report. A determinate bar rather than a spinner: the number of
+     pages is known before the first one is rendered, so "4 of 8" is available
+     and is the thing that tells someone whether to wait. A spinner says only
+     that something is happening, which is exactly what a hung page also says. */
+  .bpprog{grid-column:1/-1;justify-self:stretch;display:flex;flex-direction:column;gap:4px;margin-top:3px}
+  .bpbar{height:5px;border-radius:3px;background:var(--bp-line);overflow:hidden}
+  .bpbar i{display:block;height:100%;width:0;border-radius:3px;background:var(--cyan);
+           transition:width .18s linear}
+  .bpstep{font-size:10.5px;line-height:1.3;color:var(--bp-dim);text-align:right;
+          font-variant-numeric:tabular-nums}
   .closebtn{width:36px;height:36px;min-width:36px;flex-shrink:0;border-radius:50%;border:1px solid var(--bp-line);
             background:var(--bp-btn);color:var(--bp-dim);font-size:16px;line-height:1;cursor:pointer;
             display:flex;align-items:center;justify-content:center;font-family:inherit;
@@ -611,6 +621,9 @@
     .agree{display:flex;font-size:12.5px;margin:7px 0 0;white-space:normal}
     .agree label{white-space:normal}
     .approve{padding:11px 20px;font-size:14px}
+    /* Last in the bar, under the button that started it. */
+    .approvewrap .bpprog{flex:0 0 100%;order:1;margin:0}
+    .approvewrap .bpstep{text-align:left}
 
     /* A sticky element only sticks while its own parent is in view, so .main
        must NOT be that parent — it ends at the filmstrip, and the art would
@@ -811,6 +824,13 @@
         <div class="approverow">
           <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
         </div>
+        <!-- Approving is tens of seconds of blocked main thread on a long
+             booklet. Silence there reads as a hang, so the work reports itself.
+             aria-live, because the bar is the only thing moving. -->
+        <div class="bpprog" id="bpProg" hidden aria-live="polite">
+          <div class="bpbar"><i id="bpFill"></i></div>
+          <div class="bpstep" id="bpStep"></div>
+        </div>
       </div>
 
       <!-- a direct child of the bar, not of the approve column: on a phone the
@@ -870,6 +890,9 @@ const MODEL = {
   coverColor: 'color',
   groups: [],
   pages: [],
+  // Set by applyJob: a real host described this job, so this is somebody's order
+  // and not the demo. It decides what an unsupplied page is made of — see SRCget.
+  hosted: false,
 };
 
 /* The job this proof is for.
@@ -928,6 +951,9 @@ function validateJob(job){
 function applyJob(job){
   const errs = validateJob(job);
   if (errs.length) return errs;
+  // Set before rebuildModel, which clears every page source drawn under the
+  // demo rules — so the first blank page is drawn knowing this is a real job.
+  MODEL.hosted   = true;
   MODEL.calc     = String(job.calc || 'saddle');
   MODEL.trim     = { w: Number(job.trim.w), h: Number(job.trim.h) };
   if (job.bleed  != null) MODEL.bleed  = Number(job.bleed);
@@ -1078,13 +1104,33 @@ function drawPlaceholder(n){
 const srcCache = new Map();
 const uploads  = new Map();
 const SRC_LRU  = 20;
+
+/* An unsupplied page on a REAL job is blank, not decorated.
+   The demo placeholder above is a fake booklet — Capoeira, Batizado 2026, bars
+   of fake body copy. Standalone that is the only way to see the shell work. In
+   front of a customer it is somebody else's artwork on their pages, and it does
+   not stop at the screen: buildPackage renders every page into PRINT_READY.pdf,
+   the approval hash binds to those bytes, and production would print the demo.
+   Seen on staging 2026-09-13, where a booklet with one page uploaded showed
+   seven pages of it.
+   So a hosted job gets white. The page is then genuinely what will print, and
+   analyze() raises it as a problem so it cannot be approved without somebody
+   saying, in as many words, that they want a blank page there. */
+function drawBlank(){
+  const w = Math.round(MODEL.trim.w * SRC_DPI), h = Math.round(MODEL.trim.h * SRC_DPI);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, w, h);
+  return { canvas:c, text:[] };
+}
 function SRCget(n){
   if (uploads.has(n)) return uploads.get(n);
   let s = srcCache.get(n);
   if (s){ srcCache.delete(n); srcCache.set(n, s); return s; }   // touch = most recent
-  const d = drawPlaceholder(n);
+  const d = MODEL.hosted ? drawBlank() : drawPlaceholder(n);
   s = { el:d.canvas, w:d.canvas.width, h:d.canvas.height, text:d.text,
-        inW:MODEL.trim.w, inH:MODEL.trim.h, label:'placeholder' };
+        inW:MODEL.trim.w, inH:MODEL.trim.h,
+        label: MODEL.hosted ? 'no artwork supplied' : 'placeholder' };
   srcCache.set(n, s);
   while (srcCache.size > SRC_LRU) srcCache.delete(srcCache.keys().next().value);
   return s;
@@ -1191,6 +1237,7 @@ function composePage(n, W, H){
 
 /* Issues, measured rather than scripted. */
 const ISSUE_TEXT = {
+  noart: 'Issue: no artwork has been supplied for this page, so it will print blank. Upload a file for it, or approve knowing this page is empty.',
   nomargin: 'Not checked: this file is a flat image, so there is no way to tell type from picture in it. Nothing here has confirmed your text is clear of the trim — please check it against the green safety line yourself.',
   cut: 'Issue: {n} run{s} of type cross{s2} the trim line and will be cut off. Move the art, or scale it down, so all type sits inside the green safety margin.',
   tight: 'Heads up: {n} run{s} of type sit{s3} inside the safety margin, as close as {gap}" to the trim. Trimming varies by about a sixteenth of an inch, so type this close can end up touching the edge.',
@@ -1255,6 +1302,15 @@ function plural(t, k){
 }
 
 function analyze(n){
+  /* A page with nothing on it is one finding, not five. Everything below
+     measures the art — bleed coverage, resolution, where the type sits — and a
+     blank page fails most of them trivially, which would bury the one thing
+     that matters ("you have not sent us this page") under four consequences of
+     it. Reported alone, and at error level, so approving a book with holes in
+     it takes the deliberate second click the checkpoint asks for. */
+  if (MODEL.hosted && !uploads.has(n)){
+    return Object.assign([{ kind:'noart', level:'error', text:ISSUE_TEXT.noart }], { marks:[] });
+  }
   // Measured at a fixed working size — the geometry is scale-independent, so
   // one modest composition answers for every display size.
   const r = composePage(n, 460, Math.round(460 * BLEED_H / BLEED_W));
@@ -2322,6 +2378,29 @@ function runFileChecks(){
 
 const PRINT_DPI = 300;
 
+/* ── saying what is happening ────────────────────────────────────
+   Approving is real work: a 300-DPI render of every page, a JPEG encode each,
+   a PDF assembly, then the previews. On an 8pp booklet that is seconds; on a
+   64pp one it is a minute, and nearly all of it blocks the main thread. With
+   no report the button said PREPARING… and the page then stopped responding,
+   which is indistinguishable from a crash — and a customer who closes the tab
+   there has thrown away the approval they were moments from finishing.
+
+   Two halves, and the second is the one that is easy to get wrong: announce
+   the step BEFORE running it, then yield a frame so the announcement actually
+   paints. Setting textContent immediately ahead of a long synchronous block
+   paints nothing at all — the browser never gets a turn to draw it. Two
+   rAFs, because one only gets us into the frame that is already being built. */
+function nextFrame(){
+  return new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+}
+let onPkgProgress = null;   // set for the duration of a build; null when nobody is watching
+async function pkgProgress(text, done, total){
+  if (!onPkgProgress) return;
+  try { onPkgProgress(text, done, total); } catch (e){ /* a broken readout must not fail an approval */ }
+  await nextFrame();
+}
+
 /* Guides drawn on the preview only. The print file carries none — they are a
    proofing aid, and baking them in would print them. */
 function drawGuides(ctx, W, H){
@@ -2351,16 +2430,25 @@ function renderPrintPage(n){
 }
 
 async function buildPackage(){
-  await ensureLibs();
-  const { PDFDocument } = window.PDFLib;
-
   const pages = MODEL.pages.map(p => p.n);
   const files = [];
+  // Every page is rendered twice — once for print, once for the preview — plus
+  // the engine, the assembly and the manifest. Counting it out in advance is
+  // what makes the bar determinate.
+  const TOTAL = pages.length * 2 + 3;
+  let step = 0;
+  const tick = (text) => pkgProgress(text, step++, TOTAL);
+
+  await tick('Starting the PDF engine…');
+  await ensureLibs();
+  const { PDFDocument } = window.PDFLib;
 
   // ── 1. the print file ──
   const pdf = await PDFDocument.create();
   const perPage = [];
+  let i = 0;
   for (const n of pages){
+    await tick('Rendering page ' + (++i) + ' of ' + pages.length + ' at ' + PRINT_DPI + ' DPI');
     const r = renderPrintPage(n);
     // JPEG rather than PNG: a flattened photographic page as PNG runs to tens of
     // megabytes a page, and at 300 DPI q0.94 the difference is not printable.
@@ -2375,6 +2463,7 @@ async function buildPackage(){
     perPage.push({ n, effDpi:r.effDpi, t:Object.assign({}, state.perPage[n]),
                    src:SRCget(n).label || 'placeholder', margins:mk });
   }
+  await tick('Assembling the print file…');
   const pdfBytes = await pdf.save();
   const printBlob = new Blob([pdfBytes], { type:'application/pdf' });
   const printHash = await sha256Hex(new Uint8Array(pdfBytes));
@@ -2383,7 +2472,9 @@ async function buildPackage(){
 
   // ── 2. preview JPEGs, guides drawn on ──
   const PW = 900, PH = Math.round(PW * BLEED_H / BLEED_W);
+  let j = 0;
   for (const n of pages){
+    await tick('Preview ' + (++j) + ' of ' + pages.length);
     const r = composePage(n, PW, PH);
     const c = document.createElement('canvas');
     c.width = PW; c.height = PH;
@@ -2397,6 +2488,7 @@ async function buildPackage(){
   }
 
   // ── 3. the manifest ──
+  await tick('Writing the manifest…');
   const origins = deliverables();
   const struct  = (typeof lastStructure !== 'undefined' && lastStructure) ? lastStructure : null;
   const L = [];
@@ -2420,6 +2512,16 @@ async function buildPackage(){
   L.push('  ' + fmtBytes(pdfBytes.length) + ' at ' + PRINT_DPI + ' DPI');
   L.push('  This hash binds the approval to these exact bytes.');
   L.push('');
+  // Named explicitly rather than left to be inferred from eight "src=no artwork
+  // supplied" lines further down: a blank page in a printed booklet is the kind
+  // of thing production must be able to see at a glance was intended.
+  const blanks = pages.filter(n => !uploads.has(n));
+  if (blanks.length){
+    L.push('BLANK PAGES');
+    L.push('  page' + (blanks.length === 1 ? ' ' : 's ') + blanks.join(', ')
+           + ' — no artwork was supplied; these print blank');
+    L.push('');
+  }
   L.push('ORIGINAL FILES AS RECEIVED (never modified)');
   if (origins.length){
     origins.forEach(o => L.push('  ' + o.name + '  ' + fmtBytes(o.size) + '  sha256 ' + (o.hash || 'n/a')));
@@ -2478,6 +2580,7 @@ async function buildPackage(){
   files.push({ name:'MANIFEST.txt', blob:new Blob([L.join('\n')], { type:'text/plain' }),
                note:'transforms, effective DPI, margins, hashes' });
 
+  await pkgProgress('Done', TOTAL, TOTAL);
   return { files, printHash, pageCount:pages.length };
 }
 
@@ -2587,6 +2690,10 @@ document.addEventListener('click', async (ev) => {
   if (!btn) return;
   const note = document.getElementById('pkgNote');
   btn.disabled = true; note.textContent = 'Composing ' + MODEL.pages.length + ' pages at ' + PRINT_DPI + ' DPI…';
+  // Same work, same stall — this panel gets the running commentary in its note.
+  onPkgProgress = (text, done, total) => {
+    note.textContent = text + '  ·  ' + Math.round(done / total * 100) + '%';
+  };
   try {
     const pkg = await buildPackage();
     renderPackage(pkg);
@@ -2596,7 +2703,7 @@ document.addEventListener('click', async (ev) => {
     out.hidden = false;
     out.innerHTML = '<div class="pkgerr">Package failed: ' + (err && err.message ? err.message : err) + '</div>';
     note.textContent = '';
-  } finally { btn.disabled = false; }
+  } finally { onPkgProgress = null; btn.disabled = false; }
 });
 
 /* Everything flagged across the WHOLE job, not the page on screen.
@@ -2897,6 +3004,22 @@ document.getElementById('approveBtn').onclick = async () => {
   const wasLabel = btn.textContent;
   btn.textContent = 'PREPARING…';
   approvalNote('Building your print file…');
+
+  const prog = document.getElementById('bpProg');
+  const fill = document.getElementById('bpFill');
+  const stepEl = document.getElementById('bpStep');
+  if (prog) prog.hidden = false;
+  let lastStep = '';
+  onPkgProgress = (text, done, total) => {
+    lastStep = text;
+    const pct = Math.max(0, Math.min(100, Math.round(done / total * 100)));
+    if (fill) fill.style.width = pct + '%';
+    if (stepEl) stepEl.textContent = text + '  ·  ' + pct + '%';
+    // Also on the button itself: on a phone the bar is below the fold of the
+    // bottom bar on some keyboards, and the button never is.
+    btn.textContent = 'PREPARING… ' + pct + '%';
+  };
+
   try {
     const pkg = await buildPackage();
     renderPackage(pkg);
@@ -2922,14 +3045,21 @@ document.getElementById('approveBtn').onclick = async () => {
       out.hidden = false;
       const e = document.createElement('div');
       e.className = 'pkgerr';
-      e.textContent = 'We could not prepare your proof: ' + (err && err.message ? err.message : err);
+      // Where it got to is most of the diagnosis — "at: Rendering page 5 of 8"
+      // turns a support call into a look at page 5.
+      e.textContent = 'We could not prepare your proof: ' + (err && err.message ? err.message : err)
+                    + (lastStep ? '  (stopped at: ' + lastStep + ')' : '');
       out.replaceChildren(e);
     }
     approvalNote('');
     post({ type:'pps-proof:approve-failed',
            attempts: approveFailures,
+           step: lastStep,
            message: String(err && err.message || err) });
     if (approveFailures >= 2) offerEscapeHatch();
+  } finally {
+    onPkgProgress = null;
+    if (prog) prog.hidden = true;
   }
 };
 
