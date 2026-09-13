@@ -2261,6 +2261,18 @@ function pps_ajax_add_to_cart() {
         $cart_item_data['pps_proof_hash'] = $proof_hash;
     }
 
+    // The proofer's escape hatch: this artwork was NOT approved and a human has
+    // been promised. Free text from the proof surface, so it is trimmed hard and
+    // only ever rendered escaped; its presence is what matters, not its wording.
+    // A proof hash and a prepress flag are contradictory — approval produced
+    // bytes, the escape hatch did not — so the flag wins and the hash is dropped
+    // rather than letting the imposition tool treat the job as approved.
+    $prepress = sanitize_text_field( wp_unslash( $_POST['pps_prepress_review'] ?? '' ) );
+    if ( $prepress !== '' ) {
+        $cart_item_data['pps_prepress_review'] = mb_substr( $prepress, 0, 300 );
+        unset( $cart_item_data['pps_proof_hash'] );
+    }
+
     // Full approval package: every uploaded deliverable (raw + print-ready PDF +
     // preview pages + manifest) as an array of { path, name }. The raw file is
     // also kept in pps_artwork_path above for reorder/back-compat.
@@ -2432,7 +2444,7 @@ add_action( 'woocommerce_cart_loaded_from_session', function( $cart ) {
 // ═══════════════════════════════════════════════════════════════
 
 add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $values ) {
-    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path', 'pps_artwork_files', 'pps_proof_hash' );
+    $keys = array( 'pps_price', 'pps_rush', 'pps_summary', 'pps_metadata', 'pps_biz_days', 'pps_hash', 'pps_artwork_path', 'pps_artwork_files', 'pps_proof_hash', 'pps_prepress_review' );
     foreach ( $keys as $k ) {
         if ( isset( $values[ $k ] ) ) {
             $cart_item[ $k ] = $values[ $k ];
@@ -2969,6 +2981,20 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         $item->add_meta_data( '_pps_proof_hash', (string) $values['pps_proof_hash'], true );
     }
 
+    // The proofer's escape hatch, which until now told nobody.
+    //
+    // After two failed approvals the customer is offered "continue and prepress
+    // will check this". They then order with the file exactly as supplied and
+    // NO approval — which is the opposite of a self-approved order, and used to
+    // be indistinguishable from one. It rides to the order as visible staff meta
+    // (internal only: pps_internal_item_meta_keys() keeps it off the customer's
+    // copy), turns the spec's proof token into PREPRESS-REVIEW, and raises an
+    // order note below so it cannot be missed in the admin timeline.
+    $prepress = trim( (string) ( $values['pps_prepress_review'] ?? '' ) );
+    if ( $prepress !== '' ) {
+        $item->add_meta_data( 'PPS-Prepress-Review', $prepress, true );
+    }
+
     // Visible in order emails
     $item->add_meta_data( 'Estimated Delivery', $delivery->format( 'l, M j, Y' ), true );
     $item->add_meta_data( 'Order Summary', $values['pps_summary'] ?? '', true );
@@ -2983,7 +3009,10 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         $size     = pps_spec_size_label( $full );
         $iPaper   = is_array( $full['insidePaper'] ?? null ) ? ( $full['insidePaper']['label'] ?? '' ) : '';
         $iColor   = ( $full['insideColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
-        $proof    = ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' );
+        // An order that took the prepress escape hatch was never approved by
+        // anyone; saying SelfApproved on its ticket would be a lie prepress acts on.
+        $proof    = $prepress !== '' ? 'PREPRESS-REVIEW'
+            : ( ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' ) );
         $rush     = ( $full['rushCost'] ?? 0 ) > 0 ? 'RUSH' : 'Standard';
         $days     = intval( $full['days'] ?? $biz_days );
         $sets_ct  = count( $sets );
@@ -3058,7 +3087,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
  * `Preset` goes too. It is an analytics slug, meaningless to a customer.
  */
 function pps_internal_item_meta_keys() {
-    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset' );
+    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset', 'PPS-Prepress-Review' );
 }
 
 // WooCommerce renders both notifications through the same meta accessor, so the filter
@@ -3449,6 +3478,37 @@ function pps_prefill_customer_shipping( $metadata_json ) {
 // once the line items exist, which is what this reads from.
 add_action( 'woocommerce_checkout_order_processed', 'pps_apply_calculator_shipping_address', 20, 1 );
 add_action( 'woocommerce_store_api_checkout_order_processed', 'pps_apply_calculator_shipping_address', 20, 1 );
+
+/**
+ * Say out loud that an order came through the proofer's escape hatch.
+ *
+ * Item meta is where production reads a job; an order note is where anyone
+ * looking at the order sees it. Both, because this is the one order shape that
+ * must not be printed on the customer's say-so: they could not get through
+ * approval, and were promised a human would look.
+ */
+function pps_note_prepress_review( $order ) {
+    $order = is_numeric( $order ) ? wc_get_order( $order ) : $order;
+    if ( ! $order || ! is_a( $order, 'WC_Order' ) ) return;
+    if ( $order->get_meta( '_pps_prepress_noted' ) ) return;   // once per order
+
+    $reasons = array();
+    foreach ( $order->get_items() as $item ) {
+        $r = $item->get_meta( 'PPS-Prepress-Review' );
+        if ( $r ) $reasons[] = $item->get_name() . ': ' . $r;
+    }
+    if ( ! $reasons ) return;
+
+    $order->add_order_note(
+        "PREPRESS REVIEW REQUESTED — the customer could not complete the online proof and "
+        . "chose to continue with their file as supplied. This artwork is NOT approved: "
+        . "check it before printing.\n\n" . implode( "\n", $reasons )
+    );
+    $order->update_meta_data( '_pps_prepress_noted', 1 );
+    $order->save();
+}
+add_action( 'woocommerce_checkout_order_processed', 'pps_note_prepress_review', 25, 1 );
+add_action( 'woocommerce_store_api_checkout_order_processed', 'pps_note_prepress_review', 25, 1 );
 
 // Safety net. If an order reaches processing without a shipping address — a gateway
 // that builds the order down another path, a manual order, a checkout plugin we have

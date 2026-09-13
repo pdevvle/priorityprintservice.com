@@ -2162,7 +2162,12 @@ document.getElementById('filePick').onchange = e => {
    name order. Page-at-a-time is right for a cover; a 64-page booklet handed
    over as 64 files is not something anyone should place by hand, and the tile
    you drop on says where the run starts. */
-function loadArtSequence(startPage, fileList){
+/* Sequential on purpose. These used to be fired off without awaiting, which was
+   invisible while a drop was the only way in: one drop, one batch, nothing after
+   it. A host that hands us whole-file artwork AND per-page replacements needs the
+   second to land on top of the first, so each load has to finish before the next
+   starts. */
+async function loadArtSequence(startPage, fileList){
   const files = [...(fileList || [])].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric:true, sensitivity:'base' }));
   if (!files.length) return;
@@ -2171,14 +2176,16 @@ function loadArtSequence(startPage, fileList){
     alert(files.length + ' files dropped on page ' + startPage + ', but only ' + room +
           ' pages follow it. The extra ' + (files.length - room) + ' were not placed.');
   }
-  files.slice(0, room).forEach((f, i) => loadArt(startPage + i, f));
+  const placing = files.slice(0, room);
+  for (let i = 0; i < placing.length; i++) await loadArt(startPage + i, placing[i]);
 }
 async function loadArt(n, file){
   if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)){
-    ingestPdf(file, n).catch(err => {
+    try { await ingestPdf(file, n); }
+    catch (err){
       alert('That PDF could not be read: ' + (err && err.message ? err.message : err) +
             '\n\nNothing has been attached to page ' + n + '.');
-    });
+    }
     return;
   }
   if (!/^image\//.test(file.type)){
@@ -2187,18 +2194,21 @@ async function loadArt(n, file){
   }
   const origin = await originOf(file);
   const url = URL.createObjectURL(file);
-  const img = new Image();
-  img.onload = () => {
-    // A file with no stated physical size is taken at 300 DPI, which is what a
-    // print shop assumes and makes the DPI readout mean something.
-    uploads.set(n, { el:img, w:img.naturalWidth, h:img.naturalHeight,
-                     inW:img.naturalWidth/300, inH:img.naturalHeight/300,
-                     origin, label:file.name, stamp:Date.now() });
-    cache.clear();
-    renderAll();
-  };
-  img.onerror = () => { URL.revokeObjectURL(url); alert('That image could not be read.'); };
-  img.src = url;
+  await new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      // A file with no stated physical size is taken at 300 DPI, which is what a
+      // print shop assumes and makes the DPI readout mean something.
+      uploads.set(n, { el:img, w:img.naturalWidth, h:img.naturalHeight,
+                       inW:img.naturalWidth/300, inH:img.naturalHeight/300,
+                       origin, label:file.name, stamp:Date.now() });
+      cache.clear();
+      renderAll();
+      resolve();
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); alert('That image could not be read.'); resolve(); };
+    img.src = url;
+  });
 }
 
 /* ── preflight ─────────────────────────────────────────────────
@@ -2817,10 +2827,20 @@ window.addEventListener('message', async ev => {
   if (m.type === 'pps-proof:job'){
     const errs = bootJob(m.job);
     if (errs.length) return;
-    if (m.files && m.files.length){
-      try { await loadArtSequence(1, Array.from(m.files)); }
-      catch (e){ post({ type:'pps-proof:error', errors:['artwork could not be read: ' + (e && e.message || e)] }); }
+    try {
+      if (m.files && m.files.length) await loadArtSequence(1, Array.from(m.files));
+      // Per-page replacements, placed after the sequence so they win where they
+      // overlap. A customer who uploaded pages individually used to be handed an
+      // empty proof: the host forwarded its whole-file list and nothing else, so
+      // the pages they had actually supplied were not in front of them when they
+      // approved (2026-09-13).
+      for (const s of (m.slots || [])){
+        const page = Number(s && s.page);
+        if (!s || !s.file || !(page >= 1) || page > MODEL.pages.length) continue;
+        await loadArt(page, s.file);
+      }
     }
+    catch (e){ post({ type:'pps-proof:error', errors:['artwork could not be read: ' + (e && e.message || e)] }); }
   }
 });
 
