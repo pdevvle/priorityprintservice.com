@@ -44,6 +44,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `pps-html-deploy.php` | How calculators actually reach production. Also owns retention (v1.5.0): after each deploy it prunes superseded extracted scripts and trims the deploy archive. Accepts `calc-*.html` plus `proof-ui-draft.html` — an explicit list, because this directory is writable by a deploy tool.  Watches `wp-content/plugins/pps-calculators/_pending_html/`; the next WP request copies `*.html` into `wp-content/uploads/pps-calculators/`, updates the registry, archives the source under `_pending_html/_archive/`, and logs to `wp_options['pps_html_deploy_log_v2']`. Also hosts the Bulk Upload admin page (`admin.php?page=pps-bulk-upload`). |
 | `pps-proof-status.php` | Makes `SelfApproved` mean someone signed off in the proofer, rather than "did not buy a staff proof". Rewrites only that token in PPS-Spec, adds a `PPS-Proof` item meta, notes the order when artwork arrived unapproved. **On staging, NOT in `active_plugins` on either site** — until it is activated, every order still reads `SelfApproved`. |
 | `pps-delivery-date-guard.php` | Floors `_pps_delivery_date` at priority 99 and suppresses pi-edd on registry products. **Never deployed** — the pi-edd plugin is still active on both sites, so the server-side cause of a weekend delivery date is unaddressed. |
+| `tools-proof-slots-test.mjs`, `tools-prepress-flag-test.mjs` | The two proofer blockers closed on 2026-09-13. The first drives the proofer over its real job message with `slots` and proves per-page uploads land on their pages, beat the whole-file art where they overlap, and survive an out-of-range page. The second reads `pps-calculators.php` for the whole server chain (cart data, session key, item meta, spec token, order note, proof-hash drop) and runs the shipped submit function of all eight compiled calculators to prove the flag is posted when — and only when — the escape hatch was taken. |
 | `tools-order-e2e-test.mjs` | The whole order against a fake WordPress: a real PDF through the real uploader and proof modal on the compiled saddle AND perfect-bound builds, then Add to Order against a mocked admin-ajax (bare `-1` for a wrong nonce, JSON otherwise) and a cart page. Proves the nonce retry and the package contents (raw first, no `.html`, previews + manifest listed) where the customer actually meets them. Needs `parity-saddle.html` and `parity-pb.html` in the harness dir. |
 | `tools-nonce-strategy-test.mjs`, `tools-order-gates-test.mjs` | Ordering-path gates (2026-09-12 audit). The first runs the SHIPPED `submitToWooCommerce` out of every compiled calculator under a fake browser: baked nonce first, admin-ajax refresh on `-1`, REST fallback, reload message, WAF 403 named as a block, preset slug posted, reference files as supplementary deliverables, a refused supplementary never aborting (the perfect-bound `.html` bug). The second drives the saddle harness: "Upload Art with Order" with no file is stopped, and the mobile bar shows the pricing error instead of a dead button. Run both after touching any calculator's submit path or Panel. |
 | `tools-proof-serve.mjs` | Harness for the proofer's suites. They cannot run over `file://` (pdf.js needs a real origin), so this serves the tree on 127.0.0.1:8137 and the pinned libraries under `/vendor/`. Populate `proof-vendor/` with `tools-proof-vendor.mjs` first. |
@@ -145,13 +146,27 @@ transforms legitimately produces no PDF.
   which scans **every page plus the file-level preflight**, not the page on
   screen: a clean cover in front of you says nothing about page 5. The
   acknowledgment is recorded in the manifest.
-- **The escape hatch tells nobody.** After two failed approvals the customer is
-  offered "continue and prepress will check this", which emits `prepressReview`
-  on the artwork payload — and nothing reads it. Not the parent, not the server.
-  Such an order is indistinguishable from one where the proof was never opened.
-- **Per-slot uploads never reach it.** The handler forwards `rawFilesRef` only,
-  so a customer who uploaded pages individually gets an empty proof.
+- ~~The escape hatch tells nobody.~~ **Closed 2026-09-13.** The calculator posts
+  `pps_prepress_review`; PHP stores it as staff-visible `PPS-Prepress-Review`
+  item meta (internal-only, off the customer's copy), turns the spec's proof
+  token into `PREPRESS-REVIEW` instead of `SelfApproved`, raises an order note
+  saying the artwork is NOT approved, and **drops any `pps_proof_hash`** so an
+  unapproved job cannot look approved to the imposition tool.
+  `tools-prepress-flag-test.mjs` is the gate.
+- ~~Per-slot uploads never reach it.~~ **Closed 2026-09-13.** The job message
+  carries `slots: [{ page, file }]` alongside `files`; the proofer applies them
+  after the whole-file sequence (so a per-page choice wins where both cover a
+  page) and ignores a page outside the book. `loadArt`/`loadArtSequence` are now
+  genuinely sequential — they used to fire and forget, which is why a second
+  batch could not be layered on the first. The slot files also ride to the order
+  named `page_NNN_<name>`. `tools-proof-slots-test.mjs` is the gate.
 - **Only the saddle calculator is wired.** The other seven still use the modal.
+- **The knob does not exist on either server yet.** `proof_url` lives in the
+  repo's `pps-config-admin.php` only; production is running a copy without it
+  (117,942 bytes, 2026-09-06) and staging an older one still. Turning the
+  proofer on anywhere means deploying that file first, then setting **PPS Config
+  → Production → New Proof URL** by hand — it is not something to write into
+  `pps_calc_config` from here, because that option carries live credentials.
 - The "I don't have bleeds" answer reaches neither surface; both detect bleed
   from the art and ignore the selection.
 
