@@ -50,6 +50,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-proof-serve.mjs` | Harness for the proofer's suites. They cannot run over `file://` (pdf.js needs a real origin), so this serves the tree on 127.0.0.1:8137 and the pinned libraries under `/vendor/`. Populate `proof-vendor/` with `tools-proof-vendor.mjs` first. |
 | `tools-proof-vendor.mjs` | One command to install the proofer's pinned pdf.js/pdf-lib into `proof-vendor/` and restore the calculators' pdf.js afterwards. The two majors cannot share one `node_modules`. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
+| `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
 | `tools-proof-ui-draft-test.mjs`, `-preflight-`, `-mobile-`, `-style-`, `tools-proof-embed-test.mjs`, `tools-proof-integration-test.mjs` | The proofer's six suites: engine, PDF preflight, touch layout, **design parity**, the host seam, and the calculator round trip. Run all six after any proofer change. The style suite reads the palette out of `calc-preview-test.html` rather than copying it, so the two documents cannot drift apart, and it fails any rule whose `var()` does not resolve — which is how a whole panel once rendered unstyled without anyone noticing. |
 | `pps-theme/` | Custom WordPress theme replacing Astra Pro — owns site chrome, typography, color tokens, WooCommerce shell. Stays out of the calculator plugin's way. `pps-theme/preview.html` is a Pages-served standalone preview of the header. |
@@ -199,6 +200,21 @@ transforms legitimately produces no PDF.
   so the readout actually paints**. A failure names the step it stopped at, in
   the message and in `pps-proof:approve-failed`.
   `tools-proof-progress-test.mjs` is the gate.
+- ~~The ordered-size check warned on every correct file.~~ **Closed 2026-09-13.**
+  A print file with bleed is trim + 2 × bleed and usually carries no TrimBox, so
+  measuring the page against the trim alone called every good file wrong — and
+  this check feeds the acknowledgment gate, so it was training people to tick
+  past the one gate between artwork and a press. The no-TrimBox branch it
+  already had could never run: pdf-lib answers `getTrimBox()` with the MediaBox
+  when the file has none, so a declared trim has to be read as one that DIFFERS
+  from the page. `tools-proof-size-check-test.mjs` is the gate.
+- **A no-bleed file raises nothing in the PROOFER.** The calculator catches it
+  ("Artwork has content at edges but no bleed area") and that is where the
+  customer is told. Inside the proofer the default crop behaviour scales the art
+  to fill the bleed, so the geometric bleed check cannot fire — it only catches
+  art that is letterboxed. What the customer sees instead is the consequence:
+  type warnings near the trim. Worth closing with the "I don't have bleeds"
+  answer below rather than another geometric check.
 - **Only the saddle calculator is wired.** The other seven still use the modal.
 - **The knob does not exist on either server yet.** `proof_url` lives in the
   repo's `pps-config-admin.php` only; production is running a copy without it

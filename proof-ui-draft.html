@@ -2297,18 +2297,40 @@ const FILE_CHECKS = [
     }},
   { id:'size', label:'Built to the ordered size', run(f){
       if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
+      /* A print file WITH bleed is trim + 2 \u00d7 bleed, and most design tools
+         never write a TrimBox \u2014 so the page size is all there is to measure,
+         and measuring it against the trim alone calls every correctly prepared
+         file wrong. That is worse than an unhelpful message: this check feeds
+         the acknowledgment gate, so a warning on every good file teaches people
+         to tick past the one gate that stands between artwork and a press.
+         Found on staging on 2026-09-13, on a file built exactly to spec.
+         A file that DOES declare a TrimBox has said where the cut goes, and
+         that is what has to match \u2014 no bleed allowance there. */
       const want = MODEL.trim, tol = 0.03, bad = [];
+      const bled = { w: want.w + MODEL.bleed * 2, h: want.h + MODEL.bleed * 2 };
+      const matches = (t, s) => (Math.abs(t.w - s.w) < tol && Math.abs(t.h - s.h) < tol) ||
+                                (Math.abs(t.w - s.h) < tol && Math.abs(t.h - s.w) < tol);
+      let bledCount = 0, noTrim = 0;
       f.pdfs.forEach(u => {
         const pg = u.pdf.pages[u.pdf.pageIndex] || {};
         const t = pg.trim || pg.media;
         if (!t) return;
-        const fits = (Math.abs(t.w - want.w) < tol && Math.abs(t.h - want.h) < tol) ||
-                     (Math.abs(t.w - want.h) < tol && Math.abs(t.h - want.w) < tol);
-        if (!fits) bad.push(u.label + ' is ' + t.w.toFixed(2) + '" \u00d7 ' + t.h.toFixed(2) + '"');
+        /* pdf-lib answers getTrimBox() with the MediaBox when the file carries
+           no TrimBox of its own, so `pg.trim` is never null and the old
+           "carries no TrimBox" branch could never run. A declared trim is one
+           that DIFFERS from the page. */
+        const declared = !!(pg.media && !matches(t, pg.media));
+        if (!declared) noTrim++;
+        if (matches(t, want)) return;
+        if (!declared && MODEL.bleed > 0 && matches(t, bled)) { bledCount++; return; }
+        bad.push(u.label + ' is ' + t.w.toFixed(2) + '" \u00d7 ' + t.h.toFixed(2) + '"');
       });
-      const noTrim = f.pdfs.filter(u => !(u.pdf.pages[u.pdf.pageIndex] || {}).trim).length;
-      if (bad.length) return { state:'warn', text:'Ordered ' + want.w + '" \u00d7 ' + want.h +
-        '". ' + bad.join('; ') + '. It will be scaled or cropped to fit, which is what the Art Behavior controls decide.' };
+      const sizes = want.w + '" \u00d7 ' + want.h + '" trimmed'
+                  + (MODEL.bleed > 0 ? ', or ' + bled.w + '" \u00d7 ' + bled.h + '" with bleed' : '');
+      if (bad.length) return { state:'warn', text:'Ordered ' + sizes + '. ' + bad.join('; ') +
+        '. It will be scaled or cropped to fit, which is what the Art Behavior controls decide.' };
+      if (bledCount) return { state:'pass', text:'Page size is the ordered ' + want.w + '" \u00d7 ' + want.h +
+        '" plus ' + MODEL.bleed + '" bleed on every side, which is how a print file should arrive.' };
       return { state:'pass', text:'Trimmed size matches the ' + want.w + '" \u00d7 ' + want.h + '" ordered.' +
         (noTrim ? ' (' + noTrim + ' page' + (noTrim===1?'':'s') + ' carry no TrimBox, so the page size was used instead.)' : '') };
     }},
