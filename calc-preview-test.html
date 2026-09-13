@@ -2831,7 +2831,7 @@ function ppsProofUrl(){
      { action:'escape', reason }        prepress will check the file
      { action:'closed' }                they backed out
    Rejects only if the proof could not be opened at all. */
-function ppsOpenProof({ url, job, files, onProgress }){
+function ppsOpenProof({ url, job, files, slots, onProgress }){
   return new Promise((resolve, reject) => {
     const origin = window.location.origin;
     let done = false;
@@ -2870,7 +2870,7 @@ function ppsOpenProof({ url, job, files, onProgress }){
 
       if (m.type === 'pps-proof:ready'){
         clearTimeout(readyTimer);
-        frame.contentWindow.postMessage({ type:'pps-proof:job', job, files: files || [] }, origin);
+        frame.contentWindow.postMessage({ type:'pps-proof:job', job, files: files || [], slots: slots || [] }, origin);
         return;
       }
       if (m.type === 'pps-proof:error'){
@@ -3192,15 +3192,30 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     const sources = (rawFilesRef.current && rawFilesRef.current.length)
       ? rawFilesRef.current.slice()
       : (raw ? [raw] : []);
+    // Pages the customer supplied one at a time. These used to be dropped on the
+    // way to the proofer, so someone who built their booklet page by page proofed
+    // and approved an empty job (2026-09-13). They travel as page numbers, are
+    // applied after the whole-file art, and ride to the order named per page so
+    // prepress can see which is which — the same naming the built-in modal uses.
+    const slotFiles = slotFilesRef.current || {};
+    const slots = Object.keys(slotFiles)
+      .map(k => ({ page: Number(k) + 1, file: slotFiles[k] }))
+      .filter(s => s.file && s.page >= 1)
+      .sort((a, b) => a.page - b.page);
+    const slotOriginals = slots.map(s => new File([s.file],
+      `page_${String(s.page).padStart(3, "0")}_${s.file.name}`, { type: s.file.type }));
+    // Artwork exists if EITHER shape of upload does; opening on `sources` alone
+    // is what made the slots-only case an empty proof.
+    if (!sources.length && !slots.length) return false;
     try {
-      const r = await ppsOpenProof({ url, job, files: sources });
+      const r = await ppsOpenProof({ url, job, files: sources, slots });
       if (r.action === "approved") {
         const { files: mapped, printReadyName } = ppsProofFilesToOrder(r.files, baseName);
         // Originals travel too — the file as supplied is what we are trusted
         // to keep, and it is the only thing that can settle a dispute later.
         const originals = [];
         const seen = new Set();
-        sources.forEach(f => {
+        sources.concat(slotOriginals).forEach(f => {
           const k = f.name + ":" + f.size;
           if (seen.has(k)) return;
           seen.add(k); originals.push(f);
@@ -3212,7 +3227,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         // Deliberately NOT approved: the order goes through with the raw file
         // and prepress is told. Better than a customer who cannot order.
         setArtApproved(false);
-        emitArtwork({ type: "files", list: sources.slice(), approved: false,
+        emitArtwork({ type: "files", list: sources.concat(slotOriginals), approved: false,
                       prepressReview: r.reason || "proof could not be prepared" });
       }
       return true;
@@ -5948,6 +5963,14 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
       if (artFiles.type === "files" && artFiles.proofHash && artFiles.proofHashOf
           && uploadedFiles.some(f => f.name === artFiles.proofHashOf)) {
         fd.append("pps_proof_hash", artFiles.proofHash);
+      }
+      // The proofer's escape hatch. The customer could not get through approval
+      // and was told prepress would check the file, so the order has to say so:
+      // PHP turns this into visible staff meta, a PREPRESS-REVIEW token in the
+      // spec string and an order note. Without it such an order is
+      // indistinguishable from one that was properly approved.
+      if (artFiles.type === "files" && artFiles.prepressReview) {
+        fd.append("pps_prepress_review", String(artFiles.prepressReview).slice(0, 300));
       }
       return fd;
     };

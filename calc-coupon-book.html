@@ -5257,6 +5257,14 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
           && uploadedFiles.some(f => f.name === artFiles.proofHashOf)) {
         fd.append("pps_proof_hash", artFiles.proofHash);
       }
+      // The proofer's escape hatch. The customer could not get through approval
+      // and was told prepress would check the file, so the order has to say so:
+      // PHP turns this into visible staff meta, a PREPRESS-REVIEW token in the
+      // spec string and an order note. Without it such an order is
+      // indistinguishable from one that was properly approved.
+      if (artFiles.type === "files" && artFiles.prepressReview) {
+        fd.append("pps_prepress_review", String(artFiles.prepressReview).slice(0, 300));
+      }
       return fd;
     };
     // Classify like the uploader does: admin-ajax answers a rejected nonce with a
