@@ -19,13 +19,20 @@
  *      an old cart, a restored reorder or a stale tab can still present one, and
  *      the server should not be taking the client's word for it either way.
  *
- *   2. Estimate Delivery Date for WooCommerce Pro (pi-edd). Its
- *      `EstimateCalculator::get_delivery_date()` skips its whole weekend loop when
- *      shipping days is 0 and returns the raw date. PPS calculator products are
- *      WooCommerce *virtual* products, so no shipping method applies to them and
- *      that is exactly the 0-day case. It then writes `pi_item_min_date`,
- *      `pi_item_max_date`, `pi_item_estimate_msg` and friends onto the line item —
- *      keys with no underscore prefix, so WooCommerce shows them.
+ *   2. Estimate Delivery Date for WooCommerce Pro (pi-edd). It writes
+ *      `pi_item_min_date`, `pi_item_max_date`, `pi_item_estimate_msg`,
+ *      `estimate_details` and friends onto every line item — keys with no
+ *      underscore prefix, so WooCommerce shows them.
+ *
+ *      Corrected 2026-09-15 after reading the installed plugin (v2026-08-10):
+ *      pi-edd is NOT the source of the Sunday date. `Product::validate_enabled()`
+ *      already switches itself off for a virtual product, and every registry
+ *      product is virtual by owner rule — so for our items it writes *empty*
+ *      estimate keys, not competing ones. That is still worth stopping (they
+ *      clutter the order item table beside the PPS spec, which is how a stray
+ *      date gets read as ours) but it is housekeeping, not a correctness fix.
+ *      **The Sunday on order 87105 came from our side, case 1.** Do not go
+ *      looking for it in pi-edd.
  *
  * PPS owns the delivery date for any product in the calculator registry: it knows
  * the production days, the 2pm cutoff, the closure list and the transit zone, and
@@ -36,6 +43,31 @@
  *
  * This file only ever moves a date FORWARD to the next working day. It never moves
  * one earlier, so it cannot turn a promise the customer accepted into a shorter one.
+ *
+ * ── What it does NOT cover ───────────────────────────────────────────────────
+ *
+ * The floor hangs off `woocommerce_checkout_create_order_line_item`, so it sees
+ * orders created by a checkout — classic or Store API, both fire it. It does not
+ * see an order built any other way: `pps_handle_single_item_reorder()`, an order
+ * keyed in by staff in wp-admin, or one created over the REST API. Those are rare
+ * and staff-visible, which is why they are left rather than covered by a broader
+ * hook that would fire on every item write in the admin.
+ *
+ * ── Third-party hooks used, verified against the installed plugin ────────────
+ *
+ * Both were checked in pi-edd as installed on 2026-09-15 (files dated 2026-08-10),
+ * because a filter that does not exist fails silently and would leave this whole
+ * section looking like it worked:
+ *
+ *   - `pi_edd_disable_product_estimate_storage` — public/class-orderfront.php,
+ *     `apply_filters( ..., false, $item, $cart_item_key, $values, $order )`, 5 args.
+ *   - `pisol_edd_hide_estimate_in_order` — public/class-orderemail.php,
+ *     `apply_filters( ..., $hide_estimate, $order )`, 2 args. Note it gates BOTH
+ *     the combined order estimate and, via `product_estimate_display_in_order()`,
+ *     the per-item `pi_item_estimate_msg` — so returning true covers both.
+ *
+ * If a pi-edd update ever renames either, this section goes quiet without a word.
+ * `tools-delivery-date-guard-test.php` is the gate that notices.
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
@@ -66,15 +98,22 @@ function pps_ddg_is_working_day( DateTime $d ): bool {
     return true;
 }
 
-/** The first working day on or after $d. Returns a new object; $d is untouched. */
-function pps_ddg_snap_forward( DateTime $d ): DateTime {
+/**
+ * The first working day on or after $d, or NULL if there isn't one within a year.
+ *
+ * Bounded so a pathological closure list cannot spin: a year of closures is already
+ * a broken configuration, and looping forever would take the site down. Returning
+ * null rather than the exhausted date matters — handing back a day 366 days out
+ * that is *still* closed would replace a wrong date with a far wronger one, so the
+ * caller leaves the original alone instead.
+ */
+function pps_ddg_snap_forward( DateTime $d ): ?DateTime {
     $out = clone $d;
-    // Bounded so a pathological closure list cannot spin: a year of closures is
-    // already a broken configuration, and looping forever would take the site down.
-    for ( $i = 0; $i < 366 && ! pps_ddg_is_working_day( $out ); $i++ ) {
+    for ( $i = 0; $i < 366; $i++ ) {
+        if ( pps_ddg_is_working_day( $out ) ) return $out;
         $out->modify( '+1 day' );
     }
-    return $out;
+    return null;
 }
 
 /** Is this product driven by a PPS calculator? */
@@ -115,21 +154,60 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
     if ( pps_ddg_is_working_day( $d ) ) return;
 
     $fixed = pps_ddg_snap_forward( $d );
+    if ( ! $fixed ) return;   // no working day within a year — leave it alone, see above
 
     $item->update_meta_data( '_pps_delivery_date', $fixed->format( 'Y-m-d' ) );
     $item->update_meta_data( 'Estimated Delivery', $fixed->format( 'l, M j, Y' ) );
 
-    // Say so on the order. A date that moved after the customer saw it is something
-    // production and support both need to know about, and silently correcting it
-    // would hide however it got there in the first place.
-    if ( is_object( $order ) && method_exists( $order, 'add_order_note' ) ) {
-        $order->add_order_note( sprintf(
-            'Delivery date %s falls on a day the shop is closed; moved to %s.',
-            $d->format( 'l, M j, Y' ),
-            $fixed->format( 'l, M j, Y' )
-        ) );
-    }
+    /* Remember it; the note is written later, once the order exists.
+     *
+     * This used to call $order->add_order_note() right here, which almost never
+     * worked. WC_Order::add_order_note() returns 0 without writing anything when
+     * the order has no ID, and on a first checkout attempt it does not have one
+     * yet: WC_Checkout::create_order() builds the line items and only then calls
+     * $order->save(). So the one part of this guard whose whole job was to stop a
+     * silent correction was itself silent — it would have logged on a retry after
+     * a failed payment and nowhere else. */
+    $GLOBALS['pps_ddg_moved'][] = array(
+        'from' => $d->format( 'l, M j, Y' ),
+        'to'   => $fixed->format( 'l, M j, Y' ),
+    );
 }, 99, 4 );
+
+/**
+ * Say so on the order.
+ *
+ * A date that moved after the customer saw it is something production and support
+ * both need to know about, and silently correcting it would hide however it got
+ * there in the first place.
+ *
+ * Both checkout paths, because the store runs both: the classic form and the Store
+ * API that the blocks checkout posts to. The meta flag makes a second firing a
+ * no-op rather than a duplicate note.
+ */
+function pps_ddg_note_moved_dates( $order ) {
+    if ( is_numeric( $order ) ) $order = wc_get_order( $order );
+    if ( ! is_object( $order ) || ! method_exists( $order, 'add_order_note' ) ) return;
+
+    $moved = $GLOBALS['pps_ddg_moved'] ?? array();
+    if ( ! $moved ) return;
+    if ( $order->get_meta( '_pps_ddg_noted' ) ) return;
+
+    $lines = array();
+    foreach ( $moved as $m ) {
+        $lines[] = sprintf( '%s → %s', $m['from'], $m['to'] );
+    }
+    $order->add_order_note(
+        'Delivery date fell on a day the shop is closed and was moved forward: '
+        . implode( '; ', array_unique( $lines ) ) . '.'
+    );
+    $order->update_meta_data( '_pps_ddg_noted', 1 );
+    $order->save();
+
+    unset( $GLOBALS['pps_ddg_moved'] );
+}
+add_action( 'woocommerce_checkout_order_processed', 'pps_ddg_note_moved_dates', 25 );
+add_action( 'woocommerce_store_api_checkout_order_processed', 'pps_ddg_note_moved_dates', 25 );
 
 // ── 2. Keep pi-edd off PPS line items ────────────────────────────────────────
 
