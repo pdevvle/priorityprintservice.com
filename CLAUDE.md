@@ -49,6 +49,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-nonce-strategy-test.mjs`, `tools-order-gates-test.mjs` | Ordering-path gates (2026-09-12 audit). The first runs the SHIPPED `submitToWooCommerce` out of every compiled calculator under a fake browser: baked nonce first, admin-ajax refresh on `-1`, REST fallback, reload message, WAF 403 named as a block, preset slug posted, reference files as supplementary deliverables, a refused supplementary never aborting (the perfect-bound `.html` bug). The second drives the saddle harness: "Upload Art with Order" with no file is stopped, and the mobile bar shows the pricing error instead of a dead button. Run both after touching any calculator's submit path or Panel. |
 | `tools-proof-serve.mjs` | Harness for the proofer's suites. They cannot run over `file://` (pdf.js needs a real origin), so this serves the tree on 127.0.0.1:8137 and the pinned libraries under `/vendor/`. Populate `proof-vendor/` with `tools-proof-vendor.mjs` first. |
 | `tools-proof-vendor.mjs` | One command to install the proofer's pinned pdf.js/pdf-lib into `proof-vendor/` and restore the calculators' pdf.js afterwards. The two majors cannot share one `node_modules`. |
+| `tools-order-blockers-test.mjs` | The two guards from the 2026-09-15 checkout blocker: the registry (not the database) decides whether WCPA owns a product, and a refused checkout on a calculator cart is recorded to `pps_checkout_refusals` instead of costing a silent order. Also pins the things that stop the tripwire becoming the failure it watches for — wrapped, bounded, autoload-off, scoped to PPS carts. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
@@ -413,6 +414,27 @@ Two things now hold the line, and the second is the one that matters:
 
 Adding a product to the registry therefore no longer requires touching WCPA at all. If you
 ever see "Addon data missing" on a PPS product again, that filter is what to check first.
+
+**And a refused checkout on a calculator cart is now recorded.** We cannot enumerate
+every plugin that might one day claim one of our products, so the durable protection is
+that the next one announces itself. `woocommerce_after_checkout_validation` at priority
+99 writes the product IDs and the refusal messages to
+`wp_options['pps_checkout_refusals']` (newest first, capped at 30, autoload off) and to
+the PHP error log. **Read it with `wp_get_option( 'pps_checkout_refusals' )` — it is the
+first place to look when someone reports "it won't let me order".** The hook only fires
+on carts carrying a `pps_metadata`/`pps_price` line, and the whole body is wrapped in
+try/catch: a tripwire that breaks checkout would be worse than no tripwire.
+`tools-order-blockers-test.mjs` gates both guards.
+
+**Audited 2026-09-15, the other systems that could do the same thing.** Of the plugins
+whose per-product meta sits on registry products, only **WCPA** and **pi-edd** are in
+`active_plugins`. The `_uni_cpo_*`, `_cpo_*`, `_nbdesigner_*`/`_nbo_*`/`_nbd*` and
+`_wooclientzone_*` keys are residue from uninstalled plugins and cannot run — but they
+are exactly the shape that caused this, so if one is ever reactivated, check its
+per-product ownership flag against the registry before trusting an order path. pi-edd
+writes a competing delivery date rather than refusing an order (see
+`pps-delivery-date-guard.php`, still undeployed). `_virtual` was spot-checked across
+saddle, perfect-bound, brochure, sticker and greeting-card products and holds.
 
 **Do NOT add WCPA-active product IDs to the PPS calculator registry** — that would route them through both systems simultaneously and likely double-bill or break the cart. WCPA products should not appear on any of: `pps_get_registry()` entries, `wp_options['pps_presets']` rows, or the "PPS Defaults" product meta box. WCPA products will not use the integrated Google Drive uploads or shipping/turnaround logic by design.
 

@@ -2558,6 +2558,61 @@ add_filter( 'get_post_metadata', function( $value, $object_id, $meta_key, $singl
     return $single ? '1' : array( '1' );
 }, 10, 4 );
 
+/* A refused checkout on a PPS cart must not be silent.
+ *
+ * The WCPA collision above cost a customer four days and a rush-mail bill, and we
+ * only learned about it because she wrote in. Everyone else who met that wall just
+ * left, and nothing anywhere recorded that they had tried. That is the part worth
+ * fixing permanently: we cannot enumerate every plugin that might one day claim one
+ * of our products, but we can make sure the next one announces itself instead of
+ * quietly costing orders.
+ *
+ * So: when WooCommerce finishes validating a checkout that contains a calculator
+ * line AND has decided to refuse it, record why. Read it back with
+ * `wp_get_option( 'pps_checkout_refusals' )` — newest first, capped at 30 so it can
+ * never grow without bound.
+ *
+ * This hook runs on every checkout of a PPS product on a live store, so it is
+ * written to be incapable of causing the failure it exists to observe: it only
+ * reads, the whole body is wrapped, and any error is swallowed. A tripwire that
+ * breaks checkout is worse than no tripwire.
+ */
+add_action( 'woocommerce_after_checkout_validation', function( $data, $errors ) {
+    try {
+        if ( ! is_wp_error( $errors ) || ! $errors->get_error_codes() ) return;   // checkout is fine
+        if ( ! function_exists( 'WC' ) || ! WC()->cart ) return;
+
+        $items = array();
+        foreach ( WC()->cart->get_cart() as $ci ) {
+            if ( isset( $ci['pps_metadata'] ) || isset( $ci['pps_price'] ) ) {
+                $items[] = (int) ( $ci['product_id'] ?? 0 );
+            }
+        }
+        if ( ! $items ) return;                                                  // not our cart
+
+        $messages = array();
+        foreach ( $errors->get_error_codes() as $code ) {
+            foreach ( (array) $errors->get_error_messages( $code ) as $m ) {
+                $messages[] = mb_substr( wp_strip_all_tags( (string) $m ), 0, 300 );
+            }
+        }
+
+        $log = get_option( 'pps_checkout_refusals', array() );
+        if ( ! is_array( $log ) ) $log = array();
+        array_unshift( $log, array(
+            'time'     => current_time( 'mysql' ),
+            'products' => array_values( array_unique( $items ) ),
+            'errors'   => array_slice( $messages, 0, 6 ),
+        ) );
+        update_option( 'pps_checkout_refusals', array_slice( $log, 0, 30 ), false );
+
+        error_log( '[pps] checkout refused on a calculator cart (products '
+            . implode( ',', array_unique( $items ) ) . '): ' . implode( ' | ', $messages ) );
+    } catch ( \Throwable $e ) {
+        // Observation must never be the thing that breaks an order.
+    }
+}, 99, 2 );
+
 // WCPA (still active for non-registry products) also filters this hook and
 // emits its form-field labels — valueless — on registry products it does not
 // own ("Booklet Finished Size:", "Insides Print Color:", …). Scrub
