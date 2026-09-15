@@ -29,17 +29,53 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 // SHARED: PPS ORDER VIEW HELPERS
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Every customer-chosen field that a reorder or an Edit Specs round-trip must carry.
+ *
+ * A whitelist rather than the whole metadata blob, because the blob also holds derived
+ * figures — totals, transit days, weights, the debug block — and restoring those would
+ * pin a new quote to an old calculation.
+ *
+ * It was written against the saddle-stitch calculator and never extended when the flat
+ * ones shipped, so it listed bindDir, sets, insideColor and coverColor while omitting
+ * every field a brochure, postcard, letterhead, greeting card or sticker actually
+ * prices on. Editing a single-sided brochure therefore reloaded it as double-sided —
+ * `sides` simply was not in the payload — and re-quoted $107.72 as $141.85, silently.
+ * The calculators were never the problem: their restore handlers already read all of
+ * these.
+ *
+ * When adding a pricing input to any calculator, add it here in the same change. The
+ * test is simple: if changing it changes the price, it belongs in this list.
+ */
 function pps_reorder_field_whitelist() {
     return array(
-        'sizeLabel', 'customLong', 'customShort', 'bindDir',
-        'sets',
-        'insideColor', 'coverColor',
+        // Identity
+        'jobName', 'qty',
+        // Size — presets and custom, both families
+        'sizeMode', 'sizeLabel', 'customLong', 'customShort', 'longEdge', 'shortEdge',
+        // Booklets
+        'bindDir', 'sets', 'insideColor', 'coverColor',
         'insidePaper', 'insidePaperType',
         'coverMode', 'coverPaper', 'coverPaperType',
-        'twoStaple', 'vividPrint',
-        'coating', 'bundling', 'roundCorner',
+        'twoStaple', 'outfold',
+        // Coupon books
+        'bindStyle', 'sidesPrinted', 'magnetBacker',
+        // Flats
+        'foldType', 'foldDir', 'frontColor', 'backColor', 'sides', 'paper', 'paperType',
+        // Finishing — vividPrint is the booklet spelling, vivid the flat one
+        'vividPrint', 'vivid', 'coating', 'coatSides', 'bundling', 'roundCorner',
+        'perforation', 'perfDir', 'perfPositions',
+        // Artwork & proofing
         'artwork', 'artEditPages', 'bleed', 'proof',
-        'shipState',
+        'proofAddrSame', 'proofAddr', 'canvaLink', 'canvaInstructions',
+        // Destination. The date is deliberately absent: a delivery date is a promise
+        // about a specific day, so it is re-quoted rather than restored.
+        // shipAddr (name/company/street/city) is deliberately absent: these
+        // payloads travel in URL query strings (cart Edit-Specs links, reorder
+        // links), which land in access logs, browser history, and Referer
+        // headers to third parties. State+ZIP stay — they are quote inputs.
+        // The full address re-enters the checkout session at add-to-cart.
+        'shipState', 'shipZip',
     );
 }
 
@@ -68,10 +104,15 @@ function pps_build_single_item_reorder_url( $order, $item ) {
     $product = wc_get_product( $item->get_product_id() );
     if ( ! $product || ! $product->exists() ) return '';
 
-    $url = add_query_arg( array(
+    $args = array(
         'pps_reorder_order' => $order->get_id(),
         'pps_reorder_item'  => $item->get_id(),
-    ), wc_get_cart_url() );
+    );
+    // Placeholder the JS rewrites when a quantity tier is chosen. Kept inside
+    // the nonce'd URL so swapping it cannot smuggle in anything else: the
+    // handler treats it as an index into the order's own stored tiers.
+    $args['pps_reorder_tier'] = 0;
+    $url = add_query_arg( $args, wc_get_cart_url() );
 
     return wp_nonce_url( $url, 'pps_reorder_item_' . $order->get_id() . '_' . $item->get_id() );
 }
@@ -115,13 +156,13 @@ function pps_render_pps_item_card( $item, $order ) {
     $metadata_json = $item->get_meta( '_pps_metadata' );
     $is_pps = (bool) $metadata_json;
 
-    // Legacy (WCPA-era) fallback: skip cards for items whose product is gone
-    if ( ! $is_pps ) {
-        $product = wc_get_product( $item->get_product_id() );
-        if ( ! $product || ! $product->exists() ) return '';
-    } else {
-        $product = wc_get_product( $item->get_product_id() );
-    }
+    // Legacy (WCPA-era) items may point at a product retired in the 3.0
+    // catalog. Render the card anyway — silently skipping it made a
+    // customer's whole history "yield nothing" — but withhold the one-click
+    // reorder and route them to Contact Us, which already carries the
+    // order/item/specs payload for a manual re-quote.
+    $product      = wc_get_product( $item->get_product_id() );
+    $product_gone = ( ! $product || ! $product->exists() );
 
     $product_url = ( $product && $product->exists() ) ? $product->get_permalink() : '';
 
@@ -130,7 +171,16 @@ function pps_render_pps_item_card( $item, $order ) {
     $thumb_name      = $is_pps ? (string) $item->get_meta( '_pps_artwork_thumb' ) : '';
     $rush            = $is_pps ? (float) $item->get_meta( '_pps_rush' ) : 0;
     $reorder         = $is_pps ? pps_build_reorder_url( $item ) : '';
-    $legacy_reorder  = $is_pps ? '' : pps_build_single_item_reorder_url( $order, $item );
+    $legacy_reorder  = ( $is_pps || $product_gone ) ? '' : pps_build_single_item_reorder_url( $order, $item );
+
+    // Quantity tiers quoted at the time. Offering them again is the point of
+    // storing them — a customer who bought 250 can reorder 500 without asking.
+    // Prices are historical, so they are shown through the past-order
+    // multiplier rather than at the original figure.
+    $tiers = array();
+    if ( ! $product_gone && function_exists( 'pps_quote_normalise_tiers' ) ) {
+        $tiers = pps_quote_normalise_tiers( (array) $order->get_meta( '_pps_qty_tiers' ) );
+    }
     // Pass '_' to filter underscore-prefixed (internal) meta keys per WP/WC
     // convention. Empty string previously disabled the filter and exposed
     // internal keys like _pi_item_min_preparation_days to the customer.
@@ -140,6 +190,24 @@ function pps_render_pps_item_card( $item, $order ) {
     $is_inactive = in_array( $status, array( 'cancelled', 'refunded', 'failed' ), true );
     $pill_kind   = pps_status_to_pill_kind( $status );
     $status_lbl  = wc_get_order_status_name( $status );
+
+    // Live work vs finished work, which the carousel colours on: yellow for a
+    // job still moving through the shop, blue for one that is done. Cancelled
+    // and refunded keep their own muted treatment and are neither.
+    $is_ongoing  = ! $is_inactive && in_array( $status, array( 'pending', 'on-hold', 'processing' ), true );
+    $is_past     = ! $is_inactive && ! $is_ongoing;
+
+    // A job invoiced by email sits pending until the customer pays. Offer the
+    // payment link here rather than a Reorder button they cannot use yet — a
+    // customer who lost the invoice email can still settle it from this page.
+    // A QuickBooks-invoiced job carries its own external link; offering the
+    // site checkout alongside it would give the customer two live ways to pay
+    // the same invoice. pps_job_invoice_pay_link() picks the right one.
+    if ( function_exists( 'pps_job_invoice_pay_link' ) ) {
+        $pay_url = pps_job_invoice_pay_link( $order );
+    } else {
+        $pay_url = $order->needs_payment() ? $order->get_checkout_payment_url() : '';
+    }
 
     $delivery_pretty = '';
     if ( $delivery && ! $is_inactive ) {
@@ -167,22 +235,23 @@ function pps_render_pps_item_card( $item, $order ) {
     $date_created = $order->get_date_created();
     $date_str = $date_created ? wc_format_datetime( $date_created, get_option( 'date_format' ) ) : '';
 
+    $has_thumb = ( $is_pps && $thumb_url );
     $card_classes = 'order-card';
+    if ( ! $has_thumb ) $card_classes .= ' no-thumb';
     if ( $is_inactive ) {
         $card_classes .= ' cancelled';
-    } elseif ( ! $is_pps ) {
-        $card_classes .= ' legacy';
+    } else {
+        $card_classes .= $is_ongoing ? ' ongoing' : ' past';
+        if ( ! $is_pps ) $card_classes .= ' legacy';
     }
 
     ob_start();
     ?>
     <article class="<?php echo esc_attr( $card_classes ); ?>">
-        <?php if ( $is_pps && $thumb_url ) : ?>
+        <?php if ( $has_thumb ) : ?>
             <div class="oc-thumb">
                 <img src="<?php echo esc_url( $thumb_url ); ?>" alt="" loading="lazy" />
             </div>
-        <?php else : ?>
-            <div class="oc-thumb-empty" aria-hidden="true"></div>
         <?php endif; ?>
 
         <div class="oc-body">
@@ -229,12 +298,30 @@ function pps_render_pps_item_card( $item, $order ) {
         </div>
 
         <div class="oc-actions">
-            <?php if ( $is_inactive ) : ?>
+            <?php if ( $pay_url ) : ?>
+                <a href="<?php echo esc_url( $pay_url ); ?>" class="btn btn-pay">Pay now</a>
+            <?php elseif ( $is_inactive ) : ?>
                 <button type="button" class="btn btn-ghost" disabled style="opacity:.6;cursor:not-allowed">Reorder unavailable</button>
             <?php elseif ( $reorder ) : ?>
                 <a href="<?php echo esc_url( $reorder ); ?>" class="btn btn-primary">Reorder</a>
+            <?php elseif ( $legacy_reorder && count( $tiers ) > 1 ) : ?>
+                <div class="oc-tier">
+                    <label class="oc-tier-lbl" for="tier-<?php echo esc_attr( $item->get_id() ); ?>">Quantity</label>
+                    <select id="tier-<?php echo esc_attr( $item->get_id() ); ?>" class="oc-tier-sel"
+                            data-base="<?php echo esc_attr( $legacy_reorder ); ?>">
+                        <?php foreach ( $tiers as $i => $t ) :
+                            $shown = pps_apply_past_multiplier( $t['price'] ); ?>
+                            <option value="<?php echo esc_attr( $i ); ?>"<?php selected( (int) $t['qty'], (int) $item->get_quantity() ); ?>>
+                                <?php echo esc_html( number_format_i18n( $t['qty'] ) ); ?> — <?php echo esc_html( wp_strip_all_tags( wc_price( $shown ) ) ); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <a href="<?php echo esc_url( $legacy_reorder ); ?>" class="btn btn-primary oc-tier-go">Reorder</a>
             <?php elseif ( $legacy_reorder ) : ?>
                 <a href="<?php echo esc_url( $legacy_reorder ); ?>" class="btn btn-primary">Reorder (same as before)</a>
+            <?php elseif ( $product_gone ) : ?>
+                <button type="button" class="btn btn-ghost" disabled style="opacity:.6;cursor:not-allowed" title="This product was retired from the online catalog — use Contact Us and we'll re-quote it.">No longer sold online</button>
             <?php endif; ?>
             <?php
             $contact_data = array(
@@ -284,13 +371,16 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
  * Where an order-lookup inquiry is delivered.
  *
  * NOT `woocommerce_email_from_address`. That option holds the address the store sends
- * FROM, so using it here addressed every inquiry to the very mailbox it was sent from.
- * Self-addressed mail is the problem: a message whose sender is one of your own
- * identities is treated by Missive as something you wrote, so it lands already read and
- * is never seen. The inquiries were arriving the whole time; nothing was ever unread.
+ * FROM (orders@), so using it here addressed every inquiry to the very mailbox it was
+ * sent from.
+ *
+ * Self-addressed mail is the whole problem: a shared inbox treats a message whose sender
+ * is one of its own identities as something you wrote, so it lands already read and never
+ * raises an unread badge. Nothing bounced and nothing was lost — the inquiries were
+ * sitting there looking answered.
  *
  * Filterable so the destination can move without a deploy, and validated so a bad filter
- * cannot silently send inquiries nowhere.
+ * cannot silently route inquiries into nothing.
  */
 function pps_reorder_contact_recipient() {
     $default = 'Office@priorityprintservice.com';
@@ -510,17 +600,23 @@ function pps_order_lookup_render_orders( $email, $contact_sent = false ) {
         'status'        => array_keys( wc_get_order_statuses() ),
     ) );
 
-    $buffer = '';
-    $rendered = 0;
+    // Live work leads. Orders arrive newest-first; this is a stable partition
+    // on top of that, so within each group the date order is untouched — a job
+    // still in the shop is what someone opening this page came to check on.
+    $live_cards = array();
+    $done_cards = array();
     foreach ( $orders as $order ) {
+        $st      = $order->get_status();
+        $is_live = ! in_array( $st, array( 'cancelled', 'refunded', 'failed', 'completed' ), true );
         foreach ( $order->get_items() as $item ) {
             $card = pps_render_pps_item_card( $item, $order );
-            if ( $card ) {
-                $buffer .= $card;
-                $rendered++;
-            }
+            if ( ! $card ) continue;
+            if ( $is_live ) $live_cards[] = $card; else $done_cards[] = $card;
         }
     }
+    $cards    = array_merge( $live_cards, $done_cards );
+    $rendered = count( $cards );
+    $buffer   = implode( '', $cards );
 
     $signin_url = wc_get_page_permalink( 'myaccount' );
     ?>
@@ -547,7 +643,18 @@ function pps_order_lookup_render_orders( $email, $contact_sent = false ) {
             <?php if ( $rendered === 0 ) : ?>
                 <div class="empty"><span>No print orders found for this email.</span></div>
             <?php else : ?>
-                <?php echo $buffer; // already-escaped per-card ?>
+                <div class="oc-carousel<?php echo $rendered > 1 ? '' : ' single'; ?>">
+                    <button type="button" class="oc-nav oc-prev" aria-label="Previous order" hidden>&lsaquo;</button>
+                    <div class="oc-track" tabindex="0" role="region"
+                         aria-label="Your orders — <?php echo esc_attr( $rendered ); ?> total, scroll sideways">
+                        <?php echo $buffer; // already-escaped per-card ?>
+                    </div>
+                    <button type="button" class="oc-nav oc-next" aria-label="Next order" hidden>&rsaquo;</button>
+                </div>
+                <div class="oc-legend" aria-hidden="true">
+                    <span><i class="sw sw-ongoing"></i> In progress</span>
+                    <span><i class="sw sw-past"></i> Completed</span>
+                </div>
                 <?php if ( $signin_url ) : ?>
                     <p class="results-foot">Want to edit a pending order? <a href="<?php echo esc_url( $signin_url ); ?>">Sign in to your account.</a></p>
                 <?php endif; ?>
@@ -595,6 +702,51 @@ function pps_order_lookup_render_orders( $email, $contact_sent = false ) {
     </div>
     <script>
     (function(){
+        // Carousel nav. The track scrolls natively (scroll-snap does the
+        // alignment and touch already works), so this only drives the arrows
+        // and keeps them hidden at the ends — with no JS the track is still a
+        // perfectly usable horizontal scroller.
+        var car = document.querySelector('.oc-carousel');
+        if (car) {
+            var track = car.querySelector('.oc-track');
+            var prev  = car.querySelector('.oc-prev');
+            var next  = car.querySelector('.oc-next');
+            var step  = function () {
+                var card = track.querySelector('.order-card');
+                return card ? card.getBoundingClientRect().width + 14 : track.clientWidth * 0.9;
+            };
+            var sync = function () {
+                var max = track.scrollWidth - track.clientWidth - 1;
+                var can = max > 0;
+                prev.hidden = !can || track.scrollLeft <= 0;
+                next.hidden = !can || track.scrollLeft >= max;
+            };
+            prev.addEventListener('click', function () { track.scrollBy({ left: -step(), behavior: 'smooth' }); });
+            next.addEventListener('click', function () { track.scrollBy({ left:  step(), behavior: 'smooth' }); });
+            track.addEventListener('scroll', sync, { passive: true });
+            window.addEventListener('resize', sync);
+            track.addEventListener('keydown', function (e) {
+                if (e.key === 'ArrowRight') { e.preventDefault(); track.scrollBy({ left:  step(), behavior: 'smooth' }); }
+                if (e.key === 'ArrowLeft')  { e.preventDefault(); track.scrollBy({ left: -step(), behavior: 'smooth' }); }
+            });
+            sync();
+        }
+
+        // Quantity tiers: point the Reorder button at the chosen one. The nonce
+        // signs the action, not the query string, so rewriting this parameter is
+        // safe — and the handler only accepts an index into that order's own
+        // stored tiers, so it cannot be pushed anywhere it was not quoted.
+        document.querySelectorAll('.oc-tier-sel').forEach(function (sel) {
+            var go = sel.closest('.oc-actions').querySelector('.oc-tier-go');
+            if (!go) return;
+            var base = sel.getAttribute('data-base');
+            function apply() {
+                go.href = base.replace(/([?&]pps_reorder_tier=)\d+/, '$1' + sel.value);
+            }
+            sel.addEventListener('change', apply);
+            apply();
+        });
+
         var modal = document.getElementById('pps-contact-modal');
         if (!modal) return;
         var backdrop = modal.querySelector('.contact-modal-backdrop');
@@ -714,15 +866,41 @@ function pps_handle_single_item_reorder() {
     // Let WCPA (and any other add-ons) restore their cart item data from the line item
     $cart_item_data = apply_filters( 'woocommerce_order_again_cart_item_data', array(), $item, $order );
 
-    // Preserve the original unit price so totals don't drift from the historical order
-    $unit_price = $quantity > 0 ? ( (float) $item->get_subtotal() / $quantity ) : (float) $item->get_subtotal();
+    // A quote-born order carries the quantity tiers it was sold with, so a
+    // reorder can switch to one of them instead of repeating the exact figure.
+    $tiers = function_exists( 'pps_quote_normalise_tiers' )
+        ? pps_quote_normalise_tiers( (array) $order->get_meta( '_pps_qty_tiers' ) )
+        : array();
+    $line_total = (float) $item->get_subtotal();
+    if ( $tiers && isset( $_GET['pps_reorder_tier'] ) ) {
+        $ti = absint( $_GET['pps_reorder_tier'] );
+        if ( isset( $tiers[ $ti ] ) ) {
+            $quantity   = max( 1, (int) $tiers[ $ti ]['qty'] );
+            $line_total = (float) $tiers[ $ti ]['price'];
+        }
+    }
+
+    // Preserve the original unit price so totals don't drift from the historical
+    // order — then float it by the past-order multiplier, which is 1.00 until
+    // deliberately changed. This is the one lever that lets years-old prices
+    // rise with costs instead of being honoured forever at the original figure.
+    $unit_price = $quantity > 0 ? ( $line_total / $quantity ) : $line_total;
+    if ( function_exists( 'pps_apply_past_multiplier' ) ) {
+        $unit_price = pps_apply_past_multiplier( $unit_price );
+    }
     $cart_item_data['pps_legacy_unit_price'] = $unit_price;
     $cart_item_data['pps_legacy_source']     = array(
         'order_id' => $order_id,
         'item_id'  => $item_id,
     );
 
+    // A reorder carries its own price authority in pps_legacy_unit_price, so it is a
+    // legitimate add even for a product the calculator owns. Without this flag the
+    // spec-less-line guard in pps-calculators.php would refuse it as if it were someone
+    // pressing WooCommerce's Add to cart button on a placeholder-priced product.
+    $GLOBALS['pps_internal_add_to_cart'] = true;
     $cart_key = WC()->cart->add_to_cart( $product_id, $quantity, $variation_id, $variations, $cart_item_data );
+    unset( $GLOBALS['pps_internal_add_to_cart'] );
 
     if ( ! $cart_key ) {
         wc_add_notice( 'Could not add that item to your cart.', 'error' );
@@ -816,8 +994,87 @@ function pps_acct_ui_css() {
   margin-bottom: 14px;
   align-items: start;
 }
-.pps-acct .order-card.legacy { background: var(--white); border-color: var(--border); }
+.pps-acct .order-card.no-thumb { grid-template-columns: 1fr auto; }
+.pps-acct .order-card.legacy { background: var(--white); }
 .pps-acct .order-card.cancelled { background: var(--white); border-color: var(--border); opacity: 0.65; }
+
+/* Status outline: yellow while the job is live, blue once it is finished.
+   2px so the colour reads as a deliberate outline rather than a hairline, and
+   a matching top rule so the state is still legible to anyone who cannot
+   separate the two hues. Cancelled keeps its own muted grey above. */
+.pps-acct .order-card.ongoing {
+  border: 2px solid var(--process-yellow);
+  background: var(--process-yellow-light);
+  box-shadow: inset 0 3px 0 var(--process-yellow);
+}
+.pps-acct .order-card.past {
+  border: 2px solid var(--process-cyan);
+  background: var(--card-bg);
+  box-shadow: inset 0 3px 0 var(--process-cyan);
+}
+.pps-acct .order-card.ongoing .oc-specs { background: rgba(255,255,255,0.72); }
+
+/* ── Carousel ───────────────────────────────────────────────────────────
+   One horizontal track with scroll-snap. Native scrolling means touch and
+   trackpads work with no JS at all; the arrows are progressive enhancement
+   and hide themselves at the ends. */
+.pps-acct .oc-carousel { position: relative; margin: 0 0 6px; }
+.pps-acct .oc-track {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 0 4px;
+  padding: 4px 4px 14px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.pps-acct .oc-track:focus-visible { outline: 3px solid rgba(0,126,255,0.32); outline-offset: 2px; border-radius: 8px; }
+.pps-acct .oc-track .order-card {
+  flex: 0 0 min(560px, 86vw);
+  scroll-snap-align: start;
+  margin-bottom: 0;
+}
+/* A lone card should look like a card, not a stranded carousel item. */
+.pps-acct .oc-carousel.single .oc-track { overflow-x: visible; }
+.pps-acct .oc-carousel.single .oc-track .order-card { flex: 1 1 auto; }
+
+.pps-acct .oc-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  z-index: 2;
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--white); color: var(--key);
+  font-size: 20px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.14);
+}
+.pps-acct .oc-nav:hover { border-color: var(--process-cyan); color: var(--process-cyan); }
+.pps-acct .oc-nav:focus-visible { outline: 3px solid rgba(0,126,255,0.32); outline-offset: 2px; }
+.pps-acct .oc-nav[hidden] { display: none; }
+.pps-acct .oc-prev { left: -14px; }
+.pps-acct .oc-next { right: -14px; }
+
+.pps-acct .oc-legend {
+  display: flex; gap: 16px; align-items: center;
+  font-size: 12px; color: var(--mid); padding: 0 4px 4px;
+}
+.pps-acct .oc-legend .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; vertical-align: -1px; margin-right: 5px; }
+.pps-acct .oc-legend .sw-ongoing { background: var(--process-yellow); }
+.pps-acct .oc-legend .sw-past { background: var(--process-cyan); }
+
+.pps-acct .oc-tier { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; }
+.pps-acct .oc-tier-lbl { font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--mid); }
+.pps-acct .oc-tier-sel {
+  padding: 7px 9px; border: 1px solid var(--border); border-radius: 4px;
+  font-size: 13px; font-family: var(--font-ui); background: var(--white); color: var(--key); max-width: 190px;
+}
+.pps-acct .oc-tier-sel:focus { border-color: var(--process-cyan); box-shadow: 0 0 0 3px rgba(0,126,255,0.18); outline: none; }
+.pps-acct .oc-carousel:not(.single) .oc-tier { align-items: flex-start; }
+
+/* Payment link for a job invoiced by email and not yet paid. */
+.pps-acct .btn-pay { background: var(--process-yellow); color: #3d2a06; border-color: var(--process-yellow); }
+.pps-acct .btn-pay:hover { background: #d8951f; color: #3d2a06; }
+.pps-acct .btn-pay:focus-visible { outline: 3px solid rgba(240,168,48,0.42); outline-offset: 1px; }
 
 .pps-acct .oc-thumb {
   width: 140px; height: 140px;
@@ -991,8 +1248,26 @@ function pps_acct_ui_css() {
 .pps-acct .contact-form .field textarea:focus { border-color: var(--process-cyan); box-shadow: 0 0 0 3px rgba(0,126,255,0.18); }
 .pps-acct .contact-form .field input[disabled] { background: var(--bg); color: var(--mid); cursor: not-allowed; }
 
+/* A carousel card is narrow by definition, so it uses the stacked layout the
+   full-width card only falls back to on phones: thumb + body side by side,
+   actions on their own row. A single card keeps the roomy 3-column form. */
+.pps-acct .oc-carousel:not(.single) .order-card { grid-template-columns: 120px 1fr; }
+.pps-acct .oc-carousel:not(.single) .order-card.no-thumb { grid-template-columns: 1fr; }
+.pps-acct .oc-carousel:not(.single) .oc-thumb,
+.pps-acct .oc-carousel:not(.single) .oc-thumb-empty { width: 120px; height: 120px; }
+.pps-acct .oc-carousel:not(.single) .oc-actions {
+  grid-column: 1 / -1;
+  flex-direction: row; align-items: center; justify-content: flex-start;
+  min-width: 0; gap: 10px; flex-wrap: wrap;
+}
+.pps-acct .oc-carousel:not(.single) .oc-caveat { max-width: none; text-align: left; }
+
 @media (max-width: 639px) {
+  /* Touch scrolls the track directly; the arrows would only cover content. */
+  .pps-acct .oc-nav { display: none; }
+  .pps-acct .oc-track .order-card { flex-basis: 88vw; }
   .pps-acct .order-card { grid-template-columns: 96px 1fr; padding: 14px; gap: 14px; }
+  .pps-acct .order-card.no-thumb { grid-template-columns: 1fr; }
   .pps-acct .oc-thumb,
   .pps-acct .oc-thumb-empty { width: 96px; height: 96px; }
   .pps-acct .oc-actions { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; min-width: 0; gap: 12px; }
