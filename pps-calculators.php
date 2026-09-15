@@ -2527,6 +2527,37 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
     return $data;
 }, 10, 2 );
 
+/* WCPA must never consider a registry product its own.
+ *
+ * WCPA's global and category-scoped forms apply by category, so any registry
+ * product in a category it targets is "owned" by both systems at once. Its
+ * checkout validation then refuses the order with "Addon data missing for
+ * product <name>" — the calculator added the line by AJAX, so it never passed
+ * through a WCPA form and carries no form data. The customer sees a cart, a
+ * correct price, a full specification, and a checkout that will not complete.
+ *
+ * The per-product tick ("Exclude global forms", post meta
+ * wcpa_exclude_global_forms) fixes it, but it is un-versioned database state
+ * that has to be remembered for every product ever added to the registry. It
+ * was set on five products in the 2026-07 migration and missed on the other
+ * twenty-nine; the gap surfaced on 2026-09-15 when a customer could not pay for
+ * a 9x9 booklet (product 22754) and told us so, which is the only reason we
+ * learned about it. An unknown number of earlier customers simply left.
+ *
+ * So the registry decides, not the database: force the flag on for anything the
+ * registry owns. A product added to pps_get_registry() tomorrow is covered the
+ * moment it is added, with no tick to remember.
+ *
+ * The stored meta is still set on all 34 products so the admin screen agrees
+ * with behaviour — but this filter is what makes it true.
+ */
+add_filter( 'get_post_metadata', function( $value, $object_id, $meta_key, $single ) {
+    if ( $meta_key !== 'wcpa_exclude_global_forms' ) return $value;
+    if ( ! function_exists( 'pps_get_calculator_for_product' ) ) return $value;
+    if ( ! pps_get_calculator_for_product( $object_id ) ) return $value;   // WCPA's or plain Woo
+    return $single ? '1' : array( '1' );
+}, 10, 4 );
+
 // WCPA (still active for non-registry products) also filters this hook and
 // emits its form-field labels — valueless — on registry products it does not
 // own ("Booklet Finished Size:", "Insides Print Color:", …). Scrub
