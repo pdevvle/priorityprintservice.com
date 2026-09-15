@@ -390,6 +390,30 @@ PPS React calculators and the legacy WCPA plugin run side-by-side on the same Wo
 - Reorders of legacy WCPA-era orders are handled by `pps_handle_single_item_reorder()` in `pps-reorder.php` with the original unit price frozen via `pps_legacy_unit_price`.
 - The `_pi_*` admin-meta hider in `pps-reorder.php` is the only globally-firing PPS hook; it's defensive cleanup of WCPA's leaked-visible internal keys, not a coupling.
 
+**WCPA's global/category forms apply by CATEGORY, so a registry product sitting in a
+category WCPA targets is claimed by both systems at once.** Its checkout validation then
+refuses the order — *"Addon data missing for product &lt;name&gt;"* — because the calculator
+added the line by AJAX and it carries no WCPA form data. The customer sees a correct cart,
+a correct price, a full specification, and a checkout that will not complete. `wcpaIgnore`
+on the cart item covers WCPA's *cart* hooks; it does **not** cover this.
+
+The per-product tick is "Exclude global forms" (post meta `wcpa_exclude_global_forms`).
+It was set on five products during the 2026-07 registry migration and missed on the other
+twenty-nine. The gap surfaced on **2026-09-15**, when a customer could not pay for a 9×9
+booklet (product 22754) and wrote in to say so — which is the only reason we found out.
+Nobody who simply gave up ever appeared in a log.
+
+Two things now hold the line, and the second is the one that matters:
+
+1. The meta is set on all 34 registry products, so the admin screen agrees with behaviour.
+2. **`pps-calculators.php` filters `get_post_metadata` for that key and forces `1` for
+   anything `pps_get_calculator_for_product()` owns.** The registry decides, not the
+   database — a product added to the registry tomorrow is covered the moment it is added,
+   with no tick to remember and nothing to re-do after a database refresh from production.
+
+Adding a product to the registry therefore no longer requires touching WCPA at all. If you
+ever see "Addon data missing" on a PPS product again, that filter is what to check first.
+
 **Do NOT add WCPA-active product IDs to the PPS calculator registry** — that would route them through both systems simultaneously and likely double-bill or break the cart. WCPA products should not appear on any of: `pps_get_registry()` entries, `wp_options['pps_presets']` rows, or the "PPS Defaults" product meta box. WCPA products will not use the integrated Google Drive uploads or shipping/turnaround logic by design.
 
 **Every product assigned a PPS calculator MUST be a WooCommerce *virtual* product** (`_virtual` = `yes`, owner rule 2026-07-19). The calculator collects the shipping address itself and PPS owns shipping/turnaround; marking the product virtual keeps WooCommerce's own shipping machinery (and coexisting addon/shipping plugins) out of the cart/checkout for these items. Flipping `_virtual` is part of the registry-migration checklist — set it in the same change that adds the product ID to `pps_get_registry()`. All 34 registry products were flipped on staging 2026-07-19.
