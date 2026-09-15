@@ -367,6 +367,27 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
 // GUEST ORDER LOOKUP (shortcode + handler)
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Where an order-lookup inquiry is delivered.
+ *
+ * NOT `woocommerce_email_from_address`. That option holds the address the store sends
+ * FROM (orders@), so using it here addressed every inquiry to the very mailbox it was
+ * sent from.
+ *
+ * Self-addressed mail is the whole problem: a shared inbox treats a message whose sender
+ * is one of its own identities as something you wrote, so it lands already read and never
+ * raises an unread badge. Nothing bounced and nothing was lost — the inquiries were
+ * sitting there looking answered.
+ *
+ * Filterable so the destination can move without a deploy, and validated so a bad filter
+ * cannot silently route inquiries into nothing.
+ */
+function pps_reorder_contact_recipient() {
+    $default = 'Office@priorityprintservice.com';
+    $to      = (string) apply_filters( 'pps_reorder_contact_recipient', $default );
+    return is_email( $to ) ? $to : $default;
+}
+
 function pps_order_lookup_rate_key() {
     $ip = isset( $_SERVER['REMOTE_ADDR'] ) ? $_SERVER['REMOTE_ADDR'] : '';
     $salt = defined( 'AUTH_SALT' ) ? AUTH_SALT : 'pps';
@@ -475,7 +496,7 @@ function pps_order_lookup_shortcode() {
         $c_message = sanitize_textarea_field( wp_unslash( $_POST['pps_contact_message'] ?? '' ) );
 
         if ( $c_order && $c_email && $c_message ) {
-            $to      = get_option( 'woocommerce_email_from_address', get_option( 'admin_email' ) );
+            $to      = pps_reorder_contact_recipient();
             $subject = 'Order Inquiry — #' . $c_order . ' — ' . $c_item;
             $body    = "Customer inquiry from the order lookup page.\n\n";
             $body   .= "Order #: {$c_order}\n";
