@@ -549,6 +549,38 @@ download the imposed PDF. Useful for testing and one-off jobs.
   suite (flats, saddle, PB, PB grid, print-safety fixtures) — the margin path
   is a no-op until the box is changed.
 
+  ### Saved setups (1.37)
+
+  Owner: "I need an easy way to save configurations." A **Saved setups** row
+  sits at the top of the controls column: a picker, **Save as…** (prompts for a
+  name, suggests one from product, size and sheet), **Update** (enabled only
+  once the settings differ from the saved copy — the note under the row says
+  "edited since it was saved") and **Delete**.
+
+  - **What a setup holds:** every setting in the controls column — product,
+    size, sides, press sheet and margin, offset, gutter and per-gap arrays,
+    manual grid (both perfect-bound halves), signature order and copies,
+    pattern, orientation, flip and back rotation, bleed and synthesis, art
+    inset/scale, creep, spine, guts order, multi-page mode, marks/slug
+    switches, greyscale pages, split spreads and slipsheet design. **Not** the
+    job's own facts: name, order/item, quantity, per-page bleed overrides,
+    dropped files (artwork, back, gang, custom slipsheet).
+  - **Applying over a loaded order** keeps the order's product, size, sides,
+    spine and PB part — the order is authoritative for those; the setup brings
+    the layout. The notice says which.
+  - **Where they live:** in wp-admin, `wp_options['pps_impose_setups']` through
+    `wp_ajax_pps_impose_setups` (`op=get|save`, `manage_options` + nonce) —
+    one list shared by everyone on the queue, last writer wins, mirrored to
+    `localStorage` so a failed save still keeps them in the browser (the note
+    says so). Standalone (Pages), `localStorage` only. The endpoint sanitises
+    to scalars and small nested arrays (depth 4, 500 entries, 200-char
+    strings, 200 setups, 512 KB) — nothing in a setup is ever executed.
+  - Verified in the browser harness (`ui_setups.mjs`): save, dirty/Update
+    gating, apply after changing product and size, persistence across a
+    reload, second setup, delete of the selected one only. Endpoint
+    round-tripped under a stubbed WordPress: bad JSON and oversize refused,
+    malformed entries dropped, depth capped.
+
   ### Workspace layout (1.33)
 
   Rebuilt to the owner's wireframe (`Imp_tool_layout.pdf`, 2026-09-06):

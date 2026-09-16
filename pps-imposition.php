@@ -536,6 +536,65 @@ add_action( 'wp_ajax_pps_impose_set_hidden', function() {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// SAVED SETUPS — named copies of the tool's control column
+// ═══════════════════════════════════════════════════════════════
+// One JSON list in wp_options, shared by everyone who uses the queue; the
+// tool sends the whole list on every save (last writer wins — a two-person
+// prepress desk, not a collaborative editor). Values are sanitised to
+// scalars and small nested arrays; nothing in a setup is ever executed.
+
+add_action( 'wp_ajax_pps_impose_setups', function() {
+    if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( PPS_IMPOSE_NONCE, 'nonce', false ) ) {
+        wp_send_json_error( array( 'message' => 'Unauthorized' ), 403 );
+    }
+    $op = sanitize_key( $_POST['op'] ?? 'get' );
+    if ( $op === 'save' ) {
+        $raw = (string) wp_unslash( $_POST['setups'] ?? '' );
+        if ( strlen( $raw ) > 512 * 1024 ) wp_send_json_error( array( 'message' => 'Setups list is too large (512 KB cap) — delete some.' ) );
+        $list = json_decode( $raw, true );
+        if ( ! is_array( $list ) ) wp_send_json_error( array( 'message' => 'Setups must be a JSON list.' ) );
+        $clean = pps_impose_setups_sanitize( $list );
+        update_option( 'pps_impose_setups', wp_json_encode( $clean ), false );
+        wp_send_json_success( array( 'setups' => $clean ) );
+    }
+    $stored = json_decode( (string) get_option( 'pps_impose_setups', '[]' ), true );
+    wp_send_json_success( array( 'setups' => is_array( $stored ) ? pps_impose_setups_sanitize( $stored ) : array() ) );
+});
+
+function pps_impose_setups_sanitize( $list ) {
+    $out = array();
+    foreach ( array_slice( array_values( $list ), 0, 200 ) as $s ) {
+        if ( ! is_array( $s ) || ! isset( $s['spec'] ) || ! is_array( $s['spec'] ) ) continue;
+        $id   = substr( preg_replace( '/[^a-z0-9_-]/i', '', (string) ( $s['id'] ?? '' ) ), 0, 40 );
+        $name = mb_substr( sanitize_text_field( (string) ( $s['name'] ?? '' ) ), 0, 80 );
+        if ( $id === '' || $name === '' ) continue;
+        $out[] = array(
+            'id'    => $id,
+            'name'  => $name,
+            'spec'  => pps_impose_setups_value( $s['spec'], 0 ),
+            'saved' => sanitize_text_field( (string) ( $s['saved'] ?? '' ) ),
+        );
+    }
+    return $out;
+}
+
+function pps_impose_setups_value( $v, $depth ) {
+    if ( $depth > 4 ) return null;
+    if ( is_bool( $v ) || is_null( $v ) || is_int( $v ) || is_float( $v ) ) return $v;
+    if ( is_string( $v ) ) return mb_substr( sanitize_text_field( $v ), 0, 200 );
+    if ( is_array( $v ) ) {
+        $o = array(); $n = 0;
+        foreach ( $v as $k => $x ) {
+            if ( ++$n > 500 ) break;
+            $key = is_int( $k ) ? $k : preg_replace( '/[^a-zA-Z0-9_.-]/', '', (string) $k );
+            $o[ $key ] = pps_impose_setups_value( $x, $depth + 1 );
+        }
+        return $o;
+    }
+    return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // DOWNLOAD — proxy an artwork PDF from Drive to the browser
 // ═══════════════════════════════════════════════════════════════
 
