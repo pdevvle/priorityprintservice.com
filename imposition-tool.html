@@ -45,6 +45,10 @@
   .imp-side { flex:0 0 400px; min-width:340px; position:sticky; top:8px; max-height:calc(100vh - 16px); overflow:auto;
               background:#1a1d23; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px; }
   .imp-side-h { font-size:14px; font-weight:700; padding:4px 6px 10px; display:flex; align-items:center; justify-content:space-between; }
+  .imp-setups { display:flex; gap:6px; align-items:center; padding:0 6px 6px; }
+  .imp-setups select { flex:1; min-width:0; font-size:12px; }
+  .imp-setups .imp-btn { padding:5px 9px; font-size:11.5px; white-space:nowrap; }
+  .imp-setups-note { font-size:11px; color:rgba(255,255,255,.45); padding:0 6px 8px; }
   .imp-acc { border:1px solid rgba(255,255,255,.08); border-radius:10px; margin-bottom:8px; background:#1e2128; }
   .imp-acc-h { width:100%; display:flex; align-items:center; gap:8px; background:none; border:0; color:#e8eaf0;
                font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.5px; padding:11px 12px; cursor:pointer; text-align:left; }
@@ -100,7 +104,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-11 22:16 UTC · IMPOSE-V1.36</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-16 06:05 UTC · IMPOSE-V1.37</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -4001,6 +4005,91 @@ function App() {
   const [slipCustom, setSlipCustom] = useState(null);      // { bytes, name }
   const genSeq = useRef(0);
 
+  // ── Saved setups ──────────────────────────────────────────────────────────
+  // Everything in the controls column except what belongs to ONE job: name,
+  // order/item, quantity, per-page bleed overrides and dropped files. Stored in
+  // wp_options in wp-admin (shared by everyone on the queue, last writer wins)
+  // and in localStorage standalone. Applying one while an order is loaded
+  // keeps the order's product, size, sides and spine — the order is
+  // authoritative for those; the setup brings the layout.
+  const SETUP_FIELDS = {
+    calc: [calc, setCalc], trimLong: [trimLong, setTrimLong], trimShort: [trimShort, setTrimShort], sides: [sides, setSides],
+    sheetFlip: [sheetFlip, setSheetFlip], backRotate: [backRotate, setBackRotate],
+    marks: [marks, setMarks], foldMarks: [foldMarks, setFoldMarks], slugOn: [slugOn, setSlugOn],
+    sheetSel: [sheetSel, setSheetSel], sheetLong: [sheetLong, setSheetLong], sheetShort: [sheetShort, setSheetShort], sheetMargin: [sheetMargin, setSheetMargin],
+    allowBestFit: [allowBestFit, setAllowBestFit], efficient: [efficient, setEfficient], gutterMode: [gutterMode, setGutterMode],
+    gapCols: [gapCols, setGapCols], gapRows: [gapRows, setGapRows], gapFill: [gapFill, setGapFill],
+    gridOn: [gridOn, setGridOn], gridAcross: [gridAcross, setGridAcross], gridDown: [gridDown, setGridDown], gridSheet: [gridSheet, setGridSheet],
+    pbGrids: [pbGrids, setPbGrids], repOn: [repOn, setRepOn], sigOrder: [sigOrder, setSigOrder], repN: [repN, setRepN],
+    offsetMode: [offsetMode, setOffsetMode], offsetRight: [offsetRight, setOffsetRight], offsetBottom: [offsetBottom, setOffsetBottom],
+    pattern: [pattern, setPattern], manualPattern: [manualPattern, setManualPattern], forceRotated: [forceRotated, setForceRotated],
+    bleedIn: [bleedIn, setBleedIn], addBleed: [addBleed, setAddBleed], addBleedSmart: [addBleedSmart, setAddBleedSmart],
+    artScale: [artScale, setArtScale], creep: [creep, setCreep], spine: [spine, setSpine], pbPart: [pbPart, setPbPart], pbGutsOrder: [pbGutsOrder, setPbGutsOrder],
+    artInset: [artInset, setArtInset], streakEps: [streakEps, setStreakEps], multiMode: [multiMode, setMultiMode],
+    greyPagesTxt: [greyPagesTxt, setGreyPagesTxt], splitSpreads: [splitSpreads, setSplitSpreads],
+    slipOn: [slipOn, setSlipOn], slipWhen: [slipWhen, setSlipWhen], slipSheets: [slipSheets, setSlipSheets], slipDesign: [slipDesign, setSlipDesign],
+  };
+  const SETUP_JOB_KEYS = ["calc", "trimLong", "trimShort", "sides", "spine", "pbPart"];
+  const captureSetup = () => { const o = {}; for (const k in SETUP_FIELDS) o[k] = SETUP_FIELDS[k][0]; return JSON.parse(JSON.stringify(o)); };
+  const applySetup = (s, keepJob) => {
+    for (const k in SETUP_FIELDS) {
+      if (!s.spec || !(k in s.spec)) continue;
+      if (keepJob && SETUP_JOB_KEYS.includes(k)) continue;
+      SETUP_FIELDS[k][1](s.spec[k]);
+    }
+  };
+  const [setups, setSetups] = useState([]);
+  const [setupSel, setSetupSel] = useState("");
+  const [setupsErr, setSetupsErr] = useState("");
+  const SETUPS_LS = "ppsImposeSetups";
+  const readLocalSetups = () => { try { const v = JSON.parse(localStorage.getItem(SETUPS_LS) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
+  useEffect(() => {
+    let dead = false;
+    if (!CFG) { setSetups(readLocalSetups()); return; }
+    ajax("pps_impose_setups", { op: "get" })
+      .then(async r => { if (!r.ok) throw await ajaxFail(r, "saved setups"); return r.json(); })
+      .then(j => { if (dead) return; if (!j.success) throw new Error((j.data && j.data.message) || "saved setups failed"); setSetups(Array.isArray(j.data.setups) ? j.data.setups : []); })
+      .catch(e => { if (!dead) { setSetupsErr(e.message); setSetups(readLocalSetups()); } });
+    return () => { dead = true; };
+  }, []);
+  const persistSetups = async (list) => {
+    setSetups(list);
+    try { localStorage.setItem(SETUPS_LS, JSON.stringify(list)); } catch (e) { /* private mode */ }
+    if (!CFG) return;
+    try {
+      const r = await ajax("pps_impose_setups", { op: "save", setups: JSON.stringify(list) });
+      if (!r.ok) throw await ajaxFail(r, "saving setups");
+      const j = await r.json();
+      if (!j.success) throw new Error((j.data && j.data.message) || "saving setups failed");
+      if (Array.isArray(j.data.setups)) setSetups(j.data.setups);
+      setSetupsErr("");
+    } catch (e) { setSetupsErr("saved in this browser only — " + e.message); }
+  };
+  const curSetup = setups.find(x => x.id === setupSel) || null;
+  const setupDirty = !!curSetup && JSON.stringify(curSetup.spec) !== JSON.stringify(captureSetup());
+  const setupSuggestedName = () => `${(CALC_TYPES.find(c => c.val === calc) || { label: calc }).label.replace(/\s*\(.*$/, "")} ${trimLong}×${trimShort}${sheetSel !== "auto" ? " · " + sheetSel : ""}`;
+  const saveSetupAs = async () => {
+    const name = window.prompt("Name this setup", curSetup ? curSetup.name : setupSuggestedName());
+    if (name == null || !name.trim()) return;
+    const su = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name.trim().slice(0, 80), spec: captureSetup(), saved: new Date().toISOString() };
+    await persistSetups([...setups, su]); setSetupSel(su.id); setNotice(`Setup “${su.name}” saved.`);
+  };
+  const updateSetup = async () => {
+    if (!curSetup) return;
+    const su = { ...curSetup, spec: captureSetup(), saved: new Date().toISOString() };
+    await persistSetups(setups.map(x => (x.id === su.id ? su : x))); setNotice(`Setup “${su.name}” updated.`);
+  };
+  const deleteSetup = async () => {
+    if (!curSetup || !window.confirm(`Delete setup “${curSetup.name}”?`)) return;
+    await persistSetups(setups.filter(x => x.id !== curSetup.id)); setSetupSel("");
+  };
+  const pickSetup = id => {
+    setSetupSel(id);
+    const su = setups.find(x => x.id === id); if (!su) return;
+    applySetup(su, !!activeOrder);
+    setNotice(activeOrder ? `Setup “${su.name}” applied — product, size and sides kept from order #${activeOrder.order_id}.` : `Setup “${su.name}” applied.`);
+  };
+
   // Fetch the order queue (WP mode only)
   useEffect(() => {
     if (!CFG) return;
@@ -4519,6 +4608,22 @@ function App() {
                       onClick={() => setSecOpen({ general: false, layout: false, product: false, bleed: false, specialty: false, marks: false })}>none</button>
             </span>
           </div>
+          <div className="imp-setups" data-setups>
+            <select value={setupSel} onChange={e => pickSetup(e.target.value)} title="Apply a saved setup">
+              <option value="">{setups.length ? "Saved setups…" : "No saved setups yet"}</option>
+              {setups.map(su => <option key={su.id} value={su.id}>{su.name}</option>)}
+            </select>
+            <button type="button" className="imp-btn sec" onClick={saveSetupAs} title="Save every setting in this column as a named setup">Save as…</button>
+            {curSetup && <button type="button" className="imp-btn sec" disabled={!setupDirty} onClick={updateSetup} title="Overwrite this setup with the settings as they are now">Update</button>}
+            {curSetup && <button type="button" className="imp-btn sec" onClick={deleteSetup} title="Delete this setup">Delete</button>}
+          </div>
+          {(curSetup || setupsErr) && (
+            <div className="imp-setups-note">
+              {setupsErr ? "⚠ Setups " + setupsErr
+                : setupDirty ? `“${curSetup.name}” — edited since it was saved (Update to keep the changes)`
+                : `“${curSetup.name}” — ${CFG ? "shared with everyone on the queue" : "saved in this browser"}${activeOrder ? "; product, size and sides come from the order" : ""}`}
+            </div>
+          )}
 
           <Acc id="general" title="General settings" open={secOpen.general} onToggle={() => toggleSec("general")}>
             <Field label="Product layout type">
