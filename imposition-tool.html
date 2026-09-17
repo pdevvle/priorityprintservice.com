@@ -104,7 +104,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-17 00:56 UTC · IMPOSE-V1.38</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-17 20:23 UTC · IMPOSE-V1.39</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -721,6 +721,15 @@ function computeSaddleLayout(pw, ph, opts) {
   // bleed never manufactures a gutter the operator didn't ask for. The
   // Gutter override still spaces spreads out explicitly when wanted.
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : [0];
+  // Spread orientation on the sheet. Flats always had this; saddle ignored it,
+  // so a square-ish book (4×4 pages → an 8×4 spread) that fits either way
+  // could only go the way the search happened to pick. "no" = the spread's
+  // long edge along the sheet's long edge; "yes" = across it (rotated 90°).
+  // Pagination, tumbling and the fold line all follow the spread, so nothing
+  // else changes — only which way the spreads lie on the press sheet.
+  const allowedRot = opts && opts.forceRotated === "yes" ? [true]
+                   : opts && opts.forceRotated === "no" ? [false] : [false, true];
+  const forcedNote = allowedRot.length === 1 ? ` in the forced orientation (spreads ${allowedRot[0] ? "rotated 90°" : "along the sheet's long edge"})` : "";
   let grid = null, colGaps = null, rowGaps = null, fillSheet = false;
 
   // ── Manual signature copies (operator dictates how many go on the sheet) ──
@@ -737,7 +746,7 @@ function computeSaddleLayout(pw, ph, opts) {
     if (manual.a * manual.d > MANUAL_GRID_MAX)
       throw new Error(`Manual grid ${manual.a}×${manual.d} = ${manual.a * manual.d} signature copies exceeds the ${MANUAL_GRID_MAX}-cell limit.`);
     const cands = ovSheet ? [ovSheet] : [SH("13x19"), SH("13x27.5")];
-    const res = fitManualGrid(manual.a, manual.d, spL, spS, cands, gutters, [false, true],
+    const res = fitManualGrid(manual.a, manual.d, spL, spS, cands, gutters, allowedRot,
                               opts && opts.saddleColGaps, opts && opts.saddleRowGaps, !!(opts && opts.saddleFillSheet));
     if (!res.ok) {
       const b = res.best;
@@ -762,13 +771,13 @@ function computeSaddleLayout(pw, ph, opts) {
     const cands = ovSheet ? [ovSheet] : [SH("13x19"), SH("13x27.5")];
     let hit = null;
     for (const sh of cands) {
-      const g = bestGridForCount(repN, spL, spS, sh, gutters);
+      const g = bestGridForCount(repN, spL, spS, sh, gutters, allowedRot);
       if (g) { hit = { sheet: sh, grid: g }; break; }
     }
     if (!hit) {
-      const room = cands.map(sh => { const b = bestPhysicalGrid(spL, spS, sh, gutters); return { sh, n: b ? b.a * b.d : 0 }; })
+      const room = cands.map(sh => { const b = bestPhysicalGrid(spL, spS, sh, gutters, allowedRot); return { sh, n: b ? b.a * b.d : 0 }; })
                         .reduce((x, y) => (y.n > x.n ? y : x));
-      throw new Error(`Step and repeat ${repN}: ${repN} copies of a ${spreadW}×${spreadH}″ spread do not fit in a whole grid${room.n ? ` — ${room.sh.label} holds at most ${room.n}` : ""}. Lower the count, or use “set signature copies manually” for an uneven arrangement.`);
+      throw new Error(`Step and repeat ${repN}: ${repN} copies of a ${spreadW}×${spreadH}″ spread do not fit in a whole grid${forcedNote}${room.n ? ` — ${room.sh.label} holds at most ${room.n}` : ""}. Lower the count, or use “set signature copies manually” for an uneven arrangement.`);
     }
     sheet = hit.sheet; grid = hit.grid; stepRepeat = repN; manualGrid = true;
     warnings.push(`Step and repeat: ${repN} identical cop${repN === 1 ? "y" : "ies"} of each signature per side — ${grid.a} across × ${grid.d} down on ${sheet.label}${grid.rotated ? " (spreads rotated 90°)" : ""}${repN === target ? "" : ` — pricing assumed ${target} per 13×19-side, so sheet count and cost per book will differ`}.`);
@@ -777,7 +786,7 @@ function computeSaddleLayout(pw, ph, opts) {
   // Efficient mode — the oversize sheet, or whatever parent was forced.
   if (!grid && opts && opts.efficient) {
     const effSheet = ovSheet || SH("13x27.5");
-    const effGrid = bestPhysicalGrid(spL, spS, effSheet, gutters);
+    const effGrid = bestPhysicalGrid(spL, spS, effSheet, gutters, allowedRot);
     if (effGrid && effGrid.a * effGrid.d > target) {
       sheet = effSheet; grid = effGrid; efficient = true;
       const c = effGrid.a * effGrid.d;
@@ -786,20 +795,21 @@ function computeSaddleLayout(pw, ph, opts) {
       warnings.push("Efficient 13×27.5 mode fits no additional signature copies for this booklet size — ignored.");
     }
   }
-  if (!grid) grid = bestGridForCount(target, spL, spS, sheet, gutters);
+  if (!grid) grid = bestGridForCount(target, spL, spS, sheet, gutters, allowedRot);
   if (!grid) {
     if (!(opts && opts.allowBestFit)) {
-      throw new Error(`${target} spread(s) of ${spreadW}×${spreadH}″ (pages ${pw}×${ph}″, priced ${imp}/side${source === "custom" ? ", custom size" : ""}) do not physically fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}. Pricing/production mismatch — enable "allow best physical fit" to place fewer (flagged).`);
+      throw new Error(`${target} spread(s) of ${spreadW}×${spreadH}″ (pages ${pw}×${ph}″, priced ${imp}/side${source === "custom" ? ", custom size" : ""}) do not physically fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}${forcedNote}. Pricing/production mismatch — ${forcedNote ? "set Spread orientation back to Auto, or " : ""}enable "allow best physical fit" to place fewer (flagged).`);
     }
-    grid = bestPhysicalGrid(spL, spS, sheet, gutters);
-    if (!grid) throw new Error(`A ${spreadW}×${spreadH}″ spread does not fit on ${sheet.label} at all.`);
+    grid = bestPhysicalGrid(spL, spS, sheet, gutters, allowedRot);
+    if (!grid) throw new Error(`A ${spreadW}×${spreadH}″ spread does not fit on ${sheet.label}${forcedNote} at all.`);
     mismatch = true;
-    warnings.push(`MISMATCH: placing ${grid.a * grid.d} spread(s)/side but pricing assumed ${target}. Review before printing.`);
+    warnings.push(`MISMATCH: placing ${grid.a * grid.d} spread(s)/side but pricing assumed ${target}${forcedNote}. Review before printing.`);
   }
 
   const pieceLong = Math.max(spreadW, spreadH), pieceShort = Math.min(spreadW, spreadH);
   const cellW = grid.rotated ? pieceShort : pieceLong;
   const cellH = grid.rotated ? pieceLong : pieceShort;
+  if (allowedRot.length === 1) warnings.push(`Spread orientation forced: spreads ${grid.rotated ? "rotated 90° (long edge across the sheet)" : "along the sheet's long edge"} — ${grid.a} × ${grid.d} on ${sheet.label}.`);
 
   // ── Manual per-gap gutter override (from the signature-gutter editor) ──
   // Sized to the current across×down grid; replaces the rule/uniform gaps.
@@ -4919,6 +4929,20 @@ function App() {
                   </select>
                 </Field>
               </div>
+            )}
+            {isSaddle && (
+              <Field label="Spread orientation on the sheet">
+                <select value={forceRotated} onChange={e => setForceRotated(e.target.value)}>
+                  <option value="auto">Auto — whichever fits the priced count, fewest cuts first</option>
+                  <option value="no">Spread's long edge along the sheet's long edge</option>
+                  <option value="yes">Spread's long edge across the sheet (rotated 90°)</option>
+                </select>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                  A square-ish book (4×4 pages is an 8×4″ spread) fits either way; pick the one that suits the folder and the cutter.
+                  Pagination, tumbling and the fold line follow the spread — only its direction on the press sheet changes.
+                  {lay && lay.booklet ? ` Now: ${lay.across} × ${lay.down}, spreads ${lay.booklet.spreadAlongX ? "along" : "across"} the sheet.` : ""}
+                </div>
+              </Field>
             )}
             {!isSaddle && pattern === "manual" && lay && (
               <div style={{ marginBottom: 12 }}>

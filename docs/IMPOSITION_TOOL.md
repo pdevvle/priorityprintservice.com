@@ -628,6 +628,37 @@ download the imposed PDF. Useful for testing and one-off jobs.
     pdf-lib before it went in: shared content refs, blank pages, reload clean.
   - Not part of a saved setup: a sequence is a fact about one job's pages.
 
+  ### Spread orientation for saddle stitch (1.39)
+
+  Owner: "We have orientation override controls for flat layout, but on
+  saddle stitch we need to orientate things differently — a 4×4 booklet could
+  go either way." The flats' `forceRotated` already reached `computeLayout`;
+  the saddle path ignored it and the select was hidden for saddle, so a
+  square-ish spread (4×4 pages → 8×4″) could only lie the way the search
+  happened to pick (fewest cuts first: 4 × 1 rotated).
+
+  - **Spread orientation on the sheet** (Layout settings, saddle only):
+    Auto · spread's long edge *along* the sheet's long edge · *across* it
+    (rotated 90°). Same `spec.forceRotated` key as the flats' Grid
+    orientation, so it is saved in setups and applies to a perfect-bound
+    half exactly as before.
+  - `computeSaddleLayout()` now passes `allowedRot` to every grid pick —
+    manual copies, step and repeat, efficient mode, the priced search and the
+    best-fit fallback — and says so in the notes ("Spread orientation forced:
+    spreads along the sheet's long edge — 2 × 2 on 13×19"). A forced
+    orientation that cannot hold the priced count refuses with the
+    orientation named and "set Spread orientation back to Auto" as the first
+    remedy. Pagination, tumbling and the fold line follow
+    `booklet.spreadAlongX`, which already derived from `grid.rotated`, so the
+    duplex registration and the fold guides are untouched.
+  - Verified: 4×4 booklet → Auto 4 × 1 rotated, *along* 2 × 2, *across*
+    4 × 1; a manual 2 × 2 across (8 × 16″) refuses against the 12.5″ margin;
+    efficient + across → 6 × 1 on 13×27.5; the 5.5×8.5 booklet forced *along*
+    refuses (22″ > 18.5″) and *across* lays out as before; flats' orientation
+    behaviour unchanged. UI: the select appears only for saddle, the hint reads
+    the live layout ("Now: 2 × 2, spreads along the sheet"), and the report
+    carries the note. Harness: `cases_rot.json`, `ui_rot.mjs`.
+
   ### Workspace layout (1.33)
 
   Rebuilt to the owner's wireframe (`Imp_tool_layout.pdf`, 2026-09-06):
