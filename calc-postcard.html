@@ -767,27 +767,43 @@ function getShopToday() {
   const dateStr = new Intl.DateTimeFormat("en-US", { timeZone: PCF.shop_timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
   const [m, d, y] = dateStr.split("/");
   const today = new Date(y, m - 1, d);
-  if (shopHour >= PCF.shop_cutoff_hour || today.getDay() === 0 || today.getDay() === 6) {
+  // isBusinessDay, not a bare weekend test: production cannot start on a day the shop
+  // is shut, and this date is the origin every other date downstream is measured from.
+  if (shopHour >= PCF.shop_cutoff_hour || !isBusinessDay(today)) {
     today.setDate(today.getDate() + 1);
-    while (today.getDay() === 0 || today.getDay() === 6) today.setDate(today.getDate() + 1);
+    while (!isBusinessDay(today)) today.setDate(today.getDate() + 1);
   }
   return today;
 }
 function addBusinessDays(start, days) {
   const d = new Date(start); let added = 0;
-  while (added < days) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) added++; }
+  while (added < days) { d.setDate(d.getDate() + 1); if (isBusinessDay(d)) added++; }
   return d;
 }
 function businessDaysBetween(a, b) {
   let count = 0; const d = new Date(a);
-  while (d < b) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) count++; }
+  while (d < b) { d.setDate(d.getDate() + 1); if (isBusinessDay(d)) count++; }
   return count;
 }
 function fmtDate(d) { return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); }
 // Dimension label: round to 2 decimals and trim trailing zeros (8.5 -> "8.5", 11/3 -> "3.67", 8.25 -> "8.25").
 function fmtInch(n) { return (Math.round((Number(n) || 0) * 100) / 100).toString(); }
 function toYMD(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
-const SHOP_CLOSURES = (_CFG.pcf || {}).closures || [];
+// Closures sit at the TOP LEVEL of the injected config, BESIDE `pcf`, not inside it:
+// pps_get_closures() reads $cfg['closures'], and pps_get_public_config() treats
+// $cfg['pcf'] as its own sub-array alongside it. Reading _CFG.pcf.closures resolved
+// to undefined and fell through to [], so this list was empty on every flat
+// calculator for its whole life — isBusinessDay() never saw a holiday, the DatePicker
+// never greyed one out, and Christmas Day was a selectable delivery date.
+const SHOP_CLOSURES = _CFG.closures || [
+  // Annual recurring (MM-DD). Same set as pps_default_config().
+  "01-01",  // New Year's Day
+  "07-04",  // Independence Day
+  "11-28",  // Thanksgiving (approx — update yearly)
+  "11-29",  // Day after Thanksgiving
+  "12-24",  // Christmas Eve
+  "12-25",  // Christmas Day
+];
 // The delivery date recorded against the order has to be the date the customer was
 // actually shown. It used to be `config.needByDate || sh.freeDeliveryYMD` — the raw
 // contents of the date field, with no check that the value was valid, reachable, or
