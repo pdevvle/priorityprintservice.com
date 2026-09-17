@@ -104,7 +104,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-16 06:05 UTC · IMPOSE-V1.37</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-17 00:56 UTC · IMPOSE-V1.38</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2713,6 +2713,104 @@ async function insertSlipsheets(bytes, slip, duplex, labels) {
   };
 }
 
+// ── Page / sheet sequences ───────────────────────────────────────────────
+// One grammar for both, over 1-based numbers, comma or space separated:
+//   5        one page (sheet)         3-8      a run
+//   5x2      that page twice          3-8x2    the run twice (3…8, 3…8)
+//   blank    an empty page (sheet)    all      every one, once      last  the final one
+// A number past the end is an ERROR, never a silent skip — a wrong folio in a
+// book map prints the wrong page. Repeats are made in place: a repeated page
+// is a new page object sharing the original's content and resources, so the
+// document's /OCProperties, fonts and images are untouched (a copy into a new
+// document would drop the optional-content state — the 1.2x hidden-layer bug).
+const SEQ_MAX = 2000;
+function describeSeq(items) {
+  const parts = []; let i = 0;
+  while (i < items.length) {
+    const v = items[i];
+    if (v === 0) { parts.push("blank"); i++; continue; }
+    let j = i; while (j + 1 < items.length && items[j + 1] === items[j] + 1) j++;
+    parts.push(j > i ? `${v}-${items[j]}` : String(v)); i = j + 1;
+  }
+  const t = parts.join(", ");
+  return t.length > 160 ? t.slice(0, 157) + "…" : t;
+}
+function parseSeq(txt, total, noun) {
+  noun = noun || "page";
+  const items = [], errors = [];
+  const toks = String(txt || "").split(/[,\s]+/).filter(Boolean);
+  for (const tok of toks) {
+    const m = tok.toLowerCase().match(/^(blank|all|last|end|(\d+)(?:-(\d+))?)(?:[x×*](\d+))?$/);
+    if (!m) { errors.push(`"${tok}" is not a ${noun} item`); continue; }
+    const rep = m[4] ? +m[4] : 1;
+    if (!(rep >= 1)) { errors.push(`"${tok}": the repeat count must be 1 or more`); continue; }
+    let run = null;
+    if (m[1] === "blank") run = [0];
+    else if (m[1] === "all") run = total ? Array.from({ length: total }, (_, i) => i + 1) : null;
+    else if (m[1] === "last" || m[1] === "end") run = total ? [total] : null;
+    else { let a = +m[2], b = m[3] ? +m[3] : a; if (b < a) [a, b] = [b, a]; run = []; for (let k = a; k <= b; k++) run.push(k); }
+    if (!run) { errors.push(`"${tok}" needs the ${noun} count`); continue; }
+    const bad = run.find(v => v !== 0 && (v < 1 || (total && v > total)));
+    if (bad != null) { errors.push(`${noun} ${bad} does not exist${total ? ` (there are ${total})` : ""}`); continue; }
+    for (let r = 0; r < rep; r++) for (const v of run) items.push(v);
+    if (items.length > SEQ_MAX) { errors.push(`sequence longer than ${SEQ_MAX} ${noun}s`); break; }
+  }
+  if (!toks.length) errors.push("empty sequence");
+  return { items, errors, text: describeSeq(items) };
+}
+// Rebuild the page tree of `doc` from `items` (0 = blank), `per` pages per
+// item (2 on a duplex output: front + back). In place — see above.
+function resequenceDoc(doc, items, per, labels) {
+  const n = doc.getPageCount(), pages = doc.getPages();
+  let last = pages[0].getSize();
+  const newLabels = Array.isArray(labels) ? [] : null;
+  const seen = new Map();
+  for (const s of items) {
+    const k = seen.get(s) || 0; seen.set(s, k + 1);
+    for (let f = 0; f < per; f++) {
+      const idx = s === 0 ? -1 : (s - 1) * per + f;
+      if (idx < 0 || idx >= n) {
+        doc.addPage([last.width, last.height]);
+        if (newLabels) newLabels.push(s === 0 ? `BLANK${per === 2 ? (f ? " — BACK" : " — FRONT") : ""}` : `BLANK (sheet ${s} has no ${f ? "back" : "front"})`);
+        continue;
+      }
+      const src = pages[idx];
+      const leaf = src.node.clone(doc.context);
+      leaf.delete(PL.PDFName.of("Parent"));
+      for (const key of ["Resources", "MediaBox", "CropBox", "Rotate"]) {
+        const v = src.node.getInheritableAttribute(PL.PDFName.of(key));
+        if (v) leaf.set(PL.PDFName.of(key), v);
+      }
+      const ref = doc.context.register(leaf);
+      doc.addPage(PL.PDFPage.of(leaf, ref, doc));
+      last = src.getSize();
+      if (newLabels) newLabels.push((labels[idx] != null ? String(labels[idx]) : `SHEET ${s}`) + (k ? ` · REPEAT ${k + 1}` : ""));
+    }
+  }
+  for (let i = 0; i < n; i++) doc.removePage(0);
+  return newLabels;
+}
+// SOURCE pages: the run the imposition consumes.
+async function remapPagesBytes(bytes, seqTxt) {
+  const doc = await loadPdf(bytes, "artwork"); ensurePageContents(doc);
+  const n = doc.getPageCount();
+  const seq = parseSeq(seqTxt, n, "page");
+  if (seq.errors.length) throw new Error(`Page sequence: ${seq.errors.join("; ")}. The artwork has ${n} page${n === 1 ? "" : "s"}.`);
+  resequenceDoc(doc, seq.items, 1, null);
+  return { bytes: await doc.save({ useObjectStreams: false }), count: seq.items.length,
+           note: `Page sequence applied: ${n} source page${n === 1 ? "" : "s"} → ${seq.items.length} (${seq.text}). Page numbers in the notes below refer to this sequence.` };
+}
+// OUTPUT sheets: repeat or reorder the physical sheets after imposition.
+async function reorderSheetsBytes(bytes, seqTxt, duplex, labels) {
+  const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+  const n = doc.getPageCount(), per = duplex ? 2 : 1, sheets = Math.ceil(n / per);
+  const seq = parseSeq(seqTxt, sheets, "sheet");
+  if (seq.errors.length) throw new Error(`Sheet sequence: ${seq.errors.join("; ")}. The imposed output has ${sheets} physical sheet${sheets === 1 ? "" : "s"}.`);
+  const newLabels = resequenceDoc(doc, seq.items, per, labels);
+  return { bytes: await doc.save({ useObjectStreams: false }), labels: newLabels, sheetsBefore: sheets,
+           note: `Sheet sequence applied: ${sheets} imposed sheet${sheets === 1 ? "" : "s"} → ${seq.items.length} (${seq.text}). Slugs still carry the original sheet numbers; the run figures above count the imposed sheets, not the repeats.` };
+}
+
 // ── Source preflight: fonts, page sizes, spreads ─────────────────────────
 // Fonts that are not embedded are substituted by the RIP. Fiery has the
 // standard 14 (Helvetica, Times, Courier, Symbol, ZapfDingbats), so those only
@@ -2952,6 +3050,14 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     const r = await forceGreyPagesBytes(artBytes, grey);
     artBytes = r.bytes; greyNote = r.note;
   }
+  // Page sequence AFTER greyscale (whose numbers refer to the file as dropped)
+  // and BEFORE the core, so every product path — flats, saddle signatures,
+  // both perfect-bound halves — paginates the operator's run, not the file's.
+  let seqNote = null;
+  if (spec.pageSeq && artBytes) {
+    const r = await remapPagesBytes(artBytes, spec.pageSeq);
+    artBytes = r.bytes; seqNote = r.note;
+  }
   const res = await imposeCore(artBytes, backBytes, spec, gangFiles);
   const parts = res.parts || [res];
   const duplex = spec.sides === 2 || isBookCalc(spec.calc);
@@ -2965,6 +3071,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     p.warnings = [...pre, ...(p.warnings || [])];
     try {
       const empties = await emptySides(p.bytes);
+      p.sheetsImposed = Math.ceil(empties.total / (duplex ? 2 : 1));   // before any sheet sequence / slipsheets
       if (empties.total > 0 && empties.empty.length === empties.total && srcInk !== null && srcInk <= 0.002) {
         p.warnings.push(`⚠ Every sheet side renders with no ink, and the artwork's first page is blank too — this file may be empty. Check it before it goes to press.`);
       }
@@ -2976,6 +3083,14 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
       }
     } catch (e) { if (/NO INK/.test(e.message)) throw e; /* render failures are not verdicts */ }
     if (greyNote) p.warnings = [greyNote, ...(p.warnings || [])];
+    if (seqNote) p.warnings = [seqNote, ...(p.warnings || [])];
+    // Sheet sequence BEFORE slipsheets, so a slipsheet's sheet number refers to
+    // the physical sheets that will actually come off the press.
+    if (spec.sheetSeq) {
+      const r = await reorderSheetsBytes(p.bytes, spec.sheetSeq, duplex, p.pageLabels);
+      p.bytes = r.bytes; if (r.labels) p.pageLabels = r.labels;
+      p.warnings = [...(p.warnings || []), r.note];
+    }
     if (spec.slip && spec.slip.on) {
       const r = await insertSlipsheets(p.bytes, spec.slip, duplex, p.pageLabels);
       p.bytes = r.bytes; if (r.labels) p.pageLabels = r.labels;
@@ -3396,7 +3511,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc };
+window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -3406,6 +3521,14 @@ function useDebounced(value, ms) {
   const [v, setV] = useState(value);
   useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
   return v;
+}
+
+// Live readout under a sequence box: what the run will be, or why it cannot be.
+function SeqNote({ txt, total, noun, what }) {
+  if (!String(txt || "").trim()) return null;
+  const r = parseSeq(txt, total, noun);
+  if (r.errors.length) return <div style={{ fontSize: 11.5, color: "#f87171", marginTop: 3 }}>✕ {r.errors.join("; ")}{total == null ? ` — ${noun === "sheet" ? "impose a file" : "drop the artwork"} to check against the ${noun} count` : ""}</div>;
+  return <div style={{ fontSize: 11.5, color: "#4ade80", marginTop: 3 }}>→ {r.items.length} {what}{total != null ? ` (from ${total})` : ""}: {r.text}</div>;
 }
 
 function Field({ label, children, style }) {
@@ -3997,6 +4120,8 @@ function App() {
   const [rulers, setRulers] = useState(true);
   const [viewPart, setViewPart] = useState(0);             // perfect bound: which part the viewport shows
   const [greyPagesTxt, setGreyPagesTxt] = useState("");    // force greyscale on these source pages
+  const [pageSeqTxt, setPageSeqTxt] = useState("");        // source page sequence (duplicate / repeat / reorder / blanks)
+  const [sheetSeqTxt, setSheetSeqTxt] = useState("");      // imposed sheet sequence (repeat / reorder physical sheets)
   const [splitSpreads, setSplitSpreads] = useState(false); // cut 2-page reader spreads into single pages
   const [slipOn, setSlipOn] = useState(false);
   const [slipWhen, setSlipWhen] = useState("before");
@@ -4186,6 +4311,8 @@ function App() {
     pbPart: isPB ? pbPart : null,
     pbGutsOrder: isPB ? pbGutsOrder : null,
     greyPages: greyPagesTxt.trim() || null,
+    pageSeq: pageSeqTxt.trim() || null,
+    sheetSeq: sheetSeqTxt.trim() || null,
     splitSpreads,
     slip: slipOn ? { on: true, when: slipWhen, sheets: slipSheets, design: slipDesign,
                      customBytes: slipCustom && slipCustom.bytes, customName: slipCustom && slipCustom.name } : null,
@@ -4196,7 +4323,7 @@ function App() {
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, splitSpreads, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -5324,7 +5451,15 @@ function App() {
           </Acc>
 
           <Acc id="specialty" title="Specialty settings" open={secOpen.specialty} onToggle={() => toggleSec("specialty")}
-               badge={(greyPagesTxt.trim() || slipOn) ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>ON</span> : null}>
+               badge={(greyPagesTxt.trim() || slipOn || pageSeqTxt.trim() || sheetSeqTxt.trim()) ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>ON</span> : null}>
+            <Field label="Page sequence — source pages (duplicate, repeat, reorder, blanks)">
+              <input type="text" value={pageSeqTxt} onChange={e => setPageSeqTxt(e.target.value)} placeholder="e.g. 1-8, 9x2, blank, 10-last   (empty = pages as they are)" />
+              <SeqNote txt={pageSeqTxt} total={art ? art.pageCount : null} noun="page" what="pages" />
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                The run of pages the imposition paginates. <b>5</b> one page · <b>3-8</b> a run · <b>5x2</b> that page twice · <b>3-8x2</b> the run twice · <b>blank</b> an empty page · <b>all</b> · <b>last</b>.
+                A page number past the end refuses rather than skipping. Greyscale page numbers above refer to the file as dropped; the notes and slugs refer to this run. Artwork file only — a separate back file and gang files are untouched.
+              </div>
+            </Field>
             <Field label="Force greyscale print on pages">
               <input type="text" value={greyPagesTxt} onChange={e => setGreyPagesTxt(e.target.value)} placeholder="e.g. 3, 5-8  (source page numbers)" />
               <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
@@ -5332,6 +5467,16 @@ function App() {
                 Those pages are no longer vector. {art ? `File has ${art.pageCount} page${art.pageCount === 1 ? "" : "s"}.` : ""}
               </div>
             </Field>
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
+              <Field label="Sheet sequence — imposed sheets (repeat or reorder physical sheets)">
+                <input type="text" value={sheetSeqTxt} onChange={e => setSheetSeqTxt(e.target.value)} placeholder="e.g. 1x3, 2-4, blank   (empty = sheets as imposed)" />
+                <SeqNote txt={sheetSeqTxt} total={viewRes && viewRes.sheetsImposed != null ? viewRes.sheetsImposed : null} noun="sheet" what="sheets" />
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                  Same grammar over the <b>physical sheets of the imposed output</b> (sheet 1 = the first front/back pair on a duplex job). Repeats share the original's slug, so the press sees the same sheet number more than once.
+                  Slipsheets are inserted after this, so their sheet numbers refer to the result. On perfect bound it applies to the cover and the guts alike.
+                </div>
+              </Field>
+            </div>
             <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
               <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 8 }}>
                 <input type="checkbox" checked={slipOn} onChange={e => setSlipOn(e.target.checked)} style={{ width: "auto" }} />

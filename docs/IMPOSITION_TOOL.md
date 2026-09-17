@@ -581,6 +581,53 @@ download the imposed PDF. Useful for testing and one-off jobs.
     round-tripped under a stubbed WordPress: bad JSON and oversize refused,
     malformed entries dropped, depth capped.
 
+  ### Page and sheet sequences — duplicate, repeat, reorder (1.38)
+
+  Owner: "Add a way to duplicate pages, make them repeat for easy folio
+  manipulation. Both based on the source PDF and the imposed sheet." Two boxes
+  in Specialty settings, one grammar:
+
+  | item | means |
+  |---|---|
+  | `5` | one page (sheet) |
+  | `3-8` | a run |
+  | `5x2` | that page twice |
+  | `3-8x2` | the run twice (3…8, 3…8) |
+  | `blank` | an empty page (sheet) |
+  | `all`, `last` | every one once / the final one |
+
+  - **Page sequence (source pages)** — `spec.pageSeq`, applied by the
+    `imposePdf` wrapper *after* greyscale (whose numbers refer to the file as
+    dropped) and *before* the core, so every product path — flats, saddle
+    signatures, both perfect-bound halves — paginates the operator's run. The
+    artwork file only; a separate back file and gang files are untouched.
+    Verified: `1-4, 3x2, blank, 5-16` on a 16-page booklet → 19 pages (padded
+    to 20 by the saddle path), page 3 placed three times, a white page where
+    `blank` sits; `1x2, 2x2` on a ganged 2-page flat → each design twice.
+  - **Sheet sequence (imposed sheets)** — `spec.sheetSeq`, applied to each
+    output part after the ink guard and *before* slipsheets, so a slipsheet's
+    sheet number refers to the physical sheets that will come off the press.
+    Verified: `1x3` → three identical sheets; `1, blank, 1` → a white sheet
+    between; `2x2, 1` on a 4-sheet booklet → 6 sides in that order, viewport
+    captions marked `· REPEAT 2`; a slipsheet "before sheet 2" lands between
+    the two repeats. On perfect bound it applies to the cover and the guts
+    alike. Slugs still carry the original sheet numbers.
+  - **Refusal, not skipping.** A number past the end (`1-40` on 16 pages,
+    `9` on 4 sheets) and a typo (`p5`) refuse with the count named — a wrong
+    folio in a book map prints the wrong page. The live readout under each
+    box shows the resolved run (`→ 19 pages (from 16): 1-4, 3, 3, blank,
+    5-16`) or the error, and asks for the artwork when `last`/`all` cannot be
+    resolved yet; the sheet readout uses `res.sheetsImposed`, recorded by the
+    wrapper before any resequencing.
+  - **In place, never a copy.** `resequenceDoc()` rebuilds the page tree of
+    the *same* document: a repeated page is a new page leaf sharing the
+    original's content stream and resources (inheritable attributes copied
+    down), then the original leaves are removed. Copying pages into a fresh
+    document would drop `/OCProperties` and reprint hidden layers — the 1.2x
+    bug — so it is not done that way. Prototyped in node against the vendored
+    pdf-lib before it went in: shared content refs, blank pages, reload clean.
+  - Not part of a saved setup: a sequence is a fact about one job's pages.
+
   ### Workspace layout (1.33)
 
   Rebuilt to the owner's wireframe (`Imp_tool_layout.pdf`, 2026-09-06):
