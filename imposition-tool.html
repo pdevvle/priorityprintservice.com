@@ -45,6 +45,9 @@
   .imp-side { flex:0 0 400px; min-width:340px; position:sticky; top:8px; max-height:calc(100vh - 16px); overflow:auto;
               background:#1a1d23; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px; }
   .imp-side-h { font-size:14px; font-weight:700; padding:4px 6px 10px; display:flex; align-items:center; justify-content:space-between; }
+  .imp-progress { position:relative; display:inline-block; width:240px; height:18px; background:rgba(255,255,255,.08); border-radius:9px; overflow:hidden; vertical-align:middle; }
+  .imp-progress .fill { position:absolute; left:0; top:0; bottom:0; background:#4ea1ff; transition:width .15s linear; }
+  .imp-progress .txt { position:relative; font-size:10.5px; line-height:18px; padding:0 9px; color:#fff; white-space:nowrap; font-weight:600; }
   .imp-setups { display:flex; gap:6px; align-items:center; padding:0 6px 6px; }
   .imp-setups select { flex:1; min-width:0; font-size:12px; }
   .imp-setups .imp-btn { padding:5px 9px; font-size:11.5px; white-space:nowrap; }
@@ -104,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-18 01:46 UTC · IMPOSE-V1.40</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-18 02:29 UTC · IMPOSE-V1.41</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1984,6 +1987,7 @@ async function imposeSaddle(artBytes, spec, layout) {
   const arts = [];
   const artCache = new Map(); // pages with identical geometry share one resolution
   for (let i = 0; i < n; i++) {
+    if (n > 4 && i % Math.max(1, Math.floor(n / 10)) === 0) await progress(`Reading page ${i + 1} of ${n}`, 0.2 + 0.2 * i / n);
     const p = src.getPage(i);
     const mb = pageBox(p);
     const abm = abMode(i);
@@ -2127,6 +2131,7 @@ async function imposeSaddle(artBytes, spec, layout) {
 
   for (let f = 0; f < F; f++) {
     const sigs = forms[f];
+    await progress(`Placing form ${f + 1} of ${F}`, 0.4 + 0.4 * f / F);
     for (const inner of [false, true]) {
       const page = out.addPage([W, H]);
       const cells = inner ? mirrorCells(layout.cells, layout, flip) : layout.cells;
@@ -2220,6 +2225,18 @@ async function imposeSaddle(artBytes, spec, layout) {
     sideReports: [{ side: "BOOKLET", pages: n, padded: P, signatures: S, forms: F, sigMode: order,
       formPlan: forms.map(fm => fm.map(k => k + 1)), spreadsPerSide: bk.spreadsPerSide, tumble, srcRotPages: arts.filter(a => a.rot).length }],
   };
+}
+
+// ── Progress ───────────────────────────────────────────────────────────────
+// One channel for the whole run. Every report YIELDS A FRAME before returning
+// (rAF, or 40 ms if the tab is hidden and rAF never fires): the work below is
+// synchronous pdf-lib in long chunks, and a bar that is updated but never
+// painted reads as a hang — the proofer learned that the hard way.
+let PROG = null;
+async function progress(label, frac) {
+  if (!PROG) return;
+  try { PROG(label, Math.max(0, Math.min(1, frac))); } catch (e) { /* UI only */ }
+  await new Promise(r => { let done = false; const f = () => { if (!done) { done = true; r(); } }; requestAnimationFrame(f); setTimeout(f, 40); });
 }
 
 // ── Main entry: impose artwork bytes onto press sheets ──
@@ -2962,6 +2979,7 @@ async function emptySides(bytes) {
   const empty = [];
   try {
     for (let i = 1; i <= pdf.numPages; i++) {
+      await progress(`Checking ink on side ${i} of ${pdf.numPages}`, 0.8 + 0.13 * (i - 1) / pdf.numPages);
       const page = await pdf.getPage(i);
       const vp = page.getViewport({ scale: GUARD_DPI / 72 });
       const c = document.createElement("canvas"); c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
@@ -2989,7 +3007,16 @@ async function emptySides(bytes) {
 //               product path (flats, saddle, both PB halves) sees grey pages.
 //   slip      → applied to each OUTPUT part after preflight, so the physical
 //               sheet count the operator typed refers to the imposed sheets.
-async function imposePdf(artBytes, backBytes, spec, gangFiles) {
+async function imposePdf(artBytes, backBytes, spec, gangFiles, onProgress) {
+  PROG = typeof onProgress === "function" ? onProgress : null;
+  try {
+    await progress("Reading artwork", 0.02);
+    const res = await imposePdfStages(artBytes, backBytes, spec, gangFiles);
+    await progress("Done", 1);
+    return res;
+  } finally { PROG = null; }
+}
+async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
   const pre = [];
   lastRaster = null;                                    // never inherit a previous job's raster note
   let frontRaster = null;
@@ -3000,6 +3027,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     artBytes = await ppsToPdfBytes(artBytes, "front");
     frontRaster = lastRaster; lastRaster = null;
     const doc = await loadPdf(artBytes, "artwork");
+    await progress("Checking fonts and page sizes", 0.06);
     pre.push(...fontNotes(doc, "artwork"));
     try {
       // UserUnit scales a page's units; nothing here honours it, so say so.
@@ -3061,6 +3089,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   let greyNote = null;
   const grey = parsePageList(spec.greyPages);
   if (grey.length && artBytes) {
+    await progress(`Rasterising ${grey.length} greyscale page${grey.length === 1 ? "" : "s"}`, 0.1);
     const r = await forceGreyPagesBytes(artBytes, grey);
     artBytes = r.bytes; greyNote = r.note;
   }
@@ -3069,11 +3098,14 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
   // both perfect-bound halves — paginates the operator's run, not the file's.
   let seqNote = null;
   if (spec.pageSeq && artBytes) {
+    await progress("Applying page sequence", 0.16);
     const r = await remapPagesBytes(artBytes, spec.pageSeq);
     artBytes = r.bytes; seqNote = r.note;
   }
+  await progress("Laying out", 0.2);
   const res = await imposeCore(artBytes, backBytes, spec, gangFiles);
   const parts = res.parts || [res];
+  await progress("Checking the output", 0.8);
   const duplex = spec.sides === 2 || isBookCalc(spec.calc);
   // Output ink guard — the generic form of the encrypted-file failure: if the
   // source has ink and the imposed output has none on ANY side, something
@@ -3101,11 +3133,13 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles) {
     // Sheet sequence BEFORE slipsheets, so a slipsheet's sheet number refers to
     // the physical sheets that will actually come off the press.
     if (spec.sheetSeq) {
+      await progress("Applying sheet sequence", 0.94);
       const r = await reorderSheetsBytes(p.bytes, spec.sheetSeq, duplex, p.pageLabels);
       p.bytes = r.bytes; if (r.labels) p.pageLabels = r.labels;
       p.warnings = [...(p.warnings || []), r.note];
     }
     if (spec.slip && spec.slip.on) {
+      await progress("Inserting slipsheets", 0.96);
       const r = await insertSlipsheets(p.bytes, spec.slip, duplex, p.pageLabels);
       p.bytes = r.bytes; if (r.labels) p.pageLabels = r.labels;
       p.warnings = [...(p.warnings || []), r.note];
@@ -3336,6 +3370,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   const pageLabels = [];
   let slugWarned = false, tumbleNoted = false;
   for (let s = 0; s < D; s++) {
+    await progress(`Placing sheet ${s + 1} of ${D}`, 0.4 + 0.4 * s / D);
     for (const sideIdx of (sides === 2 ? [0, 1] : [0])) {
       const page = out.addPage([layout.sheet.long * PT, layout.sheet.short * PT]);
       const cellsForMarks = sideIdx === 0 ? layout.cells : mirroredAll;
@@ -3713,9 +3748,12 @@ function SheetViewport({ res, layout, zoom, setZoom, rulers, fit }) {
   return (
     <div className="imp-view">
       <div className="imp-strip" ref={stripRef}>
-        {pdf ? Array.from({ length: n }, (_, i) => (
+        {(pdf && res) ? Array.from({ length: n }, (_, i) => (
+          // `pdf` outlives `res` for one render when a run is refused after a
+          // success (the effect that clears it runs after paint) — guard both,
+          // or that render throws and the error boundary swallows the tool.
           <SheetSide key={(res && res.filename) + ":" + i} pdf={pdf} index={i} px={px} rulers={rulers} root={stripRef}
-                     label={res.pageLabels && res.pageLabels[i]} />
+                     label={res.pageLabels ? res.pageLabels[i] : undefined} />
         )) : layout ? (
           <div className="imp-sheet">
             {rulers ? <div className="corner" /> : <div />}
@@ -4109,6 +4147,9 @@ function App() {
   const [backArt, setBackArt] = useState(null);
   const [result, setResult] = useState(null); // { bytes, layout, warnings, sheets, filename }
   const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState(null);                  // { label, pct } while an imposition runs
+  const [errStage, setErrStage] = useState("");            // the stage a failed run stopped at
+  const lastStageRef = useRef("");
   const [queueBusy, setQueueBusy] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState("");
@@ -4417,9 +4458,15 @@ function App() {
     const ganging = gangFiles.length >= 2;
     if ((!art && !ganging) || (!layoutInfo.layout && !layoutInfo.pb)) { setResult(null); return; }
     const seq = ++genSeq.current;
-    setBusy(true); setError(""); setUploadState({});
+    setBusy(true); setError(""); setErrStage(""); setUploadState({}); setProg({ label: "Starting", pct: 0 }); lastStageRef.current = "Starting";
+    const onProgress = (label, frac) => {
+      if (seq !== genSeq.current) return;
+      lastStageRef.current = label;
+      // Monotonic: perfect bound runs the core twice, and the bar must not walk back.
+      setProg(p => ({ label, pct: Math.max(p ? p.pct : 0, Math.round(frac * 100)) }));
+    };
     imposePdf(art ? art.bytes : null, (debSpec.calc === "perfect-bound" || debSpec.sides === 2) ? (backArt && backArt.bytes) : null, debSpec,
-              ganging ? gangFiles.map(g => ({ bytes: g.bytes, name: g.name, slots: g.slots === "" ? null : +g.slots })) : null)
+              ganging ? gangFiles.map(g => ({ bytes: g.bytes, name: g.name, slots: g.slots === "" ? null : +g.slots })) : null, onProgress)
       .then(res => {
         if (seq !== genSeq.current) return;
         // An approval mismatch travels on the filename so the flag survives
@@ -4438,8 +4485,8 @@ function App() {
         }
         setResult(res);
       })
-      .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); } })
-      .finally(() => { if (seq === genSeq.current) setBusy(false); });
+      .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); setErrStage(lastStageRef.current); } })
+      .finally(() => { if (seq === genSeq.current) { setBusy(false); setProg(null); } });
   }, [art, backArt, gangFiles, debSpec, layoutInfo.layout ? 1 : 0]);
 
   const makeCleanCopy = async () => {
@@ -5742,7 +5789,12 @@ function App() {
               {parityBadge}
               <span>{sheetSummary}</span>
               {layoutInfo.error && <span style={{ color: "#f87171" }}>{layoutInfo.error}</span>}
-              {busy && <span style={{ color: "#7ab8ff" }}>Imposing…</span>}
+              {busy && (
+                <span className="imp-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={prog ? prog.pct : 0} title="Imposition progress">
+                  <span className="fill" style={{ width: (prog ? prog.pct : 0) + "%" }} />
+                  <span className="txt">{prog ? `${prog.label} · ${prog.pct}%` : "Imposing…"}</span>
+                </span>
+              )}
             </div>
             {viewRes && (
               <div className="grp" style={{ marginLeft: "auto", borderRight: 0 }}>
@@ -5761,6 +5813,7 @@ function App() {
           {(notice || error) && (
             <div className="imp-card" style={{ marginBottom: 12, padding: "10px 14px", borderColor: error ? "rgba(239,68,68,.4)" : "rgba(34,197,94,.3)" }}>
               <div style={{ fontSize: 13, color: error ? "#f87171" : "#4ade80", lineHeight: 1.5, whiteSpace: "pre-line" }}>{error || notice}</div>
+              {error && errStage && <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: 4 }}>Stopped while: {errStage}</div>}
             </div>
           )}
 

@@ -680,6 +680,35 @@ download the imposed PDF. Useful for testing and one-off jobs.
     `ui_pbrot.mjs`: the select tracks the half being edited, the other half is
     untouched, the report lists both. Harness: `cases_pbrot.json`.
 
+  ### Progress bar (1.41)
+
+  Owner: "add a progress bar for imposition status." The toolbar's "Imposing…"
+  is now a determinate bar with the stage in words and the percentage.
+
+  - **One channel.** `imposePdf()` takes an `onProgress(label, frac)` and sets
+    a module-level `PROG`; `progress(label, frac)` is called from the wrapper
+    (reading, fonts/sizes, greyscale, page sequence, laying out, checking the
+    output, sheet sequence, slipsheets, done) and from the core loops (reading
+    pages during bleed detection, placing each form/sheet, checking ink on
+    each side). **Every report yields a frame** (`requestAnimationFrame`, or
+    40 ms if the tab is hidden and rAF never fires) before returning — the
+    work is synchronous pdf-lib in long chunks, and a bar that is updated but
+    never painted reads as a hang. The proofer's 2026-09-13 lesson, applied.
+  - **Monotonic within a run.** Perfect bound runs the core twice, so the
+    App clamps the percentage to never decrease; a superseded run's reports
+    are dropped by the generation guard. A new run (a drop can trigger two:
+    the re-applied trim changes the spec) restarts the bar.
+  - **A failure names the stage.** The error banner adds "Stopped while: …"
+    from the last stage reported.
+  - **Crash found by the test and fixed:** `SheetViewport` kept the previous
+    run's pdf.js document for one render after `res` became null (a refusal
+    after a success), and read `res.pageLabels` off null — the error boundary
+    swallowed the whole tool. Guarded on both.
+  - Verified (`ui_prog.mjs`, MutationObserver on the bar's text): 51 distinct
+    painted readouts across a 16-page booklet, percentages monotonic within
+    each run, placing and ink-check stages seen, bar gone on completion and
+    on failure, "Stopped while: Applying page sequence" on a bad sequence.
+
   ### Workspace layout (1.33)
 
   Rebuilt to the owner's wireframe (`Imp_tool_layout.pdf`, 2026-09-06):
