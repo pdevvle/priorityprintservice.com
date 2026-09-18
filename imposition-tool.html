@@ -104,7 +104,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-17 20:23 UTC · IMPOSE-V1.39</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-18 01:46 UTC · IMPOSE-V1.40</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2380,7 +2380,7 @@ async function ppsToPdfBytes(bytes, label) {
 //
 // Whitelisted rather than merged wholesale: these are layout choices, and a
 // part override must not be able to reach trim size, spine or artwork handling.
-const PB_PART_KEYS = ["gridAcross", "gridDown", "gridSheet", "colGaps", "rowGaps", "fillSheet", "gutter"];
+const PB_PART_KEYS = ["gridAcross", "gridDown", "gridSheet", "colGaps", "rowGaps", "fillSheet", "gutter", "forceRotated"];
 function pbPartOverrides(spec, part) {
   const src = spec && spec.pbGrid && spec.pbGrid[part];
   const out = {};
@@ -2417,6 +2417,10 @@ function pbGridSpec(g) {
     gridAcross: g.on ? Math.floor(+g.across) || 0 : null,
     gridDown:   g.on ? Math.floor(+g.down)   || 0 : null,
     gridSheet:  g.sheet && g.sheet !== "auto" ? g.sheet : null,   // the half's press sheet, manual grid or not
+    // The half's own orientation on its sheet ("auto" | "no" = piece's long
+    // edge along the sheet's long edge | "yes" = across it). null = the job's
+    // Grid orientation applies, as before 1.40.
+    forceRotated: g.rot && g.rot !== "default" ? g.rot : null,
     colGaps: g.cols, rowGaps: g.rows,
     fillSheet: g.fill == null ? null : !!g.fill,
   };
@@ -4063,7 +4067,7 @@ function App() {
   // Perfect bound images two pieces of different sizes, so it gets two
   // independent copies of the grid + gutter settings above rather than sharing
   // one. `pbGridPart` is only which half the shared panel is currently editing.
-  const PB_GRID0 = { on: false, across: 1, down: 1, sheet: "auto", cols: null, rows: null, fill: null };
+  const PB_GRID0 = { on: false, across: 1, down: 1, sheet: "auto", cols: null, rows: null, fill: null, rot: "default" };
   const [pbGrids, setPbGrids] = useState({ cover: PB_GRID0, guts: PB_GRID0 });
   const [pbGridPart, setPbGridPart] = useState("cover");
   // Step and repeat (saddle): duplicate each signature N× on the press sheet.
@@ -4921,7 +4925,7 @@ function App() {
                     <option value="manual">Manual (tap cells)…</option>
                   </select>
                 </Field>
-                <Field label="Grid orientation" style={{ flex: "0 0 140px" }}>
+                <Field label={isPB ? "Grid orientation (job default)" : "Grid orientation"} style={{ flex: "0 0 140px" }}>
                   <select value={forceRotated} onChange={e => setForceRotated(e.target.value)}>
                     <option value="auto">Auto</option>
                     <option value="no">Force unrotated</option>
@@ -5090,6 +5094,19 @@ function App() {
                           <option value="12x18">12×18</option>
                         </select>
                       </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>Orientation for the {part}</span>
+                        <select value={G.rot || "default"} style={{ width: 230, fontSize: 12 }}
+                                onChange={e => setG({ rot: e.target.value, cols: null, rows: null })}>
+                          <option value="default">Job default (Grid orientation above)</option>
+                          <option value="auto">Auto — best fit</option>
+                          <option value="no">{part === "cover" ? "Cover" : "Pages"} long edge along the sheet's long edge</option>
+                          <option value="yes">{part === "cover" ? "Cover" : "Pages"} across the sheet (rotated 90°)</option>
+                        </select>
+                        <span style={{ fontSize: 11.5, color: "rgba(255,255,255,.55)" }}>
+                          {panelLay ? `now ${panelLay.across} × ${panelLay.down}${panelLay.rotated ? ", rotated 90°" : ""}` : ""}
+                        </span>
+                      </div>
                       {half && half.error && (
                         <div style={{ fontSize: 12, color: "#f87171", marginTop: 5 }}>{half.error}</div>
                       )}
@@ -5227,7 +5244,7 @@ function App() {
                     {(!ok || G.on || (!isPB && repOn)) && (
                       <button type="button" className="imp-btn sec"
                               style={{ padding: "3px 10px", fontSize: 12, borderColor: ok ? undefined : "#f87171", color: ok ? undefined : "#f87171" }}
-                              onClick={() => { if (!isPB) setRepOn(false); setG({ on: false, sheet: "auto", cols: null, rows: null, fill: null }); }}>
+                              onClick={() => { if (!isPB) setRepOn(false); setG({ on: false, sheet: "auto", cols: null, rows: null, fill: null, rot: "default" }); }}>
                         Back to automatic{isPB ? ` (${part})` : ""}
                       </button>
                     )}
