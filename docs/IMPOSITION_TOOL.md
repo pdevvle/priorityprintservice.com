@@ -659,6 +659,27 @@ download the imposed PDF. Useful for testing and one-off jobs.
     the live layout ("Now: 2 × 2, spreads along the sheet"), and the report
     carries the note. Harness: `cases_rot.json`, `ui_rot.mjs`.
 
+  ### Orientation per perfect-bound half (1.40)
+
+  Owner: "need something similar for perfect bound." Both halves run through
+  the flats pipeline, so the job's Grid orientation already reached them — but
+  only *together*, and a cover (11.25×8.5″) and a book block (5.5×8.5″) are
+  different pieces that rarely want the same answer.
+
+  - `forceRotated` joins `PB_PART_KEYS`; `pbGridSpec()` emits it from the
+    half's `rot` (`default` = inherit the job's Grid orientation, else
+    `auto` / `no` / `yes`), so `pbPartOverrides()` overrides it per half
+    exactly as it does the press sheet.
+  - UI: an **Orientation for the cover / guts** select in the half's header,
+    beside its press sheet, with a live "now 3 × 1, rotated 90°" readout; the
+    job-level select is relabelled "Grid orientation (job default)". Back to
+    automatic resets it.
+  - Verified: job-level *across* rotates both halves (cover 2 × 1 rotated,
+    guts 3 × 1 rotated); guts *across* with cover *along* → 3 × 1 rotated and
+    1 × 1; guts *auto* beats a job-level *across* (2 × 2). UI harness
+    `ui_pbrot.mjs`: the select tracks the half being edited, the other half is
+    untouched, the report lists both. Harness: `cases_pbrot.json`.
+
   ### Workspace layout (1.33)
 
   Rebuilt to the owner's wireframe (`Imp_tool_layout.pdf`, 2026-09-06):
