@@ -40,10 +40,11 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `ups-zone-map-seed.json` | UPS Ground transit days by 3-digit ZIP prefix (1000 entries) |
 | `docs/GO_LIVE_RUNBOOK.md` | The 3.0 go-live: staging de-bloat (Phase 0), selective order-table pull live→staging, freeze-window sequence, auto-increment fix, staging→production push, verification. HPOS confirmed on live. **Read before any go-live or cross-site DB work.** |
 | `docs/PPS_3.1_WC11_PLAN.md` | **The release after go-live**: WooCommerce 11 + Action Scheduler 4.0 update for both sites, compatibility test matrix (Drive/AS artwork pipeline is the top risk), default-on feature postures (POS, abandoned-cart stays OFF), hardening riders. Binding rule it carries: **version freeze — no WC/WP/plugin updates on either site during the go-live window**; WC 11 lands in 3.1, both sites together. |
-| `proof-ui-draft.html` | **The new proof surface.** Standalone document, embeddable by a host — see "Proofing" below. Vanilla JS, its own pdf.js/pdf-lib, its own four test suites. Not a component: the calculator frames it. |
+| `docs/PROOFER_BRIEF.md` | **Start here for anything proofing.** Handover brief: file inventory, running the eleven suites (ten live), the old modal's origin/vulnerabilities/per-product usage, the new proofer's design decisions and handshake, modal→proofer parity checklist, the saddle→all-products adaptation plan, invariants, and case studies (incl. order 87152's unscannable QR). |
+| `proof-ui-draft.html` | **The new proof surface.** Standalone document, embeddable by a host — see "Proofing" below. Vanilla JS, its own pdf.js/pdf-lib, eleven test suites (ten live — see `docs/PROOFER_BRIEF.md` §1.2). Not a component: the calculator frames it. |
 | `pps-html-deploy.php` | How calculators actually reach production. Also owns retention (v1.5.0): after each deploy it prunes superseded extracted scripts and trims the deploy archive. Accepts `calc-*.html` plus `proof-ui-draft.html` — an explicit list, because this directory is writable by a deploy tool.  Watches `wp-content/plugins/pps-calculators/_pending_html/`; the next WP request copies `*.html` into `wp-content/uploads/pps-calculators/`, updates the registry, archives the source under `_pending_html/_archive/`, and logs to `wp_options['pps_html_deploy_log_v2']`. Also hosts the Bulk Upload admin page (`admin.php?page=pps-bulk-upload`). |
 | `pps-proof-status.php` | Makes `SelfApproved` mean someone signed off in the proofer, rather than "did not buy a staff proof". Rewrites only that token in PPS-Spec, adds a `PPS-Proof` item meta, notes the order when artwork arrived unapproved. **On staging, NOT in `active_plugins` on either site** — until it is activated, every order still reads `SelfApproved`. |
-| `pps-delivery-date-guard.php` | Floors `_pps_delivery_date` to a working day and keeps pi-edd off registry line items. **Still not deployed** (it is not in `active_plugins` on either site), so a weekend delivery date is still possible server-side. Reviewed 2026-09-15: its two pi-edd filter names were verified against the installed plugin and are real, but **the order note was being written from `woocommerce_checkout_create_order_line_item`, where the order has no ID yet** — `add_order_note()` returns 0 without writing, so the one mechanism meant to stop a silent correction was itself silent. The note now waits for `woocommerce_checkout_order_processed` / the Store API twin. Also corrected: pi-edd already switches itself off for virtual products, so it was never the source of the Sunday on order 87105 — that came from our side. `tools-delivery-date-guard-test.php` is the gate (32 checks). |
+| `pps-delivery-date-guard.php` | Floors `_pps_delivery_date` to a working day and keeps pi-edd off registry line items. **Deployed and active on both sites 2026-09-15** (pinned to `e0bc851`, 12,311 bytes, added to `active_plugins` immediately after `pps-calculators.php`). Reviewed 2026-09-15: its two pi-edd filter names were verified against the installed plugin and are real, but **the order note was being written from `woocommerce_checkout_create_order_line_item`, where the order has no ID yet** — `add_order_note()` returns 0 without writing, so the one mechanism meant to stop a silent correction was itself silent. The note now waits for `woocommerce_checkout_order_processed` / the Store API twin. Also corrected: pi-edd already switches itself off for virtual products, so it was never the source of the Sunday on order 87105 — that came from our side. `tools-delivery-date-guard-test.php` is the gate (32 checks). |
 | `tools-proof-slots-test.mjs`, `tools-prepress-flag-test.mjs` | The two proofer blockers closed on 2026-09-13. The first drives the proofer over its real job message with `slots` and proves per-page uploads land on their pages, beat the whole-file art where they overlap, and survive an out-of-range page. The second reads `pps-calculators.php` for the whole server chain (cart data, session key, item meta, spec token, order note, proof-hash drop) and runs the shipped submit function of all eight compiled calculators to prove the flag is posted when — and only when — the escape hatch was taken. |
 | `tools-order-e2e-test.mjs` | The whole order against a fake WordPress: a real PDF through the real uploader and proof modal on the compiled saddle AND perfect-bound builds, then Add to Order against a mocked admin-ajax (bare `-1` for a wrong nonce, JSON otherwise) and a cart page. Proves the nonce retry and the package contents (raw first, no `.html`, previews + manifest listed) where the customer actually meets them. Needs `parity-saddle.html` and `parity-pb.html` in the harness dir. |
 | `tools-nonce-strategy-test.mjs`, `tools-order-gates-test.mjs` | Ordering-path gates (2026-09-12 audit). The first runs the SHIPPED `submitToWooCommerce` out of every compiled calculator under a fake browser: baked nonce first, admin-ajax refresh on `-1`, REST fallback, reload message, WAF 403 named as a block, preset slug posted, reference files as supplementary deliverables, a refused supplementary never aborting (the perfect-bound `.html` bug). The second drives the saddle harness: "Upload Art with Order" with no file is stopped, and the mobile bar shows the pricing error instead of a dead button. Run both after touching any calculator's submit path or Panel. |
@@ -51,10 +52,11 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-proof-vendor.mjs` | One command to install the proofer's pinned pdf.js/pdf-lib into `proof-vendor/` and restore the calculators' pdf.js afterwards. The two majors cannot share one `node_modules`. |
 | `tools-delivery-date-guard-test.php` | Drives `pps-delivery-date-guard.php` against stubs: a Sunday moves to the Monday and the human-readable twin moves with it, a good date is untouched, `2026-13-45` is refused rather than rolled over, a shop that is never open leaves the date alone rather than replacing it with one a year out, and the order note lands exactly once across both checkout hooks. Also pins the two pi-edd filter NAMES and arg counts — a filter that does not exist fails silently and would leave that whole section looking like it worked. |
 | `tools-order-blockers-test.mjs` | The two guards from the 2026-09-15 checkout blocker: the registry (not the database) decides whether WCPA owns a product, and a refused checkout on a calculator cart is recorded to `pps_checkout_refusals` instead of costing a silent order. Also pins the things that stop the tripwire becoming the failure it watches for — wrapped, bounded, autoload-off, scoped to PPS carts. |
+| `tools-closure-engine-test.mjs` | **The shop closes, and every calculator has to know it.** Static half pins the config path (`_CFG.closures`, never the `pcf` sub-array) and that no bare weekend test survives in the counting loops; behavioural half extracts `isBusinessDay`/`addBusinessDays`/`businessDaysBetween` out of each COMPILED build and runs them against a real holiday. Confirmed to discriminate — against the pre-fix brochure, `addBusinessDays(Wed 25 Nov, 1)` returns Thanksgiving. 72 checks. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
-| `tools-proof-ui-draft-test.mjs`, `-preflight-`, `-mobile-`, `-style-`, `tools-proof-embed-test.mjs`, `tools-proof-integration-test.mjs` | The proofer's six suites: engine, PDF preflight, touch layout, **design parity**, the host seam, and the calculator round trip. Run all six after any proofer change. The style suite reads the palette out of `calc-preview-test.html` rather than copying it, so the two documents cannot drift apart, and it fails any rule whose `var()` does not resolve — which is how a whole panel once rendered unstyled without anyone noticing. |
+| `tools-proof-ui-draft-test.mjs`, `-preflight-`, `-mobile-`, `-style-`, `tools-proof-embed-test.mjs`, `tools-proof-integration-test.mjs` | The proofer's original six suites: engine, PDF preflight, touch layout, **design parity**, the host seam, and the calculator round trip. Five more were added 2026-09-13 (slots, progress, blank pages, size check, prepress flag); `docs/PROOFER_BRIEF.md` §1.2 lists all eleven with the run recipe. Run every live suite after any proofer change. The style suite reads the palette out of `calc-preview-test.html` rather than copying it, so the two documents cannot drift apart, and it fails any rule whose `var()` does not resolve — which is how a whole panel once rendered unstyled without anyone noticing. |
 | `pps-theme/` | Custom WordPress theme replacing Astra Pro — owns site chrome, typography, color tokens, WooCommerce shell. Stays out of the calculator plugin's way. `pps-theme/preview.html` is a Pages-served standalone preview of the header. |
 | `designer/` | **Spike.** Print-first layout editor (Vite + React + TS) — the document *is* a product; press-PDF export with CMYK, bleed/trim boxes and subset font embedding. Unlike the calculators this is a real build, not a single inline-Babel HTML. `dist/` is committed for Pages. **Read `docs/DESIGNER_SPIKE.md` before touching it** — it records what's proven vs faked and the next steps in order. Run `cd designer && npm test` after any change to `src/export/pdf.ts`. |
 
@@ -76,6 +78,33 @@ Affected saddle and coupon-book, which shared the code. Perfect bound already
 took page 1 only; the five flats have front/back sheet slots and were always
 right. `tools-slot-upload-test.mjs` is the gate, and it runs against both the
 saddle and coupon builds.
+
+## Shop closures — the calculators are copies, not modules
+
+Closures live at the **top level** of the injected config, beside `pcf`, never inside
+it: `pps_get_closures()` reads `$cfg['closures']` and `pps_get_public_config()` treats
+`$cfg['pcf']` as its own sub-array. The calculators read `_CFG.closures`, where
+`_CFG = PPS_CONFIG.calc`.
+
+Until 2026-09-19 the five flats read `(_CFG.pcf || {}).closures`, which is `undefined`,
+and fell back to `[]`. **`SHOP_CLOSURES` was empty on brochure, postcard, greeting card,
+letterhead and sticker for the whole life of those files**, which silently disabled the
+two places that did handle closures correctly — the DatePicker's greying-out and the
+last-line guard in `quotedDeliveryYMD`. Independently, `getShopToday`,
+`addBusinessDays` and `businessDaysBetween` inlined a bare weekend test instead of
+calling `isBusinessDay`, so even a populated list would have been ignored by the
+arithmetic. Either bug alone would have hidden the other.
+
+Christmas Day was a selectable, quotable, orderable delivery date on those five.
+Turnaround ran short by a day per holiday in the window, rush was **undercharged** (a
+fatter denominator in `freeDeliveryBizDays / bizDaysToDate`), and `tooSoon` failed to
+trip — so the calculator accepted deadlines the shop cannot meet.
+
+**The general lesson, which is the reason this section exists:** these eight files are
+copies, so a fix lands in one and not the others and nothing complains. It was found by
+extracting every named function from all eight, normalising whitespace and hashing —
+38 functions are shared by 6+ files and 19 had drifted. That sweep is worth re-running
+after any change to shared machinery. `tools-closure-engine-test.mjs` is the gate.
 
 ## Shared Components (in each calculator HTML)
 - `PCF` — pricing constants object, overridable via PPS_CONFIG.calc
@@ -122,6 +151,14 @@ saddle and coupon builds.
 - Output: `IMPOSED_Order-<id>_<job>_<trim>_<imp>up_<sheet>.pdf` filed into the same Drive order folder; the admin queue shows an IMPOSED badge when one exists.
 
 ## Proofing — two surfaces, one of them dark
+
+> **`docs/PROOFER_BRIEF.md` is the handover document for all proofing work.** It carries
+> the full picture: file inventory, how to run the eleven suites (ten live), the old modal's origin and
+> vulnerabilities, the new proofer's design decisions, a modal→proofer feature-parity
+> checklist, the plan for adapting it from saddle to all eight products, the invariants,
+> and the case studies. Read it before touching `proof-ui-draft.html`, any proof modal,
+> or anything named `tools-proof-*`. The section below is the summary; the brief is the
+> detail.
 
 There are currently **two** proof UIs, and which one a customer sees is a config
 value, not a code path you can read off the file.
@@ -218,12 +255,14 @@ transforms legitimately produces no PDF.
   type warnings near the trim. Worth closing with the "I don't have bleeds"
   answer below rather than another geometric check.
 - **Only the saddle calculator is wired.** The other seven still use the modal.
-- **The knob does not exist on either server yet.** `proof_url` lives in the
-  repo's `pps-config-admin.php` only; production is running a copy without it
-  (117,942 bytes, 2026-09-06) and staging an older one still. Turning the
-  proofer on anywhere means deploying that file first, then setting **PPS Config
-  → Production → New Proof URL** by hand — it is not something to write into
+- **The knob exists on staging, not on production.** Staging runs the
+  `pps-config-admin.php` that added `proof_url` (118,443 bytes, deployed
+  2026-09-13), so **PPS Config → Production → New Proof URL** is live there,
+  blank. Production runs the commit before it (117,942 bytes, 2026-09-06) and
+  has no field. Turning the proofer on in production means deploying that file
+  first, then setting the field by hand — it is not something to write into
   `pps_calc_config` from here, because that option carries live credentials.
+  Do not set it anywhere until the brief's §7.0, §7.4 and §7.6 are closed.
 - The "I don't have bleeds" answer reaches neither surface; both detect bleed
   from the art and ignore the selection.
 
@@ -434,7 +473,7 @@ whose per-product meta sits on registry products, only **WCPA** and **pi-edd** a
 are exactly the shape that caused this, so if one is ever reactivated, check its
 per-product ownership flag against the registry before trusting an order path. pi-edd
 writes a competing delivery date rather than refusing an order (see
-`pps-delivery-date-guard.php`, still undeployed). `_virtual` was spot-checked across
+`pps-delivery-date-guard.php`, live on both sites since 2026-09-15). `_virtual` was spot-checked across
 saddle, perfect-bound, brochure, sticker and greeting-card products and holds.
 
 **Do NOT add WCPA-active product IDs to the PPS calculator registry** — that would route them through both systems simultaneously and likely double-bill or break the cart. WCPA products should not appear on any of: `pps_get_registry()` entries, `wp_options['pps_presets']` rows, or the "PPS Defaults" product meta box. WCPA products will not use the integrated Google Drive uploads or shipping/turnaround logic by design.
