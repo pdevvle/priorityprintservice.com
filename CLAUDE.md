@@ -51,6 +51,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-proof-vendor.mjs` | One command to install the proofer's pinned pdf.js/pdf-lib into `proof-vendor/` and restore the calculators' pdf.js afterwards. The two majors cannot share one `node_modules`. |
 | `tools-delivery-date-guard-test.php` | Drives `pps-delivery-date-guard.php` against stubs: a Sunday moves to the Monday and the human-readable twin moves with it, a good date is untouched, `2026-13-45` is refused rather than rolled over, a shop that is never open leaves the date alone rather than replacing it with one a year out, and the order note lands exactly once across both checkout hooks. Also pins the two pi-edd filter NAMES and arg counts — a filter that does not exist fails silently and would leave that whole section looking like it worked. |
 | `tools-order-blockers-test.mjs` | The two guards from the 2026-09-15 checkout blocker: the registry (not the database) decides whether WCPA owns a product, and a refused checkout on a calculator cart is recorded to `pps_checkout_refusals` instead of costing a silent order. Also pins the things that stop the tripwire becoming the failure it watches for — wrapped, bounded, autoload-off, scoped to PPS carts. |
+| `tools-closure-engine-test.mjs` | **The shop closes, and every calculator has to know it.** Static half pins the config path (`_CFG.closures`, never the `pcf` sub-array) and that no bare weekend test survives in the counting loops; behavioural half extracts `isBusinessDay`/`addBusinessDays`/`businessDaysBetween` out of each COMPILED build and runs them against a real holiday. Confirmed to discriminate — against the pre-fix brochure, `addBusinessDays(Wed 25 Nov, 1)` returns Thanksgiving. 72 checks. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
@@ -76,6 +77,33 @@ Affected saddle and coupon-book, which shared the code. Perfect bound already
 took page 1 only; the five flats have front/back sheet slots and were always
 right. `tools-slot-upload-test.mjs` is the gate, and it runs against both the
 saddle and coupon builds.
+
+## Shop closures — the calculators are copies, not modules
+
+Closures live at the **top level** of the injected config, beside `pcf`, never inside
+it: `pps_get_closures()` reads `$cfg['closures']` and `pps_get_public_config()` treats
+`$cfg['pcf']` as its own sub-array. The calculators read `_CFG.closures`, where
+`_CFG = PPS_CONFIG.calc`.
+
+Until 2026-09-19 the five flats read `(_CFG.pcf || {}).closures`, which is `undefined`,
+and fell back to `[]`. **`SHOP_CLOSURES` was empty on brochure, postcard, greeting card,
+letterhead and sticker for the whole life of those files**, which silently disabled the
+two places that did handle closures correctly — the DatePicker's greying-out and the
+last-line guard in `quotedDeliveryYMD`. Independently, `getShopToday`,
+`addBusinessDays` and `businessDaysBetween` inlined a bare weekend test instead of
+calling `isBusinessDay`, so even a populated list would have been ignored by the
+arithmetic. Either bug alone would have hidden the other.
+
+Christmas Day was a selectable, quotable, orderable delivery date on those five.
+Turnaround ran short by a day per holiday in the window, rush was **undercharged** (a
+fatter denominator in `freeDeliveryBizDays / bizDaysToDate`), and `tooSoon` failed to
+trip — so the calculator accepted deadlines the shop cannot meet.
+
+**The general lesson, which is the reason this section exists:** these eight files are
+copies, so a fix lands in one and not the others and nothing complains. It was found by
+extracting every named function from all eight, normalising whitespace and hashing —
+38 functions are shared by 6+ files and 19 had drifted. That sweep is worth re-running
+after any change to shared machinery. `tools-closure-engine-test.mjs` is the gate.
 
 ## Shared Components (in each calculator HTML)
 - `PCF` — pricing constants object, overridable via PPS_CONFIG.calc
