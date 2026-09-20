@@ -2112,6 +2112,109 @@ function pps_cart_tripwire_report( $product_id, $reason, $price ) {
     );
 }
 
+/**
+ * A fingerprint of everything in a spec that changes the printed artwork.
+ *
+ * Used only to decide whether an approval may follow a line through an edit or
+ * a reorder. **Deny by default:** every metadata key is assumed to change what
+ * prints unless it is named in the ignore list below. That direction is
+ * deliberate — a key the calculators gain in future will block carry-over
+ * rather than be silently ignored, and the cost of blocking is a re-proof,
+ * while the cost of ignoring is an approval hash that says a file was signed
+ * off when the spec beneath it moved.
+ *
+ * Returns null when the metadata will not parse, which also blocks carry-over.
+ */
+function pps_proof_carryover_signature( $metadata_json ) {
+    $d = json_decode( (string) $metadata_json, true );
+    if ( ! is_array( $d ) ) {
+        return null;
+    }
+
+    // The only fields a customer can change while the approved PDF still
+    // describes their order exactly: where it ships, when, how many, what it
+    // costs, and which proof they bought.
+    $ignore = array(
+        'shipState', 'shipZip', 'shipAddr', 'needByDate', 'estWeightLb', 'estCartons',
+        'transitDays', 'productionBizDays', 'requestedBizDays', 'freeDeliveryBizDays',
+        'rushMultiplier', 'rushCost', 'productionStartDate', 'mustShipByDate',
+        'estimatedDeliveryDate',
+        'total', 'baseTotal', 'perUnit', 'totalQty', 'days', 'debug', 'tamperFlag',
+        'proof',
+    );
+    foreach ( $ignore as $k ) {
+        unset( $d[ $k ] );
+    }
+
+    // Quantity rides inside each set beside the page count. Page count changes
+    // the artwork; quantity does not — so compare the pages and drop the rest.
+    if ( isset( $d['sets'] ) && is_array( $d['sets'] ) ) {
+        $pages = array();
+        foreach ( $d['sets'] as $s ) {
+            $pages[] = is_array( $s ) ? ( $s['pages'] ?? null ) : $s;
+        }
+        $d['sets'] = $pages;
+    }
+
+    ksort( $d );
+    return md5( (string) wp_json_encode( $d ) );
+}
+
+/**
+ * Decide which approval keys may follow a line through an edit or a reorder.
+ *
+ * Pure, so it can be tested without WooCommerce — the handler only supplies the
+ * old cart item and merges the result. Returns:
+ *   [ 'carry' => [ key => value, … ], 'reason' => <why nothing was carried> ]
+ *
+ * $already is the cart data built from this request; a key the calculator
+ * posted itself is authoritative and is never overwritten here.
+ */
+function pps_proof_carryover_from( $old, $new_metadata, $new_artwork_path, array $already = array() ) {
+    $out = array( 'carry' => array(), 'reason' => '' );
+
+    if ( ! is_array( $old ) ) {
+        $out['reason'] = 'no previous line';
+        return $out;
+    }
+    if ( empty( $old['pps_proof_hash'] ) && empty( $old['pps_prepress_review'] ) && empty( $old['pps_artwork_files'] ) ) {
+        $out['reason'] = 'nothing to carry';
+        return $out;
+    }
+
+    // Artwork first: a different file makes every other comparison moot.
+    if ( (string) ( $old['pps_artwork_path'] ?? '' ) !== (string) $new_artwork_path ) {
+        $out['reason'] = 'artwork changed';
+        return $out;
+    }
+
+    $sig_new = pps_proof_carryover_signature( $new_metadata );
+    $sig_old = pps_proof_carryover_signature( $old['pps_metadata'] ?? '' );
+    if ( $sig_new === null || $sig_old === null ) {
+        $out['reason'] = 'spec unreadable';
+        return $out;
+    }
+    if ( $sig_new !== $sig_old ) {
+        $out['reason'] = 'spec changed';
+        return $out;
+    }
+
+    foreach ( array( 'pps_proof_hash', 'pps_artwork_files', 'pps_prepress_review' ) as $k ) {
+        if ( ! empty( $old[ $k ] ) && empty( $already[ $k ] ) ) {
+            $out['carry'][ $k ] = $old[ $k ];
+        }
+    }
+
+    // The escape hatch beats an approval hash regardless of which side each
+    // arrived from — approval produced bytes, the escape hatch did not.
+    if ( ! empty( $already['pps_prepress_review'] ) || ! empty( $out['carry']['pps_prepress_review'] ) ) {
+        unset( $out['carry']['pps_proof_hash'] );
+    }
+
+    $out['reason'] = $out['carry'] ? 'ok' : 'nothing to carry';
+    return $out;
+}
+
 function pps_ajax_add_to_cart() {
     check_ajax_referer( 'pps_add_to_cart', 'nonce' );
 
@@ -2294,6 +2397,40 @@ function pps_ajax_add_to_cart() {
             if ( $clean ) {
                 $cart_item_data['pps_artwork_files'] = $clean;
             }
+        }
+    }
+
+    // ── Edit / reorder: carry the approval forward (2026-09-20) ──
+    //
+    // Edit mode and reorder restore artwork as { type:'existing', path }. The
+    // calculator no longer holds the approved package, so it cannot re-post
+    // pps_proof_hash, pps_artwork_files or pps_prepress_review — they were lost
+    // on EVERY edit. That mattered more than it looks: the imposition tool only
+    // runs its check when a 64-hex hash is present, and a line with none is
+    // "unbound" — it skips the comparison AND names the output exactly as it
+    // names a verified one. The approval silently ceased to exist and nothing
+    // downstream, including the filename in Drive, could tell you.
+    //
+    // Carried only when the artwork file and every print-affecting spec field
+    // are identical to the line being replaced. If anything else moved, the
+    // approved PDF no longer describes this order and the hash must not follow
+    // it — a false approval is far worse than the missing one this fixes.
+    if ( $edit_key ) {
+        $cart_now = WC()->cart ? WC()->cart->get_cart() : array();
+        $old      = isset( $cart_now[ $edit_key ] ) ? $cart_now[ $edit_key ] : null;
+        $carry    = pps_proof_carryover_from( $old, $metadata, $artwork_path, $cart_item_data );
+
+        if ( $carry['carry'] ) {
+            $cart_item_data = array_merge( $cart_item_data, $carry['carry'] );
+            // Final-state guard: whichever source each key came from, an
+            // escape-hatch flag and an approval hash cannot coexist.
+            if ( ! empty( $cart_item_data['pps_prepress_review'] ) ) {
+                unset( $cart_item_data['pps_proof_hash'] );
+            }
+        } elseif ( in_array( $carry['reason'], array( 'spec changed', 'artwork changed', 'spec unreadable' ), true ) ) {
+            // The one place an approval legitimately disappears. Logged so it is
+            // a recorded decision rather than the silence this fix removes.
+            error_log( sprintf( '[pps] edit dropped approval for pid=%d: %s', $product_id, $carry['reason'] ) );
         }
     }
 

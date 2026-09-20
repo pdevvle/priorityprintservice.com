@@ -87,6 +87,7 @@ a real origin).
 | `tools-proof-package-test.mjs` | **DEAD.** Pre-harness prototype: imports `./node_modules/playwright`, reads `ui/vendor/`, opens the file over `file://`, needs an uncommitted `test-art.pdf`. Superseded by the draft + progress suites. Delete or revive; do not count it as green. |
 | `tools-proof-serve.mjs` | Static server on `127.0.0.1:8137` + `/vendor/`. Its second log line names `node_modules` regardless of where it found the libraries — trust `curl -sI http://127.0.0.1:8137/vendor/pdf.min.js`. Its header still says "three suites"; stale. |
 | `tools-proof-vendor.mjs` | Installs the proofer's pinned pdf.js 3.11.174 / pdf-lib 1.17.1 into `proof-vendor/`. `--check` reports without installing. |
+| `tools-proof-carryover-test.php` | **Plain PHP, no browser, no harness** — `php tools-proof-carryover-test.php`. The edit/reorder approval carry-over of §7.8: an unchanged spec keeps its hash, a changed one loses it. Lifts the two functions out of the shipped plugin, so it fails on drift. `PPS_PLUGIN_FILE` points it at another copy. |
 
 `PPS_PROOF_VENDOR_DIR` is read **only** by the serve and vendor tools. Passing it to a suite
 is harmless and does nothing.
@@ -615,16 +616,44 @@ and gate it with a fixture whose layers are all on.
 already part of `specSig` (`:3258`), so a change there already revokes approval on the
 host side.
 
-### 7.8 Edit mode and reorders lose the approval package
+### 7.8 Edit mode and reorders lose the approval package — **CLOSED 2026-09-20**
 
 Both restore artwork as `{type:"existing", path}` (`:6345-6349`); the gate exempts
-`existing` (`:6878-6895`); only `pps_artwork_path` is posted (`:5983`).
-`pps_ajax_add_to_cart` builds the new line from POST alone (`pps-calculators.php:2230-2298`)
-and removes the old one (`:2316-2318`), so `pps_proof_hash`, `pps_artwork_files` and
-`pps_prepress_review` do not carry over. An edited or reordered line reaches the
-imposition queue **unbound**, with no print-ready file. Fix: copy those three keys from
-the old cart item when spec-affecting fields are unchanged; otherwise require a fresh
-proof.
+`existing` (`:6878-6895`); only `pps_artwork_path` is posted (`:5983`). So the
+calculator *cannot* re-post the approval keys — the information exists only on the cart
+item being replaced, and `pps_ajax_add_to_cart` built the new line from POST alone.
+`pps_proof_hash`, `pps_artwork_files` and `pps_prepress_review` were therefore dropped on
+**every** edit and reorder.
+
+Why this deserved to rank higher than eighth: per §1.1 the imposition tool only runs its
+check when a 64-hex hash is present, and a line with none is `unbound` — it skips the
+comparison **and** names its output exactly as it names a verified one. So the approval
+silently ceased to exist and nothing downstream, including the filename in Drive, could
+distinguish that from a job that passed. Every other item on this list is *noisy* — it
+warns on good files and someone complains. This one was silent.
+
+**The fix** (`pps_proof_carryover_from` + `pps_proof_carryover_signature`,
+`pps-calculators.php`): the three keys are carried from the replaced cart item when the
+artwork path **and** every print-affecting spec field are identical; anything else moved
+and they are dropped, with an `error_log` line naming the reason, because a carried hash
+that asserts a sign-off the spec no longer matches is far worse than the missing one this
+closes. The escape-hatch flag still beats a hash whichever side each arrived from.
+
+The signature is **deny-by-default**: every metadata key counts as print-affecting unless
+it is in an explicit ignore list (shipping, dates, quantity, money, diagnostics, which
+proof was bought). A key the calculators gain in future therefore *blocks* carry-over
+rather than being silently ignored — the cost of blocking is a re-proof, the cost of
+ignoring is a false approval. Quantity is compared out of `sets` while page count is kept,
+so the commonest edit of all keeps its approval.
+
+Gate: `php tools-proof-carryover-test.php` (41 checks). Confirmed to discriminate — a
+scratch copy with the ignore list widened to swallow `pageTransforms`/colour/size fails 6
+checks, and one reverted to carrying nothing fails 11.
+
+**Still open here:** `unbound` and `verified` remain indistinguishable in the imposed
+filename (§1.1). This fix removes the common *cause*; it does not make a residual case
+visible. Marking the unbound output would change filenames for every pre-2026-09 order
+too, so it is an operational decision, not a code one.
 
 ### 7.9 The "I don't have bleeds" answer reaches neither surface
 
