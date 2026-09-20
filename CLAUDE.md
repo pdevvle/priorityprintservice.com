@@ -40,6 +40,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `ups-zone-map-seed.json` | UPS Ground transit days by 3-digit ZIP prefix (1000 entries) |
 | `docs/GO_LIVE_RUNBOOK.md` | The 3.0 go-live: staging de-bloat (Phase 0), selective order-table pull live→staging, freeze-window sequence, auto-increment fix, staging→production push, verification. HPOS confirmed on live. **Read before any go-live or cross-site DB work.** |
 | `docs/PPS_3.1_WC11_PLAN.md` | **The release after go-live**: WooCommerce 11 + Action Scheduler 4.0 update for both sites, compatibility test matrix (Drive/AS artwork pipeline is the top risk), default-on feature postures (POS, abandoned-cart stays OFF), hardening riders. Binding rule it carries: **version freeze — no WC/WP/plugin updates on either site during the go-live window**; WC 11 lands in 3.1, both sites together. |
+| `docs/PROOFER_BRIEF.md` | **Start here for anything proofing.** Handover brief: file inventory, running the ten suites, the old modal's origin/vulnerabilities/per-product usage, the new proofer's design decisions and handshake, modal→proofer parity checklist, the saddle→all-products adaptation plan, invariants, and case studies (incl. order 87152's unscannable QR). |
 | `proof-ui-draft.html` | **The new proof surface.** Standalone document, embeddable by a host — see "Proofing" below. Vanilla JS, its own pdf.js/pdf-lib, its own four test suites. Not a component: the calculator frames it. |
 | `pps-html-deploy.php` | How calculators actually reach production. Also owns retention (v1.5.0): after each deploy it prunes superseded extracted scripts and trims the deploy archive. Accepts `calc-*.html` plus `proof-ui-draft.html` — an explicit list, because this directory is writable by a deploy tool.  Watches `wp-content/plugins/pps-calculators/_pending_html/`; the next WP request copies `*.html` into `wp-content/uploads/pps-calculators/`, updates the registry, archives the source under `_pending_html/_archive/`, and logs to `wp_options['pps_html_deploy_log_v2']`. Also hosts the Bulk Upload admin page (`admin.php?page=pps-bulk-upload`). |
 | `pps-proof-status.php` | Makes `SelfApproved` mean someone signed off in the proofer, rather than "did not buy a staff proof". Rewrites only that token in PPS-Spec, adds a `PPS-Proof` item meta, notes the order when artwork arrived unapproved. **On staging, NOT in `active_plugins` on either site** — until it is activated, every order still reads `SelfApproved`. |
@@ -150,6 +151,14 @@ after any change to shared machinery. `tools-closure-engine-test.mjs` is the gat
 - Output: `IMPOSED_Order-<id>_<job>_<trim>_<imp>up_<sheet>.pdf` filed into the same Drive order folder; the admin queue shows an IMPOSED badge when one exists.
 
 ## Proofing — two surfaces, one of them dark
+
+> **`docs/PROOFER_BRIEF.md` is the handover document for all proofing work.** It carries
+> the full picture: file inventory, how to run the ten suites, the old modal's origin and
+> vulnerabilities, the new proofer's design decisions, a modal→proofer feature-parity
+> checklist, the plan for adapting it from saddle to all eight products, the invariants,
+> and the case studies. Read it before touching `proof-ui-draft.html`, any proof modal,
+> or anything named `tools-proof-*`. The section below is the summary; the brief is the
+> detail.
 
 There are currently **two** proof UIs, and which one a customer sees is a config
 value, not a code path you can read off the file.
