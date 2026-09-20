@@ -2005,6 +2005,11 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const frontInputRef = useRef(null);
   const backInputRef = useRef(null);
   const rawFileRef = useRef(null);
+  // The uploaded PDF's own bytes, kept so the print file can be re-rendered from
+  // the SOURCE at press resolution instead of upscaling the 144 DPI screen
+  // raster. `doc` is the parsed pdf.js handle, cached lazily so a two-sided job
+  // parses once. See renderPdfPageToCanvas().
+  const srcPdfRef = useRef(null);
   const [approvalPkg, setApprovalPkg] = useState(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [genProgress, setGenProgress] = useState(null);
@@ -2133,6 +2138,94 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   }, [txHash]);
 
   // Rotate a dataUrl image by N steps of 90° clockwise
+  // ── Press-resolution source rendering (2026-09-20) ────────────────────────
+  //
+  // The screen raster is deliberately cheap: one 144 DPI render per page, JPEG
+  // 0.85, reused for the proof, the thumbnails and the 3D preview. The print
+  // file must NOT come from it. Upscaling 144 DPI to a 300 DPI canvas and
+  // re-encoding at 0.95 produces a file that is 300 DPI in its header and 144
+  // DPI in its detail — soft type, mushy line art, unreliable QR codes — and it
+  // cannot be recovered downstream.
+  //
+  // So the print path re-renders the customer's own PDF at the resolution the
+  // placement actually needs. Geometry is unchanged: the same draw maths runs
+  // on both paths, only the pixel source differs.
+
+  const PRINT_DPI = 300;
+  // Canvas ceilings. Browsers refuse to allocate past roughly these, and mobile
+  // Safari is the tightest; exceeding them yields a blank canvas, not an error,
+  // so the guard degrades the scale instead of trusting the allocation.
+  const MAX_SRC_SIDE = 10000;
+  const MAX_SRC_AREA = 32e6;
+
+  /**
+   * How many times the page's own size the artwork ends up occupying, which is
+   * what decides the resolution the source has to be rendered at. Mirrors the
+   * fit maths in generateApprovalPackage exactly — if one changes, change both.
+   */
+  function srcScaleMultiplier(tx, ed, bleedW, bleedH) {
+    if (!ed || !ed.wIn || !ed.hIn) return 1;
+    const fm = tx && tx.fitMode;
+    const kW = bleedW / ed.wIn, kH = bleedH / ed.hIn;
+    if (fm === "stretch") return Math.max(kW, kH);
+    if (fm === "cover") return Math.max(kW, kH);
+    if (fm === "scale") return Math.max(0.1, (tx.artScale || 100) / 100);
+    if (fm === "crop") return 1;
+    return Math.min(kW, kH); // contain / fit
+  }
+
+  /** Re-render one page of the uploaded PDF at `ppi`. Null when unavailable. */
+  async function renderPdfPageToCanvas(pageNum, ppi) {
+    const src = srcPdfRef.current;
+    if (!src || !src.buf || !pageNum) return null;
+    try {
+      await window.__ppsPdfJs;
+      if (!src.doc) {
+        // slice() because pdf.js may detach the buffer it is handed.
+        src.doc = await pdfjsLib.getDocument({ data: src.buf.slice(0) }).promise;
+      }
+      if (pageNum > src.doc.numPages) return null;
+      const pg = await src.doc.getPage(pageNum);
+      let scale = Math.max(1, ppi / 72);
+      let vp = pg.getViewport({ scale });
+      const shrink = Math.min(
+        1,
+        MAX_SRC_SIDE / Math.max(vp.width, vp.height),
+        Math.sqrt(MAX_SRC_AREA / Math.max(1, vp.width * vp.height))
+      );
+      if (shrink < 1) { scale *= shrink; vp = pg.getViewport({ scale }); }
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(vp.width));
+      c.height = Math.max(1, Math.round(vp.height));
+      const ctx = c.getContext("2d");
+      if (!ctx) return null;
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, c.width, c.height);
+      await pg.render({ canvasContext: ctx, viewport: vp }).promise;
+      return { canvas: c, ppi: scale * 72, capped: shrink < 1 };
+    } catch (e) {
+      // Never fail the approval over this — fall back to the screen raster,
+      // which is what shipped before, and say so in the manifest.
+      console.warn("[pps] press-resolution re-render failed; using screen raster", e);
+      return null;
+    }
+  }
+
+  /** Rotate a canvas in 90° steps without a JPEG round trip. */
+  function rotateCanvasBySteps(src, steps) {
+    const s = (((steps || 0) % 4) + 4) % 4;
+    if (!s) return src;
+    const swap = s % 2 === 1;
+    const c = document.createElement("canvas");
+    c.width = swap ? src.height : src.width;
+    c.height = swap ? src.width : src.height;
+    const ctx = c.getContext("2d");
+    ctx.translate(c.width / 2, c.height / 2);
+    ctx.rotate((s * Math.PI) / 2);
+    ctx.drawImage(src, -src.width / 2, -src.height / 2);
+    return c;
+  }
+
   function rotateImageBySteps(dataUrl, steps) {
     if (steps <= 0) return Promise.resolve(dataUrl);
     return new Promise(resolve => {
@@ -2311,6 +2404,10 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       if (file.type === "application/pdf") {
         const buf = await file.arrayBuffer();
         await window.__ppsPdfJs;
+        // Keep our own copy BEFORE pdf.js sees it: getDocument may detach the
+        // buffer, and the print path needs these bytes again at press
+        // resolution. This is the whole reason the flats can stop upscaling.
+        srcPdfRef.current = { buf: buf.slice(0), doc: null };
         const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
         window.PPS_PDF_RISKS = {};
         // Runs before the page renders below, so those reuse the operator lists this builds.
@@ -2322,7 +2419,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
           c.width = vp.width; c.height = vp.height;
           await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
           const [x0, y0, x1, y1] = pg.view;
-          return { dataUrl: c.toDataURL("image/jpeg", 0.85), dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } };
+          return { dataUrl: c.toDataURL("image/jpeg", 0.85), pdfPage: num, dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } };
         };
         const front = await renderPage(1);
         setFrontArt({ ...front, file });
@@ -2331,6 +2428,9 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
           setBackArt({ ...back, file });
         }
       } else {
+        // A bitmap replacing a previous PDF: drop the stale source, or the
+        // print path would re-render the OLD file at press resolution.
+        srcPdfRef.current = null;
         const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
         if (!dataUrl) return;
         const dims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
@@ -2359,6 +2459,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     setFrontArt(null); setBackArt(null); setFileName(""); setApproved(false);
     setPageTransforms({}); setTxHistory([]);
     rawFileRef.current = null;
+    srcPdfRef.current = null;
     if (onArtwork) onArtwork({ type: "none" });
   }
 
@@ -2857,8 +2958,8 @@ generate();
     const frontUrl = frontArt ? await rotateImageBySteps(frontArt.dataUrl, frontTx.rotateSteps) : null;
     const backUrl  = backArt  ? await rotateImageBySteps(backArt.dataUrl,  backTx.rotateSteps)  : null;
     const pageSources = [
-      frontArt ? { dataUrl: frontUrl, isBlank: false, label: "Front (Outside)", tx: frontTx, ed: sideEd(frontArt, frontTx.rotateSteps) } : { isBlank: true, label: "Front (Outside)" },
-      backArt  ? { dataUrl: backUrl,  isBlank: false, label: "Back (Inside)",   tx: backTx,  ed: sideEd(backArt,  backTx.rotateSteps)  } : null,
+      frontArt ? { dataUrl: frontUrl, isBlank: false, label: "Front (Outside)", tx: frontTx, ed: sideEd(frontArt, frontTx.rotateSteps), pdfPage: frontArt.pdfPage || null } : { isBlank: true, label: "Front (Outside)" },
+      backArt  ? { dataUrl: backUrl,  isBlank: false, label: "Back (Inside)",   tx: backTx,  ed: sideEd(backArt,  backTx.rotateSteps), pdfPage: backArt.pdfPage || null } : null,
     ].filter(p => p && !p.isBlank);
     if (!pageSources.length) throw new Error("No artwork uploaded");
     const totalPages = pageSources.length;
@@ -2866,7 +2967,10 @@ generate();
     // "No transforms" skip — currently brochure always rasterizes, but keep the flag for manifest
     const noTransforms = pageSources.every(p => p.tx.fitMode === "crop" && p.tx.rotateSteps === 0 && p.tx.artScale === 100
       && (p.tx.posX ?? 50) === 50 && (p.tx.posY ?? 50) === 50);
-    const isSourcePdf = false; // brochure doesn't preserve pdfDoc; always rasterize
+    const isSourcePdf = pageSources.some(p => p.pdfPage) && !!srcPdfRef.current;
+    // Filled in per page below, then reported in the manifest: what the print
+    // file was ACTUALLY composed from. "reported 300 DPI" has to mean something.
+    const srcReport = [];
 
     let printReadyBlob = null;
     const previewBlobs = [];
@@ -2887,17 +2991,42 @@ generate();
         const tx = page.tx;
         const ed = page.ed;
 
-        const srcCanvas = await new Promise(resolve => {
-          const img = new Image();
-          img.onload = () => {
-            const tc = document.createElement("canvas");
-            tc.width = img.naturalWidth; tc.height = img.naturalHeight;
-            tc.getContext("2d").drawImage(img, 0, 0);
-            resolve(tc);
-          };
-          img.onerror = () => resolve(null);
-          img.src = page.dataUrl;
-        });
+        // Press resolution first: re-render the customer's own PDF page at the
+        // DPI this placement needs, rather than enlarging the 144 DPI screen
+        // raster into the 300 DPI canvas below. Rotation is applied to that
+        // canvas directly, avoiding the JPEG round trip rotateImageBySteps does.
+        let srcCanvas = null;
+        if (page.pdfPage) {
+          const needPpi = PRINT_DPI * srcScaleMultiplier(tx, ed, bleedW, bleedH);
+          const hi = await renderPdfPageToCanvas(page.pdfPage, needPpi);
+          if (hi && hi.canvas) {
+            srcCanvas = rotateCanvasBySteps(hi.canvas, tx.rotateSteps);
+            srcReport.push({
+              page: i + 1, from: "pdf",
+              ppi: Math.round(hi.ppi), wanted: Math.round(needPpi), capped: !!hi.capped,
+            });
+          }
+        }
+
+        // Fallback: a bitmap upload, or a PDF we could not re-open. This is the
+        // pre-2026-09-20 behaviour and is upscaled — recorded as such.
+        if (!srcCanvas) {
+          srcCanvas = await new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => {
+              const tc = document.createElement("canvas");
+              tc.width = img.naturalWidth; tc.height = img.naturalHeight;
+              tc.getContext("2d").drawImage(img, 0, 0);
+              resolve(tc);
+            };
+            img.onerror = () => resolve(null);
+            img.src = page.dataUrl;
+          });
+          if (srcCanvas) {
+            const ppi = ed && ed.wIn ? Math.round(srcCanvas.width / ed.wIn) : null;
+            srcReport.push({ page: i + 1, from: page.pdfPage ? "screen-raster-fallback" : "bitmap", ppi, wanted: PRINT_DPI, capped: false });
+          }
+        }
         if (!srcCanvas) throw new Error("Page "+(i+1)+" of "+totalPages+" could not be rendered — the file may be damaged, password-protected, or in a format this browser cannot read. Nothing was approved.");
 
         const c = document.createElement("canvas");
@@ -3003,6 +3132,27 @@ generate();
     });
     manifestLines.push("", "── Notes ──");
     if (noTransforms) manifestLines.push("No customer transforms were applied on either side.");
+
+    // PRINT RESOLUTION — what the file was actually composed from, per page.
+    // Before 2026-09-20 every page here was a 144 DPI raster enlarged into a
+    // 300 DPI canvas, so the stated DPI meant nothing. It has to be checkable.
+    if (srcReport.length) {
+      manifestLines.push("");
+      manifestLines.push("PRINT RESOLUTION");
+      manifestLines.push(`  Output canvas: ${PRINT_DPI} DPI (${canvasW} × ${canvasH} px)`);
+      for (const r of srcReport) {
+        if (r.from === "pdf") {
+          manifestLines.push(
+            `  Page ${r.page}: re-rendered from the source PDF at ${r.ppi} DPI` +
+            (r.capped ? ` (capped from ${r.wanted} DPI by this browser's canvas limit)` : "")
+          );
+        } else if (r.from === "bitmap") {
+          manifestLines.push(`  Page ${r.page}: bitmap upload, ${r.ppi ? r.ppi + " DPI" : "resolution unknown"} at placed size — not re-renderable`);
+        } else {
+          manifestLines.push(`  Page ${r.page}: SOURCE RE-RENDER FAILED — composed from the ${r.ppi ? r.ppi + " DPI" : "screen"} proof raster and upscaled`);
+        }
+      }
+    }
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 

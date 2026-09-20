@@ -87,6 +87,7 @@ a real origin).
 | `tools-proof-package-test.mjs` | **DEAD.** Pre-harness prototype: imports `./node_modules/playwright`, reads `ui/vendor/`, opens the file over `file://`, needs an uncommitted `test-art.pdf`. Superseded by the draft + progress suites. Delete or revive; do not count it as green. |
 | `tools-proof-serve.mjs` | Static server on `127.0.0.1:8137` + `/vendor/`. Its second log line names `node_modules` regardless of where it found the libraries — trust `curl -sI http://127.0.0.1:8137/vendor/pdf.min.js`. Its header still says "three suites"; stale. |
 | `tools-proof-vendor.mjs` | Installs the proofer's pinned pdf.js 3.11.174 / pdf-lib 1.17.1 into `proof-vendor/`. `--check` reports without installing. |
+| `tools-flat-print-dpi-test.mjs` | **Does the flats' print file carry real 300 DPI detail?** Uploads a fixture with a 75 lp/in bar band, drives the real proof + Approve, hooks `jsPDF.addImage` to grab the page image, and measures luminance SD across the band. A dimensions check would have passed the entire time the bug existed — the canvas was always 300 DPI-shaped — so this measures detail, which upscaling cannot fake. Run per flat with `PPS_CALC_PAGE`. Needs a harness page (`tools-harness-prep.mjs`) + `PPS_HARNESS_DIR`. Pre-fix sd 43, post-fix sd ~90, threshold 70. |
 
 `PPS_PROOF_VENDOR_DIR` is read **only** by the serve and vendor tools. Passing it to a suite
 is harmless and does nothing.
@@ -190,7 +191,27 @@ pricing, upload, composition, proofing, PDF generation and cart submission.
   screen to print; **no SHA-256 is ever computed** (the `pps_proof_hash` post branch at
   `calc-brochure.html:4646-4648` exists in all seven but `artFiles.proofHash` is never set,
   so it is inert plumbing — do not read its presence as binding); no acknowledgment
-  gate; **always rasterise** (`calc-brochure.html:2866-2869`, `isSourcePdf = false`).
+  gate; **always rasterise** — there is still no raw/vector pass-through on the flats.
+
+  **Their print file now carries real 300 DPI (2026-09-20).** It did not before. Each
+  flat rendered an uploaded PDF exactly once, at pdf.js `scale: 2` = **144 DPI**, JPEG
+  0.85, kept only that raster, then drew it into the 300 DPI print canvas and re-encoded
+  at 0.95 — a file that declared 300 DPI and carried 144, plus a second JPEG generation.
+  No 300 DPI render existed anywhere in those five files (a 300 DPI viewport is
+  `scale ≈ 4.17`; the only scale present was `2`). Saddle, perfect bound and coupon were
+  never affected — they re-render from the PDF at the requested DPI.
+
+  The fix keeps the cheap 144 DPI raster for the screen and re-renders the customer's own
+  PDF at press resolution for the print file only: `srcPdfRef` retains the uploaded bytes
+  (copied before pdf.js can detach them), `srcScaleMultiplier()` works out the DPI the
+  placement needs, `renderPdfPageToCanvas()` produces it under a canvas-area cap, and
+  rotation happens on that canvas instead of through another JPEG. Geometry is untouched —
+  the same draw maths runs on both paths, only the pixel source differs, which is the
+  property that keeps screen and print in agreement. Bitmap uploads are unchanged (there
+  is nothing to re-render), and a failed re-render silently falls back to the old path.
+  The manifest gained a **PRINT RESOLUTION** section naming, per page, what the file was
+  actually composed from — because "300 DPI" has to be checkable.
+  Gate: `tools-flat-print-dpi-test.mjs` (§1.2).
 
 So "the proof system" is really two systems, and every parity claim you inherit applies
 to saddle only.
@@ -255,7 +276,11 @@ The PPS-Spec proof token is derived from the **purchase**, not from any sign-off
 - **pdf.js version collision.** Calculators load 4.10.38 ESM; the proofer pins 3.11.174
   UMD. Both claim `window.pdfjsLib`.
 - **Lossy-by-default print path** whenever the raw path is not taken: extraction JPEG
-  q0.8 (`:2243`), print JPEG q0.95 (`:3693`), previews q0.85.
+  q0.8 (`:2243`), print JPEG q0.95 (`:3693`), previews q0.85. On saddle the print branch
+  re-renders from the PDF, so the q0.8 extraction is screen-only; on the five flats it
+  fed the print file until 2026-09-20 (above), which made it a double JPEG on top of the
+  upscale. Still lossy by default everywhere — the remaining fix is a raw/vector
+  pass-through (§7.0), not a higher quality number.
 - **The raw-path tolerance punishes good files.** A file with 0.25″ bleed for a 0.125″
   spec misses `< 0.25` by exactly zero and is rasterised. §9.1.
 

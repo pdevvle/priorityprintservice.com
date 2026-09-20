@@ -53,6 +53,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-delivery-date-guard-test.php` | Drives `pps-delivery-date-guard.php` against stubs: a Sunday moves to the Monday and the human-readable twin moves with it, a good date is untouched, `2026-13-45` is refused rather than rolled over, a shop that is never open leaves the date alone rather than replacing it with one a year out, and the order note lands exactly once across both checkout hooks. Also pins the two pi-edd filter NAMES and arg counts — a filter that does not exist fails silently and would leave that whole section looking like it worked. |
 | `tools-order-blockers-test.mjs` | The two guards from the 2026-09-15 checkout blocker: the registry (not the database) decides whether WCPA owns a product, and a refused checkout on a calculator cart is recorded to `pps_checkout_refusals` instead of costing a silent order. Also pins the things that stop the tripwire becoming the failure it watches for — wrapped, bounded, autoload-off, scoped to PPS carts. |
 | `tools-closure-engine-test.mjs` | **The shop closes, and every calculator has to know it.** Static half pins the config path (`_CFG.closures`, never the `pcf` sub-array) and that no bare weekend test survives in the counting loops; behavioural half extracts `isBusinessDay`/`addBusinessDays`/`businessDaysBetween` out of each COMPILED build and runs them against a real holiday. Confirmed to discriminate — against the pre-fix brochure, `addBusinessDays(Wed 25 Nov, 1)` returns Thanksgiving. 72 checks. |
+| `tools-flat-print-dpi-test.mjs` | **The flats' print file has to carry the resolution it claims.** Each flat rendered an uploaded PDF once at pdf.js `scale: 2` (**144 DPI**), JPEG 0.85, kept only that raster, then enlarged it into the 300 DPI print canvas and re-encoded at 0.95 — 300 DPI in the header, 144 in the detail, plus a second JPEG generation. No 300 DPI render existed anywhere in those five files. Soft type, mushy line art, unreliable QR codes, unrecoverable downstream. A dimensions check would have passed the whole time the bug existed, so this uploads a 75 lp/in bar fixture, drives the real proof and Approve, hooks `jsPDF.addImage` and measures luminance SD across the band: interpolation cannot invent detail it never had. Pre-fix sd 43, post-fix ~90, threshold 70. One flat per run via `PPS_CALC_PAGE`. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
@@ -78,6 +79,46 @@ Affected saddle and coupon-book, which shared the code. Perfect bound already
 took page 1 only; the five flats have front/back sheet slots and were always
 right. `tools-slot-upload-test.mjs` is the gate, and it runs against both the
 saddle and coupon builds.
+
+## Print resolution — screen raster vs press raster
+
+Every calculator renders an uploaded PDF cheaply on ingest — pdf.js `scale: 2`
+(**144 DPI**), JPEG 0.85 — and reuses that raster for the proof, the thumbnails and the
+3D preview. That is correct and should stay: it is what makes the proof responsive.
+
+**What must never happen is the print file coming from it.** Until 2026-09-20 all five
+flats did exactly that: `generateApprovalPackage()` drew the 144 DPI raster into a 300 DPI
+canvas and re-encoded at 0.95. The output declared 300 DPI and carried 144, through two
+JPEG generations. There was no 300 DPI render anywhere in those files — a 300 DPI viewport
+is `scale ≈ 4.17` and the only scale present was `2`. Saddle, perfect bound and coupon were
+never affected; their composition engine re-renders from the PDF at the DPI asked for.
+
+The shape of the fix, if you touch this again:
+
+- `srcPdfRef` keeps the uploaded bytes, **copied with `buf.slice(0)` before pdf.js sees
+  them** — `getDocument` may detach the buffer it is handed.
+- `srcScaleMultiplier(tx, ed, bleedW, bleedH)` returns how many times its own size the art
+  ends up occupying, which is what sets the needed DPI. **It mirrors the fit maths in
+  `generateApprovalPackage` — if one changes, change both**, or the print file quietly
+  under-renders for one fit mode.
+- `renderPdfPageToCanvas()` does the render behind a canvas-area cap (mobile Safari returns
+  a blank canvas rather than an error when you exceed it, so the guard degrades the scale
+  instead of trusting the allocation), and returns null on any failure so approval can
+  never break over this.
+- Rotation happens on that canvas via `rotateCanvasBySteps`, not through
+  `rotateImageBySteps`, which re-encodes JPEG 0.85 and would add a third generation.
+- **Geometry is untouched.** The same draw maths runs on both paths; only the pixel source
+  differs. That is the property that keeps screen and print in agreement — the 87032 class
+  of bug is two different composition paths, and this is deliberately not that.
+- Bitmap uploads are unchanged: there is nothing to re-render, and the DPI warning already
+  covers them. A failed re-render falls back to the old path silently.
+- The manifest gained a **PRINT RESOLUTION** section naming, per page, what the file was
+  actually composed from. "300 DPI" has to be checkable.
+
+Still open: there is no raw/vector pass-through on the flats — a press-ready PDF is still
+rasterised, just at the right resolution now. `docs/PROOFER_BRIEF.md` §7.0.
+
+`tools-flat-print-dpi-test.mjs` is the gate, and it must be run per flat.
 
 ## Shop closures — the calculators are copies, not modules
 
