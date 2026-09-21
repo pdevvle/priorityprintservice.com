@@ -183,6 +183,13 @@ pricing, upload, composition, proofing, PDF generation and cart submission.
   matches print exactly. Two display-only residues still use CSS `object-fit`: the slot
   grid thumbnails (`:4984`) and the 3D preview before `trimmedPages` exists (`:5592`).
   Neither feeds the print file.
+- **Perfect bound and coupon book copied the saddle's generator but not its 2026-08-24
+  fix.** Until 2026-09-21 they chose the PDF page to re-render as `i + 1` (display index),
+  not `page.srcPdfPage`. With an 8-page upload into a 20-page book the back cover sits at
+  index 19, `i + 1` points past the PDF, and the back cover was printed from its 108 DPI
+  thumbnail; a page shifted by a blank, or replaced by a slot upload, would have printed
+  the wrong page. Found by `tools-book-print-dpi-test.mjs` (§9.5), fixed the same day. All
+  three booklets also placed the source on a fractional offset, resampling every page.
 - **The other seven** show the proof as a CSS-positioned `<img>` (`calc-brochure.html:3544`)
   but build the print file on a **separate canvas path** — `generateApprovalPackage()`
   with `drawGuides()`, a 300 DPI canvas, jsPDF JPEG q0.95, 150 DPI previews and a manifest
@@ -719,8 +726,10 @@ exists — though from here that is indistinguishable from the check never runni
 `_pps_proof_hash` on an HPOS order is not readable through the MCP tools.
 
 **What is hypothesis.** This is a saddle order, so the flats' 144 DPI print path (§9.5)
-does not apply — the saddle renders at `DPI / 72`. Rasterisation alone does not explain
-it: order 87202, a week later, took the same code branch and its QR was reported fine — but 87202's art was
+does not apply — the saddle renders at `DPI / 72`. But the saddle's print path did
+degrade it: until 2026-09-21 the rendered page was placed on a fractional offset and
+resampled, measured at 20% mid-grey over a QR that should read 0% (§9.5). That is a
+confirmed contributor, not the whole story. Rasterisation alone does not explain it: order 87202, a week later, took the same code branch and its QR was reported fine — but 87202's art was
 downscaled ~1.9× under `fit=cover`, which raises the effective DPI of any placed bitmap,
 so it is a weaker control than "identical." The leading explanation is that the QR was a
 low-resolution placed bitmap inside the PDF (§7.1) — **unconfirmed**; nobody has opened
@@ -770,6 +779,17 @@ already ruined, and the manifest called it 300 DPI.
 whether the customer's QR was itself vector has not been checked from here. A reprint
 from the fixed build will settle it: if the QR is still soft, the source is a bitmap and
 §7.1 applies.
+
+**Then the booklets were measured instead of trusted.** The line above about the booklets
+rendering at `DPI / 72` was itself read off the code. `tools-book-print-dpi-test.mjs`
+drives saddle, perfect bound and coupon with an 8-page 6″ × 9″ QR PDF (0.25″ off the
+bleed sheet, so rasterised, as 87152 was). First run: every page on all three measured
+20% mid-grey — the source was placed at `(canvasW - drawW) / 2`, a fractional offset, and
+Canvas resampled the whole sheet; and page 8 on perfect bound and coupon measured 50%,
+because it was the back cover moved to book page 20 and rendered from its 108 DPI
+thumbnail (§2). After whole-pixel placement and `srcPdfPage`: 0% on every page of all
+three. So on order 87152 the saddle's own print path *did* soften the QR, measurably,
+before any question of what was inside the PDF.
 
 **Two lessons.** First, a number in a manifest is a claim, not a measurement — the
 manifest said 300 DPI because a constant said 300. Second, the flats are the live
