@@ -185,12 +185,26 @@ pricing, upload, composition, proofing, PDF generation and cart submission.
   Neither feeds the print file.
 - **The other seven** show the proof as a CSS-positioned `<img>` (`calc-brochure.html:3544`)
   but build the print file on a **separate canvas path** — `generateApprovalPackage()`
-  with `drawGuides()`, 300 DPI, jsPDF JPEG q0.95, 150 DPI previews and a manifest
+  with `drawGuides()`, a 300 DPI canvas, jsPDF JPEG q0.95, 150 DPI previews and a manifest
   (`:2781-3010`). Same four deliverables as saddle. What they genuinely lack: nothing ties
   screen to print; **no SHA-256 is ever computed** (the `pps_proof_hash` post branch at
   `calc-brochure.html:4646-4648` exists in all seven but `artFiles.proofHash` is never set,
   so it is inert plumbing — do not read its presence as binding); no acknowledgment
   gate; **always rasterise** (`calc-brochure.html:2866-2869`, `isSourcePdf = false`).
+- **The five flats printed the screen preview until 2026-09-21.** Brochure, postcard,
+  letterhead, greeting card and sticker rendered an uploaded PDF exactly once, at upload,
+  with pdf.js at `scale: 2` — 144 DPI, JPEG q0.85 — for the on-screen proof, and
+  `generateApprovalPackage()` then decoded *that* JPEG and drew it up onto the 300 DPI
+  canvas, on a fractional pixel offset that resampled the whole sheet a second time. The
+  manifest said "300 DPI"; the pixels were 144 DPI blown up 2.08×. Perfect bound and
+  coupon book, which the flats' generator was copied from, render the page at `DPI / 72`
+  and never had it. Order 87171 (§9.5) is the customer who found out. Now each PDF side
+  is rendered again from its own bytes at the print DPI inside the generator
+  (`ppsPrintSourceCanvas()`), placed on whole pixels, and the manifest names the source
+  per side (`print source: pdf page 1 rendered at 300 DPI`).
+  `tools-flat-print-dpi-test.mjs` is the gate. This is the same failure shape as the new
+  proofer's §7.0 — a print file built from the screen render — on the surface that is
+  actually live.
 
 So "the proof system" is really two systems, and every parity claim you inherit applies
 to saddle only.
@@ -704,8 +718,9 @@ the hash bound to the rasterised bytes, an `IMPOSED_` file with no `_UNAPPROVED`
 exists — though from here that is indistinguishable from the check never running, since
 `_pps_proof_hash` on an HPOS order is not readable through the MCP tools.
 
-**What is hypothesis.** Rasterisation alone does not explain it: order 87202, a week
-later, took the same code branch and its QR was reported fine — but 87202's art was
+**What is hypothesis.** This is a saddle order, so the flats' 144 DPI print path (§9.5)
+does not apply — the saddle renders at `DPI / 72`. Rasterisation alone does not explain
+it: order 87202, a week later, took the same code branch and its QR was reported fine — but 87202's art was
 downscaled ~1.9× under `fit=cover`, which raises the effective DPI of any placed bitmap,
 so it is a weaker control than "identical." The leading explanation is that the QR was a
 low-resolution placed bitmap inside the PDF (§7.1) — **unconfirmed**; nobody has opened
@@ -731,6 +746,39 @@ between a customer and a press.
 The modal's greyscale was a CSS filter; the package generator never applied it; page 28
 went to Drive in colour. Same failure shape as 87032 — screen and print composed by
 different code — on a different axis. Fixed in both surfaces 2026-09-11.
+
+### 9.5 Order 87171 — the QR code that was printed from the screen preview
+
+**What the records show.** A 3-panel accordion brochure, 21″ × 7″ trim, two-sided, from
+a two-page 11 MB PDF at 21.5″ × 7.5″ (0.25″ bleed against the 0.125″ ordered — so, as on
+87152, `|art − bleed| = 0.25` and no raw path; on a flat there is no raw path anyway).
+Crop, 0°, 100%. Placed 2026-09-09, shipped 2026-09-15. The customer reported the QR code
+on the printed piece would not scan.
+
+**What is confirmed, from the print-ready file on Drive.** The QR sits on the outside at
+0.78″ across with modules of about 4 px at 300 DPI (0.013″), a logo knocked out of its
+centre. OpenCV finds the finder patterns and cannot decode it. Over the QR's area, 26.5 %
+of pixels are mid-grey (60–195) and the Laplacian variance is 1,873 — the signature of a
+soft upscale, not of a crisp render. The same measurement on the pre-fix brochure build
+driven with a clean vector QR at the same module size gives 35.7 % and 2,551; on the
+fixed build, 0.0 % and 18,654. The cause is in §2: the print file was the 144 DPI
+preview JPEG drawn up 2.08× and resampled once more on a half-pixel offset. A module of
+0.013″ is 1.9 px at 144 DPI. Everything after that was faithful to a file that was
+already ruined, and the manifest called it 300 DPI.
+
+**What is not confirmed.** The raw file exceeds the Drive tool's 10 MB download limit, so
+whether the customer's QR was itself vector has not been checked from here. A reprint
+from the fixed build will settle it: if the QR is still soft, the source is a bitmap and
+§7.1 applies.
+
+**Two lessons.** First, a number in a manifest is a claim, not a measurement — the
+manifest said 300 DPI because a constant said 300. Second, the flats are the live
+surface for five products, and their generator was a "parameterized copy" of the
+booklets' that quietly dropped the one line that mattered (`scale: DPI / 72`).
+`tools-flat-print-dpi-test.mjs` now measures the print file itself, and it was run
+against the old build first to prove it fails there. It also turned up that the sticker
+uploader threw `setBackArt is not defined` on any multi-page PDF — a state the flats'
+copy assumed and the sticker never declared — which is fixed in the same commit.
 
 ---
 

@@ -1217,6 +1217,12 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
   const backColor = "bw"; // unused but kept for code path compat
   const [frontArt, setFrontArt] = useState(null); // {dataUrl, file, dims:{w,h}}
   const backArt = null;
+  // Stickers are one artwork, step-and-repeated. The upload path was copied from
+  // the two-sided flats and still called setBackArt for page 2 of a PDF and on
+  // clear — which threw "setBackArt is not defined" and told the customer "We
+  // couldn't read that file" after page 1 had already loaded (found 2026-09-21
+  // by tools-flat-print-dpi-test.mjs). A second page is simply not a side here.
+  const setBackArt = () => {};
   // Push frontArt up to the parent so the sidebar preview can mirror it
   useEffect(() => { if (onCoverArt) onCoverArt(frontArt); }, [frontArt, onCoverArt]);
   // Expose imperative open-preview hook for the sidebar preview card
@@ -1349,6 +1355,68 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
   }, [txHash]);
 
   // Rotate a dataUrl image by N steps of 90° clockwise
+  // Print-resolution source for one side.
+  //
+  // Until 2026-09-21 the print-ready PDF was built from the JPEG made at upload
+  // for the SCREEN preview (pdf.js at scale 2 = 144 DPI, quality 0.85), drawn
+  // up onto the 300 DPI canvas. So every PDF a customer uploaded on a flat
+  // product was printed at less than half the resolution the manifest claimed,
+  // and a QR code with 1pt modules (under 2 px at 144 DPI) was mush by the time
+  // it reached the press — order 87171. The booklets never had this: their
+  // generator renders the PDF page at DPI / 72.
+  //
+  // A PDF side is now rendered again from its own bytes at the print DPI. A
+  // raster upload is decoded once at its native pixels. Rotation happens on the
+  // canvas, so nothing is re-encoded as JPEG on the way to the press. If the
+  // print render fails, the preview raster is NOT used silently — the customer
+  // gets the same "could not be rendered" refusal as any other broken page.
+  async function ppsPrintSourceCanvas(art, rotateSteps, dpi, fallbackDataUrl) {
+    let src = null, from = "raster";
+    const file = art && art.file;
+    if (file && file.type === "application/pdf") {
+      await window.__ppsPdfJs;
+      const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+      try {
+        const pageNo = Math.min(Math.max(1, art.pdfPage || 1), pdf.numPages);
+        const pg = await pdf.getPage(pageNo);
+        const vp = pg.getViewport({ scale: dpi / 72 });
+        const c = document.createElement("canvas");
+        c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+        await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+        src = c; from = "pdf page " + pageNo + " rendered at " + dpi + " DPI";
+      } finally { try { pdf.destroy(); } catch (_) {} }
+    } else {
+      src = await new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          const tc = document.createElement("canvas");
+          tc.width = img.naturalWidth; tc.height = img.naturalHeight;
+          tc.getContext("2d").drawImage(img, 0, 0);
+          resolve(tc);
+        };
+        img.onerror = () => resolve(null);
+        img.src = (art && art.dataUrl) || fallbackDataUrl;
+      });
+      if (src) from = "raster upload at " + src.width + "\u00d7" + src.height + " px";
+    }
+    if (!src) return null;
+    const s = ((rotateSteps % 4) + 4) % 4;
+    let out = src;
+    if (s) {
+      const swap = s % 2 === 1;
+      const c = document.createElement("canvas");
+      c.width = swap ? src.height : src.width;
+      c.height = swap ? src.width : src.height;
+      const ctx = c.getContext("2d");
+      ctx.translate(c.width / 2, c.height / 2);
+      ctx.rotate((s * Math.PI) / 2);
+      ctx.drawImage(src, -src.width / 2, -src.height / 2);
+      out = c;
+    }
+    out.__ppsFrom = from;
+    return out;
+  }
+
   function rotateImageBySteps(dataUrl, steps) {
     if (steps <= 0) return Promise.resolve(dataUrl);
     return new Promise(resolve => {
@@ -1530,10 +1598,10 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
           return { dataUrl: c.toDataURL("image/jpeg", 0.85), dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } };
         };
         const front = await renderPage(1);
-        setFrontArt({ ...front, file });
+        setFrontArt({ ...front, file, pdfPage: 1 });
         if (pdf.numPages >= 2) {
           const back = await renderPage(2);
-          setBackArt({ ...back, file });
+          setBackArt({ ...back, file, pdfPage: 2 });
         }
       } else {
         const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
@@ -1650,11 +1718,11 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
     // Pages-shim — pre-rotate each side with its OWN rotateSteps
     const frontTx = getTx("front");
     const backTx  = getTx("back");
-    const frontUrl = frontArt ? await rotateImageBySteps(frontArt.dataUrl, frontTx.rotateSteps) : null;
-    const backUrl  = backArt  ? await rotateImageBySteps(backArt.dataUrl,  backTx.rotateSteps)  : null;
+    const frontUrl = frontArt ? frontArt.dataUrl : null; // rotation is applied on the print canvas (ppsPrintSourceCanvas)
+    const backUrl  = backArt  ? backArt.dataUrl  : null;
     const pageSources = [
-      frontArt ? { dataUrl: frontUrl, isBlank: false, label: "Front", tx: frontTx, ed: sideEd(frontArt, frontTx.rotateSteps) } : { isBlank: true, label: "Front" },
-      backArt  ? { dataUrl: backUrl,  isBlank: false, label: "Back",  tx: backTx,  ed: sideEd(backArt,  backTx.rotateSteps)  } : null,
+      frontArt ? { dataUrl: frontUrl, isBlank: false, label: "Front", tx: frontTx, art: frontArt, ed: sideEd(frontArt, frontTx.rotateSteps) } : { isBlank: true, label: "Front" },
+      backArt  ? { dataUrl: backUrl,  isBlank: false, label: "Back",  tx: backTx,  art: backArt,  ed: sideEd(backArt,  backTx.rotateSteps)  } : null,
     ].filter(p => p && !p.isBlank);
     if (!pageSources.length) throw new Error("No artwork uploaded");
     const totalPages = pageSources.length;
@@ -1682,17 +1750,8 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
         const tx = page.tx;
         const ed = page.ed;
 
-        const srcCanvas = await new Promise(resolve => {
-          const img = new Image();
-          img.onload = () => {
-            const tc = document.createElement("canvas");
-            tc.width = img.naturalWidth; tc.height = img.naturalHeight;
-            tc.getContext("2d").drawImage(img, 0, 0);
-            resolve(tc);
-          };
-          img.onerror = () => resolve(null);
-          img.src = page.dataUrl;
-        });
+        const srcCanvas = await ppsPrintSourceCanvas(page.art, tx.rotateSteps, DPI, page.dataUrl);
+        page.renderedFrom = srcCanvas && srcCanvas.__ppsFrom;
         if (!srcCanvas) throw new Error("Page "+(i+1)+" of "+totalPages+" could not be rendered — the file may be damaged, password-protected, or in a format this browser cannot read. Nothing was approved.");
 
         const c = document.createElement("canvas");
@@ -1708,14 +1767,18 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
           const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
           const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
           const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
-          const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
-          ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+          let drawW = canvasW * nativeW, drawH = canvasH * nativeH;
+          // The source was rendered at this DPI, so at 100% it IS the canvas size
+          // give or take rounding: copy it 1:1 rather than resample it by a hair.
+          if (Math.abs(drawW - srcW) < 1 && Math.abs(drawH - srcH) < 1) { drawW = srcW; drawH = srcH; }
+          else { drawW = Math.round(drawW); drawH = Math.round(drawH); }
+          ctx.drawImage(srcCanvas, Math.round((canvasW - drawW) / 2), Math.round((canvasH - drawH) / 2), drawW, drawH);
         } else if (tx.fitMode === "cover") {
           const sc = Math.max(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+          ctx.drawImage(srcCanvas, Math.round((canvasW - srcW * sc) / 2), Math.round((canvasH - srcH * sc) / 2), srcW * sc, srcH * sc);
         } else {
           const sc = Math.min(canvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+          ctx.drawImage(srcCanvas, Math.round((canvasW - srcW * sc) / 2), Math.round((canvasH - srcH * sc) / 2), srcW * sc, srcH * sc);
         }
 
         pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, bleedW, bleedH);
@@ -1782,6 +1845,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
       const dimsStr = p.ed ? `${p.ed.wIn}″ × ${p.ed.hIn}″ post-rotation` : "N/A";
       manifestLines.push(`  ${i + 1}: ${p.label}`);
       manifestLines.push(`    fit=${p.tx.fitMode} rotate=${p.tx.rotateSteps * 90}° scale=${p.tx.artScale}%  [${dimsStr}]`);
+      manifestLines.push(`    print source: ${p.renderedFrom || "unknown"}`);
     });
     manifestLines.push("", "── Notes ──");
     if (noTransforms) manifestLines.push("No customer transforms were applied on either side.");
@@ -1876,7 +1940,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
                     c.width = vp.width; c.height = vp.height;
                     await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
                     const [x0, y0, x1, y1] = pg.view;
-                    setArt({ dataUrl: c.toDataURL("image/jpeg", 0.85), file, dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } });
+                    setArt({ dataUrl: c.toDataURL("image/jpeg", 0.85), file, pdfPage: 1, dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } });
                     setApproved(false);
                     return;
                   }
