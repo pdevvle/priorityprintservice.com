@@ -477,8 +477,58 @@ function pps_paylink_extract_conversation( $payload ) {
  * Best effort remains best effort: if shutdown never runs, the link still
  * exists and is still in the response body.
  */
+/**
+ * Marker carried by every note we post, so we can recognise our own words
+ * coming back at us.
+ *
+ * The webhook fires on new messages in a conversation, and a note we post IS a
+ * new message. Without this the module can answer itself: on 2026-09-21 a
+ * refusal note was parsed as a fresh command, refused again, and posted again,
+ * spamming the thread. Worse, that note's own help text ("write it as $250")
+ * carries a parseable price -- a self-reply could have minted a real link for
+ * $250. Two independent guards now stop it: the command prefix is required
+ * (pps_paylink_looks_like_command) and any text carrying this marker is
+ * ignored outright.
+ */
+const PPS_PAYLINK_NOTE_MARK = "\u{2063}pps-pay-link\u{2063}";
+
+/**
+ * Whether this text is an operator issuing a command, rather than a customer
+ * talking or us talking back.
+ *
+ * The parser STRIPS an optional /ppspay prefix but never required one, so every
+ * message in the conversation was treated as a possible command. Requiring the
+ * slash is what makes "can you do it for $250?" and our own refusals inert.
+ */
+function pps_paylink_looks_like_command( $text ) {
+    return (bool) preg_match( '#^\s*/(ppspay|paylink|pay|quote)\b#i', (string) $text );
+}
+
+/** The same test without the slash -- used only to explain a near miss in the log. */
+function pps_paylink_looks_like_bare_command( $text ) {
+    return (bool) preg_match( '#^\s*(ppspay|paylink)\b#i', (string) $text );
+}
+
+/**
+ * At most a few refusals per conversation per window.
+ *
+ * The prefix rule closes the loop we actually had. This closes the loops we
+ * have not thought of: whatever makes the module talk to itself next, the
+ * thread stops filling after a handful of notes instead of running all night.
+ */
+function pps_paylink_refusal_allowed( $conversation_id ) {
+    if ( ! $conversation_id ) return false;
+    $key = 'pps_paylink_refuse_' . md5( (string) $conversation_id );
+    $n   = (int) get_transient( $key );
+    if ( $n >= 3 ) return false;
+    set_transient( $key, $n + 1, 10 * MINUTE_IN_SECONDS );
+    return true;
+}
+
 function pps_paylink_queue_note( $conversation_id, $text ) {
     if ( ! $conversation_id ) return;
+    // Every note carries the marker, so the next webhook can recognise it.
+    $text = rtrim( (string) $text ) . "\n\n" . PPS_PAYLINK_NOTE_MARK;
     add_action( 'shutdown', function () use ( $conversation_id, $text ) {
         pps_paylink_missive_note( $conversation_id, $text );
     }, 20 );
@@ -726,6 +776,31 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
                 'message' => 'No description/price fields and no readable text in the payload. The keys received have been recorded on the Pay Links screen.',
             ), 400 );
         }
+        // Our own note, come back to us as a new message. Answering it is how
+        // the thread filled with refusals on 2026-09-21. Silence is the whole
+        // fix: no note, no 400, nothing for a rule to react to.
+        if ( false !== strpos( $text, PPS_PAYLINK_NOTE_MARK ) ) {
+            pps_paylink_log_outcome( 'own_note', array( 'conversation' => '' !== $conversation ) );
+            return new WP_REST_Response( array( 'ok' => true, 'ignored' => 'own_note' ), 200 );
+        }
+
+        // A webhook that fires on every message must act only on an explicit
+        // command. Anything else -- a customer replying, a colleague's comment,
+        // our own words -- is not ours to answer, and answering it is what made
+        // the loop possible in the first place.
+        if ( ! pps_paylink_looks_like_command( $text ) ) {
+            pps_paylink_log_outcome( 'not_command', array(
+                // Recorded so a workflow broken by requiring the slash is
+                // visible here rather than silently stopping.
+                'near_miss'    => pps_paylink_looks_like_bare_command( $text ),
+                'text_len'     => strlen( $text ),
+                'conversation' => '' !== $conversation,
+            ) );
+            // 200, not 400: from the sender's side nothing went wrong, and a
+            // 4xx invites a retry of something we deliberately did not do.
+            return new WP_REST_Response( array( 'ok' => true, 'ignored' => 'not_command' ), 200 );
+        }
+
         $parsed = pps_paylink_parse_command( $text );
         if ( is_wp_error( $parsed ) ) {
             pps_paylink_log_outcome( 'parse_refused', array(
@@ -735,8 +810,10 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
                 'has_dollar'   => ( false !== strpos( $text, '$' ) ),
                 'conversation' => '' !== $conversation,
             ) );
-            pps_paylink_queue_note( $conversation,
-                "⚠️ No pay link was created.\n\n" . $parsed->get_error_message() );
+            if ( pps_paylink_refusal_allowed( $conversation ) ) {
+                pps_paylink_queue_note( $conversation,
+                    "⚠️ No pay link was created.\n\n" . $parsed->get_error_message() );
+            }
             return new WP_REST_Response( array(
                 'ok' => false, 'error' => $parsed->get_error_code(), 'message' => $parsed->get_error_message(),
             ), 400 );
@@ -760,8 +837,10 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
             'error'        => $res->get_error_code(),
             'conversation' => '' !== $conversation,
         ) );
-        pps_paylink_queue_note( $conversation,
-            "⚠️ No pay link was created.\n\n" . $res->get_error_message() );
+        if ( pps_paylink_refusal_allowed( $conversation ) ) {
+            pps_paylink_queue_note( $conversation,
+                "⚠️ No pay link was created.\n\n" . $res->get_error_message() );
+        }
         return new WP_REST_Response( array(
             'ok'    => false,
             'error' => $res->get_error_code(),

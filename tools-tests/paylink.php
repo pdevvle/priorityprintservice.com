@@ -384,5 +384,33 @@ foreach (pps_paylink_health() as $c) {
     if ($c['ok']) { ok('passing check adds no noise', $c['detail'], ''); break; }
 }
 
+// --- only an explicit command counts
+// The loop of 2026-09-21: the parser stripped an optional /ppspay but never
+// required one, so our own refusal note was read as a fresh command, refused,
+// and posted again. Its help text carries "$250", so a self-reply could also
+// have minted a real link.
+ok('slash command',     pps_paylink_looks_like_command('/ppspay [job] $250'), true);
+ok('alias /pay',        pps_paylink_looks_like_command('/pay [job] $250'), true);
+ok('leading space ok',  pps_paylink_looks_like_command('   /ppspay [job] $250'), true);
+ok('case insensitive',  pps_paylink_looks_like_command('/PPSPay [job] $250'), true);
+
+// The exact note that spammed the thread must be inert.
+$loop = "⚠️ No pay link was created.\n\nNo price found. Write it as $250, outside the brackets.";
+ok('our own note is not a command', pps_paylink_looks_like_command($loop), false);
+// And it carries a price, which is why silence matters more than a better refusal.
+ok('...though it does carry a price', pps_paylink_parse_price('$250'), 250.0);
+
+// Customers and colleagues talking.
+ok('customer question',  pps_paylink_looks_like_command('Can you do it for $250?'), false);
+ok('bare word refused',  pps_paylink_looks_like_command('ppspay [job] $250'), false);
+ok('mid-sentence',       pps_paylink_looks_like_command('I will /ppspay that later'), false);
+ok('empty',              pps_paylink_looks_like_command(''), false);
+// "pay" as ordinary prose must never arm the parser.
+ok('prose pay',          pps_paylink_looks_like_command('pay the invoice when you can'), false);
+
+// A bare command is a near miss, logged so a broken workflow is visible.
+ok('near miss detected', pps_paylink_looks_like_bare_command('ppspay [job] $250'), true);
+ok('prose is no near miss', pps_paylink_looks_like_bare_command('Can you do it for $250?'), false);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
