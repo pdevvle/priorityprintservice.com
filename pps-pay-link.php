@@ -525,6 +525,32 @@ function pps_paylink_refusal_allowed( $conversation_id ) {
     return true;
 }
 
+/**
+ * WHY A REFUSAL ANSWERS 200
+ *
+ * A refusal used to answer 400, which is wrong about who failed. The webhook
+ * arrived, authenticated, and was understood completely -- what we rejected was
+ * the CONTENT, and no amount of resending changes content. To a sender, 4xx
+ * means "your delivery failed", so Missive did the correct thing with incorrect
+ * information: it retried with exponential backoff.
+ *
+ * On 2026-09-21 one mistyped command was redelivered five times over eight
+ * minutes -- 32s, 64s, 122s, 241s apart -- and each redelivery posted the same
+ * refusal note into the thread. It looked like the module talking to itself;
+ * it was the module being asked the same question five times and answering
+ * honestly each time. The outcome log settled it: every attempt carried
+ * has_dollar:false, while our own note contains "$250", so our note was never
+ * the text being parsed.
+ *
+ * So: 200 with ok:false. Delivery succeeded, the request did not. Our own
+ * outcome log is the record of what was refused; the sender does not need a
+ * status code to tell it to stop trying.
+ *
+ * 401 stays 401 -- an unauthenticated caller SHOULD be told the delivery was
+ * not accepted, and that is not a content judgement.
+ */
+function pps_paylink_refusal_status() { return 200; }
+
 function pps_paylink_queue_note( $conversation_id, $text ) {
     if ( ! $conversation_id ) return;
     // Every note carries the marker, so the next webhook can recognise it.
@@ -774,7 +800,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
             return new WP_REST_Response( array(
                 'ok' => false, 'error' => 'no_text',
                 'message' => 'No description/price fields and no readable text in the payload. The keys received have been recorded on the Pay Links screen.',
-            ), 400 );
+            ), 200 );   // see pps_paylink_refusal_status()
         }
         // Our own note, come back to us as a new message. Answering it is how
         // the thread filled with refusals on 2026-09-21. Silence is the whole
@@ -816,7 +842,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
             }
             return new WP_REST_Response( array(
                 'ok' => false, 'error' => $parsed->get_error_code(), 'message' => $parsed->get_error_message(),
-            ), 400 );
+            ), 200 );   // see pps_paylink_refusal_status()
         }
         $body = array_merge( $body, $parsed );
     }
@@ -847,7 +873,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
             // Safe to return: these are the operator's own validation messages,
             // and the caller is already authenticated by this point.
             'message' => $res->get_error_message(),
-        ), 400 );
+        ), 200 );   // see pps_paylink_refusal_status()
     }
 
     // The link is knowable without this, but seeing it confirms it was actually
