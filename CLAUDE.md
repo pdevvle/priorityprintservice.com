@@ -54,6 +54,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-order-blockers-test.mjs` | The two guards from the 2026-09-15 checkout blocker: the registry (not the database) decides whether WCPA owns a product, and a refused checkout on a calculator cart is recorded to `pps_checkout_refusals` instead of costing a silent order. Also pins the things that stop the tripwire becoming the failure it watches for — wrapped, bounded, autoload-off, scoped to PPS carts. |
 | `tools-closure-engine-test.mjs` | **The shop closes, and every calculator has to know it.** Static half pins the config path (`_CFG.closures`, never the `pcf` sub-array) and that no bare weekend test survives in the counting loops; behavioural half extracts `isBusinessDay`/`addBusinessDays`/`businessDaysBetween` out of each COMPILED build and runs them against a real holiday. Confirmed to discriminate — against the pre-fix brochure, `addBusinessDays(Wed 25 Nov, 1)` returns Thanksgiving. 72 checks. |
 | `tools-flat-print-dpi-test.mjs` | **The print file a flat ships must be the upload at print resolution, not the screen preview blown up.** Drives each compiled flat build like a customer with a two-page PDF carrying a QR code at order 87171's module size, pulls the print-ready PDF out of the mocked upload, and checks: bleed sheet at 300 DPI, QR decodes on every side, modules crisp (mid-grey share under 5% — the old build measured 36%, a half-pixel placement 20%), manifest names the print source. Needs `flat-<calc>.html` harness copies on :8137; `PPS_FLAT_PAGES` selects builds, which is how it was run against the pre-fix brochure to prove it fails there. |
+| `tools-book-print-dpi-test.mjs` | The same measurement on the three booklets, because "they render at `DPI / 72`" was a line of code, not a file. An 8-page 6″ × 9″ PDF (misses the raw path by 0.25″, as order 87152 did) with a QR at the customer's module size on every page, through saddle, perfect bound and coupon; every page of the uploaded print-ready file must be the bleed sheet at 300 DPI, decode, and be crisp. First run, 2026-09-21: all three resampled every page through a half-pixel offset (20% mid-grey), and perfect bound + coupon printed the reconciled back cover from its 108 DPI thumbnail (50%) because they picked the PDF page by display index. Both fixed the same day. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
@@ -125,6 +126,19 @@ side (`print source: pdf page 1 rendered at 300 DPI`). The five flats still have
 `tools-flat-print-dpi-test.mjs` is the gate; it measures the print file, not the constant.
 Same lesson as the closures section above: the flats are copies, and a copy can drop the
 one line that matters. See `docs/PROOFER_BRIEF.md` §9.5.
+
+**The booklets were then measured the same way rather than trusted**
+(`tools-book-print-dpi-test.mjs`), and two more things fell out on the same day. All three
+placed the 300 DPI source at `(canvasW - drawW) / 2`, a fractional offset, so Canvas
+resampled every pixel of every rasterised page (20% mid-grey over a QR that should have
+none; 0% once placed on whole pixels — the crop-at-100% case is now a 1:1 copy). And
+perfect bound + coupon book chose the PDF page to re-render as `i + 1`, the display index:
+reconciliation moves the back cover to the last book page, so it pointed past the PDF and
+the back cover was printed from its 108 DPI thumbnail (50% mid-grey), and a slot upload or
+a shifted page would have printed the WRONG page. They now carry `srcPdfPage` from
+extraction and render by it, the fix the saddle took on 2026-08-24 and the copies never
+received. Rule that follows from all of it: **a resolution or DPI claim anywhere in this
+repo is unverified until a test has decoded the shipped file.**
 
 ## Shared Components (in each calculator HTML)
 - `PCF` — pricing constants object, overridable via PPS_CONFIG.calc

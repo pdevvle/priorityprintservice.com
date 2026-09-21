@@ -3377,14 +3377,20 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
       const nativeW = ed ? (ed.wIn / bleedW) * mult : mult;
       const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
-      const drawW = canvasW * nativeW, drawH = canvasH * nativeH;
-      ctx.drawImage(srcCanvas, (canvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+      let drawW = canvasW * nativeW, drawH = canvasH * nativeH;
+      // The source was rendered at this DPI, so at 100% it IS the sheet size give or
+      // take rounding: copy it 1:1 on whole pixels. A fractional offset made Canvas
+      // resample every pixel of every page (measured 20% mid-grey over a QR code
+      // that should have none — tools-book-print-dpi-test.mjs, 2026-09-21).
+      if (Math.abs(drawW - srcW) < 1 && Math.abs(drawH - srcH) < 1) { drawW = srcW; drawH = srcH; }
+      else { drawW = Math.round(drawW); drawH = Math.round(drawH); }
+      ctx.drawImage(srcCanvas, Math.round((canvasW - drawW) / 2), Math.round((canvasH - drawH) / 2), drawW, drawH);
     } else if (tx.fitMode === "cover") {
       const sc = Math.max(canvasW / srcW, canvasH / srcH);
-      ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+      ctx.drawImage(srcCanvas, Math.round((canvasW - srcW * sc) / 2), Math.round((canvasH - srcH * sc) / 2), srcW * sc, srcH * sc);
     } else {
       const sc = Math.min(canvasW / srcW, canvasH / srcH);
-      ctx.drawImage(srcCanvas, (canvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+      ctx.drawImage(srcCanvas, Math.round((canvasW - srcW * sc) / 2), Math.round((canvasH - srcH * sc) / 2), srcW * sc, srcH * sc);
     }
     return c;
   }

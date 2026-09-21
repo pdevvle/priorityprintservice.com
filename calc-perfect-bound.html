@@ -2082,7 +2082,9 @@ async function extractPdfPages(file, onProgress) {
     await pg.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
     const url = canvas.toDataURL("image/jpeg", 0.8);
     let label = pageLabel(i - 1, pdf.numPages);
-    result.push({ dataUrl: url, label });
+    // srcPdfPage: which ORIGINAL PDF page these pixels came from. The print
+    // generator re-renders by this number, never by display position.
+    result.push({ dataUrl: url, label, srcPdfPage: i });
   }
   return { pages: result, dims: { wIn: pdfW, hIn: pdfH, wPx: pxW, hPx: pxH, source: "pdf" }, pdfDoc: pdf };
 }
@@ -3361,8 +3363,16 @@ update();
 
         // Render source at 300 DPI
         let srcCanvas = null;
-        if (pdfDocRef.current && isSourcePdf && !isWrapPg) {
-          const pdfPageNum = i + 1 - _wrapLead; // interiors sit after the prepended cover faces
+        // Vector re-render ONLY for pages that genuinely came from the uploaded PDF,
+        // addressed by their original page number (page.srcPdfPage). Display index
+        // must never be used: reconciliation moves the back cover to the last book
+        // page and pads blanks before it, so `i + 1` pointed past the PDF and the
+        // back cover was printed from its 108 DPI thumbnail — or, with pages shifted
+        // or a slot upload in place, at the WRONG page. The saddle took this fix on
+        // 2026-08-24; found here by tools-book-print-dpi-test.mjs on 2026-09-21.
+        const srcPdfPage = page.srcPdfPage;
+        if (pdfDocRef.current && isSourcePdf && !isWrapPg && srcPdfPage) {
+          const pdfPageNum = srcPdfPage;
           if (pdfPageNum <= pdfDocRef.current.numPages) {
             const pg = await pdfDocRef.current.getPage(pdfPageNum);
             const vp = pg.getViewport({ scale: DPI / 72 });
@@ -3418,14 +3428,20 @@ update();
           const mult = tx.fitMode === "scale" ? tx.artScale / 100 : 1;
           const nativeW = ed ? (ed.wIn / pgBleedW) * mult : mult;
           const nativeH = ed ? (ed.hIn / bleedH) * mult : mult;
-          const drawW = pgCanvasW * nativeW, drawH = canvasH * nativeH;
-          ctx.drawImage(srcCanvas, (pgCanvasW - drawW) / 2, (canvasH - drawH) / 2, drawW, drawH);
+          let drawW = pgCanvasW * nativeW, drawH = canvasH * nativeH;
+      // The source was rendered at this DPI, so at 100% it IS the sheet size give or
+      // take rounding: copy it 1:1 on whole pixels. A fractional offset made Canvas
+      // resample every pixel of every page (measured 20% mid-grey over a QR code
+      // that should have none — tools-book-print-dpi-test.mjs, 2026-09-21).
+      if (Math.abs(drawW - srcW) < 1 && Math.abs(drawH - srcH) < 1) { drawW = srcW; drawH = srcH; }
+      else { drawW = Math.round(drawW); drawH = Math.round(drawH); }
+          ctx.drawImage(srcCanvas, Math.round((pgCanvasW - drawW) / 2), Math.round((canvasH - drawH) / 2), drawW, drawH);
         } else if (tx.fitMode === "cover") {
           const sc = Math.max(pgCanvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (pgCanvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+          ctx.drawImage(srcCanvas, Math.round((pgCanvasW - srcW * sc) / 2), Math.round((canvasH - srcH * sc) / 2), srcW * sc, srcH * sc);
         } else {
           const sc = Math.min(pgCanvasW / srcW, canvasH / srcH);
-          ctx.drawImage(srcCanvas, (pgCanvasW - srcW * sc) / 2, (canvasH - srcH * sc) / 2, srcW * sc, srcH * sc);
+          ctx.drawImage(srcCanvas, Math.round((pgCanvasW - srcW * sc) / 2), Math.round((canvasH - srcH * sc) / 2), srcW * sc, srcH * sc);
         }
 
         pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, pgBleedW, bleedH);
