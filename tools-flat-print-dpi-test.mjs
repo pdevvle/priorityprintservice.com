@@ -164,6 +164,34 @@ async function run(b, file) {
     img && img.parentElement && img.parentElement.click();
   });
   await p.waitForTimeout(2500);
+
+  // "Render at full resolution (slow to load)": the proof on screen is the 144 DPI
+  // upload preview (6″ art → 864 px) until the box is ticked; then a status bar shows
+  // while each PDF side is rendered at 300 DPI, and the proof becomes the 1800 px render.
+  const widest = () => p.evaluate(() => Math.max(0, ...[...document.querySelectorAll('img')].filter(i => /^data:image\/jpeg/.test(i.src)).map(i => i.naturalWidth)));
+  const before = await widest();
+  ok(`${file}: the proof opens on the quick preview (144 DPI)`, before > 0 && before < 1000, 'widest data image ' + before + ' px');
+  // A small sheet renders in well under the poll interval, so the bar is watched with a
+  // MutationObserver armed BEFORE the tick — a bar that appears and goes between two
+  // polls still counts, and a bar that is never mounted still fails.
+  await p.evaluate(() => {
+    window.__sawBar = false;
+    new MutationObserver(() => { if (document.querySelector('[role=progressbar][aria-label="Rendering at full resolution"]')) window.__sawBar = true; })
+      .observe(document.body, { childList: true, subtree: true });
+  });
+  const ticked = await p.evaluate(() => { const l = [...document.querySelectorAll('label')].find(x => /Render at full resolution/i.test(x.textContent || '')); const cb = l && l.querySelector('input[type=checkbox]'); if (!cb || cb.disabled) return false; cb.click(); return true; });
+  ok(`${file}: the full-resolution checkbox is there and enabled for a PDF upload`, ticked);
+  let after = before;
+  for (let i = 0; i < 120; i++) {
+    await p.waitForTimeout(250);
+    after = await widest();
+    const busy = await p.evaluate(() => !!document.querySelector('[role=progressbar][aria-label="Rendering at full resolution"]'));
+    if (!busy && after >= 1700) break;
+  }
+  ok(`${file}: a status bar was shown while rendering`, await p.evaluate(() => window.__sawBar));
+  ok(`${file}: the proof now shows the 300 DPI render`, after >= 1700, 'widest data image ' + after + ' px');
+  ok(`${file}: the label confirms 300 DPI`, await p.evaluate(() => /✓ 300 DPI/.test(([...document.querySelectorAll('label')].find(x => /Render at full resolution/i.test(x.textContent || '')) || {}).textContent || '')));
+
   await p.evaluate(() => { const ack = [...document.querySelectorAll('label')].find(l => /print anyway/i.test(l.textContent || '')); const cb = ack && ack.querySelector('input[type=checkbox]'); cb && cb.click(); });
   await p.waitForTimeout(300);
   const approveClicked = await p.evaluate(() => { const btn = [...document.querySelectorAll('button')].find(y => /^\s*Approve (artwork|Now)\s*$/i.test(y.textContent || '')); if (!btn) return false; btn.click(); return true; });

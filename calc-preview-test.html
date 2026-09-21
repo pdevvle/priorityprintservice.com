@@ -5632,6 +5632,19 @@ update();
 // WOOCOMMERCE BRIDGE — injects hidden inputs into form.cart
 // ═══════════════════════════════════════════════════════════════
 
+// Every finishing choice on the job, as the words the customer chose. Posted in the
+// metadata as `addons`, printed on the order as its own "Add-ons" line and carried in
+// PPS-Spec. A coating that exists only as `coating: 750` inside a JSON blob is not on
+// the ticket, and on 2026-09-21 that was the only place it lived.
+function buildAddons(config) {
+  const a = [];
+  const coat = COATINGS.find(x => x.val === config.coating); if (coat && coat.val > 0) a.push(`Coating: ${coat.label}`);
+  const bund = BUNDLING.find(x => x.val === config.bundling); if (bund && bund.val > 0) a.push(`Bundling: ${bund.label}`);
+  const rc = CORNERS.find(x => x.val === config.roundCorner); if (rc && rc.val > 0) a.push(`Round Corner: ${rc.label}`);
+  if (config.vividPrint) a.push("Enhanced Vivid Print");
+  return a;
+}
+
 function buildSummary(config, result) {
   const lines = [];
   const r = result;
@@ -5698,6 +5711,7 @@ function buildSummary(config, result) {
 function buildMetadata(config, result) {
   const sh = result.shipping || {};
   return JSON.stringify({
+    addons: buildAddons(config),
     // Customer selections
     sizeLabel: config.sizeLabel,
     customLong: config.customLong,

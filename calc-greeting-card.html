@@ -2034,6 +2034,37 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const [magPos, setMagPos] = useState(null);
   const [showGuides, setShowGuides] = useState(true); // toggle bleed/trim/safety/fold/perf overlays in proof
   const [hiResProof, setHiResProof] = useState(null);
+  // "Render at full resolution": the on-screen proof is the 144 DPI preview made at
+  // upload. Ticked, each PDF side is rendered again from its own bytes at 300 DPI and
+  // shown in its place — in the viewport and under the loupe. Off by default because a
+  // 21″ sheet at 300 DPI is a 6,000-pixel image and takes a few seconds; the bar names
+  // the side it is on, and a frame is yielded before each render so it actually paints.
+  const [fullRes, setFullRes] = useState(false);
+  const [fullResBusy, setFullResBusy] = useState(null);   // { side, i, n } while rendering
+  const [fullResUrls, setFullResUrls] = useState({});      // side → { key: art.dataUrl, url }
+  const fullResAvailable = [frontArt, backArt].some(a => a && a.file && a.file.type === "application/pdf");
+  useEffect(() => {
+    if (!fullRes) return;
+    const todo = [["front", frontArt], ["back", backArt]].filter(([s, a]) =>
+      a && a.file && a.file.type === "application/pdf" && !(fullResUrls[s] && fullResUrls[s].key === a.dataUrl));
+    if (!todo.length) return;
+    let cancelled = false;
+    (async () => {
+      for (let i = 0; i < todo.length; i++) {
+        const [s, a] = todo[i];
+        setFullResBusy({ side: s, i: i + 1, n: todo.length });
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        try {
+          const c = await ppsPrintSourceCanvas(a, 0, 300, a.dataUrl);
+          if (cancelled) return;
+          const url = c ? c.toDataURL("image/jpeg", 0.92) : null;
+          if (url) setFullResUrls(prev => ({ ...prev, [s]: { key: a.dataUrl, url } }));
+        } catch (e) { console.warn("Full-resolution proof render failed:", e); }
+      }
+      if (!cancelled) setFullResBusy(null);
+    })();
+    return () => { cancelled = true; setFullResBusy(null); };
+  }, [fullRes, frontArt, backArt]);
 
   // Per-side transform helpers
   const DEFAULT_TX = { fitMode: "crop", artScale: 100, rotateSteps: 0 };
@@ -2213,7 +2244,12 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   }
 
   // Effective art dimensions after rotation
-  const currentArtRaw = side === "front" ? frontArt : backArt;
+  const currentArtBase = side === "front" ? frontArt : backArt;
+  const currentArtRaw = useMemo(() => {
+    const fr = fullRes && currentArtBase && fullResUrls[side];
+    return (fr && fr.key === currentArtBase.dataUrl) ? { ...currentArtBase, dataUrl: fr.url } : currentArtBase;
+  }, [currentArtBase, fullRes, fullResUrls, side]);
+  const currentSideFullRes = !!(fullRes && currentArtBase && fullResUrls[side] && fullResUrls[side].key === currentArtBase.dataUrl);
   const effectiveDims = useMemo(() => {
     if (!currentArtRaw?.dims) return null;
     const d = currentArtRaw.dims;
@@ -3396,6 +3432,21 @@ generate();
                   background: showGuides ? "rgba(56,161,105,.2)" : "rgba(255,255,255,.06)",
                   color: showGuides ? "#38a169" : "rgba(255,255,255,.5)",
                 }}>{showGuides ? "Guides: Shown" : "Guides: Hidden"}</button>
+                <label title={fullResAvailable ? "Show the proof from a 300 DPI render of your PDF instead of the quick preview" : "Your upload is an image file, which is already shown at its native resolution"}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, userSelect: "none", cursor: fullResAvailable ? "pointer" : "default",
+                    color: currentSideFullRes ? "#38a169" : "rgba(255,255,255,.55)", opacity: fullResAvailable ? 1 : 0.5 }}>
+                  <input type="checkbox" checked={fullRes} disabled={!fullResAvailable} onChange={e => setFullRes(e.target.checked)} style={{ margin: 0 }} />
+                  Render at full resolution (slow to load){currentSideFullRes && !fullResBusy ? " ✓ 300 DPI" : ""}
+                </label>
+                {fullResBusy && (
+                  <div role="progressbar" aria-valuemin={0} aria-valuemax={fullResBusy.n} aria-valuenow={fullResBusy.i - 1} aria-label="Rendering at full resolution"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "rgba(255,255,255,.75)" }}>
+                    <div style={{ width: 90, height: 6, borderRadius: 3, background: "rgba(255,255,255,.12)", overflow: "hidden" }}>
+                      <div style={{ width: `${Math.round(((fullResBusy.i - 0.5) / fullResBusy.n) * 100)}%`, height: "100%", background: "#38a169", transition: "width .3s" }} />
+                    </div>
+                    Rendering {fullResBusy.side} at 300 DPI… {fullResBusy.i}/{fullResBusy.n}
+                  </div>
+                )}
                 {/* Viewport zoom controls */}
                 <div style={{ display:"flex", alignItems:"center", gap:2, padding:2, borderRadius:6, border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.04)" }}>
                   <button type="button" onClick={() => vpZoomBy(-VP_STEP)} disabled={vpScale<=VP_MIN} title="Zoom out" style={{padding:"4px 9px",fontSize:14,lineHeight:1,fontWeight:700,border:"none",borderRadius:4,cursor:vpScale<=VP_MIN?"default":"pointer",background:"transparent",color:vpScale<=VP_MIN?"rgba(255,255,255,.42)":"rgba(255,255,255,.7)",fontFamily:"inherit"}}>−</button>
@@ -4256,6 +4307,21 @@ function RichTip({ children, tipKey, title, content, dark }) {
 // CART-SUBMISSION HELPERS  (parity with saddle stitch + perfect bound)
 // ═══════════════════════════════════════════════════════════════
 
+// Every finishing choice on the job, as the words the customer chose. Posted in the
+// metadata as `addons`, printed on the order as its own "Add-ons" line and carried in
+// PPS-Spec. A coating that exists only as `coating: 750` inside a JSON blob is not on
+// the ticket, and on 2026-09-21 that was the only place it lived.
+function buildAddons(config) {
+  const a = [];
+  if (config.coating > 0) { const ct = COATINGS.find(o => o.val === config.coating); if (ct) a.push(`Coating: ${ct.label}` + (config.coatSides === 2 ? " (both sides)" : "")); }
+  if (config.bundling > 0) { const b = BUNDLING.find(o => o.val === config.bundling); if (b) a.push(`Bundling: ${b.label}`); }
+  if (config.perforation > 0) { const p = PERF_OPTS.find(o => o.val === config.perforation); if (p) a.push(`Perforation: ${p.label} (${config.perfDir})`); }
+  if (config.roundCorner > 0) { const rc = CORNERS.find(o => o.val === config.roundCorner); if (rc) a.push(`Round Corner: ${rc.label}`); }
+  if (config.vivid) a.push("Enhanced Vivid Print");
+  if (config.envelopes && config.sizeMode === "preset") { const _ep = SIZE_PRESETS.find(s => s.label === config.sizeLabel); if (_ep && _ep.env) a.push(`Blank Envelopes: ${_ep.env.label}`); }
+  return a;
+}
+
 function buildSummary(config, result) {
   const lines = [];
   const r = result;
@@ -4322,6 +4388,7 @@ function buildSummary(config, result) {
 function buildMetadata(config, result) {
   const sh = result.shipping || {};
   return JSON.stringify({
+    addons: buildAddons(config),
     // Calc identification
     calcType: "greeting-card",
     calcLabel: "Greeting Card",
@@ -4329,7 +4396,8 @@ function buildMetadata(config, result) {
     jobName: config.jobName || "",
     qty: config.qty,
     sizeMode: config.sizeMode,
-    sizeLabel: config.sizeLabel,
+    // A custom size used to post the last preset label ("4.25×5.5" on a 21×7 job).
+    sizeLabel: config.sizeMode === "custom" ? `${config.longEdge}×${config.shortEdge}" custom` : config.sizeLabel,
     longEdge: config.longEdge,
     shortEdge: config.shortEdge,
     foldType: config.foldType,

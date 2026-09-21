@@ -3111,17 +3111,11 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
             ? 'SELF-COVER'
             : 'COVER: ' . $cPaper . '/' . $cColor;
 
-        // Finishing choices live in the metadata as numeric config values, not labels —
-        // coating 750 means nothing on a job ticket. buildSummary() has already resolved
-        // every one of them to the words the customer chose, so take them from there:
-        // the labeled lines are facts we already have, the rest are the add-ons.
-        $addons = array();
-        $seen_headline = false;
-        foreach ( array_filter( array_map( 'trim', explode( "\n", (string) ( $values['pps_summary'] ?? '' ) ) ) ) as $line ) {
-            if ( strpos( $line, ':' ) !== false ) continue;   // Inside:/Cover:/Rush:/Ship to:
-            if ( ! $seen_headline ) { $seen_headline = true; continue; }  // size · qty · pages
-            $addons[] = $line;
-        }
+        // Add-ons. Since 2026-09-21 every calculator resolves its finishing choices to the
+        // words the customer chose and posts them as `addons` in the metadata; older
+        // builds are read back out of the summary text. See pps_order_addons() for why
+        // the summary alone was not enough.
+        $addons = pps_order_addons( $full, (string) ( $values['pps_summary'] ?? '' ) );
 
         $ship = trim( (string) ( $full['shipState'] ?? '' ) . ' ' . (string) ( $full['shipZip'] ?? '' ) );
         $job  = isset( $sets[0]['name'] ) ? trim( (string) $sets[0]['name'] ) : '';
@@ -3148,6 +3142,13 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         $spec = implode( ' | ', array_filter( $spec_parts, static function( $p ) { return trim( (string) $p ) !== ''; } ) );
         $item->add_meta_data( 'PPS-Spec', $spec, true );
 
+        // The add-ons as their own visible line — on the admin notification, the
+        // customer's receipt and the order screen — so a coating or a perforation is
+        // never something staff have to go looking for in a JSON blob.
+        if ( $addons ) {
+            $item->add_meta_data( 'Add-ons', implode( '; ', $addons ), true );
+        }
+
         // Production start date — distinct label for Missive rule parsing
         $prodStart = $full['productionStartDate'] ?? '';
         if ( $prodStart ) {
@@ -3155,6 +3156,41 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         }
     }
 }, 10, 4 );
+
+/**
+ * The add-ons on a job, as labels: "Coating: UV Gloss (both sides)", "Perforation: 1
+ * Perforation Line", "Outfold: 1 Fold-Out Page (Bifold)", "Magnetic Backer" …
+ *
+ * Source of truth is the calculator's own `addons` list in the metadata (every
+ * calculator posts it since 2026-09-21). Until then the only source was the summary
+ * text, and the filter that read it skipped every line containing a colon — meant to
+ * drop Inside:/Cover:/Rush:/Ship to:, it also dropped every flat's "Coating: UV Gloss",
+ * "Perforation: …", "Bundling: …" and "Round Corner: …", so none of those reached
+ * PPS-Spec. Perfect bound and coupon book never wrote outfold, perforation or the
+ * magnetic backer into the summary at all. The fallback below is for orders placed by a
+ * calculator build that predates the `addons` key: it keeps the colon-free lines the old
+ * spec carried and adds back the colon lines that name a finishing category.
+ */
+function pps_order_addons( $full, $summary ) {
+    $out = array();
+    if ( is_array( $full ) && isset( $full['addons'] ) && is_array( $full['addons'] ) ) {
+        foreach ( $full['addons'] as $a ) {
+            $label = is_array( $a ) ? ( $a['label'] ?? '' ) : $a;
+            $label = trim( sanitize_text_field( (string) $label ) );
+            if ( $label !== '' && ! in_array( $label, $out, true ) ) $out[] = $label;
+        }
+        return array_slice( $out, 0, 20 );
+    }
+    $finishing = '/^(Coating|Bundling|Perforation|Round Corner|Blank Envelopes|Outfold|Magnetic Backer|Envelopes):/i';
+    $seen_headline = false;
+    foreach ( array_filter( array_map( 'trim', explode( "\n", (string) $summary ) ) ) as $line ) {
+        if ( ! $seen_headline ) { $seen_headline = true; continue; }  // size · qty · pages
+        if ( strpos( $line, ':' ) !== false && ! preg_match( $finishing, $line ) ) continue;   // Inside:/Cover:/Rush:/Ship to:
+        $line = sanitize_text_field( $line );
+        if ( $line !== '' && ! in_array( $line, $out, true ) ) $out[] = $line;
+    }
+    return array_slice( $out, 0, 20 );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // ORDER: KEEP THE PRODUCTION FIELDS OFF THE CUSTOMER'S COPY
