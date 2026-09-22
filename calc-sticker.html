@@ -2790,6 +2790,39 @@ function RichTip({ children, tipKey, title, content, dark }) {
 // CART-SUBMISSION HELPERS  (parity with saddle stitch + perfect bound)
 // ═══════════════════════════════════════════════════════════════
 
+// A postal address on one line, or "not given".
+function ppsFmtAddr(a) {
+  if (!a || typeof a !== "object") return "not given";
+  const parts = [a.name, a.company, a.street1 || a.street, a.street2, [a.city, a.state, a.zip].filter(Boolean).join(" ")]
+    .map(v => String(v || "").trim()).filter(Boolean);
+  return parts.length ? parts.join(", ") : "not given";
+}
+
+// The customer-side half of the Job Ticket: every choice as words, in the order a
+// press operator reads a job. The server adds art status, dates, ship-to and the
+// shipment estimate and writes the whole thing as the first line of the order
+// (pps_job_ticket() in pps-calculators.php). Labels come from the same option tables
+// the price came from, so the ticket can never say "cardstock" on a self-cover job.
+function buildTicket(config, result) {
+  const t = [];
+  const push = (k, v) => { v = v == null ? "" : String(v).trim(); if (v) t.push([k, v]); };
+  const cName = c => c === "bw" ? "Black & White" : "Full Color";
+  push("Product", "Stickers");
+  push("Job name", config.jobName);
+  push("Quantity", Number(config.qty || 0).toLocaleString());
+  const _size = config.sizeMode === "custom" ? `${config.longEdge}×${config.shortEdge}" custom` : config.sizeLabel;
+  push("Size", _size);
+  push("Paper", config.paper && config.paper.label ? config.paper.label : "unknown");
+  push("Print", config.sides === 2 ? `2 sides · Front ${cName(config.frontColor)} · Back ${cName(config.backColor)}` : `1 side · ${cName(config.frontColor)}`);
+  const _ad = buildAddons(config); push("Finishing", _ad.length ? _ad.join("; ") : "None");
+  push("Proof", config.proof >= 3 ? "Hardcopy proof, mailed before printing" : config.proof > 0 ? "Digital proof by staff before printing" : "Self-approved online (no staff proof)");
+  if (config.proof >= 3) push("Proof ship-to", config.proofAddrSame === false ? ppsFmtAddr(config.proofAddr) : "Same as the order ship-to");
+  const _art = ART_OPTS.find(x => x.val === config.artwork); push("Artwork", _art ? _art.label : "unknown");
+  const _bld = BLEED_OPTS.find(x => x.val === config.bleed); if (_bld && _bld.val > 0) push("Bleed", _bld.label);
+  if (config.canvaLink) push("Canva link", config.canvaLink);
+  return t;
+}
+
 // Every finishing choice on the job, as the words the customer chose. Posted in the
 // metadata as `addons`, printed on the order as its own "Add-ons" line and carried in
 // PPS-Spec. A coating that exists only as `coating: 750` inside a JSON blob is not on
@@ -2844,6 +2877,7 @@ function buildMetadata(config, result) {
   const sh = result.shipping || {};
   return JSON.stringify({
     addons: buildAddons(config),
+    ticket: buildTicket(config, result),
     // Calc identification
     calcType: "sticker",
     calcLabel: "Sticker",

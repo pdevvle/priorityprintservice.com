@@ -4916,6 +4916,51 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
 // WOOCOMMERCE BRIDGE — injects hidden inputs into form.cart
 // ═══════════════════════════════════════════════════════════════
 
+// A postal address on one line, or "not given".
+function ppsFmtAddr(a) {
+  if (!a || typeof a !== "object") return "not given";
+  const parts = [a.name, a.company, a.street1 || a.street, a.street2, [a.city, a.state, a.zip].filter(Boolean).join(" ")]
+    .map(v => String(v || "").trim()).filter(Boolean);
+  return parts.length ? parts.join(", ") : "not given";
+}
+
+// The customer-side half of the Job Ticket: every choice as words, in the order a
+// press operator reads a job. The server adds art status, dates, ship-to and the
+// shipment estimate and writes the whole thing as the first line of the order
+// (pps_job_ticket() in pps-calculators.php). Labels come from the same option tables
+// the price came from, so the ticket can never say "cardstock" on a self-cover job.
+function buildTicket(config, result) {
+  const t = [];
+  const push = (k, v) => { v = v == null ? "" : String(v).trim(); if (v) t.push([k, v]); };
+  const colorName = v => v === "color" ? "Full Color" : "Black & White";
+  push("Product", "Coupon Book");
+  const _first = (config.sets && config.sets[0]) || {};
+  push("Job name", _first.name);
+  push("Size", (function () {
+    if (String(config.sizeLabel || "").toLowerCase().indexOf("custom") === -1) return config.sizeLabel;
+    const a = parseFloat(config.customShort), b = parseFloat(config.customLong);
+    if (!isFinite(a) || !isFinite(b)) return config.sizeLabel;
+    const n = v => String(Math.round(v * 100) / 100);
+    return `Custom ${n(Math.min(a, b))}×${n(Math.max(a, b))}"`;
+  })());
+  push("Sets", (config.sets || []).map(s => `${Number(s.qty || 0).toLocaleString()} × ${s.pages} pages` + (s.name ? ` "${s.name}"` : "")).join("; "));
+  push("Binding", ((BIND_STYLE_OPTS.find(o => o.val === config.bindStyle) || {}).label || config.bindStyle || "unknown"));
+  push("Coupon sheets", (config.insidePaper && config.insidePaper.label ? config.insidePaper.label : "unknown") + " · " +
+    (config.sidesPrinted === "single"
+      ? `Front ${colorName(config.frontColor || config.insideColor)} · single-sided`
+      : `Front ${colorName(config.frontColor || config.insideColor)} · Back ${colorName(config.backColor || config.insideColor)}`));
+  push("Cover", config.coverMode !== "same" && config.coverPaper && config.coverPaper.label
+    ? `${config.coverPaper.label} · ${colorName(config.coverColor)}`
+    : "Self-cover (same stock as inside)");
+  const _ad = buildAddons(config); push("Finishing", _ad.length ? _ad.join("; ") : "None");
+  push("Proof", config.proof >= 3 ? "Hardcopy proof, mailed before printing" : config.proof > 0 ? "Digital proof by staff before printing" : "Self-approved online (no staff proof)");
+  if (config.proof >= 3) push("Proof ship-to", config.proofAddrSame === false ? ppsFmtAddr(config.proofAddr) : "Same as the order ship-to");
+  const _art = ART_OPTS.find(x => x.val === config.artwork); push("Artwork", _art ? _art.label : "unknown");
+  const _bld = BLEED_OPTS.find(x => x.val === config.bleed); if (_bld && _bld.val > 0) push("Bleed", _bld.label);
+  if (config.canvaLink) push("Canva link", config.canvaLink);
+  return t;
+}
+
 // Every finishing choice on the job, as the words the customer chose. Posted in the
 // metadata as `addons`, printed on the order as its own "Add-ons" line and carried in
 // PPS-Spec. A coating that exists only as `coating: 750` inside a JSON blob is not on
@@ -5013,6 +5058,7 @@ function buildMetadata(config, result) {
   const sh = result.shipping || {};
   return JSON.stringify({
     addons: buildAddons(config),
+    ticket: buildTicket(config, result),
     // Customer selections
     sizeLabel: config.sizeLabel,
     customLong: config.customLong,
@@ -5042,6 +5088,8 @@ function buildMetadata(config, result) {
     artEditPages: config.artEditPages,
     bleed: config.bleed,
     proof: config.proof,
+    proofAddrSame: config.proofAddrSame,
+    proofAddr: config.proofAddr || {},
     // Per-page art transforms — what the customer approved per page in the
     // proof modal. Keyed by page index → { fitMode, artScale, rotateSteps }.
     // (Phase 2: server-side rendering will use these to produce print-ready
@@ -6305,6 +6353,8 @@ function App(){
       bindStyle, sidesPrinted, magnetBacker,
       twoStaple, vividPrint, coating, bundling, roundCorner,
       artwork, artEditPages, bleed, proof,
+      // The hardcopy proof address never left the booklets before 2026-09-22 (order 87198).
+      proofAddrSame, proofAddr,
       shipState, shipAddr, shipZip, needByDate,
       pageTransforms, artDims,
     };
