@@ -197,6 +197,13 @@ if ( file_exists( PPS_CALC_DIR . 'pps-paper-report.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-paper-report.php';
 }
 
+// Job health: the print file measured on the order, and the daily exceptions
+// digest to the office. Reads pps_reorder_contact_recipient() and
+// pps_paper_report_open_statuses() when they exist.
+if ( file_exists( PPS_CALC_DIR . 'pps-job-health.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-job-health.php';
+}
+
 // /pps-product-feed.xml for Google Merchant Center. Depends on pps-catalog.php.
 if ( file_exists( PPS_CALC_DIR . 'pps-product-feed.php' )
      && file_exists( PPS_CALC_DIR . 'pps-catalog.php' ) ) {
