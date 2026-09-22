@@ -611,7 +611,13 @@ is walked through the responsibility sentence and PHP stores a hash alongside a
 `Hardcopy` token. Pass `proof` in the job and render review-only when `job.proof !== 0`;
 until then gate the call site: `if (proof === 0 && ppsProofUrl() && …)`.
 
-### 7.5 The hardcopy proof address — a booklet-only gap
+### 7.5 The hardcopy proof address — a booklet-only gap — **closed 2026-09-22**
+
+Closed by the Job Ticket work: the three booklets now put `proofAddrSame`/`proofAddr` in
+the config and the metadata, and `pps_job_ticket()` prints "Proof ship-to" on the order
+for every hardcopy proof, on all eight products (`tools-job-ticket-test.mjs`). What is
+still open from the paragraph below: `proofAddrSame` is not seeded from `D`, so a reorder
+does not restore it. The original finding, for the record:
 
 All eight calculators show the same/different address form. **The five flats have
 serialised `proofAddrSame`/`proofAddr` into `_pps_metadata` since 2026-06-19**

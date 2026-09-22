@@ -3081,12 +3081,23 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         $item->add_meta_data( 'PPS-Prepress-Review', $prepress, true );
     }
 
+    $full = json_decode( $values['pps_metadata'] ?? '{}', true );
+
+    // The Job Ticket. One block, first on the order, that production can run the job
+    // from without opening anything else: every choice the customer made, as words,
+    // then what the server knows (art status, dates, ship-to, shipment). It is the
+    // customer's receipt too — the same block on both sides, so a question about a
+    // job is answered by reading, not by exploring a JSON blob. See pps_job_ticket().
+    $ticket = pps_job_ticket( is_array( $full ) ? $full : array(), $values, $delivery, $prepress );
+    if ( $ticket !== '' ) {
+        $item->add_meta_data( 'Job Ticket', $ticket, true );
+    }
+
     // Visible in order emails
     $item->add_meta_data( 'Estimated Delivery', $delivery->format( 'l, M j, Y' ), true );
     $item->add_meta_data( 'Order Summary', $values['pps_summary'] ?? '', true );
 
     // ── Missive-parseable fields ──
-    $full = json_decode( $values['pps_metadata'] ?? '{}', true );
     if ( $full ) {
         // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
         $sets     = is_array( $full['sets'] ?? null ) ? $full['sets'] : array();
@@ -3156,6 +3167,94 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         }
     }
 }, 10, 4 );
+
+/**
+ * The Job Ticket, as text: one "Label: value" line per fact, in the order a press
+ * operator reads a job. Written as visible item meta ("Job Ticket") ahead of
+ * everything else, on the admin notification, the order screen and the receipt.
+ *
+ * The calculator posts the customer-side facts as `ticket` — an ordered list of
+ * [label, value] pairs it resolved from its own option tables (every calculator since
+ * 2026-09-22): product, job name, quantity or sets, size, paper, print, binding,
+ * finishing, artwork option, bleed answer, proof type and, for a hardcopy proof, where
+ * it goes. The server appends what only it knows: whether the art is approved,
+ * how many files came with the order, production start, must-ship and delivery
+ * dates, rush, the ship-to address and the shipment estimate.
+ *
+ * Why the calculator writes the words and not the server: the option tables live in
+ * the calculator and are overridable per site, so a value like `coating: 750` means
+ * "UV Gloss" only there. The server guessing labels from numbers is how a self-cover
+ * job came to say "cardstock" (order 87202). An older build with no `ticket` falls
+ * back to its summary text, so the block is never empty.
+ */
+function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepress = '' ) {
+    $lines = array();
+    $put = static function( $label, $value ) use ( &$lines ) {
+        $label = trim( sanitize_text_field( (string) $label ) );
+        $value = trim( sanitize_text_field( (string) $value ) );
+        if ( $label === '' || $value === '' ) return;
+        $lines[] = $label . ': ' . $value;
+    };
+
+    if ( isset( $full['ticket'] ) && is_array( $full['ticket'] ) ) {
+        foreach ( array_slice( $full['ticket'], 0, 40 ) as $pair ) {
+            if ( is_array( $pair ) && count( $pair ) >= 2 ) $put( $pair[0], $pair[1] );
+        }
+    } else {
+        // Legacy build: the summary is the best words we have.
+        $summary = array_values( array_filter( array_map( 'trim', explode( "\n", (string) ( $values['pps_summary'] ?? '' ) ) ) ) );
+        if ( $summary ) {
+            $put( 'Job', array_shift( $summary ) );
+            foreach ( $summary as $l ) {
+                if ( preg_match( '/^(Rush|Standard delivery|Ship to):/i', $l ) ) continue;   // the server says these below
+                $lines[] = sanitize_text_field( $l );
+            }
+        }
+        $addons = pps_order_addons( $full, (string) ( $values['pps_summary'] ?? '' ) );
+        $put( 'Finishing', $addons ? implode( '; ', $addons ) : 'None' );
+    }
+
+    // ── What only the server knows ──
+    $proof_hash = ! empty( $values['pps_proof_hash'] ) && preg_match( '/^[0-9a-f]{64}$/', (string) $values['pps_proof_hash'] );
+    $proof_opt  = (float) ( $full['proof'] ?? 0 );
+    if ( trim( (string) $prepress ) !== '' ) {
+        $put( 'Art status', 'NOT APPROVED — customer asked for prepress review; check before plating' );
+    } elseif ( $proof_opt > 0 ) {
+        $put( 'Art status', $proof_opt >= 3 ? 'Awaiting hardcopy proof approval' : 'Awaiting digital proof approval' );
+    } else {
+        $put( 'Art status', $proof_hash ? 'Self-approved online (approval bound to the print file)' : 'Self-approved online' );
+    }
+
+    $files = $values['pps_artwork_files'] ?? null;
+    $n = is_array( $files ) ? count( $files ) : ( ! empty( $values['pps_artwork_path'] ) ? 1 : 0 );
+    $names = array();
+    if ( is_array( $files ) ) foreach ( $files as $f ) { if ( is_array( $f ) && ! empty( $f['name'] ) ) $names[] = sanitize_file_name( $f['name'] ); }
+    $put( 'Artwork files', $n ? ( $n . ' uploaded' . ( $names ? ' (' . implode( ', ', array_slice( $names, 0, 6 ) ) . ( count( $names ) > 6 ? ', …' : '' ) . ')' : '' ) ) : 'none uploaded — see the artwork option above' );
+
+    $fmt = static function( $ymd ) {
+        $d = is_string( $ymd ) && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) ? DateTime::createFromFormat( 'Y-m-d', $ymd ) : null;
+        return $d ? $d->format( 'D, M j, Y' ) : '';
+    };
+    $put( 'Production start', $fmt( $full['productionStartDate'] ?? '' ) );
+    $put( 'Must ship by', $fmt( $full['mustShipByDate'] ?? '' ) );
+    $rush = ( (float) ( $full['rushCost'] ?? 0 ) ) > 0;
+    $days = intval( $full['requestedBizDays'] ?? $full['freeDeliveryBizDays'] ?? 0 );
+    $put( 'Delivery', $delivery->format( 'l, M j, Y' ) . ( $rush ? ' — RUSH' : ' — standard' ) . ( $days ? ' (' . $days . ' business days)' : '' ) );
+
+    $a = is_array( $full['shipAddr'] ?? null ) ? $full['shipAddr'] : array();
+    $parts = array_filter( array(
+        $a['name'] ?? '', $a['company'] ?? '', $a['street1'] ?? ( $a['street'] ?? '' ), $a['street2'] ?? '',
+        trim( ( $a['city'] ?? '' ) . ' ' . ( $full['shipState'] ?? ( $a['state'] ?? '' ) ) . ' ' . ( $a['zip'] ?? ( $full['shipZip'] ?? '' ) ) ),
+    ), static function( $v ) { return trim( (string) $v ) !== ''; } );
+    $put( 'Ship to', $parts ? implode( ', ', $parts ) : ( trim( (string) ( $full['shipState'] ?? '' ) ) !== '' ? $full['shipState'] : '' ) );
+
+    $lb = $full['estWeightLb'] ?? null; $ct = $full['estCartons'] ?? null;
+    if ( is_numeric( $lb ) && (float) $lb > 0 ) {
+        $put( 'Shipment', rtrim( rtrim( number_format( (float) $lb, 1, '.', '' ), '0' ), '.' ) . ' lb' . ( is_numeric( $ct ) && (int) $ct > 0 ? ' · ' . (int) $ct . ( (int) $ct === 1 ? ' carton' : ' cartons' ) : '' ) . ' (estimate)' );
+    }
+
+    return implode( "\n", $lines );
+}
 
 /**
  * The add-ons on a job, as labels: "Coating: UV Gloss (both sides)", "Perforation: 1
