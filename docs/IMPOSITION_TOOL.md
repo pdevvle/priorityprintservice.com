@@ -463,9 +463,10 @@ download the imposed PDF. Useful for testing and one-off jobs.
   in the files that had already gone wrong):
 
   - **Non-embedded fonts**, listed by name. The standard 14 are only noted
-    (Fiery has them); anything else — Arial, Calibri, a brand face — is
-    warned, because the RIP substitutes a different face with different
-    widths and lines re-wrap on the press. Walks page and form resources.
+    (Fiery has them); anything else — Arial, Calibri, a brand face — was
+    warned in 1.34 and is **refused** since 1.43 (see "Font gate"), because
+    the RIP substitutes a different face with different widths and lines
+    re-wrap on the press. Walks page and form resources.
   - **Mixed page sizes**, listed by page with what the tool does to each
     (fit-to-trim scaled; a landscape page turned 90° into a portrait slot).
   - **2-page spreads** — pages ≈ 2 × trim width. A bound product is refused
@@ -730,10 +731,10 @@ download the imposed PDF. Useful for testing and one-off jobs.
     `pageFlipOf(spec, sheet)` swaps the flip in page terms when the sheet is
     portrait; the tumble rule then follows unchanged, and the slug still
     names the physical edge ("DUPLEX FLIP ON SHORT (13in) EDGE · SHEET
-    PORTRAIT"). Verified by mirroring the back's ink mask about the physical
-    axis onto the front's: IoU 1.0 on the portrait strip job and the portrait
-    4×4 booklet, and the other axis does not register; landscape cases
-    unchanged.
+    PORTRAIT"). Verified on the crop-mark geometry (identical on both sides
+    of a sheet): every front mark on the portrait strip job and the portrait
+    4×4 booklet matches a back mark mirrored top↔bottom (14/14, 16/16) and
+    none matches left↔right; the landscape cases match left↔right only.
   - The manual-grid refusal now ends "…or stand the sheet on end (Sheet
     orientation: portrait)", and the reverse when already portrait.
   - Verified: 1×5 of 12.75×3″ refuses landscape and lays out portrait
@@ -741,6 +742,48 @@ download the imposed PDF. Useful for testing and one-off jobs.
     2 × 2 rotated. UI: select present, sheet line reads "13×19 ↕ portrait ·
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
+
+  ### Font gate (1.43)
+
+  Owner: "ARE YOU, in imposition, able to inform us that a customer's font is
+  named, not embedded, and not a font that you can reference?" — yes, and a
+  warning buried in the report was the wrong answer to "seems like a gigantic
+  vulnerability". A font that is only NAMED in the PDF (a `/Font` with no
+  `FontFile`/`FontFile2`/`FontFile3` in its descriptor) is not in the file,
+  not in this tool and not on the Fiery, which substitutes silently; the
+  text re-wraps or changes on press and nothing anywhere reports an error.
+
+  - **Refusal by default.** `fontNotes()` throws `FONTS NOT EMBEDDED in
+    <artwork | back file | gang file "x">: <names>` with the plain
+    explanation and the customer-facing fix (PDF/X-4 / "embed all fonts").
+    Checked on the artwork, the back file and every gang file (the gang
+    loop and the back-file `try` used to swallow everything; they now
+    re-throw the gate). The standard 14 stay a note — every RIP has them.
+  - **Override, per job, never quiet.** The refusal banner offers one tick,
+    "Impose with missing fonts" (`spec.allowMissingFonts`). With it the run
+    goes through and: the warnings carry `⚠ FONT OVERRIDE — …`, the result
+    carries `res.fontsMissing` (on every perfect-bound part too), the
+    filename gets **`_FONTS`** before `.pdf` (composes with `_UNAPPROVED`:
+    `…_FONTS_UNAPPROVED.pdf`), the toolbar reads "FONT OVERRIDE" instead of
+    "preflight passed", and a red card names the fonts with a "Revoke
+    override" button that brings the refusal back. The tick is App state
+    only: **not in `SETUP_FIELDS`** (a setup cannot pre-approve missing
+    fonts) and **reset whenever `art`, `backArt` or `gangFiles` change**, so
+    one job's yes cannot leak into the next drop.
+  - **Bulk impose never overrides.** The queue path builds its spec from
+    `specFromRow()`, which has no such key, so an order with a named-only
+    font fails its row, is listed in the failures, and nothing is filed to
+    Drive. Imposing it means opening the order and ticking the box with
+    the names on screen.
+  - Verified (`cases_fontgate.json`, `ui_fonts.mjs`): `fx_calibri.pdf`
+    refuses as artwork, as a back file and as a gang file, each naming its
+    role; with the override it imposes with `fontsMissing: ["Calibri"]`,
+    the `_FONTS` filename and the red card; revoke restores the refusal;
+    dropping a different file drops the tick (`fx_fonts.pdf`, standard-14
+    only, imposes clean with no flag); re-dropping the Calibri file refuses
+    again; `specFromRow` carries no override. Engine output for files with
+    embedded fonts is content-identical to 1.42 (138 pages across the
+    rot/pbrot/seq/port suites).
 
   ### Workspace layout (1.33)
 

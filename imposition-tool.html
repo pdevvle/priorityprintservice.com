@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 01:44 UTC · IMPOSE-V1.42</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 02:40 UTC · IMPOSE-V1.43</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2905,13 +2905,25 @@ function inspectFonts(doc) {
   for (const pg of doc.getPages()) { try { visitRes(pageResources(pg.node), 0); } catch (e) { /* best-effort */ } }
   return { missing: [...missing.keys()], std: [...std] };
 }
-function fontNotes(doc, what) {
+// Font gate. A font that is only NAMED in the PDF (no FontFile stream) is
+// not in this tool and not on the RIP, so Fiery substitutes silently and the
+// text re-wraps on press with no error anywhere. That is a refusal by
+// default; `spec.allowMissingFonts` (a per-job tick, never saved in a setup,
+// never sent by bulk impose) lets a job through with the names in the
+// warnings, in `missingOut` (→ res.fontsMissing → the _FONTS filename flag)
+// and on screen. Standard-14 names are a note, not a gate: every RIP has them.
+function fontNotes(doc, what, spec, missingOut) {
   const out = [];
-  try {
-    const r = inspectFonts(doc);
-    if (r.missing.length) out.push(`${what}: fonts NOT EMBEDDED — ${r.missing.slice(0, 8).join(", ")}${r.missing.length > 8 ? ` +${r.missing.length - 8} more` : ""}. Fiery will substitute a different face with different widths, so text can re-wrap or change on the press. Ask for a PDF with all fonts embedded (PDF/X-4, or “embed all fonts” on export).`);
-    if (r.std.length) out.push(`${what}: standard fonts not embedded (${r.std.join(", ")}) — the RIP has these; appearance may differ slightly from the customer's screen.`);
-  } catch (e) { /* best-effort */ }
+  let r;
+  try { r = inspectFonts(doc); } catch (e) { return out; }     // inspection failure is not a verdict
+  if (r.missing.length) {
+    const list = `${r.missing.slice(0, 8).join(", ")}${r.missing.length > 8 ? ` +${r.missing.length - 8} more` : ""}`;
+    if (!(spec && spec.allowMissingFonts))
+      throw new Error(`FONTS NOT EMBEDDED in ${what}: ${list}. ${r.missing.length === 1 ? "This font is" : "These fonts are"} only named in the file — not carried in it, not in this tool, not on the RIP — so Fiery would substitute a different face with different widths and the text can re-wrap, shift or change on the press with no error. Ask for a PDF with all fonts embedded (PDF/X-4, or “embed all fonts” on export). To impose it anyway, tick “Impose with missing fonts” below: the output is then flagged _FONTS in its filename and marked on screen.`);
+    out.push(`⚠ FONT OVERRIDE — ${what}: fonts NOT EMBEDDED (${list}), imposed on operator override. Fiery will substitute; the filename carries _FONTS.`);
+    if (missingOut) for (const n of r.missing) if (!missingOut.includes(n)) missingOut.push(n);
+  }
+  if (r.std.length) out.push(`${what}: standard fonts not embedded (${r.std.join(", ")}) — the RIP has these; appearance may differ slightly from the customer's screen.`);
   return out;
 }
 
@@ -3038,6 +3050,7 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles, onProgress) {
 }
 async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
   const pre = [];
+  const fontsMissing = [];                              // names let through on override → res.fontsMissing
   lastRaster = null;                                    // never inherit a previous job's raster note
   let frontRaster = null;
   // Source preflight — on the bytes as dropped, before any pass rewrites them.
@@ -3048,7 +3061,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     frontRaster = lastRaster; lastRaster = null;
     const doc = await loadPdf(artBytes, "artwork");
     await progress("Checking fonts and page sizes", 0.06);
-    pre.push(...fontNotes(doc, "artwork"));
+    pre.push(...fontNotes(doc, "artwork", spec, fontsMissing));
     try {
       // UserUnit scales a page's units; nothing here honours it, so say so.
       const uu = doc.getPage(0).node.get(PL.PDFName.of("UserUnit"));
@@ -3087,8 +3100,8 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     try {
       const bb = await ppsToPdfBytes(backBytes, "back");
       if (lastRaster) { const n = rasterNote(lastRaster, tw, th); if (n) pre.push(n); lastRaster = null; }
-      pre.push(...fontNotes(await loadPdf(bb, "back file"), "back file"));
-    } catch (e) { /* reported by the core load */ }
+      pre.push(...fontNotes(await loadPdf(bb, "back file"), "back file", spec, fontsMissing));
+    } catch (e) { if (/FONTS NOT EMBEDDED/.test(e.message)) throw e; /* anything else is reported by the core load */ }
   }
   // Gang combo files must be the same trim; a smaller or larger one is
   // fit-scaled into the cell, which is never what was meant.
@@ -3097,12 +3110,14 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
       if (!g || !g.bytes) continue;
       try {
         const gb = await ppsToPdfBytes(g.bytes, g.name || "gang");
-        const sv = pageSizeSurvey(await loadPdf(gb, g.name || "gang file"), spec);
+        const gdoc = await loadPdf(gb, g.name || "gang file");
+        pre.push(...fontNotes(gdoc, `gang file "${g.name || "?"}"`, spec, fontsMissing));
+        const sv = pageSizeSurvey(gdoc, spec);
         const z = sv.sizes[0];
         const near = (a, b) => Math.abs(a - b) <= 0.3;
         const fits = (near(z.w, tw) && near(z.h, th)) || (near(z.w, th) && near(z.h, tw)) || (near(z.w, tw + 2 * BLEED) && near(z.h, th + 2 * BLEED)) || (near(z.w, th + 2 * BLEED) && near(z.h, tw + 2 * BLEED));
         if (!fits) pre.push(`⚠ gang file "${g.name}" is ${z.w}×${z.h}″ but the job is ${tw}×${th}″ — it will be fit-scaled into its cells. Gang combos need same-size pieces.`);
-      } catch (e) { /* reported by the core load */ }
+      } catch (e) { if (/FONTS NOT EMBEDDED/.test(e.message)) throw e; /* anything else is reported by the core load */ }
     }
   }
   lastRaster = null;                                    // gang-file conversions above must not leak a note
@@ -3135,6 +3150,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
   try { srcInk = artBytes ? await inkFraction(artBytes, 0) : null; } catch (e) { srcInk = null; }
   for (const p of parts) {
     p.warnings = [...pre, ...(p.warnings || [])];
+    p.fontsMissing = fontsMissing.slice();              // on every part AND the top-level result
     try {
       const empties = await emptySides(p.bytes);
       p.sheetsImposed = Math.ceil(empties.total / (duplex ? 2 : 1));   // before any sheet sequence / slipsheets
@@ -3165,6 +3181,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
       p.warnings = [...(p.warnings || []), r.note];
     }
   }
+  res.fontsMissing = fontsMissing.slice();
   return res;
 }
 
@@ -4175,6 +4192,9 @@ function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // Per-job font override. Not a setting: never in a setup, and dropped the
+  // moment different artwork arrives, so one job's "yes" cannot carry over.
+  const [allowMissingFonts, setAllowMissingFonts] = useState(false);
   const [uploadState, setUploadState] = useState({});     // per output filename: "uploading" | "done" | "failed: …"
   const [activeOrder, setActiveOrder] = useState(null);   // queue row currently loaded
   const [rows, setRows] = useState(null);                  // admin queue rows (WP mode)
@@ -4365,8 +4385,10 @@ function App() {
     else { setTrimLong(Math.max(detTrim.w, detTrim.h)); setTrimShort(Math.min(detTrim.w, detTrim.h)); }
   }, [isBound, detTrim, activeOrder]);
 
+  useEffect(() => { setAllowMissingFonts(false); }, [art, backArt, gangFiles]);
+
   const spec = useMemo(() => ({
-    calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0,
+    calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0, allowMissingFonts,
     sides: isBook ? 2 : +sides, qty: +qty || 0, sheetFlip,
     backRotate: backRotate === "auto" ? "auto" : +backRotate,
     jobName, orderRef, itemRef, marks, foldMarks, slug: slugOn, allowBestFit,
@@ -4396,7 +4418,7 @@ function App() {
     // ignores anything null, so a half the operator never touched behaves
     // exactly as it did before these controls existed.
     pbGrid: isPB ? { cover: pbGridSpec(pbGrids.cover), guts: pbGridSpec(pbGrids.guts) } : null,
-  }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
+  }), [calc, trimLong, trimShort, allowMissingFonts, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin, sheetPortrait,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
        gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
@@ -4493,7 +4515,14 @@ function App() {
         // An approval mismatch travels on the filename so the flag survives
         // into the Drive folder and the press room, not just this screen.
         const unappr = art && art.approval && art.approval.state === "mismatch";
-        const flagIt = n => unappr ? n.replace(/\.pdf$/i, "_UNAPPROVED.pdf") : n;
+        // Likewise a font override: _FONTS on the filename, so the press room
+        // sees it on the file itself and not only in this session's report.
+        const fontsFlag = !!(res.fontsMissing && res.fontsMissing.length);
+        const flagIt = n => {
+          if (fontsFlag) n = n.replace(/\.pdf$/i, "_FONTS.pdf");
+          if (unappr) n = n.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
+          return n;
+        };
         // Perfect bound returns two parts, each with its own layout and its own
         // filename — the COVER and GUTS suffixes keep them apart in the order's
         // Drive folder and in the queue's IMPOSED detection.
@@ -5831,7 +5860,7 @@ function App() {
                     {uploadState[viewRes.filename] === "uploading" ? "Uploading…" : uploadState[viewRes.filename] === "done" ? "✓ Filed to Drive" : "📁 Send to order's Drive folder"}
                   </button>
                 )}
-                <span style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>{(viewRes.bytes.length / 1048576).toFixed(2)} MB · preflight passed</span>
+                <span style={{ fontSize: 11, color: viewRes.fontsMissing && viewRes.fontsMissing.length ? "#f87171" : "rgba(255,255,255,.45)" }}>{(viewRes.bytes.length / 1048576).toFixed(2)} MB · {viewRes.fontsMissing && viewRes.fontsMissing.length ? "FONT OVERRIDE" : "preflight passed"}</span>
                 {String(uploadState[viewRes.filename] || "").startsWith("failed") && <span style={{ color: "#f87171", fontSize: 12 }}>{uploadState[viewRes.filename]}</span>}
               </div>
             )}
@@ -5841,6 +5870,20 @@ function App() {
             <div className="imp-card" style={{ marginBottom: 12, padding: "10px 14px", borderColor: error ? "rgba(239,68,68,.4)" : "rgba(34,197,94,.3)" }}>
               <div style={{ fontSize: 13, color: error ? "#f87171" : "#4ade80", lineHeight: 1.5, whiteSpace: "pre-line" }}>{error || notice}</div>
               {error && errStage && <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: 4 }}>Stopped while: {errStage}</div>}
+              {error && /FONTS NOT EMBEDDED/.test(error) && !allowMissingFonts && (
+                <label data-font-override style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 8, fontSize: 12.5, color: "#fca5a5", cursor: "pointer" }}>
+                  <input type="checkbox" checked={allowMissingFonts} onChange={e => setAllowMissingFonts(e.target.checked)} style={{ width: "auto", marginTop: 3 }} />
+                  <span><b>Impose with missing fonts</b> — I accept that the press will substitute {"them"}. The output filename gets <b>_FONTS</b>, the report and the viewport say so, and this tick is dropped when different artwork is loaded. Bulk impose never uses it.</span>
+                </label>
+              )}
+            </div>
+          )}
+          {viewRes && viewRes.fontsMissing && viewRes.fontsMissing.length > 0 && (
+            <div className="imp-card" data-font-flag style={{ marginBottom: 12, padding: "10px 14px", borderColor: "rgba(239,68,68,.6)", background: "rgba(239,68,68,.08)" }}>
+              <div style={{ fontSize: 13, color: "#f87171", lineHeight: 1.5 }}>
+                <b>⚠ FONT OVERRIDE — fonts NOT EMBEDDED:</b> {viewRes.fontsMissing.join(", ")}. Imposed on your say-so; Fiery will substitute a different face and the text can re-wrap on press. The file is flagged <b>_FONTS</b>.
+                <button className="imp-btn sec" style={{ marginLeft: 10, padding: "2px 8px", fontSize: 11 }} onClick={() => setAllowMissingFonts(false)}>Revoke override</button>
+              </div>
             </div>
           )}
 
