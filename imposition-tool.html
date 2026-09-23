@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-18 02:29 UTC · IMPOSE-V1.41</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 01:44 UTC · IMPOSE-V1.42</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -166,6 +166,25 @@ function withMargin(sheet, m) {
   if (2 * m >= Math.min(sheet.long, sheet.short)) throw new Error(`A ${m}″ imageable margin leaves no printable area on a ${sheet.label} sheet.`);
   const t = n => Math.round(n * 1000) / 1000;
   return Object.assign({}, sheet, { usableLong: t(sheet.long - 2 * m), usableShort: t(sheet.short - 2 * m), margin: m });
+}
+// The parent sheet stood on end: X becomes the physical short edge. Same key
+// (every `sheet.key === …` rule still holds), same physical sheet, only which
+// way it lies under the layout. A 1 × 5 of 12.75×3″ strips does not fit a
+// 19×13 but fits a 13×19 — the operator's fix is this toggle, not a
+// transposed grid. Duplex: the physical short-edge flip is then a TOP/BOTTOM
+// mirror in page terms (see pageFlipOf).
+function orientSheet(sheet, portrait) {
+  if (!sheet || !portrait) return sheet;
+  return Object.assign({}, sheet, { long: sheet.short, short: sheet.long, usableLong: sheet.usableShort, usableShort: sheet.usableLong,
+                                    portrait: true, label: sheet.label + " ↕ portrait" });
+}
+// The flip edge in PAGE terms. mirrorCells' "short" mirrors columns (the
+// sheet turns about the axis parallel to its short edges); on a portrait page
+// those edges are top and bottom, so the physical short-edge flip is a row
+// mirror — mirrorCells' "long". The slug keeps the physical edge.
+function pageFlipOf(spec, sheet) {
+  const phys = spec.sheetFlip || "short";
+  return sheet && sheet.portrait ? (phys === "short" ? "long" : "short") : phys;
 }
 // Operator override of the parent sheet. Returns null for "auto" (the product's
 // own press sheet). NOTE this changes only the PHYSICAL sheet — the priced imp
@@ -523,7 +542,7 @@ function computeLayout(calc, trimA, trimB, opts) {
   // at the default 0.25″), so a margin typed on an AUTO or preset sheet moves
   // the printable area exactly as it does on a custom one.
   const SM = opts && opts.sheetMargin != null ? opts.sheetMargin : null;
-  const SH = k => withMargin(SHEETS[k], SM);
+  const SH = k => orientSheet(withMargin(SHEETS[k], SM), opts && opts.sheetPortrait);
   if (SM != null && Math.abs(SM - SHEET_MARGIN) > EPS) warnings.push(`Imageable margin ${SM}″ (default ${SHEET_MARGIN}″) — marks, slug and the jog all follow the smaller/larger printable area.`);
   const autoGutters = bleed > 0 ? [2 * bleed, bleed, 0] : [0];
   // Gutter override: a fixed value replaces the auto policy everywhere
@@ -577,7 +596,7 @@ function computeLayout(calc, trimA, trimB, opts) {
     const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
     if (!res.ok) {
       const b = res.best;
-      throw new Error(`Manual ${manual.a}×${manual.d} grid of ${pieceLong}×${pieceShort}″ needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″. Reduce columns/rows or gutters, or lower the imageable margin (0″ = the whole sheet).`);
+      throw new Error(`Manual ${manual.a}×${manual.d} grid of ${pieceLong}×${pieceShort}″ needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″. Reduce columns/rows or gutters, lower the imageable margin (0″ = the whole sheet), or ${b.sheet.portrait ? "set Sheet orientation back to landscape" : "stand the sheet on end (Sheet orientation: portrait)"}.`);
     }
     sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
     const placed = grid.a * grid.d;
@@ -697,7 +716,7 @@ function computeSaddleLayout(pw, ph, opts) {
   const bleed = opts && isFinite(opts.bleed) && opts.bleed !== null ? Math.min(Math.max(+opts.bleed, 0), 0.5) : BLEED;
   if (Math.abs(bleed - BLEED) > EPS) warnings.push(`Bleed override: ${bleed}″ per side (default ${BLEED}″).`);
   const SM = opts && opts.sheetMargin != null ? opts.sheetMargin : null;
-  const SH = k => withMargin(SHEETS[k], SM);
+  const SH = k => orientSheet(withMargin(SHEETS[k], SM), opts && opts.sheetPortrait);
   if (SM != null && Math.abs(SM - SHEET_MARGIN) > EPS) warnings.push(`Imageable margin ${SM}″ (default ${SHEET_MARGIN}″) — marks, slug and the jog all follow the smaller/larger printable area.`);
   const { imp, source } = resolveSaddleImp(pw, ph);
   if (imp < 1) throw new Error(`${pw}×${ph}″ pages do not image on any press sheet (imp=${imp})`);
@@ -753,7 +772,7 @@ function computeSaddleLayout(pw, ph, opts) {
                               opts && opts.saddleColGaps, opts && opts.saddleRowGaps, !!(opts && opts.saddleFillSheet));
     if (!res.ok) {
       const b = res.best;
-      throw new Error(`Manual ${manual.a}×${manual.d} of a ${spreadW}×${spreadH}″ spread needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″. Reduce copies or gutters, or lower the imageable margin (0″ = the whole sheet).`);
+      throw new Error(`Manual ${manual.a}×${manual.d} of a ${spreadW}×${spreadH}″ spread needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″. Reduce copies or gutters, lower the imageable margin (0″ = the whole sheet), or ${b.sheet.portrait ? "set Sheet orientation back to landscape" : "stand the sheet on end (Sheet orientation: portrait)"}.`);
     }
     sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
     const c = grid.a * grid.d;
@@ -1802,7 +1821,7 @@ function drawSlug(page, layout, font, info, cells) {
     (info.artScale && info.artScale !== 1) ? `ART ${(info.artScale * 100).toFixed(2)}%` : null,
     info.creep ? `CREEP ${info.creep}in total (this sig ${(info.creepAt || 0).toFixed(4)}in)` : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
-    info.duplex === false ? "SIMPLEX" : info.flip ? `DUPLEX FLIP ON ${String(info.flip).toUpperCase()} (${info.flip === "long" ? layout.sheet.long : layout.sheet.short}in) EDGE` : null,
+    info.duplex === false ? "SIMPLEX" : info.flip ? `DUPLEX FLIP ON ${String(info.flip).toUpperCase()} (${info.flip === "long" ? Math.max(layout.sheet.long, layout.sheet.short) : Math.min(layout.sheet.long, layout.sheet.short)}in) EDGE${layout.sheet.portrait ? " · SHEET PORTRAIT" : ""}` : null,
     info.date,
   ].filter(Boolean);
   page.drawText(parts.join("  ·  "), {
@@ -2056,7 +2075,7 @@ async function imposeSaddle(artBytes, spec, layout) {
   if (synTotal) warnings.push(`add-bleed synthesized on ${synTotal} of ${n} pages (${Object.entries(synCount).map(([m, c]) => `${c} ${m}`).join(", ")}${synPre ? `; ${synPre} pre-scaled — art stopped shy of trim` : ""})`);
 
   const spreadRot = bk.spreadAlongX ? 0 : 90;
-  const flip = spec.sheetFlip || "short"; // Fiery short-edge feed is the shop default
+  const flip = pageFlipOf(spec, layout.sheet); // page-frame flip (portrait sheet swaps it); Fiery short-edge feed is the shop default
   // Tumble rule: the back needs 180° when the press flip axis is
   // perpendicular to the placed pages' head-to-foot axis.
   const headVertical = spreadRot % 180 === 0;
@@ -2270,7 +2289,8 @@ function layoutOpts(spec) {
     // manual grid wins when both are set — it is the more specific instruction.
     sigRepeat: isFinite(+spec.sigRepeat) && +spec.sigRepeat >= 1 ? Math.floor(+spec.sigRepeat) : null,
     // Parent-sheet override (throws on an unusable custom size).
-    sheetOverride: sheetOverrideOf(spec),
+    sheetOverride: orientSheet(sheetOverrideOf(spec), !!spec.sheetPortrait),
+    sheetPortrait: !!spec.sheetPortrait,
     sheetMargin: marginOf(spec),
     colGaps: Array.isArray(spec.colGaps) ? spec.colGaps.map(gapNum) : null,
     rowGaps: Array.isArray(spec.rowGaps) ? spec.rowGaps.map(gapNum) : null,
@@ -3353,7 +3373,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
 
   // Reading order for piece assignment: top row first, left → right
   const reading = [...layout.cells].sort((a, b) => b.row - a.row || a.col - b.col);
-  const flip = spec.sheetFlip || "short";
+  const flip = pageFlipOf(spec, layout.sheet);   // page-frame flip; the slug reports the physical edge
   const mirroredAll = mirrorCells(layout.cells, layout, flip);
   const mirrorOf = new Map(layout.cells.map((c, i) => [c, mirroredAll[i]]));
 
@@ -3390,7 +3410,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
           const autoTumble = flip === "short" ? !headVertical : headVertical;
           const bmode = spec.backRotate === 0 || spec.backRotate === 180 ? spec.backRotate : "auto";
           extraRot = bmode === "auto" ? (autoTumble ? 180 : 0) : bmode;
-          if (extraRot && !tumbleNoted) { tumbleNoted = true; warnings.push(`back rotated 180° (${bmode === "auto" ? "auto — registers with front under " + flip + "-edge flip" : "manual tumble"})`); }
+          if (extraRot && !tumbleNoted) { tumbleNoted = true; warnings.push(`back rotated 180° (${bmode === "auto" ? "auto — registers with front under " + (spec.sheetFlip || "short") + "-edge flip" + (layout.sheet.portrait ? " (portrait sheet)" : "") : "manual tumble"})`); }
         }
         placeInCell(page, embedded, art, cell, extraRot + (frontCell.patRot || 0));
       }
@@ -3554,8 +3574,8 @@ function imposedFilename(spec, layout) {
   // per order — keep in sync with pps_impose_is_output_name() in PHP.
   if (spec.orderRef) bits.push("Order-" + sanitizeName(spec.orderRef) + (spec.itemRef ? "-i" + sanitizeName(spec.itemRef) : ""));
   if (spec.jobName) bits.push(sanitizeName(spec.jobName).replace(/\.pdf$/i, ""));
-  if (layout.booklet) bits.push(`${layout.booklet.pw}x${layout.booklet.ph}`, "saddle", `${layout.booklet.spreadsPerSide}spread`, layout.sheet.key);
-  else bits.push(`${layout.pieceLong}x${layout.pieceShort}`, `${layout.imp}up`, layout.sheet.key);
+  if (layout.booklet) bits.push(`${layout.booklet.pw}x${layout.booklet.ph}`, "saddle", `${layout.booklet.spreadsPerSide}spread`, layout.sheet.key + (layout.sheet.portrait ? "P" : ""));
+  else bits.push(`${layout.pieceLong}x${layout.pieceShort}`, `${layout.imp}up`, layout.sheet.key + (layout.sheet.portrait ? "P" : ""));
   return bits.join("_") + ".pdf";
 }
 
@@ -4090,6 +4110,7 @@ function App() {
   const [sheetLong, setSheetLong] = useState(19);
   const [sheetShort, setSheetShort] = useState(13);
   const [sheetMargin, setSheetMargin] = useState(0.25);
+  const [sheetPortrait, setSheetPortrait] = useState(false); // parent sheet stood on end (short edge across)
   const [allowBestFit, setAllowBestFit] = useState(false);
   const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
   const [gutterMode, setGutterMode] = useState("auto");   // "auto" | fixed inches
@@ -4196,7 +4217,7 @@ function App() {
     calc: [calc, setCalc], trimLong: [trimLong, setTrimLong], trimShort: [trimShort, setTrimShort], sides: [sides, setSides],
     sheetFlip: [sheetFlip, setSheetFlip], backRotate: [backRotate, setBackRotate],
     marks: [marks, setMarks], foldMarks: [foldMarks, setFoldMarks], slugOn: [slugOn, setSlugOn],
-    sheetSel: [sheetSel, setSheetSel], sheetLong: [sheetLong, setSheetLong], sheetShort: [sheetShort, setSheetShort], sheetMargin: [sheetMargin, setSheetMargin],
+    sheetSel: [sheetSel, setSheetSel], sheetLong: [sheetLong, setSheetLong], sheetShort: [sheetShort, setSheetShort], sheetMargin: [sheetMargin, setSheetMargin], sheetPortrait: [sheetPortrait, setSheetPortrait],
     allowBestFit: [allowBestFit, setAllowBestFit], efficient: [efficient, setEfficient], gutterMode: [gutterMode, setGutterMode],
     gapCols: [gapCols, setGapCols], gapRows: [gapRows, setGapRows], gapFill: [gapFill, setGapFill],
     gridOn: [gridOn, setGridOn], gridAcross: [gridAcross, setGridAcross], gridDown: [gridDown, setGridDown], gridSheet: [gridSheet, setGridSheet],
@@ -4349,7 +4370,7 @@ function App() {
     sides: isBook ? 2 : +sides, qty: +qty || 0, sheetFlip,
     backRotate: backRotate === "auto" ? "auto" : +backRotate,
     jobName, orderRef, itemRef, marks, foldMarks, slug: slugOn, allowBestFit,
-    sheet: sheetSel, sheetLong: +sheetLong || 0, sheetShort: +sheetShort || 0, sheetMargin,
+    sheet: sheetSel, sheetLong: +sheetLong || 0, sheetShort: +sheetShort || 0, sheetMargin, sheetPortrait,
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
     pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
@@ -4376,7 +4397,7 @@ function App() {
     // exactly as it did before these controls existed.
     pbGrid: isPB ? { cover: pbGridSpec(pbGrids.cover), guts: pbGridSpec(pbGrids.guts) } : null,
   }), [calc, trimLong, trimShort, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
-       sheetSel, sheetLong, sheetShort, sheetMargin,
+       sheetSel, sheetLong, sheetShort, sheetMargin, sheetPortrait,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
        gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
   const debSpec = useDebounced(spec, 450);
@@ -4887,6 +4908,12 @@ function App() {
                       <input type="number" step="0.0625" min="0" value={sheetMargin} placeholder={String(SHEET_MARGIN)}
                              onChange={e => setSheetMargin(e.target.value)} />
                     </Field>
+                    <Field label="Sheet orientation" style={{ flex: "0 0 150px", marginBottom: 8 }}>
+                      <select value={sheetPortrait ? "portrait" : "landscape"} onChange={e => setSheetPortrait(e.target.value === "portrait")} title="Which way the parent sheet lies under the layout">
+                        <option value="landscape">Landscape — long edge across</option>
+                        <option value="portrait">Portrait — stood on end</option>
+                      </select>
+                    </Field>
                   </div>
                   {sheetSel === "custom" && (
                     <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 8, flexWrap: "wrap" }}>
@@ -4904,7 +4931,7 @@ function App() {
                     </div>
                   )}
                   <div className="imp-sheetline" style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: -2, marginBottom: 10 }}>
-                    Sheet <b style={{ color: "rgba(255,255,255,.8)" }}>{shL ? shL.label : `${dims[0]}×${dims[1]}`}</b>
+                    Sheet <b style={{ color: "rgba(255,255,255,.8)" }}>{shL ? shL.label : `${dims[1]}×${dims[0]}${sheetPortrait ? " ↕ portrait" : ""}`}</b>
                     {" · "}prints <b style={{ color: "rgba(255,255,255,.8)" }}>{printable}″</b> inside a {m}″ margin
                     {fillOn ? <span style={{ color: "#fbbf24" }}> · fill mode — block centred inside that margin; set it to 0 for the whole sheet</span> : null}
                     {sheetSel !== "auto" && <span> · physical sheet only; the priced imp stays what the calculator quoted</span>}

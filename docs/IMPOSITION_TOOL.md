@@ -709,6 +709,39 @@ download the imposed PDF. Useful for testing and one-off jobs.
     each run, placing and ink-check stages seen, bar gone on completion and
     on failure, "Stopped while: Applying page sequence" on a bad sequence.
 
+  ### Parent sheet orientation (1.42)
+
+  Owner, on a refusal ("Manual 1×5 grid of 12.75×3″ needs 12.75×15″ but the
+  13×19 … is 19×13″"): "I need the quick and easy ability to flip the
+  orientation of the parent sheet." The sheet always lay long edge across;
+  a stack of five 12.75″ strips only fits with the sheet stood on end.
+
+  - **Sheet orientation** (Layout settings, beside the margin): Landscape —
+    long edge across (as before) / Portrait — stood on end. `spec.sheetPortrait`;
+    saved in setups; applies to the job's sheet and every candidate sheet
+    (`orientSheet()` inside `SH()` in both layout functions and on the
+    override), so manual grids, efficient mode and the priced search all see
+    a 13-wide × 19-tall sheet. Same `key`, so every `sheet.key === …` rule
+    holds; label gains "↕ portrait"; the filename token gains `P`; the slug
+    gains `SHEET PORTRAIT`.
+  - **Duplex on a portrait sheet.** The physical short-edge flip turns the
+    sheet about the axis parallel to its 13″ edges, which on a portrait page
+    are top and bottom — a row mirror in page terms, `mirrorCells`' "long".
+    `pageFlipOf(spec, sheet)` swaps the flip in page terms when the sheet is
+    portrait; the tumble rule then follows unchanged, and the slug still
+    names the physical edge ("DUPLEX FLIP ON SHORT (13in) EDGE · SHEET
+    PORTRAIT"). Verified by mirroring the back's ink mask about the physical
+    axis onto the front's: IoU 1.0 on the portrait strip job and the portrait
+    4×4 booklet, and the other axis does not register; landscape cases
+    unchanged.
+  - The manual-grid refusal now ends "…or stand the sheet on end (Sheet
+    orientation: portrait)", and the reverse when already portrait.
+  - Verified: 1×5 of 12.75×3″ refuses landscape and lays out portrait
+    (13×19 page, block 12.75×15″ jogged to the bottom); 4×4 booklet portrait →
+    2 × 2 rotated. UI: select present, sheet line reads "13×19 ↕ portrait ·
+    prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
+    `ui_port.mjs`.
+
   ### Workspace layout (1.33)
 
   Rebuilt to the owner's wireframe (`Imp_tool_layout.pdf`, 2026-09-06):
