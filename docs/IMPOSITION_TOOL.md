@@ -743,6 +743,56 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Stale result under a refusal, and the sheet/piece in plain W×H (1.45)
+
+  Owner, after 1.44: "still not working correctly. GET IT WORKING. IT IS
+  VERY FUCKING SIMPLE … Sheet: 13x19 or 19x13. Piece: 12x3 or 3x12."
+
+  Reproduced by driving the wp-admin queue with a mocked bridge
+  (`ui_wpflow.mjs`: mocked `pps_impose_list` / `pps_impose_download` /
+  `pps_impose_setups`, a 12×3 brochure order, the artwork in both page
+  orientations). What the operator actually saw on loading the order:
+
+  - **A wrong file offered for Drive under a red refusal.** The priced path
+    refuses (8-up was priced; at most 5 or 6 fit), so the layout is null and
+    the regenerate effect returned early with `setResult(null)` — **without
+    bumping `genSeq`**. The run that had already started under the previous
+    spec (the tool's default 11×8.5, because the order's size lands in the
+    debounced spec 450 ms after the artwork does) then finished and put
+    "Download IMPOSED_11x8.5_2up_13x19.pdf" — the customer's 3×12 art
+    fit-scaled ×0.9 into letter cells, "preflight passed" — with a
+    Send-to-Drive button, directly under the refusal. Two fixes: the early
+    return now invalidates in-flight runs (`++genSeq.current`, busy/progress
+    cleared), and the effect never starts a run while the spec is still
+    settling (`if (spec !== debSpec) return;` — it re-runs when `debSpec`
+    catches up), so a drop or an order load no longer produces a first
+    imposition under the wrong size at all.
+  - **The priced refusal names the most that fits, every way.**
+    `physicalFitOptions()` (both sheet orientations × both artwork rotations
+    at the current margin, best counts first) feeds "The most that fits: (1)
+    6-up as 6 × 1 with the artwork 3 wide × 12 tall (90°) on the 13×19 sheet
+    lying 19 wide × 13 tall; (2) 6-up as 1 × 6 … lying 13 wide × 19 tall; …"
+    followed by the two ways to run it (manual columns × rows, or Allow best
+    physical fit) and the MISMATCH note.
+  - **Everything in width × height, as it lies.** Sheet orientation reads
+    "19 wide × 13 tall (landscape)" / "13 wide × 19 tall (portrait)";
+    Artwork rotation reads "12 wide × 3 tall (0°)", "3 wide × 12 tall (90°)",
+    "…, upside down (180°/270°)", "Auto — 12 × 3 or 3 × 12, whichever fits",
+    all computed from the job; the sheet line reads "Sheet 13×19 lying 19
+    wide × 13 tall · prints 18.5×12.5″"; refusals read "1 column × 5 rows of
+    the artwork 12 wide × 3 tall (0°) needs 12.00 wide × 15.00 tall, but the
+    13×19 sheet lying 19 wide × 13 tall prints 18.5 wide × 12.5 tall inside
+    its 0.25″ margin" (`stockOf`/`sheetWH`/`sheetWords`/`pieceWords`). The
+    words "long edge", "landscape" as a bare adjective and "PORTRAIT" are
+    gone from every message an operator reads at the press.
+  - Verified: `ui_wpflow.mjs` (order load → refusal with fits, **no download
+    button**; portrait 1 × 5 → 5-up file `…_13x19P.pdf`; landscape 5 × 1 at
+    90° → 5-up file), both artwork orientations; the imposed images inspected
+    by eye (5 rows of upright 12×3 art on the portrait sheet, 5 upright
+    columns on the landscape sheet, backs turned for the flip); all eight UI
+    suites pass; engine output content-identical to 1.44 (169 pages, seven
+    suites).
+
   ### Artwork rotation on the sheet, and refusals that say what fits (1.44)
 
   Owner, after 1.42: "That layout still doesn't fix the problem. Imagine

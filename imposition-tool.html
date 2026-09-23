@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 03:20 UTC · IMPOSE-V1.44</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 04:05 UTC · IMPOSE-V1.45</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -537,6 +537,30 @@ function remargin(sheet, m) {
 // first and then at the smaller margins the press may still image. A refusal
 // that only says "does not fit" leaves the operator guessing at 11 pm; this
 // one names the two or three settings to click.
+// Plain words for a sheet and a piece AS THEY LIE: "13×19 stock lying 19 wide
+// × 13 tall", "artwork 3 wide × 12 tall (90°)". The operator thinks in
+// width × height, never in "long edge along the long edge".
+function stockOf(sheet) { return sheet.key && SHEETS[sheet.key] ? SHEETS[sheet.key].label : String(sheet.label || "").replace(/ ↕ portrait$/, ""); }
+function sheetWH(sheet) { return `${sheet.long} wide × ${sheet.short} tall`; }
+function sheetWords(sheet) { return `the ${stockOf(sheet)} sheet lying ${sheetWH(sheet)}`; }
+function pieceWords(pieceLong, pieceShort, rotated) { return rotated ? `${pieceShort} wide × ${pieceLong} tall (90°)` : `${pieceLong} wide × ${pieceShort} tall (0°)`; }
+// The most that physically fits, every way: both sheet orientations × both
+// artwork rotations at the current margin, best counts first (≤3 lines).
+function physicalFitOptions(pieceLong, pieceShort, sheets, gutters, curMargin) {
+  const out = [];
+  for (const portrait of [false, true]) {
+    for (const rot of [false, true]) {
+      for (const base of sheets) {
+        let sh; try { sh = orientSheet(remargin(base, curMargin), portrait); } catch (e) { continue; }
+        const g = bestPhysicalGrid(pieceLong, pieceShort, sh, gutters, [rot]);
+        if (!g) continue;
+        out.push({ n: g.a * g.d, text: `${g.a * g.d}-up as ${g.a} × ${g.d} with the artwork ${pieceWords(pieceLong, pieceShort, rot)} on ${sheetWords(sh)}` });
+      }
+    }
+  }
+  out.sort((x, y) => y.n - x.n);
+  return out.slice(0, 3).map(o => o.text);
+}
 function manualGridAlternatives(a, d, pieceLong, pieceShort, sheets, gutters, fillSheet, curMargin) {
   const out = [];
   const margins = [curMargin, 0.125, 0].filter((m, i, arr) => m <= curMargin + EPS && arr.indexOf(m) === i);
@@ -550,7 +574,7 @@ function manualGridAlternatives(a, d, pieceLong, pieceShort, sheets, gutters, fi
           const r = fitManualGrid(A, D, pieceLong, pieceShort, cands, gutters, [rot], null, null, fillSheet);
           if (!r.ok) continue;
           const sh = r.ok.sheet;
-          out.push(`${A} × ${D} with the artwork at ${rot ? "90°" : "0°"} (${rot ? pieceShort : pieceLong}×${rot ? pieceLong : pieceShort}″ as placed) on the ${sh.key && SHEETS[sh.key] ? SHEETS[sh.key].label : sh.label.replace(/ ↕ portrait$/, "")} ${portrait ? "PORTRAIT" : "landscape"}${Math.abs(m - curMargin) > EPS ? ` at a ${m}″ margin` : ""}`);
+          out.push(`${A} × ${D} with the artwork ${pieceWords(pieceLong, pieceShort, rot)} on ${sheetWords(sh)}${Math.abs(m - curMargin) > EPS ? ` at a ${m}″ margin` : ""}`);
           if (out.length >= 4) return out;
         }
       }
@@ -630,9 +654,8 @@ function computeLayout(calc, trimA, trimB, opts) {
     const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
     if (!res.ok) {
       const b = res.best;
-      const placed = allowedRot.length === 1 ? ` with the artwork at ${allowedRot[0] ? "90°" : "0°"} (${b.grid.rotated ? pieceShort : pieceLong}×${b.grid.rotated ? pieceLong : pieceShort}″ as placed)` : "";
       const alts = manualGridAlternatives(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, fillSheet, sheetMarginOf(b.sheet));
-      throw new Error(`Manual ${manual.a}×${manual.d} grid of ${pieceLong}×${pieceShort}″${placed} needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″.`
+      throw new Error(`${manual.a} column${manual.a === 1 ? "" : "s"} × ${manual.d} row${manual.d === 1 ? "" : "s"} of the artwork ${pieceWords(pieceLong, pieceShort, b.grid.rotated)} needs ${b.W.toFixed(2)} wide × ${b.H.toFixed(2)} tall, but ${sheetWords(b.sheet)} prints ${b.bw} wide × ${b.bh} tall inside its ${sheetMarginOf(b.sheet)}″ margin.`
         + (alts.length ? `\n${manual.a * manual.d} pieces DO fit as: ${alts.map((t, i) => `(${i + 1}) ${t}`).join("; ")}. Set Sheet orientation and Artwork rotation in Layout settings to match.`
                        : ` No sheet orientation, artwork rotation or margin down to 0″ holds ${manual.a * manual.d} pieces this size — reduce columns/rows or gutters.`));
     }
@@ -698,7 +721,10 @@ function computeLayout(calc, trimA, trimB, opts) {
         // count happens only on explicit operator override, and is flagged in
         // the UI, the warnings, and the sheet's slug line.
         if (!(opts && opts.allowBestFit)) {
-          throw new Error(`Priced imposition ${priced}-up of ${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}${allowedRot.length === 1 ? " in the forced orientation" : ""}. Pricing/production mismatch — enable "allow best physical fit" to place the maximum that fits (flagged), and review pricing for this size.`);
+          const fits = physicalFitOptions(pieceLong, pieceShort, [sheet], gutters, sheetMarginOf(sheet));
+          throw new Error(`The calculator priced this ${priced}-up, but ${priced} pieces of ${pieceLong}×${pieceShort}″ do not fit on ${sheetWords(sheet)}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}${allowedRot.length === 1 ? " with the artwork rotation forced" : ""}.`
+            + (fits.length ? `\nThe most that fits: ${fits.map((t, i) => `(${i + 1}) ${t}`).join("; ")}.` : "")
+            + `\nTo run it: tick “Set columns × rows manually” and enter one of those (Sheet orientation and Artwork rotation are in Layout settings), or tick “Allow best physical fit” to place the most that fits as-is. Either way it is flagged MISMATCH against the ${priced}-up price — review pricing for this size.`);
         }
         grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot);
         if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label} at all.`);
@@ -4553,7 +4579,16 @@ function App() {
   // Auto-regenerate the imposed PDF when spec or art changes
   useEffect(() => {
     const ganging = gangFiles.length >= 2;
-    if ((!art && !ganging) || (!layoutInfo.layout && !layoutInfo.pb)) { setResult(null); return; }
+    // No artwork, or a refused layout: nothing may remain on screen — and an
+    // in-flight run started under the PREVIOUS spec must not land afterwards.
+    // (Found 1.45: loading a 12×3 order refused its priced 8-up, yet the run
+    // that had started under the default 11×8.5 spec finished a moment later
+    // and put "Download IMPOSED_11x8.5_2up" — the customer's art fit-scaled
+    // into letter cells — under the red refusal, with a Send-to-Drive button.)
+    if ((!art && !ganging) || (!layoutInfo.layout && !layoutInfo.pb)) { ++genSeq.current; setResult(null); setBusy(false); setProg(null); return; }
+    // The spec is debounced; artwork can arrive while a size change is still
+    // settling. Wait for it — the effect re-runs when debSpec catches up.
+    if (spec !== debSpec) return;
     const seq = ++genSeq.current;
     setBusy(true); setError(""); setErrStage(""); setUploadState({}); setProg({ label: "Starting", pct: 0 }); lastStageRef.current = "Starting";
     const onProgress = (label, frac) => {
@@ -4975,6 +5010,8 @@ function App() {
                 : sheetSel === "custom" ? [Math.max(+sheetLong || 0, +sheetShort || 0), Math.min(+sheetLong || 0, +sheetShort || 0)]
                 : SHEETS[sheetSel] ? [SHEETS[sheetSel].long, SHEETS[sheetSel].short] : [19, 13];
               const printable = shL ? `${shL.usableLong}×${shL.usableShort}` : `${(dims[0] - 2 * m).toFixed(2)}×${(dims[1] - 2 * m).toFixed(2)}`;
+              const pL = Math.max(+trimLong || 0, +trimShort || 0) || "long", pS = Math.min(+trimLong || 0, +trimShort || 0) || "short";
+              const lyW = shL ? shL.long : (sheetPortrait ? dims[1] : dims[0]), lyH = shL ? shL.short : (sheetPortrait ? dims[0] : dims[1]);
               return (
                 <>
                   <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -4993,18 +5030,18 @@ function App() {
                     </Field>
                     <Field label="Sheet orientation" style={{ flex: "0 0 150px", marginBottom: 8 }}>
                       <select value={sheetPortrait ? "portrait" : "landscape"} onChange={e => setSheetPortrait(e.target.value === "portrait")} title="Which way the parent sheet lies under the layout">
-                        <option value="landscape">Landscape — long edge across</option>
-                        <option value="portrait">Portrait — stood on end</option>
+                        <option value="landscape">{`${dims[0]} wide × ${dims[1]} tall (landscape)`}</option>
+                        <option value="portrait">{`${dims[1]} wide × ${dims[0]} tall (portrait)`}</option>
                       </select>
                     </Field>
                     {!isSaddle && !isPB && (
                       <Field label="Artwork rotation on the sheet" style={{ flex: "1 1 220px", marginBottom: 8 }}>
                         <select value={artRotate} onChange={e => setArtRotate(e.target.value)} title="How each piece lies in its cell. Columns × rows below count the piece as placed.">
-                          <option value="auto">Auto — whichever way fits</option>
-                          <option value="0">0° — long edge along the sheet's long edge</option>
-                          <option value="90">90° — long edge across the sheet</option>
-                          <option value="180">180° — as 0°, turned head-down</option>
-                          <option value="270">270° — as 90°, turned head-down</option>
+                          <option value="auto">{`Auto — ${pL} × ${pS} or ${pS} × ${pL}, whichever fits`}</option>
+                          <option value="0">{`${pL} wide × ${pS} tall (0°)`}</option>
+                          <option value="90">{`${pS} wide × ${pL} tall (90°)`}</option>
+                          <option value="180">{`${pL} wide × ${pS} tall, upside down (180°)`}</option>
+                          <option value="270">{`${pS} wide × ${pL} tall, upside down (270°)`}</option>
                         </select>
                       </Field>
                     )}
@@ -5030,7 +5067,7 @@ function App() {
                     </div>
                   )}
                   <div className="imp-sheetline" style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: -2, marginBottom: 10 }}>
-                    Sheet <b style={{ color: "rgba(255,255,255,.8)" }}>{shL ? shL.label : `${dims[1]}×${dims[0]}${sheetPortrait ? " ↕ portrait" : ""}`}</b>
+                    Sheet <b style={{ color: "rgba(255,255,255,.8)" }}>{shL ? stockOf(shL) : `${dims[1]}×${dims[0]}`}</b> lying <b style={{ color: "rgba(255,255,255,.8)" }}>{lyW} wide × {lyH} tall</b>
                     {" · "}prints <b style={{ color: "rgba(255,255,255,.8)" }}>{printable}″</b> inside a {m}″ margin
                     {fillOn ? <span style={{ color: "#fbbf24" }}> · fill mode — block centred inside that margin; set it to 0 for the whole sheet</span> : null}
                     {sheetSel !== "auto" && <span> · physical sheet only; the priced imp stays what the calculator quoted</span>}
