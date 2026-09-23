@@ -743,6 +743,20 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Default imageable margin is 0 (1.46)
+
+  Owner: "set default imageable margin to 0." `SHEET_MARGIN` is 0 and every
+  stock sheet's usable area is the whole sheet (13×19 → 19×13 printable,
+  13×27.5 → 27.5×13, 12×18 → 18×12). The margin box, setups and the
+  per-job override work exactly as before; an operator whose press needs
+  its edges kept clear types the margin or saves it in a setup. The priced
+  imp functions carry their own 18.5″ constant, so pricing parity is
+  untouched. Consequence to know: marks and the slug now sit at the sheet
+  edge by default, where a press that cannot image its outer 1/8″ will
+  clip them — that is the operator's margin to set. Every UI suite passes;
+  engine output changes for every job (the printable area moved), which is
+  the intent.
+
   ### Stale result under a refusal, and the sheet/piece in plain W×H (1.45)
 
   Owner, after 1.44: "still not working correctly. GET IT WORKING. IT IS
