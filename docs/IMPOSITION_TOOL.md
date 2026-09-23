@@ -743,6 +743,54 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Artwork rotation on the sheet, and refusals that say what fits (1.44)
+
+  Owner, after 1.42: "That layout still doesn't fix the problem. Imagine
+  you're me; working late trying to set up a job and my imposition software
+  is giving me everything but the very basic options I need. Give me the
+  ability to rotate not just the parent sheet but the artwork itself on the
+  sheet. I need one column of 5 rows and right now that isn't possible."
+
+  What was actually in the way: the piece's orientation in its cell was
+  chosen by the tool (a tri-state "Grid orientation" buried in the pattern
+  row, whose "rotated" meant nothing to an operator thinking about the
+  artwork), columns × rows counted a piece the operator could not see, and
+  the refusal said only what did NOT fit. Five 12.75×3″ strips fit two ways
+  — 5 × 1 with the art turned 90° on a landscape sheet, or 1 × 5 with the
+  art at 0° on a portrait sheet — and the tool named neither.
+
+  - **Artwork rotation on the sheet** (Layout settings, beside Sheet
+    orientation; flats and stickers): Auto / 0° (long edge along the sheet's
+    long edge) / 90° (across) / 180° (as 0°, head-down) / 270° (as 90°,
+    head-down). `spec.artRotate`; `artRotateOf()` maps it onto the engine's
+    `forceRotated` (0/180 → "no", 90/270 → "yes") plus a new `artTurn` flag
+    that `buildCells()` adds to every cell's `patRot` on top of the piece
+    pattern, so 180° composes with head-to-head etc. and the backs follow
+    through the duplex flip as any pattern does. Saved in setups. Saddle
+    keeps its Spread orientation select and perfect bound its job-default +
+    per-half tri-state; a flat job sends `forceRotated: "auto"` so a stale
+    tri-state (from a setup or a product switch) can never force a flat.
+  - **Piece as placed** readout under the Layout head — "3×12.75″ (rotated
+    90°) · 5 columns × 1 row · block 16.00×12.75″ on the 19×13″ sheet" — and
+    the same on the manual-grid panel header, so columns × rows count what
+    is on screen.
+  - **Refusals name the alternatives.** `manualGridAlternatives()` tries the
+    same count as a×d and d×a, at 0° and 90°, on the sheet landscape and
+    portrait, at the current margin and then 0.125″ and 0″, and the message
+    ends "5 pieces DO fit as: (1) 5 × 1 with the artwork at 90° (3×12.75″ as
+    placed) on the 13×19 landscape; (2) 1 × 5 with the artwork at 0° … on
+    the 13×19 PORTRAIT. Set Sheet orientation and Artwork rotation in Layout
+    settings to match." At the default 0.25″ margin the same job lists both
+    "at a 0.125″ margin", which is the real reason a 12.75″ piece would not
+    go on a 13″ edge. When nothing holds the count even at 0″ it says so.
+  - Verified (`cases_artrot.json`, `ui_artrot.mjs`): both hinted layouts lay
+    out when followed; 180° sets every `patRot` to 180 and warns; 270° =
+    rotated + 180; head-to-head + 180° gives rows 180/0/180; Auto/0°/90°
+    reproduce the tri-state (90° on a priced 9-up still refuses as the forced
+    orientation always did); select present for flats only. Engine output
+    with the control on Auto is content-identical to 1.43 (141 pages across
+    five suites).
+
   ### Font gate (1.43)
 
   Owner: "ARE YOU, in imposition, able to inform us that a customer's font is
