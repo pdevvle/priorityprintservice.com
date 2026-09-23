@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 04:05 UTC · IMPOSE-V1.45</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 04:30 UTC · IMPOSE-V1.46</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -127,14 +127,16 @@ const CFG = window.PPS_IMPOSE_CFG || null; // injected by pps-imposition.php in 
 const PT = 72, BLEED = 0.125, EPS = 1e-6;
 
 const SHEETS = {
-  "13x19":   { key:"13x19",   label:"13×19",              long:19,   short:13, usableLong:18.5, usableShort:12.5 },
-  "13x27.5": { key:"13x27.5", label:"13×27.5 (oversize)", long:27.5, short:13, usableLong:27,   usableShort:12.5 },
-  "12x18":   { key:"12x18",   label:"12×18 crack-n-peel", long:18,   short:12, usableLong:17.5, usableShort:11.5 },
+  "13x19":   { key:"13x19",   label:"13×19",              long:19,   short:13, usableLong:19,   usableShort:13 },
+  "13x27.5": { key:"13x27.5", label:"13×27.5 (oversize)", long:27.5, short:13, usableLong:27.5, usableShort:13 },
+  "12x18":   { key:"12x18",   label:"12×18 crack-n-peel", long:18,   short:12, usableLong:18,   usableShort:12 },
 };
 
-// Every stock sheet images to 0.25″ inside its edge; a custom parent sheet
-// takes the same default unless the operator knows their press does otherwise.
-const SHEET_MARGIN = 0.25;
+// Default imageable margin: 0 — the whole sheet is the layout area (owner's
+// decision, 1.46; it was 0.25″ from v1 to 1.45). The operator types a margin
+// per job or saves one in a setup when a press needs its edges kept clear.
+// The priced imp functions carry their own 18.5″ constant and are untouched.
+const SHEET_MARGIN = 0;
 const SHEET_MAX = 60;
 function customSheet(a, b, margin) {
   const L = Math.max(a, b), S = Math.min(a, b);
