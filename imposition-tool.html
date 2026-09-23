@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 02:40 UTC · IMPOSE-V1.43</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 03:20 UTC · IMPOSE-V1.44</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -472,7 +472,7 @@ function buildCells(layout, opts) {
       const top   = row === layout.down - 1 ? b : half(rg[row]);
       layout.cells.push({
         col, row,
-        patRot: patternRot(pattern, manual, col, row, layout.across),
+        patRot: (patternRot(pattern, manual, col, row, layout.across) + (opts && opts.artTurn ? 180 : 0)) % 360,
         trim: { x, y, w, h },
         clip: { x: x - left, y: y - bot, w: w + left + right, h: h + bot + top },
       });
@@ -526,6 +526,39 @@ function fitManualGrid(a, d, pieceLong, pieceShort, sheets, gutters, allowedRot,
   return { ok: null, best };
 }
 
+// The same sheet with a different imageable margin, in its base (landscape)
+// orientation — for "what WOULD fit" searches only.
+function remargin(sheet, m) {
+  if (sheet.key && SHEETS[sheet.key]) return withMargin(SHEETS[sheet.key], m);
+  return customSheet(Math.max(sheet.long, sheet.short), Math.min(sheet.long, sheet.short), m);
+}
+// When a manual grid refuses, say what WOULD hold the same count: every
+// sheet orientation × artwork rotation × (a×d, d×a), at the current margin
+// first and then at the smaller margins the press may still image. A refusal
+// that only says "does not fit" leaves the operator guessing at 11 pm; this
+// one names the two or three settings to click.
+function manualGridAlternatives(a, d, pieceLong, pieceShort, sheets, gutters, fillSheet, curMargin) {
+  const out = [];
+  const margins = [curMargin, 0.125, 0].filter((m, i, arr) => m <= curMargin + EPS && arr.indexOf(m) === i);
+  const grids = a === d ? [[a, d]] : [[a, d], [d, a]];
+  for (const m of margins) {
+    for (const portrait of [false, true]) {
+      for (const rot of [false, true]) {
+        for (const [A, D] of grids) {
+          let cands;
+          try { cands = sheets.map(sh => orientSheet(remargin(sh, m), portrait)); } catch (e) { continue; }
+          const r = fitManualGrid(A, D, pieceLong, pieceShort, cands, gutters, [rot], null, null, fillSheet);
+          if (!r.ok) continue;
+          const sh = r.ok.sheet;
+          out.push(`${A} × ${D} with the artwork at ${rot ? "90°" : "0°"} (${rot ? pieceShort : pieceLong}×${rot ? pieceLong : pieceShort}″ as placed) on the ${sh.key && SHEETS[sh.key] ? SHEETS[sh.key].label : sh.label.replace(/ ↕ portrait$/, "")} ${portrait ? "PORTRAIT" : "landscape"}${Math.abs(m - curMargin) > EPS ? ` at a ${m}″ margin` : ""}`);
+          if (out.length >= 4) return out;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 function computeLayout(calc, trimA, trimB, opts) {
   if (calc === "saddle") return computeSaddleLayout(trimA, trimB, opts); // trimA = page WIDTH, trimB = page HEIGHT (not normalized — spine is the height edge)
   const pieceLong = Math.max(trimA, trimB), pieceShort = Math.min(trimA, trimB);
@@ -544,6 +577,7 @@ function computeLayout(calc, trimA, trimB, opts) {
   const SM = opts && opts.sheetMargin != null ? opts.sheetMargin : null;
   const SH = k => orientSheet(withMargin(SHEETS[k], SM), opts && opts.sheetPortrait);
   if (SM != null && Math.abs(SM - SHEET_MARGIN) > EPS) warnings.push(`Imageable margin ${SM}″ (default ${SHEET_MARGIN}″) — marks, slug and the jog all follow the smaller/larger printable area.`);
+  if (opts && opts.artTurn) warnings.push(`Artwork turned 180° in every cell (Artwork rotation ${opts.forceRotated === "yes" ? "270°" : "180°"}) — on top of any piece pattern; backs follow through the duplex flip.`);
   const autoGutters = bleed > 0 ? [2 * bleed, bleed, 0] : [0];
   // Gutter override: a fixed value replaces the auto policy everywhere
   const gutters = opts && isFinite(opts.gutter) && opts.gutter !== null ? [Math.max(+opts.gutter, 0)] : autoGutters;
@@ -596,7 +630,11 @@ function computeLayout(calc, trimA, trimB, opts) {
     const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
     if (!res.ok) {
       const b = res.best;
-      throw new Error(`Manual ${manual.a}×${manual.d} grid of ${pieceLong}×${pieceShort}″ needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″. Reduce columns/rows or gutters, lower the imageable margin (0″ = the whole sheet), or ${b.sheet.portrait ? "set Sheet orientation back to landscape" : "stand the sheet on end (Sheet orientation: portrait)"}.`);
+      const placed = allowedRot.length === 1 ? ` with the artwork at ${allowedRot[0] ? "90°" : "0°"} (${b.grid.rotated ? pieceShort : pieceLong}×${b.grid.rotated ? pieceLong : pieceShort}″ as placed)` : "";
+      const alts = manualGridAlternatives(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, fillSheet, sheetMarginOf(b.sheet));
+      throw new Error(`Manual ${manual.a}×${manual.d} grid of ${pieceLong}×${pieceShort}″${placed} needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″.`
+        + (alts.length ? `\n${manual.a * manual.d} pieces DO fit as: ${alts.map((t, i) => `(${i + 1}) ${t}`).join("; ")}. Set Sheet orientation and Artwork rotation in Layout settings to match.`
+                       : ` No sheet orientation, artwork rotation or margin down to 0″ holds ${manual.a * manual.d} pieces this size — reduce columns/rows or gutters.`));
     }
     sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
     const placed = grid.a * grid.d;
@@ -2266,6 +2304,12 @@ async function progress(label, frac) {
 // number input that is coerced on every keystroke eats the decimal point:
 // React rewrites "0." to "0" and the value never sticks. Coerce once, here.
 const gapNum = v => Math.max(0, +v || 0);
+function artRotateOf(spec) {
+  const v = spec && spec.artRotate;
+  if (v === null || v === undefined || v === "" || v === "auto") return null;
+  const n = +v;
+  return n === 0 || n === 90 || n === 180 || n === 270 ? n : null;
+}
 function layoutOpts(spec) {
   return {
     allowBestFit: !!spec.allowBestFit,
@@ -2274,7 +2318,11 @@ function layoutOpts(spec) {
     offset: { mode: spec.offsetMode || "jog", right: +spec.offsetRight || 0.5, bottom: +spec.offsetBottom || 0.5 },
     pattern: spec.pattern || "straight",
     manualPattern: spec.manualPattern || null,
-    forceRotated: spec.forceRotated || "auto",
+    // Artwork rotation on the sheet (flats/stickers): one explicit control —
+    // 0/180 = long edge along the sheet's long edge, 90/270 = across; 180/270
+    // additionally turn every piece head-down. Null = the legacy tri-state.
+    forceRotated: artRotateOf(spec) === null ? (spec.forceRotated || "auto") : (artRotateOf(spec) === 90 || artRotateOf(spec) === 270 ? "yes" : "no"),
+    artTurn: artRotateOf(spec) === 180 || artRotateOf(spec) === 270,
     bleed: isFinite(spec.bleed) && spec.bleed !== null && spec.bleed !== "" ? +spec.bleed : null,
     // Saddle signature gutters: manual per-gap overrides + full-sheet flag.
     saddleColGaps: Array.isArray(spec.saddleColGaps) ? spec.saddleColGaps.map(gapNum) : null,
@@ -4156,6 +4204,7 @@ function App() {
   const [pattern, setPattern] = useState("straight");     // per-cell 180° gang pattern
   const [manualPattern, setManualPattern] = useState([]); // row-major 0/180 per cell (rows bottom-up)
   const [forceRotated, setForceRotated] = useState("auto");
+  const [artRotate, setArtRotate] = useState("auto");      // flats/stickers: auto | 0 | 90 | 180 | 270 (degrees on the sheet)
   const [bleedIn, setBleedIn] = useState(0.125);           // per-job bleed override
   const [addBleed, setAddBleed] = useState("off");         // synthesize bleed for no-bleed files: off | mirror | scale
   const [addBleedSmart, setAddBleedSmart] = useState(true); // raster-detect art that stops shy of trim
@@ -4243,7 +4292,7 @@ function App() {
     gridOn: [gridOn, setGridOn], gridAcross: [gridAcross, setGridAcross], gridDown: [gridDown, setGridDown], gridSheet: [gridSheet, setGridSheet],
     pbGrids: [pbGrids, setPbGrids], repOn: [repOn, setRepOn], sigOrder: [sigOrder, setSigOrder], repN: [repN, setRepN],
     offsetMode: [offsetMode, setOffsetMode], offsetRight: [offsetRight, setOffsetRight], offsetBottom: [offsetBottom, setOffsetBottom],
-    pattern: [pattern, setPattern], manualPattern: [manualPattern, setManualPattern], forceRotated: [forceRotated, setForceRotated],
+    pattern: [pattern, setPattern], manualPattern: [manualPattern, setManualPattern], forceRotated: [forceRotated, setForceRotated], artRotate: [artRotate, setArtRotate],
     bleedIn: [bleedIn, setBleedIn], addBleed: [addBleed, setAddBleed], addBleedSmart: [addBleedSmart, setAddBleedSmart],
     artScale: [artScale, setArtScale], creep: [creep, setCreep], spine: [spine, setSpine], pbPart: [pbPart, setPbPart], pbGutsOrder: [pbGutsOrder, setPbGutsOrder],
     artInset: [artInset, setArtInset], streakEps: [streakEps, setStreakEps], multiMode: [multiMode, setMultiMode],
@@ -4395,7 +4444,12 @@ function App() {
     sheet: sheetSel, sheetLong: +sheetLong || 0, sheetShort: +sheetShort || 0, sheetMargin, sheetPortrait,
     efficient, gutter: gutterMode === "auto" ? null : +gutterMode,
     offsetMode, offsetRight: +offsetRight, offsetBottom: +offsetBottom,
-    pattern, manualPattern: pattern === "manual" ? manualPattern : null, forceRotated,
+    pattern, manualPattern: pattern === "manual" ? manualPattern : null,
+    // Flats/stickers take the one Artwork rotation control; saddle (spread
+    // orientation) and perfect bound (job default + per half) keep the
+    // tri-state, and a stale tri-state can never leak into a flat job.
+    forceRotated: isSaddle || isPB ? forceRotated : "auto",
+    artRotate: isSaddle || isPB ? null : (artRotate === "auto" ? null : +artRotate),
     bleed: +bleedIn, multiMode: isBook ? null : multiMode, addBleed, addBleedSmart, streakEps: +streakEps, artInset: +artInset || 0, artScale: +artScale || 100, creep: +creep || 0,
     addBleedPages: Object.keys(addBleedPages).length ? addBleedPages : null,
     saddleColGaps: gapCols, saddleRowGaps: gapRows, saddleFillSheet: gapFill,
@@ -4420,7 +4474,7 @@ function App() {
     pbGrid: isPB ? { cover: pbGridSpec(pbGrids.cover), guts: pbGridSpec(pbGrids.guts) } : null,
   }), [calc, trimLong, trimShort, allowMissingFonts, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin, sheetPortrait,
-       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
+       efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, artRotate, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
        gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
   const debSpec = useDebounced(spec, 450);
 
@@ -4943,7 +4997,23 @@ function App() {
                         <option value="portrait">Portrait — stood on end</option>
                       </select>
                     </Field>
+                    {!isSaddle && !isPB && (
+                      <Field label="Artwork rotation on the sheet" style={{ flex: "1 1 220px", marginBottom: 8 }}>
+                        <select value={artRotate} onChange={e => setArtRotate(e.target.value)} title="How each piece lies in its cell. Columns × rows below count the piece as placed.">
+                          <option value="auto">Auto — whichever way fits</option>
+                          <option value="0">0° — long edge along the sheet's long edge</option>
+                          <option value="90">90° — long edge across the sheet</option>
+                          <option value="180">180° — as 0°, turned head-down</option>
+                          <option value="270">270° — as 90°, turned head-down</option>
+                        </select>
+                      </Field>
+                    )}
                   </div>
+                  {!isSaddle && !isPB && tLay && (
+                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: -4, marginBottom: 8 }}>
+                      Piece as placed: <b style={{ color: "rgba(255,255,255,.8)" }}>{tLay.cellW}×{tLay.cellH}″</b>{tLay.rotated ? " (rotated 90°)" : ""}{artRotate === "180" || artRotate === "270" ? ", head-down" : ""} · {tLay.across} column{tLay.across === 1 ? "" : "s"} × {tLay.down} row{tLay.down === 1 ? "" : "s"} · block {(tLay.across * tLay.cellW + (tLay.colGaps ? tLay.colGaps.reduce((a, b) => a + b, 0) : (tLay.across - 1) * tLay.gutter)).toFixed(2)}×{(tLay.down * tLay.cellH + (tLay.rowGaps ? tLay.rowGaps.reduce((a, b) => a + b, 0) : (tLay.down - 1) * tLay.gutter)).toFixed(2)}″ on the {tLay.sheet.long}×{tLay.sheet.short}″ sheet
+                    </div>
+                  )}
                   {sheetSel === "custom" && (
                     <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 8, flexWrap: "wrap" }}>
                       <div>
@@ -5028,13 +5098,15 @@ function App() {
                     <option value="manual">Manual (tap cells)…</option>
                   </select>
                 </Field>
-                <Field label={isPB ? "Grid orientation (job default)" : "Grid orientation"} style={{ flex: "0 0 140px" }}>
-                  <select value={forceRotated} onChange={e => setForceRotated(e.target.value)}>
-                    <option value="auto">Auto</option>
-                    <option value="no">Force unrotated</option>
-                    <option value="yes">Force rotated 90°</option>
-                  </select>
-                </Field>
+                {isPB && (
+                  <Field label="Grid orientation (job default)" style={{ flex: "0 0 140px" }}>
+                    <select value={forceRotated} onChange={e => setForceRotated(e.target.value)}>
+                      <option value="auto">Auto</option>
+                      <option value="no">Force unrotated</option>
+                      <option value="yes">Force rotated 90°</option>
+                    </select>
+                  </Field>
+                )}
               </div>
             )}
             {isSaddle && (
@@ -5158,7 +5230,7 @@ function App() {
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <span className="lbl" style={{ margin: 0 }}>{isSaddle ? "Signatures per sheet, creep & gutters" : "Manual grid & gutters"}</span>
                     <span style={{ fontSize: 11, color: over ? "#f87171" : "rgba(255,255,255,.4)" }}>
-                      {ok ? `block ${tw.toFixed(2)}×${th.toFixed(2)}″ / sheet ${panelLay.sheet.long}×${panelLay.sheet.short}″${over ? " — OVERFLOW" : ""}`
+                      {ok ? `block ${tw.toFixed(2)}×${th.toFixed(2)}″ / sheet ${panelLay.sheet.long}×${panelLay.sheet.short}″${!isSaddle ? ` · piece ${panelLay.cellW}×${panelLay.cellH}″ as placed${panelLay.rotated ? " (rotated 90°)" : ""}` : ""}${over ? " — OVERFLOW" : ""}`
                           : "layout refused — adjust or reset below"}
                     </span>
                   </div>
