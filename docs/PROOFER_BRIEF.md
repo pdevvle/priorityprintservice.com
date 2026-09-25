@@ -700,6 +700,9 @@ because crop scales art to fill the bleed.
 14. **The style suite must keep reading the palette from `calc-preview-test.html`.**
 15. **Any new preflight check ships behind a test that proves it is silent on a correct
     file.**
+16. **Every original the customer supplied reaches the order, whatever the proof type or
+    approval state.** One function lists them (`allOriginals()` in the three booklets);
+    every emit that is not the approval package sends it. §9.6.
 
 ---
 
@@ -805,6 +808,36 @@ booklets' that quietly dropped the one line that mattered (`scale: DPI / 72`).
 against the old build first to prove it fails there. It also turned up that the sticker
 uploader threw `setBackArt is not defined` on any multi-page PDF — a state the flats'
 copy assumed and the sticker never declared — which is fixed in the same commit.
+
+### 9.6 Order 87273 — twenty images chosen, one received
+
+**What happened.** A coupon book with a staff digital proof, 2026-09-25. The customer chose
+twenty JPGs at once; the calculator showed twenty pages. The Drive folder received one
+file, `1.jpg`, three seconds after it was created, and nothing else — no error anywhere.
+The customer wrote in: "I attached 20 files."
+
+**Why.** The multi-file handler in all three booklets did
+`onArtwork({ type: "files", list: [fileList[0]] })`. The complete list — every original,
+slot file and wraparound cover — was only assembled inside the *self-approval* path. Any
+order without a self-approved package (a staff or hardcopy proof) shipped file 1 of N. The
+line had been there since the first commit in March. Two twins in the same place: a page
+dropped on a slot sent the slot files *alone*, dropping the whole-file set (the pre-fix
+coupon build uploaded only `page_002_…` for a twenty-image order with one slot changed);
+and on perfect bound and coupon, clearing an approval — Review, a transform, a new
+wraparound cover — cleared it in the panel but not on the order, so Add to Order shipped
+the stale approved package (invariant 7, which the saddle had since 2026-08-24 and the
+copies never received).
+
+**Fix, 2026-09-25.** `allOriginals()` in each booklet; every non-package emit calls it;
+perfect bound and coupon revoke on the order when approval is cleared.
+`tools-multi-file-upload-test.mjs` drives all three compiled builds: twenty images on a
+staff-proof order, all twenty uploaded in order; a slot change keeps them and adds
+`page_003_…`; approve-then-Review is refused at Add to Order. Run against the pre-fix
+coupon build first: 5 of 13 checks failed, the first with `["1.jpg"]` — the order exactly.
+
+**Lesson.** A preview proves the calculator *read* the files, not that the order *carries*
+them. Test what reaches the upload, on the path customers who pay for a proof take — the
+self-approval path was the only one anyone had exercised.
 
 ---
 

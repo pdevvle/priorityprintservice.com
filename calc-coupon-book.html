@@ -2861,6 +2861,44 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const wrapInputRef = useRef(null);
   const [wrapCover, setWrapCover] = useState(null); // {pages:[{dataUrl,label,isWrap}], file, dims:{wIn,hIn}}
   const hasWrapUpload = bindStyle === "wraparound" && !!wrapCover;
+
+  // Every original the customer gave us, as the order should receive it: the
+  // WHOLE multi-file selection (not just its first file), a separately uploaded wraparound
+  // cover, and each
+  // per-page slot file named by its page. Every artwork emit that is not the
+  // approval package sends this list. Until 2026-09-25 they sent fileList[0]
+  // or the slot files alone, so any order without a self-approved package — a
+  // staff or hardcopy proof — reached us with file 1 of N: order 87273 chose
+  // twenty images and production received 1.jpg.
+  const allOriginals = () => {
+    const out = [], seen = new Set();
+    const push = (f) => { if (!f) return; const k = f.name + "|" + f.size; if (seen.has(k)) return; seen.add(k); out.push(f); };
+    ((rawFilesRef.current && rawFilesRef.current.length) ? rawFilesRef.current : [rawFileRef.current]).forEach(push);
+    if (bindStyle === "wraparound" && wrapCover && wrapCover.file) push(new File([wrapCover.file], "wraparound-cover_" + wrapCover.file.name, { type: wrapCover.file.type }));
+    Object.keys(slotFilesRef.current || {}).sort((a, b) => a - b).forEach(sk => {
+      const sf = slotFilesRef.current[sk];
+      if (sf) push(new File([sf], `page_${String(Number(sk) + 1).padStart(3, "0")}_${sf.name}`, { type: sf.type }));
+    });
+    return out;
+  };
+
+  // Un-approving has to reach the ORDER, not just this panel. The transform
+  // watcher, the wraparound cover and the Review button all cleared artApproved
+  // here while the parent kept the old package marked approved — so a changed
+  // job could still ship the file approved before the change, and the approval
+  // gate saw nothing to stop. The saddle closed this on 2026-08-24 with
+  // revokeApproval(); this is the same rule for the copies. It also carries a
+  // separately uploaded wraparound cover to the order when nothing is approved.
+  const _wasApprovedRef = useRef(false);
+  const _prevWrapRef = useRef(null);
+  useEffect(() => {
+    const was = _wasApprovedRef.current, prevWrap = _prevWrapRef.current;
+    _wasApprovedRef.current = artApproved; _prevWrapRef.current = wrapCover;
+    if (artApproved || !onArtwork) return;
+    if (!was && prevWrap === wrapCover) return;
+    const list = allOriginals();
+    onArtwork(list.length ? { type: "files", list, approved: false } : { type: "none" });
+  }, [artApproved, wrapCover]);
   async function handleWrapCoverFile(e) {
     const f = e.target && e.target.files && e.target.files[0];
     if (wrapInputRef.current) wrapInputRef.current.value = "";
@@ -3859,7 +3897,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       // Store raw file for the 4-deliverable package
       rawFileRef.current = fileList[0];
       rawFilesRef.current = Array.from(fileList);
-      if (onArtwork) onArtwork({ type: "files", list: [fileList[0]] });
+      if (onArtwork) onArtwork({ type: "files", list: allOriginals() });
       setSlotsOpen(true);
       setArtApproved(false); setApprovalPkg(null);
     } catch (err) { console.error("Extraction error:", err); alert("We couldn't read that file: " + ((err && err.message) || err) + "\n\nPlease try a PDF, JPG or PNG, or send the file to us and we'll attach it to your order."); }
@@ -3974,10 +4012,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     slotFilesRef.current = { ...slotFilesRef.current, [idx]: file };
     // Build ordered file list from slot map and notify parent
     if (onArtwork) {
-      const list = Object.entries(slotFilesRef.current)
-        .sort((a, b) => Number(a[0]) - Number(b[0]))
-        .map(([i, f]) => new File([f], `page_${String(i).padStart(3,"0")}_${f.name}`, { type: f.type }));
-      onArtwork({ type: "files", list });
+      onArtwork({ type: "files", list: allOriginals() });
     }
 
     setRawPages(prev => {
@@ -4011,10 +4046,9 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
     delete updated[idx];
     slotFilesRef.current = updated;
     if (onArtwork) {
-      const entries = Object.entries(updated);
-      if (entries.length > 0) {
-        const list = entries.sort((a, b) => Number(a[0]) - Number(b[0]))
-          .map(([i, f]) => new File([f], `page_${String(i).padStart(3,"0")}_${f.name}`, { type: f.type }));
+      // What remains — a whole-file upload with a page removed is still artwork.
+      const list = allOriginals();
+      if (list.length > 0) {
         onArtwork({ type: "files", list });
       } else {
         onArtwork({ type: "none" });
