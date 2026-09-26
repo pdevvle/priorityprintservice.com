@@ -151,6 +151,8 @@ function pps_gdrive_auth_page() {
 
             if ( ! empty( $body['refresh_token'] ) ) {
                 update_option( 'pps_gdrive_refresh_token', $body['refresh_token'], false );
+                // Reconnected: pick up every open order whose art is still waiting.
+                pps_gdrive_resume_waiting();
 
                 if ( ! empty( $body['access_token'] ) ) {
                     $expires = isset( $body['expires_in'] ) ? intval( $body['expires_in'] ) - 60 : 3500;
@@ -422,6 +424,10 @@ function pps_generate_thumbnail( $file_path, $token ) {
 
 add_action( 'woocommerce_payment_complete', 'pps_schedule_artwork_upload' );
 add_action( 'woocommerce_order_status_processing', 'pps_schedule_artwork_upload' );
+// An order waiting on payment by another route (cheque, invoice) sits On Hold and
+// never passed through Processing, so its artwork never left the server. The art is
+// the customer's either way; file it now so it is where production looks.
+add_action( 'woocommerce_order_status_on-hold', 'pps_schedule_artwork_upload' );
 
 function pps_schedule_artwork_upload( $order_id ) {
     $order = wc_get_order( $order_id );
@@ -457,19 +463,34 @@ function pps_process_artwork_upload( $order_id ) {
     if ( ! $order ) return;
     if ( $order->get_meta( '_pps_artwork_processed' ) ) return;
 
+    // Drive unusable: these used to log a line and return — no retry, no note, no
+    // attempt counted, so every order placed while Drive was disconnected kept its art
+    // on the server with nothing anywhere saying so. Now they wait and retry like any
+    // other failure, and the order says why.
     if ( ! pps_gdrive_parent_folder() ) {
         error_log( 'PPS Drive: Parent folder ID not configured. Order ' . $order_id );
+        pps_gdrive_retry_later( $order, 'the Drive parent folder is not set (PPS Calculators → Google Drive)' );
         return;
     }
 
     if ( ! pps_gdrive_is_connected() ) {
         error_log( 'PPS Drive: Not connected. Order ' . $order_id );
+        pps_gdrive_retry_later( $order, 'Google Drive is not connected (PPS Calculators → Google Drive → reconnect)' );
         return;
     }
 
     $upload        = wp_upload_dir();
     $had_artwork   = false;
     $all_succeeded = true;
+
+    // Several jobs in one order share one Drive folder. Two of them called
+    // "artwork.pdf" would land side by side with nothing saying which job each
+    // belongs to, so when there is more than one, each name starts with its item.
+    $art_items = 0;
+    foreach ( $order->get_items() as $it ) {
+        if ( $it->get_meta( '_pps_artwork_files' ) || $it->get_meta( '_pps_artwork_path' ) ) $art_items++;
+    }
+    $item_no = 0;
 
     foreach ( $order->get_items() as $item_id => $item ) {
         // Skip items already uploaded to Drive (idempotent on retry)
@@ -509,6 +530,11 @@ function pps_process_artwork_upload( $order_id ) {
         if ( empty( $deliverables ) ) continue;
 
         $had_artwork = true;
+        $item_no++;
+        if ( $art_items > 1 ) {
+            foreach ( $deliverables as &$dv ) $dv['name'] = 'Item ' . $item_no . ' - ' . $dv['name'];
+            unset( $dv );
+        }
 
         // The order folder is created when the first file is actually about to go up
         // (below), not here. Creating it first is how an order whose files were not on
@@ -608,19 +634,65 @@ function pps_process_artwork_upload( $order_id ) {
         $order->save();
     } elseif ( $had_artwork && ! $all_succeeded ) {
         $order->save();
-        $attempts = intval( $order->get_meta( '_pps_drive_attempts' ) );
-        if ( $attempts < 10 && function_exists( 'as_schedule_single_action' ) ) {
-            $order->update_meta_data( '_pps_drive_attempts', $attempts + 1 );
-            $order->save();
-            $delay = 300 * pow( 2, $attempts );
-            as_schedule_single_action( time() + $delay, 'pps_process_artwork_upload', array( $order_id ), 'pps-gdrive' );
-        } elseif ( ! $order->get_meta( '_pps_drive_failed' ) ) {
-            // Ten attempts over about three and a half days, then it used to stop in
-            // silence with the files still on the server and nothing on the order.
-            $order->update_meta_data( '_pps_drive_failed', current_time( 'mysql' ) );
-            $order->add_order_note( 'ARTWORK NOT ON GOOGLE DRIVE: the upload failed ' . $attempts . ' times and has stopped retrying. The files are still on the server under uploads/pps-artwork; check the Drive connection, then re-run the upload.' );
-            $order->save();
+        pps_gdrive_retry_later( $order, '' );
+    }
+}
+
+/**
+ * After Drive is reconnected, queue every paid, open order whose artwork never made
+ * it — including those that ran out of retries while Drive was down. Their attempt
+ * count restarts; each order already carries a note saying why it waited.
+ */
+function pps_gdrive_resume_waiting() {
+    if ( ! function_exists( 'wc_get_orders' ) || ! function_exists( 'as_schedule_single_action' ) ) return 0;
+    $n = 0;
+    try {
+        $orders = wc_get_orders( array( 'status' => array( 'processing', 'on-hold' ), 'limit' => 200, 'date_created' => '>' . ( time() - 60 * 86400 ) ) );
+        foreach ( $orders as $o ) {
+            if ( $o->get_meta( '_pps_artwork_processed' ) ) continue;
+            $has = false;
+            foreach ( $o->get_items() as $it ) { if ( $it->get_meta( '_pps_artwork_path' ) ) { $has = true; break; } }
+            if ( ! $has ) continue;
+            $o->delete_meta_data( '_pps_drive_failed' );
+            $o->update_meta_data( '_pps_drive_attempts', 0 );
+            $o->save();
+            if ( ! as_next_scheduled_action( 'pps_process_artwork_upload', array( $o->get_id() ), 'pps-gdrive' ) ) {
+                as_schedule_single_action( time() + 30 * $n, 'pps_process_artwork_upload', array( $o->get_id() ), 'pps-gdrive' );
+            }
+            $n++;
         }
+    } catch ( \Throwable $e ) {
+        error_log( 'PPS Drive: resume after reconnect failed: ' . $e->getMessage() );
+    }
+    return $n;
+}
+
+/**
+ * One place for "not this time": count the attempt, schedule the next with backoff,
+ * and — once — tell the order why its art is not on Drive yet. After ten attempts
+ * (about three and a half days) stop and say so; it used to stop in silence.
+ * $why names a cause the whole site shares (Drive disconnected, no parent folder);
+ * empty means an upload itself failed.
+ */
+function pps_gdrive_retry_later( $order, $why ) {
+    if ( ! is_object( $order ) ) return;
+    $order_id = $order->get_id();
+    $attempts = intval( $order->get_meta( '_pps_drive_attempts' ) );
+    if ( $why !== '' && ! $order->get_meta( '_pps_drive_waiting_noted' ) ) {
+        $order->update_meta_data( '_pps_drive_waiting_noted', 1 );
+        $order->add_order_note( 'ARTWORK WAITING — not on Google Drive yet: ' . $why . '. The files are safe on the server and will upload automatically once this is fixed.' );
+    }
+    if ( $attempts < 10 && function_exists( 'as_schedule_single_action' ) ) {
+        $order->update_meta_data( '_pps_drive_attempts', $attempts + 1 );
+        $order->save();
+        $delay = 300 * pow( 2, $attempts );
+        as_schedule_single_action( time() + $delay, 'pps_process_artwork_upload', array( $order_id ), 'pps-gdrive' );
+    } elseif ( ! $order->get_meta( '_pps_drive_failed' ) ) {
+        $order->update_meta_data( '_pps_drive_failed', current_time( 'mysql' ) );
+        $order->add_order_note( 'ARTWORK NOT ON GOOGLE DRIVE: the upload failed ' . $attempts . ' times and has stopped retrying' . ( $why !== '' ? ' — ' . $why : '' ) . '. The files are still on the server under uploads/pps-artwork; fix the cause, then re-run the upload.' );
+        $order->save();
+    } else {
+        $order->save();
     }
 }
 
@@ -681,6 +753,6 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
         '_pps_artwork_thumb', '_pps_artwork_location',
         '_pps_gdrive_file_id', '_pps_gdrive_url',
         '_pps_gdrive_folder_id', '_pps_drive_attempts',
-        '_pps_artwork_files', '_pps_drive_done', '_pps_drive_missing',
+        '_pps_artwork_files', '_pps_drive_done', '_pps_drive_missing', '_pps_drive_waiting_noted',
     ) );
 });

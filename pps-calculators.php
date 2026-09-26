@@ -4277,6 +4277,10 @@ add_filter( 'woocommerce_my_account_my_orders_actions', function( $actions, $ord
             }
         }
 
+        // The order this came from, so the new order's Job Ticket can say "Reorder of #…"
+        // and production knows whose Drive folder holds the earlier files.
+        $reorder_config['reorderOf'] = (int) $order->get_id();
+
         $encoded = rtrim( strtr( base64_encode( json_encode( $reorder_config ) ), '+/', '-_' ), '=' );
         $url     = add_query_arg( 'pps_reorder', $encoded, $product->get_permalink() );
 

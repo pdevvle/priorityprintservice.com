@@ -44,6 +44,8 @@ const ok = (label, cond, detail) => {
 };
 
 const QR_MODULES = [];
+const SLOT_TEXT = 'HTTPS://PRIORITYPRINTSERVICE.COM/GATE/SLOT-PAGE-3/QR-FIDELITY';
+let SLOT_MODULES = 0;
 {
   const { jsPDF } = require(DEPS + '/jspdf/dist/jspdf.node.min.js');
   const QR = require(DEPS + '/qrcode');
@@ -62,6 +64,17 @@ const QR_MODULES = [];
     }
   });
   fs.writeFileSync('./art-qr-book.pdf', Buffer.from(doc.output('arraybuffer')));
+  // One page on its own, for the slot run: a PDF dropped on page 3's slot. Its
+  // preview is a 108 DPI screen render, and the print file used to be built from it.
+  const one = new jsPDF({ unit: 'in', format: [W, H], orientation: 'portrait' });
+  one.setFillColor(255, 255, 255); one.rect(0, 0, W, H, 'F');
+  one.setTextColor(0, 0, 0); one.setFontSize(18); one.text('SLOT PAGE', 0.6, 0.8);
+  const q = QR.create(SLOT_TEXT, { errorCorrectionLevel: 'M' });
+  const n = q.modules.size, side = n * MODULE_IN; SLOT_MODULES = n;
+  const x0 = (W - side) / 2, y0 = (H - side) / 2;
+  one.setFillColor(0, 0, 0);
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.modules.get(r, c)) one.rect(x0 + c * MODULE_IN, y0 + r * MODULE_IN, MODULE_IN, MODULE_IN, 'F');
+  fs.writeFileSync('./art-qr-slot.pdf', Buffer.from(one.output('arraybuffer')));
 }
 
 const jsQR = require(DEPS + '/jsqr');
@@ -108,7 +121,8 @@ const reorder = Buffer.from(JSON.stringify({ shipState: 'AZ', shipAddr: { name: 
 const field = (body, name) => { const m = body.match(new RegExp('name="' + name + '"\\r\\n\\r\\n([^\\r]*)')); return m ? m[1] : null; };
 const fileName = (body) => { const m = body.match(/name="artwork"; filename="([^"]*)"/); return m ? m[1] : null; };
 
-async function run(b, file) {
+async function run(b, file, mode) {
+  const tag = mode === 'slot' ? file + ' [page 3 on its own slot]' : file;
   const ctx = await b.newContext({ viewport: { width: 1400, height: 1000 } });
   const p = await ctx.newPage();
   const dialogs = []; p.on('dialog', async d => { dialogs.push(d.message()); await d.dismiss(); });
@@ -141,15 +155,30 @@ async function run(b, file) {
 
   await p.locator('input[type=file]').first().setInputFiles('./art-qr-book.pdf');
   await p.waitForTimeout(9000);
+  if (mode === 'slot') {
+    if (await p.locator('[data-pps-dropzone]').count() === 0) {
+      const t = p.getByText('Upload pages individually'); if (await t.count()) await t.first().click();
+    }
+    let dropped = false;
+    try {
+      await p.waitForSelector('[data-pps-dropzone]', { timeout: 15000 });
+      const zone = p.locator('[data-pps-dropzone]').nth(2);
+      const [chooser] = await Promise.all([p.waitForEvent('filechooser', { timeout: 15000 }), zone.locator('div').first().click()]);
+      await chooser.setFiles('./art-qr-slot.pdf');
+      await p.waitForTimeout(5000);
+      dropped = true;
+    } catch (e) { errs.push('slot: ' + String(e).slice(0, 120)); }
+    ok(`${tag}: a single-page PDF was dropped on page 3`, dropped);
+  }
   await p.evaluate(() => { const x = [...document.querySelectorAll('button')].find(y => /Proof required|Proof ✓|🔍|Review proof/i.test(y.textContent || '')); x && x.click(); });
   await p.waitForTimeout(2500);
   await p.evaluate(() => { const ack = [...document.querySelectorAll('label')].find(l => /print anyway/i.test(l.textContent || '')); const cb = ack && ack.querySelector('input[type=checkbox]'); cb && cb.click(); });
   await p.waitForTimeout(300);
   const approveClicked = await p.evaluate(() => { const btn = [...document.querySelectorAll('button')].find(y => /^\s*Approve (artwork|Now)\s*$/i.test(y.textContent || '')); if (!btn) return false; btn.click(); return true; });
-  ok(`${file}: the Approve button was found`, approveClicked);
+  ok(`${tag}: the Approve button was found`, approveClicked);
   let man = 0;
   for (let i = 0; i < 180 && man < 1; i++) { await p.waitForTimeout(1000); man = await p.evaluate(() => window.__manifests); }
-  ok(`${file}: the approval package was generated`, man >= 1, 'dialogs=' + dialogs.join(' || ') + ' errs=' + errs.join(' || '));
+  ok(`${tag}: the approval package was generated`, man >= 1, 'dialogs=' + dialogs.join(' || ') + ' errs=' + errs.join(' || '));
   await p.waitForTimeout(1500);
   await p.keyboard.press('Escape'); await p.waitForTimeout(500);
   await p.evaluate(() => {
@@ -158,25 +187,28 @@ async function run(b, file) {
     b && b.click();
   });
   for (let i = 0; i < 120 && !(printReady && manifest); i++) await p.waitForTimeout(1000);
-  ok(`${file}: the print-ready PDF and the manifest were uploaded`, !!(printReady && manifest), 'uploads=' + uploads.join(',') + ' dialogs=' + dialogs.join(' || '));
+  ok(`${tag}: the print-ready PDF and the manifest were uploaded`, !!(printReady && manifest), 'uploads=' + uploads.join(',') + ' dialogs=' + dialogs.join(' || '));
   await ctx.close();
   if (!(printReady && manifest)) return;
-  fs.writeFileSync('./book-print-ready-' + file.replace(/\.html$/, '') + '.pdf', printReady);
+  fs.writeFileSync('./book-print-ready-' + file.replace(/\.html$/, '') + (mode === 'slot' ? '-slot' : '') + '.pdf', printReady);
+  const want = PAYLOAD.slice(); const mods = QR_MODULES.slice();
+  if (mode === 'slot') { want[2] = SLOT_TEXT; mods[2] = SLOT_MODULES; }
 
   const bm = manifest.match(/Bleed-inclusive size: ([\d.]+)″ × ([\d.]+)″/);
   const sides = jpegStreams(printReady);
-  ok(`${file}: the print-ready PDF carries one JPEG per page`, sides.length === PAGES, sides.length + ' streams');
+  ok(`${tag}: the print-ready PDF carries one JPEG per page`, sides.length === PAGES, sides.length + ' streams');
   const expW = bm ? Math.round(parseFloat(bm[1]) * DPI) : null, expH = bm ? Math.round(parseFloat(bm[2]) * DPI) : null;
   sides.forEach((jpg, i) => {
-    const r = measure(jpg, QR_MODULES[i] || QR_MODULES[0]);
-    ok(`${file}: page ${i + 1} is the bleed sheet at ${DPI} DPI`, expW && r.width === expW && r.height === expH, `${r.width}×${r.height} expected ${expW}×${expH}`);
-    ok(`${file}: page ${i + 1}'s QR code scans from the print-ready file`, r.text === PAYLOAD[i], 'decoded=' + JSON.stringify(r.text));
-    ok(`${file}: page ${i + 1}'s QR modules are crisp`, r.midGrey < 0.05, 'mid-grey share ' + (r.midGrey * 100).toFixed(1) + '% (limit 5%)');
+    const r = measure(jpg, mods[i] || mods[0]);
+    ok(`${tag}: page ${i + 1} is the bleed sheet at ${DPI} DPI`, expW && r.width === expW && r.height === expH, `${r.width}×${r.height} expected ${expW}×${expH}`);
+    ok(`${tag}: page ${i + 1}'s QR code scans from the print-ready file`, r.text === want[i], 'decoded=' + JSON.stringify(r.text));
+    ok(`${tag}: page ${i + 1}'s QR modules are crisp`, r.midGrey < 0.05, 'mid-grey share ' + (r.midGrey * 100).toFixed(1) + '% (limit 5%)');
   });
 }
 
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] });
-for (const f of FILES) { try { await run(b, f); } catch (e) { ok(`${f}: ran`, false, String(e && e.stack || e).slice(0, 400)); } }
+const MODES = (process.env.PPS_BOOK_MODES || 'whole,slot').split(',');
+for (const f of FILES) for (const m of MODES) { try { await run(b, f, m); } catch (e) { ok(`${f} ${m}: ran`, false, String(e && e.stack || e).slice(0, 400)); } }
 await b.close();
 
 console.log('\n' + checks + ' checks, ' + failed + ' failed');

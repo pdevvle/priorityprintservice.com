@@ -42,6 +42,8 @@ function wp_upload_dir() { return array( 'basedir' => $GLOBALS['tmp'] ); }
 function pps_is_business_day( DateTime $d ): bool { return (int) $d->format( 'N' ) < 6; }
 function pps_reorder_contact_recipient() { return 'Office@priorityprintservice.com'; }
 function pps_get_config() { return array( 'pcf' => array( 'shop_timezone' => 'America/Phoenix' ) ); }
+function pps_gdrive_is_connected() { return $GLOBALS['drive_connected'] ?? true; }
+class FakeDate { public $t; function __construct( $t ) { $this->t = $t; } function getTimestamp() { return $this->t; } }
 
 class FakeItem {
     public $meta = array(); public $name;
@@ -53,6 +55,9 @@ class FakeItem {
 }
 class FakeOrder {
     public $notes = array(); public $meta = array(); public $items = array(); private $id; public $first; public $last;
+    public $status = 'processing'; public $created = null;
+    function get_status() { return $this->status; }
+    function get_date_created() { return $this->created === null ? null : new FakeDate( $this->created ); }
     function __construct( $id, $items = array(), $first = 'Pat', $last = 'Customer' ) { $this->id = $id; $this->items = $items; $this->first = $first; $this->last = $last; }
     function get_id() { return $this->id; }
     function add_order_note( $n ) { if ( ! $this->id ) return 0; $this->notes[] = $n; return count( $this->notes ); }
@@ -163,10 +168,16 @@ $orders = array(
     $mk( 109, 'Coupon Book', array( 'proof' => 0 ), array( '_pps_drive_missing' => '7.jpg, 8.jpg' ), 'Parker', 'Jones' ),
     $mk( 110, 'Booklet', array( 'proof' => 0 ), array( '_pps_drive_missing' => 'old-art.pdf', '_pps_artwork_on_drive' => 'yes' ) ),   // a reorder: not a loss
 );
-$o111 = $mk( 111, 'Postcard', array( 'proof' => 0 ) ); $o111->meta = array( '_pps_drive_failed' => '2026-09-20 10:00:00', '_pps_drive_attempts' => 10 );
-$o112 = $mk( 112, 'Postcard', array( 'proof' => 0 ) ); $o112->meta = array( '_pps_drive_attempts' => 4 );
-$o113 = $mk( 113, 'Postcard', array( 'proof' => 0 ) ); $o113->meta = array( '_pps_drive_attempts' => 5, '_pps_artwork_processed' => '2026-09-20 11:00:00' );   // got there in the end
-array_push( $orders, $o111, $o112, $o113 );
+$art = array( '_pps_artwork_path' => 'pps-artwork/2026/09/x.pdf' );
+$o111 = $mk( 111, 'Postcard', array( 'proof' => 0 ), $art ); $o111->meta = array( '_pps_drive_failed' => '2026-09-20 10:00:00', '_pps_drive_attempts' => 10 );
+$o112 = $mk( 112, 'Postcard', array( 'proof' => 0 ), $art ); $o112->meta = array( '_pps_drive_attempts' => 4 ); $o112->created = time() - 5 * 3600;
+$o113 = $mk( 113, 'Postcard', array( 'proof' => 0 ), $art ); $o113->meta = array( '_pps_drive_attempts' => 5, '_pps_artwork_processed' => '2026-09-20 11:00:00' );   // got there in the end
+// Never scheduled at all (an On Hold order before 2026-09-26, or a stuck queue): no
+// attempts, no flag — the old rule could not see it; the outcome can.
+$o114 = $mk( 114, 'Flyer', array( 'proof' => 0 ), $art ); $o114->status = 'on-hold'; $o114->created = time() - 26 * 3600;
+$o115 = $mk( 115, 'Flyer', array( 'proof' => 0 ), $art ); $o115->created = time() - 30 * 60;                 // uploading now: too soon to say
+$o116 = $mk( 116, 'Flyer', array( 'proof' => 0 ), $art ); $o116->status = 'pending'; $o116->created = time() - 48 * 3600;   // unpaid: not ours to file yet
+array_push( $orders, $o111, $o112, $o113, $o114, $o115, $o116 );
 $refusals = array(
     array( 'time' => '2026-09-21 10:00:00', 'products' => array( 22754 ), 'errors' => array( 'Addon data missing for product <b>9x9</b>' ) ),
     array( 'time' => '2026-09-01 10:00:00', 'products' => array( 1 ), 'errors' => array( 'old' ) ),
@@ -186,16 +197,22 @@ ok( 'only refusals since the last digest appear, with tags stripped', strpos( $f
 ok( 'a non-calculator line is ignored', strpos( $flat, '#108' ) === false );
 ok( 'a customer file that never reached the server is named, with what to do', strpos( $flat, '#109 Parker Jones — Coupon Book — never reached the server: 7.jpg, 8.jpg (ask the customer to resend)' ) !== false );
 ok( 'artwork reused from an earlier order is not reported as missing', strpos( $flat, '#110' ) === false );
-ok( 'an upload that gave up is listed, and one still retrying after three attempts', strpos( $flat, '#111 Pat Customer — upload stopped after 10 attempts' ) !== false && strpos( $flat, '#112 Pat Customer — still retrying (4 attempts so far)' ) !== false );
+ok( 'an upload that gave up is listed, and one still not there hours later', strpos( $flat, '#111 Pat Customer — upload stopped after 10 attempts' ) !== false && strpos( $flat, '#112 Pat Customer — not on Drive 5 h after the order (4 upload attempts)' ) !== false, $flat );
 ok( 'an upload that got there in the end is not', strpos( $flat, '#113' ) === false );
-// 1 prepress + 1 low-res + 4 staff proofs (#103 #104 #105 #107) + 2 addresses + 1 Saturday + 1 refusal + 3 Drive (#109 #111 #112)
-ok( 'the header counts every item', strpos( $flat, 'PPS exceptions — 13 items need a look (example.test)' ) === 0, substr( $flat, 0, 60 ) );
+ok( 'an order whose upload was never even attempted is caught by the outcome', strpos( $flat, '#114 Pat Customer — not on Drive 26 h after the order (0 upload attempts)' ) !== false );
+ok( 'an upload still in its first two hours, and an unpaid order, are not reported', strpos( $flat, '#115' ) === false && strpos( $flat, '#116' ) === false );
+// 1 prepress + 1 low-res + 4 staff proofs (#103 #104 #105 #107) + 2 addresses + 1 Saturday + 1 refusal + 4 Drive (#109 #111 #112 #114)
+ok( 'the header counts every item', strpos( $flat, 'PPS exceptions — 14 items need a look (example.test)' ) === 0, substr( $flat, 0, 60 ) );
+$GLOBALS['drive_connected'] = false;
+$down = pps_job_health_render( pps_job_health_collect( array(), array(), $since ), 'example.test' );
+ok( 'Drive disconnected is said once, at the top of the Drive section, even with no orders yet', strpos( $down, 'GOOGLE DRIVE IS NOT CONNECTED' ) !== false );
+$GLOBALS['drive_connected'] = true;
 
 $GLOBALS['fake_orders'] = array(); foreach ( $orders as $o2 ) $GLOBALS['fake_orders'][ $o2->get_id() ] = $o2;
 $GLOBALS['options']['pps_checkout_refusals'] = $refusals; $GLOBALS['options']['pps_job_health_last_ts'] = $since;
 $text = pps_job_health_digest( true );
-ok( 'the digest is mailed to the office, and only the office', count( $GLOBALS['mail'] ) === 1 && $GLOBALS['mail'][0]['to'] === 'Office@priorityprintservice.com' && strpos( $GLOBALS['mail'][0]['subject'], 'PPS exceptions: 13 items' ) === 0, json_encode( array_map( function( $m ) { return $m['to'] . ' / ' . $m['subject']; }, $GLOBALS['mail'] ) ) );
-ok( 'the last digest is kept where wp_get_option can read it', ( $GLOBALS['options']['pps_job_health_last']['count'] ?? 0 ) === 13 && $GLOBALS['options']['pps_job_health_last']['text'] === $text );
+ok( 'the digest is mailed to the office, and only the office', count( $GLOBALS['mail'] ) === 1 && $GLOBALS['mail'][0]['to'] === 'Office@priorityprintservice.com' && strpos( $GLOBALS['mail'][0]['subject'], 'PPS exceptions: 14 items' ) === 0, json_encode( array_map( function( $m ) { return $m['to'] . ' / ' . $m['subject']; }, $GLOBALS['mail'] ) ) );
+ok( 'the last digest is kept where wp_get_option can read it', ( $GLOBALS['options']['pps_job_health_last']['count'] ?? 0 ) === 14 && $GLOBALS['options']['pps_job_health_last']['text'] === $text );
 $GLOBALS['options']['pps_job_health_last_ts'] = 0; $GLOBALS['mail'] = array(); $GLOBALS['fake_orders'] = array();
 $GLOBALS['options']['pps_checkout_refusals'] = array( array( 'time' => date( 'Y-m-d H:i:s', time() - 30 * 86400 ), 'products' => array( 5 ), 'errors' => array( 'ancient' ) ) );
 pps_job_health_digest( true );

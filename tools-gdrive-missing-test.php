@@ -37,11 +37,12 @@ function lift( $src, $name ) {
     }
     return '';
 }
-$code = lift( $src, 'pps_process_artwork_upload' ) . "\n" . lift( $src, 'pps_gdrive_missing_is_loss' );
+$code = lift( $src, 'pps_process_artwork_upload' ) . "\n" . lift( $src, 'pps_gdrive_missing_is_loss' ) . "\n" . lift( $src, 'pps_gdrive_retry_later' ) . "\n" . lift( $src, 'pps_gdrive_resume_waiting' );
 if ( strpos( $code, 'function pps_gdrive_missing_is_loss' ) === false ) {
     // The pre-fix file has no helper; give it a stand-in so the old behaviour can be run.
     $code .= "\nfunction pps_gdrive_missing_is_loss() { return false; }";
 }
+if ( strpos( $code, 'function pps_gdrive_resume_waiting' ) === false ) $code .= "\nfunction pps_gdrive_resume_waiting() { return 0; }";
 
 // ── the smallest WordPress and Drive that will hold it up ────────────────────
 $GLOBALS['tmp'] = sys_get_temp_dir() . '/pps-gd-' . getmypid();
@@ -51,8 +52,10 @@ function sanitize_file_name( $s ) { return $s; }
 function wp_json_encode( $v ) { return json_encode( $v ); }
 function current_time( $t ) { return '2026-09-26 10:00:00'; }
 function error_log_( $m ) {}
-function pps_gdrive_parent_folder() { return 'PARENT'; }
-function pps_gdrive_is_connected() { return true; }
+function pps_gdrive_parent_folder() { return $GLOBALS['parent'] ?? 'PARENT'; }
+function pps_gdrive_is_connected() { return $GLOBALS['connected'] ?? true; }
+function as_next_scheduled_action( $h, $a, $g ) { return false; }
+function wc_get_orders( $args ) { return array_values( $GLOBALS['orders'] ); }
 function pps_generate_thumbnail( $a, $b ) { return false; }
 function pps_gdrive_create_folder( $name, $parent ) { $GLOBALS['drive']['folders'][] = $name; return 'F' . count( $GLOBALS['drive']['folders'] ); }
 function pps_gdrive_upload_file( $full, $name, $folder ) {
@@ -73,7 +76,9 @@ class FakeItem {
     function get_product() { return new FakeProduct(); }
 }
 class FakeOrder {
-    public $meta = array(); public $notes = array(); public $items;
+    public $meta = array(); public $notes = array(); public $items; public $id = 0;
+    function get_id() { return $this->id; }
+    function delete_meta_data( $k ) { unset( $this->meta[ $k ] ); }
     function __construct( $items ) { $this->items = $items; }
     function get_meta( $k ) { return $this->meta[ $k ] ?? ''; }
     function update_meta_data( $k, $v ) { $this->meta[ $k ] = $v; }
@@ -89,7 +94,7 @@ eval( str_replace( 'error_log(', 'error_log_(', $code ) );
 function reset_drive( $refuse = array() ) { $GLOBALS['drive'] = array( 'folders' => array(), 'files' => array(), 'retries' => 0, 'refuse' => $refuse ); }
 function put( $rel ) { $f = $GLOBALS['tmp'] . '/' . $rel; @mkdir( dirname( $f ), 0777, true ); file_put_contents( $f, 'x' ); }
 function listing( $names ) { $out = array(); foreach ( $names as $n ) $out[] = array( 'path' => 'pps-artwork/2026/09/' . $n, 'name' => $n ); return json_encode( $out ); }
-function run_order( $id, $items ) { $o = new FakeOrder( $items ); $GLOBALS['orders'][ $id ] = $o; pps_process_artwork_upload( $id ); return $o; }
+function run_order( $id, $items ) { $o = new FakeOrder( $items ); $o->id = $id; $GLOBALS['orders'][ $id ] = $o; pps_process_artwork_upload( $id ); return $o; }
 
 // ── 1. everything present ───────────────────────────────────────────────────
 echo "── all files on the server ──\n";
@@ -148,6 +153,41 @@ pps_process_artwork_upload( 6 );
 pps_process_artwork_upload( 6 );
 ok( 'after the last attempt the order says so, once, and is flagged for the daily email',
     $o->get_meta( '_pps_drive_failed' ) && count( $o->notes ) === 1 && strpos( $o->notes[0], 'ARTWORK NOT ON GOOGLE DRIVE' ) === 0, implode( ' || ', $o->notes ) );
+
+// ── 7. Drive disconnected ───────────────────────────────────────────────────
+echo "\n── Drive disconnected ──\n";
+reset_drive(); $GLOBALS['connected'] = false; $GLOBALS['orders'] = array();
+put( 'pps-artwork/2026/09/w.pdf' );
+$it = new FakeItem( array( '_pps_artwork_path' => 'pps-artwork/2026/09/w.pdf' ) );
+$o = run_order( 7, array( $it ) );
+pps_process_artwork_upload( 7 );
+ok( 'the order says its art is waiting and why — once — instead of a line in the server log',
+    count( $o->notes ) === 1 && strpos( $o->notes[0], 'ARTWORK WAITING' ) === 0 && strpos( $o->notes[0], 'not connected' ) !== false, implode( ' || ', $o->notes ) );
+ok( 'and it keeps retrying, counting attempts, rather than giving up on the first try', $GLOBALS['drive']['retries'] === 2 && (int) $o->get_meta( '_pps_drive_attempts' ) === 2 );
+$GLOBALS['parent'] = ''; $GLOBALS['connected'] = true; reset_drive();
+$o2 = run_order( 8, array( new FakeItem( array( '_pps_artwork_path' => 'pps-artwork/2026/09/w.pdf' ) ) ) );
+ok( 'a missing Drive parent folder is named the same way', count( $o2->notes ) === 1 && strpos( $o2->notes[0], 'parent folder' ) !== false && $GLOBALS['drive']['retries'] === 1 );
+unset( $GLOBALS['parent'] );
+
+// ── 8. reconnecting picks up what gave up ───────────────────────────────────
+echo "\n── Drive reconnected ──\n";
+reset_drive();
+$o->meta['_pps_drive_failed'] = '2026-09-26 10:00:00'; $o->meta['_pps_drive_attempts'] = 10;
+$n = pps_gdrive_resume_waiting();
+ok( 'an order that ran out of retries while Drive was down is queued again, its count reset',
+    $n >= 1 && $GLOBALS['drive']['retries'] >= 1 && ! $o->get_meta( '_pps_drive_failed' ) && (int) $o->get_meta( '_pps_drive_attempts' ) === 0 );
+
+// ── 9. two jobs in one order ────────────────────────────────────────────────
+echo "\n── two jobs, same file name, one order ──\n";
+reset_drive(); $GLOBALS['orders'] = array();
+put( 'pps-artwork/2026/09/j1/artwork.pdf' ); put( 'pps-artwork/2026/09/j2/artwork.pdf' );
+$a = new FakeItem( array( '_pps_artwork_path' => 'pps-artwork/2026/09/j1/artwork.pdf', '_pps_artwork_files' => json_encode( array( array( 'path' => 'pps-artwork/2026/09/j1/artwork.pdf', 'name' => 'artwork.pdf' ) ) ) ) );
+$b = new FakeItem( array( '_pps_artwork_path' => 'pps-artwork/2026/09/j2/artwork.pdf', '_pps_artwork_files' => json_encode( array( array( 'path' => 'pps-artwork/2026/09/j2/artwork.pdf', 'name' => 'artwork.pdf' ) ) ) ) );
+run_order( 9, array( $a, $b ) );
+ok( 'each file says which job it belongs to', $GLOBALS['drive']['files'] === array( 'Item 1 - artwork.pdf', 'Item 2 - artwork.pdf' ), json_encode( $GLOBALS['drive']['files'] ) );
+
+// ── 10. On Hold orders are filed too ────────────────────────────────────────
+ok( 'an On Hold order schedules its upload', preg_match( "/add_action\\(\\s*'woocommerce_order_status_on-hold',\\s*'pps_schedule_artwork_upload'/", $src ) === 1 );
 
 // tidy
 exec( 'rm -rf ' . escapeshellarg( $GLOBALS['tmp'] ) );

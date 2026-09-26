@@ -68,6 +68,8 @@ function pps_reorder_field_whitelist() {
         // Artwork & proofing
         'artwork', 'artEditPages', 'bleed', 'proof',
         'proofAddrSame', 'proofAddr', 'canvaLink', 'canvaInstructions',
+        // So an edited reorder keeps its "Reorder of #…" (a reorder link sets it afresh).
+        'reorderOf',
         // Destination. The date is deliberately absent: a delivery date is a promise
         // about a specific day, so it is re-quoted rather than restored.
         // shipAddr (name/company/street/city) is deliberately absent: these
@@ -95,6 +97,9 @@ function pps_build_reorder_url( $item ) {
             $reorder_config[ $key ] = $full[ $key ];
         }
     }
+
+    // Where it came from — see the same line in pps-calculators.php.
+    if ( method_exists( $item, 'get_order_id' ) ) $reorder_config['reorderOf'] = (int) $item->get_order_id();
 
     $encoded = rtrim( strtr( base64_encode( json_encode( $reorder_config ) ), '+/', '-_' ), '=' );
     return add_query_arg( 'pps_reorder', $encoded, $product->get_permalink() );

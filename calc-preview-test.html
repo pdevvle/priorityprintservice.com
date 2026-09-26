@@ -2218,6 +2218,35 @@ function DebugPanel({debug}){
 // SET PREVIEW — Inline 3D book preview with expand-to-full modal
 // ═══════════════════════════════════════════════════════════════
 
+// A PDF dropped on one page slot, rendered again from its own bytes at print
+// resolution and turned like the page. The slot's preview is a 108 DPI screen render
+// (extractPdfPages at scale 1.5), and until 2026-09-26 the print file was built from
+// that preview — order 87171's failure again, for anyone building a book a page at a
+// time from PDFs. Found by comparing the three booklet copies, measured by
+// tools-book-print-dpi-test.mjs (slot section) before it was fixed.
+async function ppsSlotPdfCanvas(file, dpi, rotateSteps) {
+  if (!file || !(file.type === "application/pdf" || /\.pdf$/i.test(file.name || ""))) return null;
+  try {
+    await window.__ppsPdfJs;
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pg = await pdf.getPage(1);
+    const vp = pg.getViewport({ scale: dpi / 72 });
+    let c = document.createElement("canvas");
+    c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+    const s = (((rotateSteps || 0) % 4) + 4) % 4;
+    if (s) {
+      const rc = document.createElement("canvas");
+      rc.width = s % 2 ? c.height : c.width; rc.height = s % 2 ? c.width : c.height;
+      const rctx = rc.getContext("2d");
+      rctx.translate(rc.width / 2, rc.height / 2); rctx.rotate((s * Math.PI) / 2);
+      rctx.drawImage(c, -c.width / 2, -c.height / 2);
+      c = rc;
+    }
+    return c;
+  } catch (e) { return null; }
+}
+
 async function extractPdfPages(file, onProgress) {
   const buf = await file.arrayBuffer();
   await window.__ppsPdfJs;
@@ -2308,20 +2337,27 @@ async function splitReaderSpreads(pdfDoc, refWidthIn, onProgress) {
 }
 
 async function extractImagePages(files, onProgress) {
-  const sorted = Array.from(files).filter(f => f.type.startsWith("image/"))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  const result = [];
+  // Every file chosen becomes a page, or the customer hears which one did not.
+  // Until 2026-09-26 anything that was not typed image/* was filtered out of the book
+  // without a word (a PDF in the batch, an iPhone HEIC the browser leaves untyped),
+  // only the FIRST image was test-loaded so a bad one later became a broken page, and
+  // the three copies disagreed about the rest: perfect bound and coupon skipped an
+  // unreadable file outright, the saddle waited forever on one. One version now.
+  const all = Array.from(files);
+  const notImages = all.filter(f => !(String(f.type || "").startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif)$/i.test(f.name || "")));
+  if (notImages.length) throw new Error((notImages.length === 1 ? "this file is" : "these files are") + " not an image, so it cannot be a page in a multi-image upload: " + notImages.map(f => f.name).join(", ") + ". Upload images only (one per page), or one PDF that holds every page");
+  const sorted = all.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const result = [], unreadable = [];
   let imgW = 0, imgH = 0;
   for (let i = 0; i < sorted.length; i++) {
     if (onProgress) onProgress(i + 1, sorted.length);
-    const url = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(sorted[i]); });
-    if (i === 0) {
-      const d = await new Promise((res, rej) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => rej(new Error("this image format cannot be shown in a browser (TIFF and HEIC are the usual ones). Please export it as PNG, JPG or PDF")); img.src = url; });
-      imgW = d.w; imgH = d.h;
-    }
-    let label = pageLabel(i, sorted.length);
-    result.push({ dataUrl: url, label });
+    const url = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(sorted[i]); });
+    const d = url ? await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight }); img.onerror = () => res(null); img.src = url; }) : null;
+    if (!d || !d.w || !d.h) { unreadable.push(sorted[i].name); continue; }
+    if (!imgW) { imgW = d.w; imgH = d.h; }
+    result.push({ dataUrl: url, label: pageLabel(i, sorted.length) });
   }
+  if (unreadable.length) throw new Error((unreadable.length === 1 ? "this image" : "these images") + " could not be opened: " + unreadable.join(", ") + ". HEIC and TIFF are the usual ones — please export them as JPG, PNG or PDF");
   // Estimate at 300 DPI
   const wIn = imgW > 0 ? parseFloat((imgW / 300).toFixed(3)) : 0;
   const hIn = imgH > 0 ? parseFloat((imgH / 300).toFixed(3)) : 0;
@@ -3015,7 +3051,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   // twenty images and production received 1.jpg.
   const allOriginals = () => {
     const out = [], seen = new Set();
-    const push = (f) => { if (!f) return; const k = f.name + "|" + f.size; if (seen.has(k)) return; seen.add(k); out.push(f); };
+    const push = (f) => { if (!f) return; const k = f.name + "|" + f.size + "|" + (f.lastModified || 0); if (seen.has(k)) return; seen.add(k); out.push(f); };
     ((rawFilesRef.current && rawFilesRef.current.length) ? rawFilesRef.current : [rawFileRef.current]).forEach(push);
     Object.keys(slotFilesRef.current || {}).sort((a, b) => a - b).forEach(sk => {
       const sf = slotFilesRef.current[sk];
@@ -3368,6 +3404,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
         }
       }
     }
+    if (!srcCanvas && !opts.fast && page.slotFile) srcCanvas = await ppsSlotPdfCanvas(page.slotFile, dpi, tx.rotateSteps);
     if (!srcCanvas) {
       srcCanvas = await new Promise(resolve => {
         const img = new Image();
@@ -4304,6 +4341,12 @@ update();
     const _big = Array.from(fileList || []).find(f => f && f.size > 209715200);
     if (_big) { alert('"' + _big.name + '" is ' + (_big.size/1048576).toFixed(0) + ' MB, over the 200 MB limit — please compress it or email your artwork.'); return; }
     if (!fileList || !fileList.length) return;
+    // A batch holding a PDF: the PDF path read only the first file and the image path
+    // silently dropped every PDF. Neither can make one book from a mix, so say so.
+    if (fileList.length > 1 && Array.from(fileList).some(f => f.type === "application/pdf" || /\.pdf$/i.test(f.name || ""))) {
+      alert("You chose " + fileList.length + " files, and at least one is a PDF.\n\nA book can come from ONE PDF that holds every page, or from several images (one per page) — not a mix, and not several PDFs at once.\n\nTo build it a PDF page at a time, use \"Upload pages individually\" and drop each PDF on its page.");
+      return;
+    }
     const splitSpreads = opts.splitSpreads != null ? opts.splitSpreads : readerSpreads;
     const f0 = fileList[0];
     const isPdf = f0.type === "application/pdf" || /\.pdf$/i.test(f0.name);
@@ -4523,7 +4566,8 @@ update();
     }
     setUploadError("");
 
-    const newPage = { dataUrl, label: pageLabel(idx, pageCount) };
+    // slotFile: the original, so the print file can be rendered from it at full resolution.
+    const newPage = { dataUrl, label: pageLabel(idx, pageCount), slotFile: file };
 
     // Track the original File object for this slot (preserves full quality for submission)
     slotFilesRef.current = { ...slotFilesRef.current, [idx]: file };
@@ -5074,7 +5118,7 @@ update();
                               const _seenOrig = new Set();
                               const _pushOrig = (f) => {
                                 if (!f) return;
-                                const k = f.name + "|" + f.size;
+                                const k = f.name + "|" + f.size + "|" + (f.lastModified || 0);
                                 if (_seenOrig.has(k)) return;
                                 _seenOrig.add(k); files.push(f);
                               };
@@ -5683,6 +5727,8 @@ function buildTicket(config, result) {
   const _art = ART_OPTS.find(x => x.val === config.artwork); push("Artwork", _art ? _art.label : "unknown");
   const _bld = BLEED_OPTS.find(x => x.val === config.bleed); if (_bld && _bld.val > 0) push("Bleed", _bld.label);
   if (config.canvaLink) push("Canva link", config.canvaLink);
+  if (config.canvaInstructions && String(config.canvaInstructions).trim()) push("Special instructions", String(config.canvaInstructions).trim());
+  if (typeof window !== "undefined" && window.__ppsReorderOf) push("Reorder of", "order #" + window.__ppsReorderOf + " — the earlier files are in that order's Drive folder");
   return t;
 }
 
@@ -5791,6 +5837,9 @@ function buildMetadata(config, result) {
     proof: config.proof,
     proofAddrSame: config.proofAddrSame,
     proofAddr: config.proofAddr || {},
+    reorderOf: (typeof window !== "undefined" && window.__ppsReorderOf) || undefined,
+    canvaLink: config.canvaLink || "",
+    canvaInstructions: config.canvaInstructions || "",
     // Per-page art transforms — what the customer approved per page in the
     // proof modal. Keyed by page index → { fitMode, artScale, rotateSteps }.
     // (Phase 2: server-side rendering will use these to produce print-ready
@@ -6430,6 +6479,13 @@ function App(){
 
       // Artwork & proofing
       if (rc.artwork != null) setArtwork(rc.artwork);
+      // A reorder link names the order it came from, so the new order can say so and
+      // production can pull the old files. Digits only — it rides in a URL.
+      if (rc.reorderOf != null) window.__ppsReorderOf = parseInt(String(rc.reorderOf).replace(/\D/g, ""), 10) || 0;
+      // Whitelisted server-side for edits and reorders, but never read back here, so
+      // editing a Canva line in the cart emptied its link.
+      if (rc.canvaLink != null) setCanvaLink(String(rc.canvaLink));
+      if (rc.canvaInstructions != null) setCanvaInstructions(String(rc.canvaInstructions));
       if (rc.artEditPages != null) setArtEditPages(rc.artEditPages);
       if (rc.bleed != null) setBleed(rc.bleed);
       if (rc.proof != null) setProof(rc.proof);
@@ -6984,6 +7040,12 @@ function App(){
     // (audit 2026-09-12: 9 of 45 recent orders arrived with no upload and no
     // note). A file whose read failed leaves the same state, so this is also
     // where a silent extraction failure finally becomes visible.
+    // "Canva design" is an artwork choice with no file: the link IS the artwork.
+    // Nothing checked for it, so a Canva order could arrive with no art and no link.
+    if (Math.abs(Number(artwork) - 0.04) < 0.005 && !String(canvaLink || "").trim()) {
+      alert("Please paste your Canva editor link before ordering.\n\nIt's how we get your design. If you'd rather send files instead, choose another artwork option.");
+      return;
+    }
     if (Math.abs(Number(artwork) - 0.01) < 0.005 && (!artFiles || artFiles.type === "none")) {
       alert("Please add your artwork file before ordering.\n\nIf you'd rather send it later, choose \"Email Art After Order\" under the artwork options.");
       return;
@@ -7013,6 +7075,9 @@ function App(){
       artwork, artEditPages, bleed, proof,
       // The hardcopy proof address never left the booklets before 2026-09-22 (order 87198).
       proofAddrSame, proofAddr,
+      // The Canva link and instructions never left the booklets: a Canva booklet
+      // order reached us with no link to the design (found 2026-09-26).
+      canvaLink, canvaInstructions,
       shipState, shipAddr, shipZip, needByDate,
       pageTransforms, artDims,
     };

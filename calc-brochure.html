@@ -2017,7 +2017,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     const out = [], seen = new Set();
     [frontArt && frontArt.file, backArt && backArt.file].forEach(f => {
       if (!f) return;
-      const k = f.name + "|" + f.size;
+      const k = f.name + "|" + f.size + "|" + (f.lastModified || 0);
       if (seen.has(k)) return;
       seen.add(k); out.push(f);
     });
@@ -2497,6 +2497,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
           if (back) { setBackArt(back); _ignored = _rest.slice(1); }
         }
         if (_ignored.length) alert("Only the first " + (Array.from(fileList).length - _ignored.length) + " file(s) were used for this job's " + (sides === 2 ? "front and back" : "artwork") + ". These were NOT attached:\n\n" + _ignored.map(f => "• " + f.name).join("\n") + "\n\nIf we need them, add them under Reference Files, or send them to us after ordering.");
+      }
+      // A PDF with more pages than this job prints: the extra pages were dropped with
+      // no word to the customer. The whole file still reaches the order; only the
+      // first page (one-sided) or two (two-sided) are printed, and now they are told.
+      const _printsPages = sides === 2 ? 2 : 1;
+      if (_firstPdfPages > _printsPages) {
+        alert("\"" + file.name + "\" has " + _firstPdfPages + " pages. This job is " + (sides === 2 ? "two-sided, so page 1 prints on the front and page 2 on the back" : "one-sided, so only page 1 prints") + ".\n\nPages " + (_printsPages + 1) + (_firstPdfPages > _printsPages + 1 ? "–" + _firstPdfPages : "") + " will NOT be printed. If you meant a different page, upload that page on its own.");
       }
       setApproved(false);
       // The order learns about the new art from the allOriginals() effect once the
@@ -3493,7 +3500,7 @@ generate();
                       const _seenOrig = new Set();
                       const _pushOrig = (f) => {
                         if (!f) return;
-                        const k = f.name + "|" + f.size;
+                        const k = f.name + "|" + f.size + "|" + (f.lastModified || 0);
                         if (_seenOrig.has(k)) return;
                         _seenOrig.add(k); files.push(f);
                       };
@@ -4488,6 +4495,8 @@ function buildTicket(config, result) {
   const _art = ART_OPTS.find(x => x.val === config.artwork); push("Artwork", _art ? _art.label : "unknown");
   const _bld = BLEED_OPTS.find(x => x.val === config.bleed); if (_bld && _bld.val > 0) push("Bleed", _bld.label);
   if (config.canvaLink) push("Canva link", config.canvaLink);
+  if (config.canvaInstructions && String(config.canvaInstructions).trim()) push("Special instructions", String(config.canvaInstructions).trim());
+  if (typeof window !== "undefined" && window.__ppsReorderOf) push("Reorder of", "order #" + window.__ppsReorderOf + " — the earlier files are in that order's Drive folder");
   return t;
 }
 
@@ -4599,6 +4608,7 @@ function buildMetadata(config, result) {
     proof: config.proof,
     proofAddrSame: config.proofAddrSame,
     proofAddr: config.proofAddr || {},
+    reorderOf: (typeof window !== "undefined" && window.__ppsReorderOf) || undefined,
     canvaLink: config.canvaLink || "",
     canvaInstructions: config.canvaInstructions || "",
     shipState: config.shipState,
@@ -5166,6 +5176,13 @@ function App() {
 
       // Artwork & proofing
       if (rc.artwork != null) setArtwork(Number(rc.artwork));
+      // A reorder link names the order it came from, so the new order can say so and
+      // production can pull the old files. Digits only — it rides in a URL.
+      if (rc.reorderOf != null) window.__ppsReorderOf = parseInt(String(rc.reorderOf).replace(/\D/g, ""), 10) || 0;
+      // Whitelisted server-side for edits and reorders, but never read back here, so
+      // editing a Canva line in the cart emptied its link.
+      if (rc.canvaLink != null) setCanvaLink(String(rc.canvaLink));
+      if (rc.canvaInstructions != null) setCanvaInstructions(String(rc.canvaInstructions));
       if (rc.artEditPages != null) setArtEditPages(Number(rc.artEditPages));
       if (rc.bleed != null) setBleed(Number(rc.bleed));
       if (rc.proof != null) setProof(Number(rc.proof));
@@ -5687,6 +5704,12 @@ function App() {
     // (audit 2026-09-12: 9 of 45 recent orders arrived with no upload and no
     // note). A file whose read failed leaves the same state, so this is also
     // where a silent extraction failure finally becomes visible.
+    // "Canva design" is an artwork choice with no file: the link IS the artwork.
+    // Nothing checked for it, so a Canva order could arrive with no art and no link.
+    if (Math.abs(Number(artwork) - 0.04) < 0.005 && !String(canvaLink || "").trim()) {
+      alert("Please paste your Canva editor link before ordering.\n\nIt's how we get your design. If you'd rather send files instead, choose another artwork option.");
+      return;
+    }
     if (Math.abs(Number(artwork) - 0.01) < 0.005 && (!artFiles || artFiles.type === "none")) {
       alert("Please add your artwork file before ordering.\n\nIf you'd rather send it later, choose \"Email Art After Order\" under the artwork options.");
       return;
