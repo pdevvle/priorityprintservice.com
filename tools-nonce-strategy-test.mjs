@@ -256,6 +256,32 @@ async function scenarios(name, code) {
     ok('S13 and the order still lands in the cart', w.window.location.href.endsWith('/cart/'));
   }
 
+  // S14 — the customer's OTHER files must arrive too (2026-09-26). File 2 of a
+  // multi-image order, or a reference file, used to be skipped with a console.warn
+  // when it was refused or too large, and the order went through without it — the
+  // same loss as order 87273, one step later. Generated files may still fail.
+  for (const [label, names, refs, bad] of [
+    ['a second customer image', ['1.jpg', '2.jpg', '3.jpg', '1_print-ready.pdf'], [], '2.jpg'],
+    ['a reference file',        ['art.pdf'], [{ name: 'brief.pdf', size: 1, file: new FakeFile(['b'], 'brief.pdf', { type: 'application/pdf' }) }], 'reference_brief.pdf'],
+  ]) {
+    const w = makeWorld({ validUpload: 'upBaked', validCart: 'cartBaked', adminNonces: {}, restNonces: {},
+                          uploadScript: (fd) => (fd.m.get('artwork').n === bad ? { success: false, data: 'File type not allowed: .x' } : null) });
+    const { submitToWooCommerce } = load(code, w);
+    await submitToWooCommerce(100, 's', meta, 0, art(names), null, '', refs);
+    ok(`S14 a refused ${label} stops the order, names the file, and says nothing was placed`,
+       w.state.cartPosts === 0 && w.alerts.length === 1 && w.alerts[0].includes(bad.replace(/^reference_/, '')) && /has not been placed/.test(w.alerts[0]),
+       w.alerts.join(' || ') + ' cartPosts=' + w.state.cartPosts);
+  }
+  {
+    const w = makeWorld({ validUpload: 'upBaked', validCart: 'cartBaked', adminNonces: {}, restNonces: {} });
+    w.window.PPS_CONFIG.maxUpload = 5;
+    const { submitToWooCommerce } = load(code, w);
+    const list = [new FakeFile(['x'], '1.jpg', { type: 'image/jpeg' }), new FakeFile(['xxxxxxxxxx'], '2.jpg', { type: 'image/jpeg' })];
+    await submitToWooCommerce(100, 's', meta, 0, { type: 'files', list, approved: false }, null, '');
+    ok('S14 a customer file over the upload limit stops the order instead of vanishing',
+       w.state.cartPosts === 0 && w.alerts.length === 1 && /"2\.jpg" is/.test(w.alerts[0]), w.alerts.join(' || '));
+  }
+
   // S11 — a primary failure still stops everything, with the server's words.
   {
     const w = makeWorld({ validUpload: 'upBaked', validCart: 'cartBaked', adminNonces: {}, restNonces: {},
@@ -273,7 +299,7 @@ for (const f of srcs) {
   const s = readFileSync(path.join(HERE, f), 'utf8');
   ok(f + ': no pre-emptive nonce refresh before submit', !/Refresh just before submit/.test(s));
   ok(f + ': the .html preview is never queued for upload', !/_preview\.html", \{ type: "text\/html" \}\)\);/.test(s) || /calc-preview-test|calc-coupon-book/.test(f));
-  ok(f + ': isPrimary is declared where it is used', /primary: isPrimary \} = queue\[fi\]/.test(s));
+  ok(f + ': isPrimary is declared where it is used', /primary: isPrimary(, kind)? \} = queue\[fi\]/.test(s));
   ok(f + ': "Upload Art with Order" without a file is stopped', /Please add your artwork file before ordering/.test(s));
   ok(f + ': a file that cannot be read is reported to the customer', /We couldn't read that file/.test(s) || /Couldn't read \$\{f0\.name\}/.test(s));
   ok(f + ': the mobile bar shows the first pricing error', !/return compact\s*\?\s*null\s*:\s*<div style=\{ST\.pnl\}><div style=\{\{\s*padding:\s*20\s*\}\}>\{result\.error/.test(s));

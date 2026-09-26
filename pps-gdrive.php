@@ -510,21 +510,22 @@ function pps_process_artwork_upload( $order_id ) {
 
         $had_artwork = true;
 
-        // Create the order folder once (persist immediately so retries reuse it).
+        // The order folder is created when the first file is actually about to go up
+        // (below), not here. Creating it first is how an order whose files were not on
+        // the server got an empty "Order #…" folder that looked like a finished upload.
         $folder_id = $order->get_meta( '_pps_gdrive_folder_id' );
-        if ( ! $folder_id ) {
-            $folder_name = 'Order #' . $order_id . ' — ' . $order->get_billing_first_name() . ' ' . $order->get_billing_last_name();
-            $folder_id   = pps_gdrive_create_folder( $folder_name, pps_gdrive_parent_folder() );
-            if ( $folder_id ) {
-                $order->update_meta_data( '_pps_gdrive_folder_id', $folder_id );
-                $order->save();
-            }
-        }
-        if ( ! $folder_id ) {
-            error_log( 'PPS Drive: Failed to create folder for order ' . $order_id );
-            $all_succeeded = false;
-            continue;
-        }
+
+        // Which listed files have already gone up, by path — so a retry can tell a file
+        // it already moved from one that was never here. Until 2026-09-26 any file after
+        // the first that was missing locally was ASSUMED uploaded and skipped without a
+        // word; a customer file that never arrived was indistinguishable from one that had.
+        $done = json_decode( (string) $item->get_meta( '_pps_drive_done' ), true );
+        if ( ! is_array( $done ) ) $done = array();
+        // An item part-uploaded by the build before this list existed: keep the old
+        // assumption for it rather than raising alarms about files that are on Drive.
+        $legacy_partial = ! $item->get_meta( '_pps_drive_done' ) && $item->get_meta( '_pps_gdrive_file_id' );
+        $reused         = $item->get_meta( '_pps_artwork_on_drive' ) === 'yes';
+        $missing        = array();
 
         // Thumbnail from the first (raw) deliverable, if present and not yet made.
         $raw_full = trailingslashit( $upload['basedir'] ) . $deliverables[0]['path'];
@@ -542,17 +543,33 @@ function pps_process_artwork_upload( $order_id ) {
         foreach ( $deliverables as $idx => $d ) {
             $full_path = trailingslashit( $upload['basedir'] ) . $d['path'];
             if ( ! file_exists( $full_path ) ) {
-                // A missing raw file on a never-uploaded item is a real error;
-                // anything else is assumed already on Drive from a prior run.
-                if ( $idx === 0 && ! $item->get_meta( '_pps_gdrive_file_id' ) ) {
-                    error_log( 'PPS Drive: Raw file missing for order ' . $order_id . ': ' . $d['path'] );
-                    $item_failed = true;
+                if ( pps_gdrive_missing_is_loss( $d['path'], $done, $legacy_partial ) ) {
+                    $missing[] = $d['name'];
+                    error_log( 'PPS Drive: listed file not on the server for order ' . $order_id . ': ' . $d['path'] . ( $reused ? ' (artwork reused from an earlier order)' : '' ) );
                 }
+                // A missing file will not come back on a retry, so it does not fail the
+                // item; it is recorded and announced below instead.
                 continue;
+            }
+
+            if ( ! $folder_id ) {
+                $folder_name = 'Order #' . $order_id . ' — ' . $order->get_billing_first_name() . ' ' . $order->get_billing_last_name();
+                $folder_id   = pps_gdrive_create_folder( $folder_name, pps_gdrive_parent_folder() );
+                if ( $folder_id ) {
+                    $order->update_meta_data( '_pps_gdrive_folder_id', $folder_id );
+                    $order->save();
+                } else {
+                    error_log( 'PPS Drive: Failed to create folder for order ' . $order_id );
+                    $item_failed = true;
+                    break;
+                }
             }
 
             $file_id = pps_gdrive_upload_file( $full_path, $d['name'], $folder_id );
             if ( $file_id ) {
+                $done[] = $d['path'];
+                $item->update_meta_data( '_pps_drive_done', wp_json_encode( array_values( array_unique( $done ) ) ) );
+                $item->save();
                 // The raw file (index 0) drives the admin "Open in Google Drive" link.
                 if ( $idx === 0 ) {
                     $item->update_meta_data( '_pps_gdrive_file_id', $file_id );
@@ -568,6 +585,14 @@ function pps_process_artwork_upload( $order_id ) {
                 error_log( 'PPS Drive: Upload failed for order ' . $order_id . ' file ' . $d['name'] . '. Kept locally.' );
                 $item_failed = true;
             }
+        }
+
+        if ( $missing && ! $item->get_meta( '_pps_drive_missing' ) ) {
+            $item->update_meta_data( '_pps_drive_missing', implode( ', ', $missing ) );
+            $item->save();
+            $order->add_order_note( $reused
+                ? 'Artwork reused from an earlier order — already on Google Drive in that order\'s folder, not uploaded again: ' . implode( ', ', $missing ) . '.'
+                : 'ARTWORK MISSING: ' . count( $missing ) . ' file(s) listed on this order were not on the server when the Google Drive upload ran — ' . implode( ', ', $missing ) . '. Ask the customer to resend them.' );
         }
 
         if ( $item_failed ) {
@@ -589,8 +614,27 @@ function pps_process_artwork_upload( $order_id ) {
             $order->save();
             $delay = 300 * pow( 2, $attempts );
             as_schedule_single_action( time() + $delay, 'pps_process_artwork_upload', array( $order_id ), 'pps-gdrive' );
+        } elseif ( ! $order->get_meta( '_pps_drive_failed' ) ) {
+            // Ten attempts over about three and a half days, then it used to stop in
+            // silence with the files still on the server and nothing on the order.
+            $order->update_meta_data( '_pps_drive_failed', current_time( 'mysql' ) );
+            $order->add_order_note( 'ARTWORK NOT ON GOOGLE DRIVE: the upload failed ' . $attempts . ' times and has stopped retrying. The files are still on the server under uploads/pps-artwork; check the Drive connection, then re-run the upload.' );
+            $order->save();
         }
     }
+}
+
+/**
+ * A listed file that is not on local disk: lost, or already moved to Drive?
+ * Moved if this item's upload record names it, or if the item was part-uploaded
+ * by a build that kept no record (the old assumption, kept only for those).
+ * Anything else was never here — a customer file the order promised and the
+ * server does not have. tools-gdrive-missing-test.php pins this.
+ */
+function pps_gdrive_missing_is_loss( $path, array $done, $legacy_partial ) {
+    if ( in_array( $path, $done, true ) ) return false;
+    if ( $legacy_partial ) return false;
+    return true;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -637,6 +681,6 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
         '_pps_artwork_thumb', '_pps_artwork_location',
         '_pps_gdrive_file_id', '_pps_gdrive_url',
         '_pps_gdrive_folder_id', '_pps_drive_attempts',
-        '_pps_artwork_files',
+        '_pps_artwork_files', '_pps_drive_done', '_pps_drive_missing',
     ) );
 });

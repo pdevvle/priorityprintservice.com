@@ -42,7 +42,7 @@ const path = await import('node:path');
 const jpeg = require(DEPS + '/jpeg-js');
 
 const BASE = process.env.PPS_CALC_BASE || 'http://127.0.0.1:8137';
-const PAGES = (process.env.PPS_MULTI_PAGES || 'parity-saddle.html,parity-pb.html,slot-coupon.html').split(',');
+const PAGES = (process.env.PPS_MULTI_PAGES ?? 'parity-saddle.html,parity-pb.html,slot-coupon.html').split(',').filter(Boolean);
 
 let checks = 0, failed = 0;
 const ok = (label, cond, detail) => {
@@ -195,6 +195,106 @@ for (const file of PAGES) {
     await s.p.waitForTimeout(800);
     await addToOrder(s);
     ok(`${file}: Add to Order is refused until it is approved again`,
+       !s.cartPost && s.dialogs.some(d => /approve your artwork/i.test(d)),
+       'cartPost=' + JSON.stringify(s.cartPost && listed(s)) + ' dialogs=' + s.dialogs.join(' || '));
+    await s.ctx.close();
+  }
+}
+
+// ── the five flats (2026-09-26) ─────────────────────────────────────────────
+// A flat has a front and a back, each with its own upload slot beside the main
+// drop zone. Only the drop zone ever told the order anything: a side uploaded or
+// replaced through its slot never reached it, two files dropped at once kept the
+// first and silently dropped the second, and clearing an approval left the order
+// holding the old package marked approved.
+const FLATS = (process.env.PPS_MULTI_FLATS || 'flat-brochure.html,flat-postcard.html,flat-greeting-card.html,flat-letterhead.html,flat-sticker.html').split(',').filter(Boolean);
+const FRONT = img('front.jpg', 3), BACK = img('back.jpg', 5), NEWFRONT = img('new-front.jpg', 9);
+// The side slots' inputs: same accept list as the drop zone, not the multi-select
+// reference picker. Once art is in, the drop zone goes and only the slots remain, so
+// they are counted from the end: the last is the back on a two-sided job.
+const sideInputs = (p) => p.locator('input[type=file][accept=".pdf,.jpg,.jpeg,.png"]:not([multiple])');
+async function slotInput(p, which, twoSided) {
+  const n = await sideInputs(p).count();
+  const idx = which === 'back' ? n - 1 : n - (twoSided ? 2 : 1);
+  return idx >= 0 && (which !== 'back' || twoSided) ? sideInputs(p).nth(idx) : null;
+}
+async function waitArt(p, n) {
+  try { await p.waitForFunction((k) => [...document.querySelectorAll('img')].filter(i => /^data:image/.test(i.src)).length >= k, n, { timeout: 30000 }); } catch (e) {}
+  await p.waitForTimeout(800);
+}
+for (const file of FLATS) {
+  const twoSided = !/sticker/.test(file);
+  const base = { ...SHIP, artwork: 0.01, proof: 0.01, ...(twoSided ? { sides: 2 } : {}) };
+
+  if (twoSided) {
+    console.log('\n── ' + file + ' / front on the drop zone, back on its own slot, staff proof ──');
+    const s = await open(file, base);
+    await s.p.locator('input[type=file]').first().setInputFiles(FRONT);
+    await waitArt(s.p, 1);
+    const backIn = await slotInput(s.p, 'back', twoSided);
+    if (backIn) await backIn.setInputFiles(BACK);
+    await waitArt(s.p, 2);
+    ok(`${file}: there is a back slot to upload to`, !!backIn);
+    await addToOrder(s);
+    ok(`${file}: the order landed in the cart`, /cart\.html$/.test(s.p.url()), 'dialogs=' + s.dialogs.join(' || '));
+    ok(`${file}: the back uploaded through its slot reaches the order, after the front`,
+       s.uploads.indexOf('front.jpg') === 0 && s.uploads.includes('back.jpg'), JSON.stringify(s.uploads));
+    await s.ctx.close();
+
+    console.log('\n── ' + file + ' / front and back dropped together ──');
+    const t = await open(file, base);
+    const b64s = [FRONT, BACK].map(f => ({ name: path.basename(f), data: fs.readFileSync(f).toString('base64') }));
+    await t.p.evaluate((items) => {
+      const dt = new DataTransfer();
+      for (const it of items) { const bin = atob(it.data); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); dt.items.add(new File([u], it.name, { type: 'image/jpeg' })); }
+      const input = document.querySelector('input[type=file]');
+      let zone = input && input.parentElement;
+      while (zone && !zone.ondrop && !Object.keys(zone).some(k => k.startsWith('__reactProps') && zone[k] && zone[k].onDrop)) zone = zone.parentElement;
+      (zone || input.parentElement).dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    }, b64s);
+    await waitArt(t.p, 2);
+    await addToOrder(t);
+    ok(`${file}: two files dropped at once become front and back, and both reach the order`,
+       t.uploads.includes('front.jpg') && t.uploads.includes('back.jpg'), JSON.stringify(t.uploads) + ' dialogs=' + t.dialogs.join(' || '));
+    await t.ctx.close();
+  }
+
+  console.log('\n── ' + file + ' / the front replaced on its slot, staff proof ──');
+  {
+    const s = await open(file, base);
+    await s.p.locator('input[type=file]').first().setInputFiles(FRONT);
+    await waitArt(s.p, 1);
+    { const fin = await slotInput(s.p, 'front', twoSided); if (fin) await fin.setInputFiles(NEWFRONT); }
+    await s.p.waitForTimeout(2500);
+    await addToOrder(s);
+    ok(`${file}: the order carries the replacement, not the file it replaced`,
+       s.uploads[0] === 'new-front.jpg' && !s.uploads.includes('front.jpg'), JSON.stringify(s.uploads) + ' dialogs=' + s.dialogs.join(' || '));
+    await s.ctx.close();
+  }
+
+  console.log('\n── ' + file + ' / approve, then replace the front ──');
+  {
+    const s = await open(file, { ...base, proof: 0 });
+    await s.p.locator('input[type=file]').first().setInputFiles(FRONT);
+    await waitArt(s.p, 1);
+    await s.p.evaluate(() => { window.__manifests = 0; const OB = window.Blob; window.Blob = function (parts, opts) { const bl = new OB(parts, opts); if (opts && opts.type === 'text/plain') window.__manifests++; return bl; }; window.Blob.prototype = OB.prototype; });
+    await s.p.evaluate(() => {
+      const x = [...document.querySelectorAll('button')].find(y => /Proof required|Proof ✓|🔍|Review proof/i.test(y.textContent || ''));
+      if (x) return x.click();
+      const im = [...document.querySelectorAll('img')].find(i => /^data:image/.test(i.src)); im && im.parentElement && im.parentElement.click();
+    });
+    await s.p.waitForTimeout(2000);
+    await s.p.evaluate(() => { const ack = [...document.querySelectorAll('label')].find(l => /print anyway/i.test(l.textContent || '')); const cb = ack && ack.querySelector('input[type=checkbox]'); cb && cb.click(); });
+    await s.p.waitForTimeout(300);
+    await s.p.evaluate(() => { const btn = [...document.querySelectorAll('button')].find(y => /^\s*Approve (artwork|Now)\s*$/i.test(y.textContent || '')); btn && btn.click(); });
+    let man = 0;
+    for (let i = 0; i < 90 && man < 1; i++) { await s.p.waitForTimeout(1000); man = await s.p.evaluate(() => window.__manifests); }
+    ok(`${file}: the approval package was generated`, man >= 1);
+    await s.p.keyboard.press('Escape'); await s.p.waitForTimeout(800);
+    { const fin = await slotInput(s.p, 'front', twoSided); if (fin) await fin.setInputFiles(NEWFRONT); }
+    await s.p.waitForTimeout(2500);
+    await addToOrder(s);
+    ok(`${file}: changed art after approval is refused at Add to Order until approved again`,
        !s.cartPost && s.dialogs.some(d => /approve your artwork/i.test(d)),
        'cartPost=' + JSON.stringify(s.cartPost && listed(s)) + ' dialogs=' + s.dialogs.join(' || '));
     await s.ctx.close();

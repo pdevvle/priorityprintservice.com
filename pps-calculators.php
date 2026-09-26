@@ -2304,6 +2304,14 @@ function pps_ajax_add_to_cart() {
         }
     }
 
+    // Editing a line that keeps its artwork: the calculator reopens it as "existing"
+    // and posts only the one raw path back. Everything else the customer gave us —
+    // files 2..N, per-page files, the approval package — and a prepress-review flag
+    // lived on the OLD line, which is removed below. Carry them onto the new one.
+    if ( $edit_key && WC()->cart && isset( WC()->cart->get_cart()[ $edit_key ] ) ) {
+        $cart_item_data = pps_carry_edit_artwork( $cart_item_data, WC()->cart->get_cart()[ $edit_key ] );
+    }
+
     if ( ! WC()->cart ) {
         wp_send_json_error( 'Cart not available.' );
     }
@@ -2445,6 +2453,41 @@ add_action( 'woocommerce_cart_loaded_from_session', function( $cart ) {
         ), 'notice' );
     }
 }, 20 );
+
+/**
+ * An edited cart line that reuses its artwork keeps every file and flag the old
+ * line carried. Until 2026-09-26 an edit (quantity, paper, a date) rebuilt the line
+ * from the POST alone, which for reused artwork is a single path: a twenty-file
+ * order came out of an edit with one file, the approval package gone, and an
+ * escape-hatch job no longer marked NOT APPROVED.
+ *
+ * Only when the artwork really is the same — the posted raw path equals the old
+ * line's. New artwork means a new upload, and the old files must not ride along.
+ * The approval hash is deliberately NOT carried: the edit may have changed what
+ * prints, and "unbound" is the honest state for the imposition tool to meet.
+ * tools-edit-artwork-test.php is the gate.
+ */
+function pps_carry_edit_artwork( array $new, $old ) {
+    if ( ! is_array( $old ) ) return $new;
+    $same = ! empty( $new['pps_artwork_path'] ) && ! empty( $old['pps_artwork_path'] )
+        && (string) $new['pps_artwork_path'] === (string) $old['pps_artwork_path'];
+    if ( ! $same ) return $new;
+
+    if ( ! empty( $old['pps_artwork_files'] ) && is_array( $old['pps_artwork_files'] ) ) {
+        $merged = array(); $seen = array();
+        foreach ( array_merge( $old['pps_artwork_files'], (array) ( $new['pps_artwork_files'] ?? array() ) ) as $f ) {
+            if ( ! is_array( $f ) || empty( $f['path'] ) || isset( $seen[ $f['path'] ] ) ) continue;
+            $seen[ $f['path'] ] = true;
+            $merged[] = $f;
+        }
+        $new['pps_artwork_files'] = $merged;
+    }
+    if ( ! empty( $old['pps_prepress_review'] ) && empty( $new['pps_prepress_review'] ) ) {
+        $new['pps_prepress_review'] = $old['pps_prepress_review'];
+        unset( $new['pps_proof_hash'] );
+    }
+    return $new;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // CART: SESSION PERSISTENCE

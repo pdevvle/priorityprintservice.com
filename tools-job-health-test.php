@@ -86,6 +86,17 @@ file_put_contents( "$T/pps-artwork/good_print-ready.pdf", make_pdf( 2, array( 15
 file_put_contents( "$T/pps-artwork/soft_print-ready.pdf", make_pdf( 2, array( 1530, 522 ), 3060, 1044 ) );   // the same sheet @ 144
 file_put_contents( "$T/pps-artwork/vector.pdf", make_pdf( 12, array( 324, 324 ), 0, 0, false ) );          // 4.5×4.5 in, no images
 file_put_contents( "$T/pps-artwork/notes.txt", 'hello' );
+// Order 87272's shape: a customer's 12-page InDesign export, 8×11 in, a
+// sheet-proportioned photo on each page plus dozens of other placed images. Its
+// sheet-shaped images happen to count ≥ pages; the old rule called that "raster,
+// 62 DPI" and put a false alarm on a correct order.
+$indd = make_pdf( 12, array( 576, 792 ), 496, 682 );
+$extra = ''; for ( $k = 0; $k < 30; $k++ ) $extra .= ( 100 + $k ) . " 0 obj\n<< /Type /XObject /Subtype /Image /Width 1200 /Height 300 /Length 3 >>stream\nabc\nendstream\nendobj\n";
+file_put_contents( "$T/pps-artwork/indesign.pdf", str_replace( 'trailer', $extra . 'trailer', $indd ) );
+// The calculator's print-ready file as it is really stored: a random upload name.
+@mkdir( "$T/pps-artwork/2026/09", 0777, true );
+copy( "$T/pps-artwork/good_print-ready.pdf", "$T/pps-artwork/2026/09/20260925-010843-1e929ab7.pdf" );
+copy( "$T/pps-artwork/indesign.pdf", "$T/pps-artwork/2026/09/20260925-010840-aa11bb22.pdf" );
 
 echo "── the print file, measured ──\n";
 $g = pps_print_file_check( "$T/pps-artwork/good_print-ready.pdf" );
@@ -100,6 +111,9 @@ ok( 'a vector PDF is named as such with its page count and size, no DPI claim, n
 $x = pps_print_file_check( "$T/pps-artwork/notes.txt" );
 ok( 'a non-PDF is refused, not guessed', $x['ok'] === false && $x['summary'] === 'not a PDF' );
 ok( 'a missing file is reported, not fatal', pps_print_file_check( "$T/nope.pdf" )['summary'] === 'print file not readable' );
+$id = pps_print_file_check( "$T/pps-artwork/indesign.pdf" );
+ok( 'order 87272\'s shape — a layout PDF with a photo per page and 30 more images — is NOT called raster and raises no warning',
+    $id['kind'] === 'mixed' && $id['warn'] === '' && $id['min_dpi'] === null, $id['kind'] . ' | ' . $id['summary'] . ' | ' . $id['warn'] );
 
 echo "\n── on the order ──\n";
 $item = new FakeItem( 'Square Accordion Brochure', array( 'Job Ticket' => "Product: Brochure / Flat Print\nQuantity: 250" ) );
@@ -123,6 +137,15 @@ ok( 'an image upload is left alone', $item3->get_meta( 'Print File Check' ) === 
 $item4 = new FakeItem( 'Flyer' );
 fire( 'woocommerce_checkout_create_order_line_item', $item4, 'k4', array( 'pps_metadata' => '{}', 'pps_artwork_files' => array( array( 'path' => 'pps-artwork/gone_print-ready.pdf', 'name' => 'g' ) ) ), new FakeOrder( 0 ) );
 ok( 'a file already moved to Drive is reported as not checked, not as an error', $item4->get_meta( 'Print File Check' ) === 'not checked — file already moved off the server' );
+$item5 = new FakeItem( 'Booklet', array( 'Job Ticket' => 'Product: Saddle Stitch Booklet' ) );
+fire( 'woocommerce_checkout_create_order_line_item', $item5, 'k5', array( 'pps_metadata' => '{}',
+    'pps_artwork_path'  => 'pps-artwork/2026/09/20260925-010840-aa11bb22.pdf',
+    'pps_artwork_files' => array(
+        array( 'path' => 'pps-artwork/2026/09/20260925-010840-aa11bb22.pdf', 'name' => 'KFA 2025 Journal.pdf' ),
+        array( 'path' => 'pps-artwork/2026/09/20260925-010843-1e929ab7.pdf', 'name' => 'KFA 2025 Journal_print-ready.pdf' ),
+    ) ), new FakeOrder( 0 ) );
+ok( 'on a real order the print-ready file is found by its NAME (stored paths are random) — not the raw upload beside it',
+    strpos( (string) $item5->get_meta( 'Print File Check' ), 'raster · 2 pages · 21.25×7.25 in' ) === 0 && $item5->get_meta( '_pps_print_check_warn' ) === '', $item5->get_meta( 'Print File Check' ) );
 
 echo "\n── the digest ──\n";
 $mk = function( $id, $name, $meta, $itemmeta = array(), $first = 'Pat', $last = 'Customer' ) {
@@ -137,7 +160,13 @@ $orders = array(
     $mk( 106, 'Booklet',  array( 'proof' => 0 ), array( '_pps_delivery_date' => '2026-09-26' ) ),                              // a Saturday
     $mk( 107, 'Booklet',  array( 'proof' => 3.01, 'proofAddrSame' => false, 'proofAddr' => array( 'street' => '1 Main St' ) ) ),
     new FakeOrder( 108, array( new FakeItem( 'Legacy WCPA item', array() ) ) ),
+    $mk( 109, 'Coupon Book', array( 'proof' => 0 ), array( '_pps_drive_missing' => '7.jpg, 8.jpg' ), 'Parker', 'Jones' ),
+    $mk( 110, 'Booklet', array( 'proof' => 0 ), array( '_pps_drive_missing' => 'old-art.pdf', '_pps_artwork_on_drive' => 'yes' ) ),   // a reorder: not a loss
 );
+$o111 = $mk( 111, 'Postcard', array( 'proof' => 0 ) ); $o111->meta = array( '_pps_drive_failed' => '2026-09-20 10:00:00', '_pps_drive_attempts' => 10 );
+$o112 = $mk( 112, 'Postcard', array( 'proof' => 0 ) ); $o112->meta = array( '_pps_drive_attempts' => 4 );
+$o113 = $mk( 113, 'Postcard', array( 'proof' => 0 ) ); $o113->meta = array( '_pps_drive_attempts' => 5, '_pps_artwork_processed' => '2026-09-20 11:00:00' );   // got there in the end
+array_push( $orders, $o111, $o112, $o113 );
 $refusals = array(
     array( 'time' => '2026-09-21 10:00:00', 'products' => array( 22754 ), 'errors' => array( 'Addon data missing for product <b>9x9</b>' ) ),
     array( 'time' => '2026-09-01 10:00:00', 'products' => array( 1 ), 'errors' => array( 'old' ) ),
@@ -145,7 +174,7 @@ $refusals = array(
 $since = strtotime( '2026-09-15 00:00:00' );
 $sections = pps_job_health_collect( $orders, $refusals, $since );
 $titles = array_map( function( $s ) { return $s['title']; }, $sections );
-ok( 'six sections, in reading order', count( $sections ) === 6 && strpos( $titles[0], 'NOT approved' ) !== false && strpos( $titles[5], 'Checkout refused' ) !== false, implode( ' | ', $titles ) );
+ok( 'seven sections, in reading order', count( $sections ) === 7 && strpos( $titles[0], 'NOT approved' ) !== false && strpos( $titles[5], 'Checkout refused' ) !== false && strpos( $titles[6], 'did not reach Google Drive' ) !== false, implode( ' | ', $titles ) );
 $flat = pps_job_health_render( $sections, 'example.test' );
 ok( 'prepress review names the order and the customer', strpos( $flat, '#101 Ana Lee — Booklet' ) !== false );
 ok( 'the low-resolution file carries its reason', strpos( $flat, '#102 Pat Customer — Brochure — BELOW PRINT RESOLUTION: 144 DPI' ) !== false );
@@ -155,14 +184,18 @@ ok( 'a chosen-but-blank address is called out; a filled one is not', strpos( $fl
 ok( 'a Saturday delivery is flagged with its weekday', strpos( $flat, '#106 Pat Customer — Booklet — Saturday, Sep 26' ) !== false );
 ok( 'only refusals since the last digest appear, with tags stripped', strpos( $flat, 'product 22754 — Addon data missing for product 9x9' ) !== false && strpos( $flat, 'product 1 —' ) === false );
 ok( 'a non-calculator line is ignored', strpos( $flat, '#108' ) === false );
-// 1 prepress + 1 low-res + 4 staff proofs (#103 #104 #105 #107) + 2 addresses + 1 Saturday + 1 refusal
-ok( 'the header counts every item', strpos( $flat, 'PPS exceptions — 10 items need a look (example.test)' ) === 0, substr( $flat, 0, 60 ) );
+ok( 'a customer file that never reached the server is named, with what to do', strpos( $flat, '#109 Parker Jones — Coupon Book — never reached the server: 7.jpg, 8.jpg (ask the customer to resend)' ) !== false );
+ok( 'artwork reused from an earlier order is not reported as missing', strpos( $flat, '#110' ) === false );
+ok( 'an upload that gave up is listed, and one still retrying after three attempts', strpos( $flat, '#111 Pat Customer — upload stopped after 10 attempts' ) !== false && strpos( $flat, '#112 Pat Customer — still retrying (4 attempts so far)' ) !== false );
+ok( 'an upload that got there in the end is not', strpos( $flat, '#113' ) === false );
+// 1 prepress + 1 low-res + 4 staff proofs (#103 #104 #105 #107) + 2 addresses + 1 Saturday + 1 refusal + 3 Drive (#109 #111 #112)
+ok( 'the header counts every item', strpos( $flat, 'PPS exceptions — 13 items need a look (example.test)' ) === 0, substr( $flat, 0, 60 ) );
 
 $GLOBALS['fake_orders'] = array(); foreach ( $orders as $o2 ) $GLOBALS['fake_orders'][ $o2->get_id() ] = $o2;
 $GLOBALS['options']['pps_checkout_refusals'] = $refusals; $GLOBALS['options']['pps_job_health_last_ts'] = $since;
 $text = pps_job_health_digest( true );
-ok( 'the digest is mailed to the office, and only the office', count( $GLOBALS['mail'] ) === 1 && $GLOBALS['mail'][0]['to'] === 'Office@priorityprintservice.com' && strpos( $GLOBALS['mail'][0]['subject'], 'PPS exceptions: 10 items' ) === 0, json_encode( array_map( function( $m ) { return $m['to'] . ' / ' . $m['subject']; }, $GLOBALS['mail'] ) ) );
-ok( 'the last digest is kept where wp_get_option can read it', ( $GLOBALS['options']['pps_job_health_last']['count'] ?? 0 ) === 10 && $GLOBALS['options']['pps_job_health_last']['text'] === $text );
+ok( 'the digest is mailed to the office, and only the office', count( $GLOBALS['mail'] ) === 1 && $GLOBALS['mail'][0]['to'] === 'Office@priorityprintservice.com' && strpos( $GLOBALS['mail'][0]['subject'], 'PPS exceptions: 13 items' ) === 0, json_encode( array_map( function( $m ) { return $m['to'] . ' / ' . $m['subject']; }, $GLOBALS['mail'] ) ) );
+ok( 'the last digest is kept where wp_get_option can read it', ( $GLOBALS['options']['pps_job_health_last']['count'] ?? 0 ) === 13 && $GLOBALS['options']['pps_job_health_last']['text'] === $text );
 $GLOBALS['options']['pps_job_health_last_ts'] = 0; $GLOBALS['mail'] = array(); $GLOBALS['fake_orders'] = array();
 $GLOBALS['options']['pps_checkout_refusals'] = array( array( 'time' => date( 'Y-m-d H:i:s', time() - 30 * 86400 ), 'products' => array( 5 ), 'errors' => array( 'ancient' ) ) );
 pps_job_health_digest( true );
@@ -173,6 +206,7 @@ ok( 'nothing to say → no mail', count( $GLOBALS['mail'] ) === 0 );
 ok( 'the daily cron is scheduled once on init', ( fire( 'init' ) === null ) && count( array_filter( $GLOBALS['scheduled'] ?? array(), function( $s ) { return $s[0] === 'daily' && $s[1] === 'pps_job_health_digest'; } ) ) === 1 );
 
 // tidy
+foreach ( glob( "$T/pps-artwork/2026/09/*" ) as $f ) @unlink( $f ); @rmdir( "$T/pps-artwork/2026/09" ); @rmdir( "$T/pps-artwork/2026" );
 foreach ( glob( "$T/pps-artwork/*" ) as $f ) @unlink( $f ); @rmdir( "$T/pps-artwork" ); @rmdir( $T );
 
 echo "\n{$GLOBALS['t_checks']} checks, {$GLOBALS['t_failed']} failed\n";

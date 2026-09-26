@@ -90,8 +90,11 @@ it renders from a 150 DPI source (handover §7.0) and must fail.
   the order **byte-identical**, as the first deliverables, before anything generated.
 - This holds for **every** proof type and approval state: self-approved, staff digital proof,
   hardcopy proof, un-approved after a change, and the prepress escape hatch.
-- One function builds that list (`allOriginals()` in the booklets since 2026-09-25). Every
-  emit to the order calls it. No emit builds its own list.
+- One function builds that list (`allOriginals()` in the booklets since 2026-09-25, in the
+  flats since 2026-09-26). Every emit to the order calls it. No emit builds its own list.
+- A customer file that cannot be uploaded stops the order with the file named; only
+  generated files (print-ready, previews, manifest) may fail quietly. Editing a cart line
+  keeps every file; the Drive uploader names any file the order lists and the server lacks.
 
 **Proved by:** `tools-multi-file-upload-test.mjs` — twenty images on a staff-proof order, all
 twenty uploaded in order; a slot replacement keeps the twenty and adds the page file. When a
