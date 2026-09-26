@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-26 00:20 UTC · IMPOSE-V1.47</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-26 01:00 UTC · IMPOSE-V1.48</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1243,7 +1243,7 @@ const DIM_EPS = 0.02; // inches — dimension match tolerance (~1.4pt)
 // Resolve where the finished piece lives on a source page + how it sits in a
 // layout cell. Box priority (fix c): TrimBox → BleedBox−0.125″ → MediaBox
 // heuristics. Scaling is always fit-to-trim (contain) — NEVER fill-crop.
-function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed) {
+function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, oversize) {
   const B = isFinite(bleed) ? bleed : BLEED;
   const notes = [];
   const rot = ((page.getRotation().angle % 360) + 360) % 360;
@@ -1280,6 +1280,20 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed) {
     } else if (Math.abs(aLong - pieceLong) < DIM_EPS && Math.abs(aShort - pieceShort) < DIM_EPS) {
       trimRaw = { x: 0, y: 0, w: W, h: H };
       notes.push("page size = exact trim — NO BLEED in source file");
+    } else if (oversize !== "scale" && aLong >= pieceLong - DIM_EPS && aShort >= pieceShort - DIM_EPS) {
+      // Larger than the finished size on both axes and no box says where the
+      // trim is: a page built with crop marks and slug around the design
+      // (4.5×2.5 for a 4×2 card). Prepress places that at 100 %, centred on
+      // the finished size — the marks fall outside the bleed clip and are cut
+      // away. Scaling it (1.47 and earlier) printed the card 11 % small with
+      // the marks inside the cut. "Scale to fit" is still there for a file
+      // that was NOT built centred on the finished size.
+      const pageLandscape = dispW >= dispH;
+      const tdW = pageLandscape ? pieceLong : pieceShort, tdH = pageLandscape ? pieceShort : pieceLong;
+      const tw = (rot % 180 ? tdH : tdW) * PT, th = (rot % 180 ? tdW : tdH) * PT;
+      trimRaw = { x: (W - tw) / 2, y: (H - th) / 2, w: tw, h: th };
+      const offL = (aLong - pieceLong) / 2, offS = (aShort - pieceShort) / 2;
+      notes.push(`page ${aLong.toFixed(2)}×${aShort.toFixed(2)}″ is larger than the ${pieceLong}×${pieceShort}″ finished size — placed at 100% and CROPPED to it, centred (${offL.toFixed(3)}″ and ${offS.toFixed(3)}″ off each edge; crop marks and slug beyond the bleed are cut away). If this file was not built centred on the finished size, set "Artwork larger than the finished size" to Scale to fit.`);
     } else {
       trimRaw = { x: 0, y: 0, w: W, h: H };
       notes.push(`page size ${aLong.toFixed(2)}×${aShort.toFixed(2)}″ matches neither trim nor trim+bleed — fit-to-trim scaled (content is never crop-filled)`);
@@ -2124,7 +2138,7 @@ async function imposeSaddle(artBytes, spec, layout) {
       : `${p.getRotation().angle}|${mb.x},${mb.y},${mb.w},${mb.h}|${JSON.stringify(getPageBox(p, "TrimBox"))}|${JSON.stringify(getPageBox(p, "BleedBox"))}`;
     let art = artCache.get(key);
     if (!art) {
-      art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed);
+      art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed, spec.oversize);
       applyArtScale(art, userScale);
       applyArtInset(art, inset);
       // A bleed ALLOWANCE is not bleed. Measure the ring whenever the page
@@ -3453,7 +3467,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   async function prepared(ref) {
     const key = keyOf(ref);
     if (!artCache.has(key)) {
-      const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed);
+      const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed, spec.oversize);
       const abm = ref.gi != null || ref.doc === backDoc
         ? (spec.addBleed && spec.addBleed !== "off" ? spec.addBleed : null) : abMode(ref.pno);
       applyArtScale(art, userScale);
@@ -4344,6 +4358,7 @@ function App() {
   const [pageSeqTxt, setPageSeqTxt] = useState("");        // source page sequence (duplicate / repeat / reorder / blanks)
   const [sheetSeqTxt, setSheetSeqTxt] = useState("");      // imposed sheet sequence (repeat / reorder physical sheets)
   const [splitSpreads, setSplitSpreads] = useState(false); // cut 2-page reader spreads into single pages
+  const [oversize, setOversize] = useState("crop");        // a page larger than the finished size with no TrimBox: crop at 100% (centred) | scale to fit
   const [slipOn, setSlipOn] = useState(false);
   const [slipWhen, setSlipWhen] = useState("before");
   const [slipSheets, setSlipSheets] = useState("");
@@ -4372,7 +4387,7 @@ function App() {
     bleedIn: [bleedIn, setBleedIn], addBleed: [addBleed, setAddBleed], addBleedSmart: [addBleedSmart, setAddBleedSmart],
     artScale: [artScale, setArtScale], creep: [creep, setCreep], spine: [spine, setSpine], pbPart: [pbPart, setPbPart], pbGutsOrder: [pbGutsOrder, setPbGutsOrder],
     artInset: [artInset, setArtInset], streakEps: [streakEps, setStreakEps], multiMode: [multiMode, setMultiMode],
-    greyPagesTxt: [greyPagesTxt, setGreyPagesTxt], splitSpreads: [splitSpreads, setSplitSpreads],
+    greyPagesTxt: [greyPagesTxt, setGreyPagesTxt], splitSpreads: [splitSpreads, setSplitSpreads], oversize: [oversize, setOversize],
     slipOn: [slipOn, setSlipOn], slipWhen: [slipWhen, setSlipWhen], slipSheets: [slipSheets, setSlipSheets], slipDesign: [slipDesign, setSlipDesign],
   };
   const SETUP_JOB_KEYS = ["calc", "trimLong", "trimShort", "sides", "spine", "pbPart"];
@@ -4541,7 +4556,7 @@ function App() {
     greyPages: greyPagesTxt.trim() || null,
     pageSeq: pageSeqTxt.trim() || null,
     sheetSeq: sheetSeqTxt.trim() || null,
-    splitSpreads,
+    splitSpreads, oversize,
     slip: slipOn ? { on: true, when: slipWhen, sheets: slipSheets, design: slipDesign,
                      customBytes: slipCustom && slipCustom.bytes, customName: slipCustom && slipCustom.name } : null,
     // Per-half layout controls. Shaped for the engine (pbPartOverrides), which
@@ -4551,7 +4566,7 @@ function App() {
   }), [calc, trimLong, trimShort, allowMissingFonts, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin, sheetPortrait,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, artRotate, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, oversize, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -5016,6 +5031,12 @@ function App() {
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
             </div>
+            <Field label="Artwork larger than the finished size">
+              <select value={oversize} onChange={e => setOversize(e.target.value)} title="A page bigger than the finished size with no TrimBox — e.g. 4.5×2.5 pages carrying crop marks for a 4×2 card">
+                <option value="crop">Crop to the finished size at 100%, centred (marks cut away)</option>
+                <option value="scale">Scale the whole page down to fit the finished size</option>
+              </select>
+            </Field>
             <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <Field label="Duplexed sheets" style={{ flex: "0 0 150px" }}>
                 <label style={{ fontSize: 13, display: "flex", gap: 7, alignItems: "center", cursor: isBook ? "default" : "pointer", padding: "8px 0" }}>

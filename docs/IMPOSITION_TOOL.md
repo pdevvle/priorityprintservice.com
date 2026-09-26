@@ -743,6 +743,41 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Pages larger than the finished size: crop at 100 %, not scale (1.48)
+
+  Owner: "when I input a set of pages that measure 4.5×2.5 with crop marks,
+  but then I want to enter the finish size 4×2 it wants to scale them to
+  within the 'new' image area rather than crop to size."
+
+  `resolveSideArt()` located the trim by TrimBox, BleedBox, "page = trim +
+  2×bleed" or "page = trim", and for anything else took the whole page as
+  the trim and fit-scaled it — a 4.5×2.5 page with marks printed the card
+  at 80 % with the marks inside the cut. Prepress places such a page at
+  100 %, centred on the finished size.
+
+  - New branch, before the fallback: a page larger than the finished size on
+    both axes with no box to say where the trim is gets its trim rect
+    centred on the page at exactly the finished size (orientation follows the
+    page's displayed orientation; `/Rotate` honoured), scale 1. The bleed
+    clip then takes the ring around it and the crop marks beyond the bleed
+    are cut away. Note: "page 4.50×2.50″ is larger than the 4×2″ finished
+    size — placed at 100% and CROPPED to it, centred (0.250″ and 0.250″ off
+    each edge; crop marks and slug beyond the bleed are cut away)…".
+  - `spec.oversize` — **Artwork larger than the finished size** (General
+    settings, under the size boxes; in setups): "Crop to the finished size
+    at 100%, centred" (default) / "Scale the whole page down to fit" (the
+    old behaviour, for a file that was not built centred on the finished
+    size). A page SMALLER than the finished size on either axis still
+    scales — there is nothing to crop.
+  - Verified (`cases_oversize.json`, `fx_marks45.pdf`: 4.5×2.5 page, blue
+    to the 4.25×2.25 bleed box, marks in the outer ring): crop mode places
+    the blue exactly to the cell's bleed clip (0.625″ = clip x0) at scale 1
+    with `hasBleed` true and no marks on the sheet; scale mode places it at
+    ×0.8 starting 0.222″ inside the trim with `hasBleed` false — the old
+    result. Rotated grid (artwork 90°, 4 × 2) crops the same. Engine output
+    content-identical to 1.47 on every existing suite (none of them hit the
+    fallback branch with an oversize page).
+
   ### "Invalid header in flate stream: -1, -1" (1.47)
 
   Owner pasted that line and nothing else. It is pdf-lib's stream decoder
