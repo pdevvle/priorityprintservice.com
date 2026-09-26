@@ -743,6 +743,42 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### "Invalid header in flate stream: -1, -1" (1.47)
+
+  Owner pasted that line and nothing else. It is pdf-lib's stream decoder
+  (pdf-lib ported pdf.js's FlateStream; the vendored pdf.js does not carry
+  the string) reading a `/FlateDecode` stream that has ZERO bytes — both
+  header reads return −1. Some exporters write a blank page exactly that
+  way (`/Length 0 /Filter /FlateDecode`), and pdf-lib only decodes a page's
+  content when it EMBEDS the page, so the message surfaced at impose time
+  with no file, no page and no fix in it. Reproduced with a hand-written
+  2-page PDF whose page 2 is such a blank: 1-sided imposed (page 1 only),
+  2-sided and gang refused with the bare message.
+
+  - `repairPageContents(doc, what)` runs inside `loadPdf()` — every source
+    path: artwork, back file, gang files, the CLEAN copy, the queue. Each
+    page's `/Contents` (single or array) is walked; a filtered raw stream
+    with zero bytes is dropped (the page keeps its other streams, or gets an
+    empty raw stream), and the file carries `__ppsRepairNote`, which the
+    stages push as "⚠ "artwork": page 2 has an EMPTY compressed content
+    stream — the exporter's way of writing a blank page — and is imposed
+    blank. If that page should carry art, the export is broken; re-export
+    and check page 2 before it prints." A back that should not be blank is
+    therefore never printed blank quietly.
+  - A NON-empty stream that will not decode is real damage: the load
+    refuses "<file> page N: its content stream cannot be decompressed
+    (<decoder reason>). The file is damaged or was cut short on export — a
+    RIP would fail on it the same way. Re-export …" — by file and page,
+    never a blank in its place. The back-file and gang-file preflight
+    blocks re-throw it like the font gate.
+  - The viewport's pdf.js load now catches a rejection (it was an unhandled
+    promise).
+  - Verified (`cases_flate.json`): empty-stream fixture imposes 2-sided,
+    ganged and as a back file with the page-2 note; corrupt-stream fixture
+    refuses as artwork and as a back file naming page 2 and the decoder's
+    reason; all UI suites pass; engine output content-identical to 1.46 on
+    every existing suite.
+
   ### Default imageable margin is 0 (1.46)
 
   Owner: "set default imageable margin to 0." `SHEET_MARGIN` is 0 and every

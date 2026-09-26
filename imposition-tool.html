@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-23 04:30 UTC · IMPOSE-V1.46</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-26 00:20 UTC · IMPOSE-V1.47</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1017,7 +1017,50 @@ async function loadPdf(bytes, what) {
   if (doc.isEncrypted) {
     throw new Error(`"${what || "This file"}" is encrypted (an owner/permissions password). The browser cannot decrypt it, so its pages would impose as garbage and Fiery would print blank sheets. Remove the security first — Acrobat: File → Properties → Security → No Security (or re-export from the source) — then drop it again.`);
   }
+  repairPageContents(doc, what || "This file");
   return doc;
+}
+
+// Content streams pdf-lib cannot decode (1.47). Some exporters write a blank
+// page as a /FlateDecode stream with ZERO bytes; pdf-lib's decoder then throws
+// "Invalid header in flate stream: -1, -1" at embed time — a message with no
+// file, no page and no fix in it (owner hit it on a 2-sided job whose back
+// page was such a blank). Zero bytes under a filter is legally nothing, so it
+// becomes an empty raw stream and the page is blank as the exporter meant;
+// the note names the page so a back that SHOULD carry art is not printed
+// blank quietly. A NON-empty stream that will not decode is real damage —
+// refuse by file and page, never substitute a blank for it.
+function repairPageContents(doc, what) {
+  const ctx = doc.context, C = PL.PDFName.of("Contents");
+  const blanked = [];
+  doc.getPages().forEach((page, i) => {
+    const leaf = page.node;
+    const ref = leaf.get(C);
+    if (!ref) return;
+    const val = ctx.lookup(ref);
+    const items = val instanceof PL.PDFArray ? val.asArray() : [ref];
+    const kept = [];
+    let dropped = 0;
+    for (const it of items) {
+      const st = ctx.lookup(it);
+      if (!(st instanceof PL.PDFRawStream) || !st.dict.get(PL.PDFName.of("Filter"))) { kept.push(it); continue; }
+      const bytes = st.contents;
+      if (!bytes || bytes.length === 0) { dropped++; continue; }
+      try { PL.decodePDFRawStream(st).decode(); kept.push(it); }
+      catch (e) {
+        throw new Error(`"${what}" page ${i + 1}: its content stream cannot be decompressed (${e.message}). The file is damaged or was cut short on export — a RIP would fail on it the same way. Re-export it from the design app (or Acrobat: File → Save As Other → Optimized PDF), then drop it again. The CLEAN 1:1 copy cannot repair this either.`);
+      }
+    }
+    if (!dropped) return;
+    if (kept.length === 0) leaf.set(C, ctx.register(ctx.stream("")));
+    else if (kept.length === 1) leaf.set(C, kept[0]);
+    else leaf.set(C, ctx.obj(kept));
+    blanked.push(i + 1);
+  });
+  doc.__ppsRepairNote = blanked.length
+    ? `"${what}": page${blanked.length === 1 ? "" : "s"} ${blanked.join(", ")} ${blanked.length === 1 ? "has" : "have"} an EMPTY compressed content stream — the exporter's way of writing a blank page — and ${blanked.length === 1 ? "is" : "are"} imposed blank. If ${blanked.length === 1 ? "that page" : "those pages"} should carry art, the export is broken; re-export and check page ${blanked.join(", ")} before it prints.`
+    : null;
+  return blanked;
 }
 
 function getPageBox(page, name) {
@@ -3137,6 +3180,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     frontRaster = lastRaster; lastRaster = null;
     const doc = await loadPdf(artBytes, "artwork");
     await progress("Checking fonts and page sizes", 0.06);
+    if (doc.__ppsRepairNote) pre.push("⚠ " + doc.__ppsRepairNote);
     pre.push(...fontNotes(doc, "artwork", spec, fontsMissing));
     try {
       // UserUnit scales a page's units; nothing here honours it, so say so.
@@ -3176,8 +3220,10 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     try {
       const bb = await ppsToPdfBytes(backBytes, "back");
       if (lastRaster) { const n = rasterNote(lastRaster, tw, th); if (n) pre.push(n); lastRaster = null; }
-      pre.push(...fontNotes(await loadPdf(bb, "back file"), "back file", spec, fontsMissing));
-    } catch (e) { if (/FONTS NOT EMBEDDED/.test(e.message)) throw e; /* anything else is reported by the core load */ }
+      const bdoc = await loadPdf(bb, "back file");
+      if (bdoc.__ppsRepairNote) pre.push("⚠ " + bdoc.__ppsRepairNote);
+      pre.push(...fontNotes(bdoc, "back file", spec, fontsMissing));
+    } catch (e) { if (/FONTS NOT EMBEDDED|cannot be decompressed/.test(e.message)) throw e; /* anything else is reported by the core load */ }
   }
   // Gang combo files must be the same trim; a smaller or larger one is
   // fit-scaled into the cell, which is never what was meant.
@@ -3187,13 +3233,14 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
       try {
         const gb = await ppsToPdfBytes(g.bytes, g.name || "gang");
         const gdoc = await loadPdf(gb, g.name || "gang file");
+        if (gdoc.__ppsRepairNote) pre.push("⚠ " + gdoc.__ppsRepairNote);
         pre.push(...fontNotes(gdoc, `gang file "${g.name || "?"}"`, spec, fontsMissing));
         const sv = pageSizeSurvey(gdoc, spec);
         const z = sv.sizes[0];
         const near = (a, b) => Math.abs(a - b) <= 0.3;
         const fits = (near(z.w, tw) && near(z.h, th)) || (near(z.w, th) && near(z.h, tw)) || (near(z.w, tw + 2 * BLEED) && near(z.h, th + 2 * BLEED)) || (near(z.w, th + 2 * BLEED) && near(z.h, tw + 2 * BLEED));
         if (!fits) pre.push(`⚠ gang file "${g.name}" is ${z.w}×${z.h}″ but the job is ${tw}×${th}″ — it will be fit-scaled into its cells. Gang combos need same-size pieces.`);
-      } catch (e) { if (/FONTS NOT EMBEDDED/.test(e.message)) throw e; /* anything else is reported by the core load */ }
+      } catch (e) { if (/FONTS NOT EMBEDDED|cannot be decompressed/.test(e.message)) throw e; /* anything else is reported by the core load */ }
     }
   }
   lastRaster = null;                                    // gang-file conversions above must not leak a note
@@ -3851,7 +3898,8 @@ function SheetViewport({ res, layout, zoom, setZoom, rulers, fit }) {
     let dead = false;
     setPdf(null);
     if (!res || !res.bytes) return;
-    pdfjsLib.getDocument({ data: res.bytes.slice(0) }).promise.then(d => { if (!dead) setPdf(d); else d.destroy(); });
+    pdfjsLib.getDocument({ data: res.bytes.slice(0) }).promise.then(d => { if (!dead) setPdf(d); else d.destroy(); })
+      .catch(e => { console.warn("viewport: pdf.js could not open the imposed output —", e && e.message); });
     return () => { dead = true; };
   }, [res && res.bytes]);
   // Fit: the sheet's long edge from the layout (or 19″ until one exists).
