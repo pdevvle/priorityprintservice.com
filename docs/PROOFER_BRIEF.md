@@ -835,6 +835,14 @@ staff-proof order, all twenty uploaded in order; a slot change keeps them and ad
 `page_003_…`; approve-then-Review is refused at Add to Order. Run against the pre-fix
 coupon build first: 5 of 13 checks failed, the first with `["1.jpg"]` — the order exactly.
 
+**The sweep, 2026-09-26.** The same question — does everything the customer gave us reach
+the order? — asked of every path found five more: the flats' per-side slots and approval
+revocation (all five), customer files skipped at upload when refused or too large (all
+eight), a cart edit shedding every file but one, the Drive uploader assuming a missing
+file was already uploaded, and the print-file check reading a random path and calling a
+layout PDF "62 DPI" (87272). `CLAUDE.md` §"Every original reaches the order" lists each with
+its gate; every gate was run against the live build first and failed there.
+
 **Lesson.** A preview proves the calculator *read* the files, not that the order *carries*
 them. Test what reaches the upload, on the path customers who pay for a proof take — the
 self-approval path was the only one anyone had exercised.

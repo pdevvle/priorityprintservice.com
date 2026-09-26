@@ -5960,13 +5960,24 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
 
   const total_files = queue.length;
   for (let fi = 0; fi < total_files; fi++) {
-    const { file, primary: isPrimary } = queue[fi];
+    const { file, primary: isPrimary, kind } = queue[fi];
+    // The customer's own files — every original and every reference file — must
+    // arrive. Only what is generated here (print-ready PDF, previews, manifest) may
+    // fail without stopping the order: those can be rebuilt; the customer's cannot.
+    // Until 2026-09-26 a customer file after the first that was too large or was
+    // refused was skipped with a console.warn, and the order went through without it.
+    const mustArrive = isPrimary || kind === "reference"
+      || !/(_print-ready\.pdf|_preview(_[^/]*)?\.(jpe?g|png|html)|_manipulation_manifest\.txt)$/i.test(file.name);
     try {
       // Refuse a file the server physically cannot accept, naming the real
       // limit, rather than letting PHP drop the POST and reporting nothing.
       if (PPS.maxUpload && file.size > PPS.maxUpload) {
         if (isPrimary) {
           alert("That file is " + _mb(file.size) + ", and this site accepts up to " + _mb(PPS.maxUpload) + " per upload.\n\nPlease compress the PDF, or send it to us and we'll attach it to your order.");
+          return;
+        }
+        if (mustArrive) {
+          alert("\"" + file.name + "\" is " + _mb(file.size) + ", and this site accepts up to " + _mb(PPS.maxUpload) + " per upload.\n\nYour order has not been placed and nothing was charged.\n\nPlease compress that file and try again. If it keeps failing, choose \"Email Art After Order\" under the artwork options and send your files to us.");
           return;
         }
         try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — ${_mb(file.size)} exceeds the ${_mb(PPS.maxUpload)} server limit.`); } catch (e) {}
@@ -6010,11 +6021,19 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
           alert("Artwork upload failed: " + reason + "\nPlease try again.");
           return;
         }
+        if (mustArrive) {
+          alert("We couldn't upload \"" + file.name + "\": " + reason + "\n\nYour order has not been placed and nothing was charged.\n\nPlease try again. If it keeps failing, choose \"Email Art After Order\" under the artwork options and send your files to us.");
+          return;
+        }
         try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload rejected: ${reason}`); } catch (e) {}
       }
     } catch (err) {
       if (isPrimary) {
         alert("Artwork upload error: " + err.message + "\nPlease try again.");
+        return;
+      }
+      if (mustArrive) {
+        alert("We couldn't upload \"" + file.name + "\": " + err.message + "\n\nYour order has not been placed and nothing was charged.\n\nPlease try again. If it keeps failing, choose \"Email Art After Order\" under the artwork options and send your files to us.");
         return;
       }
       try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload error: ${err.message}`); } catch (e) {}

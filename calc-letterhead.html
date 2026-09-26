@@ -1370,6 +1370,31 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
   const frontInputRef = useRef(null);
   const backInputRef = useRef(null);
   const rawFileRef = useRef(null);
+  // Every original the customer supplied, as the order should receive it: the file
+  // behind each side, front first (the first is the order's artwork path). The
+  // effect below sends it to the order whenever the art changes or an approval is
+  // cleared. Until 2026-09-26 only the drop zone told the order anything: a side
+  // uploaded or replaced through its own slot, or removed with ✕, never reached it,
+  // so a staff-proof front + back order shipped the front alone (or nothing, slot
+  // only), and clearing an approval left the order holding the old package marked
+  // approved. Same failure as order 87273 on the booklets.
+  const allOriginals = () => {
+    const out = [], seen = new Set();
+    [frontArt && frontArt.file, backArt && backArt.file].forEach(f => {
+      if (!f) return;
+      const k = f.name + "|" + f.size;
+      if (seen.has(k)) return;
+      seen.add(k); out.push(f);
+    });
+    return out;
+  };
+  const _origEmittedRef = useRef(false);
+  useEffect(() => {
+    if (approved || !onArtwork) return;
+    const list = allOriginals();
+    if (list.length) { _origEmittedRef.current = true; onArtwork({ type: "files", list, approved: false }); }
+    else if (_origEmittedRef.current) { _origEmittedRef.current = false; onArtwork({ type: "none" }); }
+  }, [frontArt, backArt, approved]);
   const [approvalPkg, setApprovalPkg] = useState(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [genProgress, setGenProgress] = useState(null);
@@ -1724,11 +1749,36 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
   const safetyPctX = ((BLEED + 0.125) / bleedW) * 100;
   const safetyPctY = ((BLEED + 0.125) / bleedH) * 100;
 
+  // One side's art from one file: page 1 of a PDF (rendered for the screen; the
+  // print file re-renders it from the bytes) or the image itself.
+  async function ppsReadSideArt(file, riskKey) {
+    if (!file) return null;
+    if (file.type === "application/pdf") {
+      const buf = await file.arrayBuffer();
+      await window.__ppsPdfJs;
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      window.PPS_PDF_RISKS = window.PPS_PDF_RISKS || {};
+      window.PPS_PDF_RISKS[riskKey] = await window.ppsAnalyzePdfRisks(pdf);
+      const pg = await pdf.getPage(1);
+      const vp = pg.getViewport({ scale: 2 });
+      const c = document.createElement("canvas");
+      c.width = vp.width; c.height = vp.height;
+      await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+      const [x0, y0, x1, y1] = pg.view;
+      return { dataUrl: c.toDataURL("image/jpeg", 0.85), file, pdfPage: 1, dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } };
+    }
+    const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
+    if (!dataUrl) return null;
+    const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+    return { dataUrl, file, dims };
+  }
+
   async function processFile(fileList) {
     const _big = Array.from(fileList || []).find(f => f && f.size > 209715200);
     if (_big) { alert('"' + _big.name + '" is ' + (_big.size/1048576).toFixed(0) + ' MB, over the 200 MB limit — please compress it or email your artwork.'); return; }
     if (!fileList || !fileList.length) return;
     const file = fileList[0];
+    let _firstPdfPages = 0;
     setLoading(true);
     setFileName(file.name);
     rawFileRef.current = file;
@@ -1750,6 +1800,7 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
           const [x0, y0, x1, y1] = pg.view;
           return { dataUrl: c.toDataURL("image/jpeg", 0.85), dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } };
         };
+        _firstPdfPages = pdf.numPages;
         const front = await renderPage(1);
         setFrontArt({ ...front, file, pdfPage: 1 });
         if (pdf.numPages >= 2) {
@@ -1762,8 +1813,22 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
         const dims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
         setFrontArt({ dataUrl, file, dims });
       }
+      // Two or more files dropped at once. The first is the front (or, as a
+      // two-page PDF, both sides); on a two-sided job the next becomes the back.
+      // Anything beyond what the job can use is named to the customer rather than
+      // dropped in silence — it is not attached to the order.
+      const _rest = Array.from(fileList).slice(1);
+      if (_rest.length) {
+        let _ignored = _rest;
+        if (sides === 2 && _firstPdfPages < 2) {
+          const back = await ppsReadSideArt(_rest[0], "back");
+          if (back) { setBackArt(back); _ignored = _rest.slice(1); }
+        }
+        if (_ignored.length) alert("Only the first " + (Array.from(fileList).length - _ignored.length) + " file(s) were used for this job's " + (sides === 2 ? "front and back" : "artwork") + ". These were NOT attached:\n\n" + _ignored.map(f => "• " + f.name).join("\n") + "\n\nIf we need them, add them under Reference Files, or send them to us after ordering.");
+      }
       setApproved(false);
-      if (onArtwork) onArtwork({ type: "files", list: [file] });
+      // The order learns about the new art from the allOriginals() effect once the
+      // side state has updated — the list here would be one render stale.
     } catch (e) { console.error("File processing failed:", e); alert("We couldn't read that file: " + ((e && e.message) || e) + "\n\nPlease try a PDF, JPG or PNG, or send the file to us and we'll attach it to your order."); }
     setLoading(false);
   }
@@ -2266,9 +2331,7 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
                         if (_seenOrig.has(k)) return;
                         _seenOrig.add(k); files.push(f);
                       };
-                      _pushOrig(rawFileRef.current);
-                      _pushOrig(frontArt && frontArt.file);
-                      _pushOrig(backArt && backArt.file);
+                      allOriginals().forEach(_pushOrig);
                       if (pkg.printReadyBlob) files.push(new File([pkg.printReadyBlob], baseName + "_print-ready.pdf", { type: "application/pdf" }));
                       const sideNames = ["front", "back"];
                       pkg.previewBlobs.forEach((b, i) => {
@@ -3331,13 +3394,24 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
 
   const total_files = queue.length;
   for (let fi = 0; fi < total_files; fi++) {
-    const { file, primary: isPrimary } = queue[fi];
+    const { file, primary: isPrimary, kind } = queue[fi];
+    // The customer's own files — every original and every reference file — must
+    // arrive. Only what is generated here (print-ready PDF, previews, manifest) may
+    // fail without stopping the order: those can be rebuilt; the customer's cannot.
+    // Until 2026-09-26 a customer file after the first that was too large or was
+    // refused was skipped with a console.warn, and the order went through without it.
+    const mustArrive = isPrimary || kind === "reference"
+      || !/(_print-ready\.pdf|_preview(_[^/]*)?\.(jpe?g|png|html)|_manipulation_manifest\.txt)$/i.test(file.name);
     try {
       // Refuse a file the server physically cannot accept, naming the real
       // limit, rather than letting PHP drop the POST and reporting nothing.
       if (PPS.maxUpload && file.size > PPS.maxUpload) {
         if (isPrimary) {
           alert("That file is " + _mb(file.size) + ", and this site accepts up to " + _mb(PPS.maxUpload) + " per upload.\n\nPlease compress the PDF, or send it to us and we'll attach it to your order.");
+          return;
+        }
+        if (mustArrive) {
+          alert("\"" + file.name + "\" is " + _mb(file.size) + ", and this site accepts up to " + _mb(PPS.maxUpload) + " per upload.\n\nYour order has not been placed and nothing was charged.\n\nPlease compress that file and try again. If it keeps failing, choose \"Email Art After Order\" under the artwork options and send your files to us.");
           return;
         }
         try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — ${_mb(file.size)} exceeds the ${_mb(PPS.maxUpload)} server limit.`); } catch (e) {}
@@ -3381,11 +3455,19 @@ async function submitToWooCommerce(total, summary, metadata, rushCost, artFiles,
           alert("Artwork upload failed: " + reason + "\nPlease try again.");
           return;
         }
+        if (mustArrive) {
+          alert("We couldn't upload \"" + file.name + "\": " + reason + "\n\nYour order has not been placed and nothing was charged.\n\nPlease try again. If it keeps failing, choose \"Email Art After Order\" under the artwork options and send your files to us.");
+          return;
+        }
         try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload rejected: ${reason}`); } catch (e) {}
       }
     } catch (err) {
       if (isPrimary) {
         alert("Artwork upload error: " + err.message + "\nPlease try again.");
+        return;
+      }
+      if (mustArrive) {
+        alert("We couldn't upload \"" + file.name + "\": " + err.message + "\n\nYour order has not been placed and nothing was charged.\n\nPlease try again. If it keeps failing, choose \"Email Art After Order\" under the artwork options and send your files to us.");
         return;
       }
       try { console.warn(`[PPS calc] Skipping supplementary deliverable "${file.name}" — upload error: ${err.message}`); } catch (e) {}

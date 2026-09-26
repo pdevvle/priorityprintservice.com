@@ -30,7 +30,9 @@
  *    job that needs a person before it runs: artwork NOT approved (prepress
  *    review), print files below resolution, staff proofs awaiting approval,
  *    hardcopy proofs with no usable address, deliveries promised on a day the
- *    shop is closed, and checkouts that were refused since the last digest. It
+ *    shop is closed, checkouts that were refused since the last digest, and
+ *    customer artwork that did not reach Google Drive (a listed file that was
+ *    never on the server, or an upload still failing after three attempts). It
  *    sends only when there is something to say. The last digest is kept in
  *    `wp_options['pps_job_health_last']` for reading from here.
  *
@@ -105,7 +107,14 @@ function pps_print_file_check( $abs_path ) {
     $sheet_str = $sheet ? $fmt_in( $sheet[0] ) . '×' . $fmt_in( $sheet[1] ) . ' in' : 'sheet size unknown';
     $pg_str = $out['pages'] . ( $out['pages'] === 1 ? ' page' : ' pages' );
 
-    if ( $out['pages'] > 0 && $sheet_imgs >= $out['pages'] && $min !== null ) {
+    // Raster means the calculators' own shape and nothing else: exactly one image per
+    // page, every one of them sheet-sized. A customer's InDesign export with a
+    // sheet-proportioned photo on each page and ninety other placed images is NOT a
+    // raster file — reading it as one called order 87272's correct 12-page PDF
+    // "62 DPI" in an order note (2026-09-25). When in doubt this falls through to
+    // "mixed", which makes no resolution claim at all: a check that warns on good
+    // files teaches people to ignore it.
+    if ( $out['pages'] > 0 && $sheet_imgs === $out['pages'] && count( $images ) === $out['pages'] && $min !== null ) {
         $out['kind'] = 'raster'; $out['min_dpi'] = $min;
         $first = null; foreach ( $images as $im ) { if ( $im['dpi'] !== null ) { $first = $im; break; } }
         $out['summary'] = 'raster · ' . $pg_str . ' · ' . $sheet_str . ' · ' . $first['w'] . '×' . $first['h'] . ' px · ' . $min . ' DPI';
@@ -131,9 +140,14 @@ function pps_job_health_line_item( $item, $cart_item_key, $values, $order ) {
     try {
         $files  = is_array( $values['pps_artwork_files'] ?? null ) ? $values['pps_artwork_files'] : array();
         $target = null; $label = '';
+        // Chosen by the NAME the calculator gave it. The stored path is the upload
+        // endpoint's random name (pps-artwork/2026/09/20260925-010843-1e929ab7.pdf), so
+        // matching on the path never found the print-ready file on a real order and the
+        // check fell through to the customer's raw PDF instead (87272).
         foreach ( $files as $f ) {
             $p = is_array( $f ) ? (string) ( $f['path'] ?? '' ) : '';
-            if ( $p !== '' && preg_match( '/_print-ready\.pdf$/i', $p ) ) { $target = $p; $label = 'print-ready'; break; }
+            $n = is_array( $f ) ? (string) ( $f['name'] ?? '' ) : '';
+            if ( $p !== '' && ( preg_match( '/_print-ready\.pdf$/i', $n ) || preg_match( '/_print-ready\.pdf$/i', $p ) ) ) { $target = $p; $label = 'print-ready'; break; }
         }
         if ( ! $target ) {
             $raw = (string) ( $values['pps_artwork_path'] ?? '' );
@@ -214,12 +228,25 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
         'proofaddr'=> array( 'title' => 'Hardcopy proof with no usable address', 'items' => array() ),
         'closed'   => array( 'title' => 'Delivery promised on a day the shop is closed', 'items' => array() ),
         'refused'  => array( 'title' => 'Checkout refused (customer could not pay)', 'items' => array() ),
+        'drive'    => array( 'title' => 'Customer artwork that did not reach Google Drive', 'items' => array() ),
     );
     $zone = new DateTimeZone( $tz );
 
     foreach ( $orders as $order ) {
         if ( ! is_object( $order ) || ! method_exists( $order, 'get_items' ) ) continue;
         $who = trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() );
+
+        // The Drive upload gave up, or is still retrying after three attempts. Either
+        // way the files are on the server and not where production looks for them.
+        if ( ! $order->get_meta( '_pps_artwork_processed' ) ) {
+            $att = (int) $order->get_meta( '_pps_drive_attempts' );
+            if ( $order->get_meta( '_pps_drive_failed' ) ) {
+                $sec['drive']['items'][] = '#' . $order->get_id() . ' ' . $who . ' — upload stopped after ' . $att . ' attempts; files still on the server';
+            } elseif ( $att >= 3 ) {
+                $sec['drive']['items'][] = '#' . $order->get_id() . ' ' . $who . ' — still retrying (' . $att . ' attempts so far)';
+            }
+        }
+
         foreach ( $order->get_items() as $item ) {
             $raw = $item->get_meta( '_pps_metadata' );
             if ( ! $raw ) continue;
@@ -228,6 +255,11 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
             $ref = '#' . $order->get_id() . ' ' . $who . ' — ' . $item->get_name();
 
             if ( (string) $item->get_meta( 'PPS-Prepress-Review' ) !== '' ) $sec['prepress']['items'][] = $ref;
+
+            $miss = (string) $item->get_meta( '_pps_drive_missing' );
+            if ( $miss !== '' && $item->get_meta( '_pps_artwork_on_drive' ) !== 'yes' ) {
+                $sec['drive']['items'][] = $ref . ' — never reached the server: ' . $miss . ' (ask the customer to resend)';
+            }
 
             $lw = (string) $item->get_meta( '_pps_print_check_warn' );
             if ( $lw !== '' ) $sec['lowres']['items'][] = $ref . ' — ' . $lw;
