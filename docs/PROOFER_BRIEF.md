@@ -843,6 +843,13 @@ file was already uploaded, and the print-file check reading a random path and ca
 layout PDF "62 DPI" (87272). `CLAUDE.md` §"Every original reaches the order" lists each with
 its gate; every gate was run against the live build first and failed there.
 
+A second pass the same day found the Canva link and instructions never reaching booklet
+orders, Drive outages failing in silence, the booklet batch reader dropping non-images, and
+**a PDF dropped on one page slot printing at 108 DPI on all three booklets** — the print
+file built from the slot's screen preview, 87171's failure again, measured at 50.5%
+mid-grey before `ppsSlotPdfCanvas()` and 0.0% after (`tools-book-print-dpi-test.mjs`,
+slot mode). Details in `CLAUDE.md`.
+
 **Lesson.** A preview proves the calculator *read* the files, not that the order *carries*
 them. Test what reaches the upload, on the path customers who pay for a proof take — the
 self-approval path was the only one anyone had exercised.

@@ -231,19 +231,35 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
         'drive'    => array( 'title' => 'Customer artwork that did not reach Google Drive', 'items' => array() ),
     );
     $zone = new DateTimeZone( $tz );
+    $now  = time();
+
+    // Drive itself down: one line that explains every order below it.
+    if ( function_exists( 'pps_gdrive_is_connected' ) && ! pps_gdrive_is_connected() ) {
+        $sec['drive']['items'][] = 'GOOGLE DRIVE IS NOT CONNECTED — no artwork is being filed. Reconnect under PPS Calculators → Google Drive; waiting uploads resume by themselves.';
+    }
 
     foreach ( $orders as $order ) {
         if ( ! is_object( $order ) || ! method_exists( $order, 'get_items' ) ) continue;
         $who = trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() );
 
-        // The Drive upload gave up, or is still retrying after three attempts. Either
-        // way the files are on the server and not where production looks for them.
+        // Artwork that should be on Drive and is not — whatever the reason. Judged by
+        // the outcome, not by which failure path ran: an upload that gave up, one still
+        // retrying, one that was never scheduled, one waiting on a disconnected Drive,
+        // one stuck in the queue. Paid orders only (processing / on-hold), and only once
+        // two hours have passed, so a normal upload in flight is never reported.
         if ( ! $order->get_meta( '_pps_artwork_processed' ) ) {
-            $att = (int) $order->get_meta( '_pps_drive_attempts' );
-            if ( $order->get_meta( '_pps_drive_failed' ) ) {
-                $sec['drive']['items'][] = '#' . $order->get_id() . ' ' . $who . ' — upload stopped after ' . $att . ' attempts; files still on the server';
-            } elseif ( $att >= 3 ) {
-                $sec['drive']['items'][] = '#' . $order->get_id() . ' ' . $who . ' — still retrying (' . $att . ' attempts so far)';
+            $has_art = false;
+            foreach ( $order->get_items() as $it ) { if ( $it->get_meta( '_pps_artwork_path' ) ) { $has_art = true; break; } }
+            $status  = method_exists( $order, 'get_status' ) ? (string) $order->get_status() : 'processing';
+            $created = method_exists( $order, 'get_date_created' ) && $order->get_date_created() ? $order->get_date_created()->getTimestamp() : 0;
+            $age_h   = $created ? ( $now - $created ) / 3600 : 999;
+            $att     = (int) $order->get_meta( '_pps_drive_attempts' );
+            if ( $has_art && in_array( $status, array( 'processing', 'on-hold' ), true ) ) {
+                if ( $order->get_meta( '_pps_drive_failed' ) ) {
+                    $sec['drive']['items'][] = '#' . $order->get_id() . ' ' . $who . ' — upload stopped after ' . $att . ' attempts; files still on the server';
+                } elseif ( $age_h >= 2 ) {
+                    $sec['drive']['items'][] = '#' . $order->get_id() . ' ' . $who . ' — not on Drive ' . (int) floor( $age_h ) . ' h after the order (' . $att . ' upload attempt' . ( $att === 1 ? '' : 's' ) . ')';
+                }
             }
         }
 
