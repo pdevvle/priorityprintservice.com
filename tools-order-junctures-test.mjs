@@ -123,11 +123,41 @@ for (const file of PAGES) {
     const m = s.meta || {};
     ok(`${file}: an edited hardcopy-proof line keeps its proof address`, m.proofAddrSame === false && m.proofAddr && m.proofAddr.street === '9 Proof Ln' && m.proofAddr.zip === '85281',
        JSON.stringify({ same: m.proofAddrSame, addr: m.proofAddr, dialogs: s.dialogs }));
+    // The server re-quotes a cart paid on a later day against this (pps_requote_line).
+    ok(`${file}: the order records the shop day it was quoted on`, m.quotedOn === '2026-10-01', String(m.quotedOn));
     await s.ctx.close();
     const t = await open(file, { ...JOB, proof: 3.01, proofAddrSame: false, proofAddr: { ...PA, street: '', zip: '8528' }, shipState: 'AZ', shipAddr: { ...ADDR, city: 'Phoenix', zip: '85087' } });
     await addToOrder(t);
     ok(`${file}: a proof address with no street or a bad ZIP stops the order and says which`, !t.meta && t.dialogs.some(d => /hardcopy proof[\s\S]*street address[\s\S]*5-digit ZIP/.test(d)),
        'posted=' + !!t.meta + ' dialogs=' + t.dialogs.join(' || ').slice(0, 200));
+    await t.ctx.close();
+  }
+
+  console.log('\n── ' + file + ' / a military address ──');
+  {
+    // APO/FPO/DPO is USPS-only and not orderable online (owner 2026-09-27). Before this,
+    // it priced and ordered with a UPS ground delivery date that meant nothing.
+    const s = await open(file, { ...JOB, shipState: 'NY', shipAddr: { name: 'SGT Test', street1: 'Unit 2050 Box 4190', city: 'APO', zip: '09096' } });
+    await addToOrder(s);
+    const txt = await s.p.evaluate(() => document.body.innerText);
+    ok(`${file}: an APO address is stopped before anything uploads, and the customer is told to contact us`, !s.meta && /can't ship to APO, FPO or DPO/.test(txt), 'posted=' + !!s.meta);
+    await s.ctx.close();
+  }
+
+  if (/saddle|preview-test/.test(file)) {
+    console.log('\n── ' + file + ' / two staples on a small book ──');
+    // Owner 2026-09-27: under a 3.5″ binding edge only one staple fits.
+    const s = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...ADDR, city: 'Phoenix', zip: '85087' }, sizeLabel: 'Custom Size', customShort: 3, customLong: 5, bindDir: 'short', twoStaple: true });
+    const txt = await s.p.evaluate(() => document.body.innerText);   // before Add to Order leaves for the cart
+    await addToOrder(s);
+    const bind = s.meta && Array.isArray(s.meta.ticket) ? (s.meta.ticket.find(p => p[0] === 'Binding') || [])[1] : null;
+    ok(`${file}: a 3″ binding edge orders one staple even when two were asked for, and says why`,
+       s.meta && s.meta.twoStaple === false && /single staple/.test(bind || '') && /Only one staple can be used on a binding edge under 3\.5/.test(txt),
+       JSON.stringify({ twoStaple: s.meta && s.meta.twoStaple, bind }));
+    await s.ctx.close();
+    const t = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...ADDR, city: 'Phoenix', zip: '85087' }, sizeLabel: 'Custom Size', customShort: 4, customLong: 5, bindDir: 'short', twoStaple: true });
+    await addToOrder(t);
+    ok(`${file}: at 4″ two staples can still be chosen`, t.meta && t.meta.twoStaple === true, JSON.stringify({ twoStaple: t.meta && t.meta.twoStaple }));
     await t.ctx.close();
   }
 

@@ -1308,3 +1308,26 @@ they're not admin-configurable; each calc just falls back to its hardcoded
 default silently. `perfectbound_binder_throat_in` was wired through the admin
 properly (Pattern A, 4-file edit) despite its siblings not being; if the
 missing three are ever wired up, do them together.
+
+## Rush re-quote on a late cart (2026-09-27)
+
+A rush price is a function of how many working days are left before the delivery date, and
+a cart can sit for days before it is paid. The server re-quotes every calculator line when
+WooCommerce checks the cart (`pps_requote_cart()` / `pps_requote_line()` in
+`pps-calculators.php`), using the quote day the calculator records as `quotedOn`:
+
+```
+left  = working days from today's shop day to the quoted delivery date
+if left >= freeDeliveryBizDays          → no price change (production dates move to today)
+elif the line had no rush               → price unchanged; delivery moves to today + free days
+elif left < productionBizDays + 1       → refused ("open it with Edit")
+else rushCost = baseTotal × freeDeliveryBizDays ÷ left − baseTotal     (same rule as calculate())
+     price    = baseTotal + rushCost
+```
+
+`baseTotal` is the calculator's pre-rush `total` (the sale discount is already inside it,
+and WooCommerce coupons apply after). The line is re-priced only when `pps_price − pps_rush`
+agrees with `baseTotal` to within 5¢; otherwise the customer is asked to Edit. Price only
+ever goes up here — a free line is never charged, it moves instead. The shop's cutoff hour
+is ignored on the server (date only), so the server is never stricter than the calculator.
+Gate: `tools-server-junctures-test.php`.
