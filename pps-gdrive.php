@@ -483,15 +483,13 @@ function pps_process_artwork_upload( $order_id ) {
     $had_artwork   = false;
     $all_succeeded = true;
 
-    // Several jobs in one order share one Drive folder. Two of them called
-    // "artwork.pdf" would land side by side with nothing saying which job each
-    // belongs to, so when there is more than one, each name starts with its item.
-    $art_items = 0;
-    foreach ( $order->get_items() as $it ) {
-        if ( $it->get_meta( '_pps_artwork_files' ) || $it->get_meta( '_pps_artwork_path' ) ) $art_items++;
-    }
-    $item_no = 0;
-
+    // Drive names are a CONTRACT: the imposition tool finds each item's print file
+    // by matching the folder listing against the names in _pps_artwork_files
+    // (pps_impose_item_artwork), exactly. A 2026-09-26 change that prefixed names
+    // with "Item N - " on multi-job orders broke that match and sent imposition to
+    // the raw file instead of the approved print-ready one; it was reverted the next
+    // day. Upload under the listed name, unchanged. tools-gdrive-missing-test.php
+    // pins it.
     foreach ( $order->get_items() as $item_id => $item ) {
         // Skip items already uploaded to Drive (idempotent on retry)
         if ( $item->get_meta( '_pps_artwork_location' ) === 'gdrive' ) continue;
@@ -530,11 +528,6 @@ function pps_process_artwork_upload( $order_id ) {
         if ( empty( $deliverables ) ) continue;
 
         $had_artwork = true;
-        $item_no++;
-        if ( $art_items > 1 ) {
-            foreach ( $deliverables as &$dv ) $dv['name'] = 'Item ' . $item_no . ' - ' . $dv['name'];
-            unset( $dv );
-        }
 
         // The order folder is created when the first file is actually about to go up
         // (below), not here. Creating it first is how an order whose files were not on
@@ -595,6 +588,12 @@ function pps_process_artwork_upload( $order_id ) {
             if ( $file_id ) {
                 $done[] = $d['path'];
                 $item->update_meta_data( '_pps_drive_done', wp_json_encode( array_values( array_unique( $done ) ) ) );
+                // Which Drive file each listed name became. Names alone cannot tell two
+                // jobs in one order apart when their files share a name; the id can.
+                $ids = json_decode( (string) $item->get_meta( '_pps_drive_ids' ), true );
+                if ( ! is_array( $ids ) ) $ids = array();
+                $ids[ $d['name'] ] = $file_id;
+                $item->update_meta_data( '_pps_drive_ids', wp_json_encode( $ids ) );
                 $item->save();
                 // The raw file (index 0) drives the admin "Open in Google Drive" link.
                 if ( $idx === 0 ) {
@@ -753,6 +752,6 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden ) {
         '_pps_artwork_thumb', '_pps_artwork_location',
         '_pps_gdrive_file_id', '_pps_gdrive_url',
         '_pps_gdrive_folder_id', '_pps_drive_attempts',
-        '_pps_artwork_files', '_pps_drive_done', '_pps_drive_missing', '_pps_drive_waiting_noted',
+        '_pps_artwork_files', '_pps_drive_done', '_pps_drive_missing', '_pps_drive_waiting_noted', '_pps_drive_ids',
     ) );
 });

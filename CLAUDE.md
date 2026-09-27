@@ -144,7 +144,12 @@ and each gated by a test that was first run against the live build and failed th
   note, no attempt counted — when Drive was disconnected or the parent folder unset. Every
   path now goes through `pps_gdrive_retry_later()` (note once, retry with backoff, note on
   giving up); reconnecting runs `pps_gdrive_resume_waiting()`. On Hold orders now upload
-  too, and files from several jobs in one order are named "Item N - …".
+  too. **Drive file names are a contract** — the imposition tool matches the folder
+  listing against `_pps_artwork_files` names exactly (`pps_impose_item_artwork`), so files
+  go up under the listed name, unchanged. An "Item N - …" prefix shipped on 2026-09-26
+  broke that match on multi-job orders and was reverted on 2026-09-27; each item now
+  records `_pps_drive_ids` (name → Drive file id) so same-named files across jobs can be
+  told apart once imposition reads it.
 - **The digest judges the outcome, not the path:** any processing/on-hold order whose
   artwork is not on Drive two hours after it was placed is listed, whatever the reason, and
   a disconnected Drive is said at the top.
