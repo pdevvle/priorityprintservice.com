@@ -32,7 +32,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const DIST = path.join(HERE, 'dist');
+// PPS_DIST points at another set of compiled builds — how the pre-fix ones are checked.
+const DIST = process.env.PPS_DIST || path.join(HERE, 'dist');
 const FILES = [
   'calc-preview-test.html', 'calc-perfect-bound.html', 'calc-coupon-book.html',
   'calc-brochure.html', 'calc-postcard.html', 'calc-greeting-card.html',
@@ -124,6 +125,35 @@ for (const f of FILES) {
   // Thu/Fri are closures and Sat/Sun weekend. So 3, not 5.
   const span = api.businessDaysBetween(new Date(2026, 10, 23), new Date(2026, 10, 30));
   ok(`${short}: the Thanksgiving week counts 3 working days, not 5`, span === 3, 'got ' + span);
+}
+
+console.log('\n── a dated closure holds in any time zone, and the default list knows Thanksgiving ──');
+// isBusinessDay built its YYYY-MM-DD with toISOString(), which is UTC: east of UTC a local
+// midnight is the previous day there, so "2026-12-31" was tested against the 30th. And the
+// fallback list carried Thanksgiving as "11-28"/"11-29", which misses it in 2026 (26th/27th).
+function fourthThursday(y) { const f = new Date(y, 10, 1).getDay(); return 1 + ((4 - f + 7) % 7) + 21; }
+for (const f of FILES) {
+  const src = readFileSync(path.join(DIST, f), 'utf8');
+  const short = f.replace(/^calc-|\.html$/g, '');
+  const isBD = fnSrc(src, 'isBusinessDay');
+  const savedTZ = process.env.TZ;
+  try {
+    process.env.TZ = 'Pacific/Auckland';
+    const fn = new Function('SHOP_CLOSURES', isBD + '\nreturn isBusinessDay;')(['2026-12-31']);
+    ok(`${short}: a dated closure is closed in Auckland too`, fn(new Date(2026, 11, 31)) === false && fn(new Date(2026, 11, 30)) === true);
+  } catch (e) { ok(`${short}: isBusinessDay evaluates`, false, String(e.message)); }
+  finally { if (savedTZ === undefined) delete process.env.TZ; else process.env.TZ = savedTZ; }
+
+  const m = /const SHOP_CLOSURES\s*=\s*_CFG\.closures\s*\|\|\s*/.exec(src);
+  const arr = m && extract(src.replace(/\[/g, '{').replace(/\]/g, '}'), m.index + m[0].length - 1);
+  // extract() matches braces, so read the array span by position from the swapped copy.
+  const lit = arr && src.substr(src.indexOf('[', m.index), arr.length);
+  const helper = fnSrc(src, 'ppsThanksgivingClosures') || '';
+  let list = null;
+  try { list = new Function(helper + '\nreturn ' + lit + ';')(); } catch (e) { ok(`${short}: default closures evaluate`, false, String(e.message)); continue; }
+  const y = new Date().getFullYear(), d = fourthThursday(y);
+  const want = `${y}-11-${String(d).padStart(2, '0')}`, fri = `${y}-11-${String(d + 1).padStart(2, '0')}`;
+  ok(`${short}: the fallback closures include this year's Thanksgiving and the day after (${want})`, list.includes(want) && list.includes(fri), JSON.stringify(list));
 }
 
 console.log('\n' + checks + ' checks, ' + failed + ' failed');

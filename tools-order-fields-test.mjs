@@ -55,6 +55,7 @@ const JPGS = [1, 2, 3].map(i => {
   const w = 300, h = 450, data = Buffer.alloc(w * h * 4, 200);
   const f = path.join(TMP, i + '.jpg'); fs.writeFileSync(f, jpeg.encode({ data, width: w, height: h }, 80).data); return f;
 });
+const DOCX = path.join(TMP, 'notes.docx'); fs.writeFileSync(DOCX, Buffer.from('PK\x03\x04 not really a docx'));
 const BROKEN = path.join(TMP, '4.jpg'); fs.writeFileSync(BROKEN, Buffer.from('this is not a jpeg at all'));
 const ONEPDF = path.join(TMP, 'cover.pdf');
 { const doc = new jsPDF({ unit: 'in', format: [5.75, 8.75] }); fs.writeFileSync(ONEPDF, Buffer.from(doc.output('arraybuffer'))); }
@@ -121,6 +122,23 @@ for (const file of PAGES) {
     ok(`${file}: and the customer's instructions`, m.canvaInstructions === 'Put the map on page 3, not page 2.', String(m.canvaInstructions));
     ok(`${file}: both are on the Job Ticket, in words`, ticketHas(m, 'Canva link', /TEST123/) && ticketHas(m, 'Special instructions', /map on page 3/), JSON.stringify(m.ticket || null));
     ok(`${file}: the order says it is a reorder, and of which order`, m.reorderOf === 87000 && ticketHas(m, 'Reorder of', /#87000/), JSON.stringify({ reorderOf: m.reorderOf }));
+    await s.ctx.close();
+  }
+
+  console.log('\n── ' + file + ' / an unsupported reference file ──');
+  {
+    // Since 2026-09-26 a reference the server refuses stops the order, so the
+    // picker has to turn it away when it is chosen, with the reason.
+    // The picker appears with the design-service options ("Artwork needs edits").
+    const s = await open(file, { ...SHIP, artwork: 2.01, proof: 0.01 });
+    const ref = s.p.locator('input[type=file][multiple][accept=".pdf,.ai,.eps,.tif,.tiff,.jpg,.jpeg,.png,.txt"]');
+    const n = await ref.count();
+    if (n) await ref.first().setInputFiles([DOCX, JPGS[0]]);
+    for (let i = 0; i < 10 && !s.dialogs.length; i++) await s.p.waitForTimeout(300);
+    const listed = await s.p.evaluate(() => document.body.innerText);
+    ok(`${file}: a .docx reference is turned away when picked, by name, and the good one is kept`,
+       n > 0 && s.dialogs.some(d => /can't be attached here[\s\S]*notes\.docx/.test(d)) && !/notes\.docx/.test(listed) && /1\.jpg/.test(listed),
+       'inputs=' + n + ' dialogs=' + s.dialogs.join(' || '));
     await s.ctx.close();
   }
 

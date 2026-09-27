@@ -120,6 +120,24 @@ ok( 'the floor is hooked after the main plugin writes at 10',
     ok( 'the move is remembered for the note', count( $GLOBALS['pps_ddg_moved'] ?? array() ) === 1 );
 }
 {
+    // 2026-09-27: the Job Ticket is written at priority 10 with the old date, so the
+    // order said Monday in one place and Sunday in another.
+    unset( $GLOBALS['pps_ddg_moved'] );
+    $item = new FakeItem( 22754, array( '_pps_delivery_date' => '2026-08-30',
+        'Job Ticket' => "Product: Saddle Stitch Booklet\nDelivery: Sunday, Aug 30, 2026 — standard (7 business days)\nShip to: X" ) );
+    fire( $hook, $item, 'ck', array( 'pps_metadata' => array() ), new FakeOrder( 0 ) );
+    ok( 'the Job Ticket\'s delivery line moves with the date, and says why',
+        strpos( $item->meta['Job Ticket'], "Delivery: Monday, Aug 31, 2026 (moved from Sun, Aug 30, a closed day) — standard (7 business days)\n" ) !== false
+        && strpos( $item->meta['Job Ticket'], 'Sunday, Aug 30' ) === false, $item->meta['Job Ticket'] );
+    // The block checkout can fire the order hook in a later request than the line
+    // items, when the in-request record is gone: the note must come from the item.
+    unset( $GLOBALS['pps_ddg_moved'] );
+    $o = new FakeOrder( 501, array( $item ) );
+    pps_ddg_note_moved_dates( $o );
+    ok( 'the note is still written when only the item remembers the move',
+        count( $o->notes ) === 1 && strpos( $o->notes[0], 'Aug 31' ) !== false, implode( ' | ', $o->notes ) );
+}
+{
     unset( $GLOBALS['pps_ddg_moved'] );
     $item = new FakeItem( 22754, array( '_pps_delivery_date' => '2026-09-15' ) );  // a Tuesday
     fire( $hook, $item, 'ck', array( 'pps_metadata' => array() ), new FakeOrder( 0 ) );

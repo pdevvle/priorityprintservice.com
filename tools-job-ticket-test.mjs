@@ -23,7 +23,8 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const DIST = path.join(HERE, 'dist');
+// PPS_DIST points at another set of compiled builds — how the pre-fix ones are checked.
+const DIST = process.env.PPS_DIST || path.join(HERE, 'dist');
 let checks = 0, failed = 0;
 const ok = (label, cond, detail) => {
   checks++;
@@ -49,6 +50,7 @@ try {
   const script = `
 function sanitize_text_field($s){ return trim(strip_tags((string)$s)); }
 function sanitize_file_name($s){ return preg_replace('/[^A-Za-z0-9._-]+/', '-', (string)$s); }
+${phpFunction(php, 'pps_clean_text') || ''}
 ${phpFunction(php, 'pps_order_addons')}
 ${phpFunction(php, 'pps_job_ticket')}
 $d = new DateTime('2026-09-30', new DateTimeZone('America/Phoenix'));
@@ -63,6 +65,7 @@ $out = array();
 $out['full'] = pps_job_ticket($full, $vals, $d, '');
 $out['prepress'] = pps_job_ticket(array('proof' => 0), array('pps_artwork_path' => 'pps-artwork/x.pdf'), $d, 'yes');
 $out['selfok'] = pps_job_ticket(array('proof' => 0), array('pps_proof_hash' => str_repeat('b', 64)), $d, '');
+$out['typed'] = pps_job_ticket(array('ticket' => array(array('Special instructions', "Use the <b>blue</b> logo\nkeep 50% margin\x07"), array('Job name', 'Spring <Gala>'))), array(), $d, '');
 $out['legacy'] = pps_job_ticket(array('rushCost' => 12), array('pps_summary' => "500 × 8.5×11 · Trifold\\nPaper: 100lb Gloss\\nFront: Full Color · Back: Full Color\\nCoating: UV Gloss (both sides)\\nUpload Art with Order\\nRush: 3 business days\\nShip to: AZ 85001"), $d, '');
 echo json_encode($out, JSON_UNESCAPED_UNICODE);
 `;
@@ -75,6 +78,9 @@ echo json_encode($out, JSON_UNESCAPED_UNICODE);
   ok('php: ship-to reads as one line with state and zip; shipment estimate present', /Ship to: Peter Huang, Yew Chung International School, 310 EASY ST, MOUNTAIN VIEW CA 94043/.test(out.full) && /Shipment: 18\.1 lb · 1 carton \(estimate\)/.test(out.full), out.full);
   ok('php: prepress review → NOT APPROVED, one file counted from the path', /Art status: NOT APPROVED/.test(out.prepress) && /Artwork files: 1 uploaded/.test(out.prepress), out.prepress);
   ok('php: self-approved with a hash says so', /Art status: Self-approved online \(approval bound to the print file\)/.test(out.selfok), out.selfok);
+  // 2026-09-27: strip_tags() ate anything between < and > the customer typed ("Spring <Gala>"
+  // became "Spring "), and a newline in Special Instructions broke the one-pair-per-line block.
+  ok('php: what the customer typed survives: angle brackets kept as text, newlines flattened, control chars gone', /Special instructions: Use the ‹b›blue‹\/b› logo \/ keep 50% margin\n/.test(out.typed + '\n') && /Job name: Spring ‹Gala›/.test(out.typed) && !/[<>\x07]/.test(out.typed), out.typed);
   ok('php: a legacy order still gets a block — job line, its summary lines, finishing, rush flag', /^Job: 500 × 8\.5×11 · Trifold/.test(out.legacy) && /Paper: 100lb Gloss/.test(out.legacy) && /Finishing: Coating: UV Gloss \(both sides\); Upload Art with Order/.test(out.legacy) && /— RUSH/.test(out.legacy) && !/Ship to: AZ 85001\n/.test(out.legacy + '\n'), out.legacy);
 } catch (e) { ok('php: pps_job_ticket() runs', false, String(e.message || e).slice(0, 400)); }
 
@@ -111,6 +117,12 @@ const CALCS = {
     ok('brochure: artwork option and proof type are words', get(t, 'Artwork') === 'Upload Art with Order' && /^Self-approved online/.test(get(t, 'Proof') || ''), JSON.stringify(t));
     const h = build({ qty: 100, sizeMode: 'preset', sizeLabel: '8.5×11', foldType: 'trifold', frontColor: 'bw', sides: 1, paper: { label: 'X' }, coating: 750, coatSides: 2, bundling: 0, perforation: 0, roundCorner: 0, artwork: 0.02, bleed: 1, proof: 3.01, proofAddrSame: false, proofAddr: { name: 'Kelley Curry', street: '1 Main St', city: 'Phoenix', state: 'AZ', zip: '85001' } }, {});
     ok('brochure: hardcopy proof carries its own ship-to; bleed answer and finishing carried', get(h, 'Proof ship-to') === 'Kelley Curry, 1 Main St, Phoenix AZ 85001' && /^Hardcopy/.test(get(h, 'Proof')) && get(h, 'Bleed') === "I don't have bleeds" && get(h, 'Finishing') === 'Coating: UV Gloss (both sides)', JSON.stringify(h));
+    // 2026-09-27: which edge the panels divide, where the perforations go, and how many
+    // pages the designer is editing were in the price and nowhere in the order.
+    const fd = build({ qty: 500, sizeMode: 'preset', sizeLabel: '8.5×11', longEdge: 99, shortEdge: 99, foldType: 'trifold', foldDir: 'long', frontColor: 'color', backColor: 'color', sides: 2, paper: { label: 'X' }, coating: 0, bundling: 0, perforation: 2000, perfDir: 'vertical', perfPositions: [33.3, 66.7], roundCorner: 0, artwork: 2.01, artEditPages: 3, bleed: 0, proof: 0 }, { longE: 11, shortE: 8.5 });
+    ok('brochure: fold direction named from the priced size, not stale custom inputs', / · Trifold \(3 Panel\) \(panels across the 11" edge\)$/.test(get(fd, 'Size') || ''), get(fd, 'Size'));
+    ok('brochure: perforation says where', /Perforation: 1 Perforation Line \(vertical\) at 33% of the sheet/.test(get(fd, 'Finishing') || ''), get(fd, 'Finishing'));
+    ok('brochure: pages needing edits reach the ticket', get(fd, 'Pages needing edits') === '3', JSON.stringify(fd));
   } },
   'calc-postcard.html':      { tables: ['COATINGS', 'BUNDLING', 'PERF_OPTS', 'CORNERS', 'FOLD_TYPES', 'ART_OPTS', 'BLEED_OPTS'], run(build) {
     const t = build({ qty: 500, sizeMode: 'preset', sizeLabel: '4×6', foldType: 'none', frontColor: 'color', backColor: 'bw', sides: 2, paper: { label: '14pt C2S' }, coating: 510, coatSides: 1, bundling: 750, perforation: 0, roundCorner: 0, artwork: 0.01, bleed: 0, proof: 0.01 }, {});
@@ -119,6 +131,10 @@ const CALCS = {
   'calc-greeting-card.html': { tables: ['COATINGS', 'BUNDLING', 'PERF_OPTS', 'CORNERS', 'FOLD_TYPES', 'ART_OPTS', 'BLEED_OPTS', 'SIZE_PRESETS'], run(build) {
     const t = build({ qty: 50, sizeMode: 'preset', sizeLabel: '5×7', foldType: 'half', frontColor: 'color', backColor: 'color', sides: 2, paper: { label: '110lb Cover' }, coating: 0, bundling: 0, perforation: 0, roundCorner: 0, envelopes: false, artwork: 0.04, bleed: 0, proof: 0, canvaLink: 'https://canva.com/x' }, {});
     ok('greeting card: a Canva order names the link', get(t, 'Artwork') === 'I have a design in Canva' && get(t, 'Canva link') === 'https://canva.com/x', JSON.stringify(t));
+    const sc = build({ qty: 50, sizeMode: 'preset', sizeLabel: '5×7', foldType: 'bifold', foldDir: 'long', scoreFold: 'score', frontColor: 'color', backColor: 'color', sides: 2, paper: { label: '110lb Cover' }, coating: 0, bundling: 0, perforation: 0, roundCorner: 0, artwork: 0.01, bleed: 0, proof: 0 }, { longE: 10, shortE: 7 });
+    ok('greeting card: "score only, arrives flat" is on the ticket', /Folding: Scored only — ship FLAT, do not fold/.test(get(sc, 'Finishing') || ''), get(sc, 'Finishing'));
+    const sf = build({ qty: 50, sizeMode: 'preset', sizeLabel: '5×7', foldType: 'bifold', foldDir: 'long', scoreFold: 'scorefold', frontColor: 'color', backColor: 'color', sides: 2, paper: { label: '110lb Cover' }, coating: 0, bundling: 0, perforation: 0, roundCorner: 0, artwork: 0.01, bleed: 0, proof: 0 }, { longE: 10, shortE: 7 });
+    ok('greeting card: score & fold says ship folded', /Folding: Score & fold — ship folded/.test(get(sf, 'Finishing') || ''), get(sf, 'Finishing'));
   } },
   'calc-letterhead.html':    { tables: ['PERF_OPTS', 'ART_OPTS', 'BLEED_OPTS'], run(build) {
     const t = build({ qty: 1000, sizeMode: 'preset', sizeLabel: '8.5×11', frontColor: 'color', backColor: 'bw', sides: 1, paper: { label: '70lb Linen' }, perforation: 2000, perfDir: 'width', artwork: 0.01, bleed: 0, proof: 0 }, {});
@@ -131,10 +147,17 @@ const CALCS = {
   'calc-preview-test.html':  { tables: ['COATINGS', 'BUNDLING', 'CORNERS', 'ART_OPTS', 'BLEED_OPTS'], run(build) {
     const t = build({ sizeLabel: 'Custom Size', customShort: 4, customLong: 4, sets: [{ qty: 500, pages: 12, name: 'Fall Program' }], insidePaper: { label: '100lb Gloss Text' }, insideColor: 'color', coverMode: 'same', coverPaper: { label: '100lb Gloss Cover' }, coverColor: 'color', twoStaple: false, coating: 0, bundling: 0, roundCorner: 0, vividPrint: false, artwork: 0.01, bleed: 0, proof: 0 }, { twoAuto: true });
     ok('saddle: custom size named, sets, staples from the auto rule, self-cover says so — never the cover stock', get(t, 'Size') === 'Custom 4×4"' && get(t, 'Sets') === '500 × 12 pages "Fall Program"' && get(t, 'Binding') === 'Saddle stitch · two staples' && get(t, 'Inside') === '100lb Gloss Text · Full Color' && get(t, 'Cover') === 'Self-cover (same stock as inside)' && get(t, 'Job name') === 'Fall Program', JSON.stringify(t));
+    const bd = build({ sizeLabel: 'Custom Size', customShort: 5.5, customLong: 8.5, bindDir: 'short', sets: [{ qty: 100, pages: 8 }], insidePaper: { label: 'X' }, insideColor: 'color', coverMode: 'same', coating: 0, bundling: 0, roundCorner: 0, artwork: 0.01, bleed: 0, proof: 0 }, {});
+    ok('saddle: a custom book names its binding edge', get(bd, 'Size') === 'Custom 5.5×8.5" · bound on the short edge', get(bd, 'Size'));
   } },
   'calc-perfect-bound.html': { tables: ['COATINGS', 'BUNDLING', 'CORNERS', 'OUTFOLD_OPTS', 'PERF_OPTS', 'ART_OPTS', 'BLEED_OPTS'], run(build) {
     const t = build({ sizeLabel: '6×9', sets: [{ qty: 200, pages: 120 }], insidePaper: { label: '60lb Offset' }, insideColor: 'bw', coverMode: 'cover', coverPaper: { label: '12pt C1S' }, coverColor: 'color', coating: 750, bundling: 0, roundCorner: 0, outfold: 1000, perforation: 0, vividPrint: false, artwork: 0.01, bleed: 0, proof: 3.01, proofAddrSame: true }, {});
     ok('perfect bound: binding, inside/cover stock and colour, outfold in finishing, hardcopy to the order address', get(t, 'Binding') === 'Perfect bound' && get(t, 'Inside') === '60lb Offset · Black & White' && get(t, 'Cover') === '12pt C1S · Full Color' && /^Coating: UV Gloss; Outfold: 1 Fold-Out/.test(get(t, 'Finishing') || '') && get(t, 'Proof ship-to') === 'Same as the order ship-to', JSON.stringify(t));
+    const mx = build({ sizeLabel: '6×9', sets: [{ qty: 200, pages: 120, colorMode: 'mixed', colorPages: 40, bwPages: 80 }], insidePaper: { label: '60lb Offset' }, insideColor: 'color', coverMode: 'same', coating: 0, bundling: 0, roundCorner: 0, outfold: 0, perforation: 2000, perfPositions: [50], vividPrint: false, artwork: 0.01, bleed: 0, proof: 0 }, {});
+    ok('perfect bound: mixed colour says how many pages are which, not "Full Color"', get(mx, 'Inside') === '60lb Offset · Mixed — 40 color + 80 black & white pages', get(mx, 'Inside'));
+    ok('perfect bound: perforation says where', /Perforation: 1 Perforation Line at 50% of the sheet/.test(get(mx, 'Finishing') || ''), get(mx, 'Finishing'));
+    const bd = build({ sizeLabel: 'Custom Size', customShort: 6, customLong: 9, bindDir: 'long', sets: [{ qty: 100, pages: 60 }], insidePaper: { label: 'X' }, insideColor: 'bw', coverMode: 'same', coating: 0, bundling: 0, roundCorner: 0, outfold: 0, perforation: 0, artwork: 0.01, bleed: 0, proof: 0 }, {});
+    ok('perfect bound: a custom book names its binding edge', get(bd, 'Size') === 'Custom 6×9" · bound on the long edge', get(bd, 'Size'));
   } },
   'calc-coupon-book.html':   { tables: ['COATINGS', 'BUNDLING', 'CORNERS', 'OUTFOLD_OPTS', 'PERF_OPTS', 'MAGNET_OPTS', 'BIND_STYLE_OPTS', 'ART_OPTS', 'BLEED_OPTS'], run(build) {
     const t = build({ sizeLabel: '3.5×8.5', sets: [{ qty: 1000, pages: 20 }], insidePaper: { label: '70lb Offset' }, insideColor: 'color', frontColor: 'color', backColor: 'bw', sidesPrinted: 'double', bindStyle: 'wraparound', coverMode: 'cover', coverPaper: { label: '12pt C1S' }, coverColor: 'color', coating: 0, bundling: 0, roundCorner: 0, outfold: 0, perforation: 2000, magnetBacker: 1, vividPrint: false, artwork: 0.01, bleed: 0, proof: 0 }, {});

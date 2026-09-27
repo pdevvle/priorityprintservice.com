@@ -175,8 +175,9 @@ function pps_job_health_line_item( $item, $cart_item_key, $values, $order ) {
                 $GLOBALS['pps_job_health_warns'][] = $check['warn'] . ' (' . basename( $target ) . ')';
             }
         }
-        $ticket = (string) $item->get_meta( 'Job Ticket' );
-        if ( $ticket !== '' ) $item->update_meta_data( 'Job Ticket', $ticket . "\nPrint file: " . $line );
+        // Not appended to the Job Ticket any more: the ticket is on the customer's
+        // receipt, and this is a prepress measurement ("… before plating"). It stays on
+        // its own staff-only line (audit 2026-09-27).
     } catch ( \Throwable $e ) {
         error_log( 'pps-job-health: line item check failed: ' . $e->getMessage() );
     }
@@ -191,7 +192,19 @@ add_action( 'woocommerce_checkout_create_order_line_item', 'pps_job_health_line_
 function pps_job_health_note( $order ) {
     if ( is_numeric( $order ) ) $order = wc_get_order( $order );
     if ( ! is_object( $order ) || ! method_exists( $order, 'add_order_note' ) ) return;
+    // Read from the order's items, not only from this request: the block checkout can
+    // write line items in one request and fire this hook in another, and a global
+    // does not survive that (audit 2026-09-27).
     $warns = $GLOBALS['pps_job_health_warns'] ?? array();
+    if ( method_exists( $order, 'get_items' ) ) {
+        foreach ( $order->get_items() as $it ) {
+            $w = (string) $it->get_meta( '_pps_print_check_warn' );
+            if ( $w !== '' ) {
+                $c = json_decode( (string) $it->get_meta( '_pps_print_check' ), true );
+                $warns[] = $w . ( is_array( $c ) && ! empty( $c['file'] ) ? ' (' . basename( (string) $c['file'] ) . ')' : '' );
+            }
+        }
+    }
     if ( ! $warns ) return;
     if ( $order->get_meta( '_pps_job_health_noted' ) ) return;
     $order->add_order_note( 'PRINT FILE CHECK: ' . implode( '; ', array_unique( $warns ) ) . '. The print-ready file on this order is below print resolution. Re-render from the customer\'s file before plating.' );
@@ -278,7 +291,7 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
             }
 
             $lw = (string) $item->get_meta( '_pps_print_check_warn' );
-            if ( $lw !== '' ) $sec['lowres']['items'][] = $ref . ' — ' . $lw;
+            if ( $lw !== '' && ! pps_job_health_check_measured_wrong_file( $item ) ) $sec['lowres']['items'][] = $ref . ' — ' . $lw;
 
             $proof = (float) ( $meta['proof'] ?? 0 );
             if ( $proof > 0 ) {
@@ -312,6 +325,27 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
     }
 
     return array_values( array_filter( $sec, static function( $s ) { return ! empty( $s['items'] ); } ) );
+}
+
+/**
+ * A warning written before 2026-09-26 may have measured the wrong file: the check
+ * then looked for the print-ready file by its stored (random) path, never found it,
+ * and measured the customer's raw PDF instead — 87272's false "62 DPI". Such a
+ * check is recognisable after the fact: the order lists a print-ready file, and the
+ * file the check recorded is a different one. Those are not repeated in the digest.
+ */
+function pps_job_health_check_measured_wrong_file( $item ) {
+    $chk = json_decode( (string) $item->get_meta( '_pps_print_check' ), true );
+    $measured = is_array( $chk ) ? (string) ( $chk['file'] ?? '' ) : '';
+    if ( $measured === '' ) return false;
+    $files = json_decode( (string) $item->get_meta( '_pps_artwork_files' ), true );
+    if ( ! is_array( $files ) ) return false;
+    foreach ( $files as $f ) {
+        if ( is_array( $f ) && preg_match( '/_print-ready\.pdf$/i', (string) ( $f['name'] ?? '' ) ) ) {
+            return (string) ( $f['path'] ?? '' ) !== $measured;
+        }
+    }
+    return false;
 }
 
 function pps_job_health_render( array $sections, $site = '' ) {

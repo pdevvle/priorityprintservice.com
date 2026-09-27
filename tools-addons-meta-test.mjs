@@ -48,7 +48,7 @@ function phpFunction(src, name) {
   return null;
 }
 try {
-  const fn = phpFunction(php, 'pps_order_addons');
+  const fn = (phpFunction(php, 'pps_clean_text') || '') + '\n' + phpFunction(php, 'pps_order_addons');
   const script = `<?php
 function sanitize_text_field($s){ return trim(strip_tags((string)$s)); }
 ${fn}
