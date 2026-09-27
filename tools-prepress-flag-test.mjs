@@ -47,7 +47,7 @@ console.log('── what the order carries (pps-calculators.php) ──');
   ok('it lands on the order line as staff-visible meta',
      /add_meta_data\(\s*'PPS-Prepress-Review'/.test(php));
   ok('and is kept off the customer copy',
-     /function pps_internal_item_meta_keys\(\)[\s\S]{0,200}'PPS-Prepress-Review'/.test(php));
+     /function pps_internal_item_meta_keys\(\)[\s\S]{0,500}'PPS-Prepress-Review'/.test(php));
   ok('the spec string says PREPRESS-REVIEW instead of SelfApproved',
      /\$proof\s*=\s*\$prepress\s*!==\s*''\s*\?\s*'PREPRESS-REVIEW'/.test(php));
   ok('an order note is raised, once, on both checkout paths',

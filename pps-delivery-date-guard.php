@@ -158,6 +158,15 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
 
     $item->update_meta_data( '_pps_delivery_date', $fixed->format( 'Y-m-d' ) );
     $item->update_meta_data( 'Estimated Delivery', $fixed->format( 'l, M j, Y' ) );
+    // The Job Ticket's "Delivery:" line was written earlier (priority 10) with the old
+    // date, so the order disagreed with itself (audit 2026-09-27). Move it too.
+    $ticket = (string) $item->get_meta( 'Job Ticket' );
+    if ( $ticket !== '' ) {
+        $item->update_meta_data( 'Job Ticket', preg_replace( '/^Delivery: ' . preg_quote( $d->format( 'l, M j, Y' ), '/' ) . '/m', 'Delivery: ' . $fixed->format( 'l, M j, Y' ) . ' (moved from ' . $d->format( 'D, M j' ) . ', a closed day)', $ticket ) );
+    }
+    // Kept on the item as well as in the request, so the note can be written even
+    // when the block checkout fires the order hook in a later request.
+    $item->update_meta_data( '_pps_ddg_moved_from', $d->format( 'l, M j, Y' ) );
 
     /* Remember it; the note is written later, once the order exists.
      *
@@ -190,6 +199,12 @@ function pps_ddg_note_moved_dates( $order ) {
     if ( ! is_object( $order ) || ! method_exists( $order, 'add_order_note' ) ) return;
 
     $moved = $GLOBALS['pps_ddg_moved'] ?? array();
+    if ( ! $moved && method_exists( $order, 'get_items' ) ) {
+        foreach ( $order->get_items() as $it ) {
+            $from = (string) $it->get_meta( '_pps_ddg_moved_from' );
+            if ( $from !== '' ) $moved[] = array( 'from' => $from, 'to' => (string) $it->get_meta( 'Estimated Delivery' ) );
+        }
+    }
     if ( ! $moved ) return;
     if ( $order->get_meta( '_pps_ddg_noted' ) ) return;
 

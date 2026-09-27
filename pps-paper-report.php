@@ -75,7 +75,7 @@ function pps_paper_report_key( $val ) {
  * a val alone still answers the question when a row has been renamed or
  * retired out of the config (docs/PAPER_CATALOG.md).
  */
-function pps_paper_report_classify( $paper ) {
+function pps_paper_report_classify( $paper, $use_catalog = true ) {
     $label = '';
     $val   = null;
     if ( is_array( $paper ) ) {
@@ -87,7 +87,7 @@ function pps_paper_report_classify( $paper ) {
     if ( $val === null && $label === '' ) return null;
 
     $row = null;
-    if ( $val !== null ) {
+    if ( $val !== null && $use_catalog ) {
         $catalog = pps_paper_report_catalog();
         $key     = pps_paper_report_key( $val );
         if ( isset( $catalog[ $key ] ) ) $row = $catalog[ $key ];
@@ -138,8 +138,13 @@ function pps_paper_report_classify( $paper ) {
 function pps_paper_report_item_papers( array $meta ) {
     $out = array();
 
-    $add = function ( $paper, $role ) use ( &$out ) {
-        $c = pps_paper_report_classify( $paper );
+    // Sticker label stock reuses the `val` numbers of the cardstock list (0.02, 0.03),
+    // so looking it up there called factory-ordered Matte and Uncoated labels "in
+    // stock" (audit 2026-09-27). A sticker's paper is read from its own snapshot.
+    $own_list = ( (string) ( $meta['calcType'] ?? '' ) ) === 'sticker'
+        || ( is_array( $meta['paper'] ?? null ) && stripos( (string) ( $meta['paper']['label'] ?? '' ), 'adhesive' ) !== false );
+    $add = function ( $paper, $role ) use ( &$out, $own_list ) {
+        $c = pps_paper_report_classify( $paper, ! ( $own_list && $role === 'stock' ) );
         if ( ! $c ) return;
         $c['role'] = $role;
         // Same stock in both roles is one paper to order, not two.

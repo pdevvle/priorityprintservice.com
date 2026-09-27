@@ -63,6 +63,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-multi-file-upload-test.mjs` | **Every file the customer chose reaches the order.** Drives the compiled saddle, perfect-bound and coupon builds (`parity-saddle.html`, `parity-pb.html`, `slot-coupon.html`): twenty images on a staff-proof order must all upload, in order, and be listed for Drive; a slot replacement keeps the twenty and adds `page_003_<name>`; approve-then-Review must be refused at Add to Order. Then the five flats (`flat-<calc>.html`): a back uploaded on its own slot reaches the order, two files dropped together become front and back, a slot replacement replaces, and changed art after approval is refused. Written for order 87273 (twenty JPGs chosen, `1.jpg` received). `PPS_MULTI_PAGES` / `PPS_MULTI_FLATS` select builds — the pre-fix coupon build fails 5 of 13, the pre-fix flats 18 of 31. |
 | `tools-gdrive-missing-test.php`, `tools-edit-artwork-test.php` | The 2026-09-26 sweep's server half. The first lifts `pps_process_artwork_upload()` out of `pps-gdrive.php` and runs it against a fake Drive: twenty files listed and one on the server names the nineteen instead of assuming them uploaded; a reorder reusing old art creates no empty folder; a retry after a partial upload converges quietly; the tenth failure notes the order. The second lifts `pps_carry_edit_artwork()` and checks an edit keeps every file and the NOT APPROVED flag, drops the hash, and lets new artwork replace the old. Both were run against the pre-fix files and fail there (5 checks each). |
 | `tools-order-fields-test.mjs` | **What the customer typed and chose reaches the order, on all eight.** A Canva order with no link is stopped; with one, the link and Special Instructions ride in the metadata and on the Job Ticket; a reorder says "Reorder of order #…"; a flat given a 4-page PDF names the pages that will not print; a booklet batch holding a PDF is refused and one holding an unreadable image names it. `PPS_FIELDS_PAGES` selects builds — the live builds failed every check. |
+| `tools-order-junctures-test.mjs`, `tools-order-inputs-test.mjs`, `tools-server-junctures-test.php`, `tools-upload-endpoint-test.php` | The 2026-09-27 juncture sweep (see "Junctures" below). Browser, all eight: a four-digit ZIP stops the order before upload and names the fix; a picked date that can no longer be met stops Add to Order; the quote re-runs when the shop day moves (Playwright clock); a hardcopy proof address survives an edit and a blank one stops the order. Inputs: bad values from links, reorders, defaults and the config either become a makeable job or say why. PHP: closures/timezone that cannot stop checkout, the stale-quote rule (and that a Friday cart is fine on Saturday), PPS-Spec for flats, art status by artwork option, the add-to-cart guards, the sticker paper report; the upload endpoint's sniffing. The live code fails 56/64, 32/33, 17/18 and 3/9. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
@@ -229,6 +230,82 @@ a shifted page would have printed the WRONG page. They now carry `srcPdfPage` fr
 extraction and render by it, the fix the saddle took on 2026-08-24 and the copies never
 received. Rule that follows from all of it: **a resolution or DPI claim anywhere in this
 repo is unverified until a test has decoded the shipped file.**
+
+## Junctures: priced → placed → printed (2026-09-27)
+
+A sweep of every point a job passes between the quote and the press, asking at each one
+"what could go through wrong here without anyone being told". What it found, all fixed and
+each gated by a test first run against the live code, where it failed:
+
+- **A setting could stop every checkout.** `pps_get_closures()` passed a closures value saved
+  as text straight to `in_array()`, which throws; a blank or mistyped shop timezone
+  ("Arizona") threw in `new DateTimeZone()`. Both on every calculator line at checkout. Now
+  `pps_get_closures()` always returns a list of strings and `pps_shop_timezone()` falls back
+  to Phoenix. **Thanksgiving** was "11-28"/"11-29" in every fallback list, which misses it in
+  2026 (26th/27th) and most years; it is now computed (fourth Thursday + Friday) in the PHP
+  default and all eight calculators. The admin closures list is un-versioned — check it holds
+  the right Thanksgiving each year.
+- **`isBusinessDay` tested dated closures against the UTC date** (`toISOString()`), so east
+  of UTC — and after 5pm in Phoenix for dates carrying a time — a "YYYY-MM-DD" closure was
+  checked against the wrong day. Local date now.
+- **A delivery date the shop could no longer meet was dropped in silence.** The tab sat open
+  past the cutoff, or the job grew, and the order went through at the free-delivery date with
+  `requestedBizDays` still the too-short count. Now the picker says so and Add to Order stops.
+  The quote also **re-runs when the shop day moves** (a 60 s check of `getShopToday()`), so a
+  tab left open overnight no longer submits yesterday's dates. On the server,
+  `pps_quote_is_stale()` refuses a cart line at checkout only when its delivery date is now
+  inside production + 1 working day — **never merely because it was quoted on an earlier
+  day**: a free-delivery quote starts production the day it is made, so that rule would turn
+  away every cart added on Friday and paid on Saturday.
+- **ZIP.** A four-digit ZIP (a New England ZIP that lost its leading zero) passed the
+  calculator and was refused by the server after the artwork had uploaded. The shipping gate
+  now names it ("did you mean 02134?"); the server refuses the same shape at add to cart.
+- **What production reads.** PPS-Spec read only booklet keys, so every flat reached Missive as
+  `0qty | 0pg | INSIDE: /Color` — it now names quantity, sides, paper and colour per side
+  (built by `pps_build_spec()`, lifted out of the line-item hook so it can be tested). A `|`
+  in a job name split the spec. `strip_tags()` ate anything the customer typed between `<`
+  and `>`, and a newline in Special Instructions broke the Job Ticket's one-line-per-fact
+  layout: `pps_clean_text()` keeps the text and flattens the line. Every proof-free order
+  said "Self-approved online", including "email art after order" (nothing received), Canva
+  and the design services — art status now follows the artwork option. Perfect bound's
+  **mixed colour** reached the ticket as "Full Color"; custom books did not say which **edge
+  binds**; folded flats did not say which edge the panels divide; perforations did not say
+  where; "pages needing edits" and the greeting card's **"score only — ship flat"** reached
+  nowhere a person reads. The delivery-date guard now moves the Job Ticket's Delivery line
+  when it moves the date, and the paper report stops calling factory sticker labels "in
+  stock" (their `val` collides with the cardstock list).
+- **Cart and order.** A second identical job merged into the first line and a cart quantity
+  could multiply a quoted job — each add is now its own line (`pps_uid`) and calculator
+  products are sold individually. An edit whose new line landed on the old key deleted
+  itself. The calculator's ship-to was re-applied on every status change, over staff
+  corrections — once now. Refusals raised as WooCommerce notices (not `WP_Error`) were
+  missing from `pps_checkout_refusals`. "Print File Check" reached customers' receipts.
+- **Uploads.** A JPEG named `.png` (phones do this) was refused by the magic-byte check; it is
+  now accepted and stored under its real type. A PDF with a few bytes before `%PDF-` is
+  accepted, as every reader does.
+
+- **What arrives from outside the form** — a share link, a reorder or cart edit, a product
+  default, the injected config — was trusted. `calculate()` returned an *empty* error list
+  for "no valid sets", and the Panel draws a total whenever the list is empty, so 0 + 0
+  Mixed pages on perfect bound, or `?qty=-5` on any booklet, unmounted the calculator.
+  Page counts were never checked where they entered: perfect bound opened at 4 pages (the
+  minimum is 8), saddle took 10, Mixed mode took 9 or 700, and `?pages=2000` hung the tab,
+  while the Pages select showed "8 Pages". Each booklet now has `ppsSnapPages()` at every
+  entry point and `ppsPagesError()` inside `calculate()`; an unknown size label is refused
+  instead of priced as the first preset; `_cfgList()` treats an option list injected as
+  `[]` as missing; the flats refuse a NaN quantity (`!(qty >= 1)`). An edited **mixed-colour**
+  perfect-bound or coupon book came back full colour (the restore dropped the per-set split,
+  then `insideColor` overwrote it), and an edited **hardcopy proof** lost its separate proof
+  address, so the proof went to the order's ship-to. A blank proof address now stops Add to
+  Order instead of surfacing in the next morning's digest. Unverified and for the owner:
+  booklets price custom sizes down to 2″ × 2″ — confirm the stitcher's and binder's minimums.
+
+Gates: `tools-order-junctures-test.mjs` (browser, all eight — ZIP, date gate, re-quote, proof address; the
+live builds fail 56 of 64), `tools-order-inputs-test.mjs` (browser, all eight; the
+live builds fail 32 of 33), `tools-server-junctures-test.php`, `tools-upload-endpoint-test.php`,
+and new checks in `tools-job-ticket-test.mjs`, `tools-closure-engine-test.mjs` and
+`tools-delivery-date-guard-test.php`. Several take `PPS_DIST` / `PPS_CALC_PHP` /
+`PPS_PAPER_PHP` / `PPS_JUNCTURE_PAGES` to point at the pre-fix copies.
 
 ## Shared Components (in each calculator HTML)
 - `PCF` — pricing constants object, overridable via PPS_CONFIG.calc
@@ -401,7 +478,7 @@ transforms legitimately produces no PDF.
 - Noscript fallback with static content for crawlers (calculator product pages AND preset URLs — preset version pulls title + description + spec table from the preset row)
 - llms.txt endpoint at /llms.txt for AI search engines, with a "## Presets" section listing every preset URL + description
 - Order meta: PPS-Spec (pipe-delimited spec string) and PPS-Production-Start for Missive parsing
-- **Print File Check + exceptions digest (2026-09-22).** `pps-job-health.php`, see the file table. The check is the last line of the Job Ticket; the digest is the daily email to the office. Both exist because every defect this month was reported by a customer first.
+- **Print File Check + exceptions digest (2026-09-22).** `pps-job-health.php`, see the file table. The check is its own staff-only "Print File Check" line (it was the last line of the Job Ticket until 2026-09-27, which put a prepress measurement on customers' receipts); the digest is the daily email to the office, and it skips a pre-2026-09-26 warning that measured the raw file instead of the listed print-ready one (87272). Both exist because every defect this month was reported by a customer first.
 - **Job Ticket (2026-09-22).** The first visible item meta on every order, on the admin notification, the order screen and the customer's receipt alike: every choice as words, then what only the server knows. The calculator posts `ticket` — ordered `[label, value]` pairs from `buildTicket(config, result)`, resolved from its own option tables (product, job name, quantity or sets, size with the custom inches, paper, print, binding, inside, cover, finishing, artwork option, bleed answer, proof type, proof ship-to) — and `pps_job_ticket()` appends art status (NOT APPROVED for a prepress-review order; awaiting staff proof; self-approved, hash-bound), the uploaded file names, production start, must-ship, delivery with the rush flag, the ship-to on one line and the shipment estimate. Words come from the calculator, never guessed from numbers on the server, which is how a self-cover job once read "cardstock" (87202). A legacy build with no `ticket` gets a block from its summary. Same commit: the three booklets now carry `proofAddrSame`/`proofAddr` in the order (the booklet-only gap behind order 87198). `tools-job-ticket-test.mjs` is the gate. Order Summary and PPS-Spec stay as they were; Missive keeps parsing PPS-Spec.
 - **Add-ons (2026-09-21).** Every calculator posts `addons` in the metadata — each finishing choice as the words the customer chose ("Coating: UV Gloss (both sides)", "Perforation: 1 Perforation Line", "Outfold: …", "Magnetic Backer: …", "Enhanced Vivid Print") from `buildAddons(config)`. `pps_order_addons()` writes them as a visible **Add-ons** item meta (customer receipt, admin notification, order screen) and as parts of PPS-Spec. It used to read them out of the summary text and skip every line with a colon — meant for Inside:/Cover:/Rush:/Ship to:, it also ate the flats' "Coating: …" lines, so a coating lived only as `coating: 750` in the JSON blob. `tools-addons-meta-test.mjs` is the gate. The flats' proof modal also has **"Render at full resolution (slow to load)"**: ticked, each PDF side is rendered again at 300 DPI with a status bar and replaces the 144 DPI upload preview in the viewport and under the loupe (`tools-flat-print-dpi-test.mjs` covers it).
 - Edit mode: atomic add-before-remove for cart item updates; a plain product-page visit clears a stale `pps_edit_key_<pid>` so an abandoned edit cannot delete the next ordinary add

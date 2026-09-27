@@ -453,6 +453,9 @@ const CC = {
 };
 
 const _CFG = (window.PPS_CONFIG || {}).calc || {};
+// An option list injected empty ([]) is a misconfiguration, not "no options": used as-is
+// it blanked the page on the first lookup (audit 2026-09-27). Fall back to the built-ins.
+const _cfgList = v => (Array.isArray(v) && v.length ? v : null);
 // Per-calc add-on visibility flags injected by PHP. Absent key = treated as visible.
 const _AD = (window.PPS_CONFIG || {}).addons || {};
 const PCF = Object.assign({
@@ -490,7 +493,7 @@ const PCF = Object.assign({
 // Sticker sizes — own config key (sticker_sizes) so it never inherits the
 // shared brochure/perfect-bound "size_presets" admin list. Rack card sizes
 // grouped via `rack:true`.
-const SIZE_PRESETS = _CFG.sticker_sizes || [
+const SIZE_PRESETS = _cfgList(_CFG.sticker_sizes) || [
   {label:"2×3.5 (Business Card)",imp:20,long:3.5,short:2,easy:true},
   {label:"3×5 (Index Card)",imp:10,long:5,short:3,easy:true},
   {label:"4×6",imp:4,long:6,short:4,easy:true},
@@ -510,7 +513,7 @@ const SIZE_PRESETS = _CFG.sticker_sizes || [
 
 // Sticker paper — crack-n-peel adhesive label stock (12×18 sheet).
 // Own config key (sticker_papers) so it stays independent.
-const PAPERS = _CFG.sticker_papers || [
+const PAPERS = _cfgList(_CFG.sticker_papers) || [
   {label:"Crack n Peel Gloss Adhesive Label",val:0.01,days:1,price:0.99,oversizePrice:0.99,factory:false,coatable:true},
   {label:"Crack n Peel Matte Adhesive Label",val:0.02,days:5,price:0.99,oversizePrice:0.99,factory:true,coatable:true},
   {label:"Crack n Peel Uncoated Adhesive Label",val:0.03,days:5,price:0.99,oversizePrice:0.99,factory:true,coatable:false},
@@ -518,11 +521,11 @@ const PAPERS = _CFG.sticker_papers || [
 const ALL_PAPERS = PAPERS;
 const INV_VALS=[0.01];
 
-const COATINGS=_CFG.coatings||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
+const COATINGS=_cfgList(_CFG.coatings)||[{label:"No Additional Coating",val:0,price:0},{label:"UV Gloss",val:750,price:0.03},{label:"UV Matte",val:510,price:0.04}];
 const COAT_SIDES=[{label:"Front Only",val:1,mult:1,daysMult:1}];
 
-const ART_OPTS=_CFG.art_opts||[{label:"Upload Art with Order",val:0.01},{label:"Email Art After Order",val:0.02},{label:"Artwork already discussed",val:0.03},{label:"I have a design in Canva",val:0.04},{label:"Artwork needs edits",val:2.01},{label:"Design from scratch",val:4.01}];
-const BLEED_OPTS=_CFG.bleed_opts||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
+const ART_OPTS=_cfgList(_CFG.art_opts)||[{label:"Upload Art with Order",val:0.01},{label:"Email Art After Order",val:0.02},{label:"Artwork already discussed",val:0.03},{label:"I have a design in Canva",val:0.04},{label:"Artwork needs edits",val:2.01},{label:"Design from scratch",val:4.01}];
+const BLEED_OPTS=_cfgList(_CFG.bleed_opts)||[{label:"My artwork has proper bleeds",val:0,price:0},{label:"I don't have bleeds",val:1,price:0.5}];
 
 // Transit days
 // Merged over the defaults, NOT replaced. US_STATES is derived from these keys, so a
@@ -604,7 +607,7 @@ function getTransitDays(state, zip) {
     queueLiveTransit(_lz, state);
   }
   if (HAS_ZONE_MAP && zip && zip.length >= 3) {
-    const pfx = zip.substring(0, 3);
+    const pfx = String(zip).replace(/[^0-9]/g, "").substring(0, 3).padStart(3, "0");
     if (ZONE_MAP[pfx]) return ZONE_MAP[pfx];
   }
   return TRANSIT_DAYS[state] || PCF.default_transit_days;
@@ -646,12 +649,24 @@ function toYMD(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart
 // to undefined and fell through to [], so this list was empty on every flat
 // calculator for its whole life — isBusinessDay() never saw a holiday, the DatePicker
 // never greyed one out, and Christmas Day was a selectable delivery date.
+// Fourth Thursday of November and the Friday after, this year and next, as YYYY-MM-DD.
+function ppsThanksgivingClosures() {
+  const out = [], y0 = new Date().getFullYear();
+  for (let y = y0; y <= y0 + 1; y++) {
+    const first = new Date(y, 10, 1).getDay();
+    const day = 1 + ((4 - first + 7) % 7) + 21;
+    out.push(`${y}-11-${String(day).padStart(2, "0")}`, `${y}-11-${String(day + 1).padStart(2, "0")}`);
+  }
+  return out;
+}
+
 const SHOP_CLOSURES = _CFG.closures || [
   // Annual recurring (MM-DD). Same set as pps_default_config().
   "01-01",  // New Year's Day
   "07-04",  // Independence Day
-  "11-28",  // Thanksgiving (approx — update yearly)
-  "11-29",  // Day after Thanksgiving
+  // Thanksgiving moves (fourth Thursday of November), so it cannot be an MM-DD. The
+  // old "11-28"/"11-29" pair missed it in 2026 (26th/27th) and most other years.
+  ...ppsThanksgivingClosures(),
   "12-24",  // Christmas Eve
   "12-25",  // Christmas Day
 ];
@@ -683,7 +698,9 @@ function isBusinessDay(d) {
   const dow = d.getDay();
   if (dow === 0 || dow === 6) return false;
   const mmdd = String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
-  const ymd = d.toISOString().split("T")[0];
+  // Local date, not toISOString(): that is UTC, so after 5pm in Phoenix it names
+  // tomorrow and a dated closure was tested against the wrong day.
+  const ymd = d.getFullYear() + "-" + mmdd;
   for (const c of SHOP_CLOSURES) { if (c === mmdd || c === ymd) return false; }
   return true;
 }
@@ -734,7 +751,7 @@ function calculate(c) {
   }
 
   const qty = c.qty;
-  if (qty < 1) return { error: ["Enter quantity"] };
+  if (!(qty >= 1)) return { error: ["Enter quantity"] };   // !(>=) so NaN is refused too
   const fold = { val: "flat", panels: 1, label: "Flat" };
   const panels = 1;
   const pressSheets = qty / imp;
@@ -2888,6 +2905,7 @@ function buildTicket(config, result) {
   push("Proof", config.proof >= 3 ? "Hardcopy proof, mailed before printing" : config.proof > 0 ? "Digital proof by staff before printing" : "Self-approved online (no staff proof)");
   if (config.proof >= 3) push("Proof ship-to", config.proofAddrSame === false ? ppsFmtAddr(config.proofAddr) : "Same as the order ship-to");
   const _art = ART_OPTS.find(x => x.val === config.artwork); push("Artwork", _art ? _art.label : "unknown");
+  if (config.artwork >= 2 && config.artwork < 4 && Number(config.artEditPages) > 0) push("Pages needing edits", String(Number(config.artEditPages)));
   const _bld = BLEED_OPTS.find(x => x.val === config.bleed); if (_bld && _bld.val > 0) push("Bleed", _bld.label);
   if (config.canvaLink) push("Canva link", config.canvaLink);
   if (config.canvaInstructions && String(config.canvaInstructions).trim()) push("Special instructions", String(config.canvaInstructions).trim());
@@ -2965,6 +2983,7 @@ function buildMetadata(config, result) {
     coating: config.coating,
     paper: config.paper,
     artwork: config.artwork,
+    artEditPages: config.artEditPages || 0,
     bleed: config.bleed,
     proof: config.proof,
     proofAddrSame: config.proofAddrSame,
@@ -2985,7 +3004,8 @@ function buildMetadata(config, result) {
     estCartons: sh.estCartons,
     transitDays: sh.transitDays,
     productionBizDays: sh.productionBizDays,
-    requestedBizDays: sh.bizDaysToDate || sh.freeDeliveryBizDays,
+    // The days actually quoted: a too-soon or past date is not what the price is for.
+    requestedBizDays: (sh.needByValid && !sh.tooSoon && sh.bizDaysToDate) || sh.freeDeliveryBizDays,
     freeDeliveryBizDays: sh.freeDeliveryBizDays,
     rushMultiplier: sh.rushMultiplier,
     rushCost: sh.rushCost,
@@ -3482,7 +3502,8 @@ function App() {
       const rc = JSON.parse(json);
 
       // Quantity
-      if (rc.qty != null) setQty(Math.max(1, Math.round(Number(rc.qty))));
+      // Math.max(1, NaN) is NaN: a non-numeric qty priced "$NaN" and still posted.
+      if (rc.qty != null) { const _q = Math.round(Number(rc.qty)); if (isFinite(_q) && _q >= 1) setQty(Math.min(99999, _q)); }
 
       // Size mode + dimensions
       if (rc.sizeMode) setSizeMode(rc.sizeMode);
@@ -3517,6 +3538,10 @@ function App() {
       // Shipping (no date — recalculated fresh)
       if (rc.shipState) setShipState(rc.shipState);
       if (rc.shipAddr) setShipAddr(rc.shipAddr);
+      // A hardcopy proof going somewhere else: an edited line fell back to "same as
+      // the ship-to" and the proof went to the wrong address (audit 2026-09-27).
+      if (rc.proofAddrSame === false) setProofAddrSame(false);
+      if (rc.proofAddr && typeof rc.proofAddr === "object") setProofAddr(p => ({ ...p, ...rc.proofAddr }));
 
       // Existing artwork (edit mode — file already on server)
       if (rc.artworkPath) setArtFiles({ type: "existing", path: rc.artworkPath });
@@ -3573,6 +3598,10 @@ function App() {
   if (!String(shipAddr.city || "").trim())    _destMissing.push("city");
   if (!String(shipState || "").trim())        _destMissing.push("state");
   if (!String(shipAddr.zip || "").trim())     _destMissing.push("ZIP code");
+  // A ZIP the carrier cannot use is as missing as no ZIP: the server refuses it at
+  // Add to Order, which is after the artwork has uploaded. Four digits is nearly
+  // always a New England ZIP that lost its leading zero in a spreadsheet.
+  else if (!/^\d{5}(-\d{4})?$/.test(String(shipAddr.zip).trim())) _destMissing.push(/^\d{4}$/.test(String(shipAddr.zip).trim()) ? "a 5-digit ZIP code (did you mean 0" + String(shipAddr.zip).trim() + "?)" : "a 5-digit ZIP code");
   const missingDest = _destMissing.length > 0;
   // Name what is missing rather than repeat one generic warning: someone who has filled
   // three of the four fields needs to know which one is still empty.
@@ -3602,6 +3631,14 @@ function App() {
 
   // Shippo live transit: re-run the pricing memo when a live lookup lands.
   const [ltTick, setLtTick] = useState(0);
+  // The quote is a function of the clock: the shop's today and its order cutoff. A tab
+  // left open across the cutoff or midnight kept quoting the earlier day's dates and
+  // price until something else changed, and submitted them. Re-quote when the shop day moves.
+  useEffect(() => {
+    let day = toYMD(getShopToday());
+    const id = setInterval(() => { const d = toYMD(getShopToday()); if (d !== day) { day = d; setLtTick(t => t + 1); } }, 60000);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => {
     const _f = () => setLtTick(t => t + 1);
     window.addEventListener("pps-live-transit", _f);
@@ -3921,6 +3958,29 @@ function App() {
   const handleAddToOrder = async () => {
     if (!result || result.error || submitting) return;
     if (missingDest) { focusShipping(); return; }
+    // A picked date the shop can no longer meet (passed, or inside production since the
+    // tab was opened, or restored from a reorder) used to be dropped in silence and the
+    // order quoted at the free-delivery date. The customer is still expecting theirs.
+    if (needByDate && result.shipping && (result.shipping.tooSoon || !result.shipping.needByValid)) {
+      alert(result.shipping.tooSoon
+        ? "We can no longer deliver by the date you picked. The earliest possible delivery is " + result.shipping.earliestDate + ".\n\nPlease pick another date, or clear it for free delivery. Your order has not been placed."
+        : "The delivery date you picked has passed.\n\nPlease pick another date, or clear it for free delivery. Your order has not been placed.");
+      return;
+    }
+    // A hardcopy proof sent to a different address needs that address. Blank, it was
+    // caught only by the next morning's exceptions email, after the order was placed.
+    if (proof >= 3 && proofAddrSame === false) {
+      const _pa = proofAddr || {}, _pm = [];
+      if (!String(_pa.name || "").trim()) _pm.push("name");
+      if (!String(_pa.street || "").trim()) _pm.push("street address");
+      if (!String(_pa.city || "").trim()) _pm.push("city");
+      if (!String(_pa.state || "").trim()) _pm.push("state");
+      if (!/^\d{5}(-\d{4})?$/.test(String(_pa.zip || "").trim())) _pm.push("a 5-digit ZIP code");
+      if (_pm.length) {
+        alert("Where should we mail the hardcopy proof? Please add the proof address's " + _pm.join(", ") + ".\n\nOr choose to send it to the order's shipping address. Your order has not been placed.");
+        return;
+      }
+    }
     // Artwork must be approved before it can be ordered. Until now nothing
     // enforced this: `approved` lives inside the artwork component and the only
     // thing crossing to the parent was {type, list}, so an order placed without
@@ -3966,7 +4026,7 @@ function App() {
       sizeMode, sizeLabel, longEdge: activeLongEdge, shortEdge: activeShortEdge,
       frontColor, coating,
       paper,
-      artwork, bleed, proof,
+      artwork, artEditPages, bleed, proof,
       proofAddrSame, proofAddr,
       canvaLink, canvaInstructions,
       shipState, shipAddr, needByDate,
@@ -4196,7 +4256,14 @@ function App() {
                   <span>Choose Files</span>
                   <input type="file" multiple accept=".pdf,.ai,.eps,.tif,.tiff,.jpg,.jpeg,.png,.txt" onChange={e=>{
                     const files=Array.from(e.target.files||[]);
-                    if(files.length) setReferenceFiles(prev=>[...prev,...files.map(f=>({name:f.name,size:f.size,file:f}))]);
+                    // Checked here, when they are picked: since 2026-09-26 a reference file the
+                    // server refuses stops the whole order, so an unsupported one must be
+                    // turned away now, with the reason — not at checkout.
+                    const _okRef=/\.(pdf|ai|eps|tiff?|jpe?g|png|txt)$/i, _maxRef=(window.PPS_CONFIG||{}).maxUpload||0;
+                    const _badRef=files.filter(f=>!_okRef.test(f.name)||(_maxRef&&f.size>_maxRef));
+                    const _goodRef=files.filter(f=>_badRef.indexOf(f)<0);
+                    if(_badRef.length) alert("These can't be attached here:\n\n"+_badRef.map(f=>"• "+f.name+(_okRef.test(f.name)?" (over the "+Math.round(_maxRef/1048576)+" MB upload limit)":"")).join("\n")+"\n\nReference files can be PDF, AI, EPS, TIFF, JPG, PNG or TXT. Please send anything else to us after ordering.");
+                    if(_goodRef.length) setReferenceFiles(prev=>[...prev,..._goodRef.map(f=>({name:f.name,size:f.size,file:f}))]);
                     e.target.value="";
                   }} style={{display:"none"}}/>
                 </label>
@@ -4355,6 +4422,7 @@ function App() {
                   earliestDate={r.shipping.earliestYMD} freeDate={r.shipping.freeDeliveryYMD}/>
                 {needByDate&&r.shipping.needByPast&&<p style={ST.err}>This date has passed — please select a future date</p>}
                 {needByDate&&!r.shipping.needByValid&&!r.shipping.needByPast&&<p style={ST.err}>Date must be in the future</p>}
+                {needByDate&&r.shipping.tooSoon&&<p style={ST.err}>We can no longer deliver by this date. The earliest possible is {r.shipping.earliestDate}. Pick another date or clear it.</p>}
               </div>
 
               {debugUnlocked&&r.shipping.needByValid&&!r.shipping.tooSoon&&r.shipping.rushMultiplier>1&&(

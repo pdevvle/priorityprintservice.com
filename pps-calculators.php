@@ -35,9 +35,43 @@ add_filter( 'pre_term_description', 'wp_filter_post_kses' );
 function pps_get_closures() {
     if ( function_exists( 'pps_get_config' ) ) {
         $cfg = pps_get_config();
-        return isset( $cfg['closures'] ) ? $cfg['closures'] : array();
+        $c   = $cfg['closures'] ?? array();
+        // Always a list of strings. A value saved as text instead of a list made
+        // in_array() throw inside the delivery-date guard on every checkout line
+        // (audit 2026-09-27) — a settings slip must not be able to stop orders.
+        if ( is_string( $c ) ) {
+            $j = json_decode( $c, true );
+            $c = is_array( $j ) ? $j : preg_split( '/[\s,]+/', $c );
+        }
+        if ( ! is_array( $c ) ) return array();
+        return array_values( array_filter( array_map( static function( $v ) { return is_scalar( $v ) ? trim( (string) $v ) : ''; }, $c ), 'strlen' ) );
     }
-    return array( '01-01', '07-04', '12-24', '12-25', '11-28', '11-29' );
+    // Thanksgiving is the fourth Thursday, never a fixed MM-DD.
+    $out = array( '01-01', '07-04', '12-24', '12-25' );
+    $y0  = (int) gmdate( 'Y' );
+    foreach ( array( $y0, $y0 + 1 ) as $y ) {
+        $tg    = strtotime( "fourth thursday of november $y" );
+        $out[] = gmdate( 'Y-m-d', $tg );
+        $out[] = gmdate( 'Y-m-d', $tg + 86400 );
+    }
+    return $out;
+}
+
+/**
+ * The shop's timezone, always a valid one. The admin field was stored unvalidated and
+ * used in `new DateTimeZone()` on every checkout line: a blank or mistyped value
+ * ("Arizona") threw and refused every order (audit 2026-09-27).
+ */
+function pps_shop_timezone() {
+    $tz = 'America/Phoenix';
+    if ( function_exists( 'pps_get_config' ) ) {
+        $cfg = pps_get_config();
+        $want = trim( (string) ( $cfg['pcf']['shop_timezone'] ?? '' ) );
+        if ( $want !== '' ) {
+            try { new DateTimeZone( $want ); $tz = $want; } catch ( \Throwable $e ) { /* keep the default */ }
+        }
+    }
+    return $tz;
 }
 
 /**
@@ -321,12 +355,7 @@ function pps_registry_product_ids( $products_str ) {
  * @return string|null Formatted date, or null if neither source yields one.
  */
 function pps_quoted_delivery_date( $metadata_json, $biz_days ) {
-    $tz  = 'America/Phoenix';
-    if ( function_exists( 'pps_get_config' ) ) {
-        $cfg = pps_get_config();
-        $tz  = $cfg['pcf']['shop_timezone'] ?? $tz;
-    }
-    $zone = new DateTimeZone( $tz );
+    $zone = new DateTimeZone( pps_shop_timezone() );
 
     $meta = json_decode( (string) $metadata_json, true );
     $ymd  = is_array( $meta ) ? trim( (string) ( $meta['estimatedDeliveryDate'] ?? '' ) ) : '';
@@ -1414,6 +1443,22 @@ add_action( 'wp', function() {
 add_action( 'wp_ajax_pps_upload_artwork', 'pps_ajax_upload_artwork' );
 add_action( 'wp_ajax_nopriv_pps_upload_artwork', 'pps_ajax_upload_artwork' );
 
+/**
+ * What a file really is, from its first bytes. PDF: the header may sit anywhere in
+ * the first 1024 bytes — the PDF format and pdf.js both allow leading bytes, so a
+ * file the calculator had just previewed was refused for a prefix nobody can see.
+ * tools-upload-endpoint-test.php is the gate.
+ */
+function pps_artwork_sniff_type( $head ) {
+    $head = (string) $head;
+    if ( strncmp( $head, "\xFF\xD8\xFF", 3 ) === 0 ) return 'jpg';
+    if ( strncmp( $head, "\x89PNG\r\n\x1a\n", 8 ) === 0 ) return 'png';
+    if ( strncmp( $head, "II*\x00", 4 ) === 0 || strncmp( $head, "MM\x00*", 4 ) === 0 ) return 'tif';
+    $p = strpos( substr( $head, 0, 1024 ), '%PDF-' );
+    if ( $p !== false ) return 'pdf';
+    return '';
+}
+
 function pps_ajax_upload_artwork() {
     check_ajax_referer( 'pps_upload_artwork', 'nonce' );
 
@@ -1454,34 +1499,38 @@ function pps_ajax_upload_artwork() {
         wp_send_json_error( 'File too large (max 200MB).' );
     }
 
-    // Magic-byte validation: the file's leading bytes must match its claimed
-    // extension — blocks executables/polyglots renamed to an allowed type.
+    // Magic-byte validation: the file's content must be the kind of file it claims
+    // to be — blocks executables/polyglots renamed to an allowed type.
     $fh   = fopen( $file['tmp_name'], 'rb' );
-    $head = $fh ? (string) fread( $fh, 16 ) : '';
+    $head = $fh ? (string) fread( $fh, 1024 ) : '';
     if ( $fh ) {
         fclose( $fh );
     }
+    $sniffed  = pps_artwork_sniff_type( $head );
     $magic_ok = false;
     switch ( $ext ) {
         case 'pdf':
-            $magic_ok = strncmp( $head, '%PDF', 4 ) === 0;
+            $magic_ok = $sniffed === 'pdf';
             break;
         case 'jpg':
         case 'jpeg':
-            $magic_ok = strncmp( $head, "\xFF\xD8\xFF", 3 ) === 0;
-            break;
         case 'png':
-            $magic_ok = strncmp( $head, "\x89PNG\r\n\x1a\n", 8 ) === 0;
-            break;
         case 'tif':
         case 'tiff':
-            $magic_ok = strncmp( $head, "II*\x00", 4 ) === 0 || strncmp( $head, "MM\x00*", 4 ) === 0;
+            // An image is accepted as whatever image it really is. A PNG saved as
+            // ".jpg" displays normally everywhere, so the customer cannot see the
+            // problem; refusing it stopped the order (2026-09-27). Stored under its
+            // true type so everything downstream opens it as what it is.
+            if ( in_array( $sniffed, array( 'jpg', 'png', 'tif' ), true ) ) {
+                $magic_ok = true;
+                $ext      = $sniffed;
+            }
             break;
         case 'eps':
             $magic_ok = strncmp( $head, '%!PS', 4 ) === 0 || strncmp( $head, "\xC5\xD0\xD3\xC6", 4 ) === 0;
             break;
         case 'ai': // modern AI = PDF-compatible; legacy AI = PostScript
-            $magic_ok = strncmp( $head, '%PDF', 4 ) === 0 || strncmp( $head, '%!PS', 4 ) === 0;
+            $magic_ok = $sniffed === 'pdf' || strncmp( $head, '%!PS', 4 ) === 0;
             break;
         case 'txt': // generated manifests: small, and no executable headers
             $magic_ok = $file['size'] <= 1024 * 1024
@@ -2134,7 +2183,7 @@ function pps_ajax_add_to_cart() {
     // sanitize_*() does not undo it, so without wp_unslash an apostrophe survives as
     // a literal backslash all the way into the cart and checkout summary — e.g.
     // "I don\'t have bleeds". Every other $_POST read in this file already unslashes.
-    $summary    = sanitize_textarea_field( wp_unslash( $_POST['pps_summary'] ?? '' ) );
+    $summary    = pps_clean_text( wp_unslash( $_POST['pps_summary'] ?? '' ), true, 8000 );
     $metadata   = wp_unslash( $_POST['pps_metadata'] ?? '{}' );
     $biz_days   = intval( $_POST['pps_biz_days'] ?? 5 );
 
@@ -2142,9 +2191,24 @@ function pps_ajax_add_to_cart() {
         wp_send_json_error( 'Invalid product or price.' );
     }
 
-    json_decode( $metadata );
-    if ( json_last_error() !== JSON_ERROR_NONE ) {
+    $meta_obj = json_decode( $metadata, true );
+    // Valid JSON is not enough: a bare string or number here passed, and then threw a
+    // TypeError while the order was being written (audit 2026-09-27).
+    if ( json_last_error() !== JSON_ERROR_NONE || ! is_array( $meta_obj ) ) {
         wp_send_json_error( 'Invalid metadata JSON.' );
+    }
+
+    // The delivery ZIP must be a real one. A one- or two-digit ZIP left the calculator
+    // with no destination, so it quoted the earliest possible date with no rush charge
+    // — a free overnight promise — and a four-digit one (a Boston ZIP that lost its
+    // leading zero) priced transit from the wrong state and went onto the order as the
+    // shipping address (audit 2026-09-27). The calculators check this too; this is the
+    // line that holds if a cached older page does not.
+    $zip_raw = '';
+    if ( is_array( $meta_obj['shipAddr'] ?? null ) && isset( $meta_obj['shipAddr']['zip'] ) ) $zip_raw = (string) $meta_obj['shipAddr']['zip'];
+    elseif ( isset( $meta_obj['shipZip'] ) ) $zip_raw = (string) $meta_obj['shipZip'];
+    if ( trim( $zip_raw ) !== '' && ! preg_match( '/^\s*\d{5}(-\d{4})?\s*$/', $zip_raw ) ) {
+        wp_send_json_error( 'Please enter the 5-digit ZIP code for the delivery address (for example 02134, not 2134).' );
     }
 
     // ── Payload tripwire (2026-07-27) ──
@@ -2247,6 +2311,11 @@ function pps_ajax_add_to_cart() {
         // what refuses a cart quantity edit with "Field … is required". WCPA
         // honours this flag (process.php: `if (isset($cart_item_data['wcpaIgnore']))`).
         'wcpaIgnore'   => true,
+        // Every job is its own line. Two identical jobs used to merge into one line
+        // at quantity 2 — charged twice, produced once — and an "Update Order" that
+        // changed nothing re-added onto the SAME line, which the edit then removed,
+        // deleting the job from the cart (audit 2026-09-27).
+        'pps_uid'      => function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : uniqid( 'pps', true ),
     );
 
     // Artwork: direct relative path from upload endpoint
@@ -2328,7 +2397,7 @@ function pps_ajax_add_to_cart() {
         pps_prefill_customer_shipping( $metadata );
 
         // Edit mode: now safe to remove old item since new one succeeded
-        if ( $edit_key ) {
+        if ( $edit_key && $edit_key !== $cart_item_key ) {
             WC()->cart->remove_cart_item( $edit_key );
             WC()->session->set( 'pps_edit_key_' . $product_id, null );
         }
@@ -2489,6 +2558,61 @@ function pps_carry_edit_artwork( array $new, $old ) {
     return $new;
 }
 
+/**
+ * A calculator line is one whole job, priced as a total: its quantity is always 1.
+ * The quantity box was only hidden on the classic cart, so a block cart or a direct
+ * request could raise it and charge the job twice while production made it once.
+ */
+add_filter( 'woocommerce_is_sold_individually', function( $individually, $product ) {
+    if ( is_object( $product ) && function_exists( 'pps_get_calculator_for_product' )
+        && pps_get_calculator_for_product( $product->get_id() ) ) {
+        return true;
+    }
+    return $individually;
+}, 10, 2 );
+
+/**
+ * A quote is a promise about dates. A cart left open over a weekend kept the delivery
+ * date it was quoted, and could be paid for once the shop could no longer meet it
+ * (audit 2026-09-27). Refused only when that is actually true — the quoted delivery is
+ * now earlier than production + 1 working day from the shop's next working day, the
+ * calculator's own "too soon" rule — never merely because the quote is from an earlier
+ * day. A free-delivery quote starts production the day it is made, so refusing on a
+ * past production start would turn away every cart added on Friday and paid on
+ * Saturday. The shop's cutoff hour is deliberately ignored here: a difference of
+ * opinion about today's cutoff must never block an order the calculator just quoted.
+ * Checked on the cart, the checkout and the block checkout (same action).
+ */
+function pps_quote_is_stale( $metadata, DateTime $now ) {
+    $m = is_array( $metadata ) ? $metadata : json_decode( (string) $metadata, true );
+    if ( ! is_array( $m ) ) return false;
+    $ymd  = (string) ( $m['estimatedDeliveryDate'] ?? '' );
+    $prod = isset( $m['productionBizDays'] ) && is_numeric( $m['productionBizDays'] ) ? (int) $m['productionBizDays'] : -1;
+    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) || $prod < 0 ) return false;
+    $start = new DateTime( $now->format( 'Y-m-d' ), $now->getTimezone() );
+    for ( $i = 0; $i < 30 && ! pps_is_business_day( $start ); $i++ ) $start->modify( '+1 day' );
+    $earliest = pps_add_business_days( $start, $prod + 1 );
+    return $ymd < $earliest->format( 'Y-m-d' );
+}
+
+function pps_refuse_stale_quotes() {
+    try {
+        if ( ! function_exists( 'WC' ) || ! WC()->cart ) return;
+        $now = new DateTime( 'now', new DateTimeZone( pps_shop_timezone() ) );
+        foreach ( WC()->cart->get_cart() as $ci ) {
+            if ( empty( $ci['pps_metadata'] ) || ! pps_quote_is_stale( $ci['pps_metadata'], $now ) ) continue;
+            $name = ( isset( $ci['data'] ) && is_object( $ci['data'] ) ) ? $ci['data']->get_name() : 'a print job';
+            wc_add_notice( sprintf(
+                'We can no longer deliver %s by the date it was quoted for. Please open it with "Edit" in your cart to choose a date we can keep, then check out.',
+                esc_html( $name )
+            ), 'error' );
+        }
+    } catch ( \Throwable $e ) {
+        // A check that breaks the cart is worse than no check.
+    }
+}
+add_action( 'woocommerce_check_cart_items', 'pps_refuse_stale_quotes' );
+
 // ═══════════════════════════════════════════════════════════════
 // CART: SESSION PERSISTENCE
 // ═══════════════════════════════════════════════════════════════
@@ -2629,7 +2753,12 @@ add_filter( 'get_post_metadata', function( $value, $object_id, $meta_key, $singl
  */
 add_action( 'woocommerce_after_checkout_validation', function( $data, $errors ) {
     try {
-        if ( ! is_wp_error( $errors ) || ! $errors->get_error_codes() ) return;   // checkout is fine
+        // Refusals arrive two ways: in the validation error list, and as error notices
+        // (WCPA's "Addon data missing", stock, coupons) — the very refusal this log was
+        // written for came the second way and was never recorded (audit 2026-09-27).
+        $notices = function_exists( 'wc_get_notices' ) ? (array) wc_get_notices( 'error' ) : array();
+        $has_err = is_wp_error( $errors ) && $errors->get_error_codes();
+        if ( ! $has_err && ! $notices ) return;                                  // checkout is fine
         if ( ! function_exists( 'WC' ) || ! WC()->cart ) return;
 
         $items = array();
@@ -2641,10 +2770,16 @@ add_action( 'woocommerce_after_checkout_validation', function( $data, $errors ) 
         if ( ! $items ) return;                                                  // not our cart
 
         $messages = array();
-        foreach ( $errors->get_error_codes() as $code ) {
-            foreach ( (array) $errors->get_error_messages( $code ) as $m ) {
-                $messages[] = mb_substr( wp_strip_all_tags( (string) $m ), 0, 300 );
+        if ( $has_err ) {
+            foreach ( $errors->get_error_codes() as $code ) {
+                foreach ( (array) $errors->get_error_messages( $code ) as $m ) {
+                    $messages[] = mb_substr( wp_strip_all_tags( (string) $m ), 0, 300 );
+                }
             }
+        }
+        foreach ( $notices as $n ) {
+            $m = is_array( $n ) ? ( $n['notice'] ?? '' ) : $n;
+            $messages[] = mb_substr( wp_strip_all_tags( (string) $m ), 0, 300 );
         }
 
         $log = get_option( 'pps_checkout_refusals', array() );
@@ -3066,11 +3201,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
     // The date the customer was quoted, not a fresh count from checkout time. Both are
     // usually the same day; they diverge exactly when it matters — a cart left overnight,
     // an order placed after the 2pm cutoff, or a delivery date the customer chose.
-    $tz = 'America/Phoenix';
-    if ( function_exists( 'pps_get_config' ) ) {
-        $cfg = pps_get_config();
-        $tz  = $cfg['pcf']['shop_timezone'] ?? $tz;
-    }
+    $tz = pps_shop_timezone();
     $biz_days  = intval( $values['pps_biz_days'] ?? 5 );
     $quoted    = pps_quoted_delivery_date( $values['pps_metadata'] ?? '', $biz_days );
     $delivery  = $quoted !== null
@@ -3148,59 +3279,9 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
     $item->add_meta_data( 'Order Summary', $values['pps_summary'] ?? '', true );
 
     // ── Missive-parseable fields ──
-    if ( $full ) {
+    if ( is_array( $full ) && $full ) {
         // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
-        $sets     = is_array( $full['sets'] ?? null ) ? $full['sets'] : array();
-        $totalQty = array_sum( array_column( $sets, 'qty' ) );
-        $totalPg  = array_sum( array_column( $sets, 'pages' ) );
-        $size     = pps_spec_size_label( $full );
-        $iPaper   = is_array( $full['insidePaper'] ?? null ) ? ( $full['insidePaper']['label'] ?? '' ) : '';
-        $iColor   = ( $full['insideColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
-        // An order that took the prepress escape hatch was never approved by
-        // anyone; saying SelfApproved on its ticket would be a lie prepress acts on.
-        $proof    = $prepress !== '' ? 'PREPRESS-REVIEW'
-            : ( ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' ) );
-        $rush     = ( $full['rushCost'] ?? 0 ) > 0 ? 'RUSH' : 'Standard';
-        $days     = intval( $full['days'] ?? $biz_days );
-        $sets_ct  = count( $sets );
-
-        // Cover stock and color are priced and printed separately from the inside, so a
-        // spec that names only the inside paper is a spec production cannot work from.
-        $cPaper = is_array( $full['coverPaper'] ?? null ) ? ( $full['coverPaper']['label'] ?? '' ) : '';
-        $cColor = ( $full['coverColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
-        $cover  = ( ( $full['coverMode'] ?? '' ) === 'same' || $cPaper === '' )
-            ? 'SELF-COVER'
-            : 'COVER: ' . $cPaper . '/' . $cColor;
-
-        // Add-ons. Since 2026-09-21 every calculator resolves its finishing choices to the
-        // words the customer chose and posts them as `addons` in the metadata; older
-        // builds are read back out of the summary text. See pps_order_addons() for why
-        // the summary alone was not enough.
-        $addons = pps_order_addons( $full, (string) ( $values['pps_summary'] ?? '' ) );
-
-        $ship = trim( (string) ( $full['shipState'] ?? '' ) . ' ' . (string) ( $full['shipZip'] ?? '' ) );
-        $job  = isset( $sets[0]['name'] ) ? trim( (string) $sets[0]['name'] ) : '';
-
-        $spec_parts = array_merge(
-            array(
-                $size,
-                $totalQty . 'qty',
-                $totalPg . 'pg',
-                $sets_ct . ( $sets_ct === 1 ? 'set' : 'sets' ),
-                'INSIDE: ' . $iPaper . '/' . $iColor,
-                $cover,
-            ),
-            $addons,
-            array(
-                $proof,
-                $rush,
-                $days . 'days',
-            )
-        );
-        if ( $ship !== '' ) $spec_parts[] = 'SHIP: ' . $ship;
-        if ( $job !== '' )  $spec_parts[] = 'JOB: ' . $job;
-
-        $spec = implode( ' | ', array_filter( $spec_parts, static function( $p ) { return trim( (string) $p ) !== ''; } ) );
+        list( $spec, $addons ) = pps_build_spec( $full, (string) ( $values['pps_summary'] ?? '' ), $prepress, $biz_days );
         $item->add_meta_data( 'PPS-Spec', $spec, true );
 
         // The add-ons as their own visible line — on the admin notification, the
@@ -3217,6 +3298,86 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         }
     }
 }, 10, 4 );
+
+/**
+ * PPS-Spec, the pipe-delimited line Missive parses, and the add-on words it carries.
+ * Lifted out of the line-item hook (2026-09-27) so the flats' spec and the escaping can
+ * be tested without WooCommerce. Returns array( $spec, $addons ).
+ */
+function pps_build_spec( array $full, $summary, $prepress, $biz_days ) {
+    // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
+    $sets     = is_array( $full['sets'] ?? null ) ? $full['sets'] : array();
+    $totalQty = array_sum( array_map( 'intval', array_column( $sets, 'qty' ) ) );
+    $totalPg  = array_sum( array_map( 'intval', array_column( $sets, 'pages' ) ) );
+    $size     = pps_spec_size_label( $full );
+    $iPaper   = is_array( $full['insidePaper'] ?? null ) ? ( $full['insidePaper']['label'] ?? '' ) : '';
+    $iColor   = ( $full['insideColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
+    // The five flats carry no `sets` and no inside/cover: they have one quantity,
+    // one stock and a colour per side. Read only the booklet keys, their spec said
+    // "0qty | 0pg | 0sets | INSIDE: /Color" on every flat order Missive saw
+    // (audit 2026-09-27). Same positions, so a rule written for booklets still
+    // finds quantity in slot 2.
+    $is_flat = ! $sets && isset( $full['qty'] );
+    if ( $is_flat ) {
+        $totalQty = intval( $full['qty'] );
+        $sides    = intval( $full['sides'] ?? 2 ) === 1 ? 1 : 2;
+        $totalPg  = $sides;
+        $iPaper   = is_array( $full['paper'] ?? null ) ? ( $full['paper']['label'] ?? '' ) : '';
+        $fc = ( $full['frontColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
+        $bc = ( $full['backColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
+        $iColor   = $sides === 1 ? $fc : ( $fc === $bc ? $fc : $fc . '+' . $bc );
+    }
+    // An order that took the prepress escape hatch was never approved by
+    // anyone; saying SelfApproved on its ticket would be a lie prepress acts on.
+    $proof    = $prepress !== '' ? 'PREPRESS-REVIEW'
+        : ( ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' ) );
+    $rush     = ( $full['rushCost'] ?? 0 ) > 0 ? 'RUSH' : 'Standard';
+    $days     = intval( $full['days'] ?? $biz_days );
+    $sets_ct  = $is_flat ? 1 : count( $sets );
+
+    // Cover stock and color are priced and printed separately from the inside, so a
+    // spec that names only the inside paper is a spec production cannot work from.
+    $cPaper = is_array( $full['coverPaper'] ?? null ) ? ( $full['coverPaper']['label'] ?? '' ) : '';
+    $cColor = ( $full['coverColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
+    $cover  = $is_flat ? 'FLAT' . ( ! empty( $full['foldType'] ) && $full['foldType'] !== 'flat' ? ': ' . ( $full['foldLabel'] ?? $full['foldType'] ) : '' )
+        : ( ( ( $full['coverMode'] ?? '' ) === 'same' || $cPaper === '' )
+        ? 'SELF-COVER'
+        : 'COVER: ' . $cPaper . '/' . $cColor );
+
+    // Add-ons. Since 2026-09-21 every calculator resolves its finishing choices to the
+    // words the customer chose and posts them as `addons` in the metadata; older
+    // builds are read back out of the summary text. See pps_order_addons() for why
+    // the summary alone was not enough.
+    $addons = pps_order_addons( $full, $summary );
+
+    $ship = trim( (string) ( $full['shipState'] ?? '' ) . ' ' . (string) ( $full['shipZip'] ?? '' ) );
+    $job  = isset( $sets[0]['name'] ) ? trim( (string) $sets[0]['name'] ) : trim( (string) ( $full['jobName'] ?? '' ) );
+
+    $spec_parts = array_merge(
+        array(
+            $size,
+            $totalQty . 'qty',
+            $totalPg . 'pg',
+            $sets_ct . ( $sets_ct === 1 ? 'set' : 'sets' ),
+            'INSIDE: ' . $iPaper . '/' . $iColor,
+            $cover,
+        ),
+        $addons,
+        array(
+            $proof,
+            $rush,
+            $days . 'days',
+        )
+    );
+    if ( $ship !== '' ) $spec_parts[] = 'SHIP: ' . $ship;
+    if ( $job !== '' )  $spec_parts[] = 'JOB: ' . $job;
+
+    // A '|' inside a value (a job name "Spring | Gala") split the pipe-delimited
+    // spec Missive parses; line breaks did the same to its line rules.
+    $spec_parts = array_map( static function( $p ) { return str_replace( '|', '/', pps_clean_text( $p, false, 300 ) ); }, $spec_parts );
+    $spec = implode( ' | ', array_filter( $spec_parts, static function( $p ) { return trim( (string) $p ) !== ''; } ) );
+    return array( $spec, $addons );
+}
 
 /**
  * The Job Ticket, as text: one "Label: value" line per fact, in the order a press
@@ -3237,11 +3398,30 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
  * job came to say "cardstock" (order 87202). An older build with no `ticket` falls
  * back to its summary text, so the block is never empty.
  */
+/**
+ * Plain text for what staff and customers read (the Job Ticket, the summary, the
+ * spec). sanitize_text_field() was used here, and it strips percent-encoded octets
+ * and anything tag-shaped: a Canva link "…x=My%20Menu" became a different URL,
+ * "100%de-inked" became "100-inked", "Gala <Spring>" lost "<Spring>" (audit
+ * 2026-09-27). This keeps every character a person typed, turns angle brackets into
+ * look-alikes so nothing can be markup, and drops only control characters.
+ * $multiline keeps line breaks (the summary); otherwise they become " / ".
+ */
+function pps_clean_text( $s, $multiline = false, $max = 2000 ) {
+    $s = str_replace( array( '<', '>' ), array( '‹', '›' ), (string) $s );
+    $s = preg_replace( '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $s );
+    $s = str_replace( "\r\n", "\n", $s );
+    if ( ! $multiline ) $s = preg_replace( '/\s*\n+\s*/u', ' / ', $s );
+    $s = preg_replace( '/[ \t]+/u', ' ', $s );
+    if ( function_exists( 'wp_check_invalid_utf8' ) ) $s = wp_check_invalid_utf8( $s, true );
+    return trim( function_exists( 'mb_substr' ) ? mb_substr( $s, 0, $max ) : substr( $s, 0, $max ) );
+}
+
 function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepress = '' ) {
     $lines = array();
     $put = static function( $label, $value ) use ( &$lines ) {
-        $label = trim( sanitize_text_field( (string) $label ) );
-        $value = trim( sanitize_text_field( (string) $value ) );
+        $label = pps_clean_text( $label, false, 80 );
+        $value = pps_clean_text( $value );
         if ( $label === '' || $value === '' ) return;
         $lines[] = $label . ': ' . $value;
     };
@@ -3257,7 +3437,7 @@ function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepre
             $put( 'Job', array_shift( $summary ) );
             foreach ( $summary as $l ) {
                 if ( preg_match( '/^(Rush|Standard delivery|Ship to):/i', $l ) ) continue;   // the server says these below
-                $lines[] = sanitize_text_field( $l );
+                $lines[] = pps_clean_text( $l );
             }
         }
         $addons = pps_order_addons( $full, (string) ( $values['pps_summary'] ?? '' ) );
@@ -3272,7 +3452,22 @@ function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepre
     } elseif ( $proof_opt > 0 ) {
         $put( 'Art status', $proof_opt >= 3 ? 'Awaiting hardcopy proof approval' : 'Awaiting digital proof approval' );
     } else {
-        $put( 'Art status', $proof_hash ? 'Self-approved online (approval bound to the print file)' : 'Self-approved online' );
+        // "Self-approved online" is only true of a file uploaded and approved in the
+        // proof. It used to be written for every proof-free order — including "Email
+        // Art After Order", Canva and the design services, where nothing had been
+        // approved or even received (audit 2026-09-27).
+        $art = round( (float) ( $full['artwork'] ?? 0.01 ), 2 );
+        if ( $art >= 2 ) {
+            $put( 'Art status', $art >= 4 ? 'Design from scratch — our designer prepares it; no customer approval yet' : 'Artwork needs edits — our designer edits it; no customer approval yet' );
+        } elseif ( abs( $art - 0.02 ) < 0.001 ) {
+            $put( 'Art status', 'NOT RECEIVED — customer will email the artwork after ordering' );
+        } elseif ( abs( $art - 0.03 ) < 0.001 ) {
+            $put( 'Art status', 'Artwork already discussed with us — confirm which files before printing' );
+        } elseif ( abs( $art - 0.04 ) < 0.001 ) {
+            $put( 'Art status', 'Canva design — download from the link above; no proof approved' );
+        } else {
+            $put( 'Art status', $proof_hash ? 'Self-approved online (approval bound to the print file)' : 'Self-approved online' );
+        }
     }
 
     $files = $values['pps_artwork_files'] ?? null;
@@ -3325,7 +3520,8 @@ function pps_order_addons( $full, $summary ) {
     if ( is_array( $full ) && isset( $full['addons'] ) && is_array( $full['addons'] ) ) {
         foreach ( $full['addons'] as $a ) {
             $label = is_array( $a ) ? ( $a['label'] ?? '' ) : $a;
-            $label = trim( sanitize_text_field( (string) $label ) );
+            // Option-table words, not customer typing: markup has no business here.
+            $label = pps_clean_text( strip_tags( (string) $label ), false, 200 );
             if ( $label !== '' && ! in_array( $label, $out, true ) ) $out[] = $label;
         }
         return array_slice( $out, 0, 20 );
@@ -3358,7 +3554,9 @@ function pps_order_addons( $full, $summary ) {
  * `Preset` goes too. It is an analytics slug, meaningless to a customer.
  */
 function pps_internal_item_meta_keys() {
-    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset', 'PPS-Prepress-Review' );
+    // 'Print File Check' is a prepress measurement ("BELOW PRINT RESOLUTION … before
+    // plating") — it was reaching customers' receipts (audit 2026-09-27).
+    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset', 'PPS-Prepress-Review', 'Print File Check' );
 }
 
 // WooCommerce renders both notifications through the same meta accessor, so the filter
@@ -3432,6 +3630,12 @@ add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatt
 function pps_apply_calculator_shipping_address( $order_or_id ) {
     $order = is_a( $order_or_id, 'WC_Order' ) ? $order_or_id : wc_get_order( $order_or_id );
     if ( ! $order ) return false;
+    // Once per order. The status hooks below are a safety net for a checkout that
+    // skipped the first call; without this they ran again on every move to
+    // processing/on-hold and put the calculator's address back over a correction
+    // staff had made (audit 2026-09-27).
+    if ( $order->get_meta( '_pps_calc_address_applied' ) ) return false;
+    $order->update_meta_data( '_pps_calc_address_applied', 1 );
 
     // A mixed cart containing a genuinely shippable product has a real WooCommerce
     // shipping address, entered at checkout. That one is authoritative — never

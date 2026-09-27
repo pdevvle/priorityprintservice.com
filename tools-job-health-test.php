@@ -126,7 +126,9 @@ $values = array( 'pps_metadata' => '{}', 'pps_artwork_files' => array( array( 'p
 fire( 'woocommerce_checkout_create_order_line_item', $item, 'k1', $values, new FakeOrder( 0 ) );
 ok( 'the print-ready file is the one measured, and the check is a visible line', strpos( (string) $item->get_meta( 'Print File Check' ), 'raster · 2 pages' ) === 0 && strpos( $item->get_meta( 'Print File Check' ), '144 DPI' ) !== false, $item->get_meta( 'Print File Check' ) );
 ok( 'the warning is kept as its own meta for the digest', strpos( (string) $item->get_meta( '_pps_print_check_warn' ), 'BELOW PRINT RESOLUTION' ) === 0 );
-ok( 'the Job Ticket ends with the print file line', preg_match( '/\nPrint file: raster · 2 pages .* — BELOW PRINT RESOLUTION: 144 DPI/s', $item->get_meta( 'Job Ticket' ) ) === 1, $item->get_meta( 'Job Ticket' ) );
+// Until 2026-09-27 the check was also appended to the Job Ticket, which is the customer's
+// receipt too: "BELOW PRINT RESOLUTION … before plating" is for prepress, not for them.
+ok( 'the Job Ticket (also the receipt) does not carry the prepress measurement', strpos( (string) $item->get_meta( 'Job Ticket' ), 'Print file:' ) === false && strpos( (string) $item->get_meta( 'Job Ticket' ), 'BELOW PRINT' ) === false, $item->get_meta( 'Job Ticket' ) );
 $o = new FakeOrder( 90001 ); $GLOBALS['fake_orders'][90001] = $o;
 fire( 'woocommerce_checkout_order_processed', 90001 );
 fire( 'woocommerce_store_api_checkout_order_processed', $o );
@@ -167,6 +169,11 @@ $orders = array(
     new FakeOrder( 108, array( new FakeItem( 'Legacy WCPA item', array() ) ) ),
     $mk( 109, 'Coupon Book', array( 'proof' => 0 ), array( '_pps_drive_missing' => '7.jpg, 8.jpg' ), 'Parker', 'Jones' ),
     $mk( 110, 'Booklet', array( 'proof' => 0 ), array( '_pps_drive_missing' => 'old-art.pdf', '_pps_artwork_on_drive' => 'yes' ) ),   // a reorder: not a loss
+    // 87272's shape: a warning from the pre-fix check, which measured the raw PDF
+    // although the order lists a print-ready file. A false alarm; not repeated.
+    $mk( 117, 'Booklet', array( 'proof' => 0 ), array( '_pps_print_check_warn' => 'BELOW PRINT RESOLUTION: 62 DPI effective',
+        '_pps_print_check' => json_encode( array( 'kind' => 'raster', 'file' => 'pps-artwork/2026/09/raw-random.pdf' ) ),
+        '_pps_artwork_files' => json_encode( array( array( 'path' => 'pps-artwork/2026/09/raw-random.pdf', 'name' => 'Journal.pdf' ), array( 'path' => 'pps-artwork/2026/09/pr-random.pdf', 'name' => 'Journal_print-ready.pdf' ) ) ) ) ),
 );
 $art = array( '_pps_artwork_path' => 'pps-artwork/2026/09/x.pdf' );
 $o111 = $mk( 111, 'Postcard', array( 'proof' => 0 ), $art ); $o111->meta = array( '_pps_drive_failed' => '2026-09-20 10:00:00', '_pps_drive_attempts' => 10 );
@@ -195,6 +202,7 @@ ok( 'a chosen-but-blank address is called out; a filled one is not', strpos( $fl
 ok( 'a Saturday delivery is flagged with its weekday', strpos( $flat, '#106 Pat Customer — Booklet — Saturday, Sep 26' ) !== false );
 ok( 'only refusals since the last digest appear, with tags stripped', strpos( $flat, 'product 22754 — Addon data missing for product 9x9' ) !== false && strpos( $flat, 'product 1 —' ) === false );
 ok( 'a non-calculator line is ignored', strpos( $flat, '#108' ) === false );
+ok( 'a pre-fix warning that measured the raw file instead of the listed print-ready one is not repeated (87272)', strpos( $flat, '#117' ) === false );
 ok( 'a customer file that never reached the server is named, with what to do', strpos( $flat, '#109 Parker Jones — Coupon Book — never reached the server: 7.jpg, 8.jpg (ask the customer to resend)' ) !== false );
 ok( 'artwork reused from an earlier order is not reported as missing', strpos( $flat, '#110' ) === false );
 ok( 'an upload that gave up is listed, and one still not there hours later', strpos( $flat, '#111 Pat Customer — upload stopped after 10 attempts' ) !== false && strpos( $flat, '#112 Pat Customer — not on Drive 5 h after the order (4 upload attempts)' ) !== false, $flat );

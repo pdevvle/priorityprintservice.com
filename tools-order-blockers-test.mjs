@@ -65,7 +65,9 @@ console.log('\n── a refused checkout on a PPS cart is recorded ──');
   ok('it runs late, after everyone else has had their say',
      /\}, 99, 2 \);/.test(block));
   ok('it does nothing when checkout is fine',
-     /get_error_codes\(\)\s*\)\s*return;/.test(block));
+     /get_error_codes\(\)\s*\)\s*return;/.test(block) || /if \( ! \$has_err && ! \$notices \) return;/.test(block));
+  // 2026-09-27: WooCommerce refusals raised as notices (not WP_Error) were missed.
+  ok('it also records refusals raised as error notices', /wc_get_notices\( 'error' \)/.test(block));
   ok('it only fires on carts that carry a calculator line',
      /pps_metadata'\]\s*\)\s*\|\|\s*isset\(\s*\$ci\['pps_price'\]/.test(block)
      && /if \( ! \$items \) return;/.test(block));
