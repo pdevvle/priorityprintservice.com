@@ -177,14 +177,22 @@ $n = pps_gdrive_resume_waiting();
 ok( 'an order that ran out of retries while Drive was down is queued again, its count reset',
     $n >= 1 && $GLOBALS['drive']['retries'] >= 1 && ! $o->get_meta( '_pps_drive_failed' ) && (int) $o->get_meta( '_pps_drive_attempts' ) === 0 );
 
-// ── 9. two jobs in one order ────────────────────────────────────────────────
-echo "\n── two jobs, same file name, one order ──\n";
+// ── 9. Drive names are the names the order lists ────────────────────────────
+// The imposition tool matches the Drive folder against _pps_artwork_files names,
+// exactly, to pick each item's print file. Renaming on upload (the "Item N - "
+// prefix of 2026-09-26) sent it to the raw file instead. Two jobs, two files each.
+echo "\n── Drive names match the order's file list ──\n";
 reset_drive(); $GLOBALS['orders'] = array();
-put( 'pps-artwork/2026/09/j1/artwork.pdf' ); put( 'pps-artwork/2026/09/j2/artwork.pdf' );
-$a = new FakeItem( array( '_pps_artwork_path' => 'pps-artwork/2026/09/j1/artwork.pdf', '_pps_artwork_files' => json_encode( array( array( 'path' => 'pps-artwork/2026/09/j1/artwork.pdf', 'name' => 'artwork.pdf' ) ) ) ) );
-$b = new FakeItem( array( '_pps_artwork_path' => 'pps-artwork/2026/09/j2/artwork.pdf', '_pps_artwork_files' => json_encode( array( array( 'path' => 'pps-artwork/2026/09/j2/artwork.pdf', 'name' => 'artwork.pdf' ) ) ) ) );
+foreach ( array( 'j1/art.pdf', 'j1/art_print-ready.pdf', 'j2/art.pdf', 'j2/art_print-ready.pdf' ) as $rel ) put( 'pps-artwork/2026/09/' . $rel );
+$mkl = function( $d ) { return json_encode( array( array( 'path' => "pps-artwork/2026/09/$d/art.pdf", 'name' => 'art.pdf' ), array( 'path' => "pps-artwork/2026/09/$d/art_print-ready.pdf", 'name' => 'art_print-ready.pdf' ) ) ); };
+$a = new FakeItem( array( '_pps_artwork_path' => 'pps-artwork/2026/09/j1/art.pdf', '_pps_artwork_files' => $mkl( 'j1' ) ) );
+$b = new FakeItem( array( '_pps_artwork_path' => 'pps-artwork/2026/09/j2/art.pdf', '_pps_artwork_files' => $mkl( 'j2' ) ) );
 run_order( 9, array( $a, $b ) );
-ok( 'each file says which job it belongs to', $GLOBALS['drive']['files'] === array( 'Item 1 - artwork.pdf', 'Item 2 - artwork.pdf' ), json_encode( $GLOBALS['drive']['files'] ) );
+ok( 'every file goes up under exactly the name the order lists — what imposition matches on',
+    $GLOBALS['drive']['files'] === array( 'art.pdf', 'art_print-ready.pdf', 'art.pdf', 'art_print-ready.pdf' ), json_encode( $GLOBALS['drive']['files'] ) );
+$ia = json_decode( (string) $a->get_meta( '_pps_drive_ids' ), true ); $ib = json_decode( (string) $b->get_meta( '_pps_drive_ids' ), true );
+ok( 'and each item records which Drive file each of its names became, so same-named files stay tellable apart',
+    is_array( $ia ) && is_array( $ib ) && $ia['art_print-ready.pdf'] !== $ib['art_print-ready.pdf'], json_encode( array( $ia, $ib ) ) );
 
 // ── 10. On Hold orders are filed too ────────────────────────────────────────
 ok( 'an On Hold order schedules its upload', preg_match( "/add_action\\(\\s*'woocommerce_order_status_on-hold',\\s*'pps_schedule_artwork_upload'/", $src ) === 1 );
