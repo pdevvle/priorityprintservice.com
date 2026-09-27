@@ -147,6 +147,7 @@ function pps_default_config() {
             'sheetsforlowcosthardcopyproof'     => 1500,
             'minimum_turnaround_days'           => 3,
             'two_staple_threshold'              => 5.25,
+            'one_staple_max_edge'               => 3.5,   // binding edge under this: one staple only
             'rc_all4_max_pages'                 => 24,
             // Comma list, NOT a number — see the string allowlist in the save
             // handler. These are the finishing codes for the all-four-corners
@@ -1557,6 +1558,7 @@ function pps_config_tab_production( $cfg ) {
             'sets_surcharge'         => array( 'Per-Set Surcharge', '$' ),
             'bleed_minimum'          => array( 'Bleed Minimum', '$' ),
             'two_staple_threshold'   => array( '2-Staple Threshold', 'in' ),
+            'one_staple_max_edge'    => array( '1-Staple Only Below', 'in' ),
             'rc_all4_max_pages'      => array( 'All-4 Corner Max', 'pages' ),
         ),
         'Turnaround' => array(

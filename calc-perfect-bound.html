@@ -610,6 +610,18 @@ function getShipCostEst(zip, lbs) {
   if (z.length !== 5 || !(lbs > 0)) return null;
   return _LIVE_COST[z + "|" + Math.ceil(lbs)] || null;
 }
+// APO / FPO / DPO: military mail is USPS-only, so no UPS ground quote or delivery date
+// means anything there (owner decision 2026-09-27: not orderable online; the shop arranges
+// these by hand). Recognised by ZIP prefix (AE 090–098, AA 340, AP 962–966), by the
+// military "state", or by APO/FPO/DPO typed as the city.
+function ppsIsMilitaryAddress(zip, state, city) {
+  const z = String(zip || "").replace(/[^0-9]/g, "").slice(0, 3);
+  if (/^(09[0-8]|340|96[2-6])$/.test(z)) return true;
+  if (/^(AA|AE|AP)$/i.test(String(state || "").trim())) return true;
+  return /^(APO|FPO|DPO)$/i.test(String(city || "").trim());
+}
+const PPS_MILITARY_MSG = "We can't ship to APO, FPO or DPO military addresses online. Please contact us and we'll arrange delivery.";
+
 function getTransitDays(state, zip) {
   const _lz = String(zip || "").replace(/[^0-9]/g, "").slice(0, 5);
   if (_lz.length === 5) {
@@ -5490,6 +5502,9 @@ function buildMetadata(config, result) {
     rushCost: sh.rushCost,
     // Production schedule
     productionStartDate: sh.productionStartYMD,
+    // The shop day this quote was made on (after the cutoff that is the next working day).
+    // The server re-quotes a cart line against it when the cart is paid later.
+    quotedOn: toYMD(getShopToday()),
     mustShipByDate: sh.mustShipYMD,
     estimatedDeliveryDate: quotedDeliveryYMD(config.needByDate, sh),
     // Computed results
@@ -6220,10 +6235,11 @@ function App(){
   // Add to Order, which is after the artwork has uploaded. Four digits is nearly
   // always a New England ZIP that lost its leading zero in a spreadsheet.
   else if (!/^\d{5}(-\d{4})?$/.test(String(shipAddr.zip).trim())) _destMissing.push(/^\d{4}$/.test(String(shipAddr.zip).trim()) ? "a 5-digit ZIP code (did you mean 0" + String(shipAddr.zip).trim() + "?)" : "a 5-digit ZIP code");
-  const missingDest = _destMissing.length > 0;
+  const militaryDest = ppsIsMilitaryAddress(shipAddr.zip, shipState, shipAddr.city);
+  const missingDest = _destMissing.length > 0 || militaryDest;
   // Name what is missing rather than repeat one generic warning: someone who has filled
   // three of the four fields needs to know which one is still empty.
-  const missingDestMsg = !missingDest ? ""
+  const missingDestMsg = militaryDest ? PPS_MILITARY_MSG : !missingDest ? ""
     : _destMissing.length >= 4 ? "Shipping info required prior to placing order"
     : "Shipping address incomplete \u2014 add " + (_destMissing.length === 1 ? _destMissing[0]
         : _destMissing.slice(0, -1).join(", ") + " and " + _destMissing[_destMissing.length - 1]);

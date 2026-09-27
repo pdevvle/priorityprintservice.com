@@ -252,11 +252,29 @@ each gated by a test first run against the live code, where it failed:
   past the cutoff, or the job grew, and the order went through at the free-delivery date with
   `requestedBizDays` still the too-short count. Now the picker says so and Add to Order stops.
   The quote also **re-runs when the shop day moves** (a 60 s check of `getShopToday()`), so a
-  tab left open overnight no longer submits yesterday's dates. On the server,
-  `pps_quote_is_stale()` refuses a cart line at checkout only when its delivery date is now
-  inside production + 1 working day — **never merely because it was quoted on an earlier
-  day**: a free-delivery quote starts production the day it is made, so that rule would turn
-  away every cart added on Friday and paid on Saturday.
+  tab left open overnight no longer submits yesterday's dates.
+- **A cart paid on a later day is re-quoted, not trusted** (owner decision 2026-09-27,
+  `pps_requote_cart()` on `woocommerce_check_cart_items`). Every calculator stamps
+  `quotedOn` (the shop day, cutoff applied) into the metadata; when the cart is checked on a
+  later day, each line is measured against today. Still inside the free window: only the
+  production dates move. A **free-delivery line that slipped** keeps its price and its date
+  moves out to the new free-delivery date. A **rush line that slipped** keeps its date and
+  is re-priced by the calculator's rule, `rush = baseTotal × free ÷ daysLeft − baseTotal`
+  (only when `pps_price − pps_rush` agrees with `baseTotal`; otherwise it asks for an Edit).
+  A date now inside production + 1 is refused. Every change is told to the customer; during
+  the checkout submission itself it is an error, so nobody is charged a price they did not
+  see, and the saved re-quote lets the next attempt through. The cutoff hour is ignored on
+  the server. A Friday free-delivery cart paid on Saturday therefore moves one working day —
+  production now starts Monday. Lines from builds without `quotedOn` get only the
+  "can it still be made" check (`pps_quote_is_stale()`). Recorded in
+  `docs/MASTER_PRICING_LOGIC.md` under "Rush re-quote on a late cart".
+- **Military addresses (APO/FPO/DPO)** are not orderable online (owner decision 2026-09-27):
+  USPS is the only carrier that delivers them and none of our dates mean anything there.
+  `ppsIsMilitaryAddress()` (ZIP 090–098 / 340 / 962–966, state AA/AE/AP, or APO/FPO/DPO as
+  the city) stops Add to Order with a contact-us message; add to cart refuses the same.
+- **One staple under 3.5″** (owner 2026-09-27): saddle stitch never prices or prints two
+  staples on a binding edge under `PCF.one_staple_max_edge` (Production tab, "1-Staple Only
+  Below", default 3.5); the control shows "Single Staple" with the reason beneath it.
 - **ZIP.** A four-digit ZIP (a New England ZIP that lost its leading zero) passed the
   calculator and was refused by the server after the artwork had uploaded. The shipping gate
   now names it ("did you mean 02134?"); the server refuses the same shape at add to cart.

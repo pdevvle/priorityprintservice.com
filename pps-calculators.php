@@ -2210,6 +2210,14 @@ function pps_ajax_add_to_cart() {
     if ( trim( $zip_raw ) !== '' && ! preg_match( '/^\s*\d{5}(-\d{4})?\s*$/', $zip_raw ) ) {
         wp_send_json_error( 'Please enter the 5-digit ZIP code for the delivery address (for example 02134, not 2134).' );
     }
+    // APO / FPO / DPO: not orderable online (owner decision 2026-09-27). The calculators
+    // stop it first; this is the backstop for an older build or a hand-made request.
+    $ship_state = strtoupper( trim( (string) ( $meta_obj['shipState'] ?? '' ) ) );
+    $ship_city  = is_array( $meta_obj['shipAddr'] ?? null ) ? strtoupper( trim( (string) ( $meta_obj['shipAddr']['city'] ?? '' ) ) ) : '';
+    if ( preg_match( '/^(09[0-8]|340|96[2-6])/', preg_replace( '/[^0-9]/', '', $zip_raw ) )
+        || in_array( $ship_state, array( 'AA', 'AE', 'AP' ), true ) || in_array( $ship_city, array( 'APO', 'FPO', 'DPO' ), true ) ) {
+        wp_send_json_error( "We can't ship to APO, FPO or DPO military addresses online. Please contact us and we'll arrange delivery." );
+    }
 
     // ── Payload tripwire (2026-07-27) ──
     // Fires only on a deliberately edited request; see pps_cart_tripwire().
@@ -2572,46 +2580,198 @@ add_filter( 'woocommerce_is_sold_individually', function( $individually, $produc
 }, 10, 2 );
 
 /**
- * A quote is a promise about dates. A cart left open over a weekend kept the delivery
- * date it was quoted, and could be paid for once the shop could no longer meet it
- * (audit 2026-09-27). Refused only when that is actually true — the quoted delivery is
- * now earlier than production + 1 working day from the shop's next working day, the
- * calculator's own "too soon" rule — never merely because the quote is from an earlier
- * day. A free-delivery quote starts production the day it is made, so refusing on a
- * past production start would turn away every cart added on Friday and paid on
- * Saturday. The shop's cutoff hour is deliberately ignored here: a difference of
- * opinion about today's cutoff must never block an order the calculator just quoted.
- * Checked on the cart, the checkout and the block checkout (same action).
+ * A quote is a promise about dates, and a cart can sit for days before it is paid. Each
+ * time WooCommerce checks the cart, every calculator line is RE-QUOTED against today
+ * instead of being trusted or refused (owner decision 2026-09-27):
+ *
+ *   - Still inside the free-delivery window: nothing the customer sees changes; the
+ *     production dates move to today so the ticket never shows a start in the past.
+ *   - A free-delivery line that has slipped (fewer working days left than delivery takes):
+ *     the date moves out to the new free-delivery date. Price unchanged.
+ *   - A rush line that has slipped: the date is kept and the rush charge is re-priced with
+ *     the calculator's own rule, rush = base × (free days ÷ days left) − base
+ *     (docs/MASTER_PRICING_LOGIC.md: grandTotal = total + rushCost).
+ *   - The date is now inside production + 1 working day: refused, as before.
+ *
+ * The customer is told about every change. During the checkout submission itself the
+ * message is an ERROR, so an order is never charged a price nobody saw; the re-quote is
+ * already saved, so the next attempt goes through. The shop's cutoff hour is deliberately
+ * ignored: a difference of opinion about today's cutoff must never block or re-price an
+ * order the calculator just quoted. Lines from builds before `quotedOn` existed get only
+ * the "can it still be made" check. `tools-server-junctures-test.php` is the gate.
  */
+function pps_shop_start_day( DateTime $now ) {
+    $start = new DateTime( $now->format( 'Y-m-d' ), $now->getTimezone() );
+    for ( $i = 0; $i < 30 && ! pps_is_business_day( $start ); $i++ ) $start->modify( '+1 day' );
+    return $start;
+}
+
+/** Working days after $a up to and including $b — the calculators' businessDaysBetween(). */
+function pps_business_days_between( DateTime $a, DateTime $b ) {
+    $d = clone $a; $n = 0;
+    for ( $i = 0; $i < 800 && $d < $b; $i++ ) {
+        $d->modify( '+1 day' );
+        if ( pps_is_business_day( $d ) ) $n++;
+    }
+    return $n;
+}
+
 function pps_quote_is_stale( $metadata, DateTime $now ) {
     $m = is_array( $metadata ) ? $metadata : json_decode( (string) $metadata, true );
     if ( ! is_array( $m ) ) return false;
     $ymd  = (string) ( $m['estimatedDeliveryDate'] ?? '' );
     $prod = isset( $m['productionBizDays'] ) && is_numeric( $m['productionBizDays'] ) ? (int) $m['productionBizDays'] : -1;
     if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) || $prod < 0 ) return false;
-    $start = new DateTime( $now->format( 'Y-m-d' ), $now->getTimezone() );
-    for ( $i = 0; $i < 30 && ! pps_is_business_day( $start ); $i++ ) $start->modify( '+1 day' );
-    $earliest = pps_add_business_days( $start, $prod + 1 );
+    $earliest = pps_add_business_days( pps_shop_start_day( $now ), $prod + 1 );
     return $ymd < $earliest->format( 'Y-m-d' );
 }
 
-function pps_refuse_stale_quotes() {
+/**
+ * Re-quote one line. Returns array( 'action' => none|refresh|moved|repriced|refuse, … ).
+ * `meta`, `price`, `rush`, `biz_days` are the line's new values when action is refresh,
+ * moved or repriced; `from` / `to` describe the change for the customer.
+ */
+function pps_requote_line( array $m, DateTime $now, $price, $rush ) {
+    $none = array( 'action' => 'none' );
+    $ymd  = (string) ( $m['estimatedDeliveryDate'] ?? '' );
+    $prod = isset( $m['productionBizDays'] ) && is_numeric( $m['productionBizDays'] ) ? (int) $m['productionBizDays'] : -1;
+    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) || $prod < 0 ) return $none;
+
+    $q     = (string) ( $m['quotedOn'] ?? '' );
+    $free  = isset( $m['freeDeliveryBizDays'] ) && is_numeric( $m['freeDeliveryBizDays'] ) ? (int) $m['freeDeliveryBizDays'] : 0;
+    $start = pps_shop_start_day( $now );
+    $today = $start->format( 'Y-m-d' );
+
+    // A build from before quotedOn, or no delivery window to work from: only ask whether
+    // the date can still be made.
+    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $q ) || $free <= 0 ) {
+        return pps_quote_is_stale( $m, $now ) ? array( 'action' => 'refuse' ) : $none;
+    }
+    if ( $q >= $today ) return $none;   // quoted today (or for a later shop day): nothing to do
+
+    $zone     = $now->getTimezone();
+    $deliver  = DateTime::createFromFormat( 'Y-m-d|', $ymd, $zone );
+    if ( ! $deliver || $deliver->format( 'Y-m-d' ) !== $ymd ) return $none;
+    $left     = pps_business_days_between( $start, $deliver );
+    $earliest = $prod + 1;
+    $transit  = isset( $m['transitDays'] ) && is_numeric( $m['transitDays'] ) ? max( 1, (int) $m['transitDays'] ) : max( 1, $free - $prod );
+    $price    = round( (float) $price, 2 );
+    $rush     = round( (float) $rush, 2 );
+    $base     = isset( $m['baseTotal'] ) && is_numeric( $m['baseTotal'] ) ? round( (float) $m['baseTotal'], 2 ) : null;
+
+    $action = 'refresh'; $new_price = $price; $new_rush = $rush; $days = $left; $new_ymd = $ymd;
+    if ( $left >= $free ) {
+        // Still a free-delivery date. Nothing the customer sees changes.
+    } elseif ( $rush <= 0.004 ) {
+        // A free-delivery line that slipped: keep the price, move the date.
+        $days    = $free;
+        $new_ymd = pps_add_business_days( clone $start, $free )->format( 'Y-m-d' );
+        $action  = 'moved';
+    } else {
+        if ( $left < $earliest ) return array( 'action' => 'refuse' );
+        // Re-price only when the line's own numbers agree with each other; otherwise we
+        // cannot know what the rush was charged on, and it is safer to ask for an edit.
+        if ( $base === null || $base <= 0 || abs( ( $price - $rush ) - $base ) > 0.05 ) return array( 'action' => 'refuse', 'reason' => 'price' );
+        $new_rush  = round( max( 0, $base * ( $free / $left ) - $base ), 2 );
+        $new_price = round( $base + $new_rush, 2 );
+        if ( $new_price > $price + 0.004 ) $action = 'repriced';
+        else { $new_price = $price; $new_rush = $rush; }
+    }
+
+    // The production schedule for the (possibly new) date, exactly as calculate() builds it.
+    $eff_transit = min( $transit, max( 1, $days - $prod ) );
+    $prod_start  = pps_add_business_days( clone $start, max( 0, $days - $eff_transit - $prod ) );
+    $must_ship   = pps_add_business_days( clone $start, max( 0, $days - $eff_transit ) );
+
+    $m2 = $m;
+    $m2['estimatedDeliveryDate'] = $new_ymd;
+    $m2['requestedBizDays']      = $days;
+    $m2['rushCost']              = $new_rush;
+    $m2['rushMultiplier']        = $new_rush > 0 && $days > 0 ? round( $free / $days, 4 ) : 1;
+    $m2['productionStartDate']   = $prod_start->format( 'Y-m-d' );
+    $m2['mustShipByDate']        = $must_ship->format( 'Y-m-d' );
+    $m2['total']                 = $new_price;
+    $m2['quotedOn']              = $today;
+    if ( $action !== 'refresh' ) {
+        $m2['requoted'] = array( 'on' => $today, 'fromDate' => $ymd, 'fromPrice' => $price, 'quotedOn' => $q );
+    }
+    return array(
+        'action' => $action, 'meta' => $m2, 'price' => $new_price, 'rush' => $new_rush, 'biz_days' => $days,
+        'from' => array( 'date' => $ymd, 'price' => $price, 'rush' => $rush, 'quotedOn' => $q ),
+        'to'   => array( 'date' => $new_ymd, 'price' => $new_price, 'rush' => $new_rush ),
+    );
+}
+
+/** The one summary line that states the delivery window, rewritten to match a re-quote. */
+function pps_requote_summary( $summary, $action, $days ) {
+    $line = $action === 'repriced' ? "Rush: {$days} business days" : ( $action === 'moved' ? "Standard delivery: {$days} business days" : null );
+    if ( $line === null ) return $summary;
+    $out = preg_replace( '/^(Rush|Standard delivery): \d+ business days$/m', $line, (string) $summary, 1, $n );
+    return $n ? $out : $summary;
+}
+
+/** True while WooCommerce is taking payment (classic or block checkout), not just showing a page. */
+function pps_checkout_is_submitting() {
+    if ( did_action( 'woocommerce_checkout_process' ) || did_action( 'woocommerce_before_checkout_process' ) ) return true;
+    $uri = (string) ( $_SERVER['REQUEST_URI'] ?? '' );
+    return defined( 'REST_REQUEST' ) && REST_REQUEST && ( $_SERVER['REQUEST_METHOD'] ?? '' ) === 'POST'
+        && strpos( $uri, '/wc/store' ) !== false && strpos( $uri, 'checkout' ) !== false;
+}
+
+function pps_requote_cart() {
     try {
         if ( ! function_exists( 'WC' ) || ! WC()->cart ) return;
-        $now = new DateTime( 'now', new DateTimeZone( pps_shop_timezone() ) );
-        foreach ( WC()->cart->get_cart() as $ci ) {
-            if ( empty( $ci['pps_metadata'] ) || ! pps_quote_is_stale( $ci['pps_metadata'], $now ) ) continue;
+        $now     = new DateTime( 'now', new DateTimeZone( pps_shop_timezone() ) );
+        $submit  = pps_checkout_is_submitting();
+        $changed = false;
+        $fmt     = static function( $ymd ) { $d = DateTime::createFromFormat( 'Y-m-d|', $ymd ); return $d ? $d->format( 'D, M j' ) : $ymd; };
+        foreach ( WC()->cart->cart_contents as $key => $ci ) {
+            if ( empty( $ci['pps_metadata'] ) ) continue;
+            $m = json_decode( (string) $ci['pps_metadata'], true );
+            if ( ! is_array( $m ) ) continue;
+            $r    = pps_requote_line( $m, $now, $ci['pps_price'] ?? 0, $ci['pps_rush'] ?? 0 );
             $name = ( isset( $ci['data'] ) && is_object( $ci['data'] ) ) ? $ci['data']->get_name() : 'a print job';
-            wc_add_notice( sprintf(
-                'We can no longer deliver %s by the date it was quoted for. Please open it with "Edit" in your cart to choose a date we can keep, then check out.',
-                esc_html( $name )
-            ), 'error' );
+            if ( $r['action'] === 'none' ) continue;
+            if ( $r['action'] === 'refuse' && ( $r['reason'] ?? '' ) === 'price' ) {
+                wc_add_notice( sprintf(
+                    'The rush price for %s was quoted on an earlier day and needs a fresh quote. Please open it with "Edit" in your cart, then check out.',
+                    esc_html( $name )
+                ), 'error' );
+                continue;
+            }
+            if ( $r['action'] === 'refuse' ) {
+                wc_add_notice( sprintf(
+                    'We can no longer deliver %s by the date it was quoted for. Please open it with "Edit" in your cart to choose a date we can keep, then check out.',
+                    esc_html( $name )
+                ), 'error' );
+                continue;
+            }
+            $meta_json = wp_json_encode( $r['meta'] );
+            $ci['pps_metadata'] = $meta_json;
+            $ci['pps_hash']     = md5( $meta_json );
+            $ci['pps_price']    = $r['price'];
+            $ci['pps_rush']     = $r['rush'];
+            $ci['pps_biz_days'] = $r['biz_days'];
+            $ci['pps_summary']  = pps_requote_summary( $ci['pps_summary'] ?? '', $r['action'], $r['biz_days'] );
+            WC()->cart->cart_contents[ $key ] = $ci;
+            $changed = true;
+            if ( $r['action'] === 'refresh' ) continue;
+            $msg = $r['action'] === 'moved'
+                ? sprintf( 'The delivery date for %1$s has moved from %2$s to %3$s. It was quoted on %4$s, and ordering it later leaves too little time for the original date at the free-delivery price. The price is unchanged. To keep %2$s instead, open it with "Edit" and choose it as a rush date.',
+                    esc_html( $name ), $fmt( $r['from']['date'] ), $fmt( $r['to']['date'] ), $fmt( $r['from']['quotedOn'] ) )
+                : sprintf( 'The rush charge for %1$s has gone from $%2$s to $%3$s (total $%4$s). It was quoted on %5$s, and ordering it later leaves fewer working days to deliver by %6$s. To pay the original price, open it with "Edit" and choose a later date.',
+                    esc_html( $name ), number_format( $r['from']['rush'], 2 ), number_format( $r['to']['rush'], 2 ), number_format( $r['to']['price'], 2 ), $fmt( $r['from']['quotedOn'] ), $fmt( $r['to']['date'] ) );
+            // While paying, stop this one submission so the new price or date is seen
+            // before anyone is charged. The re-quote is saved, so the next attempt passes.
+            wc_add_notice( $submit ? 'Please review before paying: ' . $msg : $msg, $submit ? 'error' : 'notice' );
         }
+        if ( $changed ) WC()->cart->set_session();
     } catch ( \Throwable $e ) {
         // A check that breaks the cart is worse than no check.
     }
 }
-add_action( 'woocommerce_check_cart_items', 'pps_refuse_stale_quotes' );
+add_action( 'woocommerce_check_cart_items', 'pps_requote_cart' );
+
 
 // ═══════════════════════════════════════════════════════════════
 // CART: SESSION PERSISTENCE

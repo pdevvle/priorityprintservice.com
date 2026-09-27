@@ -497,6 +497,7 @@ const PCF = Object.assign({
   rc_all4_max_pages:24,
   rc_all4_vals:"107,108",
   two_staple_threshold:5.25,     // binding edge > this = auto two staple
+  one_staple_max_edge:3.5,       // binding edge < this = one staple only (two do not fit; owner 2026-09-27)
   non_inventory_fee:35,          // surcharge for non-stock papers
   bw_discount_rate:0.3,          // press cost reduction for B&W
   easy_discount_rate:0.05,       // materials discount for easy (imp≥4) sizes
@@ -605,6 +606,18 @@ function getShipCostEst(zip, lbs) {
   if (z.length !== 5 || !(lbs > 0)) return null;
   return _LIVE_COST[z + "|" + Math.ceil(lbs)] || null;
 }
+// APO / FPO / DPO: military mail is USPS-only, so no UPS ground quote or delivery date
+// means anything there (owner decision 2026-09-27: not orderable online; the shop arranges
+// these by hand). Recognised by ZIP prefix (AE 090–098, AA 340, AP 962–966), by the
+// military "state", or by APO/FPO/DPO typed as the city.
+function ppsIsMilitaryAddress(zip, state, city) {
+  const z = String(zip || "").replace(/[^0-9]/g, "").slice(0, 3);
+  if (/^(09[0-8]|340|96[2-6])$/.test(z)) return true;
+  if (/^(AA|AE|AP)$/i.test(String(state || "").trim())) return true;
+  return /^(APO|FPO|DPO)$/i.test(String(city || "").trim());
+}
+const PPS_MILITARY_MSG = "We can't ship to APO, FPO or DPO military addresses online. Please contact us and we'll arrange delivery.";
+
 function getTransitDays(state, zip) {
   const _lz = String(zip || "").replace(/[^0-9]/g, "").slice(0, 5);
   if (_lz.length === 5) {
@@ -784,6 +797,7 @@ const SIZE_PRESETS = _cfgList(_CFG.size_presets) || [
 ];
 const ALL_SIZES = SIZE_PRESETS.flatMap(g => g.items);
 const TWO_STAPLE_THRESH = PCF.two_staple_threshold;
+const ONE_STAPLE_MAX = Number(PCF.one_staple_max_edge) || 0;
 
 // sheetLong = usable long-axis inches of the press sheet.
 //   18.5 → 13×19 stock (default); 27 → 13×27.5 stock. Short axis is always 12.5.
@@ -1083,7 +1097,9 @@ function calculate(c) {
   // Two staple: auto (no extra charge) for binding edge > 5.25"
   // Only charges when user opts in on small sizes (binding edge <= 5.25")
   const twoAuto=sz.bindEdge>TWO_STAPLE_THRESH;
-  const twoOptIn=!twoAuto&&c.twoStaple;
+  // Under ONE_STAPLE_MAX two staples do not fit on the binding edge: never priced, never printed.
+  const oneStapleOnly=!twoAuto&&ONE_STAPLE_MAX>0&&sz.bindEdge>0&&sz.bindEdge<ONE_STAPLE_MAX;
+  const twoOptIn=!twoAuto&&!oneStapleOnly&&c.twoStaple;
   const twoApplied=twoAuto||twoOptIn;
 
   const easySize=!sz.isCustom?imp>=4:false;
@@ -1412,7 +1428,7 @@ function calculate(c) {
   const saleActive=P.discSale<-0.005;
   const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
   const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
-  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,q100,coatOK,vividOK:c.insidePaper.coatable,rcAll4OK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
+  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,oneStapleOnly,q100,coatOK,vividOK:c.insidePaper.coatable,rcAll4OK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
     shipping:{hasDest:_hasDest,estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
 }
 
@@ -5760,7 +5776,7 @@ function buildTicket(config, result) {
     return `Custom ${n(Math.min(a, b))}×${n(Math.max(a, b))}"` + (config.bindDir ? ` · bound on the ${config.bindDir === "short" ? "short" : "long"} edge` : "");
   })());
   push("Sets", (config.sets || []).map(s => `${Number(s.qty || 0).toLocaleString()} × ${s.pages} pages` + (s.name ? ` "${s.name}"` : "")).join("; "));
-  push("Binding", (result && result.twoAuto) || config.twoStaple ? "Saddle stitch · two staples" : "Saddle stitch · single staple");
+  push("Binding", (result && result.twoAuto) || (config.twoStaple && !(result && result.oneStapleOnly)) ? "Saddle stitch · two staples" : "Saddle stitch · single staple");
   push("Inside", config.insidePaper && config.insidePaper.label ? `${config.insidePaper.label} · ${colorName(config.insideColor)}` : "unknown");
   push("Cover", config.coverMode !== "same" && config.coverPaper && config.coverPaper.label
     ? `${config.coverPaper.label} · ${colorName(config.coverColor)}`
@@ -5823,7 +5839,7 @@ function buildSummary(config, result) {
   }
 
   // Binding
-  const staple = r.twoAuto || config.twoStaple ? "Two Staples" : "Single Staple";
+  const staple = r.twoAuto || (config.twoStaple && !r.oneStapleOnly) ? "Two Staples" : "Single Staple";
   lines.push(staple);
 
   // Finishing — only if selected
@@ -5913,6 +5929,9 @@ function buildMetadata(config, result) {
     rushCost: sh.rushCost,
     // Production schedule
     productionStartDate: sh.productionStartYMD,
+    // The shop day this quote was made on (after the cutoff that is the next working day).
+    // The server re-quotes a cart line against it when the cart is paid later.
+    quotedOn: toYMD(getShopToday()),
     mustShipByDate: sh.mustShipYMD,
     estimatedDeliveryDate: quotedDeliveryYMD(config.needByDate, sh),
     // Computed results
@@ -6668,6 +6687,9 @@ function App(){
   // That has to stop the moment the customer picks their own, or every recalculation
   // that moves the free date — a quantity change, a different paper — silently threw
   // their choice away and put the default back.
+  // A two-staple choice (from the toggle, a link or a reorder) on a book too small for two
+  // staples is switched back, so every place that reads the choice agrees with the price.
+  useEffect(()=>{ if(r.oneStapleOnly&&twoStaple) setTwoStaple(false); },[r.oneStapleOnly,twoStaple]);
   const needByTouched = useRef(false);
   useEffect(()=>{
     if(needByTouched.current) return;
@@ -7065,10 +7087,11 @@ function App(){
   // Add to Order, which is after the artwork has uploaded. Four digits is nearly
   // always a New England ZIP that lost its leading zero in a spreadsheet.
   else if (!/^\d{5}(-\d{4})?$/.test(String(shipAddr.zip).trim())) _destMissing.push(/^\d{4}$/.test(String(shipAddr.zip).trim()) ? "a 5-digit ZIP code (did you mean 0" + String(shipAddr.zip).trim() + "?)" : "a 5-digit ZIP code");
-  const missingDest = _destMissing.length > 0;
+  const militaryDest = ppsIsMilitaryAddress(shipAddr.zip, shipState, shipAddr.city);
+  const missingDest = _destMissing.length > 0 || militaryDest;
   // Name what is missing rather than repeat one generic warning: someone who has filled
   // three of the four fields needs to know which one is still empty.
-  const missingDestMsg = !missingDest ? ""
+  const missingDestMsg = militaryDest ? PPS_MILITARY_MSG : !missingDest ? ""
     : _destMissing.length >= 4 ? "Shipping info required prior to placing order"
     : "Shipping address incomplete \u2014 add " + (_destMissing.length === 1 ? _destMissing[0]
         : _destMissing.slice(0, -1).join(", ") + " and " + _destMissing[_destMissing.length - 1]);
@@ -7315,7 +7338,9 @@ function App(){
             </div>
 
             {/* Staple Binding — hidden when two_staple add-on is disabled and not pre-filled */}
-            {(_AD.two_staple!==false || twoStaple===true) && (r.twoAuto
+            {(_AD.two_staple!==false || twoStaple===true) && (r.oneStapleOnly
+              ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip></label><div style={{fontSize:12.5,color:CC.dark,fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4,alignSelf:"flex-start"}}>Single Staple</div><div style={{fontSize:11,color:CC.mid,marginTop:4}}>Only one staple can be used on a binding edge under {ONE_STAPLE_MAX}″.</div></div>
+              : r.twoAuto
               ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip><TurnBadge days={r.ti?.twoStaple}/></label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:"#0060cc",fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4}}>Two Staples — standard for this size</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#4f46e5",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
               : <><Pil label={<RichTip tipKey="saddle_stitch">Staple Binding</RichTip>} badge={<TurnBadge days={r.ti?.twoStaple}/>} value={twoStaple} onChange={setTwoStaple} options={[{t:"Single Staple",v:false},{t:"Two Staples",v:true}]}/><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:4}}>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#4f46e5",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></>
             )}
@@ -7438,7 +7463,7 @@ function App(){
                 sizeLabel={sizeLabel} customLong={customLong} customShort={customShort} bindDir={bindDir}
                 pageCount={sets[0]?.pages||8} roundCorner={roundCorner} insideColor={insideColor}
                 coverColor={coverColor} staffUnlocked={debugUnlocked}
-                twoStaplesApplied={!!(r.twoAuto || twoStaple)}
+                twoStaplesApplied={!!(r.twoAuto || (twoStaple && !r.oneStapleOnly))}
                 proof={proof} setProof={setProof}
                 pageTransforms={pageTransforms} setPageTransforms={setPageTransforms}
                 artDims={artDims} setArtDims={setArtDims}
