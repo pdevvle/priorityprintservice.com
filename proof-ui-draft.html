@@ -1178,13 +1178,36 @@ function composePage(n, W, H){
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const t = state.perPage[n], src = SRCget(n);
+  const src = SRCget(n);
+  const g = placeArt(n, W, H, src);
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const ctx = c.getContext('2d');
   ctx.imageSmoothingQuality = 'high';
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.translate(g.dx + g.drawW/2, g.dy + g.drawH/2);
+  if (g.steps) ctx.rotate(g.steps * Math.PI / 2);
+  ctx.drawImage(src.el, g.quarter ? -g.drawH/2 : -g.drawW/2, g.quarter ? -g.drawW/2 : -g.drawH/2,
+                        g.quarter ? g.drawH : g.drawW,       g.quarter ? g.drawW : g.drawH);
+  ctx.restore();
+
+  const out = { canvas:c, place:{ x:g.dx, y:g.dy, w:g.drawW, h:g.drawH }, effDpi:g.effDpi,
+                W, H, steps:g.steps, quarter:g.quarter };
+  if (cache.size > 220) cache.clear();
+  cache.set(key, out);
+  return out;
+}
+
+/* Where page n's art lands on a W x H sheet, and how big. The ONE place the
+   placement maths lives: the on-screen proof (composePage) and the print file
+   (renderPrintPage) both take their geometry from here, so they can only differ
+   in the pixels they draw from — never in where those pixels go. Two copies of
+   this maths is exactly how order 87032 printed a crop the customer never saw. */
+function placeArt(n, W, H, src){
+  const t = state.perPage[n];
 
   // Rotation first, so every later measurement is of what actually lands.
   const steps = ['0°','90°','180°','270°'].indexOf(t.rot);
@@ -1219,20 +1242,13 @@ function composePage(n, W, H){
   const ay = /Top/.test(a)  ? 0 : /Bottom/.test(a) ? 1 : 0.5;
   const dx = (W - drawW) * ax, dy = (H - drawH) * ay;
 
-  ctx.save();
-  ctx.translate(dx + drawW/2, dy + drawH/2);
-  if (steps) ctx.rotate(steps * Math.PI / 2);
-  ctx.drawImage(src.el, quarter ? -drawH/2 : -drawW/2, quarter ? -drawW/2 : -drawH/2,
-                        quarter ? drawH : drawW,       quarter ? drawW : drawH);
-  ctx.restore();
-
   // Effective resolution of what was actually placed — the honest number, not
-  // the file's nominal DPI.
+  // the file's nominal DPI. Measured against the SCREEN raster on purpose: it
+  // answers "is the placement stretching this art thin?", which must not change
+  // just because the print path renders the same art again at press resolution.
   const effDpi = Math.round(sw / (drawW / pxPerIn));
-  const out = { canvas:c, place:{ x:dx, y:dy, w:drawW, h:drawH }, effDpi, W, H, steps, quarter };
-  if (cache.size > 220) cache.clear();
-  cache.set(key, out);
-  return out;
+  return { behavior:t.behavior, steps, quarter, sw, sh, inW, inH, pxPerIn,
+           drawW, drawH, dx, dy, effDpi };
 }
 
 /* Issues, measured rather than scripted. */
@@ -2155,6 +2171,11 @@ async function ingestPdf(file, startPage){
   await ensureLibs();
   const origin = await originOf(file);
   const buf = await file.arrayBuffer();
+  // The file's own bytes, kept with every page taken from it. The screen raster
+  // below is 150 DPI and is ONLY for the screen: the print file re-renders the
+  // page from these bytes at the size it lands at (renderPrintPage). Its own
+  // copy, because pdf.js may detach the buffer it is handed.
+  const srcBytes = new Uint8Array(buf.slice(0));
   const struct = await readPdfStructure(new Uint8Array(buf.slice(0)));
   const doc = await window.pdfjsLib.getDocument({ data:new Uint8Array(buf.slice(0)) }).promise;
 
@@ -2188,7 +2209,12 @@ async function ingestPdf(file, startPage){
     // here would place every page 4-5% small.
     uploads.set(startPage + i - 1, {
       el:c, w:c.width, h:c.height, text,
-      inW:c.width/PDF_RENDER_DPI, inH:c.height/PDF_RENDER_DPI,
+      // The viewport's own size, not the canvas's rounded-up pixel count: at
+      // 150 DPI a 5.75" page is 862.5 px, and sizing from 863 would make the
+      // 300 DPI print render land 1 px wide — a 0.06% resample across every
+      // pixel of the page, which is enough to grey a QR code's edges.
+      inW:vp.width/PDF_RENDER_DPI, inH:vp.height/PDF_RENDER_DPI,
+      pdfSrc:{ bytes:srcBytes, pageIndex:i - 1 },
       origin,
       label:file.name + (doc.numPages > 1 ? ' · p' + i : ''),
       stamp:Date.now() + i,
@@ -2445,10 +2471,123 @@ function canvasToBlob(canvas, type, quality){
   return new Promise(res => canvas.toBlob(res, type, quality));
 }
 
-/* One page of the print file, at press resolution. */
-function renderPrintPage(n){
+/* ── One page of the print file, at press resolution ─────────────────────────
+   Until 2026-09-28 this was composePage(n, 300 DPI) — the same function as the
+   screen, drawing the same 150 DPI raster the screen uses, enlarged 2x into the
+   print canvas. The file said 300 DPI and carried 150: a QR code at order
+   87171's module size came out 23% mid-grey on every page.
+
+   Now the geometry still comes from placeArt(), exactly as the screen's does —
+   where the art lands and how big cannot differ between proof and print — but
+   the PIXELS come from the source:
+     - a PDF page is rendered again from its own bytes, already rotated, at
+       precisely the size it occupies on the sheet, and dropped on whole pixels.
+       At 100% crop that is a 1:1 copy with no resampling at all.
+     - a bitmap is rotated on a canvas (no JPEG round trip) and placed on whole
+       pixels at its placed size.
+     - an unsupplied page is the same white / placeholder the screen shows.
+   A PDF page that cannot be re-rendered REFUSES the approval, naming the page,
+   rather than quietly shipping the screen raster: a soft print file that looks
+   approved is the failure this replaces. */
+
+// Canvas ceilings: past roughly these, browsers hand back a BLANK canvas rather
+// than an error (mobile Safari is the tightest), so the render degrades its
+// scale instead of trusting the allocation — and says so in the manifest.
+const PRINT_MAX_SIDE = 16000;
+const PRINT_MAX_AREA = 60e6;
+
+const printDocs = new Map();                       // bytes -> pdf.js document, per package
+async function printDocFor(bytes){
+  let p = printDocs.get(bytes);
+  if (!p){ p = window.pdfjsLib.getDocument({ data:bytes.slice() }).promise; printDocs.set(bytes, p); }
+  return p;
+}
+async function releasePrintDocs(){
+  for (const p of printDocs.values()){ try { (await p).destroy(); } catch {} }
+  printDocs.clear();
+}
+
+/* Exact quarter-turn of a pixel grid. translate-to-centre + rotate lands every
+   odd-sized image on half pixels; these offsets keep pixel centres on pixel
+   centres, so a rotated page is a permutation, not a resample. */
+function rotateCanvasExact(img, steps, w, h){
+  const s = ((steps % 4) + 4) % 4;
+  const c = document.createElement('canvas');
+  c.width = s % 2 ? h : w; c.height = s % 2 ? w : h;
+  const x = c.getContext('2d');
+  if (s === 1){ x.translate(h, 0); x.rotate(Math.PI / 2); }
+  if (s === 2){ x.translate(w, h); x.rotate(Math.PI); }
+  if (s === 3){ x.translate(0, w); x.rotate(-Math.PI / 2); }
+  x.drawImage(img, 0, 0, w, h);
+  return c;
+}
+
+async function renderPrintPage(n){
   const W = Math.round(BLEED_W * PRINT_DPI), H = Math.round(BLEED_H * PRINT_DPI);
-  return composePage(n, W, H);
+  const src = SRCget(n);
+
+  // No artwork: white on a hosted job, the demo standalone — whatever the
+  // screen shows. Nothing to lose resolution on.
+  if (!uploads.has(n)){
+    const r = composePage(n, W, H);
+    return { ...r, source:{ kind:'blank', label:src.label } };
+  }
+
+  const g = placeArt(n, W, H, src);
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+
+  const dx = Math.round(g.dx), dy = Math.round(g.dy);
+  const dw = Math.max(1, Math.round(g.drawW)), dh = Math.max(1, Math.round(g.drawH));
+  let source;
+
+  if (src.pdfSrc){
+    let art, dpi, capped = false;
+    try {
+      const doc = await printDocFor(src.pdfSrc.bytes);
+      const pg  = await doc.getPage(src.pdfSrc.pageIndex + 1);
+      const rotation = (((pg.rotate || 0) + g.steps * 90) % 360 + 360) % 360;
+      const base = pg.getViewport({ scale:1, rotation });            // rotated size, in points
+      const sx = dw / base.width, sy = dh / base.height;
+      // Uniform modes land with sx == sy; stretch alone is non-uniform, and is
+      // rendered at the larger of the two then drawn to the placed box.
+      let scale = g.behavior === 'stretch' ? Math.max(sx, sy) : sx;
+      const shrink = Math.min(1,
+        PRINT_MAX_SIDE / Math.max(base.width * scale, base.height * scale),
+        Math.sqrt(PRINT_MAX_AREA / Math.max(1, base.width * scale * base.height * scale)));
+      if (shrink < 1){ scale *= shrink; capped = true; }
+      const vp = pg.getViewport({ scale, rotation });
+      art = document.createElement('canvas');
+      art.width = Math.max(1, Math.round(vp.width)); art.height = Math.max(1, Math.round(vp.height));
+      const ax = art.getContext('2d');
+      ax.fillStyle = '#fff'; ax.fillRect(0, 0, art.width, art.height);
+      await pg.render({ canvasContext:ax, viewport:vp }).promise;
+      // Pixels per inch of the ART as it lands — the honest print resolution.
+      dpi = Math.round((art.width / dw) * g.pxPerIn);
+    } catch (err){
+      throw new Error('page ' + n + ' could not be rendered at print resolution from "' + src.label +
+                      '" (' + (err && err.message ? err.message : err) + '). Nothing was approved.');
+    }
+    // 1:1 when the render already matches the placed box — no resample at all.
+    if (art.width === dw && art.height === dh) ctx.drawImage(art, dx, dy);
+    else ctx.drawImage(art, dx, dy, dw, dh);
+    source = { kind:'pdf', label:src.label, page:src.pdfSrc.pageIndex + 1, dpi, capped,
+               oneToOne: art.width === dw && art.height === dh };
+    art.width = 0; art.height = 0;
+  } else {
+    const iw = src.el.naturalWidth || src.w, ih = src.el.naturalHeight || src.h;
+    const rot = g.steps ? rotateCanvasExact(src.el, g.steps, iw, ih) : src.el;
+    ctx.drawImage(rot, dx, dy, dw, dh);
+    source = { kind:'bitmap', label:src.label, dpi:g.effDpi };
+    if (rot !== src.el){ rot.width = 0; rot.height = 0; }
+  }
+
+  return { canvas:c, place:{ x:dx, y:dy, w:dw, h:dh }, effDpi:g.effDpi, W, H,
+           steps:g.steps, quarter:g.quarter, source };
 }
 
 async function buildPackage(){
@@ -2471,7 +2610,9 @@ async function buildPackage(){
   let i = 0;
   for (const n of pages){
     await tick('Rendering page ' + (++i) + ' of ' + pages.length + ' at ' + PRINT_DPI + ' DPI');
-    const r = renderPrintPage(n);
+    let r;
+    try { r = await renderPrintPage(n); }
+    catch (err){ await releasePrintDocs(); throw err; }
     // JPEG rather than PNG: a flattened photographic page as PNG runs to tens of
     // megabytes a page, and at 300 DPI q0.94 the difference is not printable.
     const blob  = await canvasToBlob(r.canvas, 'image/jpeg', 0.94);
@@ -2483,14 +2624,17 @@ async function buildPackage(){
     pg.drawImage(img, { x:0, y:0, width:BLEED_W * 72, height:BLEED_H * 72 });
     const mk = checkMargins(n, r);
     perPage.push({ n, effDpi:r.effDpi, t:Object.assign({}, state.perPage[n]),
-                   src:SRCget(n).label || 'placeholder', margins:mk });
+                   src:SRCget(n).label || 'placeholder', margins:mk, print:r.source });
+    // A 300 DPI sheet is ~18 MB of canvas; a 64-page book must not hold them all.
+    if (r.source && r.source.kind !== 'blank'){ r.canvas.width = 0; r.canvas.height = 0; }
   }
+  await releasePrintDocs();
   await tick('Assembling the print file…');
   const pdfBytes = await pdf.save();
   const printBlob = new Blob([pdfBytes], { type:'application/pdf' });
   const printHash = await sha256Hex(new Uint8Array(pdfBytes));
   files.push({ name:'PRINT_READY.pdf', blob:printBlob,
-               note:'flattened at ' + PRINT_DPI + ' DPI · ' + pages.length + ' pages · no guides' });
+               note:'rendered from source at ' + PRINT_DPI + ' DPI · ' + pages.length + ' pages · no guides' });
 
   // ── 2. preview JPEGs, guides drawn on ──
   const PW = 900, PH = Math.round(PW * BLEED_H / BLEED_W);
@@ -2533,6 +2677,23 @@ async function buildPackage(){
   L.push('  SHA-256      ' + printHash);
   L.push('  ' + fmtBytes(pdfBytes.length) + ' at ' + PRINT_DPI + ' DPI');
   L.push('  This hash binds the approval to these exact bytes.');
+  L.push('');
+  // What each page of the print file was actually made from. Before 2026-09-28
+  // every page here was the 150 DPI screen raster enlarged, and the only record
+  // of resolution was the constant above — so it has to be checkable per page.
+  L.push('PRINT SOURCE');
+  perPage.forEach(r => {
+    const s = r.print || {};
+    if (s.kind === 'pdf'){
+      L.push('  page ' + r.n + '  re-rendered from "' + s.label + '" page ' + s.page + ' at ' + s.dpi + ' DPI'
+             + (s.oneToOne ? ', placed 1:1 on whole pixels' : '')
+             + (s.capped ? ' — CAPPED by this browser\'s canvas limit' : ''));
+    } else if (s.kind === 'bitmap'){
+      L.push('  page ' + r.n + '  bitmap "' + s.label + '" at ' + s.dpi + ' DPI as placed (its own pixels; not re-renderable)');
+    } else {
+      L.push('  page ' + r.n + '  ' + (s.label || 'no artwork'));
+    }
+  });
   L.push('');
   // Named explicitly rather than left to be inferred from eight "src=no artwork
   // supplied" lines further down: a blank page in a printed booklet is the kind
@@ -2597,8 +2758,10 @@ async function buildPackage(){
   }
   L.push('  terms        proof accepted as final; errors in approved artwork are the customer\'s');
   L.push('');
-  L.push('Every page above was composed by the same function that drew the proof');
-  L.push('on screen. The print file is that composition at ' + PRINT_DPI + ' DPI.');
+  L.push('Every page above was placed by the same function that placed the proof on');
+  L.push('screen (placeArt), so position, size, crop and rotation cannot differ. The');
+  L.push('print file draws that placement at ' + PRINT_DPI + ' DPI from the source named');
+  L.push('under PRINT SOURCE — the customer\'s PDF re-rendered, not the screen image.');
   files.push({ name:'MANIFEST.txt', blob:new Blob([L.join('\n')], { type:'text/plain' }),
                note:'transforms, effective DPI, margins, hashes' });
 
