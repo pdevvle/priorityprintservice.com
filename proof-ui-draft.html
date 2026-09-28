@@ -1036,10 +1036,14 @@ const BEHAVIORS = {
   fill:    { label:'Fill',    subs:[ { type:'grid', title:'Fill Anchor: which reference point for art', ...ANCHOR_GRID } ] },
   fit:     { label:'Fit',     subs:[ { type:'note',  note:'No options — the whole file is fitted inside the page, so paper may show at two edges and there will be no bleed.' } ] },
   stretch: { label:'Stretch', subs:[ { type:'note',  note:'No options — art is stretched to fill the page. Proportions will change.' } ] },
-  scale:   { label:'Scale',   subs:[ { type:'slider', key:'scale', title:'Size', min:50, max:200, step:0.5 },
+  // 10–300 %, the built-in modal's range. It was 50–200 here, which left a
+  // customer with a 4x-oversized file, or a small logo to enlarge, no way to
+  // get it onto the page on this surface when they could on the old one.
+  scale:   { label:'Scale',   subs:[ { type:'slider', key:'scale', title:'Size', min:10, max:300, step:0.5 },
                                      { type:'grid', title:'Scale Anchor: which reference point for art', ...ANCHOR_GRID } ] },
   rotate:  { label:'Rotate',  subs:[ { type:'pills', key:'rot', title:'Rotation',
-                                       pills:['0°','90°','180°','270°'] } ] }
+                                       pills:['0°','90°','180°','270°'] },
+                                     { type:'bookrot', title:'Every page, for the binding' } ] }
 };
 
 const state = { mode:'proof', selected:1, openPage:null, wholeOpen:true, perPage:{}, applyAll:false,
@@ -1479,8 +1483,10 @@ function renderStage(){
       '<div class="typemark'+(m.level === 'cut' ? ' cut' : '')+'" style="left:'+(m.x*100)+'%;top:'+(m.y*100)+
       '%;width:'+(m.w*100)+'%;height:'+(m.h*100)+'%"></div>').join('') + '</div>');
   sheet.insertBefore(r.canvas, sheet.firstChild);
+  r.canvas.dataset.art = 'screen';
   r.canvas.style.filter = greyFilterFor(state.selected);
   attachSheetHandlers(sheet, r);
+  scheduleHiRes(state.selected);
   syncZoomReadout();
 }
 
@@ -1496,6 +1502,45 @@ function syncZoomReadout(){
   const pct = Math.round(shown / (BLEED_W * 96) * 100);
   document.getElementById('zoomVal').textContent = pct + '%';
   if (state.zoom === 'fit') document.getElementById('zoom').value = Math.min(200, Math.max(25, pct));
+}
+
+/* ── the second pass: what you inspect is what prints ─────────
+   The surface paints first from the 150 DPI screen raster, which is quick. It
+   is not what prints: the print file is rendered from the source at 300 DPI
+   (renderPrintPage), and a customer approving "exactly what you see" should be
+   looking at those pixels, especially through the magnifier. So once the page
+   has settled, it is rendered again by the print path itself and swapped in —
+   the built-in modal's two-pass proof (fast, then 300 DPI) with the print
+   renderer, not a copy of it, doing the second pass. A slider drag or a page
+   flip in the meantime cancels it; a failure leaves the quick render up, and
+   approval re-renders every page and reports anything it cannot do. */
+const hiRes = { key:null, r:null, timer:0, seq:0 };
+const HIRES_DELAY = 250;
+function scheduleHiRes(n){
+  clearTimeout(hiRes.timer);
+  const seq = ++hiRes.seq;
+  const key = txKey(n) + '|' + MODEL.trim.w + 'x' + MODEL.trim.h + '|' + MODEL.bleed;
+  if (hiRes.key === key && hiRes.r){ swapInHiRes(n, hiRes.r); return; }
+  hiRes.timer = setTimeout(async () => {
+    let r;
+    try { r = await renderPrintPage(n); }
+    catch (e){ return; }
+    if (seq !== hiRes.seq){ r.canvas.width = 0; return; }       // superseded while rendering
+    if (hiRes.r) hiRes.r.canvas.width = 0;                      // one page at press size is plenty
+    hiRes.key = key; hiRes.r = r;
+    swapInHiRes(n, r);
+  }, HIRES_DELAY);
+}
+function swapInHiRes(n, r){
+  if (state.mode === 'book' || state.selected !== n) return;
+  const sheet = document.getElementById('sheet');
+  const cur = sheet && sheet.querySelector('canvas[data-art]');
+  if (!cur) return;
+  r.canvas.dataset.art = 'print';
+  r.canvas.style.filter = greyFilterFor(n);
+  if (cur !== r.canvas) sheet.replaceChild(r.canvas, cur);
+  // The magnifier samples whatever r it was handed; hand it the press pixels.
+  attachSheetHandlers(sheet, r);
 }
 
 /* The stapled edge as overlay markup: the bar, and a tick per staple, from the
@@ -1983,6 +2028,29 @@ function subOption(n, sub){
 
   if (sub.type === 'note'){ box.innerHTML = '<p class="subnote">'+sub.note+'</p>'; return box; }
 
+  /* Landscape art in a portrait book. Facing pages are stapled on opposite
+     edges, so "the top of the art goes to the spine" is 270° on a recto (odd
+     page, stapled left) and 90° on a verso — one angle for every page gets half
+     the book upside down. The built-in modal's Rotate menu has had these two
+     ("Head to spine", "Foot to spine") since the booklet calculator shipped;
+     same angles, same assumption that the art arrives head-up. */
+  if (sub.type === 'bookrot'){
+    if (MODEL.pages.length < 2){ box.hidden = true; return box; }
+    box.innerHTML = '<span class="subtitle">'+sub.title+'</span>';
+    const pills = document.createElement('div');
+    pills.className = 'pills';
+    [['spine', 'Head to spine'], ['edge', 'Foot to spine']].forEach(([mode, label]) => {
+      const b = document.createElement('button');
+      b.className = 'pill' + (bookRotMode() === mode ? ' on' : '');
+      b.textContent = label;
+      b.dataset.bookrot = mode;
+      b.onclick = () => { pushHistory(); rotateBook(mode); };
+      pills.appendChild(b);
+    });
+    box.appendChild(pills);
+    return box;
+  }
+
   box.innerHTML = '<span class="subtitle">'+sub.title+'</span>';
 
   /* nine reference points laid out where they actually sit on the page, so the
@@ -2058,6 +2126,33 @@ function subOption(n, sub){
   });
   box.appendChild(pills);
   return box;
+}
+
+function bookRotSteps(mode, n){
+  const recto = n % 2 === 1;
+  return mode === 'spine' ? (recto ? 3 : 1) : (recto ? 1 : 3);
+}
+function rotateBook(mode){
+  // The pages now differ by design, so "keep every page matched" has to let go
+  // — left on, the next change would copy one page's angle over all of them.
+  state.applyAll = false;
+  MODEL.pages.forEach(p => {
+    const t = state.perPage[p.n];
+    t.rot = ['0°','90°','180°','270°'][bookRotSteps(mode, p.n)];
+    // Rotate IS crop-with-an-angle; switching a cropped page over puts the
+    // angle where its own controls can show it. Fit, fill and scale keep their
+    // sizing — the angle applies to them all the same, as it does in the modal.
+    if (t.behavior === 'crop') t.behavior = 'rotate';
+  });
+  renderAll();
+}
+/* Which of the two the book is currently in, if either — so the pill can say so. */
+function bookRotMode(){
+  for (const mode of ['spine', 'edge']){
+    if (MODEL.pages.every(p => ['0°','90°','180°','270°'].indexOf(state.perPage[p.n].rot) === bookRotSteps(mode, p.n)))
+      return mode;
+  }
+  return null;
 }
 
 /* Repaint only the surface while a slider is being dragged — a full renderAll

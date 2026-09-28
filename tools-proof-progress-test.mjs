@@ -184,11 +184,14 @@ console.log('\n── when it breaks part way ──');
   await deliver(page, JOB);
   // Break the third page only: a failure at the very first step would not prove
   // the step is reported, because the first step is also the default state.
+  // Page 3 by number, and only while the package is being built: the proof
+  // surface also calls renderPrintPage for its 300 DPI second pass (2026-09-28),
+  // so counting calls would break whichever page the screen happened to render.
   await page.evaluate(() => {
     const real = window.renderPrintPage || renderPrintPage;
-    let seen = 0;
     window.renderPrintPage = renderPrintPage = async (n) => {
-      if (++seen === 3) throw new Error('synthetic render failure');
+      const building = !document.getElementById('bpProg').hidden;
+      if (building && n === 3) throw new Error('synthetic render failure');
       return real(n);
     };
   });
