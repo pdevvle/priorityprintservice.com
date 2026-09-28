@@ -823,6 +823,9 @@
           customer's responsibility.</p>
         <div class="approverow">
           <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
+          <!-- A paid proof is approved by staff, so there is nothing to approve
+               here — only to look, and then go back to the order. -->
+          <button class="approve" id="reviewDone" type="button" hidden>DONE</button>
         </div>
         <!-- Approving is tens of seconds of blocked main thread on a long
              booklet. Silence there reads as a hang, so the work reports itself.
@@ -947,6 +950,15 @@ function validateJob(job){
   // Absent means the calculator's own default, the end of the interior.
   if (job.blankPlacement != null && job.blankPlacement !== 'covers' && job.blankPlacement !== 'end')
     errs.push("blankPlacement must be 'covers' or 'end'");
+  // The proof option bought. 0 is the free online proof, which the customer
+  // approves here; anything above it is approved by staff. Refused rather than
+  // defaulted when unreadable: read as 0, a paid proof would ask the customer
+  // to take responsibility for what they paid us to check.
+  if (job.proof != null){
+    const p = Number(job.proof);
+    if (typeof job.proof === 'boolean' || !isFinite(p) || p < 0) errs.push('proof must be zero or a positive number');
+  }
+  if (job.staples != null && job.staples !== 1 && job.staples !== 2) errs.push('staples must be 1 or 2');
   return errs;
 }
 
@@ -966,6 +978,8 @@ function applyJob(job){
   MODEL.coverColor  = job.coverColor  === 'bw' ? 'bw' : 'color';
   MODEL.blankPlacement = job.blankPlacement === 'covers' ? 'covers' : 'end';
   MODEL.reconcile = null;                  // set by loadBook once the file is read
+  MODEL.proof   = Number(job.proof) || 0;
+  MODEL.staples = job.staples === 2 ? 2 : 1;
   recomputeDerived();
   rebuildModel(Number(job.pages));
   return [];
@@ -1458,7 +1472,7 @@ function renderStage(){
       '<div class="g" style="inset:0;border:2px dashed #ef4444"></div>' +
       '<div class="g" style="top:'+bt+';left:'+bl+';right:'+bl+';bottom:'+bt+';border:2px dashed #fff;filter:drop-shadow(0 0 1px #000)"></div>' +
       '<div class="g" style="top:'+st2+';left:'+sl+';right:'+sl+';bottom:'+st2+';border:2px dashed '+css('--green')+'"></div>' +
-      '<div class="g" style="'+(spineLeft?'left:'+bl:'right:'+bl)+';top:'+bt+';bottom:'+bt+';width:3px;background:#3b82f6"></div>') +
+      spineHtml(state.selected, spineLeft, bl)) +
     // A margin warning that only appears as a sentence makes the customer hunt
     // for the offending line. Ring it instead.
     (guidesOff ? '' : '<div class="markwrap">' + (analyze(state.selected).marks || []).map(m =>
@@ -1482,6 +1496,18 @@ function syncZoomReadout(){
   const pct = Math.round(shown / (BLEED_W * 96) * 100);
   document.getElementById('zoomVal').textContent = pct + '%';
   if (state.zoom === 'fit') document.getElementById('zoom').value = Math.min(200, Math.max(25, pct));
+}
+
+/* The stapled edge as overlay markup: the bar, and a tick per staple, from the
+   same spineGuide() the preview JPEGs and the magnifier draw. */
+function spineHtml(n, spineLeft, bl){
+  const g = spineGuide(n);
+  const pcY = v => (v / BLEED_H * 100) + '%';
+  const side = spineLeft ? 'left:' + bl : 'right:' + bl;
+  return '<div class="g spine" style="' + side + ';top:' + pcY(g.y0) + ';height:' + pcY(g.y1 - g.y0) +
+         ';width:3px;background:#3b82f6"></div>' +
+    g.staples.map(y => '<div class="g staple" style="' + (spineLeft ? 'left:calc(' + bl + ' - 3.5px)' : 'right:calc(' + bl + ' - 3.5px)') +
+         ';top:calc(' + pcY(y) + ' - 2.5px);width:10px;height:5px;background:#1e40af"></div>').join('');
 }
 
 /* Magnifier: the lens shows the SAME composition at 3x, so it can never
@@ -1556,6 +1582,10 @@ function showLens(sheet, r, fx, fy, px, py){
     box(MODEL.bleed, MODEL.bleed, BLEED_W-MODEL.bleed, BLEED_H-MODEL.bleed, '#111', [7,5]);
     const s = MODEL.bleed + MODEL.safety;
     box(s, s, BLEED_W-s, BLEED_H-s, '#38a169', [7,5]);
+    // The stapled edge too: close to the fold is exactly where people use the
+    // magnifier, and the surface underneath shows it.
+    const k = LENS / winW;
+    drawSpine(ctx, r.W / BLEED_W * k, r.H / BLEED_H * k, sx * k, sy * k, state.selected, 3 * LENS_Z);
   }
   wrap.appendChild(lc);
   sheet.appendChild(wrap);
@@ -1731,6 +1761,15 @@ const NOTE_PROOF =
 const NOTE_BOOK =
   'Finished-product mockup, trimmed as it will be in the bindery. This is <strong>not</strong> the print surface — ' +
   'bleed, trim and safety are only shown on the Proof view, and artwork cannot be approved from here.';
+// The calculator modal's own wording for the two paid options.
+const NOTE_STAFF =
+  'You chose a <strong>Professional Digital Proof</strong>. One of our trained prepress technicians will manually ' +
+  'review your upload for issues and bring your art up to standards before sending you a digital proof for approval ' +
+  '(emailed). Nothing needs approving here — this view is for your reference.';
+const NOTE_HARDCOPY =
+  'You chose a <strong>Hardcopy Proof</strong>. A hardcopy proof will be dispatched for your approval prior to going to ' +
+  'print. You\'ll have an opportunity to review and alter your order after receiving the proof. Nothing needs ' +
+  'approving here — this view is for your reference.';
 function renderNote(){
   const book = state.mode === 'book';
   // the closing sentence names the control that is actually on screen
@@ -1738,9 +1777,9 @@ function renderNote(){
     ? ' Drag the cover to turn the book.'
     : ' Use &#8249; &#8250; or the arrow keys to step through spreads.';
   // Only the text, never the box: the agreement checkbox lives in there too.
-  document.getElementById('noteText').innerHTML = book ? NOTE_BOOK + tail : NOTE_PROOF;
+  document.getElementById('noteText').innerHTML = book ? NOTE_BOOK + tail
+    : reviewOnly() ? (MODEL.proof >= 3 ? NOTE_HARDCOPY : NOTE_STAFF) : NOTE_PROOF;
 }
-
 function renderIssues(){
   const el = document.getElementById('issuePanel');
   if (state.mode === 'book'){ el.innerHTML = ''; return; }
@@ -2450,6 +2489,10 @@ function fileFacts(){
     notEmbedded: [...new Set(pdfs.flatMap(u => u.pdf.notEmbedded))],
     spots:       [...new Set(pdfs.flatMap(u => u.pdf.spots || []))],
     layers:      pdfs.some(u => u.pdf.hasOptionalContent),
+    // Layers switched OFF, by name (from pdf.js at ingest). null on a page means
+    // the file has layers pdf.js could not read, which is not the same as none.
+    hiddenLayers: [...new Set(pdfs.flatMap(u => (u.pdfSrc && u.pdfSrc.ocOff) || []))],
+    layersUnread: pdfs.some(u => u.pdf.hasOptionalContent && u.pdfSrc && u.pdfSrc.ocOff === null),
     interactive: pdfs.some(u => u.pdf.hasAcroForm || u.pdf.hasAnnots),
   };
 }
@@ -2527,8 +2570,20 @@ const FILE_CHECKS = [
     }},
   { id:'layers', label:'Hidden layers', run(f){
       if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
+      /* Only a layer switched OFF is a finding — the calculator's rule
+         (ppsAnalyzePdfRisks). Layers that are all on are an ordinary export
+         from InDesign or Illustrator; flagging every one of them fed the
+         acknowledgment gate with noise. A hidden one matters because this
+         proof leaves it out, and so does our print file, but a downstream
+         engine that ignores the file's layer settings would print it. */
+      if (f.hiddenLayers.length) return { state:'warn', text:'Hidden layer' +
+        (f.hiddenLayers.length === 1 ? '' : 's') + ' in the file: ' + f.hiddenLayers.join(', ') +
+        '. ' + (f.hiddenLayers.length === 1 ? 'It is' : 'They are') + ' switched off, so ' +
+        (f.hiddenLayers.length === 1 ? 'it is' : 'they are') + ' not in this proof and will not print. If ' +
+        (f.hiddenLayers.length === 1 ? 'it holds' : 'any holds') + ' artwork you want, turn it on and export again.' };
+      if (f.layersUnread) return { state:'warn', text:'This file has layers and their settings could not be read, so this proof cannot say whether any are hidden. Check it shows everything you expect.' };
       return f.layers
-        ? { state:'warn', text:'This file has optional-content layers. What prints is whatever was visible when it was saved, which is not always what the designer last looked at. Check the proof against what you expect to see.' }
+        ? { state:'pass', text:'The file has layers, and every one is visible — what you see is what prints.' }
         : { state:'pass', text:'No optional-content layers.' };
     }},
   { id:'interactive', label:'Interactive content', run(f){
@@ -2601,7 +2656,7 @@ async function pkgProgress(text, done, total){
 
 /* Guides drawn on the preview only. The print file carries none — they are a
    proofing aid, and baking them in would print them. */
-function drawGuides(ctx, W, H){
+function drawGuides(ctx, W, H, n){
   const b = MODEL.bleed / BLEED_W * W, bT = MODEL.bleed / BLEED_H * H;
   const sX = (MODEL.bleed + MODEL.safety) / BLEED_W * W;
   const sY = (MODEL.bleed + MODEL.safety) / BLEED_H * H;
@@ -2614,6 +2669,39 @@ function drawGuides(ctx, W, H){
   ctx.setLineDash([W/90, W/90]);
   ctx.strokeStyle = 'rgba(40,160,60,.9)';                  // safety
   ctx.strokeRect(sX, sY, W - sX*2, H - sY*2);
+  // The stapled edge and where the stitches land — the built-in modal's
+  // previews have always carried these, and they are what prepress checks a
+  // cover against when something sits close to the fold.
+  if (n != null) drawSpine(ctx, W / BLEED_W, H / BLEED_H, 0, 0, n, Math.max(3, W / 300));
+  ctx.restore();
+}
+
+/* The bound edge of page n on the bleed sheet, in inches. Odd pages (the cover
+   and every recto) are stapled on the left, even pages on the right — the same
+   rule the proof surface and the modal's drawGuides use. The bar runs inside
+   the trim line, stopping 2% short of each end; the staples sit at the middle,
+   or at a third and two thirds when the job has two. */
+function spineGuide(n){
+  const left = n % 2 === 1;
+  const y0 = MODEL.bleed + BLEED_H * 0.02;
+  const len = BLEED_H - MODEL.bleed * 2 - BLEED_H * 0.04;
+  const fr = MODEL.staples === 2 ? [0.33, 0.67] : [0.5];
+  return { left, x: left ? MODEL.bleed : BLEED_W - MODEL.bleed, y0, y1: y0 + len,
+           staples: fr.map(f => y0 + len * f) };
+}
+/* Draws spineGuide(n) through a scale (px per inch) and an offset, so the
+   preview JPEG and the magnifier — which sees a window of the page — share it. */
+function drawSpine(ctx, kx, ky, ox, oy, n, barPx){
+  const g = spineGuide(n);
+  const X = v => v * kx - ox, Y = v => v * ky - oy;
+  const x = g.left ? X(g.x) : X(g.x) - barPx;
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#3b82f6';
+  ctx.fillRect(x, Y(g.y0), barPx, Y(g.y1) - Y(g.y0));
+  const tickW = Math.max(barPx * 2.6, 0.09 * kx), tickH = Math.max(barPx * 1.3, 0.035 * ky);
+  ctx.fillStyle = '#1e40af';
+  g.staples.forEach(sy => ctx.fillRect(x + barPx / 2 - tickW / 2, Y(sy) - tickH / 2, tickW, tickH));
   ctx.restore();
 }
 
@@ -2866,10 +2954,10 @@ async function buildPackage(){
     const ctx = c.getContext('2d');
     ctx.drawImage(r.canvas, 0, 0);
     if (pageIsGrey(n)) bakeGreyscale(ctx, PW, PH);
-    drawGuides(ctx, PW, PH);
+    drawGuides(ctx, PW, PH, n);
     files.push({ name:'PREVIEW_p' + String(n).padStart(2,'0') + '.jpg',
                  blob:await canvasToBlob(c, 'image/jpeg', 0.88),
-                 note:(pageIsGrey(n) ? 'greyscale, as approved on screen · ' : '') + 'with bleed / trim / safety guides' });
+                 note:(pageIsGrey(n) ? 'greyscale, as approved on screen · ' : '') + 'with bleed / trim / safety / stapled-edge guides' });
   }
 
   // ── 3. the manifest ──
@@ -3177,12 +3265,32 @@ function jobFlags(){
   return _flagCache;
 }
 
+/* A paid proof (staff digital or hardcopy) is approved by prepress, never here.
+   The built-in modal has always shown those customers their art and no Approve,
+   and the add-to-cart gate applies to the free proof only. */
+function reviewOnly(){ return MODEL.proof > 0; }
+
 function renderApproval(){
   const book = state.mode === 'book';
   const agree = document.getElementById('agree');
   const wrap  = document.getElementById('approveWrap');
   const ackBx = document.getElementById('ackBox');
   const ack   = document.getElementById('ackIssues');
+
+  const review = reviewOnly();
+  document.getElementById('approveBtn').hidden = review;
+  document.getElementById('reviewDone').hidden = !review;
+  document.getElementById('liability').hidden = review;
+  agree.closest('.agree').hidden = review;
+  if (review){
+    agree.checked = false; ack.checked = false;
+    ackBx.hidden = true;
+    document.getElementById('approveBtn').disabled = true;
+    document.getElementById('note').classList.remove('agreed');
+    wrap.classList.remove('locked');
+    wrap.title = '';
+    return;
+  }
 
   agree.disabled = book;
   wrap.classList.toggle('locked', book);
@@ -3441,7 +3549,11 @@ function offerEscapeHatch(){
   out.appendChild(box);
 }
 
+document.getElementById('reviewDone').onclick = () => post({ type:'pps-proof:close' });
 document.getElementById('approveBtn').onclick = async () => {
+  // Hidden on a paid proof, and refused here too: a hidden button can still be
+  // clicked by script, and approval is the one message the host trusts.
+  if (reviewOnly()) return;
   const btn = document.getElementById('approveBtn');
   btn.disabled = true;
   const wasLabel = btn.textContent;
