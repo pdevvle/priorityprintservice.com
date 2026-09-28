@@ -25,6 +25,12 @@
 //      error — and the page-count check and the manifest say what happened.
 //   4. A job with per-page uploads is NOT reconciled, matching the calculator,
 //      whose page grid is already the book's length once a slot is used.
+//   5. (review, 2026-09-28) The report describes the book as it is NOW: an
+//      added blank given art in the proofer stops being reported, a whole new
+//      file dropped over the book retires the old report; a one- or two-page
+//      file is described as what happens ("1 page", no "before the back cover"
+//      when the back cover is blank); images are taken in the calculator's
+//      sort order.
 //
 // Needs: node tools-proof-serve.mjs &   and PPS_DEPS_DIR with pdf-lib.
 // Run:   PPS_DEPS_DIR=<node_modules> node tools-proof-reconcile-test.mjs
@@ -317,6 +323,106 @@ console.log('\n── per-page uploads: not reconciled, as in the calculator ─
   const f = await findings(page);
   ok('the empty pages are missing art, not added blanks', JSON.stringify(f.noart) === '[11,12]' && f.added.length === 0,
      'noart ' + JSON.stringify(f.noart) + ' added ' + JSON.stringify(f.added));
+  await page.close();
+}
+
+/* ── Found in review, 2026-09-28: the report has to describe the book NOW ──
+   The reconciliation is recorded when the host's file lands. The customer can
+   then fill an added blank here, or drop a whole new file over the book. The
+   page-count check feeds the acknowledgment gate, so it must not go on saying
+   pages are blank once they have art, or describe a file no longer in the book. */
+const pngFile = (page, n) => page.evaluate(async (n) => {
+  const c = document.createElement('canvas'); c.width = 1725; c.height = 2625;
+  const x = c.getContext('2d'); x.fillStyle = '#2a9d5c'; x.fillRect(0, 0, c.width, c.height);
+  await loadArt(n, new File([await new Promise(r => c.toBlob(r, 'image/png'))], 'fill' + n + '.png', { type: 'image/png' }));
+}, n);
+
+console.log('\n── an added blank given art in the proofer stops being reported blank ──');
+{
+  const page = await open();
+  await deliverPdf(page, JOB, await numberedPdf(10));
+  await waitPlaced(page, 10);
+  await pngFile(page, 10);
+  let f = await findings(page);
+  ok('fill one: only the other is still reported', JSON.stringify(f.added) === '[11]' && /^warn: /.test(f.pagesCheck) && /page 11\)/.test(f.pagesCheck),
+     JSON.stringify(f.added) + ' / ' + f.pagesCheck);
+  ok('…and the count in the sentence is the pages still blank, not the pages first added', /1 page prints blank/.test(f.pagesCheck), f.pagesCheck);
+  await pngFile(page, 11);
+  f = await findings(page);
+  ok('fill both: no added-blank findings and the page-count check passes',
+     f.added.length === 0 && f.noart.length === 0 && /^pass: /.test(f.pagesCheck), JSON.stringify(f.added) + ' / ' + f.pagesCheck);
+  const r = await approve(page);
+  const man = r.manifest || '';
+  ok('the manifest still records what the file was, and that the blanks were filled here',
+     /PAGE COUNT/.test(man) && /since given art in the proofer: 10, 11/.test(man) && !/BLANK PAGES/.test(man),
+     (man.match(/PAGE COUNT[\s\S]*?\n\n/) || [''])[0]);
+  await page.close();
+}
+
+console.log('\n── a whole new file dropped over the book retires the old report ──');
+{
+  const page = await open();
+  await deliverPdf(page, JOB, await numberedPdf(16));
+  await waitPlaced(page, 12);
+  let f = await findings(page);
+  ok('(the 16-page file is reported as running long)', /^warn: .*will not print/.test(f.pagesCheck), f.pagesCheck);
+  await page.evaluate(async (bytes) => {
+    await loadArtSequence(1, [new File([new Uint8Array(bytes)], 'replacement.pdf', { type: 'application/pdf' })]);
+  }, await numberedPdf(12));
+  f = await findings(page);
+  ok('once no page shows the old file, its "will not print" warning goes', /^pass: /.test(f.pagesCheck), f.pagesCheck);
+  await page.close();
+}
+
+console.log('\n── one- and two-page files: say what actually happens ──');
+{
+  const page = await open();
+  await deliverPdf(page, { ...JOB, pages: 8 }, await numberedPdf(1));
+  await waitPlaced(page, 1);
+  const L = await layout(page);
+  ok('(one page into eight: it is the front cover, the rest blank)', JSON.stringify(L) === JSON.stringify([1, null, null, null, null, null, null, null]), JSON.stringify(L));
+  const back = await page.evaluate(() => analyze(8)[0] || {});
+  ok('the back cover\'s finding does not claim blanks went "before the back cover"',
+     back.kind === 'added' && /only the front cover has art/.test(back.text) && !/before the back cover/.test(back.text), back.text);
+  const f = await findings(page);
+  ok('"1 page", not "1 pages", and the one page is the front cover',
+     /Your file has 1 page and/.test(f.pagesCheck) && /Your one page is the front cover/.test(f.pagesCheck), f.pagesCheck);
+  await page.close();
+
+  const p2 = await open();
+  await deliverPdf(p2, { ...JOB, pages: 8, blankPlacement: 'covers' }, await numberedPdf(2));
+  await waitPlaced(p2, 2);
+  const t4 = await p2.evaluate(() => (analyze(4)[0] || {}).text || '');
+  ok('two pages: they are the covers and everything between prints blank, whatever the placement',
+     /your two pages are the covers/.test(t4) && !/inside covers first/.test(t4), t4);
+  await p2.close();
+}
+
+console.log('\n── images are taken in the calculator\'s order ──');
+{
+  // extractImagePages sorts with localeCompare(…, { numeric: true }) and nothing
+  // else. The proofer used sensitivity:'base', which ties "a" and "A" — so two
+  // names differing only in case could land on different pages on the two
+  // surfaces.
+  const sortLine = /all\.sort\(\(a, b\) => a\.name\.localeCompare\(b\.name, undefined, \{ numeric: true \}\)\)/.test(CALC_SRC);
+  ok('(the calculator still sorts that way)', sortLine);
+  const page = await open();
+  await page.evaluate(async (job) => {
+    const mk = async (name) => {
+      const c = document.createElement('canvas'); c.width = 1725; c.height = 2625;
+      c.getContext('2d').fillRect(0, 0, 4, 4);
+      return new File([await new Promise(r => c.toBlob(r, 'image/png'))], name, { type: 'image/png' });
+    };
+    const files = [await mk('A.png'), await mk('B.png'), await mk('a.png')];
+    window.__want = files.map(f => f.name).sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
+    window.postMessage({ type: 'pps-proof:job', job: { ...job, pages: 4 }, files, slots: [] }, window.location.origin);
+  }, JOB);
+  await waitPlaced(page, 3);
+  const got = await page.evaluate(() => ({ L: MODEL.pages.map(pg => (uploads.get(pg.n) || {}).label || null), want: window.__want }));
+  // 3 into 4: front, inside, blank, back
+  const want = [got.want[0], got.want[1], null, got.want[2]];
+  ok('the book is in the calculator\'s order', JSON.stringify(got.L) === JSON.stringify(want),
+     'proofer ' + JSON.stringify(got.L) + ' calculator ' + JSON.stringify(want));
   await page.close();
 }
 

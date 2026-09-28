@@ -472,9 +472,13 @@ transforms legitimately produces no PDF.
   for byte, the surface and magnifier settle to that same print render, a short or long
   file becomes the same book the calculator showed (covers kept, `blankPlacement`
   honoured), paid proofs are review-only, only hidden layers warn, the stapled edge and
-  staples are on every surface, and head/foot-to-spine and 10–300 % scale exist. Brief
-  §5 is the checklist; `print-fidelity`, `reconcile`, `paid`, `spine`, `transforms` and
-  `screen-res` are the gates. Reader's-spread jobs stay on the modal.
+  staples are on every surface, a sideways file opens turned 90° as in the calculator,
+  and head/foot-to-spine and 10–300 % scale exist. Brief §5 is the checklist;
+  `print-fidelity`, `reconcile`, `paid`, `spine`, `transforms` and `screen-res` are the
+  gates. Reader's-spread jobs stay on the modal. **A canvas you free must be one you
+  own:** `composePage()` caches, so the print loop and the on-screen second pass get
+  their own (`own`) — freeing the cached one broke approval on any job with a blank page
+  (caught in review before it shipped; brief invariant 19).
 - **A no-bleed file raises nothing in the PROOFER.** The calculator catches it
   ("Artwork has content at edges but no bleed area") and that is where the
   customer is told. Inside the proofer the default crop behaviour scales the art

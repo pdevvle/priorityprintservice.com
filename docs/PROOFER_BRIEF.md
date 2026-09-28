@@ -54,7 +54,7 @@ If it is ever split, those are the migration, not the file move.
 
 | File | Role |
 |---|---|
-| `proof-ui-draft.html` | **The new proofer.** 206,121 bytes (2026-09-28), vanilla JS, one `<script>` (lines 877–3800). Not a component: the calculator frames it. Line references elsewhere in this brief predate the 2026-09-28 parity work and have drifted by up to ~600 lines — search by name. |
+| `proof-ui-draft.html` | **The new proofer.** 212,624 bytes (2026-09-28, after review), vanilla JS, one `<script>` (lines 877–3909). Not a component: the calculator frames it. Line references elsewhere in this brief predate the 2026-09-28 parity work and have drifted by up to ~700 lines — search by name. |
 | `calc-preview-test.html` | Saddle stitch calculator. Holds the **old modal**, the `composePageCanvas()` engine, and the **only** host-seam wiring to the new proofer. |
 | `calc-perfect-bound.html`, `calc-coupon-book.html` | The other two bound products. Old modal. Since 2026-08-26 both also carry a **wraparound-cover** surface — one wide sheet, back panel + spine + front, with its own upload slot, template and composition path; the raw-file fast path is disabled when one is present (`calc-perfect-bound.html:2846-2852, 3309`). Still marked DRAFT in code. |
 | `calc-brochure.html`, `calc-postcard.html`, `calc-greeting-card.html`, `calc-letterhead.html`, `calc-sticker.html` | The five flats. Old modal. Brochure, postcard and greeting card share the same 10-entry fold-type list and 3D fold renderers; **letterhead is the only fold-free flat**. |
@@ -85,11 +85,11 @@ a real origin).
 | `tools-proof-blank-pages-test.mjs` | Unsupplied pages on a hosted job | same |
 | `tools-proof-size-check-test.mjs` | The ordered-size preflight | same |
 | `tools-proof-print-fidelity-test.mjs` | **Print file from source.** QR crispness (0% mid-grey) and page order in PRINT_READY; proof == print under eight transforms incl. a bitmap slot and a `/Rotate` page; the untouched pass-through is byte-identical, and near misses say why they were not | + `PPS_DEPS_DIR` (jspdf, qrcode, jsqr, pdf-lib) |
-| `tools-proof-reconcile-test.mjs` | **Page-count reconciliation.** Lifts the calculator's own `displayPages` memo and checks `reconcilePlan()` against it on 3,360 combinations; real PDFs/images short (both placements) and long; `added` findings, manifest PAGE COUNT; slots not reconciled | + `PPS_DEPS_DIR` (pdf-lib) |
+| `tools-proof-reconcile-test.mjs` | **Page-count reconciliation.** Lifts the calculator's own `displayPages` memo and checks `reconcilePlan()` against it on 3,360 combinations; real PDFs/images short (both placements) and long; `added` findings, manifest PAGE COUNT; slots not reconciled; the report follows blanks filled / a file replaced in the proofer; one- and two-page wording; the calculator's image sort order | + `PPS_DEPS_DIR` (pdf-lib) |
 | `tools-proof-paid-test.mjs` | Paid proofs are review-only; a forced click cannot approve | `PPS_PLAYWRIGHT`, `PPS_PROOF_BASE` |
 | `tools-proof-spine-test.mjs` | Stapled edge + staple ticks on the surface, in the lens and on every preview JPEG; none in the print file | same |
-| `tools-proof-transforms-test.mjs` | Head/foot-to-spine against the calculator's `rotateAll` angles and a red-band fixture; scale 10–300 % | same |
-| `tools-proof-screen-res-test.mjs` | The surface settles to the 300 DPI print render, and its pixels are page 1 of the approved PRINT_READY | + `PPS_DEPS_DIR` (pdf-lib) |
+| `tools-proof-transforms-test.mjs` | Head/foot-to-spine against the calculator's `rotateAll` angles and a red-band fixture (an anchored crop stays put); scale 10–300 %; a sideways file opens turned, by the calculator's own orientation rule | same |
+| `tools-proof-screen-res-test.mjs` | The surface settles to the 300 DPI print render, and its pixels are page 1 of the approved PRINT_READY; blank pages are never swapped and browsing them cannot break approval; a job arriving after the demo is never shown it | + `PPS_DEPS_DIR` (pdf-lib) |
 | `tools-proof-package-test.mjs` | **DEAD.** Pre-harness prototype: imports `./node_modules/playwright`, reads `ui/vendor/`, opens the file over `file://`, needs an uncommitted `test-art.pdf`. Superseded by the draft + progress suites. Delete or revive; do not count it as green. |
 | `tools-proof-serve.mjs` | Static server on `127.0.0.1:8137` + `/vendor/`. Its second log line names `node_modules` regardless of where it found the libraries — trust `curl -sI http://127.0.0.1:8137/vendor/pdf.min.js`. Its header still says "three suites"; stale. |
 | `tools-proof-vendor.mjs` | Installs the proofer's pinned pdf.js 3.11.174 / pdf-lib 1.17.1 into `proof-vendor/`. `--check` reports without installing. |
@@ -389,12 +389,22 @@ in the proofer's package** — the host adds its own `File` objects, slot files 
   placed on whole pixels. Canvas area is capped (`PRINT_MAX_SIDE`, `PRINT_MAX_AREA`) and
   the manifest says so when it bites. PRINT_READY is JPEG q0.94 in pdf-lib — **unless**:
 - `untouchedOriginal(pages)`: when every page is the customer's own PDF page, in order,
-  unmoved (crop or 100 % scale, 0°), at the exact bleed size (±0.01″), with no hidden
+  unmoved (crop, Rotate at 0° or 100 % scale), at the exact bleed size (±0.01″), with no hidden
   layers, forms, annotations or `/Rotate`, PRINT_READY **is their file, byte for byte**.
   Otherwise the manifest says which of those failed ("not shipped untouched: …").
 - The surface paints from the screen raster, then **swaps in `renderPrintPage(n)`** once
   the page settles (`scheduleHiRes`, 250 ms) — the modal's fast-then-300 DPI proof. The
   magnifier samples whichever is up. So the pixels a customer inspects are print pixels.
+  Only pages with the customer's art get the second pass; one render is held at a time
+  and `rebuildModel()` drops it (`resetHiRes`). **Every 300 DPI render owns its canvas**
+  (`composePage(n, W, H, true)` for a blank page): the print loop and the second pass
+  free what they are done with, and before review on 2026-09-28 a blank page's render
+  was the page cache's own canvas, so freeing it broke the next approval.
+- pdf.js documents for print renders live in `printDocs`, shared by Approve, the rail's
+  "Build proof package" and the second pass. `releasePrintDocs()` does nothing while any
+  render is in flight (`printDocUsers`) and empties the map before destroying, so one
+  build finishing cannot destroy a document another is rendering from — before review
+  that took the whole page down.
 - `effDpi = sw / (drawW / pxPerIn)` (`:1229`) measures how thinly the held raster is
   stretched by the placement. Since the held raster is the proofer's own 150 DPI render,
   this reports over-scaling honestly and cannot see a low-resolution image inside the
@@ -425,7 +435,7 @@ Page-level `analyze()` (`:1304-1339`):
 | `cut` | error | type crosses the trim |
 | `tight` | warn | type inside the safety margin |
 | `nomargin` | info | flat image — type cannot be told from picture; **not gated** |
-| `added` | warn | hosted job, page left blank by page-count reconciliation (the customer chose where) |
+| `added` | warn | hosted job, page left blank by page-count reconciliation (the customer chose where) and still blank — `reconcileNow()` follows what the customer has filled or replaced since |
 
 File-level `FILE_CHECKS` (`:2291-2364`): `pages`, `size`, `fonts`, `spots`, `layers`,
 `interactive` — each pass/warn/fail/unknown. `size` emits warn only, never fail. `pages`
@@ -466,6 +476,8 @@ Each was a real defect. Do not regress them; each has a named gate.
 | **Presence-based layers check** (2026-09-28) | Every layered export tripped the gate. Now only OFF layers, named. | preflight suite |
 | **Stapled edge** (2026-09-28) | Missing from the lens and previews; no staples anywhere. | `tools-proof-spine-test.mjs` |
 | **Screen ≠ print resolution** (2026-09-28) | Customers inspected the 150 DPI stand-in. The surface now swaps in the print render. | `tools-proof-screen-res-test.mjs` |
+| **Orientation** (2026-09-28, review) | A landscape file for a portrait book opened unrotated and cropped; the calculator turns every page 90°. Same rule now. | `tools-proof-transforms-test.mjs` |
+| **Review of the parity work** (2026-09-28) | The second pass freed the page cache's own canvas for blank pages (approval then failed on a 0 × 0 page) and could show the demo cover on a hosted blank page 1; the page-count warning went on claiming pages were blank after the customer filled them; "1 pages"; image order differed from the calculator's on case; Head to spine re-centred an anchored crop; Rotate at 0° was treated as a change; a package build finishing could destroy the PDF documents another render was using (the page crashed). All fixed, each with a check that fails on the pre-review build. | screen-res, reconcile, transforms, print-fidelity |
 | **Greyscale** (2026-09-11, production — order 87154) | Approved grey on screen, filed to Drive in colour: the modal's grey was a CSS filter the package generator never applied. Fixed in both surfaces (`c22baeb`, `ea7274b`). | `tools-preview-greyscale-test.mjs` |
 
 **The lesson threaded through the last three, and the most transferable thing here:** a
@@ -489,6 +501,7 @@ Every cell below was checked against the code on 2026-09-20.
 | Hi-res 300 DPI print render | ✅ (vector re-render at 300) | ✅ 2026-09-28 | From the PDF bytes, whole-pixel placement |
 | 300 DPI render on screen / in the lens | ✅ (fast, then 300) | ✅ 2026-09-28 | The print renderer itself does the second pass |
 | Raw file shipped untouched (vector preserved) | ✅ saddle only, knife-edge tolerance | ✅ 2026-09-28 | Stricter: ±0.01″ of bleed, nothing hidden/interactive/rotated |
+| Orientation auto-turn | ✅ every page 90° when the file's first page and the book disagree by > 0.5″ | ✅ 2026-09-28 | `seedOrientation()`, whole-file art only; the suite lifts the calculator's rule. Measured on the rendered page, so a `/Rotate` page is not turned twice (the calculator reads the unrotated view box and would) |
 | Per-page transforms | ✅ Crop/Fill/Fit/Stretch/Scale 10–300 %/Rotate; rotate-all 90/180/270, head/foot to spine | ✅ 2026-09-28 | Proofer adds a 9-point anchor. Rotate-all by angle = "Apply to all pages"; head/foot to spine match the modal's angles; scale 10–300 %. (The modal has no free `posX/posY` — an earlier version of this row said it did.) |
 | Undo | ✅ | ✅ | |
 | Per-page slot uploads | ✅ | ✅ | |
@@ -761,7 +774,11 @@ hidden, one set all-visible) — copy it if reviving the first.
     raster reach the print file again (§9.5).
 18. **The proofer builds the same book the calculator showed.** `reconcilePlan()` must
     agree with the calculator's `displayPages` memo; the reconcile suite runs the memo
-    itself, so a change to either side that is not made to both fails there.
+    itself, so a change to either side that is not made to both fails there. The same
+    goes for the image sort order and the orientation rule, both lifted by the suites.
+19. **A canvas you free must be one you own.** `composePage()` caches; anything that
+    zeroes a canvas to save memory (the print loop, the second pass) must get one with
+    `own`, or it corrupts the cache for the next caller.
 
 ---
 

@@ -347,6 +347,12 @@ console.log('\n── the customer\'s file, untouched ──');
     // in the file. What is checked is that every page is there, in order.
     ok('every page reads, in order', r.inOrder, 'mid-grey at our half-pixel raster: ' + r.midgrey.join(' '));
   }
+  // Rotate at 0° places exactly as crop does, so it is still the customer's
+  // file. It used to count as "changed" and be rendered (review, 2026-09-28).
+  const z = await untouchedCase('rotate at 0°', { size: [5.75, 8.75],
+    mutate: { fn: setT, arg: { 1: { behavior: 'rotate', rot: '0°' }, 4: { behavior: 'rotate', rot: '0°' } } } });
+  ok('pages set to Rotate at 0° still ship the file untouched', !z.error && z.same && /UNTOUCHED/.test(z.manifest || ''),
+     z.error || (z.manifest.match(/not shipped untouched: .*/) || ['(untouched)'])[0]);
 }
 const nearMisses = [
   ['one page scaled to 90%', { size: [5.75, 8.75], mutate: { fn: setT, arg: { 3: { behavior: 'scale', scale: 90 } } } }, /page 3 was changed/],

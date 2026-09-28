@@ -17,7 +17,11 @@
 //     to the new transform — never showing a stale press render;
 //   - moving to another page upgrades that page;
 //   - the magnifier samples the press render once it is there;
-//   - 3D mode is left alone.
+//   - 3D mode is left alone;
+//   - (review, 2026-09-28) a blank page is never swapped, no 300 DPI sheet is
+//     left in the page cache, and browsing blank pages cannot break approval;
+//     a job that arrives after the demo booklet is never shown the demo, and
+//     drops whatever render was held before it.
 //
 // Needs: node tools-proof-serve.mjs &   and PPS_DEPS_DIR with pdf-lib.
 // Run:   PPS_DEPS_DIR=<node_modules> node tools-proof-screen-res-test.mjs
@@ -190,6 +194,147 @@ console.log('\n── what was on screen is what prints ──');
     return { mean: sum / (da.length / 4 * 3), w: a.width, h: a.height };
   }, shown);
   ok('the approved print file\'s page 1 matches what the surface showed', !diff.err && diff.mean < 2, JSON.stringify(diff));
+}
+
+/* ── Found in review, 2026-09-28 ──
+   1. The second pass rendered blank pages too, and a blank page's print render
+      was the page CACHE's canvas. Moving on freed it (width 0), so the next
+      approval read a 0 x 0 page back out of the cache: approval failed on any
+      job with a blank page the customer had looked at.
+   2. The proofer boots on the demo booklet. A demo page 1 rendered at press
+      resolution before the host's job arrived was swapped back in over the
+      customer's blank page 1 — same page, same trim, no upload to tell apart. */
+async function freshPage(job) {
+  const p = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+  p.on('pageerror', e => errors.push(String(e && e.message || e)));
+  p.on('dialog', d => d.dismiss());
+  await p.addInitScript((job) => {
+    window.__posts = []; window.PPS_PROOF_HOST = m => window.__posts.push(m); window.PPS_LIB_BASE = '/vendor/';
+    if (job) window.PPS_PROOF_JOB = job;
+  }, job);
+  await p.goto(PAGE, { waitUntil: 'domcontentloaded' });
+  await p.waitForFunction(() => window.__posts.some(m => m.type === 'pps-proof:ready'), null, { timeout: 20000 });
+  return p;
+}
+const postSlots = (p, job, pages) => p.evaluate(async ({ job, pages }) => {
+  const slots = [];
+  for (const n of pages) {
+    const c = document.createElement('canvas'); c.width = 1725; c.height = 2625;
+    const x = c.getContext('2d'); x.fillStyle = '#4a7bd0'; x.fillRect(0, 0, c.width, c.height);
+    slots.push({ page: n, file: new File([await new Promise(r => c.toBlob(r, 'image/png'))], 'p' + n + '.png', { type: 'image/png' }) });
+  }
+  window.postMessage({ type: 'pps-proof:job', job, files: [], slots }, window.location.origin);
+}, { job, pages });
+const shows = (p) => p.evaluate(() => document.querySelector('#sheet canvas[data-art]').dataset.art);
+const settleOn = async (p, n, wantPrint) => {
+  await p.evaluate((n) => { state.selected = n; renderAll(); }, n);
+  if (wantPrint) await p.waitForFunction((n) => state.selected === n && document.querySelector('#sheet canvas[data-art]').dataset.art === 'print', n, { timeout: 30000 });
+  else await p.waitForTimeout(900);
+};
+
+console.log('\n── blank pages: never swapped, and looking at them cannot break approval ──');
+{
+  const p = await freshPage(JOB);
+  await postSlots(p, JOB, [1, 3, 5, 6, 7, 8]);
+  await p.waitForFunction(() => uploads.size >= 6, null, { timeout: 30000 });
+  await settleOn(p, 2, false);
+  const s2 = await shows(p);
+  await settleOn(p, 4, false);
+  await settleOn(p, 1, true);
+  await settleOn(p, 3, true);           // frees page 1's press render
+  ok('a blank page stays on the quick render (nothing more to show)', s2 === 'screen', s2);
+  const held = await p.evaluate(() => {
+    const W = Math.round(BLEED_W * PRINT_DPI), H = Math.round(BLEED_H * PRINT_DPI);
+    return [...cache.keys()].filter(k => k.endsWith('|' + W + 'x' + H)).length;
+  });
+  ok('no 300 DPI sheet sits in the page cache', held === 0, held + ' held');
+  await p.evaluate(() => { for (const id of ['agree', 'ackIssues']) { const el = document.getElementById(id); if (el && !el.checked && !el.disabled) el.click(); } });
+  await p.click('#approveBtn');
+  await p.waitForFunction(() => window.__posts.some(m => /pps-proof:approve(d|-failed)/.test(m.type)), null, { timeout: 180000 });
+  const res = await p.evaluate(() => window.__posts.filter(m => /pps-proof:approve(d|-failed)/.test(m.type)).map(m => m.type + ' ' + (m.message || '')));
+  ok('approval still succeeds after browsing blank and art pages', res.length === 1 && res[0].startsWith('pps-proof:approved'), res.join(' | '));
+  await p.close();
+}
+
+console.log('\n── a job arriving after the demo is never shown the demo ──');
+{
+  const p = await freshPage(null);                 // the iframe flow: boots on the demo
+  await settleOn(p, 1, false);                     // long enough for any second pass on the demo
+  await postSlots(p, JOB, [3]);
+  await p.waitForFunction(() => uploads.size >= 1, null, { timeout: 30000 });
+  await p.waitForTimeout(900);
+  const ink = () => p.evaluate(() => {
+    const c = document.querySelector('#sheet canvas[data-art]');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0; for (let k = 0; k < d.length; k += 16) if (d[k] < 240 || d[k + 1] < 240 || d[k + 2] < 240) n++;
+    return { selected: state.selected, hosted: MODEL.hosted, res: c.dataset.art, inkPct: +(100 * n / (d.length / 16)).toFixed(2) };
+  });
+  const st = await ink();
+  ok('the customer\'s blank page 1 is white, not the demo cover', st.hosted && st.selected === 1 && st.inkPct === 0, JSON.stringify(st));
+  // And whatever is held when a job arrives is dropped, not merely out-keyed.
+  const held = await p.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 40; c.height = 40;
+    hiRes.key = 'held'; hiRes.r = { canvas: c };
+    window.postMessage({ type: 'pps-proof:job', job: window.PPS_PROOF_JOB || { calc: 'saddle', trim: { w: 5.5, h: 8.5 }, pages: 8 },
+                         files: [], slots: [] }, window.location.origin);
+    await new Promise(r => setTimeout(r, 300));
+    return { key: hiRes.key, r: hiRes.r, freed: c.width === 0 };
+  });
+  ok('a new job drops (and frees) any press render held from before it', held.key === null && held.r === null && held.freed,
+     JSON.stringify(held));
+  await p.close();
+}
+
+console.log('\n── two package builds at once: neither pulls the documents from under the other ──');
+{
+  // "Build proof package" in the rail and Approve both run buildPackage, and
+  // nothing stops a customer pressing both. The first to finish used to destroy
+  // the pdf.js documents the other was still rendering from (review, 2026-09-28).
+  const p = await freshPage(JOB);
+  await p.evaluate(async (bytes) => {
+    const file = new File([new Uint8Array(bytes)], 'fine.pdf', { type: 'application/pdf' });
+    window.postMessage({ type: 'pps-proof:job', job: window.PPS_PROOF_JOB, files: [file] }, location.origin);
+  }, await fixture());
+  await p.waitForFunction(() => uploads.size >= 8, null, { timeout: 60000 });
+  await p.evaluate(() => { for (const id of ['agree', 'ackIssues']) { const el = document.getElementById(id); if (el && !el.checked && !el.disabled) el.click(); } });
+  await p.evaluate(() => { state.openPage = null; state.wholeOpen = true; renderAll(); });
+  const hasPkg = await p.evaluate(() => !!document.getElementById('pkgBtn'));
+  // Both buttons call buildPackage by name; wrap it to record each run's outcome
+  // (the two share one status line, so the text cannot tell them apart).
+  await p.evaluate(() => {
+    window.__builds = [];
+    const real = buildPackage;
+    buildPackage = async (...a) => {
+      const rec = { done: false, ok: false, err: '' }; window.__builds.push(rec);
+      try { const v = await real(...a); rec.ok = true; return v; }
+      catch (e) { rec.err = String(e && e.message || e); throw e; }
+      finally { rec.done = true; }
+    };
+    document.getElementById('pkgBtn').click();
+    setTimeout(() => document.getElementById('approveBtn').click(), 60);
+  });
+  await p.waitForFunction(() => window.__builds.length === 2 && window.__builds.every(b => b.done), null, { timeout: 240000 });
+  const res = await p.evaluate(() => ({
+    approve: window.__posts.filter(m => /pps-proof:approve(d|-failed)/.test(m.type)).map(m => m.type + ' ' + (m.message || '')),
+    builds: window.__builds,
+  }));
+  ok('(the rail\'s package button is there to press)', hasPkg);
+  ok('(the two builds really did overlap — both ran)', res.builds.length === 2, JSON.stringify(res.builds));
+  ok('approval succeeds while a package build overlaps it', res.approve.length === 1 && res.approve[0].startsWith('pps-proof:approved'),
+     res.approve.join(' | '));
+  ok('and the package build succeeds too', res.builds.every(b => b.ok), JSON.stringify(res.builds));
+  // The overlap above rarely lands a release on a render in flight, so it is a
+  // smoke check. This is the gate: a release requested WHILE a print render is
+  // running must leave that render alone.
+  // (Before the fix this did not merely fail the render: it took the page down.)
+  const inflight = await p.evaluate(async () => {
+    const run = renderPrintPage(2);          // not awaited: in flight
+    const rel = releasePrintDocs();          // what a build finishing elsewhere does
+    try { const r = await run; await rel; const ok = r.canvas.width > 0; r.canvas.width = 0; return { ok }; }
+    catch (e) { return { ok: false, err: String(e && e.message || e) }; }
+  }).catch(e => ({ ok: false, err: 'page lost: ' + String(e && e.message || e).split('\n')[0] }));
+  ok('a release requested mid-render leaves that render alone', inflight.ok, JSON.stringify(inflight));
+  await p.close();
 }
 
 ok('no page errors', errors.length === 0, errors.join('\n       '));
