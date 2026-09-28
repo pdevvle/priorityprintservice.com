@@ -68,7 +68,11 @@ async function deliver(page, job) {
     await ensureLibs();
     const { PDFDocument, rgb } = window.PDFLib;
     const doc = await PDFDocument.create();
-    const W = 5.75 * 72, H = 8.75 * 72;
+    // 6" x 9" against the 5.75" x 8.75" bleed sheet, so every page is RENDERED.
+    // Since 2026-09-28 a bleed-exact, unchanged PDF ships untouched and renders
+    // nothing — correct, but it is the render this suite watches, and its
+    // failure injection targets renderPrintPage.
+    const W = 6 * 72, H = 9 * 72;
     for (let i = 0; i < n; i++) {
       const pg = doc.addPage([W, H]);
       pg.drawRectangle({ x:0, y:0, width:W, height:H,
@@ -183,7 +187,7 @@ console.log('\n── when it breaks part way ──');
   await page.evaluate(() => {
     const real = window.renderPrintPage || renderPrintPage;
     let seen = 0;
-    window.renderPrintPage = renderPrintPage = (n) => {
+    window.renderPrintPage = renderPrintPage = async (n) => {
       if (++seen === 3) throw new Error('synthetic render failure');
       return real(n);
     };

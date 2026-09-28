@@ -93,6 +93,7 @@ async function deliver(page, job, pdf, name = 'booklet-qr.pdf') {
     const bin = atob(b64); const u8 = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
     const file = new File([u8], name, { type: 'application/pdf' });
+    window.__lastFile = file;
     window.postMessage({ type: 'pps-proof:job', job, files: [file] }, window.location.origin);
   }, { job, b64: pdf.toString('base64'), name });
   await page.waitForFunction((n) => typeof uploads !== 'undefined' && uploads.size >= n, job.pages, { timeout: 60000 });
@@ -300,6 +301,79 @@ console.log('\n── proof == print, under every transform ──');
     });
   }
   await page.close();
+}
+
+// ── 3. the customer's own file, untouched — and only when it truly is ────────
+// An 8-page PDF built exactly to the 5.75" x 8.75" bleed sheet with nothing
+// changed must reach the host as the customer's exact bytes. Every near miss
+// must be refused AND say why, and still come out crisp.
+async function untouchedCase(label, { size, mutate }) {
+  const page = await open();
+  await deliver(page, JOB, buildFixture(size[0], size[1]), 'exact-bleed.pdf');
+  if (mutate) await page.evaluate(mutate.fn, mutate.arg);
+  const a = await approve(page);
+  if (!a || !a.ok) { await page.close(); return { error: a ? a.why : 'approve disabled' }; }
+  const r = await page.evaluate(async () => {
+    const m = window.__posts.find(x => x.type === 'pps-proof:approved');
+    const f = m.files.find(x => x.name === 'PRINT_READY.pdf');
+    const got = new Uint8Array(await f.blob.arrayBuffer());
+    const orig = new Uint8Array(await window.__lastFile.arrayBuffer());
+    const same = got.length === orig.length && got.every((v, i) => v === orig[i]);
+    const hex = async u8 => [...new Uint8Array(await crypto.subtle.digest('SHA-256', u8))]
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    const manifest = await m.files.find(x => x.name === 'MANIFEST.txt').blob.text();
+    return { same, hashIsOriginal: m.hash === await hex(orig), manifest };
+  });
+  const q = await measure(page, PAYLOAD);
+  await page.close();
+  return { ...r, inOrder: q.pages && q.pages.every(p => p.text === p.want),
+           midgrey: q.pages ? q.pages.map(p => p.midgrey == null ? 'n/a' : (p.midgrey * 100).toFixed(1) + '%') : [],
+           crisp: q.pages && q.pages.every(p => p.midgrey != null && p.midgrey < MIDGREY_MAX && p.text === p.want) };
+}
+const setT = (T) => { for (const [n, t] of Object.entries(T)) Object.assign(state.perPage[n], t); cache.clear(); renderAll(); };
+
+console.log('\n── the customer\'s file, untouched ──');
+{
+  const r = await untouchedCase('exact', { size: [5.75, 8.75] });
+  ok('an exact, unchanged file completes', !r.error, r.error);
+  if (!r.error) {
+    ok('PRINT_READY.pdf is the customer\'s file, byte for byte', r.same);
+    ok('and the approval hash is the hash of the file they uploaded', r.hashIsOriginal);
+    ok('the manifest says UNTOUCHED', /UNTOUCHED/.test(r.manifest), (r.manifest.match(/PRINT FILE[\s\S]{0,260}/) || [''])[0]);
+    // Byte-identity above is the whole assertion about quality: this IS the
+    // customer's vector file. Its QR is not measured for crispness here because
+    // a 5.75" sheet is 1725 px at 300 DPI — odd — so a centred QR sits on a
+    // half pixel when WE rasterise it, and anti-aliases in our measurement, not
+    // in the file. What is checked is that every page is there, in order.
+    ok('every page reads, in order', r.inOrder, 'mid-grey at our half-pixel raster: ' + r.midgrey.join(' '));
+  }
+}
+const nearMisses = [
+  ['one page scaled to 90%', { size: [5.75, 8.75], mutate: { fn: setT, arg: { 3: { behavior: 'scale', scale: 90 } } } }, /page 3 was changed/],
+  ['one page turned 180°',   { size: [5.75, 8.75], mutate: { fn: setT, arg: { 5: { rot: '180°' } } } }, /page 5 was changed/],
+  // Inside the modal's 0.25" tolerance — the modal would ship this raw even
+  // though its own proof crops it. Here it is rendered, matching the proof.
+  ['art 0.05" larger than the sheet', { size: [5.8, 8.8] }, /not the 5\.75" x 8\.75" bleed sheet/],
+  ['art at trim size (scaled up to cover bleed)', { size: [5.5, 8.5] }, /not the 5\.75" x 8\.75" bleed sheet/],
+  ['page 2 replaced by a slot upload', { size: [5.75, 8.75], mutate: { fn: async () => {
+      // A slot upload is ONE page (the calculator sends a multi-page PDF as the
+      // whole book, not as a slot). Page 2 of the same file, on its own.
+      const src = await PDFLib.PDFDocument.load(await window.__lastFile.arrayBuffer());
+      const one = await PDFLib.PDFDocument.create();
+      const [pg] = await one.copyPages(src, [1]); one.addPage(pg);
+      await loadArt(2, new File([await one.save()], 'slot-p2.pdf', { type: 'application/pdf' }));
+    } } }, /page 2/],
+];
+for (const [label, opts, why] of nearMisses) {
+  const r = await untouchedCase(label, opts);
+  if (r.error) { ok(label + ': completes', false, r.error); continue; }
+  ok(label + ': NOT shipped as-is', !r.same && !/UNTOUCHED/.test(r.manifest));
+  ok(label + ': the manifest says why', why.test(r.manifest), (r.manifest.match(/not shipped untouched: .*/) || ['(no reason)'])[0]);
+  // Crispness is proven in section 1, on a fixture whose modules sit on the
+  // 300 DPI grid. This one is 5.75" (1725 px, odd), so its QR is on a half
+  // pixel in the customer's own geometry and any 300 DPI raster greys its
+  // edges — not a property of our render. Order is what is checked here.
+  ok(label + ': every page still reads, in order', r.inOrder);
 }
 
 ok('no uncaught page errors', errors.length === 0, errors.slice(0, 3).join(' | '));

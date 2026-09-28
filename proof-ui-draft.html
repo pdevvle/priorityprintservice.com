@@ -943,6 +943,10 @@ function validateJob(job){
     if (job[k] == null) continue;
     if (job[k] !== 'color' && job[k] !== 'bw') errs.push(k + " must be 'color' or 'bw'");
   }
+  // Where a short file's blanks go — the customer's answer in the calculator.
+  // Absent means the calculator's own default, the end of the interior.
+  if (job.blankPlacement != null && job.blankPlacement !== 'covers' && job.blankPlacement !== 'end')
+    errs.push("blankPlacement must be 'covers' or 'end'");
   return errs;
 }
 
@@ -960,6 +964,8 @@ function applyJob(job){
   if (job.safety != null) MODEL.safety = Number(job.safety);
   MODEL.insideColor = job.insideColor === 'bw' ? 'bw' : 'color';
   MODEL.coverColor  = job.coverColor  === 'bw' ? 'bw' : 'color';
+  MODEL.blankPlacement = job.blankPlacement === 'covers' ? 'covers' : 'end';
+  MODEL.reconcile = null;                  // set by loadBook once the file is read
   recomputeDerived();
   rebuildModel(Number(job.pages));
   return [];
@@ -1254,6 +1260,7 @@ function placeArt(n, W, H, src){
 /* Issues, measured rather than scripted. */
 const ISSUE_TEXT = {
   noart: 'Issue: no artwork has been supplied for this page, so it will print blank. Upload a file for it, or approve knowing this page is empty.',
+  added: 'Heads up: this page prints blank. Your file has {raw} pages and the booklet has {target}, so blank pages were added — at {where}, as chosen when you ordered. Upload art for it here if you would rather it was not blank.',
   nomargin: 'Not checked: this file is a flat image, so there is no way to tell type from picture in it. Nothing here has confirmed your text is clear of the trim — please check it against the green safety line yourself.',
   cut: 'Issue: {n} run{s} of type cross{s2} the trim line and will be cut off. Move the art, or scale it down, so all type sits inside the green safety margin.',
   tight: 'Heads up: {n} run{s} of type sit{s3} inside the safety margin, as close as {gap}" to the trim. Trimming varies by about a sixteenth of an inch, so type this close can end up touching the edge.',
@@ -1325,6 +1332,17 @@ function analyze(n){
      it. Reported alone, and at error level, so approving a book with holes in
      it takes the deliberate second click the checkpoint asks for. */
   if (MODEL.hosted && !uploads.has(n)){
+    // A blank the calculator added to make up a short file is not a hole the
+    // customer forgot: they were told, and chose where it goes. Still flagged —
+    // it prints blank and the approval should say they saw that — but as what
+    // it is, and not as an error telling them to upload something.
+    const rc = MODEL.reconcile;
+    if (rc && rc.type === 'padded' && rc.blanks.includes(n)){
+      return Object.assign([{ kind:'added', level:'warn', text:ISSUE_TEXT.added
+        .replace('{raw}', rc.raw).replace('{target}', rc.target)
+        .replace('{where}', rc.placement === 'covers' ? 'the inside covers first' : 'the end of the book, before the back cover') }],
+        { marks:[] });
+    }
     return Object.assign([{ kind:'noart', level:'error', text:ISSUE_TEXT.noart }], { marks:[] });
   }
   // Measured at a fixed working size — the geometry is scale-independent, so
@@ -2167,7 +2185,12 @@ async function readPdfStructure(bytes){
 /* Render each page, and take its type from the text layer rather than from the
    pixels. This is the same information pdf.js gives any viewer; the margin
    check simply consumes it. */
-async function ingestPdf(file, startPage){
+/* `plan`, when given, decides which of the file's pages go where: it is called
+   with the file's page count and returns [pageIndex, bookPage] pairs. That is
+   how a whole-book upload keeps its back cover last (reconcilePlan). Without
+   it the file fills forward from startPage, which is what a drop on a tile
+   means. */
+async function ingestPdf(file, startPage, plan){
   await ensureLibs();
   const origin = await originOf(file);
   const buf = await file.arrayBuffer();
@@ -2178,10 +2201,27 @@ async function ingestPdf(file, startPage){
   const srcBytes = new Uint8Array(buf.slice(0));
   const struct = await readPdfStructure(new Uint8Array(buf.slice(0)));
   const doc = await window.pdfjsLib.getDocument({ data:new Uint8Array(buf.slice(0)) }).promise;
+  // Layers switched OFF in the file. pdf.js honours the off state, so the proof
+  // and a print re-rendered here both leave them out — but a downstream engine
+  // that drops /OCProperties would print them. So a file carrying any is never
+  // shipped as-is (untouchedOriginal), and the layers check names them.
+  let ocOff = [];
+  try {
+    const oc = await doc.getOptionalContentConfig();
+    const groups = oc && oc.getGroups ? oc.getGroups() : null;
+    if (groups) for (const id of Object.keys(groups)){
+      const g = groups[id];
+      if (g && g.visible === false) ocOff.push(g.name || id);
+    }
+  } catch (e){ ocOff = null; }            // null = could not tell, which is not "none"
 
   const room = MODEL.pages.length - startPage + 1;
-  const count = Math.min(doc.numPages, room);
-  for (let i = 1; i <= count; i++){
+  let jobs = [];
+  if (plan) jobs = plan(doc.numPages).filter(([k, n]) => k >= 0 && k < doc.numPages && n >= 1 && n <= MODEL.pages.length);
+  else for (let k = 0; k < Math.min(doc.numPages, room); k++) jobs.push([k, startPage + k]);
+  const count = jobs.length;
+  for (const [k, target] of jobs){
+    const i = k + 1;
     const page = await doc.getPage(i);
     const scale = PDF_RENDER_DPI / PT;
     const vp = page.getViewport({ scale });
@@ -2207,14 +2247,15 @@ async function ingestPdf(file, startPage){
     // viewport, which pdf.js takes from the CropBox. The TrimBox is a different
     // fact about the file and is kept for the built-to-spec check; using it
     // here would place every page 4-5% small.
-    uploads.set(startPage + i - 1, {
+    uploads.set(target, {
       el:c, w:c.width, h:c.height, text,
       // The viewport's own size, not the canvas's rounded-up pixel count: at
       // 150 DPI a 5.75" page is 862.5 px, and sizing from 863 would make the
       // 300 DPI print render land 1 px wide — a 0.06% resample across every
       // pixel of the page, which is enough to grey a QR code's edges.
       inW:vp.width/PDF_RENDER_DPI, inH:vp.height/PDF_RENDER_DPI,
-      pdfSrc:{ bytes:srcBytes, pageIndex:i - 1 },
+      pdfSrc:{ bytes:srcBytes, pageIndex:i - 1, rotate:page.rotate || 0, numPages:doc.numPages,
+               ocOff, name:file.name },
       origin,
       label:file.name + (doc.numPages > 1 ? ' · p' + i : ''),
       stamp:Date.now() + i,
@@ -2223,7 +2264,7 @@ async function ingestPdf(file, startPage){
   }
   cache.clear();
   renderAll();
-  if (doc.numPages > room){
+  if (!plan && doc.numPages > room){
     alert(file.name + ' has ' + doc.numPages + ' pages but only ' + room +
           ' fit from page ' + startPage + '. The remaining ' + (doc.numPages - room) + ' were not placed.');
   }
@@ -2260,6 +2301,106 @@ async function loadArtSequence(startPage, fileList){
   }
   const placing = files.slice(0, room);
   for (let i = 0; i < placing.length; i++) await loadArt(startPage + i, placing[i]);
+}
+
+/* ── when the file and the order disagree about page count ─────
+   A port of the calculator's own reconciliation (the displayPages memo in
+   calc-preview-test.html), because the customer has already been told there
+   what will happen and chosen where the blanks go. Covers stay covers: the
+   file's first page is the front and its LAST page is the back, whatever the
+   count. Filling forward from page 1 instead — what this surface did until
+   2026-09-28 — put a 10-page file's back cover on page 10 of a 12-page book
+   and left the real back blank, and dropped the back cover of a file that ran
+   long. Short: blanks go at the end of the interior, or (placement 'covers')
+   on the inside covers first and then backwards from the end. Long: the
+   interior pages that do not fit are left out, from the end.
+
+   Returns map[bookPage - 1] = index into the file's pages, or null for blank. */
+function reconcilePlan(raw, target, placement){
+  const map = new Array(target).fill(null);
+  if (raw <= 0 || target <= 0) return { map, info:null };
+  const where = placement === 'covers' ? 'covers' : 'end';
+  if (raw === 1 || target === 1){
+    map[0] = 0;
+    const blanks = []; for (let n = 2; n <= target; n++) blanks.push(n);
+    return { map, info: raw === target ? null
+      : raw < target ? { type:'padded', raw, target, count:target - raw, placement:where, blanks, dropped:[] }
+      :                { type:'trimmed', raw, target, count:raw - target, blanks:[], dropped:range(2, raw) } };
+  }
+  const need = target - 2, have = raw - 2;
+  const interior = new Array(need).fill(null);          // file indices; null = blank
+  let info = null;
+  if (have === need){
+    for (let i = 0; i < need; i++) interior[i] = i + 1;
+  } else if (have < need){
+    const n = need - have;
+    const blank = new Array(need).fill(false);
+    if (where === 'covers'){
+      // Inside front cover, then inside back, then backwards from the end —
+      // a blank there reads as intentional; one mid-signature reads as a mistake.
+      let left = n;
+      for (const idx of [0, need - 1]) if (left > 0 && idx >= 0 && !blank[idx]){ blank[idx] = true; left--; }
+      for (let i = need - 1; i >= 0 && left > 0; i--) if (!blank[i]){ blank[i] = true; left--; }
+    } else {
+      for (let i = have; i < need; i++) blank[i] = true;
+    }
+    let k = 1;
+    for (let i = 0; i < need; i++) if (!blank[i]) interior[i] = k++;
+    info = { type:'padded', raw, target, count:n, placement:where, dropped:[] };
+  } else {
+    for (let i = 0; i < need; i++) interior[i] = i + 1;
+    // file pages (1-based) that do not make it into the book
+    info = { type:'trimmed', raw, target, count:have - need, blanks:[], dropped:range(need + 2, raw - 1) };
+  }
+  map[0] = 0;
+  for (let i = 0; i < need; i++) map[i + 1] = interior[i];
+  map[target - 1] = raw - 1;
+  if (info && info.type === 'padded') info.blanks = map.map((v, i) => v === null ? i + 1 : 0).filter(Boolean);
+  return { map, info };
+}
+function range(a, b){ const out = []; for (let i = a; i <= b; i++) out.push(i); return out; }
+// [5,6,7,8,11] -> "5–8, 11"
+function fmtRun(list){
+  const out = [];
+  for (let i = 0; i < list.length; i++){
+    let j = i;
+    while (j + 1 < list.length && list[j + 1] === list[j] + 1) j++;
+    out.push(j > i ? list[i] + '–' + list[j] : String(list[i]));
+    i = j;
+  }
+  return out.join(', ');
+}
+
+/* The host's whole-file artwork. One PDF or a set of images (one per page, in
+   name order) is a BOOK and is reconciled against the order like the
+   calculator does; anything else — several PDFs, a mix — is not a shape the
+   calculator accepts either, so it simply fills forward. A drop on a tile is
+   not this: that is loadArtSequence, filling from where it landed. */
+async function loadBook(fileList){
+  const isPdf = f => /pdf$/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
+  const files = [...(fileList || [])].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric:true, sensitivity:'base' }));
+  if (!files.length) return;
+  const target = MODEL.pages.length;
+  if (files.length === 1 && isPdf(files[0])){
+    try {
+      await ingestPdf(files[0], 1, numPages => {
+        const p = reconcilePlan(numPages, target, MODEL.blankPlacement);
+        MODEL.reconcile = p.info;
+        invalidateFlags();
+        return p.map.map((k, i) => k === null ? null : [k, i + 1]).filter(Boolean);
+      });
+    } catch (err){
+      alert('That PDF could not be read: ' + (err && err.message ? err.message : err) +
+            '\n\nNothing has been attached.');
+    }
+    return;
+  }
+  if (files.some(isPdf)) return loadArtSequence(1, files);
+  const p = reconcilePlan(files.length, target, MODEL.blankPlacement);
+  MODEL.reconcile = p.info;
+  invalidateFlags();
+  for (let i = 0; i < p.map.length; i++) if (p.map[i] !== null) await loadArt(i + 1, files[p.map[i]]);
 }
 async function loadArt(n, file){
   if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)){
@@ -2316,7 +2457,16 @@ const NO_STRUCTURE = 'Nothing attached carries its own structure — a flat imag
 
 const FILE_CHECKS = [
   { id:'pages', label:'Page count for this binding', run(){
-      const c = MODEL.pages.length;
+      const c = MODEL.pages.length, rc = MODEL.reconcile;
+      // The calculator warns about both of these; so does this, because the
+      // acknowledgment should cover the customer having seen them.
+      if (rc && rc.type === 'padded') return { state:'warn', text:'Your file has ' + rc.raw +
+        ' pages and the booklet has ' + c + '. ' + rc.count + ' blank page' + (rc.count === 1 ? ' was' : 's were') +
+        ' added (page' + (rc.blanks.length === 1 ? ' ' : 's ') + rc.blanks.join(', ') + '). Your first and last pages stay the front and back covers.' };
+      if (rc && rc.type === 'trimmed') return { state:'warn', text:'Your file has ' + rc.raw +
+        ' pages and the booklet has ' + c + ', so ' + rc.count + ' will not print: page' +
+        (rc.dropped.length === 1 ? ' ' : 's ') + fmtRun(rc.dropped) + ' of your file. Your last page is still the back cover. ' +
+        'Order more pages, or send a file that matches, to include them.' };
       return c % 4 === 0
         ? { state:'pass', text:c + ' pages. Saddle stitch is folded sheets, so the count has to be a multiple of four, and this is.' }
         : { state:'fail', text:c + ' pages. Saddle stitch needs a multiple of four; blank pages will be inserted to make up the difference.' };
@@ -2522,6 +2672,55 @@ function rotateCanvasExact(img, steps, w, h){
   return c;
 }
 
+/* ── The customer's own file, untouched ──────────────────────────────────────
+   When the proof the customer approved IS their file — every page exactly as
+   supplied, nothing moved, nothing scaled, nothing added — the print file is
+   that file, byte for byte. No render, no JPEG, vectors and fonts intact.
+
+   Stricter than the modal on purpose. The modal ships its raw file when the art
+   is within 0.25" of the bleed sheet, which means its proof (cropped to the
+   sheet) and its print file (the file as supplied) can differ in framing by up
+   to a quarter inch. Here the proof must be an exact identity of the file, or
+   the file is not shipped as-is: anything else gets the 300 DPI render, which
+   matches the proof by construction (tools-proof-print-fidelity-test.mjs).
+
+   Returns { bytes, name } when it applies, else { why } — the first reason it
+   does not, which the manifest records so prepress can see why a PDF that
+   looked press-ready was rendered. */
+const UNTOUCHED_EPS = 0.01;                     // inches; PDF export rounding, no more
+function untouchedOriginal(pages){
+  const first = uploads.get(pages[0]);
+  if (!first || !first.pdfSrc) return { why:'page 1 is not from a PDF' };
+  const s0 = first.pdfSrc;
+  if (s0.numPages !== pages.length)
+    return { why:'the PDF has ' + s0.numPages + ' page' + (s0.numPages === 1 ? '' : 's') + ', the book ' + pages.length };
+  if (s0.ocOff === null) return { why:'its layers could not be read' };
+  if (s0.ocOff.length) return { why:'it has hidden layers (' + s0.ocOff.join(', ') + ')' };
+  const pdfInfo = first.pdf || {};
+  if (pdfInfo.hasAcroForm) return { why:'it has form fields, which would not survive downstream' };
+  if (pdfInfo.hasAnnots)   return { why:'it has annotations, which would not survive downstream' };
+  const near = (a, b) => Math.abs(a - b) <= UNTOUCHED_EPS;
+  for (const n of pages){
+    const u = uploads.get(n);
+    if (!u || !u.pdfSrc) return { why:'page ' + n + (u ? ' is a bitmap' : ' has no artwork') };
+    if (u.pdfSrc.bytes !== s0.bytes) return { why:'page ' + n + ' was supplied separately' };
+    if (u.pdfSrc.pageIndex !== n - 1) return { why:'page ' + n + ' is not the file\'s page ' + n };
+    if (u.pdfSrc.rotate) return { why:'page ' + n + ' carries its own /Rotate' };
+    const t = state.perPage[n] || {};
+    const asSupplied = (t.behavior === 'crop' || t.behavior === 'scale' && Number(t.scale) === 100)
+                       && (t.rot || '0°') === '0°';
+    if (!asSupplied) return { why:'page ' + n + ' was changed (' + (t.behavior || 'crop')
+                              + (t.behavior === 'scale' ? ' ' + t.scale + '%' : '') + ', ' + (t.rot || '0°') + ')' };
+    if (!near(u.inW, BLEED_W) || !near(u.inH, BLEED_H))
+      return { why:'page ' + n + ' is ' + u.inW.toFixed(3) + '" x ' + u.inH.toFixed(3)
+               + '", not the ' + BLEED_W + '" x ' + BLEED_H + '" bleed sheet' };
+    const pg = pdfInfo.pages && pdfInfo.pages[n - 1];
+    if (pg && pg.media && (!near(pg.media.w, BLEED_W) || !near(pg.media.h, BLEED_H)))
+      return { why:'page ' + n + '\'s MediaBox is not the bleed sheet' };
+  }
+  return { bytes:s0.bytes, name:s0.name };
+}
+
 async function renderPrintPage(n){
   const W = Math.round(BLEED_W * PRINT_DPI), H = Math.round(BLEED_H * PRINT_DPI);
   const src = SRCget(n);
@@ -2607,8 +2806,23 @@ async function buildPackage(){
   // ── 1. the print file ──
   const pdf = await PDFDocument.create();
   const perPage = [];
+  const original = untouchedOriginal(pages);
   let i = 0;
-  for (const n of pages){
+  if (original.bytes){
+    // The approved proof is an exact identity of the customer's file: ship it.
+    // Still walk every page, so the manifest records margins and the progress
+    // bar stays determinate.
+    const W = Math.round(BLEED_W * PRINT_DPI), H = Math.round(BLEED_H * PRINT_DPI);
+    for (const n of pages){
+      await tick('Page ' + (++i) + ' of ' + pages.length + ' — your file, exactly as supplied');
+      const g = placeArt(n, W, H, SRCget(n));
+      const r = { place:{ x:g.dx, y:g.dy, w:g.drawW, h:g.drawH }, W, H, steps:g.steps, quarter:g.quarter };
+      perPage.push({ n, effDpi:g.effDpi, t:Object.assign({}, state.perPage[n]),
+                     src:SRCget(n).label || 'placeholder', margins:checkMargins(n, r),
+                     print:{ kind:'original', label:original.name, page:n } });
+    }
+  }
+  for (const n of (original.bytes ? [] : pages)){
     await tick('Rendering page ' + (++i) + ' of ' + pages.length + ' at ' + PRINT_DPI + ' DPI');
     let r;
     try { r = await renderPrintPage(n); }
@@ -2630,11 +2844,16 @@ async function buildPackage(){
   }
   await releasePrintDocs();
   await tick('Assembling the print file…');
-  const pdfBytes = await pdf.save();
+  // Shipped as-is, PRINT_READY.pdf IS the customer's file, so the approval hash
+  // binds to exactly the bytes they uploaded. It stays named PRINT_READY.pdf so
+  // the host, Drive and the imposition tool treat it like any other print file.
+  const pdfBytes = original.bytes ? original.bytes : await pdf.save();
   const printBlob = new Blob([pdfBytes], { type:'application/pdf' });
   const printHash = await sha256Hex(new Uint8Array(pdfBytes));
   files.push({ name:'PRINT_READY.pdf', blob:printBlob,
-               note:'rendered from source at ' + PRINT_DPI + ' DPI · ' + pages.length + ' pages · no guides' });
+               note: original.bytes
+                 ? 'your file exactly as supplied · ' + pages.length + ' pages · untouched'
+                 : 'rendered from source at ' + PRINT_DPI + ' DPI · ' + pages.length + ' pages · no guides' });
 
   // ── 2. preview JPEGs, guides drawn on ──
   const PW = 900, PH = Math.round(PW * BLEED_H / BLEED_W);
@@ -2675,7 +2894,14 @@ async function buildPackage(){
   L.push('PRINT FILE');
   L.push('  PRINT_READY.pdf');
   L.push('  SHA-256      ' + printHash);
-  L.push('  ' + fmtBytes(pdfBytes.length) + ' at ' + PRINT_DPI + ' DPI');
+  if (original.bytes){
+    L.push('  ' + fmtBytes(pdfBytes.length) + ' — the customer\'s file "' + original.name + '", byte for byte');
+    L.push('  UNTOUCHED: every page was approved exactly as supplied, so nothing was');
+    L.push('  rendered, rasterised or re-encoded. Vectors and fonts are the originals.');
+  } else {
+    L.push('  ' + fmtBytes(pdfBytes.length) + ' at ' + PRINT_DPI + ' DPI');
+    L.push('  not shipped untouched: ' + original.why);
+  }
   L.push('  This hash binds the approval to these exact bytes.');
   L.push('');
   // What each page of the print file was actually made from. Before 2026-09-28
@@ -2684,7 +2910,9 @@ async function buildPackage(){
   L.push('PRINT SOURCE');
   perPage.forEach(r => {
     const s = r.print || {};
-    if (s.kind === 'pdf'){
+    if (s.kind === 'original'){
+      L.push('  page ' + r.n + '  "' + s.label + '" page ' + s.page + ', untouched');
+    } else if (s.kind === 'pdf'){
       L.push('  page ' + r.n + '  re-rendered from "' + s.label + '" page ' + s.page + ' at ' + s.dpi + ' DPI'
              + (s.oneToOne ? ', placed 1:1 on whole pixels' : '')
              + (s.capped ? ' — CAPPED by this browser\'s canvas limit' : ''));
@@ -2698,10 +2926,33 @@ async function buildPackage(){
   // Named explicitly rather than left to be inferred from eight "src=no artwork
   // supplied" lines further down: a blank page in a printed booklet is the kind
   // of thing production must be able to see at a glance was intended.
-  const blanks = pages.filter(n => !uploads.has(n));
-  if (blanks.length){
+  // Split: a blank added to make up a short file was announced and placed by
+  // the customer's choice; one with nothing supplied is a hole. Production
+  // should be able to tell which is which.
+  const rc = MODEL.reconcile;
+  const added  = pages.filter(n => !uploads.has(n) && rc && rc.type === 'padded' && rc.blanks.includes(n));
+  const blanks = pages.filter(n => !uploads.has(n) && !added.includes(n));
+  if (rc){
+    L.push('PAGE COUNT');
+    L.push('  the file has ' + rc.raw + ' pages; the booklet has ' + rc.target
+           + '. First page = front cover, last page = back cover.');
+    if (rc.type === 'padded'){
+      L.push('  ' + rc.count + ' blank page' + (rc.count === 1 ? '' : 's') + ' added at '
+             + (rc.placement === 'covers' ? 'the inside covers first' : 'the end of the interior')
+             + ' (customer\'s choice): page' + (rc.blanks.length === 1 ? ' ' : 's ') + rc.blanks.join(', ')
+             + (added.length < rc.blanks.length ? ' — since given art in the proofer: '
+                + rc.blanks.filter(n => !added.includes(n)).join(', ') : ''));
+    } else {
+      L.push('  NOT PRINTED: page' + (rc.dropped.length === 1 ? ' ' : 's ') + fmtRun(rc.dropped)
+             + ' of the file (' + rc.count + ' interior page' + (rc.count === 1 ? '' : 's') + ' beyond the order)');
+    }
+    L.push('');
+  }
+  if (added.length || blanks.length){
     L.push('BLANK PAGES');
-    L.push('  page' + (blanks.length === 1 ? ' ' : 's ') + blanks.join(', ')
+    if (added.length) L.push('  page' + (added.length === 1 ? ' ' : 's ') + added.join(', ')
+           + ' — added to make up a short file; these print blank');
+    if (blanks.length) L.push('  page' + (blanks.length === 1 ? ' ' : 's ') + blanks.join(', ')
            + ' — no artwork was supplied; these print blank');
     L.push('');
   }
@@ -3120,7 +3371,14 @@ window.addEventListener('message', async ev => {
     const errs = bootJob(m.job);
     if (errs.length) return;
     try {
-      if (m.files && m.files.length) await loadArtSequence(1, Array.from(m.files));
+      // A job with per-page uploads is not reconciled, in the calculator either:
+      // its page grid is already the book's length, and the whole file filled
+      // it from page 1. Without them the file IS the book, covers and all.
+      const hasSlots = (m.slots || []).some(s => s && s.file);
+      if (m.files && m.files.length){
+        if (hasSlots) await loadArtSequence(1, Array.from(m.files));
+        else await loadBook(Array.from(m.files));
+      }
       // Per-page replacements, placed after the sequence so they win where they
       // overlap. A customer who uploaded pages individually used to be handed an
       // empty proof: the host forwarded its whole-file list and nothing else, so
