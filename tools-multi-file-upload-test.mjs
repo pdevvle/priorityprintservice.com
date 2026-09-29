@@ -95,7 +95,7 @@ async function open(file, reorder) {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { path: 'pps-artwork/2026/09/' + s.uploads.length + '-' + name } }) });
     }
     if (action === 'pps_add_to_cart') {
-      s.cartPost = { files: field(body, 'pps_artwork_files'), path: field(body, 'pps_artwork_path') };
+      s.cartPost = { files: field(body, 'pps_artwork_files'), path: field(body, 'pps_artwork_path'), meta: field(body, 'pps_metadata') };
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { cart_item_key: 'k1' } }) });
     }
     return route.fulfill({ status: 400, body: '0' });
@@ -256,6 +256,35 @@ for (const file of FLATS) {
     await addToOrder(t);
     ok(`${file}: two files dropped at once become front and back, and both reach the order`,
        t.uploads.includes('front.jpg') && t.uploads.includes('back.jpg'), JSON.stringify(t.uploads) + ' dialogs=' + t.dialogs.join(' || '));
+    await t.ctx.close();
+  }
+
+  if (twoSided) {
+    // Order 87285 (2026-09-28): a two-sided accordion went to production with the front
+    // image only, and nothing asked or said so. Now the customer chooses, and the choice
+    // is on the order.
+    console.log('\n── ' + file + ' / two-sided job, only the front supplied ──');
+    const s = await open(file, base);
+    await s.p.locator('input[type=file]').first().setInputFiles(FRONT);
+    await waitArt(s.p, 1);
+    await addToOrder(s);
+    let meta = {}; try { meta = JSON.parse(s.cartPost && s.cartPost.meta || '{}'); } catch (e) {}
+    const sec = (meta.ticket || []).find(p => p[0] === 'Second side');
+    ok(`${file}: the customer is asked before a two-sided job goes with one side's art`, s.dialogs.some(d => /prints on BOTH sides, but only one side has artwork/.test(d)), s.dialogs.join(' || '));
+    ok(`${file}: choosing a blank second side is recorded on the order and its ticket`, meta.backBlank === true && !!sec && /print it blank/.test(sec[1]), JSON.stringify({ backBlank: meta.backBlank, sec }));
+    await s.ctx.close();
+
+    console.log('\n── ' + file + ' / an image the browser cannot open, on the back slot ──');
+    const t = await open(file, base);
+    await t.p.locator('input[type=file]').first().setInputFiles(FRONT);
+    await waitArt(t.p, 1);
+    const backIn = await slotInput(t.p, 'back', twoSided);
+    if (backIn) await backIn.setInputFiles({ name: 'Menu-Back.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('not an image') });
+    await t.p.waitForTimeout(1500);
+    ok(`${file}: an image that will not open is named to the customer and not taken as art`,
+       t.dialogs.some(d => /couldn't open "Menu-Back\.jpg" as an image/.test(d)), t.dialogs.join(' || '));
+    await addToOrder(t);
+    ok(`${file}: so it is never uploaded as if it were the back`, !t.uploads.includes('Menu-Back.jpg'), JSON.stringify(t.uploads));
     await t.ctx.close();
   }
 

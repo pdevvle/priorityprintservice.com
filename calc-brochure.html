@@ -757,6 +757,12 @@ function getShipCostEst(zip, lbs) {
 // A ZIP as people type it: "85001 1234" and autofill's "850011234" are ZIP+4 too, so a
 // nine-digit value is written back with its dash. Until 2026-09-29 both were refused as
 // "add a 5-digit ZIP code" even though the customer had entered one.
+// An image the browser cannot open used to be taken anyway: a broken picture on the
+// side, zero size, and the order went through with a file nobody could proof.
+function ppsUnreadableImageMsg(file) {
+  return "We couldn't open \"" + ((file && file.name) || "that file") + "\" as an image, so it was NOT added.\n\n"
+    + "Please export it again as a PDF, JPG or PNG. If it keeps failing, place your order and email the file to us.";
+}
 function ppsFmtZip(v) {
   const s = String(v == null ? "" : v).replace(/[^\d-]/g, "");
   const d = s.replace(/-/g, "");
@@ -2065,7 +2071,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   useEffect(() => {
     if (approved || !onArtwork) return;
     const list = allOriginals();
-    if (list.length) { _origEmittedRef.current = true; onArtwork({ type: "files", list, approved: false }); }
+    if (list.length) { _origEmittedRef.current = true; onArtwork({ type: "files", list, approved: false, back: !!backArt }); }
     else if (_origEmittedRef.current) { _origEmittedRef.current = false; onArtwork({ type: "none" }); }
   }, [frontArt, backArt, approved]);
   const [approvalPkg, setApprovalPkg] = useState(null);
@@ -2479,7 +2485,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     }
     const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
     if (!dataUrl) return null;
-    const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+    const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
+    if (!dims) { alert(ppsUnreadableImageMsg(file)); return null; }
     return { dataUrl, file, dims };
   }
 
@@ -2520,7 +2527,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       } else {
         const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
         if (!dataUrl) return;
-        const dims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+        const dims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
+        if (!dims) { alert(ppsUnreadableImageMsg(file)); setLoading(false); return; }
         setFrontArt({ dataUrl, file, dims });
       }
       // Two or more files dropped at once. The first is the front (or, as a
@@ -3425,7 +3433,8 @@ generate();
                   }
                   const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
                   if (!dataUrl) return;
-                  const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+                  const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
+                  if (!dims) { alert(ppsUnreadableImageMsg(file)); return; }
                   setArt({ dataUrl, file, dims });
                   setApproved(false);
                 } catch (e) { console.error("Slot file processing failed:", e); alert("We couldn't read that file: " + ((e && e.message) || e) + "\n\nPlease try a PDF, JPG or PNG, or send the file to us and we'll attach it to your order."); }
@@ -3551,7 +3560,7 @@ generate();
                       // _preview.html stays local (download only): the server does not accept
                       // .html, and on perfect-bound that refusal blocked every order (2026-09-12).
                       files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
-                      onArtwork({ type: "files", list: files, approved: true });
+                      onArtwork({ type: "files", list: files, approved: true, back: !!backArt });
                     }
                   } catch (err) {
                     console.error("Approval package generation failed:", err);
@@ -4532,6 +4541,7 @@ function buildTicket(config, result) {
   push("Size", _size + (_fold ? " · " + _fold + _fdir : ""));
   push("Paper", config.paper && config.paper.label ? config.paper.label : "unknown");
   push("Print", config.sides === 2 ? `2 sides · Front ${cName(config.frontColor)} · Back ${cName(config.backColor)}` : `1 side · ${cName(config.frontColor)}`);
+  if (config.sides === 2 && config.backBlank) push("Second side", "No artwork supplied — print it blank (customer confirmed)");
   const _ad = buildAddons(config); push("Finishing", _ad.length ? _ad.join("; ") : "None");
   push("Proof", config.proof >= 3 ? "Hardcopy proof, mailed before printing" : config.proof > 0 ? "Digital proof by staff before printing" : "Self-approved online (no staff proof)");
   if (config.proof >= 3) push("Proof ship-to", config.proofAddrSame === false ? ppsFmtAddr(config.proofAddr) : "Same as the order ship-to");
@@ -4627,6 +4637,7 @@ function buildMetadata(config, result) {
     calcLabel: "Brochure / Flat Print",
     // Customer selections
     jobName: config.jobName || "",
+    backBlank: !!config.backBlank,
     qty: config.qty,
     sizeMode: config.sizeMode,
     // A custom size used to post the last preset label ("4.25×5.5" on a 21×7 job).
@@ -5806,6 +5817,15 @@ function App() {
       alert("Please add your artwork file before ordering.\n\nIf you'd rather send it later, choose \"Email Art After Order\" under the artwork options.");
       return;
     }
+    // A two-sided job whose back has no artwork went to the order without a word, and
+    // production found one file on the order (87285, 2026-09-28: a 4-panel accordion, front
+    // only). The customer decides: go back and add it, or print the back blank on purpose.
+    let _backBlank = false;
+    if (sides === 2 && artFiles && artFiles.type === "files" && artFiles.back === false) {
+      if (!confirm("This job prints on BOTH sides, but only one side has artwork.\n\n"
+        + "OK: print the second side blank.\nCancel: go back and add the artwork for the second side (its box is under Artwork).")) return;
+      _backBlank = true;
+    }
     if (artFiles && artFiles.type === "files" && !artFiles.approved && proof === 0) {
       alert("Please approve your artwork proof before ordering.\n\n"
         + "Open the proof in Artwork & Proofing, check your artwork against the bleed, "
@@ -5816,6 +5836,7 @@ function App() {
     setSubmitting(true);
     setUploadProgress(null);
     const config = {
+      backBlank: _backBlank,
       jobName, qty,
       sizeMode, sizeLabel, longEdge, shortEdge,
       foldType, foldDir, frontColor, backColor, sides,

@@ -306,6 +306,22 @@ each gated by a test first run against the live code, where it failed:
   edit payload (page body, never a URL) now carries `shipAddr`, and a reorder link's ZIP is
   kept. WooCommerce's own "Order again" emptied the cart and re-added nothing for calculator
   orders — its button is hidden for them and the handler refuses them without touching the cart.
+- **A two-sided flat could go to production with one side's artwork, and nobody was told**
+  (order 87285, 2026-09-28: a 4-panel accordion menu; Drive received
+  `…-Menu-Front-….jpg` and nothing else, and no Drive-missing note, because the order itself
+  only ever listed the one file). Replayed on the build live that day: front on the drop
+  zone and back on its slot, or both dragged together, both arrive — but a front alone went
+  straight through, and an image the browser could not open was taken as the back with no
+  word. Which of those Ivan hit cannot be recovered; the calculator kept no trace. Now, on
+  all four two-sided flats: Add to Order asks ("prints on BOTH sides, but only one side has
+  artwork" — OK prints it blank, Cancel goes back), the answer rides as `backBlank` and a
+  "Second side" ticket line; an unreadable image is named and not taken
+  (`ppsUnreadableImageMsg`). On the server, `pps_one_side_missing()` (two-sided flat, "upload
+  art", one customer image, no `backBlank`) puts "Second side: NOT RECEIVED" on the Job
+  Ticket, an `ARTWORK:` order note, and a "Two-sided job with artwork for one side only"
+  section in the daily email — judged from the order's files, so older orders like 87285
+  are listed too. Gates: `tools-multi-file-upload-test.mjs` (the live brochure fails the 4
+  new checks), `tools-server-junctures-test.php`, `tools-job-health-test.php`.
 - **ZIP+4 without a dash** (found 2026-09-29): "85001 1234" and autofill's "850011234" were
   refused as "add a 5-digit ZIP code" by the four-digit check above, in all eight calculators
   and on the server. `ppsFmtZip()` writes nine digits back as `85001-1234` (ship and proof

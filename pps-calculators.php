@@ -3084,6 +3084,25 @@ add_filter( 'woocommerce_valid_order_statuses_for_order_again', function( $statu
     return ( $id && pps_order_has_calc_items( $id ) ) ? array() : $statuses;
 } );
 
+/** The order note for a two-sided job with one side's artwork — where the order has an ID. */
+function pps_one_side_note( $order ) {
+    try {
+        if ( is_numeric( $order ) ) $order = wc_get_order( $order );
+        if ( ! is_object( $order ) || ! method_exists( $order, 'get_items' ) || $order->get_meta( '_pps_one_side_noted' ) ) return;
+        $msgs = array();
+        foreach ( $order->get_items() as $it ) {
+            $m = (string) $it->get_meta( '_pps_one_side' );
+            if ( $m !== '' ) $msgs[] = $it->get_name() . ': ' . $m;
+        }
+        if ( ! $msgs ) return;
+        $order->add_order_note( 'ARTWORK: ' . implode( ' ', $msgs ) );
+        $order->update_meta_data( '_pps_one_side_noted', 1 );
+        $order->save();
+    } catch ( \Throwable $e ) {}
+}
+add_action( 'woocommerce_checkout_order_processed', 'pps_one_side_note', 27 );
+add_action( 'woocommerce_store_api_checkout_order_processed', 'pps_one_side_note', 27 );
+
 /**
  * A classic cart page left open across midnight shows yesterday's quote, and its express
  * pay buttons carry yesterday's amount. When the shop's day turns over, reload it so the
@@ -3827,7 +3846,9 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
         // then what the server knows (art status, dates, ship-to, shipment). It is the
         // customer's receipt too — the same block on both sides, so a question about a
         // job is answered by reading, not by exploring a JSON blob. See pps_job_ticket().
-        $ticket = pps_job_ticket( is_array( $full ) ? $full : array(), $values, $delivery, $prepress );
+        $one_side = pps_one_side_missing( is_array( $full ) ? $full : array(), $values['pps_artwork_files'] ?? array() );
+    if ( $one_side !== '' ) $item->add_meta_data( '_pps_one_side', $one_side, true );
+    $ticket = pps_job_ticket( is_array( $full ) ? $full : array(), $values, $delivery, $prepress );
         if ( $ticket !== '' ) {
             $item->add_meta_data( 'Job Ticket', $ticket, true );
         }
@@ -3983,6 +4004,34 @@ function pps_clean_text( $s, $multiline = false, $max = 2000 ) {
     return trim( function_exists( 'mb_substr' ) ? mb_substr( $s, 0, $max ) : substr( $s, 0, $max ) );
 }
 
+/**
+ * A two-sided flat whose second side has no artwork. Order 87285 (2026-09-28) was a
+ * 4-panel accordion brochure that reached production with one image — the front — and
+ * nothing anywhere said so. Returns '' when the job is fine, or a sentence for staff.
+ *
+ * Only what the files prove: one customer image on a two-sided "upload art" job, and no
+ * "print the second side blank" answer from the customer. A single PDF is left alone (it
+ * may hold both sides; the print file check counts its pages), and so is every booklet.
+ *
+ * @param array        $full  the line's decoded metadata
+ * @param array|string $files the line's artwork list (array of {name,path}, or its JSON)
+ */
+function pps_one_side_missing( array $full, $files ) {
+    if ( ! empty( $full['sets'] ) || ! isset( $full['qty'] ) ) return '';               // not a flat
+    if ( (int) ( $full['sides'] ?? 1 ) !== 2 || ! empty( $full['backBlank'] ) ) return '';
+    if ( abs( (float) ( $full['artwork'] ?? 0 ) - 0.01 ) > 0.005 ) return '';          // not "upload art with order"
+    if ( is_string( $files ) ) $files = json_decode( $files, true );
+    if ( ! is_array( $files ) ) return '';
+    $orig = array();
+    foreach ( $files as $f ) {
+        $n = is_array( $f ) ? (string) ( $f['name'] ?? basename( (string) ( $f['path'] ?? '' ) ) ) : '';
+        if ( $n === '' || preg_match( '/(_print-ready\.pdf|_preview[^\/]*|_manipulation_manifest\.txt)$/i', $n ) ) continue;
+        $orig[] = $n;
+    }
+    if ( count( $orig ) !== 1 || ! preg_match( '/\.(jpe?g|png|gif|webp|tiff?|heic)$/i', $orig[0] ) ) return '';
+    return 'Two-sided job, but only one image arrived (' . $orig[0] . '). The second side has no artwork — ask the customer before printing.';
+}
+
 function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepress = '' ) {
     $lines = array();
     $put = static function( $label, $value ) use ( &$lines ) {
@@ -4041,6 +4090,8 @@ function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepre
     $names = array();
     if ( is_array( $files ) ) foreach ( $files as $f ) { if ( is_array( $f ) && ! empty( $f['name'] ) ) $names[] = sanitize_file_name( $f['name'] ); }
     $put( 'Artwork files', $n ? ( $n . ' uploaded' . ( $names ? ' (' . implode( ', ', array_slice( $names, 0, 6 ) ) . ( count( $names ) > 6 ? ', …' : '' ) . ')' : '' ) ) : 'none uploaded — see the artwork option above' );
+    $one = pps_one_side_missing( $full, is_array( $files ) ? $files : array() );
+    if ( $one !== '' ) $put( 'Second side', 'NOT RECEIVED — only one image was uploaded for a two-sided job; we will contact you for it' );
 
     $fmt = static function( $ymd ) {
         $d = is_string( $ymd ) && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) ? DateTime::createFromFormat( 'Y-m-d', $ymd ) : null;

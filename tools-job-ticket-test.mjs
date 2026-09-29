@@ -53,6 +53,7 @@ function sanitize_file_name($s){ return preg_replace('/[^A-Za-z0-9._-]+/', '-', 
 ${phpFunction(php, 'pps_clean_text') || ''}
 ${phpFunction(php, 'pps_order_addons')}
 ${phpFunction(php, 'pps_requote_describe') || ''}
+${phpFunction(php, 'pps_one_side_missing') || ''}
 ${phpFunction(php, 'pps_job_ticket')}
 $d = new DateTime('2026-09-30', new DateTimeZone('America/Phoenix'));
 $full = array(
