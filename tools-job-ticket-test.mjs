@@ -52,6 +52,7 @@ function sanitize_text_field($s){ return trim(strip_tags((string)$s)); }
 function sanitize_file_name($s){ return preg_replace('/[^A-Za-z0-9._-]+/', '-', (string)$s); }
 ${phpFunction(php, 'pps_clean_text') || ''}
 ${phpFunction(php, 'pps_order_addons')}
+${phpFunction(php, 'pps_requote_describe') || ''}
 ${phpFunction(php, 'pps_job_ticket')}
 $d = new DateTime('2026-09-30', new DateTimeZone('America/Phoenix'));
 $full = array(
@@ -66,6 +67,7 @@ $out['full'] = pps_job_ticket($full, $vals, $d, '');
 $out['prepress'] = pps_job_ticket(array('proof' => 0), array('pps_artwork_path' => 'pps-artwork/x.pdf'), $d, 'yes');
 $out['selfok'] = pps_job_ticket(array('proof' => 0), array('pps_proof_hash' => str_repeat('b', 64)), $d, '');
 $out['typed'] = pps_job_ticket(array('ticket' => array(array('Special instructions', "Use the <b>blue</b> logo\nkeep 50% margin\x07"), array('Job name', 'Spring <Gala>'))), array(), $d, '');
+$out['requoted'] = pps_job_ticket(array('rushCost' => 0, 'requoted' => array('quotedOn' => '2026-09-25', 'fromDate' => '2026-10-06', 'toDate' => '2026-10-07', 'fromPrice' => 200, 'toPrice' => 200)), array(), $d, '');
 $out['legacy'] = pps_job_ticket(array('rushCost' => 12), array('pps_summary' => "500 × 8.5×11 · Trifold\\nPaper: 100lb Gloss\\nFront: Full Color · Back: Full Color\\nCoating: UV Gloss (both sides)\\nUpload Art with Order\\nRush: 3 business days\\nShip to: AZ 85001"), $d, '');
 echo json_encode($out, JSON_UNESCAPED_UNICODE);
 `;
@@ -82,6 +84,7 @@ echo json_encode($out, JSON_UNESCAPED_UNICODE);
   // became "Spring "), and a newline in Special Instructions broke the one-pair-per-line block.
   ok('php: what the customer typed survives: angle brackets kept as text, newlines flattened, control chars gone', /Special instructions: Use the ‹b›blue‹\/b› logo \/ keep 50% margin\n/.test(out.typed + '\n') && /Job name: Spring ‹Gala›/.test(out.typed) && !/[<>\x07]/.test(out.typed), out.typed);
   ok('php: a legacy order still gets a block — job line, its summary lines, finishing, rush flag', /^Job: 500 × 8\.5×11 · Trifold/.test(out.legacy) && /Paper: 100lb Gloss/.test(out.legacy) && /Finishing: Coating: UV Gloss \(both sides\); Upload Art with Order/.test(out.legacy) && /— RUSH/.test(out.legacy) && !/Ship to: AZ 85001\n/.test(out.legacy + '\n'), out.legacy);
+  ok('php: a cart re-quoted at checkout says so on the ticket, in words', /Re-quoted: Priced on Fri, Sep 25\. Delivery is now Wed, Oct 7 \(was Tue, Oct 6\); the price is unchanged\./.test(out.requoted), out.requoted);
 } catch (e) { ok('php: pps_job_ticket() runs', false, String(e.message || e).slice(0, 400)); }
 
 // ── 2. The calculators ──
