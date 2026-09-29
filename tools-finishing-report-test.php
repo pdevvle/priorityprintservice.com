@@ -79,6 +79,13 @@ $GLOBALS['orders'] = array(
     new FOrder( 105, array( new FItem( 'Door Hangers', array( 'Paper' => '100lb Gloss Coated Cover', 'Die Cut' => 'Standard hanger' ) ) ), 'on-hold' ),
     // A WCPA order whose options say no finishing, in the words those forms use.
     new FOrder( 107, array( new FItem( 'Flyers', array( 'UV Coating' => 'No UV', 'Folding' => 'None', 'Corners' => 'N/A' ) ) ) ),
+    // Shapes seen on the live site, 2026-09-29.
+    new FOrder( 108, array( new FItem( 'Custom Order', array( 'Specs' => "Size: 2.61×6.14\nFold: Flat — No Folding\nColor: Full Color / Full Color\nPaper: 70lb Uncoated Opaque Text" ) ) ) ),
+    new FOrder( 109, array( new FItem( 'Custom Order', array( 'Specs' => 'Bundle: 2x6 Bookmarks 14pt UVMTT2 Full Color, 4 24x36 Banners, single sided, hems' ) ) ) ),
+    new FOrder( 110, array( new FItem( 'Budget Bifold Brochure', array( 'Brochure Fold Style' => 'Bifold (2 Panel) | 1 | ($1.00)',
+        'Bifold Brochure Size (2 Panel)' => '11x17 (Folds to 8.5x11) | 11x17 (Folds to 8.5x11) #1 | ($1.00)' ) ) ), 'on-hold' ),
+    new FOrder( 111, array( new FItem( 'Accordion Brochure - 4 Panel', array(
+        '_pps_metadata' => json_encode( array( 'qty' => 500, 'foldType' => 'accordion4', 'addons' => array() ) ), '_pps_delivery_date' => '2026-10-07' ) ) ) ),
     // A quote whose text only mentions coated paper — not a coating.
     new FOrder( 106, array( new FItem( 'Custom Order', array( 'Specs' => '500 flyers on 100lb Gloss Coated Text, full color both sides' ) ) ) ),
 );
@@ -97,14 +104,18 @@ ok( 'a quote\'s Specs text is scanned for coating and corners, and marked as tex
 ok( 'a WCPA option names its die cut', ( $byid[105][0]['steps'][0]['cat'] ?? '' ) === 'Die Cut', json_encode( $byid[105] ?? null ) );
 ok( 'options answered "No UV" / "None" / "N/A" are not finishing', ! isset( $byid[107] ), json_encode( $byid[107] ?? null ) );
 ok( '"Gloss Coated" paper in a quote is not a coating', ! isset( $byid[106] ), json_encode( $byid[106] ?? null ) );
-ok( 'soonest delivery first, undated after', array_column( $r['rows'], 'order' ) === array( 101, 103, 105, 104 ), json_encode( array_column( $r['rows'], 'order' ) ) );
+ok( 'a quote whose Specs say "Fold: Flat — No Folding" is not a fold job', ! isset( $byid[108] ), json_encode( $byid[108] ?? null ) );
+ok( 'a trade printer\'s UV-coated stock code ("14pt UVMTT2") is a coating; "Bundle:" is not bundling', $cats( 109 ) === array( 'Coating: Bundle: 2x6 Bookmarks 14pt UVMTT2 Full Color, 4 24x36 Banners, single sided, hems' ), json_encode( $cats( 109 ) ) );
+ok( 'a WCPA fold is one step, without the option\'s price tail', $cats( 110 ) === array( 'Fold: Brochure Fold Style: Bifold (2 Panel)' ), json_encode( $cats( 110 ) ) );
+ok( 'a fold code reads as the calculator\'s words', $cats( 111 ) === array( 'Fold: Accordion (4 Panel)' ), json_encode( $cats( 111 ) ) );
+ok( 'soonest delivery first, undated after', array_column( $r['rows'], 'order' ) === array( 101, 103, 111, 110, 109, 105, 104 ), json_encode( array_column( $r['rows'], 'order' ) ) );
 ok( 'rush is carried', $byid[101][0]['rush'] === true && $byid[103][0]['rush'] === false );
 
 $uv = array_column( pps_finishing_report_filter( $r['rows'], '', 'uv' ), 'order' );
-ok( '"which orders need UV coating": the calculator job and the quote, not the aqueous one', $uv === array( 101, 104 ), json_encode( $uv ) );
+ok( '"which orders need UV coating": the calculator job and the two quotes, not the aqueous one', $uv === array( 101, 109, 104 ), json_encode( $uv ) );
 $coat = array_column( pps_finishing_report_filter( $r['rows'], 'coating' ), 'order' );
-ok( 'the Coating step lists every coated job', $coat === array( 101, 103, 104 ), json_encode( $coat ) );
-ok( 'counts per step', pps_finishing_report_counts( $r['rows'] )['Coating'] === 3 && pps_finishing_report_counts( $r['rows'] )['Fold'] === 1 );
+ok( 'the Coating step lists every coated job', $coat === array( 101, 103, 109, 104 ), json_encode( $coat ) );
+ok( 'counts per step', pps_finishing_report_counts( $r['rows'] )['Coating'] === 4 && pps_finishing_report_counts( $r['rows'] )['Fold'] === 3, json_encode( pps_finishing_report_counts( $r['rows'] ) ) );
 ok( 'a word must start a word: "uv" does not match inside another word', pps_finishing_report_filter( array( array( 'steps' => array( array( 'cat' => 'Note', 'detail' => 'fluvial' ) ) ) ), '', 'uv' ) === array() );
 
 ok( 'the module is loaded by the plugin', strpos( $src, "require_once PPS_CALC_DIR . 'pps-finishing-report.php';" ) !== false );
