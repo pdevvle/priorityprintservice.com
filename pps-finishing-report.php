@@ -41,7 +41,8 @@ function pps_finishing_report_open_statuses() {
  */
 function pps_finishing_text_patterns() {
     return array(
-        array( 'Coating',        '/\b(spot\s*uv|uv\b|u\.v\.|aqueous|laminat\w*|soft[\s-]?touch|coating)/i' ),
+        // "UVMTT" / "UV Matte" / "UV Gloss" are UV-coated stock codes from trade printers.
+        array( 'Coating',        '/\b(spot\s*uv|uv(?:mtt\d*|matte|gloss|coat\w*)?\b|aqueous|laminat\w*|soft[\s-]?touch|coating)/i' ),
         array( 'Fold',           '/\b(tri[\s-]?fold|bi[\s-]?fold|half[\s-]?fold|z[\s-]?fold|gate[\s-]?fold|accordion|roll[\s-]?fold|folded|folding|fold)\b/i' ),
         array( 'Score',          '/\bscor(e|ed|ing)\b/i' ),
         array( 'Perforation',    '/\bperf(orat\w*|s)?\b/i' ),
@@ -51,8 +52,27 @@ function pps_finishing_text_patterns() {
         array( 'Embossing',      '/\b(de)?emboss\w*\b/i' ),
         array( 'Die Cut',        '/\bdie[\s-]?cut\w*\b/i' ),
         array( 'Numbering',      '/\bnumber(ed|ing)\b/i' ),
-        array( 'Bundling',       '/\b(bundl\w*|shrink[\s-]?wrap\w*|banded|banding)\b/i' ),
+        // "Bundle:" on a quote is a set of products, not a finishing step.
+        array( 'Bundling',       '/\b(bundling|bundled|bundles? of \d+|shrink[\s-]?wrap\w*|banded|banding)\b/i' ),
     );
+}
+
+/** A flat's fold code as the words the calculator shows ("accordion4" → "Accordion (4 Panel)"). */
+function pps_finishing_fold_label( $code ) {
+    $code = (string) $code;
+    if ( function_exists( 'pps_get_config' ) ) {
+        $cfg = pps_get_config();
+        foreach ( (array) ( $cfg['fold_types'] ?? array() ) as $f ) {
+            if ( is_array( $f ) && (string) ( $f['val'] ?? '' ) === $code && ! empty( $f['label'] ) ) return (string) $f['label'];
+        }
+    }
+    $known = array(
+        'bifold' => 'Bifold (2 Panel)', 'trifold' => 'Trifold (3 Panel)', 'z3' => 'Accordion / "Z" Fold (3 Panel)',
+        'gate3' => 'Gate Fold (3 Panel)', 'accordion4' => 'Accordion (4 Panel)', 'roll4' => 'Roll Fold (4 Panel)',
+        'dgate4' => 'Double Gate Fold (4 Panel)', 'dparallel4' => 'Double Parallel Fold (4 Panel)',
+        'trifold_xbifold' => 'Right-Angle Fold (Trifold + Cross Bifold)',
+    );
+    return $known[ $code ] ?? $code;
 }
 
 /** A calculator add-on label ("Coating: UV Gloss (both sides)") as [category, detail]. */
@@ -101,23 +121,28 @@ function pps_finishing_item_steps( array $meta, $summary, array $texts ) {
         }
         $fold = (string) ( $meta['foldType'] ?? '' );
         if ( $fold !== '' && strtolower( $fold ) !== 'flat' && strtolower( $fold ) !== 'none' ) {
-            $add( 'Fold', trim( (string) ( $meta['foldLabel'] ?? $fold ) ), 'calculator' );
+            $add( 'Fold', trim( (string) ( $meta['foldLabel'] ?? pps_finishing_fold_label( $fold ) ) ), 'calculator' );
         }
         if ( $meta ) return $out;          // a calculator line: its own words are the whole story
     }
 
-    // Free text: a quote's Specs, a WCPA option. Scanned, and labelled as such.
+    // Free text: a quote's Specs, a WCPA option. Scanned a line at a time, one step per
+    // kind per line item, and labelled as text.
+    $found = array();
     foreach ( $texts as $key => $value ) {
-        // An option answered "None" / "No" / "No UV" asks for nothing.
-        if ( preg_match( '/^\s*(none|no|n\/?a|-+|0|false|without)\b/i', (string) $value ) ) continue;
-        $text = trim( wp_strip_all_tags( (string) $key . ': ' . (string) $value ) );
-        if ( $text === '' ) continue;
-        foreach ( pps_finishing_text_patterns() as $p ) {
-            if ( preg_match( $p[1], $text, $m, PREG_OFFSET_CAPTURE ) ) {
-                // A few words either side of the match, so the row reads without opening the order.
-                $at    = max( 0, $m[0][1] - 40 );
-                $snip  = trim( mb_substr( $text, $at, 110 ) );
-                $add( $p[0], ( $at > 0 ? '…' : '' ) . $snip . ( mb_strlen( $text ) > $at + 110 ? '…' : '' ), 'text' );
+        foreach ( preg_split( '/\r?\n/', (string) $value ) as $line ) {
+            // WCPA writes "Bifold (2 Panel) | 1 | ($1.00)": the choice is the first part.
+            $line = trim( wp_strip_all_tags( preg_replace( '/\s+\|\s.*$/s', '', $line ) ) );
+            if ( $line === '' ) continue;
+            $text   = strpos( $line, ':' ) !== false ? $line : trim( (string) $key ) . ': ' . $line;
+            $answer = trim( (string) substr( $text, strpos( $text, ':' ) + 1 ) );
+            // An answer of "None" / "No" / "N/A" / "Flat — No Folding" / "No UV" asks for nothing.
+            if ( preg_match( '/^(none|no\b|n\/?a\b|-+$|0$|false\b|without\b|flat\b)/i', $answer ) ) continue;
+            if ( preg_match( '/\bno\s+(fold\w*|coat\w*|uv|finish\w*|perf\w*)/i', $answer ) ) continue;
+            foreach ( pps_finishing_text_patterns() as $p ) {
+                if ( isset( $found[ $p[0] ] ) || ! preg_match( $p[1], $text ) ) continue;
+                $found[ $p[0] ] = true;
+                $add( $p[0], mb_strlen( $text ) > 140 ? mb_substr( $text, 0, 140 ) . '…' : $text, 'text' );
             }
         }
     }
@@ -236,6 +261,18 @@ function pps_finishing_report_get( $force = false ) {
     update_option( PPS_FINISHING_REPORT_OPTION, $report, false );
     return $report;
 }
+
+/** Staff traffic keeps it warm between cron ticks; a customer request never pays for the scan. */
+function pps_finishing_report_maybe_refresh() {
+    try {
+        if ( ! function_exists( 'current_user_can' ) || ! current_user_can( 'manage_woocommerce' ) ) return;
+        $cached = get_option( PPS_FINISHING_REPORT_OPTION, null );
+        if ( is_array( $cached ) && isset( $cached['built'] ) && ( time() - (int) $cached['built'] ) < PPS_FINISHING_REPORT_TTL ) return;
+        pps_finishing_report_get( true );
+    } catch ( \Throwable $e ) {}
+}
+add_action( 'admin_init', 'pps_finishing_report_maybe_refresh' );
+add_action( 'rest_api_init', 'pps_finishing_report_maybe_refresh' );
 
 add_action( 'init', function () {
     if ( function_exists( 'wp_next_scheduled' ) && ! wp_next_scheduled( 'pps_finishing_report_refresh' ) ) {
