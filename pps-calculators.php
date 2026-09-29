@@ -33,27 +33,38 @@ add_filter( 'pre_term_description', 'wp_filter_post_kses' );
 // ═══════════════════════════════════════════════════════════════
 
 function pps_get_closures() {
-    if ( function_exists( 'pps_get_config' ) ) {
-        $cfg = pps_get_config();
-        $c   = $cfg['closures'] ?? array();
-        // Always a list of strings. A value saved as text instead of a list made
-        // in_array() throw inside the delivery-date guard on every checkout line
-        // (audit 2026-09-27) — a settings slip must not be able to stop orders.
-        if ( is_string( $c ) ) {
-            $j = json_decode( $c, true );
-            $c = is_array( $j ) ? $j : preg_split( '/[\s,]+/', $c );
+    $fallback = function_exists( 'pps_default_closures' ) ? pps_default_closures() : null;
+    if ( $fallback === null ) {
+        // Thanksgiving is the fourth Thursday, never a fixed MM-DD.
+        $fallback = array( '01-01', '07-04', '12-24', '12-25' );
+        $y0 = (int) gmdate( 'Y' );
+        foreach ( array( $y0, $y0 + 1 ) as $y ) {
+            $tg = strtotime( "fourth thursday of november $y 12:00 UTC" );
+            $fallback[] = gmdate( 'Y-m-d', $tg );
+            $fallback[] = gmdate( 'Y-m-d', $tg + 86400 );
         }
-        if ( ! is_array( $c ) ) return array();
-        return array_values( array_filter( array_map( static function( $v ) { return is_scalar( $v ) ? trim( (string) $v ) : ''; }, $c ), 'strlen' ) );
     }
-    // Thanksgiving is the fourth Thursday, never a fixed MM-DD.
-    $out = array( '01-01', '07-04', '12-24', '12-25' );
-    $y0  = (int) gmdate( 'Y' );
-    foreach ( array( $y0, $y0 + 1 ) as $y ) {
-        $tg    = strtotime( "fourth thursday of november $y" );
-        $out[] = gmdate( 'Y-m-d', $tg );
-        $out[] = gmdate( 'Y-m-d', $tg + 86400 );
+    if ( ! function_exists( 'pps_get_config' ) ) return $fallback;
+    $cfg = pps_get_config();
+    $c   = $cfg['closures'] ?? array();
+    // Always a list of "MM-DD" / "YYYY-MM-DD" strings. A value saved as text instead of
+    // a list made in_array() throw inside the delivery-date guard on every checkout line
+    // (audit 2026-09-27) — a settings slip must not be able to stop orders.
+    if ( is_string( $c ) ) {
+        $j = json_decode( $c, true );
+        $c = is_array( $j ) ? $j : preg_split( '/[\s,]+/', $c );
     }
+    if ( ! is_array( $c ) ) return $fallback;
+    $out = array(); $bad = 0;
+    foreach ( $c as $v ) {
+        $v = is_scalar( $v ) ? trim( (string) $v ) : '';
+        if ( $v === '' ) continue;
+        if ( preg_match( '/^(\d{4}-)?\d{2}-\d{2}$/', $v ) ) $out[] = $v; else $bad++;
+    }
+    // Until 2026-09-29 the admin's chip editor saved "12-25" as the number 12, so a saved
+    // list can hold nothing but bare numbers. That list means "the usual holidays", not
+    // "open every day of the year".
+    if ( ! $out && $bad ) return $fallback;
     return $out;
 }
 
@@ -66,7 +77,8 @@ function pps_shop_timezone() {
     $tz = 'America/Phoenix';
     if ( function_exists( 'pps_get_config' ) ) {
         $cfg = pps_get_config();
-        $want = trim( (string) ( $cfg['pcf']['shop_timezone'] ?? '' ) );
+        $raw  = $cfg['pcf']['shop_timezone'] ?? '';
+        $want = is_string( $raw ) ? trim( $raw ) : '';
         if ( $want !== '' ) {
             try { new DateTimeZone( $want ); $tz = $want; } catch ( \Throwable $e ) { /* keep the default */ }
         }
@@ -126,6 +138,9 @@ function pps_get_public_config() {
             unset( $cfg[ $k ] );
         }
     }
+    // The calculators count working days from the same list the checkout uses, never
+    // from a raw value the server itself would have cleaned first.
+    $cfg['closures'] = pps_get_closures();
     if ( isset( $cfg['pcf'] ) && is_array( $cfg['pcf'] ) ) {
         $cfg['pcf']['shippo_enabled'] = ! empty( $cfg['pcf']['shippo_api_token'] );
         unset(
@@ -2207,7 +2222,7 @@ function pps_ajax_add_to_cart() {
     $zip_raw = '';
     if ( is_array( $meta_obj['shipAddr'] ?? null ) && isset( $meta_obj['shipAddr']['zip'] ) ) $zip_raw = (string) $meta_obj['shipAddr']['zip'];
     elseif ( isset( $meta_obj['shipZip'] ) ) $zip_raw = (string) $meta_obj['shipZip'];
-    if ( trim( $zip_raw ) !== '' && ! preg_match( '/^\s*\d{5}(-\d{4})?\s*$/', $zip_raw ) ) {
+    if ( trim( $zip_raw ) !== '' && ! preg_match( '/^\s*\d{5}(?:[-\s]?\d{4})?\s*$/', $zip_raw ) ) {
         wp_send_json_error( 'Please enter the 5-digit ZIP code for the delivery address (for example 02134, not 2134).' );
     }
     // APO / FPO / DPO: not orderable online (owner decision 2026-09-27). The calculators
@@ -2580,25 +2595,37 @@ add_filter( 'woocommerce_is_sold_individually', function( $individually, $produc
 }, 10, 2 );
 
 /**
- * A quote is a promise about dates, and a cart can sit for days before it is paid. Each
- * time WooCommerce checks the cart, every calculator line is RE-QUOTED against today
- * instead of being trusted or refused (owner decision 2026-09-27):
+ * A quote is a promise about dates, and a cart can sit for days before it is paid. Every
+ * calculator line is RE-QUOTED against today — never refused (owner decisions 2026-09-27
+ * and 2026-09-29: "it is vital that customers not be blocked during checkout"):
  *
  *   - Still inside the free-delivery window: nothing the customer sees changes; the
  *     production dates move to today so the ticket never shows a start in the past.
- *   - A free-delivery line that has slipped (fewer working days left than delivery takes):
- *     the date moves out to the new free-delivery date. Price unchanged.
+ *   - A free-delivery line that has slipped: the date moves out to the new free-delivery
+ *     date. Price unchanged.
  *   - A rush line that has slipped: the date is kept and the rush charge is re-priced with
  *     the calculator's own rule, rush = base × (free days ÷ days left) − base
  *     (docs/MASTER_PRICING_LOGIC.md: grandTotal = total + rushCost).
- *   - The date is now inside production + 1 working day: refused, as before.
+ *   - A rush date that can no longer be made at all moves to the earliest date that can,
+ *     priced by the same rule. A line whose numbers do not agree keeps its price.
+ *   - A line from a build before `quotedOn` existed is only moved if its date can no
+ *     longer be made; its price is never touched.
  *
- * The customer is told about every change. During the checkout submission itself the
- * message is an ERROR, so an order is never charged a price nobody saw; the re-quote is
- * already saved, so the next attempt goes through. The shop's cutoff hour is deliberately
- * ignored: a difference of opinion about today's cutoff must never block or re-price an
- * order the calculator just quoted. Lines from builds before `quotedOn` existed get only
- * the "can it still be made" check. `tools-server-junctures-test.php` is the gate.
+ * WHERE it runs is the point of the 2026-09-29 rewrite. It runs inside
+ * `woocommerce_before_calculate_totals`, ahead of the price hook, so the totals every
+ * cart, checkout and payment request computes already carry the re-quote: what is shown
+ * is what is charged. (The first version ran on `woocommerce_check_cart_items`, after the
+ * totals; on the block checkout that charged a new price the page had never shown.)
+ *
+ * The customer is told by a "Quote updated" row on the line (cart, checkout, receipt,
+ * Job Ticket) and, on the classic cart page, a notice. A change first made while the
+ * customer was not looking at their cart — typically the Place Order request itself,
+ * from a page loaded before the shop day turned over — stops that one payment attempt
+ * with one message naming every change and the new total. At most once per customer per
+ * day, and the change is saved first, so pressing Place Order again always goes through.
+ * The shop's cutoff hour is ignored here: a difference of opinion about today's cutoff
+ * must never re-price an order the calculator just quoted.
+ * `tools-server-junctures-test.php` and `tools-requote-storeapi-test.php` are the gates.
  */
 function pps_shop_start_day( DateTime $now ) {
     $start = new DateTime( $now->format( 'Y-m-d' ), $now->getTimezone() );
@@ -2619,66 +2646,83 @@ function pps_business_days_between( DateTime $a, DateTime $b ) {
 function pps_quote_is_stale( $metadata, DateTime $now ) {
     $m = is_array( $metadata ) ? $metadata : json_decode( (string) $metadata, true );
     if ( ! is_array( $m ) ) return false;
-    $ymd  = (string) ( $m['estimatedDeliveryDate'] ?? '' );
-    $prod = isset( $m['productionBizDays'] ) && is_numeric( $m['productionBizDays'] ) ? (int) $m['productionBizDays'] : -1;
+    $ymd  = is_scalar( $m['estimatedDeliveryDate'] ?? null ) ? (string) $m['estimatedDeliveryDate'] : '';
+    $prod = isset( $m['productionBizDays'] ) && is_numeric( $m['productionBizDays'] ) ? min( 400, (int) $m['productionBizDays'] ) : -1;
     if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) || $prod < 0 ) return false;
     $earliest = pps_add_business_days( pps_shop_start_day( $now ), $prod + 1 );
     return $ymd < $earliest->format( 'Y-m-d' );
 }
 
 /**
- * Re-quote one line. Returns array( 'action' => none|refresh|moved|repriced|refuse, … ).
- * `meta`, `price`, `rush`, `biz_days` are the line's new values when action is refresh,
- * moved or repriced; `from` / `to` describe the change for the customer.
+ * Re-quote one line. Returns array( 'action' => none|refresh|update, … ). For refresh and
+ * update, `meta`, `price`, `rush`, `biz_days` are the line's new values; `update` means
+ * something the customer sees changed, described by `meta['requoted']`.
  */
 function pps_requote_line( array $m, DateTime $now, $price, $rush ) {
     $none = array( 'action' => 'none' );
-    $ymd  = (string) ( $m['estimatedDeliveryDate'] ?? '' );
+    $ymd  = is_scalar( $m['estimatedDeliveryDate'] ?? null ) ? (string) $m['estimatedDeliveryDate'] : '';
     $prod = isset( $m['productionBizDays'] ) && is_numeric( $m['productionBizDays'] ) ? (int) $m['productionBizDays'] : -1;
-    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) || $prod < 0 ) return $none;
+    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) || $prod < 0 || $prod > 400 ) return $none;
+    $zone    = $now->getTimezone();
+    $deliver = DateTime::createFromFormat( 'Y-m-d|', $ymd, $zone );
+    if ( ! $deliver || $deliver->format( 'Y-m-d' ) !== $ymd ) return $none;
 
-    $q     = (string) ( $m['quotedOn'] ?? '' );
-    $free  = isset( $m['freeDeliveryBizDays'] ) && is_numeric( $m['freeDeliveryBizDays'] ) ? (int) $m['freeDeliveryBizDays'] : 0;
+    $q     = is_scalar( $m['quotedOn'] ?? null ) ? (string) $m['quotedOn'] : '';
+    $free  = isset( $m['freeDeliveryBizDays'] ) && is_numeric( $m['freeDeliveryBizDays'] ) ? max( 0, min( 400, (int) $m['freeDeliveryBizDays'] ) ) : 0;
     $start = pps_shop_start_day( $now );
     $today = $start->format( 'Y-m-d' );
+    $price = round( (float) $price, 2 );
+    $rush  = round( (float) $rush, 2 );
+    if ( ! is_finite( $price ) || ! is_finite( $rush ) ) return $none;
+    $base  = isset( $m['baseTotal'] ) && is_numeric( $m['baseTotal'] ) ? round( (float) $m['baseTotal'], 2 ) : null;
 
-    // A build from before quotedOn, or no delivery window to work from: only ask whether
-    // the date can still be made.
-    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $q ) || $free <= 0 ) {
-        return pps_quote_is_stale( $m, $now ) ? array( 'action' => 'refuse' ) : $none;
+    // Quoted today, or for a later shop day (a quote made after the cutoff): nothing to do.
+    $q_ok = (bool) preg_match( '/^\d{4}-\d{2}-\d{2}$/', $q );
+    if ( $q_ok && $q >= $today ) {
+        // A quote dated weeks ahead means a browser clock that is wrong, not a promise we
+        // can hold; fall through and treat it like a line with no quote day.
+        $horizon = ( clone $start )->modify( '+14 days' )->format( 'Y-m-d' );
+        if ( $q <= $horizon ) return $none;
+        $q_ok = false;
     }
-    if ( $q >= $today ) return $none;   // quoted today (or for a later shop day): nothing to do
+    $legacy = ! $q_ok || $free <= 0;
+    $left   = pps_business_days_between( $start, $deliver );
+    $soon   = $prod + 1;                       // the earliest a job can arrive, in working days
 
-    $zone     = $now->getTimezone();
-    $deliver  = DateTime::createFromFormat( 'Y-m-d|', $ymd, $zone );
-    if ( ! $deliver || $deliver->format( 'Y-m-d' ) !== $ymd ) return $none;
-    $left     = pps_business_days_between( $start, $deliver );
-    $earliest = $prod + 1;
-    $transit  = isset( $m['transitDays'] ) && is_numeric( $m['transitDays'] ) ? max( 1, (int) $m['transitDays'] ) : max( 1, $free - $prod );
-    $price    = round( (float) $price, 2 );
-    $rush     = round( (float) $rush, 2 );
-    $base     = isset( $m['baseTotal'] ) && is_numeric( $m['baseTotal'] ) ? round( (float) $m['baseTotal'], 2 ) : null;
-
-    $action = 'refresh'; $new_price = $price; $new_rush = $rush; $days = $left; $new_ymd = $ymd;
-    if ( $left >= $free ) {
+    $new_price = $price; $new_rush = $rush; $days = $left; $new_ymd = $ymd;
+    if ( $legacy ) {
+        // No quote day or no delivery window to work from: never re-price, only move a
+        // date that can no longer be made, to the date this line would get today.
+        if ( $left >= $soon ) return $none;
+        $days    = ( $rush <= 0.004 && $free >= $soon ) ? $free : $soon;
+        $new_ymd = pps_add_business_days( clone $start, $days )->format( 'Y-m-d' );
+    } elseif ( $left >= $free ) {
         // Still a free-delivery date. Nothing the customer sees changes.
     } elseif ( $rush <= 0.004 ) {
         // A free-delivery line that slipped: keep the price, move the date.
-        $days    = $free;
-        $new_ymd = pps_add_business_days( clone $start, $free )->format( 'Y-m-d' );
-        $action  = 'moved';
+        $days    = max( $free, $soon );
+        $new_ymd = pps_add_business_days( clone $start, $days )->format( 'Y-m-d' );
     } else {
-        if ( $left < $earliest ) return array( 'action' => 'refuse' );
+        if ( $left < $soon ) {
+            // The rush date itself can no longer be made: the earliest date that can.
+            $days    = $soon;
+            $new_ymd = pps_add_business_days( clone $start, $days )->format( 'Y-m-d' );
+        }
         // Re-price only when the line's own numbers agree with each other; otherwise we
-        // cannot know what the rush was charged on, and it is safer to ask for an edit.
-        if ( $base === null || $base <= 0 || abs( ( $price - $rush ) - $base ) > 0.05 ) return array( 'action' => 'refuse', 'reason' => 'price' );
-        $new_rush  = round( max( 0, $base * ( $free / $left ) - $base ), 2 );
-        $new_price = round( $base + $new_rush, 2 );
-        if ( $new_price > $price + 0.004 ) $action = 'repriced';
-        else { $new_price = $price; $new_rush = $rush; }
+        // cannot know what the rush was charged on, and the price stays as quoted.
+        if ( $base !== null && $base > 0 && abs( ( $price - $rush ) - $base ) <= 0.05 && $days > 0 ) {
+            $r = round( max( 0, $base * ( $free / $days ) - $base ), 2 );
+            if ( is_finite( $r ) && round( $base + $r, 2 ) > $price + 0.004 ) {
+                $new_rush  = $r;
+                $new_price = round( $base + $r, 2 );
+            }
+        }
     }
+    $date_changed  = $new_ymd !== $ymd;
+    $price_changed = abs( $new_price - $price ) > 0.004;
 
     // The production schedule for the (possibly new) date, exactly as calculate() builds it.
+    $transit     = isset( $m['transitDays'] ) && is_numeric( $m['transitDays'] ) ? max( 1, min( 60, (int) $m['transitDays'] ) ) : max( 1, $free - $prod );
     $eff_transit = min( $transit, max( 1, $days - $prod ) );
     $prod_start  = pps_add_business_days( clone $start, max( 0, $days - $eff_transit - $prod ) );
     $must_ship   = pps_add_business_days( clone $start, max( 0, $days - $eff_transit ) );
@@ -2686,91 +2730,310 @@ function pps_requote_line( array $m, DateTime $now, $price, $rush ) {
     $m2 = $m;
     $m2['estimatedDeliveryDate'] = $new_ymd;
     $m2['requestedBizDays']      = $days;
-    $m2['rushCost']              = $new_rush;
-    $m2['rushMultiplier']        = $new_rush > 0 && $days > 0 ? round( $free / $days, 4 ) : 1;
     $m2['productionStartDate']   = $prod_start->format( 'Y-m-d' );
     $m2['mustShipByDate']        = $must_ship->format( 'Y-m-d' );
-    $m2['total']                 = $new_price;
     $m2['quotedOn']              = $today;
-    if ( $action !== 'refresh' ) {
-        $m2['requoted'] = array( 'on' => $today, 'fromDate' => $ymd, 'fromPrice' => $price, 'quotedOn' => $q );
+    if ( ! $legacy ) {
+        $m2['rushCost']       = $new_rush;
+        $m2['rushMultiplier'] = $new_rush > 0 && $days > 0 ? round( $free / $days, 4 ) : 1;
+        $m2['total']          = $new_price;
+    }
+    $action = 'refresh';
+    if ( $date_changed || $price_changed ) {
+        $action = 'update';
+        // Against the ORIGINAL quote, which is what the customer saw in the calculator,
+        // however many days the cart has been re-quoted since.
+        $prev = is_array( $m['requoted'] ?? null ) ? $m['requoted'] : array();
+        $m2['requoted'] = array(
+            'on'        => $today,
+            'quotedOn'  => isset( $prev['quotedOn'] ) ? (string) $prev['quotedOn'] : ( $q_ok ? $q : '' ),
+            'fromDate'  => isset( $prev['fromDate'] ) ? (string) $prev['fromDate'] : $ymd,
+            'fromPrice' => isset( $prev['fromPrice'] ) ? (float) $prev['fromPrice'] : $price,
+            'toDate'    => $new_ymd,
+            'toPrice'   => $new_price,
+        );
     }
     return array(
         'action' => $action, 'meta' => $m2, 'price' => $new_price, 'rush' => $new_rush, 'biz_days' => $days,
-        'from' => array( 'date' => $ymd, 'price' => $price, 'rush' => $rush, 'quotedOn' => $q ),
-        'to'   => array( 'date' => $new_ymd, 'price' => $new_price, 'rush' => $new_rush ),
+        'date_changed' => $date_changed, 'price_changed' => $price_changed,
     );
 }
 
 /** The one summary line that states the delivery window, rewritten to match a re-quote. */
-function pps_requote_summary( $summary, $action, $days ) {
-    $line = $action === 'repriced' ? "Rush: {$days} business days" : ( $action === 'moved' ? "Standard delivery: {$days} business days" : null );
-    if ( $line === null ) return $summary;
-    $out = preg_replace( '/^(Rush|Standard delivery): \d+ business days$/m', $line, (string) $summary, 1, $n );
-    return $n ? $out : $summary;
+function pps_requote_summary( $summary, $rush, $days ) {
+    $line = $rush > 0.004 ? "Rush: {$days} business days" : "Standard delivery: {$days} business days";
+    $out  = preg_replace( '/^(Rush|Standard delivery): \d+ business days$/m', $line, (string) $summary, 1, $n );
+    return $n ? $out : (string) $summary;
 }
 
-/** True while WooCommerce is taking payment (classic or block checkout), not just showing a page. */
-function pps_checkout_is_submitting() {
-    if ( did_action( 'woocommerce_checkout_process' ) || did_action( 'woocommerce_before_checkout_process' ) ) return true;
-    $uri = (string) ( $_SERVER['REQUEST_URI'] ?? '' );
-    return defined( 'REST_REQUEST' ) && REST_REQUEST && ( $_SERVER['REQUEST_METHOD'] ?? '' ) === 'POST'
-        && strpos( $uri, '/wc/store' ) !== false && strpos( $uri, 'checkout' ) !== false;
+/** "Priced on Fri, Sep 25. Delivery is now …" — what changed on a re-quoted line, in words. */
+function pps_requote_describe( $rq ) {
+    if ( ! is_array( $rq ) ) return '';
+    $fmt = static function( $ymd ) {
+        $d = is_string( $ymd ) && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) ? DateTime::createFromFormat( 'Y-m-d|', $ymd ) : false;
+        return $d ? $d->format( 'D, M j' ) : '';
+    };
+    $from_d = (string) ( $rq['fromDate'] ?? '' ); $to_d = (string) ( $rq['toDate'] ?? '' );
+    $from_p = (float) ( $rq['fromPrice'] ?? 0 );  $to_p = (float) ( $rq['toPrice'] ?? 0 );
+    $dc = $from_d !== $to_d; $pc = abs( $to_p - $from_p ) > 0.004;
+    if ( ! $dc && ! $pc ) return '';
+    $when  = $fmt( $rq['quotedOn'] ?? '' );
+    $lead  = $when !== '' ? "Priced on {$when}." : 'Priced on an earlier day.';
+    $money = static function( $v ) { return '$' . number_format( (float) $v, 2 ); };
+    if ( $dc && $pc ) return "{$lead} {$fmt( $from_d )} can no longer be met; the earliest delivery is {$fmt( $to_d )}, and the job total is {$money( $to_p )} (was {$money( $from_p )}).";
+    if ( $dc )        return "{$lead} Delivery is now {$fmt( $to_d )} (was {$fmt( $from_d )}); the price is unchanged.";
+    return "{$lead} Delivering by {$fmt( $to_d )} now leaves fewer working days, so the job total is {$money( $to_p )} (was {$money( $from_p )}).";
 }
 
-function pps_requote_cart() {
+/**
+ * The REST routes being dispatched right now, innermost last. Filled from WordPress's own
+ * route matching, so a Store API request is recognised however its URL was spelled
+ * (?rest_route=, an encoded path, a batch) and a PUT sent as POST with a method override
+ * is seen as the PUT it is.
+ */
+function pps_rest_stack( $op = null, $item = null ) {
+    static $stack = array();
+    if ( $op === 'push' ) $stack[] = $item;
+    elseif ( $op === 'pop' ) array_pop( $stack );
+    elseif ( $op === 'reset' ) $stack = array();
+    return $stack;
+}
+add_filter( 'rest_request_before_callbacks', function( $response, $handler = null, $request = null ) {
     try {
-        if ( ! function_exists( 'WC' ) || ! WC()->cart ) return;
-        $now     = new DateTime( 'now', new DateTimeZone( pps_shop_timezone() ) );
-        $submit  = pps_checkout_is_submitting();
-        $changed = false;
-        $fmt     = static function( $ymd ) { $d = DateTime::createFromFormat( 'Y-m-d|', $ymd ); return $d ? $d->format( 'D, M j' ) : $ymd; };
-        foreach ( WC()->cart->cart_contents as $key => $ci ) {
-            if ( empty( $ci['pps_metadata'] ) ) continue;
-            $m = json_decode( (string) $ci['pps_metadata'], true );
+        $route  = is_object( $request ) && method_exists( $request, 'get_route' ) ? (string) $request->get_route() : '';
+        $method = is_object( $request ) && method_exists( $request, 'get_method' ) ? strtoupper( (string) $request->get_method() ) : '';
+        pps_rest_stack( 'push', array( 'route' => $route, 'method' => $method ) );
+    } catch ( \Throwable $e ) {}
+    return $response;
+}, 1, 3 );
+add_filter( 'rest_request_after_callbacks', function( $response ) {
+    pps_rest_stack( 'pop' );
+    return $response;
+}, 999, 1 );
+
+/** True while WooCommerce is taking payment for the cart (Place Order), classic or block. */
+function pps_is_placing_order() {
+    foreach ( pps_rest_stack() as $r ) {
+        if ( ( $r['method'] ?? '' ) === 'POST' && preg_match( '#^/wc/store(?:/v\d+)?/checkout/?$#', (string) ( $r['route'] ?? '' ) ) ) return true;
+    }
+    return did_action( 'woocommerce_checkout_process' ) > 0;
+}
+
+/**
+ * Is this request about to show the customer their cart with its totals? 'page' for a
+ * classic cart/checkout page (notices print there), 'api' for the block cart/checkout and
+ * the Store API cart routes that feed them, false for anything else — Place Order, the
+ * checkout PUT, mini-cart fragments, cron. A re-quote made in a false context has not been
+ * seen yet, and that is the only kind that can stop a payment.
+ */
+/** Rendering the cart or checkout page itself (not an order-received or pay endpoint). */
+function pps_is_cart_page_render() {
+    if ( ! did_action( 'wp' ) || ! function_exists( 'is_cart' ) ) return false;
+    if ( ! is_cart() && ! is_checkout() ) return false;
+    return ! ( function_exists( 'is_wc_endpoint_url' ) && is_wc_endpoint_url() );
+}
+
+/** Was this request made from the cart or checkout page? */
+function pps_referer_is_cart_page() {
+    $ref = isset( $_SERVER['HTTP_REFERER'] ) && is_string( $_SERVER['HTTP_REFERER'] ) ? $_SERVER['HTTP_REFERER'] : '';
+    if ( $ref === '' || ! function_exists( 'wc_get_cart_url' ) || ! function_exists( 'wc_get_checkout_url' ) ) return false;
+    $path = static function( $u ) { return rtrim( (string) wp_parse_url( (string) $u, PHP_URL_PATH ), '/' ); };
+    $rp = $path( $ref );
+    return $rp !== '' && ( $rp === $path( wc_get_cart_url() ) || $rp === $path( wc_get_checkout_url() ) );
+}
+
+function pps_request_shows_cart() {
+    $stack = pps_rest_stack();
+    if ( $stack ) {
+        $top = end( $stack );
+        if ( ! preg_match( '#^/wc/store(?:/v\d+)?/cart(?:/|$)#', (string) ( $top['route'] ?? '' ) ) ) return false;
+        // A cart read counts only where the cart and its totals are on screen: the page's
+        // own preload while a cart/checkout page renders, or a request that page made. A
+        // mini-cart fetching the cart on a product page is not the customer seeing a total.
+        if ( ! ( defined( 'REST_REQUEST' ) && REST_REQUEST ) ) return pps_is_cart_page_render() ? 'api' : false;
+        return pps_referer_is_cart_page() ? 'api' : false;
+    }
+    if ( defined( 'REST_REQUEST' ) && REST_REQUEST ) return false;
+    if ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() ) {
+        return ( $_REQUEST['wc-ajax'] ?? '' ) === 'update_order_review' ? 'page' : false;
+    }
+    if ( ! pps_is_cart_page_render() ) return false;
+    $block = function_exists( 'has_block' ) && ( has_block( 'woocommerce/cart' ) || has_block( 'woocommerce/checkout' ) );
+    return $block ? 'api' : 'page';
+}
+
+function pps_requote_cart( $cart = null ) {
+    try {
+        if ( is_admin() && ! ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() ) ) return;
+        if ( ! is_object( $cart ) ) $cart = function_exists( 'WC' ) ? WC()->cart : null;
+        if ( ! is_object( $cart ) || ! isset( $cart->cart_contents ) || ! is_array( $cart->cart_contents ) ) return;
+        $now   = null;
+        $shows = null;
+        foreach ( $cart->cart_contents as $key => $ci ) {
+            if ( ! is_array( $ci ) || empty( $ci['pps_metadata'] ) || ! is_string( $ci['pps_metadata'] ) ) continue;
+            $m = json_decode( $ci['pps_metadata'], true );
             if ( ! is_array( $m ) ) continue;
-            $r    = pps_requote_line( $m, $now, $ci['pps_price'] ?? 0, $ci['pps_rush'] ?? 0 );
-            $name = ( isset( $ci['data'] ) && is_object( $ci['data'] ) ) ? $ci['data']->get_name() : 'a print job';
-            if ( $r['action'] === 'none' ) continue;
-            if ( $r['action'] === 'refuse' && ( $r['reason'] ?? '' ) === 'price' ) {
-                wc_add_notice( sprintf(
-                    'The rush price for %s was quoted on an earlier day and needs a fresh quote. Please open it with "Edit" in your cart, then check out.',
-                    esc_html( $name )
-                ), 'error' );
-                continue;
+            if ( $now === null ) {
+                $now   = new DateTime( 'now', new DateTimeZone( pps_shop_timezone() ) );
+                $shows = pps_request_shows_cart();
             }
-            if ( $r['action'] === 'refuse' ) {
-                wc_add_notice( sprintf(
-                    'We can no longer deliver %s by the date it was quoted for. Please open it with "Edit" in your cart to choose a date we can keep, then check out.',
-                    esc_html( $name )
-                ), 'error' );
-                continue;
+            $dirty = false;
+            $r = pps_requote_line( $m, $now, $ci['pps_price'] ?? 0, $ci['pps_rush'] ?? 0 );
+            if ( $r['action'] !== 'none' ) {
+                $json = wp_json_encode( $r['meta'] );
+                if ( is_string( $json ) && $json !== '' ) {
+                    $ci['pps_metadata'] = $json;
+                    $ci['pps_hash']     = md5( $json );
+                    $ci['pps_price']    = $r['price'];
+                    $ci['pps_rush']     = $r['rush'];
+                    $ci['pps_biz_days'] = $r['biz_days'];
+                    if ( $r['action'] === 'update' ) {
+                        $ci['pps_summary']        = pps_requote_summary( $ci['pps_summary'] ?? '', $r['rush'], $r['biz_days'] );
+                        $ci['pps_requote_unseen'] = 1;
+                    }
+                    $dirty = true;
+                }
             }
-            $meta_json = wp_json_encode( $r['meta'] );
-            $ci['pps_metadata'] = $meta_json;
-            $ci['pps_hash']     = md5( $meta_json );
-            $ci['pps_price']    = $r['price'];
-            $ci['pps_rush']     = $r['rush'];
-            $ci['pps_biz_days'] = $r['biz_days'];
-            $ci['pps_summary']  = pps_requote_summary( $ci['pps_summary'] ?? '', $r['action'], $r['biz_days'] );
-            WC()->cart->cart_contents[ $key ] = $ci;
-            $changed = true;
-            if ( $r['action'] === 'refresh' ) continue;
-            $msg = $r['action'] === 'moved'
-                ? sprintf( 'The delivery date for %1$s has moved from %2$s to %3$s. It was quoted on %4$s, and ordering it later leaves too little time for the original date at the free-delivery price. The price is unchanged. To keep %2$s instead, open it with "Edit" and choose it as a rush date.',
-                    esc_html( $name ), $fmt( $r['from']['date'] ), $fmt( $r['to']['date'] ), $fmt( $r['from']['quotedOn'] ) )
-                : sprintf( 'The rush charge for %1$s has gone from $%2$s to $%3$s (total $%4$s). It was quoted on %5$s, and ordering it later leaves fewer working days to deliver by %6$s. To pay the original price, open it with "Edit" and choose a later date.',
-                    esc_html( $name ), number_format( $r['from']['rush'], 2 ), number_format( $r['to']['rush'], 2 ), number_format( $r['to']['price'], 2 ), $fmt( $r['from']['quotedOn'] ), $fmt( $r['to']['date'] ) );
-            // While paying, stop this one submission so the new price or date is seen
-            // before anyone is charged. The re-quote is saved, so the next attempt passes.
-            wc_add_notice( $submit ? 'Please review before paying: ' . $msg : $msg, $submit ? 'error' : 'notice' );
+            // Shown now: the totals this request computes carry it, and the line's
+            // "Quote updated" row says why. It can no longer stop a payment.
+            if ( ! empty( $ci['pps_requote_unseen'] ) && $shows ) {
+                unset( $ci['pps_requote_unseen'] );
+                $dirty = true;
+                if ( $shows === 'page' && function_exists( 'wc_add_notice' ) ) {
+                    $rq   = json_decode( (string) $ci['pps_metadata'], true );
+                    $name = ( isset( $ci['data'] ) && is_object( $ci['data'] ) && method_exists( $ci['data'], 'get_name' ) ) ? $ci['data']->get_name() : 'your print job';
+                    $text = pps_requote_describe( is_array( $rq ) ? ( $rq['requoted'] ?? null ) : null );
+                    if ( $text !== '' ) wc_add_notice( 'We re-quoted ' . esc_html( $name ) . ' for today. ' . esc_html( $text ), 'notice' );
+                }
+            }
+            if ( $dirty ) $cart->cart_contents[ $key ] = $ci;
         }
-        if ( $changed ) WC()->cart->set_session();
     } catch ( \Throwable $e ) {
-        // A check that breaks the cart is worse than no check.
+        // A re-quote that breaks the cart is worse than none: the line keeps its quote.
+        error_log( '[pps] re-quote skipped: ' . $e->getMessage() );
     }
 }
-add_action( 'woocommerce_check_cart_items', 'pps_requote_cart' );
+// Priority 10: before the price hook (20) copies pps_price onto the product.
+add_action( 'woocommerce_before_calculate_totals', 'pps_requote_cart', 10, 1 );
+
+/**
+ * The one stop: a re-quote the customer has not been shown, found while they are paying.
+ * Returns the message to show, or '' to let the payment through. Marks every line seen and
+ * saves the cart BEFORE returning, and remembers the stop for the day, so the next press
+ * of Place Order always goes through.
+ */
+function pps_requote_stop_message( $cart ) {
+    try {
+        if ( ! is_object( $cart ) || ! isset( $cart->cart_contents ) || ! is_array( $cart->cart_contents ) ) return '';
+        $parts = array(); $keys = array();
+        foreach ( $cart->cart_contents as $key => $ci ) {
+            if ( ! is_array( $ci ) || empty( $ci['pps_requote_unseen'] ) ) continue;
+            $keys[] = $key;
+            $m    = json_decode( (string) ( $ci['pps_metadata'] ?? '' ), true );
+            $text = pps_requote_describe( is_array( $m ) ? ( $m['requoted'] ?? null ) : null );
+            $name = ( isset( $ci['data'] ) && is_object( $ci['data'] ) && method_exists( $ci['data'], 'get_name' ) ) ? $ci['data']->get_name() : 'Your print job';
+            // Plain text: the block checkout shows this message as text, so an escaped "&amp;" in a
+            // product name would be printed as it stands.
+            if ( $text !== '' ) $parts[] = trim( wp_strip_all_tags( (string) $name ) ) . ': ' . $text;
+        }
+        if ( ! $keys ) return '';
+        foreach ( $keys as $k ) unset( $cart->cart_contents[ $k ]['pps_requote_unseen'] );
+        if ( method_exists( $cart, 'set_session' ) ) $cart->set_session();
+        if ( ! $parts ) return '';
+
+        $who = ( function_exists( 'WC' ) && WC()->session && method_exists( WC()->session, 'get_customer_id' ) ) ? (string) WC()->session->get_customer_id() : '';
+        $day = ( new DateTime( 'now', new DateTimeZone( pps_shop_timezone() ) ) )->format( 'Y-m-d' );
+        if ( $who !== '' ) {
+            $tk = 'pps_rq_stop_' . md5( $who . '|' . $day );
+            if ( get_transient( $tk ) ) return '';
+            set_transient( $tk, 1, 2 * DAY_IN_SECONDS );
+        }
+        $total = method_exists( $cart, 'get_total' ) ? (float) $cart->get_total( 'edit' ) : 0;
+        return 'Before you pay: this order was priced on an earlier day, so we have re-quoted it for today. '
+            . implode( ' ', $parts )
+            . ( $total > 0 ? ' Your order total is now $' . number_format( $total, 2 ) . '.' : '' )
+            . ' Nothing has been charged. Please review your order and place it again.';
+    } catch ( \Throwable $e ) {
+        return '';
+    }
+}
+
+// Block checkout (Store API): the error goes through the documented cart-errors hook, and
+// is the only error this code can raise, so there is exactly one message.
+add_action( 'woocommerce_store_api_cart_errors', function( $errors, $cart = null ) {
+    try {
+        if ( ! is_object( $errors ) || ! method_exists( $errors, 'add' ) || ! pps_is_placing_order() ) return;
+        $msg = pps_requote_stop_message( is_object( $cart ) ? $cart : ( function_exists( 'WC' ) ? WC()->cart : null ) );
+        if ( $msg !== '' ) $errors->add( 'pps_quote_updated', $msg );
+    } catch ( \Throwable $e ) {}
+}, 10, 2 );
+
+// Classic checkout (and the express-pay buttons on the classic cart, which run it).
+add_action( 'woocommerce_check_cart_items', function() {
+    try {
+        if ( pps_rest_stack() || ! did_action( 'woocommerce_checkout_process' ) ) return;
+        $msg = pps_requote_stop_message( function_exists( 'WC' ) ? WC()->cart : null );
+        if ( $msg !== '' ) wc_add_notice( $msg, 'error' );
+    } catch ( \Throwable $e ) {}
+}, 20 );
+
+/**
+ * An order paid on a later day than it was placed — a failed card retried tomorrow, or a
+ * pay-for-order link — never passes through the cart, so nothing re-quotes it. It is
+ * never stopped either: the order just gets a note when a delivery date it carries can
+ * no longer be made, so staff see it before anyone promises that date.
+ */
+function pps_flag_late_paid_order( $order ) {
+    try {
+        if ( ! is_object( $order ) || ! method_exists( $order, 'get_items' ) ) return;
+        if ( $order->get_meta( '_pps_late_paid_checked' ) ) return;
+        $created = $order->get_date_created();
+        if ( ! $created ) return;
+        $zone = new DateTimeZone( pps_shop_timezone() );
+        $now  = new DateTime( 'now', $zone );
+        $made = new DateTime( '@' . $created->getTimestamp() ); $made->setTimezone( $zone );
+        if ( pps_shop_start_day( $made )->format( 'Y-m-d' ) === pps_shop_start_day( $now )->format( 'Y-m-d' ) ) return;
+        $late = array();
+        foreach ( $order->get_items() as $item ) {
+            $meta = $item->get_meta( '_pps_metadata' );
+            if ( ! $meta || ! pps_quote_is_stale( $meta, $now ) ) continue;
+            $late[] = $item->get_name() . ' (' . $item->get_meta( '_pps_delivery_date' ) . ')';
+        }
+        $order->update_meta_data( '_pps_late_paid_checked', 1 );
+        $order->save_meta_data();
+        if ( $late ) {
+            $order->add_order_note( 'Paid on ' . $now->format( 'D, M j' ) . ', after the day it was placed. These delivery dates can no longer be made as quoted — agree a new date with the customer: ' . implode( '; ', $late ) . '.' );
+        }
+    } catch ( \Throwable $e ) {}
+}
+add_action( 'woocommerce_order_status_changed', function( $order_id, $from, $to, $order = null ) {
+    if ( ! in_array( $from, array( 'pending', 'failed' ), true ) ) return;
+    if ( ! in_array( $to, array( 'processing', 'on-hold', 'completed' ), true ) ) return;
+    pps_flag_late_paid_order( is_object( $order ) ? $order : ( function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null ) );
+}, 20, 4 );
+
+/**
+ * A classic cart page left open across midnight shows yesterday's quote, and its express
+ * pay buttons carry yesterday's amount. When the shop's day turns over, reload it so the
+ * re-quote is on screen before anyone pays. The day is the browser's own reading at load,
+ * so a wrong clock cannot make it loop. The block checkout needs none of this: its Place
+ * Order request is re-quoted and stopped once if anything moved.
+ */
+add_action( 'wp_footer', function() {
+    try {
+        if ( ! function_exists( 'is_cart' ) || ! is_cart() ) return;
+        if ( function_exists( 'has_block' ) && has_block( 'woocommerce/cart' ) ) return;
+        if ( ! function_exists( 'WC' ) || ! WC()->cart ) return;
+        $ours = false;
+        foreach ( WC()->cart->get_cart() as $ci ) { if ( isset( $ci['pps_metadata'] ) ) { $ours = true; break; } }
+        if ( ! $ours ) return;
+        $tz = wp_json_encode( pps_shop_timezone() );
+        echo "<script>(function(){try{var tz={$tz};function d(){try{return new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}catch(e){return null;}}"
+            . "var day=d(),gone=false;if(!day)return;function chk(){if(gone||document.hidden)return;var n=d();if(!n||n===day)return;"
+            . "var a=document.activeElement;if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return;gone=true;location.reload();}"
+            . "setInterval(chk,60000);document.addEventListener('visibilitychange',chk);window.addEventListener('focus',chk);}catch(e){}})();</script>";
+    } catch ( \Throwable $e ) {}
+}, 30 );
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -2858,6 +3121,13 @@ add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
         );
     }
 
+    // A line re-quoted since it was priced says so, next to the date it changed.
+    $rq_meta = json_decode( (string) ( $cart_item['pps_metadata'] ?? '' ), true );
+    $rq_text = is_array( $rq_meta ) ? pps_requote_describe( $rq_meta['requoted'] ?? null ) : '';
+    if ( $rq_text !== '' ) {
+        $data[] = array( 'key' => 'Quote updated', 'value' => $rq_text );
+    }
+
     return $data;
 }, 10, 2 );
 
@@ -2911,6 +3181,41 @@ add_filter( 'get_post_metadata', function( $value, $object_id, $meta_key, $singl
  * reads, the whole body is wrapped, and any error is swallowed. A tripwire that
  * breaks checkout is worse than no tripwire.
  */
+/** Append one refusal to `pps_checkout_refusals` and the error log. Never throws. */
+function pps_record_checkout_refusal( array $products, array $messages, $via = 'classic' ) {
+    try {
+        $clean = array();
+        foreach ( $messages as $m ) {
+            $m = is_scalar( $m ) ? trim( wp_strip_all_tags( html_entity_decode( (string) $m, ENT_QUOTES ) ) ) : '';
+            if ( $m !== '' ) $clean[] = mb_substr( $m, 0, 300 );
+        }
+        $products = array_values( array_unique( array_map( 'intval', $products ) ) );
+        $log = get_option( 'pps_checkout_refusals', array() );
+        if ( ! is_array( $log ) ) $log = array();
+        array_unshift( $log, array(
+            'time'     => current_time( 'mysql' ),
+            'products' => $products,
+            'errors'   => array_slice( $clean, 0, 6 ),
+            'via'      => $via,
+        ) );
+        update_option( 'pps_checkout_refusals', array_slice( $log, 0, 30 ), false );
+        error_log( '[pps] checkout refused on a calculator cart (' . $via . ', products '
+            . implode( ',', $products ) . '): ' . implode( ' | ', $clean ) );
+    } catch ( \Throwable $e ) {
+        // Observation must never be the thing that breaks an order.
+    }
+}
+
+/** Product IDs of the calculator lines in the cart, or an empty list. */
+function pps_cart_calculator_products() {
+    $items = array();
+    if ( ! function_exists( 'WC' ) || ! WC()->cart ) return $items;
+    foreach ( WC()->cart->get_cart() as $ci ) {
+        if ( isset( $ci['pps_metadata'] ) || isset( $ci['pps_price'] ) ) $items[] = (int) ( $ci['product_id'] ?? 0 );
+    }
+    return $items;
+}
+
 add_action( 'woocommerce_after_checkout_validation', function( $data, $errors ) {
     try {
         // Refusals arrive two ways: in the validation error list, and as error notices
@@ -2919,44 +3224,59 @@ add_action( 'woocommerce_after_checkout_validation', function( $data, $errors ) 
         $notices = function_exists( 'wc_get_notices' ) ? (array) wc_get_notices( 'error' ) : array();
         $has_err = is_wp_error( $errors ) && $errors->get_error_codes();
         if ( ! $has_err && ! $notices ) return;                                  // checkout is fine
-        if ( ! function_exists( 'WC' ) || ! WC()->cart ) return;
-
-        $items = array();
-        foreach ( WC()->cart->get_cart() as $ci ) {
-            if ( isset( $ci['pps_metadata'] ) || isset( $ci['pps_price'] ) ) {
-                $items[] = (int) ( $ci['product_id'] ?? 0 );
-            }
-        }
+        $items = pps_cart_calculator_products();
         if ( ! $items ) return;                                                  // not our cart
 
         $messages = array();
         if ( $has_err ) {
             foreach ( $errors->get_error_codes() as $code ) {
-                foreach ( (array) $errors->get_error_messages( $code ) as $m ) {
-                    $messages[] = mb_substr( wp_strip_all_tags( (string) $m ), 0, 300 );
-                }
+                foreach ( (array) $errors->get_error_messages( $code ) as $m ) $messages[] = $m;
             }
         }
         foreach ( $notices as $n ) {
             $m = is_array( $n ) ? ( $n['notice'] ?? '' ) : $n;
-            $messages[] = mb_substr( wp_strip_all_tags( (string) $m ), 0, 300 );
+            // Our own one-time re-quote stop is not a refusal: the next press goes through.
+            if ( is_string( $m ) && strpos( $m, 'Before you pay: this order was priced on an earlier day' ) === 0 ) continue;
+            $messages[] = $m;
         }
-
-        $log = get_option( 'pps_checkout_refusals', array() );
-        if ( ! is_array( $log ) ) $log = array();
-        array_unshift( $log, array(
-            'time'     => current_time( 'mysql' ),
-            'products' => array_values( array_unique( $items ) ),
-            'errors'   => array_slice( $messages, 0, 6 ),
-        ) );
-        update_option( 'pps_checkout_refusals', array_slice( $log, 0, 30 ), false );
-
-        error_log( '[pps] checkout refused on a calculator cart (products '
-            . implode( ',', array_unique( $items ) ) . '): ' . implode( ' | ', $messages ) );
+        if ( $messages ) pps_record_checkout_refusal( $items, $messages, 'classic' );
     } catch ( \Throwable $e ) {
         // Observation must never be the thing that breaks an order.
     }
 }, 99, 2 );
+
+// The block checkout never fires the classic hook above, so until 2026-09-29 no refusal
+// on it — which is every checkout on this site — was ever recorded. Read the Store API's
+// answer to Place Order instead. Card declines are the bank's answer, not ours, and are
+// left out; so is the re-quote's own one-time stop.
+add_filter( 'rest_post_dispatch', function( $result, $server = null, $request = null ) {
+    try {
+        if ( ! is_object( $request ) || ! method_exists( $request, 'get_route' ) ) return $result;
+        if ( strtoupper( (string) $request->get_method() ) !== 'POST' ) return $result;
+        if ( ! preg_match( '#^/wc/store(?:/v\d+)?/checkout/?$#', (string) $request->get_route() ) ) return $result;
+        if ( ! is_object( $result ) || ! method_exists( $result, 'get_status' ) || (int) $result->get_status() < 400 ) return $result;
+        $data = method_exists( $result, 'get_data' ) ? $result->get_data() : null;
+        $code = is_array( $data ) ? (string) ( $data['code'] ?? '' ) : '';
+        if ( $code === 'woocommerce_rest_checkout_process_payment_error' ) return $result;
+        $messages = array();
+        if ( is_array( $data ) ) {
+            if ( isset( $data['message'] ) ) $messages[] = $data['message'];
+            foreach ( (array) ( $data['additional_errors'] ?? array() ) as $e ) {
+                if ( is_array( $e ) && isset( $e['message'] ) ) $messages[] = $e['message'];
+            }
+            foreach ( (array) ( $data['data']['errors'] ?? array() ) as $e ) {
+                if ( is_array( $e ) ) foreach ( $e as $m ) if ( is_string( $m ) ) $messages[] = $m;
+            }
+        }
+        $messages = array_values( array_filter( array_unique( array_map( 'strval', $messages ) ), static function( $m ) {
+            return strpos( $m, 'Before you pay: this order was priced on an earlier day' ) !== 0;
+        } ) );
+        if ( ! $messages ) return $result;
+        $items = pps_cart_calculator_products();
+        if ( $items ) pps_record_checkout_refusal( $items, $messages, 'block:' . ( $code !== '' ? $code : 'error' ) );
+    } catch ( \Throwable $e ) {}
+    return $result;
+}, 99, 3 );
 
 // WCPA (still active for non-registry products) also filters this hook and
 // emits its form-field labels — valueless — on registry products it does not
@@ -3337,8 +3657,11 @@ function pps_is_business_day( DateTime $d ): bool {
 function pps_add_business_days( DateTime $start, int $days ): DateTime {
     $d = clone $start;
     $added = 0;
+    // Bounded: a day count arrives from the browser, and a closures list that shut every
+    // day would otherwise spin a checkout request until it timed out.
+    $days = max( 0, min( $days, 400 ) );
 
-    while ( $added < $days ) {
+    for ( $i = 0; $added < $days && $i < 2000; $i++ ) {
         $d->modify( '+1 day' );
         if ( pps_is_business_day( $d ) ) $added++;
     }
@@ -3352,110 +3675,121 @@ function pps_add_business_days( DateTime $start, int $days ): DateTime {
 
 add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $cart_item_key, $values, $order ) {
     if ( ! isset( $values['pps_metadata'] ) ) return;
+    // Everything below only records the job onto the order. An error in it must never be
+    // what stops a paid checkout, so it is caught, logged and flagged for staff instead.
+    try {
 
-    // Internal (hidden from customer)
-    $item->add_meta_data( '_pps_metadata', $values['pps_metadata'], true );
-    $item->add_meta_data( '_pps_summary', $values['pps_summary'] ?? '', true );
-    $item->add_meta_data( '_pps_rush', $values['pps_rush'] ?? 0, true );
+        // Internal (hidden from customer)
+        $item->add_meta_data( '_pps_metadata', $values['pps_metadata'], true );
+        $item->add_meta_data( '_pps_summary', $values['pps_summary'] ?? '', true );
+        $item->add_meta_data( '_pps_rush', $values['pps_rush'] ?? 0, true );
 
-    // The date the customer was quoted, not a fresh count from checkout time. Both are
-    // usually the same day; they diverge exactly when it matters — a cart left overnight,
-    // an order placed after the 2pm cutoff, or a delivery date the customer chose.
-    $tz = pps_shop_timezone();
-    $biz_days  = intval( $values['pps_biz_days'] ?? 5 );
-    $quoted    = pps_quoted_delivery_date( $values['pps_metadata'] ?? '', $biz_days );
-    $delivery  = $quoted !== null
-        ? new DateTime( $quoted, new DateTimeZone( $tz ) )
-        : pps_add_business_days( new DateTime( 'now', new DateTimeZone( $tz ) ), $biz_days );
+        // The date the customer was quoted, not a fresh count from checkout time. Both are
+        // usually the same day; they diverge exactly when it matters — a cart left overnight,
+        // an order placed after the 2pm cutoff, or a delivery date the customer chose.
+        $tz = pps_shop_timezone();
+        $biz_days  = intval( $values['pps_biz_days'] ?? 5 );
+        $quoted    = pps_quoted_delivery_date( $values['pps_metadata'] ?? '', $biz_days );
+        $delivery  = $quoted !== null
+            ? new DateTime( $quoted, new DateTimeZone( $tz ) )
+            : pps_add_business_days( new DateTime( 'now', new DateTimeZone( $tz ) ), $biz_days );
 
-    $item->add_meta_data( '_pps_delivery_date', $delivery->format( 'Y-m-d' ), true );
+        $item->add_meta_data( '_pps_delivery_date', $delivery->format( 'Y-m-d' ), true );
 
-    // Artwork: direct path from cart (no token resolution, no glob)
-    if ( ! empty( $values['pps_artwork_path'] ) ) {
-        $path = sanitize_text_field( $values['pps_artwork_path'] );
-        // Security: prevent path traversal
-        if ( strpos( $path, '..' ) === false && strpos( $path, 'pps-artwork/' ) === 0 ) {
-            $upload = wp_upload_dir();
-            $full   = trailingslashit( $upload['basedir'] ) . $path;
-            // Store path even if local file was moved to Google Drive —
-            // it serves as a reference for reorders and Drive lookups
-            $item->add_meta_data( '_pps_artwork_path', $path, true );
-            if ( ! file_exists( $full ) ) {
-                $item->add_meta_data( '_pps_artwork_on_drive', 'yes', true );
+        // Artwork: direct path from cart (no token resolution, no glob)
+        if ( ! empty( $values['pps_artwork_path'] ) ) {
+            $path = sanitize_text_field( $values['pps_artwork_path'] );
+            // Security: prevent path traversal
+            if ( strpos( $path, '..' ) === false && strpos( $path, 'pps-artwork/' ) === 0 ) {
+                $upload = wp_upload_dir();
+                $full   = trailingslashit( $upload['basedir'] ) . $path;
+                // Store path even if local file was moved to Google Drive —
+                // it serves as a reference for reorders and Drive lookups
+                $item->add_meta_data( '_pps_artwork_path', $path, true );
+                if ( ! file_exists( $full ) ) {
+                    $item->add_meta_data( '_pps_artwork_on_drive', 'yes', true );
+                }
             }
         }
-    }
 
-    // Full approval package → order item (JSON). The Drive uploader pushes every
-    // deliverable in this list into the order folder, not just the raw file.
-    if ( ! empty( $values['pps_artwork_files'] ) && is_array( $values['pps_artwork_files'] ) ) {
-        $clean = array();
-        foreach ( $values['pps_artwork_files'] as $f ) {
-            if ( ! is_array( $f ) || empty( $f['path'] ) ) continue;
-            $p = sanitize_text_field( $f['path'] );
-            if ( strpos( $p, '..' ) !== false || strpos( $p, 'pps-artwork/' ) !== 0 ) continue;
-            $clean[] = array( 'path' => $p, 'name' => sanitize_file_name( $f['name'] ?? basename( $p ) ) );
-        }
-        if ( $clean ) {
-            $item->add_meta_data( '_pps_artwork_files', wp_json_encode( $clean ), true );
-        }
-    }
-
-    // Approval binding: SHA-256 of the print-ready bytes the customer approved
-    // on screen. The imposition tool hashes the file it is about to impose and
-    // refuses on mismatch — what was approved is what prints.
-    if ( ! empty( $values['pps_proof_hash'] ) && preg_match( '/^[0-9a-f]{64}$/', (string) $values['pps_proof_hash'] ) ) {
-        $item->add_meta_data( '_pps_proof_hash', (string) $values['pps_proof_hash'], true );
-    }
-
-    // The proofer's escape hatch, which until now told nobody.
-    //
-    // After two failed approvals the customer is offered "continue and prepress
-    // will check this". They then order with the file exactly as supplied and
-    // NO approval — which is the opposite of a self-approved order, and used to
-    // be indistinguishable from one. It rides to the order as visible staff meta
-    // (internal only: pps_internal_item_meta_keys() keeps it off the customer's
-    // copy), turns the spec's proof token into PREPRESS-REVIEW, and raises an
-    // order note below so it cannot be missed in the admin timeline.
-    $prepress = trim( (string) ( $values['pps_prepress_review'] ?? '' ) );
-    if ( $prepress !== '' ) {
-        $item->add_meta_data( 'PPS-Prepress-Review', $prepress, true );
-    }
-
-    $full = json_decode( $values['pps_metadata'] ?? '{}', true );
-
-    // The Job Ticket. One block, first on the order, that production can run the job
-    // from without opening anything else: every choice the customer made, as words,
-    // then what the server knows (art status, dates, ship-to, shipment). It is the
-    // customer's receipt too — the same block on both sides, so a question about a
-    // job is answered by reading, not by exploring a JSON blob. See pps_job_ticket().
-    $ticket = pps_job_ticket( is_array( $full ) ? $full : array(), $values, $delivery, $prepress );
-    if ( $ticket !== '' ) {
-        $item->add_meta_data( 'Job Ticket', $ticket, true );
-    }
-
-    // Visible in order emails
-    $item->add_meta_data( 'Estimated Delivery', $delivery->format( 'l, M j, Y' ), true );
-    $item->add_meta_data( 'Order Summary', $values['pps_summary'] ?? '', true );
-
-    // ── Missive-parseable fields ──
-    if ( is_array( $full ) && $full ) {
-        // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
-        list( $spec, $addons ) = pps_build_spec( $full, (string) ( $values['pps_summary'] ?? '' ), $prepress, $biz_days );
-        $item->add_meta_data( 'PPS-Spec', $spec, true );
-
-        // The add-ons as their own visible line — on the admin notification, the
-        // customer's receipt and the order screen — so a coating or a perforation is
-        // never something staff have to go looking for in a JSON blob.
-        if ( $addons ) {
-            $item->add_meta_data( 'Add-ons', implode( '; ', $addons ), true );
+        // Full approval package → order item (JSON). The Drive uploader pushes every
+        // deliverable in this list into the order folder, not just the raw file.
+        if ( ! empty( $values['pps_artwork_files'] ) && is_array( $values['pps_artwork_files'] ) ) {
+            $clean = array();
+            foreach ( $values['pps_artwork_files'] as $f ) {
+                if ( ! is_array( $f ) || empty( $f['path'] ) ) continue;
+                $p = sanitize_text_field( $f['path'] );
+                if ( strpos( $p, '..' ) !== false || strpos( $p, 'pps-artwork/' ) !== 0 ) continue;
+                $clean[] = array( 'path' => $p, 'name' => sanitize_file_name( $f['name'] ?? basename( $p ) ) );
+            }
+            if ( $clean ) {
+                $item->add_meta_data( '_pps_artwork_files', wp_json_encode( $clean ), true );
+            }
         }
 
-        // Production start date — distinct label for Missive rule parsing
-        $prodStart = $full['productionStartDate'] ?? '';
-        if ( $prodStart ) {
-            $item->add_meta_data( 'PPS-Production-Start', $prodStart, true );
+        // Approval binding: SHA-256 of the print-ready bytes the customer approved
+        // on screen. The imposition tool hashes the file it is about to impose and
+        // refuses on mismatch — what was approved is what prints.
+        if ( ! empty( $values['pps_proof_hash'] ) && preg_match( '/^[0-9a-f]{64}$/', (string) $values['pps_proof_hash'] ) ) {
+            $item->add_meta_data( '_pps_proof_hash', (string) $values['pps_proof_hash'], true );
         }
+
+        // The proofer's escape hatch, which until now told nobody.
+        //
+        // After two failed approvals the customer is offered "continue and prepress
+        // will check this". They then order with the file exactly as supplied and
+        // NO approval — which is the opposite of a self-approved order, and used to
+        // be indistinguishable from one. It rides to the order as visible staff meta
+        // (internal only: pps_internal_item_meta_keys() keeps it off the customer's
+        // copy), turns the spec's proof token into PREPRESS-REVIEW, and raises an
+        // order note below so it cannot be missed in the admin timeline.
+        $prepress = trim( (string) ( $values['pps_prepress_review'] ?? '' ) );
+        if ( $prepress !== '' ) {
+            $item->add_meta_data( 'PPS-Prepress-Review', $prepress, true );
+        }
+
+        $full = json_decode( is_string( $values['pps_metadata'] ?? null ) ? $values['pps_metadata'] : '{}', true );
+
+        // The Job Ticket. One block, first on the order, that production can run the job
+        // from without opening anything else: every choice the customer made, as words,
+        // then what the server knows (art status, dates, ship-to, shipment). It is the
+        // customer's receipt too — the same block on both sides, so a question about a
+        // job is answered by reading, not by exploring a JSON blob. See pps_job_ticket().
+        $ticket = pps_job_ticket( is_array( $full ) ? $full : array(), $values, $delivery, $prepress );
+        if ( $ticket !== '' ) {
+            $item->add_meta_data( 'Job Ticket', $ticket, true );
+        }
+
+        // Visible in order emails
+        $item->add_meta_data( 'Estimated Delivery', $delivery->format( 'l, M j, Y' ), true );
+        $item->add_meta_data( 'Order Summary', $values['pps_summary'] ?? '', true );
+        $rq_text = is_array( $full ) ? pps_requote_describe( $full['requoted'] ?? null ) : '';
+        if ( $rq_text !== '' ) {
+            $item->add_meta_data( 'Quote updated', $rq_text, true );
+        }
+
+        // ── Missive-parseable fields ──
+        if ( is_array( $full ) && $full ) {
+            // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
+            list( $spec, $addons ) = pps_build_spec( $full, (string) ( $values['pps_summary'] ?? '' ), $prepress, $biz_days );
+            $item->add_meta_data( 'PPS-Spec', $spec, true );
+
+            // The add-ons as their own visible line — on the admin notification, the
+            // customer's receipt and the order screen — so a coating or a perforation is
+            // never something staff have to go looking for in a JSON blob.
+            if ( $addons ) {
+                $item->add_meta_data( 'Add-ons', implode( '; ', $addons ), true );
+            }
+
+            // Production start date — distinct label for Missive rule parsing
+            $prodStart = $full['productionStartDate'] ?? '';
+            if ( $prodStart ) {
+                $item->add_meta_data( 'PPS-Production-Start', $prodStart, true );
+            }
+        }
+    } catch ( \Throwable $e ) {
+        error_log( '[pps] order line data incomplete: ' . $e->getMessage() );
+        try { $item->add_meta_data( 'PPS-Data-Error', 'Some job details could not be written to this line (' . $e->getMessage() . '). Check the cart data before production.', true ); } catch ( \Throwable $e2 ) {}
     }
 }, 10, 4 );
 
@@ -3645,6 +3979,8 @@ function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepre
     $rush = ( (float) ( $full['rushCost'] ?? 0 ) ) > 0;
     $days = intval( $full['requestedBizDays'] ?? $full['freeDeliveryBizDays'] ?? 0 );
     $put( 'Delivery', $delivery->format( 'l, M j, Y' ) . ( $rush ? ' — RUSH' : ' — standard' ) . ( $days ? ' (' . $days . ' business days)' : '' ) );
+    // Re-quoted at checkout (a cart paid on a later day than it was priced).
+    $put( 'Re-quoted', pps_requote_describe( $full['requoted'] ?? null ) );
 
     $a = is_array( $full['shipAddr'] ?? null ) ? $full['shipAddr'] : array();
     $parts = array_filter( array(
@@ -3716,7 +4052,7 @@ function pps_order_addons( $full, $summary ) {
 function pps_internal_item_meta_keys() {
     // 'Print File Check' is a prepress measurement ("BELOW PRINT RESOLUTION … before
     // plating") — it was reaching customers' receipts (audit 2026-09-27).
-    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset', 'PPS-Prepress-Review', 'Print File Check' );
+    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset', 'PPS-Prepress-Review', 'Print File Check', 'PPS-Data-Error' );
 }
 
 // WooCommerce renders both notifications through the same meta accessor, so the filter

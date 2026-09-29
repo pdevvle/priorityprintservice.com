@@ -64,6 +64,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-gdrive-missing-test.php`, `tools-edit-artwork-test.php` | The 2026-09-26 sweep's server half. The first lifts `pps_process_artwork_upload()` out of `pps-gdrive.php` and runs it against a fake Drive: twenty files listed and one on the server names the nineteen instead of assuming them uploaded; a reorder reusing old art creates no empty folder; a retry after a partial upload converges quietly; the tenth failure notes the order. The second lifts `pps_carry_edit_artwork()` and checks an edit keeps every file and the NOT APPROVED flag, drops the hash, and lets new artwork replace the old. Both were run against the pre-fix files and fail there (5 checks each). |
 | `tools-order-fields-test.mjs` | **What the customer typed and chose reaches the order, on all eight.** A Canva order with no link is stopped; with one, the link and Special Instructions ride in the metadata and on the Job Ticket; a reorder says "Reorder of order #…"; a flat given a 4-page PDF names the pages that will not print; a booklet batch holding a PDF is refused and one holding an unreadable image names it. `PPS_FIELDS_PAGES` selects builds — the live builds failed every check. |
 | `tools-order-junctures-test.mjs`, `tools-order-inputs-test.mjs`, `tools-server-junctures-test.php`, `tools-upload-endpoint-test.php` | The 2026-09-27 juncture sweep (see "Junctures" below). Browser, all eight: a four-digit ZIP stops the order before upload and names the fix; a picked date that can no longer be met stops Add to Order; the quote re-runs when the shop day moves (Playwright clock); a hardcopy proof address survives an edit and a blank one stops the order. Inputs: bad values from links, reorders, defaults and the config either become a makeable job or say why. PHP: closures/timezone that cannot stop checkout, the stale-quote rule (and that a Friday cart is fine on Saturday), PPS-Spec for flats, art status by artwork option, the add-to-cart guards, the sticker paper report; the upload endpoint's sniffing. The live code fails 56/64, 32/33, 17/18 and 3/9. |
+| `tools-requote-storeapi-test.php` | **A cart paid on a later day, through WooCommerce's real request sequence.** Lifts the re-quote, its hooks and the price hook out of `pps-calculators.php` and drives them through a fake WooCommerce that sequences requests as 10.9 does (block checkout preload, checkout PUT, Place Order → `validate_cart` → 409 carrying the totals already computed, the session written only by `set_session()`; classic cart page and classic checkout in a second child process without `REST_REQUEST`). Every scenario checks two promises: the amount charged is the last total a response put on screen, and the order goes through by the second press. The 2026-09-27 code fails 17 of 28. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
@@ -243,7 +244,8 @@ each gated by a test first run against the live code, where it failed:
   `pps_get_closures()` always returns a list of strings and `pps_shop_timezone()` falls back
   to Phoenix. **Thanksgiving** was "11-28"/"11-29" in every fallback list, which misses it in
   2026 (26th/27th) and most years; it is now computed (fourth Thursday + Friday) in the PHP
-  default and all eight calculators. The admin closures list is un-versioned — check it holds
+  fallback and all eight calculators — and, since 2026-09-29, in the admin default
+  (`pps_default_closures()`), which the 2026-09-27 fix missed. The admin closures list is un-versioned — check it holds
   the right Thanksgiving each year.
 - **`isBusinessDay` tested dated closures against the UTC date** (`toISOString()`), so east
   of UTC — and after 5pm in Phoenix for dates carrying a time — a "YYYY-MM-DD" closure was
@@ -253,21 +255,56 @@ each gated by a test first run against the live code, where it failed:
   `requestedBizDays` still the too-short count. Now the picker says so and Add to Order stops.
   The quote also **re-runs when the shop day moves** (a 60 s check of `getShopToday()`), so a
   tab left open overnight no longer submits yesterday's dates.
-- **A cart paid on a later day is re-quoted, not trusted** (owner decision 2026-09-27,
-  `pps_requote_cart()` on `woocommerce_check_cart_items`). Every calculator stamps
-  `quotedOn` (the shop day, cutoff applied) into the metadata; when the cart is checked on a
-  later day, each line is measured against today. Still inside the free window: only the
-  production dates move. A **free-delivery line that slipped** keeps its price and its date
-  moves out to the new free-delivery date. A **rush line that slipped** keeps its date and
-  is re-priced by the calculator's rule, `rush = baseTotal × free ÷ daysLeft − baseTotal`
-  (only when `pps_price − pps_rush` agrees with `baseTotal`; otherwise it asks for an Edit).
-  A date now inside production + 1 is refused. Every change is told to the customer; during
-  the checkout submission itself it is an error, so nobody is charged a price they did not
-  see, and the saved re-quote lets the next attempt through. The cutoff hour is ignored on
-  the server. A Friday free-delivery cart paid on Saturday therefore moves one working day —
-  production now starts Monday. Lines from builds without `quotedOn` get only the
-  "can it still be made" check (`pps_quote_is_stale()`). Recorded in
+- **A cart paid on a later day is re-quoted, never refused** (owner decisions 2026-09-27 and
+  2026-09-29 — "it is vital that customers not be blocked during checkout"). Every calculator
+  stamps `quotedOn` (the shop day its quote was computed from, `sh.shopTodayYMD`) into the
+  metadata; `pps_requote_cart()` measures each line against today. Still inside the free
+  window: only the production dates move. A **free-delivery line that slipped** keeps its
+  price and its date moves out to the new free-delivery date. A **rush line that slipped**
+  keeps its date and is re-priced by the calculator's rule,
+  `rush = baseTotal × free ÷ daysLeft − baseTotal` (only when `pps_price − pps_rush` agrees
+  with `baseTotal`; otherwise it keeps its price). A rush date that can no longer be made
+  moves to the earliest date that can. A line from a build without `quotedOn` is only moved
+  if its date can no longer be made. The cutoff hour is ignored on the server. Recorded in
   `docs/MASTER_PRICING_LOGIC.md` under "Rush re-quote on a late cart".
+
+  **The first version (2026-09-27) was wrong for the block checkout, which is every checkout
+  on this site**, and the second pass is the reason to read this before touching it. It ran
+  on `woocommerce_check_cart_items`; the Store API reaches that hook only AFTER it has
+  calculated totals, so the checkout page showed yesterday's total and Place Order charged
+  today's, silently. Its "refuse" branches told the customer to "open it with Edit", a link
+  the block checkout does not have, so those carts could not be paid at all. It only ever
+  showed the first of several messages, detected Place Order by URL (missing
+  `?rest_route=` and counting a checkout PUT), and never logged a refusal. Now:
+  - It runs in `woocommerce_before_calculate_totals` at priority 10, ahead of the price hook
+    (20), so every total computed — page, preload, charge — already carries it.
+  - The customer is told on the line ("Quote updated: …") in the cart, checkout, receipt and
+    Job Ticket, plus a notice on the classic cart page.
+  - A change first made where no cart was on screen (the Place Order request itself, a
+    checkout PUT, a mini-cart read on a product page) stops that ONE payment attempt with one
+    message naming every change and the new total, via `woocommerce_store_api_cart_errors`
+    (classic: an error notice). The change is saved first and a transient allows one stop per
+    customer per day. Place Order is recognised from WordPress's matched REST route
+    (`rest_request_before_callbacks`), never the URL.
+  - Block-checkout refusals are recorded to `pps_checkout_refusals` from `rest_post_dispatch`
+    (the classic `woocommerce_after_checkout_validation` never fires there, so no refusal on
+    this site had ever been logged). Card declines and the one-time stop are left out.
+  - An order paid on a later day through order-pay gets a note if a date can no longer be made.
+  - The classic cart page reloads itself when the shop's day turns over, so its express-pay
+    buttons never carry yesterday's amount.
+  `tools-requote-storeapi-test.php` replays the real request sequence (page preload → PUT →
+  Place Order → 409 → Place Order) and checks that the amount charged is the last total shown
+  and that the order goes through by the second press; the 2026-09-27 code fails 17 of 28.
+- **ZIP+4 without a dash** (found 2026-09-29): "85001 1234" and autofill's "850011234" were
+  refused as "add a 5-digit ZIP code" by the four-digit check above, in all eight calculators
+  and on the server. `ppsFmtZip()` writes nine digits back as `85001-1234` (ship and proof
+  ZIP fields) and every ZIP check accepts `#####`, `#####-####` and `##### ####`.
+- **The admin's chip editor saved "12-25" as the number 12** (`parseFloat` on every chip),
+  so any save of PPS Config left a closures list of bare months that matched no day. The
+  editor now keeps anything that is not a plain number as text; `pps_get_closures()` treats a
+  list with no valid `MM-DD`/`YYYY-MM-DD` entry as the default holidays, and the calculators
+  are given that cleaned list rather than the raw setting. The admin default computes
+  Thanksgiving. **Check the live closures list** after the next config save.
 - **Military addresses (APO/FPO/DPO)** are not orderable online (owner decision 2026-09-27):
   USPS is the only carrier that delivers them and none of our dates mean anything there.
   `ppsIsMilitaryAddress()` (ZIP 090–098 / 340 / 962–966, state AA/AE/AP, or APO/FPO/DPO as

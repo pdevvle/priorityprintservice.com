@@ -91,6 +91,23 @@ function pps_get_addons_visibility_for_calc( $calc_type ) {
 // DEFAULT CONFIG (mirrors calculator hardcodes — single source of truth)
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * The shop's standing closures: the fixed holidays as MM-DD, and Thanksgiving + the day
+ * after as dated days for this year and next, because the fourth Thursday moves.
+ */
+if ( ! function_exists( 'pps_default_closures' ) ) {
+    function pps_default_closures() {
+        $out = array( '01-01', '07-04', '12-24', '12-25' );
+        $y0  = (int) gmdate( 'Y' );
+        foreach ( array( $y0, $y0 + 1 ) as $y ) {
+            $tg    = strtotime( "fourth thursday of november $y 12:00 UTC" );
+            $out[] = gmdate( 'Y-m-d', $tg );
+            $out[] = gmdate( 'Y-m-d', $tg + 86400 );
+        }
+        return $out;
+    }
+}
+
 function pps_default_config() {
     return array(
         'pcf' => array(
@@ -311,7 +328,9 @@ function pps_default_config() {
             'VI' => 9, 'MP' => 7,
         ),
 
-        'closures' => array( '01-01', '07-04', '12-24', '12-25', '11-28', '11-29' ),
+        // Thanksgiving is the fourth Thursday of November, never a fixed MM-DD: the
+        // old '11-28'/'11-29' missed it in 2026 and most other years.
+        'closures' => pps_default_closures(),
 
         'page_counts' => array( 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64 ),
 
@@ -1126,8 +1145,10 @@ function pps_config_render_page() {
                 wrap.querySelectorAll('input').forEach(function(inp) {
                     var v = inp.value.trim();
                     if (v === '') return;
-                    var n = parseFloat(v);
-                    vals.push(isNaN(n) ? v : n);
+                    // Only a plain number is a number. parseFloat('12-25') is 12, so this
+                    // used to turn every shop closure into a bare month on save, and the
+                    // calculators and checkout then honoured no holiday at all.
+                    vals.push(/^-?\d+(\.\d+)?$/.test(v) ? parseFloat(v) : v);
                 });
                 hidden.value = JSON.stringify(vals);
             });

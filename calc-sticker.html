@@ -600,6 +600,15 @@ function getShipCostEst(zip, lbs) {
   if (z.length !== 5 || !(lbs > 0)) return null;
   return _LIVE_COST[z + "|" + Math.ceil(lbs)] || null;
 }
+// A ZIP as people type it: "85001 1234" and autofill's "850011234" are ZIP+4 too, so a
+// nine-digit value is written back with its dash. Until 2026-09-29 both were refused as
+// "add a 5-digit ZIP code" even though the customer had entered one.
+function ppsFmtZip(v) {
+  const s = String(v == null ? "" : v).replace(/[^\d-]/g, "");
+  const d = s.replace(/-/g, "");
+  return /^\d{9}$/.test(d) ? d.slice(0, 5) + "-" + d.slice(5) : s.slice(0, 10);
+}
+const PPS_ZIP_RE = /^\d{5}(?:[-\s]?\d{4})?$/;
 // APO / FPO / DPO: military mail is USPS-only, so no UPS ground quote or delivery date
 // means anything there (owner decision 2026-09-27: not orderable online; the shop arranges
 // these by hand). Recognised by ZIP prefix (AE 090–098, AA 340, AP 962–966), by the
@@ -963,7 +972,7 @@ function calculate(c) {
       hasDest: _hasDest,
       estWeightLb, estCartons,
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
-      earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday),
+      earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday), shopTodayYMD: toYMD(shopToday),
       bizDaysToDate, rushMultiplier, rushCost: Math.round(rushCost * 100) / 100,
       needByValid, needByPast, tooSoon, productionBizDays, bufferedProdDays,
       productionStartDate: fmtDate(productionStartDate), productionStartYMD: toYMD(productionStartDate),
@@ -3024,7 +3033,7 @@ function buildMetadata(config, result) {
     productionStartDate: sh.productionStartYMD,
     // The shop day this quote was made on (after the cutoff that is the next working day).
     // The server re-quotes a cart line against it when the cart is paid later.
-    quotedOn: toYMD(getShopToday()),
+    quotedOn: sh.shopTodayYMD || toYMD(getShopToday()),
     mustShipByDate: sh.mustShipYMD,
     estimatedDeliveryDate: quotedDeliveryYMD(config.needByDate, sh),
     // Computed results
@@ -3616,7 +3625,7 @@ function App() {
   // A ZIP the carrier cannot use is as missing as no ZIP: the server refuses it at
   // Add to Order, which is after the artwork has uploaded. Four digits is nearly
   // always a New England ZIP that lost its leading zero in a spreadsheet.
-  else if (!/^\d{5}(-\d{4})?$/.test(String(shipAddr.zip).trim())) _destMissing.push(/^\d{4}$/.test(String(shipAddr.zip).trim()) ? "a 5-digit ZIP code (did you mean 0" + String(shipAddr.zip).trim() + "?)" : "a 5-digit ZIP code");
+  else if (!PPS_ZIP_RE.test(String(shipAddr.zip).trim())) _destMissing.push(/^\d{4}$/.test(String(shipAddr.zip).trim()) ? "a 5-digit ZIP code (did you mean 0" + String(shipAddr.zip).trim() + "?)" : "a 5-digit ZIP code");
   const militaryDest = ppsIsMilitaryAddress(shipAddr.zip, shipState, shipAddr.city);
   const missingDest = _destMissing.length > 0 || militaryDest;
   // Name what is missing rather than repeat one generic warning: someone who has filled
@@ -3991,7 +4000,7 @@ function App() {
       if (!String(_pa.street || "").trim()) _pm.push("street address");
       if (!String(_pa.city || "").trim()) _pm.push("city");
       if (!String(_pa.state || "").trim()) _pm.push("state");
-      if (!/^\d{5}(-\d{4})?$/.test(String(_pa.zip || "").trim())) _pm.push("a 5-digit ZIP code");
+      if (!PPS_ZIP_RE.test(String(_pa.zip || "").trim())) _pm.push("a 5-digit ZIP code");
       if (_pm.length) {
         alert("Where should we mail the hardcopy proof? Please add the proof address's " + _pm.join(", ") + ".\n\nOr choose to send it to the order's shipping address. Your order has not been placed.");
         return;
@@ -4381,7 +4390,7 @@ function App() {
                     <div style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:6}}>
                       <input type="text" name="proof-address-level2" autoComplete="address-level2" value={proofAddr.city} onChange={e=>setProofAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
                       <input type="text" name="proof-address-level1" autoComplete="address-level1" value={proofAddr.state} onChange={e=>setProofAddr(p=>({...p,state:e.target.value}))} placeholder="State" maxLength={2} style={{...ST.inp,fontSize:12,padding:"7px 10px",textTransform:"uppercase"}}/>
-                      <input type="text" name="proof-postal-code" autoComplete="postal-code" value={proofAddr.zip} onChange={e=>setProofAddr(p=>({...p,zip:e.target.value}))} placeholder="ZIP" maxLength={10} style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
+                      <input type="text" name="proof-postal-code" autoComplete="postal-code" value={proofAddr.zip} onChange={e=>setProofAddr(p=>({...p,zip:ppsFmtZip(e.target.value)}))} placeholder="ZIP" maxLength={10} style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
                     </div>
                   </form>
                 )}
@@ -4408,7 +4417,7 @@ function App() {
                 <option value="">Select&hellip;</option>
                 {US_STATES.map(st=><option key={st} value={st}>{st}</option>)}
               </Sel>
-              <div style={{...ST.f,marginTop:0}}><label style={ST.lbl} htmlFor="pps-ship-zip">ZIP Code</label><input id="pps-ship-zip" type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:e.target.value.replace(/[^\d-]/g,"").slice(0,10)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
+              <div style={{...ST.f,marginTop:0}}><label style={ST.lbl} htmlFor="pps-ship-zip">ZIP Code</label><input id="pps-ship-zip" type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:ppsFmtZip(e.target.value)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
             </div>
             </form>
 

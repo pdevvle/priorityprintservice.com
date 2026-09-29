@@ -1309,25 +1309,53 @@ default silently. `perfectbound_binder_throat_in` was wired through the admin
 properly (Pattern A, 4-file edit) despite its siblings not being; if the
 missing three are ever wired up, do them together.
 
-## Rush re-quote on a late cart (2026-09-27)
+## Rush re-quote on a late cart (2026-09-27, revised 2026-09-29)
 
 A rush price is a function of how many working days are left before the delivery date, and
-a cart can sit for days before it is paid. The server re-quotes every calculator line when
-WooCommerce checks the cart (`pps_requote_cart()` / `pps_requote_line()` in
-`pps-calculators.php`), using the quote day the calculator records as `quotedOn`:
+a cart can sit for days before it is paid. The server re-quotes every calculator line
+(`pps_requote_cart()` / `pps_requote_line()` in `pps-calculators.php`) against the quote day
+the calculator records as `quotedOn` (the shop day its quote was computed from,
+`sh.shopTodayYMD`):
 
 ```
+soon  = productionBizDays + 1                  (the earliest a job can arrive)
 left  = working days from today's shop day to the quoted delivery date
+if quotedOn >= today                    → nothing
 if left >= freeDeliveryBizDays          → no price change (production dates move to today)
 elif the line had no rush               → price unchanged; delivery moves to today + free days
-elif left < productionBizDays + 1       → refused ("open it with Edit")
-else rushCost = baseTotal × freeDeliveryBizDays ÷ left − baseTotal     (same rule as calculate())
+else days     = left, or soon if left < soon (the date moves to the earliest possible)
+     rushCost = baseTotal × freeDeliveryBizDays ÷ days − baseTotal     (same rule as calculate())
      price    = baseTotal + rushCost
 ```
 
-`baseTotal` is the calculator's pre-rush `total` (the sale discount is already inside it,
-and WooCommerce coupons apply after). The line is re-priced only when `pps_price − pps_rush`
-agrees with `baseTotal` to within 5¢; otherwise the customer is asked to Edit. Price only
-ever goes up here — a free line is never charged, it moves instead. The shop's cutoff hour
-is ignored on the server (date only), so the server is never stricter than the calculator.
-Gate: `tools-server-junctures-test.php`.
+**Nothing is ever refused** (owner, 2026-09-29: "it is vital that customers not be blocked
+during checkout"). The 2026-09-27 version refused a rush date inside production and a line
+whose numbers disagreed, and told the customer to "open it with Edit" — which the block
+checkout has no link for, so those carts could not be paid at all.
+
+- `baseTotal` is the calculator's pre-rush `total` (the sale discount is already inside it,
+  and WooCommerce coupons apply after). The line is re-priced only when
+  `pps_price − pps_rush` agrees with `baseTotal` to within 5¢; otherwise it keeps its price
+  (and its date moves if the date can no longer be made).
+- Price only ever goes up here. A free line is never charged; its date moves instead.
+- A line from a build before `quotedOn` (or with a quote day more than 14 days ahead — a
+  wrong browser clock) is never re-priced; only a date that can no longer be made moves.
+- The shop's cutoff hour is ignored on the server (date only), so the server is never
+  stricter than the calculator.
+
+**Where it runs decides whether the customer sees it.** It runs in
+`woocommerce_before_calculate_totals` at priority 10, before the price hook (20), so every
+total WooCommerce computes — the cart page, the block checkout's preloaded cart, the amount
+charged — already includes it. The first version ran on `woocommerce_check_cart_items`,
+which the Store API only reaches after the totals, so the block checkout showed yesterday's
+total and charged today's.
+
+The customer is told on the line itself ("Quote updated: Priced on Fri, Sep 25. Delivering
+by Thu, Oct 1 now leaves fewer working days, so the job total is $600.00 (was $450.00).") on
+the cart, the checkout, the receipt and the Job Ticket, plus a notice on the classic cart
+page. A change first made where no cart was on screen — typically the Place Order request
+from a page loaded before the day turned over — stops that one attempt with a single
+message naming every change and the new order total; the change is saved first, and a
+transient allows one stop per customer per day, so the next press always goes through.
+Gates: `tools-server-junctures-test.php` (the rule) and `tools-requote-storeapi-test.php`
+(the request sequence; the 2026-09-27 code fails 17 of its 28 checks).
