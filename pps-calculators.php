@@ -1355,6 +1355,11 @@ add_action( 'wp', function() {
                     foreach ( $edit_fields as $ek ) {
                         if ( isset( $edit_meta[ $ek ] ) ) $edit_cfg[ $ek ] = $edit_meta[ $ek ];
                     }
+                    // The full ship-to comes back on an edit: this payload is printed into
+                    // the page body, never a URL, so the reason reorder links leave the
+                    // street out does not apply — and without it the customer had to type
+                    // the whole address again before Add to Order would work.
+                    if ( is_array( $edit_meta['shipAddr'] ?? null ) ) $edit_cfg['shipAddr'] = $edit_meta['shipAddr'];
                     if ( ! empty( WC()->cart->get_cart()[ $edit_key ]['pps_artwork_path'] ) ) {
                         $edit_cfg['artworkPath']     = WC()->cart->get_cart()[ $edit_key ]['pps_artwork_path'];
                         $edit_cfg['artworkFilename'] = basename( WC()->cart->get_cart()[ $edit_key ]['pps_artwork_path'] );
@@ -3011,6 +3016,68 @@ add_action( 'woocommerce_order_status_changed', function( $order_id, $from, $to,
     if ( ! in_array( $to, array( 'processing', 'on-hold', 'completed' ), true ) ) return;
     pps_flag_late_paid_order( is_object( $order ) ? $order : ( function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null ) );
 }, 20, 4 );
+
+/**
+ * Before 2026-09-27 two identical jobs merged into one cart line at quantity 2, and a
+ * calculator product is now sold one job per line. The block checkout refuses such a line
+ * on every attempt ("too many in the cart") and has no quantity control to fix it, so a
+ * cart saved before then could not be paid. Split it back into one line per job: the same
+ * jobs, the same total, nothing for the customer to do.
+ */
+add_action( 'woocommerce_cart_loaded_from_session', function( $cart ) {
+    try {
+        if ( ! is_object( $cart ) || ! isset( $cart->cart_contents ) || ! is_array( $cart->cart_contents ) ) return;
+        $out = array(); $split = false;
+        foreach ( $cart->cart_contents as $key => $ci ) {
+            $qty = (int) ( $ci['quantity'] ?? 1 );
+            if ( $qty <= 1 || ! ( isset( $ci['pps_metadata'] ) || isset( $ci['pps_price'] ) ) ) { $out[ $key ] = $ci; continue; }
+            $split = true;
+            $n = min( $qty, 50 );
+            for ( $i = 1; $i <= $n; $i++ ) {
+                $copy = $ci;
+                $copy['quantity'] = 1;
+                $k = $key;
+                if ( $i > 1 ) {
+                    $copy['pps_uid'] = md5( $key . '|split|' . $i );
+                    $k = md5( $key . '|split|' . $i );
+                    if ( isset( $copy['key'] ) ) $copy['key'] = $k;
+                }
+                $out[ $k ] = $copy;
+            }
+        }
+        if ( $split ) $cart->cart_contents = $out;
+    } catch ( \Throwable $e ) {}
+}, 5 );
+
+/**
+ * WooCommerce's own "Order again" empties the cart and then re-adds each item — which the
+ * calculator products refuse (they are priced from their specification), so the customer
+ * lost the cart they had and got nothing. Calculator orders already carry a Reorder link
+ * that reopens the calculator; hide the native button for them and keep the cart if the
+ * link is used anyway.
+ */
+function pps_order_has_calc_items( $order ) {
+    if ( is_numeric( $order ) && function_exists( 'wc_get_order' ) ) $order = wc_get_order( $order );
+    if ( ! is_object( $order ) || ! method_exists( $order, 'get_items' ) ) return false;
+    foreach ( $order->get_items() as $item ) {
+        if ( $item->get_meta( '_pps_metadata' ) ) return true;
+        if ( function_exists( 'pps_get_calculator_for_product' ) && pps_get_calculator_for_product( $item->get_product_id() ) ) return true;
+    }
+    return false;
+}
+add_action( 'init', function() {
+    if ( ! function_exists( 'woocommerce_order_again_button' ) ) return;
+    if ( remove_action( 'woocommerce_order_details_after_order_table', 'woocommerce_order_again_button' ) ) {
+        add_action( 'woocommerce_order_details_after_order_table', function( $order ) {
+            if ( pps_order_has_calc_items( $order ) ) return;
+            woocommerce_order_again_button( $order );
+        } );
+    }
+}, 20 );
+add_filter( 'woocommerce_valid_order_statuses_for_order_again', function( $statuses ) {
+    $id = isset( $_GET['order_again'] ) ? absint( $_GET['order_again'] ) : 0;
+    return ( $id && pps_order_has_calc_items( $id ) ) ? array() : $statuses;
+} );
 
 /**
  * A classic cart page left open across midnight shows yesterday's quote, and its express

@@ -295,6 +295,16 @@ each gated by a test first run against the live code, where it failed:
   `tools-requote-storeapi-test.php` replays the real request sequence (page preload → PUT →
   Place Order → 409 → Place Order) and checks that the amount charged is the last total shown
   and that the order goes through by the second press; the 2026-09-27 code fails 17 of 28.
+- **Four more ways a cart could not be paid, from the same audit (2026-09-29).** A cart line
+  saved before 2026-09-27 with two identical jobs merged at quantity 2 was refused by the block
+  checkout on every attempt ("too many in the cart"; it has no quantity control) — it is now
+  split back into one line per job on load, same jobs and total. A legacy reorder of a product
+  now in the registry was cut by sold-individually to 1 × the per-unit price — it is now one
+  line priced as the whole job with "Quantity: N" in the cart and on the order. Editing a cart
+  line dropped the street address, so the customer retyped it before Add to Order worked — the
+  edit payload (page body, never a URL) now carries `shipAddr`, and a reorder link's ZIP is
+  kept. WooCommerce's own "Order again" emptied the cart and re-added nothing for calculator
+  orders — its button is hidden for them and the handler refuses them without touching the cart.
 - **ZIP+4 without a dash** (found 2026-09-29): "85001 1234" and autofill's "850011234" were
   refused as "add a 5-digit ZIP code" by the four-digit check above, in all eight calculators
   and on the server. `ppsFmtZip()` writes nine digits back as `85001-1234` (ship and proof

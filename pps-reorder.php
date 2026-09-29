@@ -893,6 +893,14 @@ function pps_handle_single_item_reorder() {
     if ( function_exists( 'pps_apply_past_multiplier' ) ) {
         $unit_price = pps_apply_past_multiplier( $unit_price );
     }
+    // A product the calculator now owns is sold one job per line, so WooCommerce would cut
+    // this add to quantity 1 at the per-unit price — 250 pieces for the price of one. Carry
+    // the job as one line priced as the whole job, and keep the quantity as words.
+    if ( $quantity > 1 && $product->is_sold_individually() ) {
+        $cart_item_data['pps_legacy_qty'] = $quantity;
+        $unit_price = $unit_price * $quantity;
+        $quantity   = 1;
+    }
     $cart_item_data['pps_legacy_unit_price'] = $unit_price;
     $cart_item_data['pps_legacy_source']     = array(
         'order_id' => $order_id,
@@ -927,6 +935,20 @@ add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $val
     }
     return $cart_item;
 }, 10, 2 );
+
+// The quantity of a reorder carried as one whole-job line, shown in the cart and kept on
+// the order so production still reads it.
+add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
+    if ( ! empty( $cart_item['pps_legacy_qty'] ) ) {
+        $data[] = array( 'key' => 'Quantity', 'value' => number_format( (int) $cart_item['pps_legacy_qty'] ) );
+    }
+    return $data;
+}, 10, 2 );
+add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $key, $values ) {
+    if ( ! empty( $values['pps_legacy_qty'] ) ) {
+        $item->add_meta_data( 'Quantity', number_format( (int) $values['pps_legacy_qty'] ), true );
+    }
+}, 10, 3 );
 
 add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
     if ( is_admin() && ! defined( 'DOING_AJAX' ) ) return;

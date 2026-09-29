@@ -129,6 +129,11 @@ for (const file of PAGES) {
     const z = t.meta && t.meta.shipAddr ? t.meta.shipAddr.zip : null;
     ok(`${file}: nine digits typed or autofilled become 85001-1234 and order`, v === '85001-1234' && z === '85001-1234', 'field=' + v + ' posted zip=' + z + ' ' + t.dialogs.join(' | ').slice(0, 160));
     await t.ctx.close();
+    // A reorder link carries the ZIP but never the street (URLs land in logs); it was dropped.
+    const r = await open(file, { ...JOB, shipState: 'AZ', shipZip: '85087' });
+    const rz = await r.p.inputValue('#pps-ship-zip').catch(() => null);
+    ok(`${file}: a reorder link's ZIP is kept, since the quote depends on it`, rz === '85087', 'field=' + rz);
+    await r.ctx.close();
     const u = await open(file, { ...JOB, proof: 3.01, proofAddrSame: false, proofAddr: { name: 'K', street: '9 Proof Ln', city: 'Tempe', state: 'AZ', zip: '85281 1234' }, shipState: 'AZ', shipAddr: { ...ADDR, city: 'Phoenix', zip: '85087' } });
     await addToOrder(u);
     ok(`${file}: and a hardcopy-proof ZIP+4 with a space is accepted too`, !!u.meta, 'posted=' + !!u.meta + ' ' + u.dialogs.join(' | ').slice(0, 160));

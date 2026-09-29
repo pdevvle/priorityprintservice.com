@@ -217,6 +217,13 @@ ok( 'an edit whose new line lands on the old key does not delete itself', strpos
 ok( 'calculator products are sold individually, so the cart cannot multiply a quoted job', (bool) preg_match( "/add_filter\( 'woocommerce_is_sold_individually'[\s\S]{0,200}pps_get_calculator_for_product/", $src ) );
 ok( 'the calculator address is applied to an order once, not on every status change', strpos( $src, "if ( \$order->get_meta( '_pps_calc_address_applied' ) ) return false;" ) !== false );
 
+$reorder_src = file_get_contents( __DIR__ . '/pps-reorder.php' );
+ok( 'a legacy reorder of a product the calculator now owns is priced as the whole job, not 1 × the unit price',
+    (bool) preg_match( '/if \( \$quantity > 1 && \$product->is_sold_individually\(\) \) \{[\s\S]{0,160}\$unit_price = \$unit_price \* \$quantity;[\s\S]{0,40}\$quantity   = 1;/', $reorder_src )
+    && strpos( $reorder_src, "'pps_legacy_qty'" ) !== false );
+ok( 'editing a cart line brings back its full ship-to (the edit payload never travels in a URL)', strpos( $src, "\$edit_cfg['shipAddr'] = \$edit_meta['shipAddr'];" ) !== false );
+ok( "WooCommerce's own Order again cannot empty the cart for a calculator order", strpos( $src, "add_filter( 'woocommerce_valid_order_statuses_for_order_again'" ) !== false && strpos( $src, 'function pps_order_has_calc_items' ) !== false );
+
 // ── 6. The paper report: sticker stock ──
 echo "\n── paper report ──\n";
 $paper_src = file_get_contents( __DIR__ . '/' . ( getenv( 'PPS_PAPER_PHP' ) ?: 'pps-paper-report.php' ) );
