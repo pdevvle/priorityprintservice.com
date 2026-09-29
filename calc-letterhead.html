@@ -3855,6 +3855,8 @@ function App() {
       // Shipping (no date — recalculated fresh)
       if (rc.shipState) setShipState(rc.shipState);
       if (rc.shipAddr) setShipAddr(rc.shipAddr);
+      // A reorder link carries only the ZIP (no street in a URL); keep it, the quote depends on it.
+      else if (rc.shipZip) setShipAddr(p=>({...p,zip:ppsFmtZip(rc.shipZip)}));
       // A hardcopy proof going somewhere else: an edited line fell back to "same as
       // the ship-to" and the proof went to the wrong address (audit 2026-09-27).
       if (rc.proofAddrSame === false) setProofAddrSame(false);

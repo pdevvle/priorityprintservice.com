@@ -129,7 +129,7 @@ class FakeCart {
     function get_cart() { return $this->cart_contents; }
     function calculate_totals() {
         do_action( 'woocommerce_before_calculate_totals', $this );
-        $t = 0; foreach ( $this->cart_contents as $ci ) $t += $ci['data']->get_price();
+        $t = 0; foreach ( $this->cart_contents as $ci ) $t += $ci['data']->get_price() * ( $ci['quantity'] ?? 1 );
         $this->total = round( $t, 2 );
         do_action( 'woocommerce_after_calculate_totals', $this );
         $this->set_session();                   // WC_Cart_Session hooks this at priority 1000
@@ -179,7 +179,7 @@ foreach ( array( 'pps_get_closures', 'pps_shop_timezone', 'pps_is_business_day',
     if ( $code !== '' ) { eval( $code ); $have[ $fn ] = true; }
 }
 foreach ( array( 'rest_request_before_callbacks', 'rest_request_after_callbacks', 'woocommerce_before_calculate_totals',
-    'woocommerce_store_api_cart_errors', 'woocommerce_check_cart_items' ) as $h ) {
+    'woocommerce_store_api_cart_errors', 'woocommerce_check_cart_items', 'woocommerce_cart_loaded_from_session' ) as $h ) {
     foreach ( lift_hooks( $src, $h ) as $code ) eval( $code );
 }
 foreach ( lift_hooks( $src, 'woocommerce_get_item_data', true ) as $code ) eval( $code );
@@ -199,6 +199,7 @@ function begin_request( $opts = array() ) {
     $cart = new FakeCart;
     foreach ( ( WC()->session->store['cart'] ?? array() ) as $k => $ci ) { $ci['data'] = new FakeProduct( $ci['name'] ); $cart->cart_contents[ $k ] = $ci; }
     WC()->cart = $cart;
+    do_action( 'woocommerce_cart_loaded_from_session', $cart );
     if ( ! empty( $opts['page'] ) || ! empty( $opts['ajax'] ) ) do_action( 'wp' );
     return $cart;
 }
@@ -216,6 +217,11 @@ function item_rows( $cart ) {
 /** CartController::validate_cart(), as WooCommerce runs it. Returns the WP_Error or null. */
 function store_validate_cart( $cart ) {
     $e = new WP_Error;
+    // CartController::validate_cart_item(): a sold-individually product at quantity > 1
+    // (every calculator product is sold individually since 2026-09-27).
+    foreach ( $cart->cart_contents as $ci ) {
+        if ( ( $ci['quantity'] ?? 1 ) > 1 ) { $e->add( 'woocommerce_rest_cart_product_sold_individually', 'There are too many "' . $ci['name'] . '" in the cart. Only 1 can be purchased. Please reduce the quantity in your cart.' ); return $e; }
+    }
     do_action( 'woocommerce_store_api_cart_errors', $e, $cart );
     if ( $e->has_errors() ) return $e;
     $prev = $GLOBALS['notices']; $GLOBALS['notices'] = array();
@@ -411,6 +417,12 @@ if ( $mode === 'block' ) {
     product_page_cart_read();
     list( $n, $charged, $shown ) = pay( 'block_place_order', 450 );
     ok( 'F2. a cart read on a product page does not count as seen: one stop, then charged the total shown', $n === 2 && abs( $charged - $shown ) < 0.005, "attempts=$n charged=$charged shown=$shown" );
+
+    // R. A cart saved before 2026-09-27 where two identical jobs merged into quantity 2.
+    set_cart( array( rush_line( 'Saddle Stitch Booklet', $ymd( $start ), $ymd( $after( $start, 4 ) ), array( 'quantity' => 2 ) ) ) );
+    list( $n, $charged, $shown, $msgs ) = pay( 'block_place_order', 900 );
+    ok( 'R. a line merged to quantity 2 before the deploy is paid first time, both jobs, same total', $n === 1 && abs( (float) $charged - 900 ) < 0.005 && count( WC()->session->store['cart'] ) === 2,
+        "attempts=$n charged=$charged lines=" . count( WC()->session->store['cart'] ) . ( $msgs ? ' ' . $msgs[0]['message'] : '' ) );
 
     // L. Nothing late: nothing changes and nothing is said.
     set_cart( array( rush_line( 'Saddle Stitch Booklet', $ymd( $start ), $ymd( $after( $start, 4 ) ) ) ) );
