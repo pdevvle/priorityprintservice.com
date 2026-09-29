@@ -44,7 +44,7 @@ function sanitize_file_name( $s ) { return preg_replace( '/[^A-Za-z0-9._-]+/', '
 
 $want = array( 'pps_get_closures', 'pps_shop_timezone', 'pps_is_business_day', 'pps_add_business_days', 'pps_shop_start_day', 'pps_business_days_between', 'pps_quote_is_stale',
                'pps_requote_line', 'pps_requote_summary', 'pps_requote_describe',
-               'pps_clean_text', 'pps_order_addons', 'pps_spec_size_label', 'pps_build_spec', 'pps_job_ticket' );
+               'pps_clean_text', 'pps_order_addons', 'pps_spec_size_label', 'pps_build_spec', 'pps_one_side_missing', 'pps_job_ticket' );
 $have = array();
 foreach ( $want as $n ) { $f = lift( $src, $n ); if ( $f !== '' ) { eval( $f ); $have[ $n ] = true; } }
 $has = function( $n ) use ( $have ) { return ! empty( $have[ $n ] ); };
@@ -205,6 +205,29 @@ ok( '"email art after order" is NOT RECEIVED, not self-approved', stripos( $art(
 ok( 'a Canva order says where the art is', stripos( $art( 0.04 ), 'Canva' ) === 0, $art( 0.04 ) );
 ok( 'a design-service order says the designer has it', stripos( $art( 2.01 ), 'Artwork needs edits' ) === 0 && stripos( $art( 4.01 ), 'Design from scratch' ) === 0, $art( 2.01 ) . ' / ' . $art( 4.01 ) );
 ok( 'an uploaded, self-approved order still says so', $art( 0.01 ) === 'Self-approved online', $art( 0.01 ) );
+
+// ── 4b. A two-sided flat with one side's artwork (order 87285) ──
+echo "\n── two-sided job, one side's art ──\n";
+if ( ! $has( 'pps_one_side_missing' ) ) {
+    ok( 'a two-sided job with one image is caught', false, 'pps_one_side_missing() missing' );
+} else {
+    $flat = array( 'qty' => 500, 'sides' => 2, 'artwork' => 0.01, 'foldType' => 'accordion4' );
+    $one  = array( array( 'name' => 'TheWetBurrito-Menu-Front-2026-V2-Menu-Flattend.jpg', 'path' => 'pps-artwork/x.jpg' ) );
+    ok( "87285's shape — two-sided, one image — is named", strpos( pps_one_side_missing( $flat, $one ), 'only one image arrived (TheWetBurrito-Menu-Front-2026-V2-Menu-Flattend.jpg)' ) !== false, pps_one_side_missing( $flat, $one ) );
+    ok( 'the same from the order\'s stored JSON', pps_one_side_missing( $flat, json_encode( $one ) ) !== '' );
+    ok( 'two images are fine', pps_one_side_missing( $flat, array( array( 'name' => 'front.jpg' ), array( 'name' => 'back.jpg' ) ) ) === '' );
+    ok( 'one PDF is left alone (it may hold both sides)', pps_one_side_missing( $flat, array( array( 'name' => 'menu.pdf' ) ) ) === '' );
+    ok( 'a customer who chose a blank second side is not flagged', pps_one_side_missing( $flat + array( 'backBlank' => true ), $one ) === '' );
+    ok( 'a one-sided job is not flagged', pps_one_side_missing( array( 'sides' => 1 ) + $flat, $one ) === '' );
+    ok( 'nor a booklet, nor art emailed later', pps_one_side_missing( array( 'sets' => array( array( 'qty' => 1 ) ) ) + $flat, $one ) === '' && pps_one_side_missing( array( 'artwork' => 0.02 ) + $flat, $one ) === '' );
+    ok( 'the approval package\'s generated files do not count as the second side',
+        pps_one_side_missing( $flat, array( array( 'name' => 'front.jpg' ), array( 'name' => 'front_print-ready.pdf' ), array( 'name' => 'front_preview_front.jpg' ), array( 'name' => 'front_manipulation_manifest.txt' ) ) ) !== '' );
+    $t = pps_job_ticket( $flat, array( 'pps_artwork_files' => $one ), new DateTime( '2026-10-07', new DateTimeZone( 'America/Phoenix' ) ), '' );
+    ok( 'the Job Ticket says the second side was not received', strpos( $t, 'Second side: NOT RECEIVED' ) !== false, $t );
+    ok( 'the order gets a note and the item a staff flag', strpos( $src, "add_action( 'woocommerce_store_api_checkout_order_processed', 'pps_one_side_note', 27 );" ) !== false && strpos( $src, "'_pps_one_side'" ) !== false );
+    $jh = file_get_contents( __DIR__ . '/pps-job-health.php' );
+    ok( 'and the daily email lists it, judged from the order\'s files (so orders from before the check are caught)', strpos( $jh, "'oneside'" ) !== false && strpos( $jh, "pps_one_side_missing( \$meta, (string) \$item->get_meta( '_pps_artwork_files' ) )" ) !== false );
+}
 
 // ── 5. Add to cart ──
 echo "\n── add to cart ──\n";

@@ -242,6 +242,7 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
         'closed'   => array( 'title' => 'Delivery promised on a day the shop is closed', 'items' => array() ),
         'refused'  => array( 'title' => 'Checkout refused (customer could not pay)', 'items' => array() ),
         'drive'    => array( 'title' => 'Customer artwork that did not reach Google Drive', 'items' => array() ),
+        'oneside'  => array( 'title' => 'Two-sided job with artwork for one side only', 'items' => array() ),
     );
     $zone = new DateTimeZone( $tz );
     $now  = time();
@@ -288,6 +289,13 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
             $miss = (string) $item->get_meta( '_pps_drive_missing' );
             if ( $miss !== '' && $item->get_meta( '_pps_artwork_on_drive' ) !== 'yes' ) {
                 $sec['drive']['items'][] = $ref . ' — never reached the server: ' . $miss . ' (ask the customer to resend)';
+            }
+
+            // Judged from the files on the order, so an order placed before the check existed
+            // (87285) is listed too.
+            if ( function_exists( 'pps_one_side_missing' ) ) {
+                $one = pps_one_side_missing( $meta, (string) $item->get_meta( '_pps_artwork_files' ) );
+                if ( $one !== '' ) $sec['oneside']['items'][] = $ref . ' — ' . $one;
             }
 
             $lw = (string) $item->get_meta( '_pps_print_check_warn' );
