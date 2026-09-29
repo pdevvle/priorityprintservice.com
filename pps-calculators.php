@@ -240,6 +240,11 @@ if ( file_exists( PPS_CALC_DIR . 'pps-catalog.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-catalog.php';
 }
 
+// Finishing report: which open jobs need coating, folding, perforation and the rest.
+if ( file_exists( PPS_CALC_DIR . 'pps-finishing-report.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-finishing-report.php';
+}
+
 // Paper report: which open jobs sit on stock we don't inventory. Depends on
 // pps-config-admin.php for the inventoried test.
 if ( file_exists( PPS_CALC_DIR . 'pps-paper-report.php' ) ) {
