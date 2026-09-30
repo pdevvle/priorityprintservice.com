@@ -930,7 +930,13 @@ function validateJob(job){
   const w = Number(job.trim && job.trim.w), h = Number(job.trim && job.trim.h);
   if (!isFinite(w) || w <= 0) errs.push('trim width must be a positive number');
   if (!isFinite(h) || h <= 0) errs.push('trim height must be a positive number');
+  // The calculators snap every page count to their own list now (ppsSnapPages),
+  // so a count that is not a whole number, or is past any book anyone sells
+  // (the longest list, perfect bound's, stops at 350), did not come from a
+  // calculator. Refuse it rather than lay out 2,000 pages and hang the tab.
   if (!isFinite(n) || n < 4)  errs.push('page count must be at least 4');
+  else if (!Number.isInteger(n)) errs.push('page count must be a whole number');
+  else if (n > 1000)          errs.push('page count ' + n + ' is past any book this proofer lays out (1,000 pages)');
   else if (n % 2)             errs.push('page count must be even');
   else if (job.calc === 'saddle' && n % 4)
     errs.push('a saddle-stitched book folds in fours, so the page count must be a multiple of 4');
@@ -2548,8 +2554,7 @@ async function loadBook(fileList){
         return p.map.map((k, i) => k === null ? null : [k, i + 1]).filter(Boolean);
       });
     } catch (err){
-      alert('That PDF could not be read: ' + (err && err.message ? err.message : err) +
-            '\n\nNothing has been attached.');
+      alert(unreadableMsg(files[0]) + '\n\n(' + (err && err.message ? err.message : err) + ')');
     }
     stampReconcile();
     return;
@@ -2625,17 +2630,26 @@ function addedText(rc){
 function coversText(rc){
   return rc.raw === 1 ? 'Your one page is the front cover.' : 'Your first and last pages stay the front and back covers.';
 }
+/* A file that cannot be shown is refused BY NAME, in the calculators' words
+   (ppsUnreadableImageMsg, 2026-09-30): a blank page with no explanation is how
+   one side of order 87285 went to production missing. */
+function unreadableMsg(file, n){
+  return 'We couldn\'t open "' + ((file && file.name) || 'that file') + '"' +
+         (n ? ' for page ' + n : '') + ', so it was NOT added.\n\n' +
+         'Please export it again as a PDF, JPG or PNG. If it keeps failing, place your order and email the file to us.';
+}
 async function loadArt(n, file){
   if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)){
     try { await ingestPdf(file, n); }
     catch (err){
-      alert('That PDF could not be read: ' + (err && err.message ? err.message : err) +
-            '\n\nNothing has been attached to page ' + n + '.');
+      alert(unreadableMsg(file, n) + '\n\n(' + (err && err.message ? err.message : err) + ')');
     }
     return;
   }
-  if (!/^image\//.test(file.type)){
-    alert('That is not an image this prototype can show.');
+  // By type OR by name, as the calculators accept them: phones hand over HEIC
+  // and some JPEGs with no type at all. The decoder below is the real test.
+  if (!/^image\//.test(file.type || '') && !/\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif)$/i.test(file.name || '')){
+    alert(unreadableMsg(file, n));
     return;
   }
   const origin = await originOf(file);
@@ -2652,7 +2666,7 @@ async function loadArt(n, file){
       renderAll();
       resolve();
     };
-    img.onerror = () => { URL.revokeObjectURL(url); alert('That image could not be read.'); resolve(); };
+    img.onerror = () => { URL.revokeObjectURL(url); alert(unreadableMsg(file, n)); resolve(); };
     img.src = url;
   });
 }

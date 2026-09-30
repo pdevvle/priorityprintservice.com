@@ -5,10 +5,28 @@
 **Baseline:** `docs/PROOFER_BRIEF.md` and `docs/NEW_PROOFER_BRIEF.md` as of 2026-09-26,
 source commit `188fcf6`. Read those first; this is only the delta.
 
-**`proof-ui-draft.html` has not changed since the handoff.** Everything below changed in
-the calculators or on the server, and is something the new proofer or its host must now
-match to keep functional parity with what ships. All of it is deployed to staging and
-production.
+**`proof-ui-draft.html` had not changed since the handoff when this was written.**
+Everything below changed in the calculators or on the server, and is something the new
+proofer or its host must now match to keep functional parity with what ships. All of it
+is deployed to staging and production.
+
+## Status in the new proofer (branch `claude/proofer-parity`, PR #56, 2026-09-30)
+
+The parity work was running in parallel. Where each item stands there:
+
+| § | Item | Status |
+|---|------|--------|
+| 1.1 | Page counts always valid | **Done.** `validateJob` also refuses a count that is not a whole number or is past 1,000 pages, rather than laying it out. |
+| 1.2 | Staple count | **Done.** The job carries `staples: twoStaplesApplied ? 2 : 1`; the proofer draws `[0.5]` or `[0.33, 0.67]` from it on the surface, in the magnifier and in every preview JPEG, and never works the count out itself. |
+| 1.3 | Mixed colour | Saddle has none. The proofer refuses any colour mode but `color`/`bw`, so a mixed book is refused, never simulated. The per-set split is still owed when perfect bound or coupon is wired. |
+| 2 | Hardcopy proofs; gate is `proof === 0` | **Done.** The job carries `proof`; above 0 the proofer is review-only (no Approve, no responsibility sentence, DONE closes). |
+| 3.1–3.2 | Flats' `back` / `backBlank` | Not yet: flats are not wired to the proofer. Carry both when they are. |
+| 3.3 | Undecodable files refused by name | **Done** for booklets. The loader refuses in the calculators' own words, naming the file and saying it was NOT added. It accepts an untyped `.jpg`/`.heic` by name, as the calculators do. |
+| 3.4, 4 | Generated-file suffixes, Drive names | Unchanged and pinned. `ppsProofFilesToOrder()` still emits `_print-ready.pdf`, `_preview_page_NNN.jpg` and `_manipulation_manifest.txt` (`tools-proof-integration-test.mjs`). An untouched file ships as `PRINT_READY.pdf`, so it reaches the order as `<base>_print-ready.pdf` like any other. |
+| 5.x | Server behaviour after `approved` | Nothing to do. The proofer does not assume Add to Order succeeds after it posts `approved`. |
+
+Gate for the booklet items: `tools-proof-handoff-test.mjs` (14 checks; 5 fail against
+the proofer as it stood before this was read).
 
 Commits covered: `3053d28` (Drive names), `ddf4de6` (junctures), `071cf97` (re-quote v1,
 military, one staple), `f06d8b9` (re-quote v2, ZIP+4), `03b29c8` (cart paths),
@@ -209,4 +227,5 @@ it has sent `approved`.
 | `tools-job-health-test.php` | one-side-missing digest section (order 87285) |
 | `tools-gdrive-missing-test.php` | Drive uploads under the listed names |
 
-Also run the ten live proofer suites listed in `docs/PROOFER_BRIEF.md` §1.2.
+Also run the live proofer suites listed in `docs/PROOFER_BRIEF.md` §1.2 — seventeen
+since 2026-09-30, including `tools-proof-handoff-test.mjs`.

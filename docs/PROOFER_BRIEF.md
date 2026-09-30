@@ -95,6 +95,7 @@ a real origin).
 | `tools-proof-spine-test.mjs` | Stapled edge + staple ticks on the surface, in the lens and on every preview JPEG; none in the print file | same |
 | `tools-proof-transforms-test.mjs` | Head/foot-to-spine against the calculator's `rotateAll` angles and a red-band fixture (an anchored crop stays put); scale 10–300 %; a sideways file opens turned, by the calculator's own orientation rule | same |
 | `tools-proof-screen-res-test.mjs` | The surface settles to the 300 DPI print render, and its pixels are page 1 of the approved PRINT_READY; blank pages are never swapped and browsing them cannot break approval; a job arriving after the demo is never shown it | + `PPS_DEPS_DIR` (pdf-lib) |
+| `tools-proof-handoff-test.mjs` | What `PROOFER_SINCE_HANDOFF.md` asks of the saddle: staples from the calculator only, page counts no calculator sends are refused, a mixed book is refused not simulated, unreadable files are refused by name, an untyped JPEG still loads | `PPS_PLAYWRIGHT`, `PPS_PROOF_BASE` |
 | `tools-proof-package-test.mjs` | **DEAD.** Pre-harness prototype: imports `./node_modules/playwright`, reads `ui/vendor/`, opens the file over `file://`, needs an uncommitted `test-art.pdf`. Superseded by the draft + progress suites. Delete or revive; do not count it as green. |
 | `tools-proof-serve.mjs` | Static server on `127.0.0.1:8137` + `/vendor/`. Its second log line names `node_modules` regardless of where it found the libraries — trust `curl -sI http://127.0.0.1:8137/vendor/pdf.min.js`. Its header still says "three suites"; stale. |
 | `tools-proof-vendor.mjs` | Installs the proofer's pinned pdf.js 3.11.174 / pdf-lib 1.17.1 into `proof-vendor/`. `--check` reports without installing. |
@@ -125,9 +126,9 @@ BABEL_DIR=$S/node_modules node tools-compile-calcs.mjs
 # 2. Port 8137 holds one server at a time.
 fuser -k 8137/tcp; node tools-proof-serve.mjs &
 
-# 3. The sixteen live suites.
+# 3. The seventeen live suites.
 for t in ui-draft ui-preflight ui-mobile ui-style embed integration slots progress blank-pages \
-         size-check print-fidelity reconcile paid spine transforms screen-res; do
+         size-check print-fidelity reconcile paid spine transforms screen-res handoff; do
   node tools-proof-$t-test.mjs | tail -1
 done
 ```
@@ -345,7 +346,7 @@ Reader's-spread jobs never reach the proofer: the host keeps them on the modal.
 
 `validateJob` (`proof-ui-draft.html:923-947`) **refuses** — posting `pps-proof:error` and
 replacing the stage with a refusal box (`:3136-3155`) — when trim is non-positive, pages
-< 4, pages odd, saddle and pages % 4, bleed/safety negative, or a colour is not exactly
+< 4, not a whole number or over 1,000, pages odd, saddle and pages % 4, bleed/safety negative, or a colour is not exactly
 `'color'`/`'bw'`. **A two-face flat is rejected before anything renders.** `applyJob`
 (`:951-966`) sets `MODEL.hosted = true`, which is what switches blank pages from demo art
 to white.
@@ -954,7 +955,7 @@ self-approval path was the only one anyone had exercised.
 ## 11. First moves for a new session
 
 1. Read this file, then `CLAUDE.md` §"Proofing — two surfaces, one of them dark".
-2. Run §1.3 exactly. Sixteen suites green; `tools-proof-package-test.mjs` is dead by design.
+2. Run §1.3 exactly. Seventeen suites green; `tools-proof-package-test.mjs` is dead by design.
 3. §7.0, §7.4 and §7.6 were closed 2026-09-28. Enable `proof_url` on staging first, with
    a real booklet through it, before production. On staging the knob already exists; that
    makes it easier to enable by accident.
