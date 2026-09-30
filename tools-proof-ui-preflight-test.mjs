@@ -17,7 +17,7 @@ await p.waitForTimeout(1200);
 // Build a PDF in the page and attach it from a given tile.
 const attach = (opts) => p.evaluate(async (o)=>{
   await ensureLibs();
-  const { PDFDocument, StandardFonts, PDFName, PDFArray, rgb } = window.PDFLib;
+  const { PDFDocument, StandardFonts, PDFName, PDFArray, PDFString, rgb } = window.PDFLib;
   const doc = await PDFDocument.create();
   const trimW = (o.trimW ?? MODEL.trim.w), trimH = (o.trimH ?? MODEL.trim.h);
   const bw = (trimW + MODEL.bleed*2)*72, bh = (trimH + MODEL.bleed*2)*72;
@@ -49,7 +49,14 @@ const attach = (opts) => p.evaluate(async (o)=>{
     }
   }
   if (o.layers){
-    doc.catalog.set(PDFName.of('OCProperties'), doc.context.obj({ OCGs:[], D:{ Order:[] } }));
+    // Two real groups. 'hidden' puts the second in /OFF — the case that
+    // matters, because a downstream engine that drops /OCProperties prints it.
+    // 'visible' leaves both on, which is an ordinary layered export.
+    const g1 = doc.context.register(doc.context.obj({ Type:'OCG', Name:PDFString.of('Artwork') }));
+    const g2 = doc.context.register(doc.context.obj({ Type:'OCG', Name:PDFString.of('Dieline') }));
+    const D = { Order:[g1, g2] };
+    if (o.layers === 'hidden') D.OFF = [g2];
+    doc.catalog.set(PDFName.of('OCProperties'), doc.context.obj({ OCGs:[g1, g2], D }));
   }
   const bytes = await doc.save();
   const file = new File([bytes], (o.name||'fixture')+'.pdf', {type:'application/pdf'});
@@ -129,9 +136,18 @@ ck('a Separation colorant is found and named', (await checks()).spots==='warn', 
 ck('and it says it will be converted', /converted to CMYK|four-color press/i.test(await textOf('spots')));
 
 await reset();
-await attach({name:'layered', at:1, layers:true});
+// Parity with the calculator's modal (ppsAnalyzePdfRisks): layers are only a
+// finding when one is switched OFF. Warning on every layered export — most
+// InDesign and Illustrator files — fed the acknowledgment gate with noise.
+await attach({name:'layered', at:1, layers:'hidden'});
 await p.waitForTimeout(400);
-ck('optional-content layers are flagged', (await checks()).layers==='warn', await textOf('layers'));
+ck('a layer switched off is flagged', (await checks()).layers==='warn', await textOf('layers'));
+ck('and it is named', /Dieline/.test(await textOf('layers')) && !/Artwork/.test(await textOf('layers')), await textOf('layers'));
+
+await reset();
+await attach({name:'layered-on', at:1, layers:'visible'});
+await p.waitForTimeout(400);
+ck('layers that are all visible are not a finding', (await checks()).layers==='pass', await textOf('layers'));
 
 await reset();
 await attach({name:'annotated', at:1, annots:true});

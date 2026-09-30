@@ -68,7 +68,11 @@ async function deliver(page, job) {
     await ensureLibs();
     const { PDFDocument, rgb } = window.PDFLib;
     const doc = await PDFDocument.create();
-    const W = 5.75 * 72, H = 8.75 * 72;
+    // 6" x 9" against the 5.75" x 8.75" bleed sheet, so every page is RENDERED.
+    // Since 2026-09-28 a bleed-exact, unchanged PDF ships untouched and renders
+    // nothing — correct, but it is the render this suite watches, and its
+    // failure injection targets renderPrintPage.
+    const W = 6 * 72, H = 9 * 72;
     for (let i = 0; i < n; i++) {
       const pg = doc.addPage([W, H]);
       pg.drawRectangle({ x:0, y:0, width:W, height:H,
@@ -180,11 +184,14 @@ console.log('\n── when it breaks part way ──');
   await deliver(page, JOB);
   // Break the third page only: a failure at the very first step would not prove
   // the step is reported, because the first step is also the default state.
+  // Page 3 by number, and only while the package is being built: the proof
+  // surface also calls renderPrintPage for its 300 DPI second pass (2026-09-28),
+  // so counting calls would break whichever page the screen happened to render.
   await page.evaluate(() => {
     const real = window.renderPrintPage || renderPrintPage;
-    let seen = 0;
-    window.renderPrintPage = renderPrintPage = (n) => {
-      if (++seen === 3) throw new Error('synthetic render failure');
+    window.renderPrintPage = renderPrintPage = async (n) => {
+      const building = !document.getElementById('bpProg').hidden;
+      if (building && n === 3) throw new Error('synthetic render failure');
       return real(n);
     };
   });

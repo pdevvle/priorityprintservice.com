@@ -143,7 +143,7 @@ console.log('\n── approving returns the package to the host ──');
   await page.waitForTimeout(300);
 
   // ── the press simulation, on every surface the customer looks at ──
-  const grey = await page.evaluate(() => {
+  const grey = await page.evaluate(async () => {
     const filt = () => document.querySelector('#sheet canvas').style.filter;
     const thumb = n => [...document.querySelectorAll('#stripBottom .pg')]
       .find(e => new RegExp('P' + n + '(\\D|$)').test(e.querySelector('.n').textContent))
@@ -151,7 +151,10 @@ console.log('\n── approving returns the package to the host ──');
     state.selected = 1; renderAll(); const p1 = filt();
     state.selected = 3; renderAll(); const p3 = filt();
     return { p1, p3, t1: thumb(1), t3: thumb(3), t12: thumb(12),
-             printIsColour: (() => { const c = renderPrintPage(3).canvas;
+             // renderPrintPage is async since 2026-09-28: it re-renders the page
+             // from its source at print resolution rather than reusing the
+             // screen raster.
+             printIsColour: await (async () => { const c = (await renderPrintPage(3)).canvas;
                const d = c.getContext('2d').getImageData(c.width/2|0, c.height/2|0, 1, 1).data;
                return Math.max(d[0],d[1],d[2]) - Math.min(d[0],d[1],d[2]) > 30; })() };
   });

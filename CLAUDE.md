@@ -43,8 +43,9 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `docs/GO_LIVE_RUNBOOK.md` | The 3.0 go-live: staging de-bloat (Phase 0), selective order-table pull live→staging, freeze-window sequence, auto-increment fix, staging→production push, verification. HPOS confirmed on live. **Read before any go-live or cross-site DB work.** |
 | `docs/PPS_3.1_WC11_PLAN.md` | **The release after go-live**: WooCommerce 11 + Action Scheduler 4.0 update for both sites, compatibility test matrix (Drive/AS artwork pipeline is the top risk), default-on feature postures (POS, abandoned-cart stays OFF), hardening riders. Binding rule it carries: **version freeze — no WC/WP/plugin updates on either site during the go-live window**; WC 11 lands in 3.1, both sites together. |
 | `docs/NEW_PROOFER_BRIEF.md` | **The build brief for the next proofer**: the job in the printer's words, the nine incidents that became requirements, twelve requirements each with the test that proves it, build order by phase with exit gates, per-product definition of done. Read it for direction, `PROOFER_BRIEF.md` for the code. |
-| `docs/PROOFER_BRIEF.md` | **Start here for anything proofing.** Handover brief: file inventory, running the eleven suites (ten live), the old modal's origin/vulnerabilities/per-product usage, the new proofer's design decisions and handshake, modal→proofer parity checklist, the saddle→all-products adaptation plan, invariants, and case studies (incl. order 87152's unscannable QR). |
-| `proof-ui-draft.html` | **The new proof surface.** Standalone document, embeddable by a host — see "Proofing" below. Vanilla JS, its own pdf.js/pdf-lib, eleven test suites (ten live — see `docs/PROOFER_BRIEF.md` §1.2). Not a component: the calculator frames it. |
+| `docs/PROOFER_SINCE_HANDOFF.md` | The delta after the two proofer briefs (2026-09-26 → 2026-09-30): what the calculators and server changed that the new proofer must match — staple count, snapped page counts, hardcopy-proof address, flats' `back`/`backBlank`, Drive names as an imposition contract. Read after `PROOFER_BRIEF.md`. |
+| `docs/PROOFER_BRIEF.md` | **Start here for anything proofing.** Handover brief: file inventory, running the seventeen live suites, the old modal's origin/vulnerabilities/per-product usage, the new proofer's design decisions and handshake, modal→proofer parity checklist, the saddle→all-products adaptation plan, invariants, and case studies (incl. order 87152's unscannable QR). |
+| `proof-ui-draft.html` | **The new proof surface.** Standalone document, embeddable by a host — see "Proofing" below. Vanilla JS, its own pdf.js/pdf-lib, seventeen live test suites (`docs/PROOFER_BRIEF.md` §1.2). Not a component: the calculator frames it. |
 | `pps-html-deploy.php` | How calculators actually reach production. Also owns retention (v1.5.0): after each deploy it prunes superseded extracted scripts and trims the deploy archive. Accepts `calc-*.html` plus `proof-ui-draft.html` — an explicit list, because this directory is writable by a deploy tool.  Watches `wp-content/plugins/pps-calculators/_pending_html/`; the next WP request copies `*.html` into `wp-content/uploads/pps-calculators/`, updates the registry, archives the source under `_pending_html/_archive/`, and logs to `wp_options['pps_html_deploy_log_v2']`. Also hosts the Bulk Upload admin page (`admin.php?page=pps-bulk-upload`). |
 | `pps-proof-status.php` | Makes `SelfApproved` mean someone signed off in the proofer, rather than "did not buy a staff proof". Rewrites only that token in PPS-Spec, adds a `PPS-Proof` item meta, notes the order when artwork arrived unapproved. **On staging, NOT in `active_plugins` on either site** — until it is activated, every order still reads `SelfApproved`. |
 | `pps-delivery-date-guard.php` | Floors `_pps_delivery_date` to a working day and keeps pi-edd off registry line items. **Deployed and active on both sites 2026-09-15** (pinned to `e0bc851`, 12,311 bytes, added to `active_plugins` immediately after `pps-calculators.php`). Reviewed 2026-09-15: its two pi-edd filter names were verified against the installed plugin and are real, but **the order note was being written from `woocommerce_checkout_create_order_line_item`, where the order has no ID yet** — `add_order_note()` returns 0 without writing, so the one mechanism meant to stop a silent correction was itself silent. The note now waits for `woocommerce_checkout_order_processed` / the Store API twin. Also corrected: pi-edd already switches itself off for virtual products, so it was never the source of the Sunday on order 87105 — that came from our side. `tools-delivery-date-guard-test.php` is the gate (32 checks). |
@@ -69,7 +70,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
-| `tools-proof-ui-draft-test.mjs`, `-preflight-`, `-mobile-`, `-style-`, `tools-proof-embed-test.mjs`, `tools-proof-integration-test.mjs` | The proofer's original six suites: engine, PDF preflight, touch layout, **design parity**, the host seam, and the calculator round trip. Five more were added 2026-09-13 (slots, progress, blank pages, size check, prepress flag); `docs/PROOFER_BRIEF.md` §1.2 lists all eleven with the run recipe. Run every live suite after any proofer change. The style suite reads the palette out of `calc-preview-test.html` rather than copying it, so the two documents cannot drift apart, and it fails any rule whose `var()` does not resolve — which is how a whole panel once rendered unstyled without anyone noticing. |
+| `tools-proof-ui-draft-test.mjs`, `-preflight-`, `-mobile-`, `-style-`, `tools-proof-embed-test.mjs`, `tools-proof-integration-test.mjs` | The proofer's original six suites: engine, PDF preflight, touch layout, **design parity**, the host seam, and the calculator round trip. Five more were added 2026-09-13 (slots, progress, blank pages, size check, prepress flag) and six on 2026-09-28 for modal parity (`print-fidelity`, `reconcile`, `paid`, `spine`, `transforms`, `screen-res`) and `handoff` on 2026-09-30 for `docs/PROOFER_SINCE_HANDOFF.md`; `docs/PROOFER_BRIEF.md` §1.2 lists them all with the run recipe. Run every live suite after any proofer change. The style suite reads the palette out of `calc-preview-test.html` rather than copying it, so the two documents cannot drift apart, and it fails any rule whose `var()` does not resolve — which is how a whole panel once rendered unstyled without anyone noticing. |
 | `pps-theme/` | Custom WordPress theme replacing Astra Pro — owns site chrome, typography, color tokens, WooCommerce shell. Stays out of the calculator plugin's way. `pps-theme/preview.html` is a Pages-served standalone preview of the header. |
 | `designer/` | **Spike.** Print-first layout editor (Vite + React + TS) — the document *is* a product; press-PDF export with CMYK, bleed/trim boxes and subset font embedding. Unlike the calculators this is a real build, not a single inline-Babel HTML. `dist/` is committed for Pages. **Read `docs/DESIGNER_SPIKE.md` before touching it** — it records what's proven vs faked and the next steps in order. Run `cd designer && npm test` after any change to `src/export/pdf.ts`. |
 
@@ -436,7 +437,7 @@ and new checks in `tools-job-ticket-test.mjs`, `tools-closure-engine-test.mjs` a
 ## Proofing — two surfaces, one of them dark
 
 > **`docs/PROOFER_BRIEF.md` is the handover document for all proofing work.** It carries
-> the full picture: file inventory, how to run the eleven suites (ten live), the old modal's origin and
+> the full picture: file inventory, how to run the seventeen live suites, the old modal's origin and
 > vulnerabilities, the new proofer's design decisions, a modal→proofer feature-parity
 > checklist, the plan for adapting it from saddle to all eight products, the invariants,
 > and the case studies. Read it before touching `proof-ui-draft.html`, any proof modal,
@@ -530,6 +531,19 @@ transforms legitimately produces no PDF.
   already had could never run: pdf-lib answers `getTrimBox()` with the MediaBox
   when the file has none, so a declared trim has to be read as one that DIFFERS
   from the page. `tools-proof-size-check-test.mjs` is the gate.
+- ~~The proofer fell short of the modal.~~ **Closed 2026-09-28 (saddle).** The print
+  file is rendered from the PDF at 300 DPI on whole pixels (it was the 150 DPI screen
+  raster enlarged — 23.5 % mid-grey over a QR), an unchanged bleed-exact PDF ships byte
+  for byte, the surface and magnifier settle to that same print render, a short or long
+  file becomes the same book the calculator showed (covers kept, `blankPlacement`
+  honoured), paid proofs are review-only, only hidden layers warn, the stapled edge and
+  staples are on every surface, a sideways file opens turned 90° as in the calculator,
+  and head/foot-to-spine and 10–300 % scale exist. Brief §5 is the checklist;
+  `print-fidelity`, `reconcile`, `paid`, `spine`, `transforms` and `screen-res` are the
+  gates. Reader's-spread jobs stay on the modal. **A canvas you free must be one you
+  own:** `composePage()` caches, so the print loop and the on-screen second pass get
+  their own (`own`) — freeing the cached one broke approval on any job with a blank page
+  (caught in review before it shipped; brief invariant 19).
 - **A no-bleed file raises nothing in the PROOFER.** The calculator catches it
   ("Artwork has content at edges but no bleed area") and that is where the
   customer is told. Inside the proofer the default crop behaviour scales the art
@@ -545,7 +559,9 @@ transforms legitimately produces no PDF.
   has no field. Turning the proofer on in production means deploying that file
   first, then setting the field by hand — it is not something to write into
   `pps_calc_config` from here, because that option carries live credentials.
-  Do not set it anywhere until the brief's §7.0, §7.4 and §7.6 are closed.
+  The brief's §7.0, §7.4 and §7.6 — the three it named as blocking — were closed on
+  2026-09-28 (saddle parity, branch `claude/proofer-parity`). Still: deploy that build to
+  staging and put a real booklet through it there before the knob is set anywhere.
 - The "I don't have bleeds" answer reaches neither surface; both detect bleed
   from the art and ignore the selection.
 

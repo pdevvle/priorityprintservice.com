@@ -3293,6 +3293,11 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
   const openStandaloneProof = async () => {
     const url = ppsProofUrl();
     if (!url) return false;
+    // Reader's spreads are cut into single pages on THIS side (splitReaderSpreads)
+    // and the proofer only ever sees the file as supplied — it would proof each
+    // 2-up sheet as one page. Until it can split them itself, those jobs stay
+    // on the built-in modal, which can.
+    if (readerSpreads) return false;
     const raw = rawFileRef.current;
     const fileName = raw ? raw.name : "";
     const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
@@ -3310,6 +3315,18 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
       // approves colour they are not going to get.
       insideColor: insideColor === "bw" ? "bw" : "color",
       coverColor:  coverColor  === "bw" ? "bw" : "color",
+      // Where a short file's blanks go — the customer answered this above the
+      // proof button. The proofer reconciles the file against pageCount with
+      // the same rule displayPages uses, so the book they approve there is the
+      // book this surface showed them.
+      blankPlacement: blankPlacement === "covers" ? "covers" : "end",
+      // The proof option they are buying. Anything but the free online proof
+      // (0) is approved by staff, so the proofer shows the art and takes no
+      // approval — the same rule as the built-in modal and the add-to-cart gate.
+      proof: Number(proof) || 0,
+      // Where the stitches go, for the staple ticks on the spine guide — the
+      // same twoStaplesApplied the built-in modal's drawGuides reads.
+      staples: twoStaplesApplied ? 2 : 1,
     };
     const sources = (rawFilesRef.current && rawFilesRef.current.length)
       ? rawFilesRef.current.slice()
