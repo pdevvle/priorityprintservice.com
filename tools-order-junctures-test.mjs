@@ -113,6 +113,33 @@ for (const file of PAGES) {
     await s.ctx.close();
   }
 
+  console.log('\n── ' + file + ' / a ZIP+4 written without a dash ──');
+  {
+    // Found 2026-09-29: "85001 1234" (how many people write it) and autofill's "850011234"
+    // were refused as "add a 5-digit ZIP code" — a regression from the four-digit check.
+    const s = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...ADDR, city: 'Phoenix', zip: '85001 1234' } });
+    await addToOrder(s);
+    ok(`${file}: a ZIP+4 written with a space orders`, !!s.meta, 'posted=' + !!s.meta + ' ' + s.dialogs.join(' | ').slice(0, 160));
+    await s.ctx.close();
+    const t = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...ADDR, city: 'Phoenix', zip: '85087' } });
+    await t.p.fill('#pps-ship-zip', '850011234');
+    await t.p.waitForTimeout(500);
+    const v = await t.p.inputValue('#pps-ship-zip');
+    await addToOrder(t);
+    const z = t.meta && t.meta.shipAddr ? t.meta.shipAddr.zip : null;
+    ok(`${file}: nine digits typed or autofilled become 85001-1234 and order`, v === '85001-1234' && z === '85001-1234', 'field=' + v + ' posted zip=' + z + ' ' + t.dialogs.join(' | ').slice(0, 160));
+    await t.ctx.close();
+    // A reorder link carries the ZIP but never the street (URLs land in logs); it was dropped.
+    const r = await open(file, { ...JOB, shipState: 'AZ', shipZip: '85087' });
+    const rz = await r.p.inputValue('#pps-ship-zip').catch(() => null);
+    ok(`${file}: a reorder link's ZIP is kept, since the quote depends on it`, rz === '85087', 'field=' + rz);
+    await r.ctx.close();
+    const u = await open(file, { ...JOB, proof: 3.01, proofAddrSame: false, proofAddr: { name: 'K', street: '9 Proof Ln', city: 'Tempe', state: 'AZ', zip: '85281 1234' }, shipState: 'AZ', shipAddr: { ...ADDR, city: 'Phoenix', zip: '85087' } });
+    await addToOrder(u);
+    ok(`${file}: and a hardcopy-proof ZIP+4 with a space is accepted too`, !!u.meta, 'posted=' + !!u.meta + ' ' + u.dialogs.join(' | ').slice(0, 160));
+    await u.ctx.close();
+  }
+
   console.log('\n── ' + file + ' / a hardcopy proof to another address ──');
   {
     // An edited line restores from the same config a reorder does. It dropped the proof
@@ -124,7 +151,7 @@ for (const file of PAGES) {
     ok(`${file}: an edited hardcopy-proof line keeps its proof address`, m.proofAddrSame === false && m.proofAddr && m.proofAddr.street === '9 Proof Ln' && m.proofAddr.zip === '85281',
        JSON.stringify({ same: m.proofAddrSame, addr: m.proofAddr, dialogs: s.dialogs }));
     // The server re-quotes a cart paid on a later day against this (pps_requote_line).
-    ok(`${file}: the order records the shop day it was quoted on`, m.quotedOn === '2026-10-01', String(m.quotedOn));
+    ok(`${file}: the order records the shop day its quote was made from`, m.quotedOn === '2026-10-01', String(m.quotedOn));
     await s.ctx.close();
     const t = await open(file, { ...JOB, proof: 3.01, proofAddrSame: false, proofAddr: { ...PA, street: '', zip: '8528' }, shipState: 'AZ', shipAddr: { ...ADDR, city: 'Phoenix', zip: '85087' } });
     await addToOrder(t);

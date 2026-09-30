@@ -60,7 +60,10 @@ console.log('── the registry decides who owns a product ──');
 console.log('\n── a refused checkout on a PPS cart is recorded ──');
 {
   const i = php.indexOf("add_action( 'woocommerce_after_checkout_validation'");
-  const block = i >= 0 ? php.slice(i, i + 2600) : '';
+  // Since 2026-09-29 the recording itself lives in pps_record_checkout_refusal(), shared
+  // with the block checkout's recorder, and the cart test in pps_cart_calculator_products().
+  const fn = (name, n) => { const j = php.indexOf('function ' + name + '('); return j >= 0 ? php.slice(j, j + n) : ''; };
+  const block = (i >= 0 ? php.slice(i, i + 2600) : '') + fn('pps_record_checkout_refusal', 1800) + fn('pps_cart_calculator_products', 600);
   ok('the tripwire is hooked', !!block);
   ok('it runs late, after everyone else has had their say',
      /\}, 99, 2 \);/.test(block));
@@ -81,6 +84,13 @@ console.log('\n── a refused checkout on a PPS cart is recorded ──');
      /update_option\(\s*'pps_checkout_refusals',[^;]*,\s*false\s*\)/.test(block));
   ok('and it CANNOT break the checkout it is watching',
      /try \{/.test(block) && /catch \( \\Throwable \$e \)/.test(block));
+  // The site's checkout is the block checkout, which never fires the classic hook.
+  const j = php.indexOf("add_filter( 'rest_post_dispatch'");
+  const rb = j >= 0 ? php.slice(j, j + 2600) : '';
+  ok('block checkout refusals are recorded too, from the Store API\'s answer to Place Order',
+     /wc\/store\(\?:\/v\\d\+\)\?\/checkout/.test(rb) && /pps_record_checkout_refusal\(/.test(rb) && /catch \( \\Throwable \$e \)/.test(rb));
+  ok('card declines and the re-quote\'s own one-time stop are not logged as refusals',
+     /woocommerce_rest_checkout_process_payment_error/.test(rb) && /Before you pay: this order was priced on an earlier day/.test(rb));
 }
 
 console.log('\n' + checks + ' checks, ' + failed + ' failed');

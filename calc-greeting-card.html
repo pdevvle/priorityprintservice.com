@@ -756,6 +756,21 @@ function getShipCostEst(zip, lbs) {
   if (z.length !== 5 || !(lbs > 0)) return null;
   return _LIVE_COST[z + "|" + Math.ceil(lbs)] || null;
 }
+// A ZIP as people type it: "85001 1234" and autofill's "850011234" are ZIP+4 too, so a
+// nine-digit value is written back with its dash. Until 2026-09-29 both were refused as
+// "add a 5-digit ZIP code" even though the customer had entered one.
+// An image the browser cannot open used to be taken anyway: a broken picture on the
+// side, zero size, and the order went through with a file nobody could proof.
+function ppsUnreadableImageMsg(file) {
+  return "We couldn't open \"" + ((file && file.name) || "that file") + "\" as an image, so it was NOT added.\n\n"
+    + "Please export it again as a PDF, JPG or PNG. If it keeps failing, place your order and email the file to us.";
+}
+function ppsFmtZip(v) {
+  const s = String(v == null ? "" : v).replace(/[^\d-]/g, "");
+  const d = s.replace(/-/g, "");
+  return /^\d{9}$/.test(d) ? d.slice(0, 5) + "-" + d.slice(5) : s.slice(0, 10);
+}
+const PPS_ZIP_RE = /^\d{5}(?:[-\s]?\d{4})?$/;
 // APO / FPO / DPO: military mail is USPS-only, so no UPS ground quote or delivery date
 // means anything there (owner decision 2026-09-27: not orderable online; the shop arranges
 // these by hand). Recognised by ZIP prefix (AE 090–098, AA 340, AP 962–966), by the
@@ -1280,7 +1295,7 @@ function calculate(c) {
       hasDest: _hasDest,
       estWeightLb, estCartons,
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
-      earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday),
+      earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday), shopTodayYMD: toYMD(shopToday),
       bizDaysToDate, rushMultiplier, rushCost: Math.round(rushCost * 100) / 100,
       needByValid, needByPast, tooSoon, productionBizDays, bufferedProdDays,
       productionStartDate: fmtDate(productionStartDate), productionStartYMD: toYMD(productionStartDate),
@@ -2078,7 +2093,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   useEffect(() => {
     if (approved || !onArtwork) return;
     const list = allOriginals();
-    if (list.length) { _origEmittedRef.current = true; onArtwork({ type: "files", list, approved: false }); }
+    if (list.length) { _origEmittedRef.current = true; onArtwork({ type: "files", list, approved: false, back: !!backArt }); }
     else if (_origEmittedRef.current) { _origEmittedRef.current = false; onArtwork({ type: "none" }); }
   }, [frontArt, backArt, approved]);
   const [approvalPkg, setApprovalPkg] = useState(null);
@@ -2455,7 +2470,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     }
     const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
     if (!dataUrl) return null;
-    const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+    const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
+    if (!dims) { alert(ppsUnreadableImageMsg(file)); return null; }
     return { dataUrl, file, dims };
   }
 
@@ -2496,7 +2512,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       } else {
         const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
         if (!dataUrl) return;
-        const dims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+        const dims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
+        if (!dims) { alert(ppsUnreadableImageMsg(file)); setLoading(false); return; }
         setFrontArt({ dataUrl, file, dims });
       }
       // Two or more files dropped at once. The first is the front (or, as a
@@ -3389,7 +3406,8 @@ generate();
                   }
                   const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
                   if (!dataUrl) return;
-                  const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res({ w: 0, h: 0 }); img.src = dataUrl; });
+                  const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
+                  if (!dims) { alert(ppsUnreadableImageMsg(file)); return; }
                   setArt({ dataUrl, file, dims });
                   setApproved(false);
                 } catch (e) { console.error("Slot file processing failed:", e); alert("We couldn't read that file: " + ((e && e.message) || e) + "\n\nPlease try a PDF, JPG or PNG, or send the file to us and we'll attach it to your order."); }
@@ -3506,7 +3524,7 @@ generate();
                       // _preview.html stays local (download only): the server does not accept
                       // .html, and on perfect-bound that refusal blocked every order (2026-09-12).
                       files.push(new File([pkg.manifestBlob], baseName + "_manipulation_manifest.txt", { type: "text/plain" }));
-                      onArtwork({ type: "files", list: files, approved: true });
+                      onArtwork({ type: "files", list: files, approved: true, back: !!backArt });
                     }
                   } catch (err) {
                     console.error("Approval package generation failed:", err);
@@ -4436,6 +4454,7 @@ function buildTicket(config, result) {
   push("Size", _size + (_fold ? " · " + _fold + _fdir : ""));
   push("Paper", config.paper && config.paper.label ? config.paper.label : "unknown");
   push("Print", config.sides === 2 ? `2 sides · Front ${cName(config.frontColor)} · Back ${cName(config.backColor)}` : `1 side · ${cName(config.frontColor)}`);
+  if (config.sides === 2 && config.backBlank) push("Second side", "No artwork supplied — print it blank (customer confirmed)");
   const _ad = buildAddons(config); push("Finishing", _ad.length ? _ad.join("; ") : "None");
   push("Proof", config.proof >= 3 ? "Hardcopy proof, mailed before printing" : config.proof > 0 ? "Digital proof by staff before printing" : "Self-approved online (no staff proof)");
   if (config.proof >= 3) push("Proof ship-to", config.proofAddrSame === false ? ppsFmtAddr(config.proofAddr) : "Same as the order ship-to");
@@ -4540,6 +4559,7 @@ function buildMetadata(config, result) {
     calcLabel: "Greeting Card",
     // Customer selections
     jobName: config.jobName || "",
+    backBlank: !!config.backBlank,
     qty: config.qty,
     sizeMode: config.sizeMode,
     // A custom size used to post the last preset label ("4.25×5.5" on a 21×7 job).
@@ -4592,7 +4612,7 @@ function buildMetadata(config, result) {
     productionStartDate: sh.productionStartYMD,
     // The shop day this quote was made on (after the cutoff that is the next working day).
     // The server re-quotes a cart line against it when the cart is paid later.
-    quotedOn: toYMD(getShopToday()),
+    quotedOn: sh.shopTodayYMD || toYMD(getShopToday()),
     mustShipByDate: sh.mustShipYMD,
     estimatedDeliveryDate: quotedDeliveryYMD(config.needByDate, sh),
     // Computed results
@@ -5162,6 +5182,8 @@ function App() {
       // Shipping (no date — recalculated fresh)
       if (rc.shipState) setShipState(rc.shipState);
       if (rc.shipAddr) setShipAddr(rc.shipAddr);
+      // A reorder link carries only the ZIP (no street in a URL); keep it, the quote depends on it.
+      else if (rc.shipZip) setShipAddr(p=>({...p,zip:ppsFmtZip(rc.shipZip)}));
       // A hardcopy proof going somewhere else: an edited line fell back to "same as
       // the ship-to" and the proof went to the wrong address (audit 2026-09-27).
       if (rc.proofAddrSame === false) setProofAddrSame(false);
@@ -5231,7 +5253,7 @@ function App() {
   // A ZIP the carrier cannot use is as missing as no ZIP: the server refuses it at
   // Add to Order, which is after the artwork has uploaded. Four digits is nearly
   // always a New England ZIP that lost its leading zero in a spreadsheet.
-  else if (!/^\d{5}(-\d{4})?$/.test(String(shipAddr.zip).trim())) _destMissing.push(/^\d{4}$/.test(String(shipAddr.zip).trim()) ? "a 5-digit ZIP code (did you mean 0" + String(shipAddr.zip).trim() + "?)" : "a 5-digit ZIP code");
+  else if (!PPS_ZIP_RE.test(String(shipAddr.zip).trim())) _destMissing.push(/^\d{4}$/.test(String(shipAddr.zip).trim()) ? "a 5-digit ZIP code (did you mean 0" + String(shipAddr.zip).trim() + "?)" : "a 5-digit ZIP code");
   const militaryDest = ppsIsMilitaryAddress(shipAddr.zip, shipState, shipAddr.city);
   const missingDest = _destMissing.length > 0 || militaryDest;
   // Name what is missing rather than repeat one generic warning: someone who has filled
@@ -5690,7 +5712,7 @@ function App() {
       if (!String(_pa.street || "").trim()) _pm.push("street address");
       if (!String(_pa.city || "").trim()) _pm.push("city");
       if (!String(_pa.state || "").trim()) _pm.push("state");
-      if (!/^\d{5}(-\d{4})?$/.test(String(_pa.zip || "").trim())) _pm.push("a 5-digit ZIP code");
+      if (!PPS_ZIP_RE.test(String(_pa.zip || "").trim())) _pm.push("a 5-digit ZIP code");
       if (_pm.length) {
         alert("Where should we mail the hardcopy proof? Please add the proof address's " + _pm.join(", ") + ".\n\nOr choose to send it to the order's shipping address. Your order has not been placed.");
         return;
@@ -5727,6 +5749,15 @@ function App() {
       alert("Please add your artwork file before ordering.\n\nIf you'd rather send it later, choose \"Email Art After Order\" under the artwork options.");
       return;
     }
+    // A two-sided job whose back has no artwork went to the order without a word, and
+    // production found one file on the order (87285, 2026-09-28: a 4-panel accordion, front
+    // only). The customer decides: go back and add it, or print the back blank on purpose.
+    let _backBlank = false;
+    if (sides === 2 && artFiles && artFiles.type === "files" && artFiles.back === false) {
+      if (!confirm("This job prints on BOTH sides, but only one side has artwork.\n\n"
+        + "OK: print the second side blank.\nCancel: go back and add the artwork for the second side (its box is under Artwork).")) return;
+      _backBlank = true;
+    }
     if (artFiles && artFiles.type === "files" && !artFiles.approved && proof === 0) {
       alert("Please approve your artwork proof before ordering.\n\n"
         + "Open the proof in Artwork & Proofing, check your artwork against the bleed, "
@@ -5737,6 +5768,7 @@ function App() {
     setSubmitting(true);
     setUploadProgress(null);
     const config = {
+      backBlank: _backBlank,
       jobName, qty,
       sizeMode, sizeLabel, longEdge, shortEdge,
       foldType, foldDir, frontColor, backColor, sides,
@@ -6221,7 +6253,7 @@ function App() {
                     <div style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:6}}>
                       <input type="text" name="proof-address-level2" autoComplete="address-level2" value={proofAddr.city} onChange={e=>setProofAddr(p=>({...p,city:e.target.value}))} placeholder="City" style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
                       <input type="text" name="proof-address-level1" autoComplete="address-level1" value={proofAddr.state} onChange={e=>setProofAddr(p=>({...p,state:e.target.value}))} placeholder="State" maxLength={2} style={{...ST.inp,fontSize:12,padding:"7px 10px",textTransform:"uppercase"}}/>
-                      <input type="text" name="proof-postal-code" autoComplete="postal-code" value={proofAddr.zip} onChange={e=>setProofAddr(p=>({...p,zip:e.target.value}))} placeholder="ZIP" maxLength={10} style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
+                      <input type="text" name="proof-postal-code" autoComplete="postal-code" value={proofAddr.zip} onChange={e=>setProofAddr(p=>({...p,zip:ppsFmtZip(e.target.value)}))} placeholder="ZIP" maxLength={10} style={{...ST.inp,fontSize:12,padding:"7px 10px"}}/>
                     </div>
                   </form>
                 )}
@@ -6248,7 +6280,7 @@ function App() {
                 <option value="">Select&hellip;</option>
                 {US_STATES.map(st=><option key={st} value={st}>{st}</option>)}
               </Sel>
-              <div style={{...ST.f,marginTop:0}}><label style={ST.lbl} htmlFor="pps-ship-zip">ZIP Code</label><input id="pps-ship-zip" type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:e.target.value.replace(/[^\d-]/g,"").slice(0,10)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
+              <div style={{...ST.f,marginTop:0}}><label style={ST.lbl} htmlFor="pps-ship-zip">ZIP Code</label><input id="pps-ship-zip" type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:ppsFmtZip(e.target.value)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
             </div>
             </form>
 

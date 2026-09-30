@@ -211,6 +211,27 @@ ok( 'an order whose upload was never even attempted is caught by the outcome', s
 ok( 'an upload still in its first two hours, and an unpaid order, are not reported', strpos( $flat, '#115' ) === false && strpos( $flat, '#116' ) === false );
 // 1 prepress + 1 low-res + 4 staff proofs (#103 #104 #105 #107) + 2 addresses + 1 Saturday + 1 refusal + 4 Drive (#109 #111 #112 #114)
 ok( 'the header counts every item', strpos( $flat, 'PPS exceptions — 14 items need a look (example.test)' ) === 0, substr( $flat, 0, 60 ) );
+// 87285 (2026-09-28): a two-sided 4-panel accordion that reached production with the front
+// image only. Judged from the order's own files, so it is listed though it was placed
+// before the check existed. The rule itself is pps_one_side_missing() in the plugin.
+$cp = file_get_contents( __DIR__ . '/' . ( getenv( 'PPS_CALC_PHP' ) ?: 'pps-calculators.php' ) );
+$at = strpos( $cp, 'function pps_one_side_missing(' );
+if ( $at !== false && ! function_exists( 'pps_one_side_missing' ) ) {
+    $d = 0; $st = false;
+    for ( $i = strpos( $cp, '{', $at ); $i < strlen( $cp ); $i++ ) { if ( $cp[$i] === '{' ) { $d++; $st = true; } elseif ( $cp[$i] === '}' && --$d === 0 ) break; }
+    eval( substr( $cp, $at, $i - $at + 1 ) );
+}
+$one = pps_job_health_render( pps_job_health_collect( array(
+    $mk( 87285, 'Accordion Brochure - 4 Panel', array( 'qty' => 500, 'sides' => 2, 'artwork' => 0.01, 'proof' => 0 ),
+        array( '_pps_artwork_files' => json_encode( array( array( 'path' => 'pps-artwork/x.jpg', 'name' => 'TheWetBurrito-Menu-Front-2026-V2-Menu-Flattend.jpg' ) ) ) ), 'Ivan', 'Iniestra' ),
+    $mk( 87290, 'Low Cost Brochure Printing', array( 'qty' => 1000, 'sides' => 2, 'artwork' => 0.01, 'proof' => 0 ),
+        array( '_pps_artwork_files' => json_encode( array( array( 'name' => 'front.jpg' ), array( 'name' => 'back.jpg' ) ) ) ) ),
+), array(), $since ), 'example.test' );
+ok( 'a two-sided job with one side\'s artwork is listed, with the file it did get (87285)',
+    function_exists( 'pps_one_side_missing' ) && stripos( $one, 'Two-sided job with artwork for one side only' ) !== false
+    && strpos( $one, '#87285 Ivan Iniestra — Accordion Brochure - 4 Panel — Two-sided job, but only one image arrived (TheWetBurrito-Menu-Front-2026-V2-Menu-Flattend.jpg)' ) !== false
+    && strpos( $one, '#87290' ) === false, $one );
+
 $GLOBALS['drive_connected'] = false;
 $down = pps_job_health_render( pps_job_health_collect( array(), array(), $since ), 'example.test' );
 ok( 'Drive disconnected is said once, at the top of the Drive section, even with no orders yet', strpos( $down, 'GOOGLE DRIVE IS NOT CONNECTED' ) !== false );

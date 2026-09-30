@@ -124,13 +124,19 @@ function pps_ddg_is_pps_product( $product_id ): bool {
 
 /** The shop's own timezone, not the server's. */
 function pps_ddg_timezone(): DateTimeZone {
+    if ( function_exists( 'pps_shop_timezone' ) ) {
+        try { return new DateTimeZone( pps_shop_timezone() ); } catch ( \Throwable $e ) { /* fall through */ }
+    }
     $tz = 'America/Phoenix';
     if ( function_exists( 'pps_get_config' ) ) {
         $cfg = pps_get_config();
-        $tz  = $cfg['pcf']['shop_timezone'] ?? $tz;
+        $v   = $cfg['pcf']['shop_timezone'] ?? '';
+        if ( is_string( $v ) && trim( $v ) !== '' ) $tz = trim( $v );
     }
+    // Throwable, not Exception: a value saved as a list reaches DateTimeZone as an
+    // array, which is a TypeError — and this runs on every checkout line.
     try { return new DateTimeZone( $tz ); }
-    catch ( Exception $e ) { return new DateTimeZone( 'America/Phoenix' ); }
+    catch ( \Throwable $e ) { return new DateTimeZone( 'America/Phoenix' ); }
 }
 
 // ── 1. Floor the PPS delivery date to a working day ──────────────────────────
