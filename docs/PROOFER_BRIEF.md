@@ -11,6 +11,11 @@ Seven of eight calculators still use the old modal.
 Read this before touching `proof-ui-draft.html`, the proof modal inside any
 `calc-*.html`, or anything named `tools-proof-*` or `tools-parity-*`.
 
+**Then read `docs/PROOFER_SINCE_HANDOFF.md`** — what changed in the calculators and on
+the server after this brief (2026-09-26 → 2026-09-30) that the proofer must match:
+staple count, snapped page counts, hardcopy-proof address rules, the flats' `back` /
+`backBlank` contract, and Drive file names as a contract with imposition.
+
 **All line numbers refer to JSX SOURCE on the integration branch** (worktree `src-wt`,
 branch `pps-fixes` / `claude/optimistic-wozniak-11ql3y`). The publish mirror
 (`/home/user/priorityprintservice.com`, branch `claude/woocommerce-domain-search-ly4vff`)
