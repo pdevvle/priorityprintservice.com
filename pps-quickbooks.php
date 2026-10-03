@@ -472,6 +472,11 @@ function pps_qbo_invoice_order( $order ) {
         if ( $amount <= 0 ) continue;
         $qty  = max( 1, (int) $item->get_quantity() );
         $desc = $item->get_name();
+        // A multi-product pay link puts each job's own description on its line
+        // as 'Item' meta. Without this every row of the invoice would read
+        // "Custom Order" and the customer could not tell what they paid for.
+        $what = $item->get_meta( 'Item' );
+        if ( $what ) $desc = $what;
         // The customer's own name for the job leads, when they gave one: it is
         // the phrase they will use on the phone, so it is the one worth having
         // at the top of the invoice line rather than buried under the spec.

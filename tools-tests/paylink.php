@@ -412,5 +412,58 @@ ok('prose pay',          pps_paylink_looks_like_command('pay the invoice when yo
 ok('near miss detected', pps_paylink_looks_like_bare_command('ppspay [job] $250'), true);
 ok('prose is no near miss', pps_paylink_looks_like_bare_command('Can you do it for $250?'), false);
 
+// --- several line items: [desc] @qty $price, repeated
+function L($t) { return pps_paylink_parse_lines($t); }
+
+$three = "[Business cards — 16pt matte] @500 \$95\n[Letterhead — 80lb text] @250 \$180\n[Envelopes — #10 window] @250 \$120";
+$r = L($three);
+ok('three lines parsed',    is_array($r) ? count($r) : 0, 3);
+ok('line 1 desc',           $r[1]['description'], 'Letterhead — 80lb text');
+ok('line 1 qty',            $r[1]['qty'], 250);
+ok('line 1 price',          $r[1]['price'], 180.0);
+ok('line 2 price',          $r[2]['price'], 120.0);
+// A #tag inside a bracket is description, exactly as the one-line rule promises.
+ok('#10 inside stays desc', $r[2]['description'], 'Envelopes — #10 window');
+
+// @qty is optional — a line without one is a single unit.
+$r = L('[Design hour] $85 [Rush fee] $40');
+ok('two lines, no qty',  count($r), 2);
+ok('qty defaults to 1',  $r[0]['qty'], 1);
+ok('second price',       $r[1]['price'], 40.0);
+
+// Order is PRESERVED and duplicates are kept — two identical lines are two jobs.
+$r = L('[Cards] @250 $60 [Cards] @250 $60');
+ok('duplicate lines kept', count($r), 2);
+
+// Commas in the quantity, and $ with a decimal.
+$r = L('[A] @1,000 $1,250.50 [B] @2 $10');
+ok('comma qty',    $r[0]['qty'], 1000);
+ok('comma price',  $r[0]['price'], 1250.5);
+
+// --- where multi-line must NOT engage, so the old form is untouched
+ok('one block is not multi',   L('[Pads 3x8] $250'), null);
+ok('no brackets is not multi', L('500 postcards $250'), null);
+// A line with no price means this was never the multi-line shape.
+ok('missing a price refuses',  L('[A] @500 $95 [B] @250'), null);
+// Nested brackets stay with the greedy single-description rule.
+ok('nested brackets not multi', L('[Pads [sample] 3x8] $250'), null);
+ok('empty bracket not multi',   L('[] @5 $10 [B] @2 $20'), null);
+ok('zero price refuses',        L('[A] @5 $0 [B] @2 $20'), null);
+
+// --- the whole command, with quote-level sigils outside the brackets
+$r = parse("/ppspay *qbo !5 #acme-oct [Cards] @500 \$95\n[Letterhead] @250 \$180");
+ok('multi: lines present',  count($r['lines']), 2);
+ok('multi: qbo read',       $r['qbo'], true);
+ok('multi: days read',      $r['min_days'], 5);
+ok('multi: reference read', $r['reference'], 'acme-oct');
+// The price the customer pays is the SUM, not the first line.
+ok('multi: price is the sum', $r['price'], 275.0);
+// And a description survives for every existing caller and log line.
+ok('multi: description set',  $r['description'], 'Cards');
+
+// Sigils are quote-level wherever they sit.
+$r = parse("[Cards] @500 \$95\n[Letterhead] @250 \$180 *qbo");
+ok('trailing *qbo still read', $r['qbo'], true);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

@@ -58,6 +58,36 @@ function pps_apply_past_multiplier( $price ) {
 }
 
 /**
+ * Normalise a list of line items to [ ['description'=>string,'qty'=>int,'price'=>float], ... ].
+ *
+ * Unlike tiers, order is PRESERVED and nothing is deduped: these are the jobs
+ * as the operator listed them, and two identical lines are two real line items
+ * (two hundred of the same card for two departments, say). Anything without a
+ * description or a positive price is dropped, because it would otherwise reach
+ * an invoice as a blank or free row.
+ */
+function pps_quote_normalise_lines( $raw ) {
+    $out = array();
+    if ( ! is_array( $raw ) ) return $out;
+    foreach ( $raw as $l ) {
+        if ( ! is_array( $l ) ) continue;
+        $d = isset( $l['description'] ) ? trim( (string) $l['description'] ) : '';
+        $q = isset( $l['qty'] ) ? absint( $l['qty'] ) : 0;
+        $p = isset( $l['price'] ) ? round( (float) $l['price'], 2 ) : 0;
+        if ( '' === $d || $p <= 0 ) continue;
+        $out[] = array( 'description' => $d, 'qty' => max( 1, $q ), 'price' => $p );
+    }
+    return $out;
+}
+
+/** What a multi-line quote costs: the sum of its lines. */
+function pps_quote_lines_total( array $lines ) {
+    $t = 0.0;
+    foreach ( $lines as $l ) $t += (float) $l['price'];
+    return round( $t, 2 );
+}
+
+/**
  * Normalise a tier list to [ ['qty'=>int,'price'=>float], ... ], sorted by
  * quantity, deduped, positives only. Accepts the raw shape posted by the form.
  */
@@ -153,6 +183,10 @@ function pps_quote_create( array $a ) {
     update_post_meta( $id, '_q_product', $pid );
     update_post_meta( $id, '_q_specs', isset( $a['specs'] ) ? sanitize_textarea_field( $a['specs'] ) : '' );
     update_post_meta( $id, '_q_tiers', $tiers );
+    // Several line items, when the command carried them. Absent on every quote
+    // made before this existed, which is exactly how a one-line quote reads.
+    $lines = pps_quote_normalise_lines( isset( $a['lines'] ) ? $a['lines'] : array() );
+    if ( $lines ) update_post_meta( $id, '_q_lines', $lines );
     update_post_meta( $id, '_q_allow_date', ! empty( $a['allow_date'] ) ? 1 : 0 );
     update_post_meta( $id, '_q_min_days', max( 0, (int) ( $a['min_days'] ?? 0 ) ) );
     update_post_meta( $id, '_q_pay_source', $source );
@@ -180,6 +214,7 @@ function pps_quote_get( $token ) {
         'product'    => (int) get_post_meta( $id, '_q_product', true ),
         'specs'      => (string) get_post_meta( $id, '_q_specs', true ),
         'tiers'      => (array) get_post_meta( $id, '_q_tiers', true ),
+        'lines'      => (array) get_post_meta( $id, '_q_lines', true ),
         'allow_date' => (bool) get_post_meta( $id, '_q_allow_date', true ),
         'min_days'   => (int) get_post_meta( $id, '_q_min_days', true ),
         'pay_source' => (string) get_post_meta( $id, '_q_pay_source', true ),
@@ -219,12 +254,24 @@ function pps_quote_url( $token ) {
  * ───────────────────────────────────────────────────────────── */
 
 function pps_quote_to_order( array $q, array $p ) {
-    $tiers = pps_quote_normalise_tiers( $q['tiers'] );
-    if ( ! $tiers ) return new WP_Error( 'tiers', 'This quote has no quantities on it. Please contact us.' );
+    // A multi-line quote has no quantity choice -- the operator listed the jobs
+    // and their prices, and the customer is paying for all of them. A one-line
+    // quote keeps its tier dropdown exactly as before.
+    $lines = pps_quote_normalise_lines( isset( $q['lines'] ) ? $q['lines'] : array() );
 
-    $idx  = isset( $p['tier'] ) ? absint( $p['tier'] ) : 0;
-    if ( ! isset( $tiers[ $idx ] ) ) $idx = 0;
-    $tier = $tiers[ $idx ];
+    $tiers = pps_quote_normalise_tiers( $q['tiers'] );
+    if ( ! $tiers && ! $lines ) return new WP_Error( 'tiers', 'This quote has no quantities on it. Please contact us.' );
+
+    if ( $lines ) {
+        // Synthesised so everything downstream -- the order's _pps_qty_tiers,
+        // the reorder card, the total check -- sees one coherent figure for the
+        // whole job rather than the first line's price.
+        $tier = array( 'qty' => 1, 'price' => pps_quote_lines_total( $lines ) );
+    } else {
+        $idx  = isset( $p['tier'] ) ? absint( $p['tier'] ) : 0;
+        if ( ! isset( $tiers[ $idx ] ) ) $idx = 0;
+        $tier = $tiers[ $idx ];
+    }
 
     $email = isset( $p['email'] ) ? sanitize_email( $p['email'] ) : '';
     if ( ! $email || ! is_email( $email ) ) return new WP_Error( 'email', 'Please enter a valid email address.' );
@@ -321,10 +368,34 @@ function pps_quote_to_order( array $q, array $p ) {
     }
     $order->set_shipping_country( 'US' );
 
-    $item_id = $order->add_product( $product, $tier['qty'], array(
-        'subtotal' => $tier['price'],
-        'total'    => $tier['price'],
+    // One WooCommerce line per quote line. The spec, project name and delivery
+    // date hang off the FIRST line only: they describe the order, and repeating
+    // them on every row would clutter the invoice and the packing list.
+    $add = $lines ? $lines : array( array(
+        'description' => '',
+        'qty'         => $tier['qty'],
+        'price'       => $tier['price'],
     ) );
+
+    $first_item_id = 0;
+    foreach ( $add as $i => $ln ) {
+        $item_id = $order->add_product( $product, $ln['qty'], array(
+            'subtotal' => $ln['price'],
+            'total'    => $ln['price'],
+        ) );
+        if ( ! $item_id ) continue;
+        if ( ! $first_item_id ) $first_item_id = $item_id;
+        $it = $order->get_item( $item_id );
+        if ( ! $it ) continue;
+        // Each line carries its OWN description, so wp-admin, the receipt and
+        // the QuickBooks invoice line all name the job on that row.
+        if ( '' !== (string) $ln['description'] ) {
+            $it->add_meta_data( 'Item', $ln['description'], true );
+        }
+        $it->save();
+    }
+
+    $item_id = $first_item_id;
     if ( $item_id ) {
         $item = $order->get_item( $item_id );
         if ( $item ) {
@@ -449,7 +520,9 @@ function pps_quote_form_view( array $q, $error ) {
     $tiers    = pps_quote_normalise_tiers( $q['tiers'] );
     $earliest = $q['allow_date'] ? pps_quote_earliest_date( $q['min_days'] ) : '';
     $states   = array( 'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC','PR' );
-    $single   = count( $tiers ) === 1;
+    // A multi-line quote is a fixed set of jobs: no quantity choice, one total.
+    $lines    = pps_quote_normalise_lines( isset( $q['lines'] ) ? $q['lines'] : array() );
+    $single   = $lines ? true : ( count( $tiers ) === 1 );
     ob_start(); ?>
     <div class="pps-acct"><div class="pps-q-wrap" style="max-width:640px;margin:0 auto">
         <p class="lookup-eyebrow">Your quote</p>
@@ -475,7 +548,26 @@ function pps_quote_form_view( array $q, $error ) {
               // next screen matches this exactly. Said out loud here because the
               // page asks for a shipping address immediately afterwards, which
               // otherwise invites "is delivery extra?" at the moment of payment. ?>
-        <?php if ( $single ) : ?>
+        <?php if ( $lines ) : ?>
+            <?php // Itemised, because a customer paying one figure for several jobs
+                  // needs to see that the figure is the sum of what was quoted. The
+                  // quantity sits with its line rather than in a column of its own:
+                  // these read as sentences, not as a spreadsheet. ?>
+            <ul class="pps-q-lines">
+                <?php foreach ( $lines as $ln ) : ?>
+                    <li>
+                        <span class="pps-q-line-desc"><?php echo nl2br( esc_html( $ln['description'] ) ); ?></span>
+                        <span class="pps-q-line-qty"><?php echo esc_html( number_format_i18n( $ln['qty'] ) ); ?></span>
+                        <span class="pps-q-line-price"><?php echo wp_kses_post( wc_price( $ln['price'] ) ); ?></span>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+            <p class="pps-q-price pps-q-total">
+                <span class="pps-q-total-label">Total</span>
+                <?php echo wp_kses_post( wc_price( pps_quote_lines_total( $lines ) ) ); ?>
+            </p>
+            <p class="pps-q-incl">Delivery included — this is the total.</p>
+        <?php elseif ( $single ) : ?>
             <p class="pps-q-price"><?php echo wp_kses_post( wc_price( $tiers[0]['price'] ) ); ?></p>
             <p class="pps-q-incl">Delivery included — this is the total.</p>
         <?php endif; ?>
@@ -593,6 +685,20 @@ function pps_quote_form_view( array $q, $error ) {
       .pps-q-spec{font-size:1.05rem;line-height:1.55;white-space:pre-wrap;word-break:break-word;margin:0 0 10px}
       .pps-q-note{margin:0 0 10px;opacity:.85}
       .pps-q-price{font-size:1.6rem;font-weight:700;margin:0 0 2px}
+      /* Itemised lines. Grid rather than a table: it collapses to one column on
+         a phone without a horizontal scroller, and these are read, not scanned. */
+      .pps-q-lines{list-style:none;margin:0 0 10px;padding:0}
+      .pps-q-lines li{display:grid;grid-template-columns:1fr auto auto;gap:4px 14px;
+        align-items:baseline;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.09)}
+      .pps-q-line-desc{font-size:1.05rem;line-height:1.5;word-break:break-word}
+      .pps-q-line-qty{opacity:.7;font-size:.95rem;white-space:nowrap}
+      .pps-q-line-price{font-weight:600;white-space:nowrap}
+      .pps-q-total{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding-top:4px}
+      .pps-q-total-label{font-size:1rem;font-weight:600;opacity:.75}
+      @media (max-width:430px){
+        .pps-q-lines li{grid-template-columns:1fr auto}
+        .pps-q-line-desc{grid-column:1/-1}
+      }
       .pps-q-incl{margin:0 0 10px;opacity:.75;font-size:.92rem}
       .pps-q-transit{margin:-4px 0 12px;font-size:1rem}
       /* Scoped to this page: it is read once, by somebody deciding whether to

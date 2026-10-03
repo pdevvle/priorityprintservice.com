@@ -247,6 +247,113 @@ function pps_paylink_extract_text( $payload ) {
  *
  * @return array|WP_Error {description, price, qbo, reference}
  */
+/**
+ * The quote-level sigils, and whatever text is left once they are removed.
+ *
+ * One copy, read by both the single-description and the several-line forms, so
+ * the two cannot drift: a #reference, a !N or a *qbo means the same thing and
+ * is matched by the same expression whichever shape the command took.
+ *
+ * Order matters. #reference and !N are taken BEFORE any price is read, so
+ * their digits can never be mistaken for money. *qbo and the bare word both
+ * answer -- the bare one so nothing already typed stops working -- and both
+ * only match standing alone, or a description mentioning "quickbooks-style
+ * ledger books" would route a payment.
+ *
+ * @return array{reference:string,min_days:int,qbo:bool,rest:string}
+ */
+function pps_paylink_parse_flags( $text ) {
+    $text = (string) $text;
+
+    $reference = '';
+    if ( preg_match( '/(?:^|\s)#([A-Za-z0-9_-]{2,60})\b/', $text, $m ) ) {
+        $reference = $m[1];
+        $text = str_replace( $m[0], ' ', $text );
+    }
+
+    $min_days = 0;
+    if ( preg_match( '/(?:^|\s)!\s*([0-9]{1,2})(?=$|\s)/', $text, $m ) ) {
+        $min_days = (int) $m[1];
+        $text = str_replace( $m[0], ' ', $text );
+    }
+
+    $qbo = false;
+    if ( preg_match( '/(?:^|\s)\*?(qbo|quickbooks)(?=$|\s)/i', $text, $m ) ) {
+        $qbo  = true;
+        $text = preg_replace( '/(?:^|\s)\*?(qbo|quickbooks)(?=$|\s)/i', ' ', $text, 1 );
+    }
+
+    return array( 'reference' => $reference, 'min_days' => $min_days, 'qbo' => $qbo, 'rest' => $text );
+}
+
+/**
+ * Normalise one line item's description the way a single-line one is handled:
+ * collapse spaces, keep the operator's newlines.
+ */
+function pps_paylink_clean_description( $d ) {
+    $d = preg_replace( '/[ \t]+/', ' ', (string) $d );
+    $d = preg_replace( '/[ \t]*\n[ \t]*/', "\n", $d );
+    $d = preg_replace( '/\n{3,}/', "\n\n", $d );
+    return trim( $d, " \t\n\r,;-" );
+}
+
+/**
+ * Several line items in one command:
+ *
+ *   [Business cards — 16pt matte] @500 $95
+ *   [Letterhead — 80lb text]      @250 $180
+ *   [Envelopes — #10 window]      @250 $120
+ *
+ * A bracket opens a line item and its pricing follows it, before the next
+ * bracket. Both numbers carry a sigil -- @ quantity, $ price -- so nothing is
+ * positional and the price is the TOTAL for that quantity, matching what the
+ * console's tier fields have always meant.
+ *
+ * WHY THIS IS A SEPARATE PASS, AND CONSERVATIVE
+ *
+ * The single-description rule is deliberately first [ to LAST ] so that a spec
+ * may itself contain brackets. Non-greedy matching would break that. So this
+ * engages only when the shape is unmistakable: TWO OR MORE bracket pairs, none
+ * of them containing a bracket, and EVERY one followed by its own $ price. Fail
+ * any of those and it returns null, and the original single-description path
+ * runs untouched. A one-line command therefore parses exactly as it did before,
+ * including every refusal.
+ *
+ * @return array<array{description:string,qty:int,price:float}>|null
+ */
+function pps_paylink_parse_lines( $text ) {
+    if ( ! preg_match_all( '/\[([^\[\]]*)\]/s', (string) $text, $m, PREG_OFFSET_CAPTURE ) ) return null;
+    $n = count( $m[0] );
+    if ( $n < 2 ) return null;   // one block is the old form, whatever follows it
+
+    $lines = array();
+    for ( $i = 0; $i < $n; $i++ ) {
+        // Everything after this block up to the next one is its pricing.
+        $from = $m[0][ $i ][1] + strlen( $m[0][ $i ][0] );
+        $to   = ( $i + 1 < $n ) ? $m[0][ $i + 1 ][1] : strlen( $text );
+        $tail = substr( $text, $from, $to - $from );
+
+        // A $ price is required per line. Without one this is not the
+        // multi-line shape at all, so hand the whole thing back.
+        if ( ! preg_match( '/\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/', $tail, $pm ) ) return null;
+        $price = pps_paylink_parse_price( $pm[1] );
+        if ( null === $price || $price <= 0 ) return null;
+
+        // @qty is optional; a line without one is a single unit, like the
+        // one-line form.
+        $qty = 1;
+        if ( preg_match( '/@\s*([0-9][0-9,]*)/', $tail, $qm ) ) {
+            $qty = max( 1, (int) str_replace( ',', '', $qm[1] ) );
+        }
+
+        $desc = pps_paylink_clean_description( $m[1][ $i ][0] );
+        if ( '' === $desc ) return null;   // an empty bracket is a typo, not a line
+
+        $lines[] = array( 'description' => $desc, 'qty' => $qty, 'price' => $price );
+    }
+    return $lines;
+}
+
 function pps_paylink_parse_command( $text ) {
     $text = trim( (string) $text );
     if ( '' === $text ) return new WP_Error( 'empty', 'Nothing to read — send the job and its price.' );
@@ -255,6 +362,29 @@ function pps_paylink_parse_command( $text ) {
     // spellings still answer, because a link minted yesterday should not stop
     // working because the command was renamed.
     $text = preg_replace( '/^\s*\/?(ppspay|paylink|pay|quote)\b[:\s]*/i', '', $text, 1 );
+
+    // ── Several line items? ──────────────────────────────────────────────
+    // Tried first, and only succeeds on an unmistakable shape (see
+    // pps_paylink_parse_lines). The quote-level sigils are read from what sits
+    // OUTSIDE the brackets, so a description mentioning qbo or a #tag stays
+    // description -- the same guarantee the one-line form gives.
+    $lines = pps_paylink_parse_lines( $text );
+    if ( null !== $lines ) {
+        $outside = preg_replace( '/\[[^\[\]]*\]/s', ' ', $text );
+        $flags   = pps_paylink_parse_flags( $outside );
+        return array(
+            // Kept so every existing caller, log line and test still sees a
+            // description and a price: the first line describes the job and the
+            // price is what the customer will actually be charged.
+            'description' => $lines[0]['description'],
+            'price'       => round( array_sum( array_column( $lines, 'price' ) ), 2 ),
+            'qty'         => $lines[0]['qty'],
+            'lines'       => $lines,
+            'qbo'         => $flags['qbo'],
+            'reference'   => $flags['reference'],
+            'min_days'    => $flags['min_days'],
+        );
+    }
 
     // ── The bracketed description, if there is one ───────────────────────
     // First [ to LAST ], and . matches newlines: a spec is one block, however
@@ -272,30 +402,11 @@ function pps_paylink_parse_command( $text ) {
     }
 
     // ── Flags and price, from OUTSIDE the brackets only ──────────────────
-    $reference = '';
-    if ( preg_match( '/(?:^|\s)#([A-Za-z0-9_-]{2,60})\b/', $text, $m ) ) {
-        $reference = $m[1];
-        $text = str_replace( $m[0], ' ', $text );
-    }
-
-    // *qbo, matching the sigils the other tokens use: $ money, # reference,
-    // * flag. The bare word still answers so nothing already typed breaks, and
-    // both forms only match standing alone — a description saying
-    // "quickbooks-style ledger books" must never route a payment.
-    // !N — minimum production days before the job can be delivered. Parsed
-    // before the price so its digits can never be read as money, for the same
-    // reason #reference is.
-    $min_days = 0;
-    if ( preg_match( '/(?:^|\s)!\s*([0-9]{1,2})(?=$|\s)/', $text, $m ) ) {
-        $min_days = (int) $m[1];
-        $text = str_replace( $m[0], ' ', $text );
-    }
-
-    $qbo = false;
-    if ( preg_match( '/(?:^|\s)\*?(qbo|quickbooks)(?=$|\s)/i', $text, $m ) ) {
-        $qbo  = true;
-        $text = preg_replace( '/(?:^|\s)\*?(qbo|quickbooks)(?=$|\s)/i', ' ', $text, 1 );
-    }
+    $flags     = pps_paylink_parse_flags( $text );
+    $reference = $flags['reference'];
+    $min_days  = $flags['min_days'];
+    $qbo       = $flags['qbo'];
+    $text      = $flags['rest'];
 
     $price = null;
     if ( preg_match( '/\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/', $text, $m ) ) {
@@ -370,6 +481,23 @@ function pps_paylink_create( array $a ) {
     $qty = isset( $a['qty'] ) ? absint( $a['qty'] ) : 1;
     if ( $qty < 1 ) $qty = 1;
 
+    // Several line items, each with its own quantity and price. Normalised
+    // here rather than trusted, because this is the figure the customer pays:
+    // a line without a positive price is dropped, and if nothing survives we
+    // fall back to the single description above rather than minting an empty
+    // link.
+    $lines = array();
+    if ( ! empty( $a['lines'] ) && is_array( $a['lines'] ) ) {
+        foreach ( $a['lines'] as $l ) {
+            if ( ! is_array( $l ) ) continue;
+            $ld = isset( $l['description'] ) ? trim( (string) $l['description'] ) : '';
+            $lp = pps_paylink_parse_price( isset( $l['price'] ) ? $l['price'] : '' );
+            $lq = isset( $l['qty'] ) ? absint( $l['qty'] ) : 1;
+            if ( '' === $ld || null === $lp || $lp <= 0 ) continue;
+            $lines[] = array( 'description' => $ld, 'qty' => max( 1, $lq ), 'price' => round( $lp, 2 ) );
+        }
+    }
+
     $pid = pps_paylink_product_id();
     if ( ! $pid ) {
         return new WP_Error(
@@ -398,6 +526,7 @@ function pps_paylink_create( array $a ) {
         'allow_date' => $min_days > 0,
         'product'    => $pid,
         'tiers'      => array( array( 'qty' => $qty, 'price' => $price ) ),
+        'lines'      => $lines,
         'specs'      => $description,
         'pay_source' => $source,
         'by'         => isset( $a['by'] ) ? (string) $a['by'] : 'missive',
