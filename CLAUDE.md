@@ -219,6 +219,11 @@ question with a "keep it as entered" answer (owner: nobody is blocked at orderin
 The confirm dialogs read "OK: … / Cancel: …" because they are `window.confirm`, like the
 two-sided-flat question. OK is always the fixing path (go back / use the suggestion).
 
+**Deployed 2026-10-04 at `482509f`**: production (3 PHP files + all eight calculators) and
+staging (3 PHP files + seven calculators). Staging's saddle was left as the proofer session's
+build (`claude/proofer-parity-staging`, PR #56), which predates this, so the address checks are
+not on staging's saddle until that branch takes them. Verify Addresses is OFF on both sites.
+
 ## Shop closures — the calculators are copies, not modules
 
 Closures live at the **top level** of the injected config, beside `pcf`, never inside
