@@ -2424,16 +2424,17 @@ function pps_ajax_add_to_cart() {
     unset( $GLOBALS['pps_internal_add_to_cart'] );
 
     if ( $cart_item_key ) {
-        // Carry the delivery address the customer just typed into the checkout session,
-        // so the address block on /checkout/ agrees with the "Ship to:" on the line item
-        // instead of showing a second, older address from their account.
-        pps_prefill_customer_shipping( $metadata );
-
         // Edit mode: now safe to remove old item since new one succeeded
         if ( $edit_key && $edit_key !== $cart_item_key ) {
             WC()->cart->remove_cart_item( $edit_key );
             WC()->session->set( 'pps_edit_key_' . $product_id, null );
         }
+
+        // Carry the delivery address into the checkout session, so the address block on
+        // /checkout/ agrees with the ship-to the order will carry instead of showing a
+        // second, older address from their account. After the edit removal, because the
+        // address comes from the first calculator line in the cart, which an edit can change.
+        pps_prefill_from_cart();
         // Discount code, if the customer entered one. Applied through WooCommerce so
         // Woo remains the single authority on coupon maths and renders the discount
         // line natively in cart, checkout, order emails and the admin order screen.
@@ -4473,9 +4474,11 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     // Auditable: whoever picks this order up in Shippo can see where the address came
     // from, rather than wondering why it differs from billing.
     $order->add_order_note( sprintf(
-        'Delivery address taken from the calculator: %s, %s %s %s.%s',
-        $addr['street1'], $addr['city'], $addr['state'], $addr['zip'],
-        $weight > 0 ? sprintf( ' Estimated %.2f lb in %d carton(s).', $weight, max( 1, $cartons ) ) : ''
+        'Delivery address taken from the calculator: %s, %s %s %s.%s%s',
+        $addr['street1'] . ( $addr['street2'] !== '' ? ', ' . $addr['street2'] : '' ), $addr['city'], $addr['state'], $addr['zip'],
+        $weight > 0 ? sprintf( ' Estimated %.2f lb in %d carton(s).', $weight, max( 1, $cartons ) ) : '',
+        // UPS does not deliver to a PO Box; the quote already carries the extra day.
+        pps_is_po_box( $addr['street1'], $addr['street2'] ) ? ' PO BOX — UPS cannot deliver; ship Ground Advantage.' : ''
     ) );
 
     $order->save();
@@ -4567,6 +4570,201 @@ function pps_prefill_customer_shipping( $metadata_json ) {
 
     return true;
 }
+
+/**
+ * One ship-to per cart, chosen the way the order chooses it: the FIRST calculator line
+ * with a whole address (pps_apply_calculator_shipping_address(), "first usable address
+ * wins"). Until 2026-10-04 the checkout was filled from the line added LAST while the
+ * order shipped to the line added FIRST, so a cart with two destinations showed the
+ * customer one address and sent the job to the other.
+ *
+ * Re-runs when a line is removed, because the first line can change; the session
+ * remembers which address it last wrote, so an address the customer has since typed
+ * over at checkout is only replaced when the cart's ship-to actually changes.
+ *
+ * @return bool True when the session was updated.
+ */
+function pps_prefill_from_cart() {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart || ! WC()->session ) return false;
+    foreach ( WC()->cart->get_cart() as $item ) {
+        $raw = isset( $item['pps_metadata'] ) ? (string) $item['pps_metadata'] : '';
+        if ( $raw === '' ) continue;
+        $meta = json_decode( $raw, true );
+        if ( ! is_array( $meta ) ) continue;
+        $a = isset( $meta['shipAddr'] ) && is_array( $meta['shipAddr'] ) ? $meta['shipAddr'] : array();
+        $street = trim( (string) ( $a['street1'] ?? '' ) );
+        $city   = trim( (string) ( $a['city'] ?? '' ) );
+        $state  = trim( (string) ( $a['state'] ?? $meta['shipState'] ?? '' ) );
+        $zip    = trim( (string) ( $a['zip'] ?? $meta['shipZip'] ?? '' ) );
+        if ( $street === '' || $city === '' || $state === '' || $zip === '' ) continue;
+        $key = md5( strtoupper( preg_replace( '/[^A-Za-z0-9]/', '', $street . (string) ( $a['street2'] ?? '' ) . $city . $state . $zip . (string) ( $a['name'] ?? '' ) . (string) ( $a['company'] ?? '' ) ) ) );
+        if ( WC()->session->get( 'pps_prefill_key' ) === $key ) return false;
+        if ( ! pps_prefill_customer_shipping( $raw ) ) return false;
+        WC()->session->set( 'pps_prefill_key', $key );
+        return true;
+    }
+    return false;
+}
+add_action( 'woocommerce_cart_item_removed', function() {
+    try { pps_prefill_from_cart(); } catch ( \Throwable $e ) { error_log( 'PPS prefill: ' . $e->getMessage() ); }
+} );
+
+/** A PO Box in either address line. UPS does not deliver to them. */
+function pps_is_po_box( $line1, $line2 = '' ) {
+    $re = '/\b(?:p\.?\s*o\.?\s*b(?:ox)?|post\s*office\s*box|postal\s*box)\b\.?\s*#?\s*\d|^\s*box\s*#?\s*\d+\s*$/i';
+    return (bool) ( preg_match( $re, (string) $line1 ) || preg_match( $re, (string) $line2 ) );
+}
+
+/**
+ * Normalise an address line for comparison: case, punctuation and the USPS
+ * abbreviations, so "7000 Lindell Road" and "7000 LINDELL RD" compare equal and a
+ * standardised suggestion is not shown to the customer as a correction.
+ */
+function pps_addr_norm( $s ) {
+    static $abbr = array(
+        'STREET' => 'ST', 'ROAD' => 'RD', 'AVENUE' => 'AVE', 'AV' => 'AVE', 'DRIVE' => 'DR', 'BOULEVARD' => 'BLVD',
+        'LANE' => 'LN', 'COURT' => 'CT', 'CIRCLE' => 'CIR', 'PLACE' => 'PL', 'HIGHWAY' => 'HWY', 'PARKWAY' => 'PKWY',
+        'TERRACE' => 'TER', 'TRAIL' => 'TRL', 'SQUARE' => 'SQ', 'EXPRESSWAY' => 'EXPY', 'FREEWAY' => 'FWY',
+        'SUITE' => 'STE', 'APARTMENT' => 'APT', 'BUILDING' => 'BLDG', 'FLOOR' => 'FL', 'ROOM' => 'RM', 'UNIT' => 'UNIT',
+        'NORTH' => 'N', 'SOUTH' => 'S', 'EAST' => 'E', 'WEST' => 'W', 'NORTHEAST' => 'NE', 'NORTHWEST' => 'NW',
+        'SOUTHEAST' => 'SE', 'SOUTHWEST' => 'SW', 'MOUNT' => 'MT', 'SAINT' => 'ST', 'FORT' => 'FT',
+    );
+    $s = strtoupper( (string) $s );
+    $s = str_replace( '#', ' # ', $s );
+    $s = preg_replace( '/[^A-Z0-9# ]+/', ' ', $s );
+    $out = array();
+    foreach ( preg_split( '/\s+/', trim( $s ) ) as $w ) {
+        if ( $w === '' || $w === '#' ) continue;
+        $out[] = $abbr[ $w ] ?? $w;
+    }
+    return implode( ' ', $out );
+}
+
+/**
+ * What a Shippo v2 validation means for the customer. Pure, so it can be tested.
+ *
+ *   verified   — the postal data matches; a standardised spelling or an added ZIP+4 is
+ *                not a correction and is not shown to the customer.
+ *   corrected  — the postal data suggests a different street, city, state or ZIP;
+ *                'suggested' carries it for "Did you mean …?".
+ *   unit       — the building was found but the apartment/suite is missing or wrong.
+ *   not_found  — the address is not in the postal database.
+ *
+ * The customer is ASKED about corrected, unit and not_found, never refused: the
+ * owner's rule is that nobody is blocked at ordering, and a new building, a campus
+ * or a trade-show booth is legitimately absent from postal data.
+ */
+function pps_addr_verify_classify( array $in, array $res ) {
+    $an   = isset( $res['analysis'] ) && is_array( $res['analysis'] ) ? $res['analysis'] : array();
+    $vr   = isset( $an['validation_result'] ) && is_array( $an['validation_result'] ) ? $an['validation_result'] : array();
+    $val  = strtolower( (string) ( $vr['value'] ?? '' ) );
+    $type = strtolower( (string) ( $an['address_type'] ?? '' ) );
+    if ( ! in_array( $type, array( 'residential', 'commercial', 'po_box' ), true ) ) $type = '';
+    $codes = array();
+    foreach ( (array) ( $vr['reasons'] ?? array() ) as $r ) {
+        if ( is_array( $r ) && ! empty( $r['code'] ) ) $codes[] = preg_replace( '/[^a-z0-9_]/', '', strtolower( (string) $r['code'] ) );
+    }
+    $codes = array_values( array_filter( $codes ) );
+    $out = array( 'status' => 'unavailable', 'type' => $type, 'reasons' => $codes, 'suggested' => null );
+    if ( $val === '' ) return $out;
+    if ( $val === 'invalid' ) { $out['status'] = 'not_found'; return $out; }
+
+    $rec  = isset( $res['recommended_address'] ) && is_array( $res['recommended_address'] ) ? $res['recommended_address'] : array();
+    $conf = strtolower( (string) ( $rec['confidence_result']['score'] ?? '' ) );
+    // A building the postal data does not hold — a campus, a dealership, a trade-show
+    // hall — comes back with low confidence and a "suggestion" that can drop the building
+    // name. Not wrong, and not worth a question (2026-10-04 sample: 87321, 87273).
+    if ( $conf === 'low' || in_array( 'address_found_non_postal_match', $codes, true ) ) {
+        $out['status'] = 'verified';
+        $out['lowConfidence'] = true;
+        return $out;
+    }
+    $sug = array(
+        'street1' => trim( (string) ( $rec['address_line_1'] ?? '' ) ),
+        'street2' => trim( (string) ( $rec['address_line_2'] ?? '' ) ),
+        'city'    => trim( (string) ( $rec['city_locality'] ?? '' ) ),
+        'state'   => strtoupper( trim( (string) ( $rec['state_province'] ?? '' ) ) ),
+        'zip'     => trim( (string) ( $rec['postal_code'] ?? '' ) ),
+    );
+    $in_unit  = pps_addr_unit( trim( ( $in['street1'] ?? '' ) . ' ' . ( $in['street2'] ?? '' ) ) );
+    $missing  = false;
+    foreach ( $codes as $c ) { if ( preg_match( '/missing_secondary|secondary_missing|secondary_required/', $c ) ) $missing = true; }
+    // A unit the customer gave that the postal data does not list (suites in office
+    // buildings mostly): the building is right, and asking would only add friction.
+    if ( in_array( 'address_confirmed_invalid_secondary', $codes, true ) ) $out['unitUnconfirmed'] = true;
+    if ( $missing && $in_unit === '' ) { $out['status'] = 'unit'; return $out; }
+    if ( $sug['street1'] === '' ) { $out['status'] = 'verified'; return $out; }
+
+    // Only a change that moves the parcel is a correction: the street (number and name),
+    // the city, the state, the five-digit ZIP or the unit number. Case, abbreviations,
+    // a street suffix, a direction word, "#" vs "Ste" and an added ZIP+4 are not.
+    $z5 = static function( $z ) { return substr( preg_replace( '/[^0-9]/', '', (string) $z ), 0, 5 ); };
+    $same = pps_addr_loose( ( $in['street1'] ?? '' ) . ' ' . ( $in['street2'] ?? '' ) ) === pps_addr_loose( $sug['street1'] . ' ' . $sug['street2'] )
+        && pps_addr_norm( $in['city'] ?? '' ) === pps_addr_norm( $sug['city'] )
+        && strtoupper( trim( (string) ( $in['state'] ?? '' ) ) ) === $sug['state']
+        && $z5( $in['zip'] ?? '' ) === $z5( $sug['zip'] );
+    if ( $same ) { $out['status'] = 'verified'; return $out; }
+    $out['status']    = 'corrected';
+    $out['suggested'] = $sug;
+    return $out;
+}
+
+/** Street line for comparison without suffix, direction or unit words: "S 3rd St # 4" → "3RD 4". */
+function pps_addr_loose( $s ) {
+    static $drop = array( 'ST', 'RD', 'AVE', 'DR', 'BLVD', 'LN', 'CT', 'CIR', 'PL', 'HWY', 'PKWY', 'TER', 'TRL', 'SQ', 'WAY',
+        'EXPY', 'FWY', 'N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW', 'STE', 'APT', 'UNIT', 'RM', 'BLDG', 'FL', '#' );
+    $w = array_diff( explode( ' ', pps_addr_norm( $s ) ), $drop );
+    return implode( ' ', array_values( array_filter( $w, 'strlen' ) ) );
+}
+
+/** The unit part of an address ("Apt 4", "Ste 300", "# 12"), or "". */
+function pps_addr_unit( $s ) {
+    return preg_match( '/(?:\b(?:APT|STE|SUITE|UNIT|RM|ROOM|FL|FLOOR|BLDG|APARTMENT)\b\.?|#)\s*([A-Z0-9-]+)/i', (string) $s, $m ) ? strtoupper( $m[1] ) : '';
+}
+
+/**
+ * Is address verification switched on? PPS Config → Production → "Verify Addresses"
+ * (pcf address_verify). Off by default: Shippo charges per US address checked, and the
+ * owner turns it on.
+ */
+function pps_addr_verify_enabled( $cfg = null ) {
+    if ( $cfg === null ) $cfg = pps_get_config();
+    $v = $cfg['pcf']['address_verify'] ?? 0;
+    return ( $v === true || (string) $v === '1' ) && ! empty( $cfg['pcf']['shippo_api_token'] );
+}
+
+/**
+ * What production should hear about a line's address check, as sentences; empty when
+ * nothing needs a person. Read from the metadata the calculator posts ('addrCheck' for
+ * the delivery address, 'proofAddrCheck' for a hardcopy proof sent elsewhere): the
+ * customer was asked, and these are the cases where they kept something the check
+ * doubted. Used by the daily exceptions email.
+ */
+function pps_addr_check_problems( array $meta ) {
+    $out = array();
+    foreach ( array( 'addrCheck' => 'Delivery address', 'proofAddrCheck' => 'Proof address' ) as $k => $label ) {
+        $c = isset( $meta[ $k ] ) && is_array( $meta[ $k ] ) ? $meta[ $k ] : null;
+        if ( ! $c ) continue;
+        $st   = (string) ( $c['status'] ?? '' );
+        $used = (string) ( $c['used'] ?? '' );
+        if ( ! empty( $c['zipState'] ) ) {
+            $out[] = $label . ': the ZIP belongs to ' . preg_replace( '/[^A-Z]/', '', strtoupper( (string) $c['zipState'] ) ) . ', not the state given (customer kept it)';
+        }
+        if ( $st === 'not_found' ) {
+            $out[] = $label . ': not found in postal data (customer kept it as entered)';
+        } elseif ( $st === 'corrected' && $used === 'entered' ) {
+            $s = is_array( $c['suggested'] ?? null ) ? $c['suggested'] : array();
+            $sug = trim( implode( ', ', array_filter( array( $s['street1'] ?? '', $s['street2'] ?? '', trim( ( $s['city'] ?? '' ) . ' ' . ( $s['state'] ?? '' ) . ' ' . ( $s['zip'] ?? '' ) ) ) ) ) );
+            $out[] = $label . ': customer kept their version over the postal suggestion' . ( $sug !== '' ? ' (' . $sug . ')' : '' );
+        } elseif ( $st === 'unit' && $used === 'entered' ) {
+            $out[] = $label . ': postal data expects an apartment/suite number; customer said none is needed';
+        }
+    }
+    return array_map( static function( $s ) { return pps_clean_text( $s ); }, $out );
+}
+
+/** Most Shippo validations one day may spend before the endpoint answers "unavailable". */
+if ( ! defined( 'PPS_ADDR_VERIFY_DAILY_CAP' ) ) define( 'PPS_ADDR_VERIFY_DAILY_CAP', 300 );
 
 // Classic checkout, block checkout, and the admin "create order" screen. Each fires
 // once the line items exist, which is what this reads from.
@@ -5273,6 +5471,74 @@ add_action( 'rest_api_init', function() {
                 return new WP_Error( 'shippo_error', $resp->get_error_message(), array( 'status' => 502 ) );
             }
             return rest_ensure_response( json_decode( wp_remote_retrieve_body( $resp ), true ) );
+        },
+    ) );
+
+    // POST /wp-json/pps/v1/shipping/verify — is this delivery address real? Called by the
+    // calculators once, at Add to Order. Public (most customers are guests), so: cached
+    // per address for 30 days, 10 lookups a minute per IP, a daily cap, and switched off
+    // unless PPS Config → Production → Verify Addresses is on. Every failure answers
+    // "unavailable" with HTTP 200 — the calculator then lets the order through marked
+    // not checked. Nothing here may ever stop an order.
+    register_rest_route( 'pps/v1', '/shipping/verify', array(
+        'methods'             => 'POST',
+        'permission_callback' => '__return_true',
+        'callback'            => function( $request ) {
+            $unavailable = array( 'status' => 'unavailable', 'type' => '', 'reasons' => array(), 'suggested' => null );
+            try {
+                $cfg = pps_get_config();
+                if ( ! pps_addr_verify_enabled( $cfg ) ) return rest_ensure_response( array( 'status' => 'off' ) );
+                $d  = (array) $request->get_json_params();
+                $in = array(
+                    'street1' => substr( sanitize_text_field( (string) ( $d['street1'] ?? '' ) ), 0, 120 ),
+                    'street2' => substr( sanitize_text_field( (string) ( $d['street2'] ?? '' ) ), 0, 120 ),
+                    'city'    => substr( sanitize_text_field( (string) ( $d['city'] ?? '' ) ), 0, 80 ),
+                    'state'   => strtoupper( substr( preg_replace( '/[^A-Za-z]/', '', (string) ( $d['state'] ?? '' ) ), 0, 2 ) ),
+                    'zip'     => substr( preg_replace( '/[^0-9-]/', '', (string) ( $d['zip'] ?? '' ) ), 0, 10 ),
+                );
+                if ( $in['street1'] === '' || ( $in['zip'] === '' && ( $in['city'] === '' || $in['state'] === '' ) ) ) {
+                    return rest_ensure_response( $unavailable );
+                }
+                $ck = 'pps_addrv1_' . md5( strtoupper( implode( '|', $in ) ) );
+                $hit = get_transient( $ck );
+                if ( is_array( $hit ) ) { $hit['cached'] = true; return rest_ensure_response( $hit ); }
+
+                $ip     = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
+                $rl_key = 'pps_addrv_rl_' . md5( $ip );
+                $hits   = (int) get_transient( $rl_key );
+                if ( $hits >= 10 ) return rest_ensure_response( $unavailable );
+                set_transient( $rl_key, $hits + 1, MINUTE_IN_SECONDS );
+                // One option, not one per day: today's count plus a running total, which is
+                // also how the owner sees what verification has cost.
+                $spend = get_option( 'pps_addrv_spend', array() );
+                if ( ! is_array( $spend ) ) $spend = array();
+                $today = gmdate( 'Y-m-d' );
+                if ( ( $spend['day'] ?? '' ) !== $today ) { $spend['day'] = $today; $spend['n'] = 0; }
+                if ( (int) $spend['n'] >= PPS_ADDR_VERIFY_DAILY_CAP ) return rest_ensure_response( $unavailable );
+                $spend['n']     = (int) $spend['n'] + 1;
+                $spend['total'] = (int) ( $spend['total'] ?? 0 ) + 1;
+                update_option( 'pps_addrv_spend', $spend, false );
+
+                $q = array( 'address_line_1' => $in['street1'], 'country_code' => 'US' );
+                if ( $in['street2'] !== '' ) $q['address_line_2'] = $in['street2'];
+                if ( $in['city'] !== '' )    $q['city_locality']  = $in['city'];
+                if ( $in['state'] !== '' )   $q['state_province'] = $in['state'];
+                if ( $in['zip'] !== '' )     $q['postal_code']    = $in['zip'];
+                $resp = wp_remote_get( 'https://api.goshippo.com/v2/addresses/validate?' . http_build_query( $q, '', '&', PHP_QUERY_RFC3986 ), array(
+                    'headers' => array( 'Authorization' => 'ShippoToken ' . $cfg['pcf']['shippo_api_token'] ),
+                    'timeout' => 5,
+                ) );
+                if ( is_wp_error( $resp ) || (int) wp_remote_retrieve_response_code( $resp ) !== 200 ) {
+                    return rest_ensure_response( $unavailable );
+                }
+                $body = json_decode( (string) wp_remote_retrieve_body( $resp ), true );
+                $out  = pps_addr_verify_classify( $in, is_array( $body ) ? $body : array() );
+                if ( $out['status'] !== 'unavailable' ) set_transient( $ck, $out, 30 * DAY_IN_SECONDS );
+                return rest_ensure_response( $out );
+            } catch ( \Throwable $e ) {
+                error_log( 'PPS address verify: ' . $e->getMessage() );
+                return rest_ensure_response( $unavailable );
+            }
         },
     ) );
 

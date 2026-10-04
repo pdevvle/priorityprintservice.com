@@ -482,6 +482,8 @@ const PCF = Object.assign({
 
   proof_hardcopy_cost:35, proof_digital_cost:10, bleed_minimum:15,
   default_transit_days:4,
+  po_box_extra_days:1,           // PO Box: UPS cannot deliver; Ground Advantage takes this much longer (owner 2026-10-04)
+  address_verify:0,              // 1 = check the ship-to with Shippo at Add to Order (2¢ per US address)
   flat_bw_discount_rate:0,   // 0 = no B&W discount on flats
   shop_timezone:"America/Phoenix", shop_cutoff_hour:14, free_shipping_buffer:2,
   shippo_api_token:"", shippo_origin_zip:"85027", ship_carton_lb:45, ship_text_sheets_per_carton:900, ship_card_sheets_per_carton:400,
@@ -672,6 +674,194 @@ function ppsIsMilitaryAddress(zip, state, city) {
   return /^(APO|FPO|DPO)$/i.test(String(city || "").trim());
 }
 const PPS_MILITARY_MSG = "We can't ship to APO, FPO or DPO military addresses online. Please contact us and we'll arrange delivery.";
+// ── Address checks (2026-10-04) ──────────────────────────────────────────────────
+// Three questions about the delivery address before an order is placed. Each is ASKED,
+// never refused: the owner's rule is that nobody is blocked at ordering, so every
+// question has a "keep it as I entered it" answer that goes straight through.
+//   1. Does the ZIP belong to the state? A local USPS prefix table, no network. A ZIP
+//      can straddle a state line, which is why this asks rather than refuses.
+//   2. Is it a PO Box? UPS cannot deliver one; it ships Ground Advantage, which takes
+//      PCF.po_box_extra_days longer. That is quoted into the delivery date, not asked.
+//   3. Is it a real address? Shippo, through /pps/v1/shipping/verify, only when PPS
+//      Config → Shippo Integration → Verify Addresses is on (Shippo charges per US
+//      address). A timeout or any failure lets the order through, marked "not checked".
+// The answers ride to the order as addrCheck / proofAddrCheck, the Job Ticket says them,
+// and the daily exceptions email lists anything the customer kept against the check.
+const PPS_ZIP3_STATES = [
+  [5,5,"NY"],[6,7,"PR"],[8,8,"VI"],[9,9,"PR"],[10,27,"MA"],[28,29,"RI"],[30,38,"NH"],
+  [39,49,"ME"],[50,54,"VT"],[55,55,"MA"],[56,59,"VT"],[60,69,"CT"],[70,89,"NJ"],
+  [100,149,"NY"],[150,196,"PA"],[197,199,"DE"],[200,200,"DC"],[201,201,"VA"],[202,205,"DC"],
+  [206,219,"MD"],[220,246,"VA"],[247,268,"WV"],[270,289,"NC"],[290,299,"SC"],[300,319,"GA"],
+  [320,339,"FL"],[341,349,"FL"],[350,369,"AL"],[370,385,"TN"],[386,397,"MS"],[398,399,"GA"],
+  [400,427,"KY"],[430,459,"OH"],[460,479,"IN"],[480,499,"MI"],[500,528,"IA"],[530,549,"WI"],
+  [550,567,"MN"],[569,569,"DC"],[570,577,"SD"],[580,588,"ND"],[590,599,"MT"],[600,629,"IL"],
+  [630,658,"MO"],[660,679,"KS"],[680,693,"NE"],[700,714,"LA"],[716,729,"AR"],[730,731,"OK"],
+  [733,733,"TX"],[734,749,"OK"],[750,799,"TX"],[800,816,"CO"],[820,831,"WY"],[832,838,"ID"],
+  [840,847,"UT"],[850,865,"AZ"],[870,884,"NM"],[885,885,"TX"],[889,898,"NV"],[900,961,"CA"],
+  [967,968,"HI"],[969,969,"GU MP AS"],[970,979,"OR"],[980,994,"WA"],[995,999,"AK"],
+];
+function ppsZipStates(zip) {
+  const d = String(zip || "").replace(/[^0-9]/g, "");
+  if (d.length < 5) return null;
+  const p = Number(d.slice(0, 3));
+  for (const r of PPS_ZIP3_STATES) if (p >= r[0] && p <= r[1]) return r[2].split(" ");
+  return null;
+}
+// The state this ZIP belongs to when it is not the one chosen; "" when they agree or
+// either is unknown.
+function ppsZipStateMismatch(zip, state) {
+  const s = String(state || "").trim().toUpperCase();
+  const z = ppsZipStates(zip);
+  if (!s || !z || z.indexOf(s) !== -1) return "";
+  return z[0];
+}
+const PPS_PO_BOX_RE = /\b(?:p\.?\s*o\.?\s*b(?:ox)?|post\s*office\s*box|postal\s*box)\b\.?\s*#?\s*\d|^\s*box\s*#?\s*\d+\s*$/i;
+function ppsIsPoBox(a) {
+  a = a || {};
+  return PPS_PO_BOX_RE.test(String(a.street1 != null ? a.street1 : (a.street || ""))) || PPS_PO_BOX_RE.test(String(a.street2 || ""));
+}
+const PO_BOX_EXTRA_DAYS = Math.max(0, Math.min(10, Math.round(Number(PCF.po_box_extra_days) || 0)));
+const ADDRESS_VERIFY_ON = Number(PCF.address_verify) === 1;
+const _ADDR_CHECKS = {};   // postal answers, per address
+const _ADDR_ANSWERS = {};  // what the customer chose, per address — a second press does not ask again
+function ppsAddrParts(a, state) {
+  a = a || {};
+  return {
+    street1: String(a.street1 != null ? a.street1 : (a.street || "")).trim(),
+    street2: String(a.street2 || "").trim(),
+    city: String(a.city || "").trim(),
+    state: String(state != null ? state : (a.state || "")).trim().toUpperCase(),
+    zip: String(a.zip || "").trim(),
+  };
+}
+function ppsAddrKey(p) {
+  return [p.street1, p.street2, p.city, p.state, String(p.zip || "").replace(/[^0-9]/g, "").slice(0, 5)].join("|").toUpperCase().replace(/\s+/g, " ");
+}
+function ppsAddrLine(p) {
+  p = p || {};
+  return [p.street1, p.street2, [p.city, p.state, p.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+}
+// Put checked parts back into the shape a calculator keeps: the ship-to has street1 and
+// street2; the proof address has a single street.
+function ppsAddrApply(orig, p, proofShape) {
+  return proofShape
+    ? { ...orig, street: [p.street1, p.street2].filter(Boolean).join(" "), city: p.city, state: p.state, zip: p.zip }
+    : { ...orig, street1: p.street1, street2: p.street2, city: p.city, zip: p.zip };
+}
+async function ppsVerifyAddress(p) {
+  const key = ppsAddrKey(p);
+  if (_ADDR_CHECKS[key]) return _ADDR_CHECKS[key];
+  if (!ADDRESS_VERIFY_ON) return { status: "off" };
+  const _root = (((window.PPS_CONFIG || {}).ajaxUrl) || "").replace(/wp-admin\/admin-ajax\.php.*$/, "");
+  const ctl = typeof AbortController === "function" ? new AbortController() : null;
+  let timer = null;
+  try {
+    const r = await Promise.race([
+      fetch((_root || "/") + "wp-json/pps/v1/shipping/verify", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+        body: JSON.stringify(p), signal: ctl ? ctl.signal : undefined,
+      }),
+      new Promise(res => { timer = setTimeout(() => { if (ctl) ctl.abort(); res(null); }, 6000); }),
+    ]);
+    const j = r && r.ok ? await r.json() : null;
+    const out = j && typeof j.status === "string" ? j : { status: "unavailable" };
+    if (out.status !== "unavailable") _ADDR_CHECKS[key] = out;
+    return out;
+  } catch (e) {
+    return { status: "unavailable" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+// Ask about one address. Returns { addr, check, changed, requote } to go on with, or
+// null when the customer chose to go back and fix it. `requote` means the correction
+// moved the ZIP, the state or the PO Box answer, so the price and dates on screen were
+// computed for a different destination and must be looked at again.
+async function ppsConfirmAddress(a, state, label) {
+  const entered = ppsAddrParts(a, state);
+  const key = ppsAddrKey(entered);
+  // "Fayetteville, TN" typed into City when the state box already says TN (order 87339):
+  // the label printed "Fayetteville, TN TN". Tidied without a question.
+  const p = { ...entered, city: entered.city.replace(/[,\s]+([A-Za-z]{2})\.?$/, (m, st) => st.toUpperCase() === entered.state ? "" : m).trim() || entered.city };
+  if (_ADDR_ANSWERS[key]) return _ADDR_ANSWERS[key];
+  if (ppsIsMilitaryAddress(p.zip, p.state, p.city)) { alert(PPS_MILITARY_MSG); return null; }
+  const check = { status: "off" };
+  const mism = ppsZipStateMismatch(p.zip, p.state);
+  if (mism) {
+    if (window.confirm("The ZIP code " + p.zip + " belongs to " + mism + ", but the " + label + " says " + p.state + ".\n\n"
+      + "OK: go back and correct it\nCancel: it's right — keep it as entered")) return null;
+    check.zipState = mism;
+  }
+  const v = await ppsVerifyAddress(p);
+  check.status = v && typeof v.status === "string" ? v.status : "unavailable";
+  if (v && v.type) check.type = v.type;
+  if (v && v.unitUnconfirmed) check.unitUnconfirmed = true;
+  if (v && v.lowConfidence) check.lowConfidence = true;
+  let out = p;
+  if (check.status === "corrected" && v.suggested && v.suggested.street1) {
+    const s = ppsAddrParts(v.suggested, v.suggested.state);
+    check.suggested = s;
+    if (window.confirm("Did you mean this " + label + "?\n\n" + ppsAddrLine(s) + "\n\nYou entered:\n" + ppsAddrLine(p) + "\n\n"
+      + "OK: use the suggested address\nCancel: keep the address as I entered it")) {
+      out = s; check.used = "suggested";
+    } else {
+      check.used = "entered";
+    }
+  } else if (check.status === "unit") {
+    if (window.confirm("This " + label + " looks like it needs an apartment, suite or unit number:\n\n" + ppsAddrLine(p) + "\n\n"
+      + "OK: go back and add it\nCancel: no number is needed — keep it as entered")) return null;
+    check.used = "entered";
+  } else if (check.status === "not_found") {
+    if (window.confirm("We couldn't find this " + label + " in postal records:\n\n" + ppsAddrLine(p) + "\n\n"
+      + "OK: go back and check it\nCancel: it's right — ship to it as entered")) return null;
+    check.used = "entered";
+  }
+  const z5 = x => String(x.zip || "").replace(/[^0-9]/g, "").slice(0, 5);
+  const changed = ppsAddrKey(out) !== key;
+  const requote = changed && (out.state !== entered.state || z5(out) !== z5(entered) || ppsIsPoBox(out) !== ppsIsPoBox(entered));
+  _ADDR_ANSWERS[ppsAddrKey(out)] = { addr: out, check, changed: false, requote: false };
+  if (changed) _ADDR_CHECKS[ppsAddrKey(out)] = { status: "verified", type: check.type || "" };
+  return { addr: out, check, changed, requote };
+}
+// Job Ticket lines for what the checks found. Words for production, and the customer's
+// receipt carries them too, so they say what happened rather than accuse anyone.
+function ppsAddrTicketLines(config, result) {
+  const out = [];
+  const sh = (result && result.shipping) || {};
+  if (sh.poBox) out.push(["PO Box", "UPS can't deliver — ship Ground Advantage (" + (sh.poBoxDays || 0) + " extra business day" + (sh.poBoxDays === 1 ? "" : "s") + " in the quote)"]);
+  const say = (c, label) => {
+    if (!c) return;
+    const zipNote = c.zipState ? "ZIP belongs to " + c.zipState + ", not the state given (customer kept it)" : "";
+    if (!c.status || c.status === "off") { if (zipNote) out.push([label, zipNote]); return; }
+    const type = c.type === "residential" ? " (residential)" : c.type === "commercial" ? " (commercial)" : "";
+    let v = c.status === "verified" ? "Verified" + type
+        + (c.lowConfidence ? " \u2014 the building is not in USPS records" : "")
+        + (c.unitUnconfirmed ? " \u2014 the suite/unit number is not in postal records" : "")
+      : c.status === "corrected" ? (c.used === "suggested" ? "Corrected to the postal suggestion" + type
+          : "Customer kept their version over the postal suggestion: " + ppsAddrLine(c.suggested))
+      : c.status === "unit" ? "Postal records expect an apartment/suite number — customer said none is needed"
+      : c.status === "not_found" ? "NOT FOUND in postal records — customer kept it as entered"
+      : "Not checked (address service unavailable)";
+    if (zipNote) v += "; " + zipNote;
+    out.push([label, v]);
+  };
+  say(config.addrCheck, "Address check");
+  say(config.proofAddrCheck, "Proof address check");
+  return out;
+}
+// Under the ship-to fields: the two things the customer can see before pressing anything.
+function PpsShipNotes({ addr, state }) {
+  const mism = ppsZipStateMismatch(addr && addr.zip, state);
+  const po = PO_BOX_EXTRA_DAYS > 0 && ppsIsPoBox(addr);
+  if (!mism && !po) return null;
+  const st = { fontSize: 12, lineHeight: 1.45, color: "#92400e", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 5, padding: "6px 10px", marginTop: 8 };
+  return (
+    <div role="status" className="pps-ship-notes">
+      {mism && <div style={st}>ZIP {addr.zip} is in {mism}, not {String(state).toUpperCase()}. Please check the ZIP code and state.</div>}
+      {po && <div style={st}>PO Box: UPS can't deliver to a PO Box, so this ships by Ground Advantage &mdash; {PO_BOX_EXTRA_DAYS} more business day{PO_BOX_EXTRA_DAYS === 1 ? "" : "s"}, already counted in the delivery date below.</div>}
+    </div>
+  );
+}
 
 function getTransitDays(state, zip) {
   const _lz = String(zip || "").replace(/[^0-9]/g, "").slice(0, 5);
@@ -988,7 +1178,8 @@ function calculate(c) {
   };
 
   // Shipping & Rush
-  const transitDays = getTransitDays(c.shipState, c.shipZip);
+  const _poBoxDays = c.shipPoBox ? PO_BOX_EXTRA_DAYS : 0;
+  const transitDays = getTransitDays(c.shipState, c.shipZip) + _poBoxDays;
   // Do we know where this is going? A ZIP is what the zone map and the live UPS lookup
   // both key on, so a dated promise needs one; state alone is a coarse guess dressed up
   // as a delivery date. Clearing the ZIP used to leave the previous date on screen
@@ -1068,7 +1259,7 @@ function calculate(c) {
     q100: qty >= 100, ti,
     saleActive, saleAmount, saleLabel: (PCF.sale_label || "Sale"), totalWithoutSale,
     shipping: {
-      hasDest: _hasDest,
+      hasDest: _hasDest, poBox: !!c.shipPoBox, poBoxDays: _poBoxDays,
       estWeightLb, estCartons,
       transitDays, effectiveTransit, freeDeliveryBizDays, freeDeliveryDate: fmtDate(freeDeliveryDate), freeDeliveryYMD: toYMD(freeDeliveryDate),
       earliestBizDays, earliestDate: fmtDate(earliestDate), earliestYMD: toYMD(earliestDate), shopToday: fmtDate(shopToday), shopTodayYMD: toYMD(shopToday),
@@ -3208,6 +3399,7 @@ function buildTicket(config, result) {
   if (config.canvaLink) push("Canva link", config.canvaLink);
   if (config.canvaInstructions && String(config.canvaInstructions).trim()) push("Special instructions", String(config.canvaInstructions).trim());
   if (typeof window !== "undefined" && window.__ppsReorderOf) push("Reorder of", "order #" + window.__ppsReorderOf + " — the earlier files are in that order's Drive folder");
+  for (const _l of ppsAddrTicketLines(config, result)) t.push(_l);
   return t;
 }
 
@@ -3298,6 +3490,10 @@ function buildMetadata(config, result) {
     shipState: config.shipState,
     shipZip: config.shipAddr?.zip || "",
     shipAddr: config.shipAddr || {},
+    // What the address checks found and what the customer chose (2026-10-04).
+    addrCheck: config.addrCheck || null,
+    proofAddrCheck: config.proofAddrCheck || null,
+    poBox: !!(result && result.shipping && result.shipping.poBox),
     needByDate: config.needByDate,
     // Shipping — durations, not absolute dates
     // Physical shipment estimate. WooCommerce has nowhere to carry this on a virtual
@@ -3973,12 +4169,14 @@ function App() {
     window.addEventListener("pps-live-transit", _f);
     return () => window.removeEventListener("pps-live-transit", _f);
   }, []);
+  // A PO Box ships Ground Advantage, which takes longer than UPS Ground (owner 2026-10-04).
+  const shipPoBox = ppsIsPoBox(shipAddr);
   const result = useMemo(() => calculate({
     qty, sizeLabel, sizeMode, longEdge, shortEdge,
     frontColor, backColor, sides,
     paper, perforation, perfDir, perfPositions,
-    artwork, bleed, proof, shipState, shipZip, needByDate,
-  }), [qty, sizeLabel, sizeMode, longEdge, shortEdge, frontColor, backColor, sides, paper, perforation, perfDir, perfPositions, artwork, bleed, proof, shipState, shipZip, needByDate,ltTick]);
+    artwork, bleed, proof, shipState, shipZip, shipPoBox, needByDate,
+  }), [qty, sizeLabel, sizeMode, longEdge, shortEdge, frontColor, backColor, sides, paper, perforation, perfDir, perfPositions, artwork, bleed, proof, shipState, shipZip, shipPoBox, needByDate,ltTick]);
 
   const r = result || {};
 
@@ -4400,7 +4598,28 @@ function App() {
         + "This is what we print from, so we need your sign-off on it.");
       return;
     }
+    // Address checks (2026-10-04): the ZIP against the state, then the postal check.
+    // Asked, never refused — "keep it as entered" always goes on to the order.
     setSubmitting(true);
+    const _shipChk = await ppsConfirmAddress(shipAddr, shipState, "delivery address");
+    if (!_shipChk) { setSubmitting(false); focusShipping(); return; }
+    let _proofChk = null;
+    if (proof >= 3 && proofAddrSame === false) {
+      _proofChk = await ppsConfirmAddress(proofAddr, proofAddr && proofAddr.state, "proof address");
+      if (!_proofChk) { setSubmitting(false); return; }
+      if (_proofChk.changed) setProofAddr(p => ppsAddrApply(p, _proofChk.addr, true));
+    }
+    if (_shipChk.changed) {
+      setShipAddr(p => ppsAddrApply(p, _shipChk.addr, false));
+      setShipState(_shipChk.addr.state);
+      // A new ZIP, state or PO Box answer moves the delivery date and can move the
+      // price, and the ones on screen were worked out for the old address.
+      if (_shipChk.requote) {
+        setSubmitting(false);
+        alert("We've updated the delivery address. Please check the delivery date and price, then press Add to Order again.");
+        return;
+      }
+    }
     setUploadProgress(null);
     const config = {
       backBlank: _backBlank,
@@ -4414,6 +4633,12 @@ function App() {
       canvaLink, canvaInstructions,
       shipState, shipAddr, needByDate,
     };
+    // The addresses as checked, and what the customer answered.
+    Object.assign(config, {
+      shipAddr: ppsAddrApply(shipAddr, _shipChk.addr, false), shipState: _shipChk.addr.state, shipZip: _shipChk.addr.zip,
+      addrCheck: _shipChk.check, proofAddrCheck: _proofChk ? _proofChk.check : null,
+    });
+    if (_proofChk) config.proofAddr = ppsAddrApply(proofAddr, _proofChk.addr, true);
     const summary  = buildSummary(config, result);
     const metadata = buildMetadata(config, result);
     const rushCost = result.shipping?.rushCost || 0;
@@ -4798,6 +5023,7 @@ function App() {
               <div style={{...ST.f,marginTop:0}}><label style={ST.lbl} htmlFor="pps-ship-zip">ZIP Code</label><input id="pps-ship-zip" type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:ppsFmtZip(e.target.value)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
             </div>
             </form>
+            <PpsShipNotes addr={shipAddr} state={shipState}/>
 
             {r.shipping&&<>
               <div style={{marginTop:10,padding:mob?"8px 10px":"10px 14px",background:CC.tint,borderRadius:10,border:`1px solid ${CC.tintBorder}`}}>

@@ -243,6 +243,7 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
         'refused'  => array( 'title' => 'Checkout refused (customer could not pay)', 'items' => array() ),
         'drive'    => array( 'title' => 'Customer artwork that did not reach Google Drive', 'items' => array() ),
         'oneside'  => array( 'title' => 'Two-sided job with artwork for one side only', 'items' => array() ),
+        'address'  => array( 'title' => 'Address the postal check could not confirm (customer kept it)', 'items' => array() ),
     );
     $zone = new DateTimeZone( $tz );
     $now  = time();
@@ -296,6 +297,10 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
             if ( function_exists( 'pps_one_side_missing' ) ) {
                 $one = pps_one_side_missing( $meta, (string) $item->get_meta( '_pps_artwork_files' ) );
                 if ( $one !== '' ) $sec['oneside']['items'][] = $ref . ' — ' . $one;
+            }
+
+            if ( function_exists( 'pps_addr_check_problems' ) ) {
+                foreach ( pps_addr_check_problems( $meta ) as $p ) $sec['address']['items'][] = $ref . ' — ' . $p;
             }
 
             $lw = (string) $item->get_meta( '_pps_print_check_warn' );

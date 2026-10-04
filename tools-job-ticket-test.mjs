@@ -178,8 +178,10 @@ for (const [f, spec] of Object.entries(CALCS)) {
   if (!parts.every(Boolean)) continue;
   const tables = spec.tables.map(n => constSrc(src, n));
   if (tables.some(t => !t)) { ok(`${short}: option tables extractable`, false, spec.tables.filter((n, i) => !tables[i]).join(',')); continue; }
+  // The address-check lines (2026-10-04) are appended by buildTicket from these two.
+  const addrParts = [fnSrc(src, 'ppsAddrLine'), fnSrc(src, 'ppsAddrTicketLines')].filter(Boolean);
   let build;
-  try { build = new Function('_CFG', tables.join('\n') + '\n' + parts.join('\n') + '\nreturn buildTicket;')({}); }
+  try { build = new Function('_CFG', tables.join('\n') + '\n' + addrParts.concat(parts).join('\n') + '\nreturn buildTicket;')({}); }
   catch (e) { ok(`${short}: buildTicket evaluates`, false, String(e.message)); continue; }
   try { spec.run(build); } catch (e) { ok(`${short}: sample configs run`, false, String(e.stack || e).slice(0, 300)); }
 }
