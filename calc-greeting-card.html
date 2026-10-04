@@ -792,9 +792,12 @@ const PPS_MILITARY_MSG = "We can't ship to APO, FPO or DPO military addresses on
 //      can straddle a state line, which is why this asks rather than refuses.
 //   2. Is it a PO Box? UPS cannot deliver one; it ships Ground Advantage, which takes
 //      PCF.po_box_extra_days longer. That is quoted into the delivery date, not asked.
-//   3. Is it a real address? Shippo, through /pps/v1/shipping/verify, only when PPS
-//      Config → Shippo Integration → Verify Addresses is on (Shippo charges per US
-//      address). A timeout or any failure lets the order through, marked "not checked".
+//   3. Is it a real address? Through /pps/v1/shipping/verify (Google Address Validation,
+//      else Shippo), only when PPS Config → Shippo Integration → Verify Addresses is on.
+//      Asked when the customer FINISHES the address — focus leaves a complete address —
+//      never per keystroke, with the suggestion shown under the fields; Add to Order asks
+//      only if that never happened. A timeout or any failure lets the order through,
+//      marked "not checked". The same call carries a free ZIP → city hint, always on.
 // The answers ride to the order as addrCheck / proofAddrCheck, the Job Ticket says them,
 // and the daily exceptions email lists anything the customer kept against the check.
 const PPS_ZIP3_STATES = [
@@ -858,10 +861,11 @@ function ppsAddrApply(orig, p, proofShape) {
     ? { ...orig, street: [p.street1, p.street2].filter(Boolean).join(" "), city: p.city, state: p.state, zip: p.zip }
     : { ...orig, street1: p.street1, street2: p.street2, city: p.city, zip: p.zip };
 }
-async function ppsVerifyAddress(p) {
-  const key = ppsAddrKey(p);
+// localOnly: just the free ZIP → city hint (our own server, no outside call).
+async function ppsVerifyAddress(p, localOnly) {
+  const key = (localOnly ? "L|" : "") + ppsAddrKey(p);
   if (_ADDR_CHECKS[key]) return _ADDR_CHECKS[key];
-  if (!ADDRESS_VERIFY_ON) return { status: "off" };
+  if (!localOnly && !ADDRESS_VERIFY_ON) return { status: "off" };
   const _root = (((window.PPS_CONFIG || {}).ajaxUrl) || "").replace(/wp-admin\/admin-ajax\.php.*$/, "");
   const ctl = typeof AbortController === "function" ? new AbortController() : null;
   let timer = null;
@@ -869,7 +873,7 @@ async function ppsVerifyAddress(p) {
     const r = await Promise.race([
       fetch((_root || "/") + "wp-json/pps/v1/shipping/verify", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
-        body: JSON.stringify(p), signal: ctl ? ctl.signal : undefined,
+        body: JSON.stringify(localOnly ? { ...p, localOnly: 1 } : p), signal: ctl ? ctl.signal : undefined,
       }),
       new Promise(res => { timer = setTimeout(() => { if (ctl) ctl.abort(); res(null); }, 6000); }),
     ]);
@@ -959,16 +963,106 @@ function ppsAddrTicketLines(config, result) {
   say(config.proofAddrCheck, "Proof address check");
   return out;
 }
-// Under the ship-to fields: the two things the customer can see before pressing anything.
-function PpsShipNotes({ addr, state }) {
+// Under the ship-to fields: what the customer can see and settle before pressing anything.
+// The postal check runs when focus LEAVES a complete address (any field whose autofill
+// token starts "shipping " — the one attribute all eight calculators put on every ship-to
+// field; ids differ between copies, and the proof fields say "section-proof"), so a
+// half-typed street is never checked and each finished address costs at most one call.
+// Whatever the customer answers here is remembered, and Add to Order does not ask again.
+function PpsShipNotes({ addr, state, onApply }) {
+  const [chk, setChk] = React.useState(null);
+  const [done, setDone] = React.useState("");
+  const live = React.useRef({ addr, state });
+  live.current = { addr, state };
+  const last = React.useRef(null);
+  const run = React.useCallback(() => {
+    const p = ppsAddrParts(live.current.addr, live.current.state);
+    if (!p.street1 || !p.city || !p.state || !PPS_ZIP_RE.test(p.zip) || ppsIsMilitaryAddress(p.zip, p.state, p.city)) return;
+    const key = ppsAddrKey(p);
+    if (last.current && last.current.key === key) return;
+    last.current = { key, p, res: { status: "checking" } };
+    setChk(last.current);
+    ppsVerifyAddress(p, !ADDRESS_VERIFY_ON).then(res => {
+      if (!last.current || last.current.key !== key) return;
+      last.current = { key, p, res: res || { status: "unavailable" } };
+      setChk(last.current);
+    });
+  }, []);
+  React.useEffect(() => {
+    const onOut = (e) => {
+      const t = e.target, ac = (t && t.getAttribute && t.getAttribute("autocomplete")) || "";
+      if (/^shipping\b/.test(ac)) setTimeout(run, 0);
+    };
+    document.addEventListener("focusout", onOut);
+    return () => document.removeEventListener("focusout", onOut);
+  }, [run]);
+
+  const cur = ppsAddrParts(addr, state);
+  const curKey = ppsAddrKey(cur);
   const mism = ppsZipStateMismatch(addr && addr.zip, state);
   const po = PO_BOX_EXTRA_DAYS > 0 && ppsIsPoBox(addr);
-  if (!mism && !po) return null;
+  const c = chk && chk.key === curKey ? chk : null;
+  const res = c ? c.res : null;
+  const remember = (out, check) => {
+    if (ppsZipStateMismatch(out.zip, out.state)) return; // Add to Order still asks that one
+    _ADDR_ANSWERS[ppsAddrKey(out)] = { addr: out, check, changed: false, requote: false };
+  };
+  // After the parent has re-rendered with the new address, so the check sees it.
+  const apply = (p) => { onApply && onApply(p); setTimeout(run, 60); };
+  const flags = r => ({ type: r.type || "", ...(r.unitUnconfirmed ? { unitUnconfirmed: true } : {}), ...(r.lowConfidence ? { lowConfidence: true } : {}) });
+
   const st = { fontSize: 12, lineHeight: 1.45, color: "#92400e", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 5, padding: "6px 10px", marginTop: 8 };
+  const ok = { ...st, color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0" };
+  const btn = { font: "inherit", fontSize: 12, fontWeight: 600, padding: "4px 10px", marginTop: 6, marginRight: 8, borderRadius: 4, border: "1px solid #d97706", background: "#fff", color: "#92400e", cursor: "pointer" };
+  const btnMain = { ...btn, background: "#d97706", color: "#fff" };
+
+  let card = null;
+  if (res && done !== curKey) {
+    if (res.status === "checking") {
+      card = <div style={{ ...st, color: "#6b7280", background: "transparent", border: "none", padding: "2px 0" }}>Checking the address&hellip;</div>;
+    } else if (res.status === "corrected" && res.suggested && res.suggested.street1) {
+      const s = ppsAddrParts(res.suggested, res.suggested.state);
+      card = <div style={st} data-pps-addr="corrected">
+        Did you mean <strong>{ppsAddrLine(s)}</strong>?
+        <div>
+          <button type="button" style={btnMain} onClick={() => {
+            remember(s, { status: "corrected", used: "suggested", suggested: s, ...flags(res) });
+            _ADDR_CHECKS[ppsAddrKey(s)] = { status: "verified", ...flags(res) };
+            apply(s);
+          }}>Use this address</button>
+          <button type="button" style={btn} onClick={() => { remember(c.p, { status: "corrected", used: "entered", suggested: s, ...flags(res) }); setDone(curKey); }}>Keep mine</button>
+        </div>
+      </div>;
+    } else if (res.status === "unit") {
+      card = <div style={st} data-pps-addr="unit">
+        This address may need an apartment, suite or unit number.
+        <div>
+          <button type="button" style={btnMain} onClick={() => { const el = document.querySelector('[autocomplete="shipping address-line2"]'); if (el) el.focus(); }}>Add one</button>
+          <button type="button" style={btn} onClick={() => { remember(c.p, { status: "unit", used: "entered", ...flags(res) }); setDone(curKey); }}>None needed</button>
+        </div>
+      </div>;
+    } else if (res.status === "not_found") {
+      card = <div style={st} data-pps-addr="not_found">
+        We couldn&rsquo;t find this address in postal records. Please check the street number, street name and ZIP code.
+        <div><button type="button" style={btn} onClick={() => { remember(c.p, { status: "not_found", used: "entered", ...flags(res) }); setDone(curKey); }}>It&rsquo;s correct</button></div>
+      </div>;
+    } else if (res.status === "verified") {
+      card = <div style={ok} data-pps-addr="verified">&#10003; Address verified</div>;
+    }
+  }
+  const hint = res && res.cityHint && res.cityHint.zipCity && done !== "city:" + curKey ? res.cityHint : null;
   return (
     <div role="status" className="pps-ship-notes">
       {mism && <div style={st}>ZIP {addr.zip} is in {mism}, not {String(state).toUpperCase()}. Please check the ZIP code and state.</div>}
       {po && <div style={st}>PO Box: UPS can't deliver to a PO Box, so this ships by Ground Advantage &mdash; {PO_BOX_EXTRA_DAYS} more business day{PO_BOX_EXTRA_DAYS === 1 ? "" : "s"}, already counted in the delivery date below.</div>}
+      {hint && !mism && <div style={st} data-pps-addr="city">
+        ZIP {cur.zip.slice(0, 5)} is {hint.zipCity}. {hint.typo ? <>Did you mean <strong>{hint.zipCity}</strong>?</> : <>Is {cur.city} right?</>}
+        <div>
+          <button type="button" style={btnMain} onClick={() => apply({ ...cur, city: hint.zipCity })}>Use {hint.zipCity}</button>
+          <button type="button" style={btn} onClick={() => setDone("city:" + curKey)}>Keep {cur.city}</button>
+        </div>
+      </div>}
+      {card}
     </div>
   );
 }
@@ -6508,7 +6602,7 @@ function App() {
               <div style={{...ST.f,marginTop:0}}><label style={ST.lbl} htmlFor="pps-ship-zip">ZIP Code</label><input id="pps-ship-zip" type="text" name="shipping-postal-code" autoComplete="shipping postal-code" value={shipAddr.zip} onChange={e=>setShipAddr(p=>({...p,zip:ppsFmtZip(e.target.value)}))} placeholder="ZIP" maxLength={10} style={ST.inp}/></div>
             </div>
             </form>
-            <PpsShipNotes addr={shipAddr} state={shipState}/>
+            <PpsShipNotes addr={shipAddr} state={shipState} onApply={p => { setShipAddr(x => ppsAddrApply(x, p, false)); setShipState(p.state); }}/>
 
             {r.shipping&&<>
               <div style={{marginTop:10,padding:mob?"8px 10px":"10px 14px",background:CC.tint,borderRadius:10,border:`1px solid ${CC.tintBorder}`}}>

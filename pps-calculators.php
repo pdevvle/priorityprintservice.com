@@ -145,9 +145,14 @@ function pps_get_public_config() {
         $cfg['pcf']['shippo_enabled'] = ! empty( $cfg['pcf']['shippo_api_token'] );
         unset(
             $cfg['pcf']['shippo_api_token'],
+            $cfg['pcf']['google_address_api_key'],
             $cfg['pcf']['question_recipient_email']
         );
     }
+    // The SEO block is public business info (phone, address, rating) and was sent whole,
+    // which carried the Places API key into every calculator page's source once it was
+    // added there (found 2026-10-04). Keys stay on the server.
+    if ( isset( $cfg['seo'] ) && is_array( $cfg['seo'] ) ) unset( $cfg['seo']['places_api_key'] );
     return $cfg;
 }
 
@@ -4730,7 +4735,130 @@ function pps_addr_unit( $s ) {
 function pps_addr_verify_enabled( $cfg = null ) {
     if ( $cfg === null ) $cfg = pps_get_config();
     $v = $cfg['pcf']['address_verify'] ?? 0;
-    return ( $v === true || (string) $v === '1' ) && ! empty( $cfg['pcf']['shippo_api_token'] );
+    return ( $v === true || (string) $v === '1' ) && pps_addr_provider( $cfg ) !== '';
+}
+
+/** The Google key for address validation: its own field, else the Places key the site already has. */
+function pps_addr_google_key( $cfg ) {
+    $k = trim( (string) ( $cfg['pcf']['google_address_api_key'] ?? '' ) );
+    if ( $k === '' ) $k = trim( (string) ( $cfg['seo']['places_api_key'] ?? '' ) );
+    return $k;
+}
+
+/**
+ * Which service checks addresses: Google Address Validation when a key is set (free up to
+ * 5,000 checks a month — far above our volume), else Shippo (2 cents each), else none.
+ */
+function pps_addr_provider( $cfg ) {
+    if ( pps_addr_google_key( $cfg ) !== '' ) return 'google';
+    if ( ! empty( $cfg['pcf']['shippo_api_token'] ) ) return 'shippo';
+    return '';
+}
+
+/**
+ * What a Google Address Validation answer means, in the same terms as
+ * pps_addr_verify_classify() so the calculators cannot tell the providers apart.
+ * USPS's delivery-point answer (CASS, requested with enableUspsCass) decides when present:
+ * Y deliverable, S unit not listed, D unit missing, N not deliverable. A building Google
+ * places exactly but USPS does not deliver to by name (a campus, a dealership) is
+ * verified with lowConfidence, never "not found" — the 2026-10-04 sample had two.
+ */
+function pps_addr_verify_classify_google( array $in, array $res ) {
+    $r  = isset( $res['result'] ) && is_array( $res['result'] ) ? $res['result'] : array();
+    $v  = isset( $r['verdict'] ) && is_array( $r['verdict'] ) ? $r['verdict'] : array();
+    $md = isset( $r['metadata'] ) && is_array( $r['metadata'] ) ? $r['metadata'] : array();
+    $u  = isset( $r['uspsData'] ) && is_array( $r['uspsData'] ) ? $r['uspsData'] : array();
+    $type = ! empty( $md['poBox'] ) ? 'po_box' : ( ! empty( $md['business'] ) ? 'commercial' : ( ! empty( $md['residential'] ) ? 'residential' : '' ) );
+    $out  = array( 'status' => 'unavailable', 'type' => $type, 'reasons' => array(), 'suggested' => null );
+    if ( ! $v ) return $out;
+    $dpv    = strtoupper( (string) ( $u['dpvConfirmation'] ?? '' ) );
+    $gran   = strtoupper( (string) ( $v['validationGranularity'] ?? '' ) );
+    $action = strtoupper( (string) ( $v['possibleNextAction'] ?? '' ) );
+    $premise = in_array( $gran, array( 'PREMISE', 'SUB_PREMISE' ), true );
+    if ( $dpv !== '' ) $out['reasons'][] = 'dpv_' . strtolower( $dpv );
+    if ( $action !== '' ) $out['reasons'][] = 'next_' . strtolower( $action );
+    $missing = array_map( 'strtolower', (array) ( $r['address']['missingComponentTypes'] ?? array() ) );
+
+    // The suggestion: USPS's standardised form when we have it, else Google's postal address.
+    $sa = isset( $u['standardizedAddress'] ) && is_array( $u['standardizedAddress'] ) ? $u['standardizedAddress'] : array();
+    if ( ! empty( $sa['firstAddressLine'] ) ) {
+        $zip = trim( (string) ( $sa['zipCode'] ?? '' ) );
+        if ( $zip !== '' && ! empty( $sa['zipCodeExtension'] ) ) $zip .= '-' . trim( (string) $sa['zipCodeExtension'] );
+        $sug = array( 'street1' => trim( (string) $sa['firstAddressLine'] ), 'street2' => trim( (string) ( $sa['secondAddressLine'] ?? '' ) ),
+                      'city' => trim( (string) ( $sa['city'] ?? '' ) ), 'state' => strtoupper( trim( (string) ( $sa['state'] ?? '' ) ) ), 'zip' => $zip );
+    } else {
+        $pa = isset( $r['address']['postalAddress'] ) && is_array( $r['address']['postalAddress'] ) ? $r['address']['postalAddress'] : array();
+        $ln = array_values( (array) ( $pa['addressLines'] ?? array() ) );
+        $sug = array( 'street1' => trim( (string) ( $ln[0] ?? '' ) ), 'street2' => trim( (string) ( $ln[1] ?? '' ) ),
+                      'city' => trim( (string) ( $pa['locality'] ?? '' ) ), 'state' => strtoupper( trim( (string) ( $pa['administrativeArea'] ?? '' ) ) ),
+                      'zip' => trim( (string) ( $pa['postalCode'] ?? '' ) ) );
+    }
+    $in_unit = pps_addr_unit( trim( ( $in['street1'] ?? '' ) . ' ' . ( $in['street2'] ?? '' ) ) );
+
+    if ( $dpv === 'N' || ( $dpv === '' && $action === 'FIX' ) ) {
+        if ( $premise ) { $out['status'] = 'verified'; $out['lowConfidence'] = true; return $out; }
+        $out['status'] = 'not_found';
+        return $out;
+    }
+    if ( ( $dpv === 'D' || $action === 'CONFIRM_ADD_SUBPREMISES' || in_array( 'subpremise', $missing, true ) ) && $in_unit === '' ) {
+        $out['status'] = 'unit';
+        return $out;
+    }
+    if ( $dpv === 'S' ) $out['unitUnconfirmed'] = true;
+    if ( $dpv === '' && ! $premise ) {
+        // No USPS answer and Google could not place the building: say nothing rather than guess.
+        $out['status'] = 'unavailable';
+        return $out;
+    }
+    $z5 = static function( $z ) { return substr( preg_replace( '/[^0-9]/', '', (string) $z ), 0, 5 ); };
+    $same = $sug['street1'] === ''
+        || ( pps_addr_loose( ( $in['street1'] ?? '' ) . ' ' . ( $in['street2'] ?? '' ) ) === pps_addr_loose( $sug['street1'] . ' ' . $sug['street2'] )
+            && pps_addr_norm( $in['city'] ?? '' ) === pps_addr_norm( $sug['city'] )
+            && strtoupper( trim( (string) ( $in['state'] ?? '' ) ) ) === $sug['state']
+            && $z5( $in['zip'] ?? '' ) === $z5( $sug['zip'] ) );
+    if ( $same ) { $out['status'] = 'verified'; return $out; }
+    $out['status']    = 'corrected';
+    $out['suggested'] = $sug;
+    return $out;
+}
+
+/** The ZIP → city table (pps-zip-city.php, generated from GeoNames by tools-build-zip-city.mjs). */
+function pps_zip_city_table() {
+    static $t = null;
+    if ( $t === null ) {
+        $f = __DIR__ . '/pps-zip-city.php';
+        $t = is_readable( $f ) ? include $f : array();
+        if ( ! is_array( $t ) ) $t = array();
+    }
+    return $t;
+}
+
+/**
+ * A city that does not belong to the ZIP, as a hint — free, no outside service. The post
+ * office accepts more than one name for many ZIPs (Hollywood for 90046, New River for
+ * 85086), so any city found anywhere in the same three-digit ZIP area is accepted; only a
+ * city from somewhere else, or a misspelling, gets a hint. Never a question, never a stop.
+ *
+ * @return array|null { zipCity: the ZIP's city, typo: true when it looks like a misspelling }
+ */
+function pps_zip_city_hint( $zip, $city ) {
+    $t = pps_zip_city_table();
+    if ( empty( $t['z'] ) ) return null;
+    $z5 = substr( preg_replace( '/[^0-9]/', '', (string) $zip ), 0, 5 );
+    if ( strlen( $z5 ) !== 5 || ! isset( $t['z'][ $z5 ] ) ) return null;
+    $norm = static function( $s ) {
+        $s = strtoupper( preg_replace( '/[^A-Za-z ]+/', ' ', (string) $s ) );
+        $s = preg_replace( array( '/\bSAINT\b/', '/\bMOUNT\b/', '/\bFORT\b/' ), array( 'ST', 'MT', 'FT' ), $s );
+        return trim( preg_replace( '/\s+/', ' ', $s ) );
+    };
+    $c = $norm( $city );
+    if ( $c === '' ) return null;
+    $name = explode( '|', (string) $t['c'][ $t['z'][ $z5 ] ] )[0];
+    if ( $norm( $name ) === $c ) return null;
+    foreach ( (array) ( $t['p'][ substr( $z5, 0, 3 ) ] ?? array() ) as $i ) {
+        if ( $norm( explode( '|', (string) ( $t['c'][ $i ] ?? '' ) )[0] ) === $c ) return null;
+    }
+    return array( 'zipCity' => ucwords( strtolower( $name ) ), 'typo' => levenshtein( $c, $norm( $name ) ) <= 2 );
 }
 
 /**
@@ -5475,11 +5603,14 @@ add_action( 'rest_api_init', function() {
     ) );
 
     // POST /wp-json/pps/v1/shipping/verify — is this delivery address real? Called by the
-    // calculators once, at Add to Order. Public (most customers are guests), so: cached
-    // per address for 30 days, 10 lookups a minute per IP, a daily cap, and switched off
-    // unless PPS Config → Production → Verify Addresses is on. Every failure answers
-    // "unavailable" with HTTP 200 — the calculator then lets the order through marked
-    // not checked. Nothing here may ever stop an order.
+    // calculators when the customer finishes the address (focus leaves a complete address,
+    // never per keystroke) and, if that never happened, once at Add to Order. Two halves:
+    // a free local ZIP → city hint, always; and the postal check (Google Address
+    // Validation, else Shippo) only when PPS Config → Shippo Integration → Verify
+    // Addresses is on. Public (most customers are guests), so the outside call is cached
+    // per address for 30 days, limited to 10 a minute per IP and capped per day. Every
+    // failure answers "unavailable" with HTTP 200 — the calculator then lets the order
+    // through marked not checked. Nothing here may ever stop an order.
     register_rest_route( 'pps/v1', '/shipping/verify', array(
         'methods'             => 'POST',
         'permission_callback' => '__return_true',
@@ -5487,7 +5618,6 @@ add_action( 'rest_api_init', function() {
             $unavailable = array( 'status' => 'unavailable', 'type' => '', 'reasons' => array(), 'suggested' => null );
             try {
                 $cfg = pps_get_config();
-                if ( ! pps_addr_verify_enabled( $cfg ) ) return rest_ensure_response( array( 'status' => 'off' ) );
                 $d  = (array) $request->get_json_params();
                 $in = array(
                     'street1' => substr( sanitize_text_field( (string) ( $d['street1'] ?? '' ) ), 0, 120 ),
@@ -5496,45 +5626,76 @@ add_action( 'rest_api_init', function() {
                     'state'   => strtoupper( substr( preg_replace( '/[^A-Za-z]/', '', (string) ( $d['state'] ?? '' ) ), 0, 2 ) ),
                     'zip'     => substr( preg_replace( '/[^0-9-]/', '', (string) ( $d['zip'] ?? '' ) ), 0, 10 ),
                 );
-                if ( $in['street1'] === '' || ( $in['zip'] === '' && ( $in['city'] === '' || $in['state'] === '' ) ) ) {
-                    return rest_ensure_response( $unavailable );
+                // The free, local half: a city that does not belong to the ZIP. Always
+                // answered, whether or not a paid check is switched on.
+                $local = array();
+                $hint  = pps_zip_city_hint( $in['zip'], $in['city'] );
+                if ( $hint ) $local['cityHint'] = $hint;
+                if ( ! empty( $d['localOnly'] ) || ! pps_addr_verify_enabled( $cfg ) ) {
+                    return rest_ensure_response( array( 'status' => 'off' ) + $local );
                 }
-                $ck = 'pps_addrv1_' . md5( strtoupper( implode( '|', $in ) ) );
+                if ( $in['street1'] === '' || ( $in['zip'] === '' && ( $in['city'] === '' || $in['state'] === '' ) ) ) {
+                    return rest_ensure_response( $unavailable + $local );
+                }
+                $provider = pps_addr_provider( $cfg );
+                $ck  = 'pps_addrv1_' . $provider . '_' . md5( strtoupper( implode( '|', $in ) ) );
                 $hit = get_transient( $ck );
-                if ( is_array( $hit ) ) { $hit['cached'] = true; return rest_ensure_response( $hit ); }
+                if ( is_array( $hit ) ) { $hit['cached'] = true; return rest_ensure_response( $hit + $local ); }
 
+                // Only an outside call is limited: 10 a minute per visitor and a daily cap.
                 $ip     = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
                 $rl_key = 'pps_addrv_rl_' . md5( $ip );
                 $hits   = (int) get_transient( $rl_key );
-                if ( $hits >= 10 ) return rest_ensure_response( $unavailable );
+                if ( $hits >= 10 ) return rest_ensure_response( $unavailable + $local );
                 set_transient( $rl_key, $hits + 1, MINUTE_IN_SECONDS );
                 // One option, not one per day: today's count plus a running total, which is
-                // also how the owner sees what verification has cost.
+                // also how the owner sees what verification has used.
                 $spend = get_option( 'pps_addrv_spend', array() );
                 if ( ! is_array( $spend ) ) $spend = array();
                 $today = gmdate( 'Y-m-d' );
                 if ( ( $spend['day'] ?? '' ) !== $today ) { $spend['day'] = $today; $spend['n'] = 0; }
-                if ( (int) $spend['n'] >= PPS_ADDR_VERIFY_DAILY_CAP ) return rest_ensure_response( $unavailable );
+                if ( (int) $spend['n'] >= PPS_ADDR_VERIFY_DAILY_CAP ) return rest_ensure_response( $unavailable + $local );
                 $spend['n']     = (int) $spend['n'] + 1;
                 $spend['total'] = (int) ( $spend['total'] ?? 0 ) + 1;
+                $spend[ $provider ] = (int) ( $spend[ $provider ] ?? 0 ) + 1;
                 update_option( 'pps_addrv_spend', $spend, false );
 
-                $q = array( 'address_line_1' => $in['street1'], 'country_code' => 'US' );
-                if ( $in['street2'] !== '' ) $q['address_line_2'] = $in['street2'];
-                if ( $in['city'] !== '' )    $q['city_locality']  = $in['city'];
-                if ( $in['state'] !== '' )   $q['state_province'] = $in['state'];
-                if ( $in['zip'] !== '' )     $q['postal_code']    = $in['zip'];
-                $resp = wp_remote_get( 'https://api.goshippo.com/v2/addresses/validate?' . http_build_query( $q, '', '&', PHP_QUERY_RFC3986 ), array(
-                    'headers' => array( 'Authorization' => 'ShippoToken ' . $cfg['pcf']['shippo_api_token'] ),
-                    'timeout' => 5,
-                ) );
+                if ( $provider === 'google' ) {
+                    // The key travels in a header, never the URL, so it cannot land in a log.
+                    $resp = wp_remote_post( 'https://addressvalidation.googleapis.com/v1:validateAddress', array(
+                        'headers' => array( 'Content-Type' => 'application/json', 'X-Goog-Api-Key' => pps_addr_google_key( $cfg ) ),
+                        'body'    => wp_json_encode( array(
+                            'address' => array(
+                                'regionCode'         => 'US',
+                                'addressLines'       => array_values( array_filter( array( $in['street1'], $in['street2'] ), 'strlen' ) ),
+                                'locality'           => $in['city'],
+                                'administrativeArea' => $in['state'],
+                                'postalCode'         => $in['zip'],
+                            ),
+                            'enableUspsCass' => true,
+                        ) ),
+                        'timeout' => 5,
+                    ) );
+                } else {
+                    $q = array( 'address_line_1' => $in['street1'], 'country_code' => 'US' );
+                    if ( $in['street2'] !== '' ) $q['address_line_2'] = $in['street2'];
+                    if ( $in['city'] !== '' )    $q['city_locality']  = $in['city'];
+                    if ( $in['state'] !== '' )   $q['state_province'] = $in['state'];
+                    if ( $in['zip'] !== '' )     $q['postal_code']    = $in['zip'];
+                    $resp = wp_remote_get( 'https://api.goshippo.com/v2/addresses/validate?' . http_build_query( $q, '', '&', PHP_QUERY_RFC3986 ), array(
+                        'headers' => array( 'Authorization' => 'ShippoToken ' . $cfg['pcf']['shippo_api_token'] ),
+                        'timeout' => 5,
+                    ) );
+                }
                 if ( is_wp_error( $resp ) || (int) wp_remote_retrieve_response_code( $resp ) !== 200 ) {
-                    return rest_ensure_response( $unavailable );
+                    return rest_ensure_response( $unavailable + $local );
                 }
                 $body = json_decode( (string) wp_remote_retrieve_body( $resp ), true );
-                $out  = pps_addr_verify_classify( $in, is_array( $body ) ? $body : array() );
+                $body = is_array( $body ) ? $body : array();
+                $out  = $provider === 'google' ? pps_addr_verify_classify_google( $in, $body ) : pps_addr_verify_classify( $in, $body );
+                $out['provider'] = $provider;
                 if ( $out['status'] !== 'unavailable' ) set_transient( $ck, $out, 30 * DAY_IN_SECONDS );
-                return rest_ensure_response( $out );
+                return rest_ensure_response( $out + $local );
             } catch ( \Throwable $e ) {
                 error_log( 'PPS address verify: ' . $e->getMessage() );
                 return rest_ensure_response( $unavailable );

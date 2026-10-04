@@ -68,6 +68,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-order-junctures-test.mjs`, `tools-order-inputs-test.mjs`, `tools-server-junctures-test.php`, `tools-upload-endpoint-test.php` | The 2026-09-27 juncture sweep (see "Junctures" below). Browser, all eight: a four-digit ZIP stops the order before upload and names the fix; a picked date that can no longer be met stops Add to Order; the quote re-runs when the shop day moves (Playwright clock); a hardcopy proof address survives an edit and a blank one stops the order. Inputs: bad values from links, reorders, defaults and the config either become a makeable job or say why. PHP: closures/timezone that cannot stop checkout, the stale-quote rule (and that a Friday cart is fine on Saturday), PPS-Spec for flats, art status by artwork option, the add-to-cart guards, the sticker paper report; the upload endpoint's sniffing. The live code fails 56/64, 32/33, 17/18 and 3/9. |
 | `tools-requote-storeapi-test.php` | **A cart paid on a later day, through WooCommerce's real request sequence.** Lifts the re-quote, its hooks and the price hook out of `pps-calculators.php` and drives them through a fake WooCommerce that sequences requests as 10.9 does (block checkout preload, checkout PUT, Place Order → `validate_cart` → 409 carrying the totals already computed, the session written only by `set_session()`; classic cart page and classic checkout in a second child process without `REST_REQUEST`). Every scenario checks two promises: the amount charged is the last total a response put on screen, and the order goes through by the second press. The 2026-09-27 code fails 17 of 28. |
 | `tools-address-check-test.mjs`, `tools-address-verify-test.php` | **The delivery address is checked, and nothing about it can block an order** (2026-10-04, see "Shipping address checks" below). Browser, all eight: a ZIP in another state is shown under the field and asked about at Add to Order (go back, or keep it); a state typed into City is tidied; a PO Box quotes exactly one more transit day and says so; with Verify Addresses on, Shippo's answers become questions ("Did you mean …?", missing apartment, not found), a correction that moves the ZIP re-quotes before ordering, and a failure or a 6 s timeout orders marked "not checked"; the proof address gets the same; every answer reaches the metadata and Job Ticket. PHP: Shippo answers classified as tuned on 50 real orders, the endpoint's gating, cache, per-IP limit and daily cap, PO Box recognition, one ship-to per cart, the digest section. The live builds fail every check. |
+| `pps-zip-city.php`, `tools-build-zip-city.mjs` | The free ZIP → city table behind the address hint (41,488 ZIPs, ~1.2 MB, a PHP array so opcache holds it). GENERATED from GeoNames US postal codes (CC BY 4.0, www.geonames.org) — never edit; rebuild with `node tools-build-zip-city.mjs US.txt > pps-zip-city.php`. Only loaded by `/pps/v1/shipping/verify`; refuses to run outside WordPress. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
@@ -218,6 +219,46 @@ question with a "keep it as entered" answer (owner: nobody is blocked at orderin
 
 The confirm dialogs read "OK: … / Cancel: …" because they are `window.confirm`, like the
 two-sided-flat question. OK is always the fixing path (go back / use the suggestion).
+
+**Second version, DRAFT on the branch, not deployed (owner 2026-10-04: "suggest after the
+street address is completed, not every keystroke"; cheaper provider):**
+
+- **Checked when the address is finished.** `PpsShipNotes` listens for focus leaving any
+  `pps-ship-*` field; when the address is complete (street, city, state, valid ZIP) and has
+  not been checked, it calls `/shipping/verify` once and shows the answer under the fields —
+  "Did you mean …? [Use this address] [Keep mine]", "may need an apartment number [Add one]
+  [None needed]", "couldn't find this address [It's correct]", "✓ Address verified". Typing
+  never calls anything. An answer given there is remembered (`_ADDR_ANSWERS`), so Add to Order
+  does not ask again; Add to Order still asks if the customer never left the fields (autofill
+  then a straight click). Taking a suggestion that moves the ZIP updates the quote before
+  ordering, so the "check the price and press again" stop rarely happens.
+- **Google Address Validation is the provider when a Google key is set**
+  (`pcf.google_address_api_key`, else the SEO tab's `places_api_key`), Shippo otherwise.
+  Server-side `validateAddress` with `enableUspsCass` is Google's "Pro" SKU: 5,000 free a
+  month, $17/1,000 after — our volume is ~300–450 a month, so $0. The key goes in the
+  `X-Goog-Api-Key` header, never the URL. `pps_addr_verify_classify_google()` maps USPS's
+  delivery-point answer (Y/S/D/N) and Google's verdict onto the same statuses as Shippo, with
+  the same leniency (a building Google places but USPS does not deliver by name is verified,
+  low confidence). `pps_addrv_spend` counts per provider. The Google key needs "Address
+  Validation API" enabled in its Cloud project.
+- **Free ZIP → city hint, always on**, whether or not verification is: the same call with
+  `localOnly` returns `cityHint` from `pps-zip-city.php` — a misspelt city ("Pheonix") gets
+  "Did you mean Phoenix? [Use Phoenix] [Keep …]"; any city in the same three-digit ZIP area is
+  accepted (85086 is "Phoenix" in GeoNames, "New River" to the shop), and it never asks or stops.
+- **Keys out of the browser**: `pps_get_public_config()` sent the whole SEO block to every
+  calculator page, Places API key included; it now drops `seo.places_api_key` and the new
+  Google key. If a Places key was set, rotate it after this deploys.
+
+Gates: `tools-address-check-test.mjs` (inline section: nothing sent while typing, one call
+on leaving, suggestion taken/kept/none-needed settled without a second question, the city
+hint with verification off) and `tools-address-verify-test.php` (Google classifier on the
+sample's shapes, the city hint, provider choice, key in header, localOnly spends nothing,
+key scrub).
+
+**Deployed 2026-10-04 at `482509f`**: production (3 PHP files + all eight calculators) and
+staging (3 PHP files + seven calculators). Staging's saddle was left as the proofer session's
+build (`claude/proofer-parity-staging`, PR #56), which predates this, so the address checks are
+not on staging's saddle until that branch takes them. Verify Addresses is OFF on both sites.
 
 ## Shop closures — the calculators are copies, not modules
 
