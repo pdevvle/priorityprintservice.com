@@ -104,6 +104,16 @@ async function addToOrder(s, waitMs = 8000) {
   }
   await s.p.waitForTimeout(400);
 }
+// Some builds open with the shipping section collapsed; a customer opens it to type.
+async function showShip(p) {
+  const visible = () => p.evaluate(() => { const e = document.querySelector('[autocomplete="shipping address-line1"]'); return !!(e && e.offsetParent); });
+  if (await visible()) return;
+  await p.evaluate(() => {
+    const h = [...document.querySelectorAll('button[aria-expanded="false"]')].find(x => /Shipping & Delivery/.test(x.textContent || ''));
+    h && h.click();
+  });
+  for (let i = 0; i < 20 && !(await visible()); i++) await p.waitForTimeout(150);
+}
 const ticket = (m) => (m && Array.isArray(m.ticket) ? m.ticket : []).map(x => x[0] + ': ' + x[1]).join('\n');
 const shipText = (p) => p.evaluate(() => { const n = document.querySelector('.pps-ship-notes'); return n ? n.textContent : ''; });
 
@@ -219,17 +229,18 @@ for (const file of PAGES) {
     // Owner 2026-10-04: suggest once the street address is complete, not on every keystroke.
     const sug = { street1: '100 N 1ST AVE STE 2', street2: '', city: 'PHOENIX', state: 'AZ', zip: '85003-1902' };
     const s = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { name: 'Test', street1: '', city: 'Phoenix', zip: '85003' } }, { verify: { status: 'corrected', type: 'commercial', suggested: sug } });
-    await s.p.click('#pps-ship-street1');
+    await showShip(s.p);
+    await s.p.click('[autocomplete="shipping address-line1"]');
     await s.p.keyboard.type('100 N 1st Ave', { delay: 30 });
     await s.p.waitForTimeout(800);
     ok(`${file}: typing the street sends nothing`, s.verifyHits === 0, 'calls while typing=' + s.verifyHits);
-    await s.p.locator('#pps-ship-street1').blur();
+    await s.p.locator('[autocomplete="shipping address-line1"]').blur();
     await s.p.waitForTimeout(800);
     const card = await s.p.evaluate(() => { const n = document.querySelector('[data-pps-addr="corrected"]'); return n ? n.textContent : ''; });
     ok(`${file}: leaving the finished address checks it once and shows the suggestion under the fields`, s.verifyHits === 1 && /Did you mean 100 N 1ST AVE STE 2/.test(card), 'calls=' + s.verifyHits + ' card=' + JSON.stringify(card.slice(0, 80)));
     await s.p.evaluate(() => { const b = [...document.querySelectorAll('[data-pps-addr="corrected"] button')].find(x => /Use this address/.test(x.textContent)); b && b.click(); });
     await s.p.waitForTimeout(700);
-    const f1 = await s.p.inputValue('#pps-ship-street1'), fz = await s.p.inputValue('#pps-ship-zip');
+    const f1 = await s.p.inputValue('[autocomplete="shipping address-line1"]'), fz = await s.p.inputValue('#pps-ship-zip');
     ok(`${file}: "Use this address" fills the fields`, f1 === '100 N 1ST AVE STE 2' && fz === '85003-1902', f1 + ' / ' + fz);
     await addToOrder(s);
     ok(`${file}: and Add to Order neither asks again nor calls again`, !!s.meta && s.dialogs.length === 0 && s.verifyHits === 1 && s.meta.addrCheck?.used === 'suggested' && s.meta.shipAddr?.street1 === '100 N 1ST AVE STE 2',
@@ -237,6 +248,7 @@ for (const file of PAGES) {
     await s.ctx.close();
 
     const k = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...AZ } }, { verify: { status: 'corrected', type: 'commercial', suggested: sug } });
+    await showShip(k.p);
     await k.p.click('#pps-ship-zip'); await k.p.locator('#pps-ship-zip').blur();
     await k.p.waitForTimeout(800);
     await k.p.evaluate(() => { const b = [...document.querySelectorAll('[data-pps-addr="corrected"] button')].find(x => /Keep mine/.test(x.textContent)); b && b.click(); });
@@ -248,6 +260,7 @@ for (const file of PAGES) {
     await k.ctx.close();
 
     const u = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...AZ } }, { verify: { status: 'unit', type: 'residential' } });
+    await showShip(u.p);
     await u.p.click('#pps-ship-city'); await u.p.locator('#pps-ship-city').blur();
     await u.p.waitForTimeout(800);
     await u.p.evaluate(() => { const b = [...document.querySelectorAll('[data-pps-addr="unit"] button')].find(x => /None needed/.test(x.textContent)); b && b.click(); });
@@ -258,6 +271,7 @@ for (const file of PAGES) {
     // Verification off: the same moment asks our own server for the free ZIP → city hint.
     const h = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...AZ, city: 'Pheonix' } },
       { verify: null, local: (b) => b.localOnly ? { status: 'off', cityHint: { zipCity: 'Phoenix', typo: true } } : { status: 'off' } });
+    await showShip(h.p);
     await h.p.click('#pps-ship-city'); await h.p.locator('#pps-ship-city').blur();
     await h.p.waitForTimeout(800);
     const hint = await h.p.evaluate(() => { const n = document.querySelector('[data-pps-addr="city"]'); return n ? n.textContent : ''; });
