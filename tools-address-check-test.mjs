@@ -45,10 +45,11 @@ const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromi
 
 // answers: what each dialog gets, in order — true = OK, false = Cancel; OK when exhausted.
 // verify: the endpoint's reply (object), 'fail' for HTTP 500, 'hang' for no reply; null = verification off.
-async function open(file, reorder, { answers = [], verify = null } = {}) {
+// local: the reply to a localOnly (free ZIP → city) request, counted separately.
+async function open(file, reorder, { answers = [], verify = null, local = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1100 }, timezoneId: 'America/Phoenix' });
   const p = await ctx.newPage();
-  const s = { ctx, p, dialogs: [], errs: [], meta: null, verifyHits: 0, verifyBodies: [] };
+  const s = { ctx, p, dialogs: [], errs: [], meta: null, verifyHits: 0, verifyBodies: [], localHits: 0 };
   p.on('dialog', async d => {
     s.dialogs.push(d.message());
     if (d.type() !== 'confirm') return d.accept();
@@ -63,6 +64,11 @@ async function open(file, reorder, { answers = [], verify = null } = {}) {
     if (on) window.PPS_CONFIG.calc = { pcf: { address_verify: 1 } };
   }, [b64(reorder), verify !== null]);
   await p.route('**/wp-json/pps/v1/shipping/verify', async (route) => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    if (body.localOnly) {
+      s.localHits++;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(local ? local(body) : { status: 'off' }) });
+    }
     s.verifyHits++;
     s.verifyBodies.push(route.request().postData() || '');
     if (verify === 'hang') return; // never answered
@@ -206,6 +212,61 @@ for (const file of PAGES) {
     await addToOrder(f);
     ok(`${file}: the check failing orders anyway, marked not checked`, !!f.meta && f.dialogs.length === 0 && f.meta.addrCheck?.status === 'unavailable' && /Not checked/.test(ticket(f.meta)), 'posted=' + !!f.meta);
     await f.ctx.close();
+  }
+
+  console.log('\n── ' + file + ' / checked when the address is finished, settled in place ──');
+  {
+    // Owner 2026-10-04: suggest once the street address is complete, not on every keystroke.
+    const sug = { street1: '100 N 1ST AVE STE 2', street2: '', city: 'PHOENIX', state: 'AZ', zip: '85003-1902' };
+    const s = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { name: 'Test', street1: '', city: 'Phoenix', zip: '85003' } }, { verify: { status: 'corrected', type: 'commercial', suggested: sug } });
+    await s.p.click('#pps-ship-street1');
+    await s.p.keyboard.type('100 N 1st Ave', { delay: 30 });
+    await s.p.waitForTimeout(800);
+    ok(`${file}: typing the street sends nothing`, s.verifyHits === 0, 'calls while typing=' + s.verifyHits);
+    await s.p.locator('#pps-ship-street1').blur();
+    await s.p.waitForTimeout(800);
+    const card = await s.p.evaluate(() => { const n = document.querySelector('[data-pps-addr="corrected"]'); return n ? n.textContent : ''; });
+    ok(`${file}: leaving the finished address checks it once and shows the suggestion under the fields`, s.verifyHits === 1 && /Did you mean 100 N 1ST AVE STE 2/.test(card), 'calls=' + s.verifyHits + ' card=' + JSON.stringify(card.slice(0, 80)));
+    await s.p.evaluate(() => { const b = [...document.querySelectorAll('[data-pps-addr="corrected"] button')].find(x => /Use this address/.test(x.textContent)); b && b.click(); });
+    await s.p.waitForTimeout(700);
+    const f1 = await s.p.inputValue('#pps-ship-street1'), fz = await s.p.inputValue('#pps-ship-zip');
+    ok(`${file}: "Use this address" fills the fields`, f1 === '100 N 1ST AVE STE 2' && fz === '85003-1902', f1 + ' / ' + fz);
+    await addToOrder(s);
+    ok(`${file}: and Add to Order neither asks again nor calls again`, !!s.meta && s.dialogs.length === 0 && s.verifyHits === 1 && s.meta.addrCheck?.used === 'suggested' && s.meta.shipAddr?.street1 === '100 N 1ST AVE STE 2',
+      'posted=' + !!s.meta + ' dialogs=' + s.dialogs.length + ' calls=' + s.verifyHits + ' ' + JSON.stringify(s.meta && s.meta.addrCheck));
+    await s.ctx.close();
+
+    const k = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...AZ } }, { verify: { status: 'corrected', type: 'commercial', suggested: sug } });
+    await k.p.click('#pps-ship-zip'); await k.p.locator('#pps-ship-zip').blur();
+    await k.p.waitForTimeout(800);
+    await k.p.evaluate(() => { const b = [...document.querySelectorAll('[data-pps-addr="corrected"] button')].find(x => /Keep mine/.test(x.textContent)); b && b.click(); });
+    await k.p.waitForTimeout(300);
+    const gone = await k.p.evaluate(() => !document.querySelector('[data-pps-addr="corrected"]'));
+    await addToOrder(k);
+    ok(`${file}: "Keep mine" closes the suggestion and Add to Order does not ask again`, gone && !!k.meta && k.dialogs.length === 0 && k.meta.addrCheck?.used === 'entered' && k.meta.shipAddr?.street1 === '100 N 1st Ave',
+      'gone=' + gone + ' posted=' + !!k.meta + ' dialogs=' + k.dialogs.length);
+    await k.ctx.close();
+
+    const u = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...AZ } }, { verify: { status: 'unit', type: 'residential' } });
+    await u.p.click('#pps-ship-city'); await u.p.locator('#pps-ship-city').blur();
+    await u.p.waitForTimeout(800);
+    await u.p.evaluate(() => { const b = [...document.querySelectorAll('[data-pps-addr="unit"] button')].find(x => /None needed/.test(x.textContent)); b && b.click(); });
+    await addToOrder(u);
+    ok(`${file}: "None needed" on a missing unit is remembered at Add to Order`, !!u.meta && u.dialogs.length === 0 && u.meta.addrCheck?.status === 'unit' && u.meta.addrCheck?.used === 'entered', 'posted=' + !!u.meta + ' dialogs=' + u.dialogs.length);
+    await u.ctx.close();
+
+    // Verification off: the same moment asks our own server for the free ZIP → city hint.
+    const h = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...AZ, city: 'Pheonix' } },
+      { verify: null, local: (b) => b.localOnly ? { status: 'off', cityHint: { zipCity: 'Phoenix', typo: true } } : { status: 'off' } });
+    await h.p.click('#pps-ship-city'); await h.p.locator('#pps-ship-city').blur();
+    await h.p.waitForTimeout(800);
+    const hint = await h.p.evaluate(() => { const n = document.querySelector('[data-pps-addr="city"]'); return n ? n.textContent : ''; });
+    ok(`${file}: with verification off, a misspelt city gets the free ZIP → city hint`, /ZIP 85003 is Phoenix\. Did you mean Phoenix\?/.test(hint) && h.localHits === 1, JSON.stringify(hint.slice(0, 80)) + ' localCalls=' + h.localHits);
+    await h.p.evaluate(() => { const b = [...document.querySelectorAll('[data-pps-addr="city"] button')].find(x => /Use Phoenix/.test(x.textContent)); b && b.click(); });
+    await h.p.waitForTimeout(500);
+    ok(`${file}: "Use Phoenix" fixes the city field`, (await h.p.inputValue('#pps-ship-city')) === 'Phoenix');
+    ok(`${file}: no page errors in the inline flow`, !s.errs.length && !k.errs.length && !u.errs.length && !h.errs.length, s.errs.concat(k.errs, u.errs, h.errs).join(' | '));
+    await h.ctx.close();
   }
 
   console.log('\n── ' + file + ' / a hardcopy proof sent elsewhere ──');

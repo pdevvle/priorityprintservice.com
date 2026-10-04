@@ -203,9 +203,13 @@ function pps_default_config() {
             // PO Box delivery: UPS does not deliver to one, so it ships Ground Advantage,
             // which takes this many more business days (owner 2026-10-04).
             'po_box_extra_days'                 => 1,
-            // Check delivery addresses with Shippo at Add to Order (1 = on). Shippo charges
-            // per US address checked, so it is off until the owner turns it on.
+            // Check delivery addresses when the customer finishes typing them (1 = on).
+            // Google Address Validation when a Google key is set (5,000 free a month),
+            // else Shippo (2 cents each). Off until the owner turns it on.
             'address_verify'                    => 0,
+            // Google Cloud key with "Address Validation API" enabled. Blank = use the
+            // SEO tab's Places API key. Server-side only; never sent to the browser.
+            'google_address_api_key'            => '',
             // Site-wide sale discount. 0 = sale off; >0 = subtotal multiplied by (1 - pct).
             // Excludes shipping, rush surcharge, and turnaround add-ons. Per-preset rows
             // can override these via the Presets admin (Sale fields).
@@ -690,7 +694,7 @@ function pps_config_render_page() {
                     $cfg['pcf'][ $key ] = sanitize_text_field( $val );
                 } elseif ( $key === 'proof_url' ) {
                     $cfg['pcf'][ $key ] = esc_url_raw( trim( (string) $val ) );
-                } elseif ( in_array( $key, array( 'shippo_api_token', 'shippo_origin_zip', 'rc_all4_vals' ) ) ) {
+                } elseif ( in_array( $key, array( 'shippo_api_token', 'shippo_origin_zip', 'rc_all4_vals', 'google_address_api_key' ) ) ) {
                     $cfg['pcf'][ $key ] = sanitize_text_field( $val );
                 } else {
                     $cfg['pcf'][ $key ] = floatval( $val );
@@ -1609,7 +1613,8 @@ function pps_config_tab_production( $cfg ) {
         'Shippo Integration' => array(
             'shippo_api_token'     => array( 'API Token', '' ),
             'shippo_origin_zip'    => array( 'Origin ZIP', '' ),
-            'address_verify'       => array( 'Verify Addresses (1 = on, 2¢ each)', '' ),
+            'address_verify'       => array( 'Verify Addresses (1 = on)', '' ),
+            'google_address_api_key' => array( 'Google Address Key (blank = Places key)', '' ),
             'po_box_extra_days'    => array( 'PO Box Extra Transit', 'days' ),
         ),
     );
@@ -1621,7 +1626,7 @@ function pps_config_tab_production( $cfg ) {
         echo '<table class="pps-ss"><tbody>';
         foreach ( $fields as $key => $meta ) {
             $val  = $pcf[ $key ] ?? '';
-            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip', 'sale_label', 'question_recipient_email', 'proof_url' ) ) ? 'text' : 'number';
+            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip', 'sale_label', 'question_recipient_email', 'proof_url', 'google_address_api_key' ) ) ? 'text' : 'number';
             $step = ( is_numeric( $val ) && ( is_float( $val + 0 ) || strpos( (string) $val, '.' ) !== false ) ) ? '0.001' : '1';
             echo '<tr>';
             echo '<td style="font-weight:600;white-space:nowrap;width:1%;padding-right:10px;font-size:12px">' . esc_html( $meta[0] ) . '</td>';

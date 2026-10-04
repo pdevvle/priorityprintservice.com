@@ -41,10 +41,11 @@ function lift( $src, $name ) {
     return $at === false ? '' : lift_at( $src, $at );
 }
 function sanitize_text_field( $s ) { return trim( strip_tags( (string) $s ) ); }
-define( 'MINUTE_IN_SECONDS', 60 ); define( 'DAY_IN_SECONDS', 86400 );
+define( 'MINUTE_IN_SECONDS', 60 ); define( 'DAY_IN_SECONDS', 86400 ); define( 'PPS_TEST', 1 );
 
 $want = array( 'pps_clean_text', 'pps_is_po_box', 'pps_addr_norm', 'pps_addr_loose', 'pps_addr_unit', 'pps_addr_verify_classify',
-               'pps_addr_verify_enabled', 'pps_addr_check_problems', 'pps_prefill_customer_shipping', 'pps_prefill_from_cart' );
+               'pps_addr_verify_enabled', 'pps_addr_check_problems', 'pps_prefill_customer_shipping', 'pps_prefill_from_cart',
+               'pps_addr_google_key', 'pps_addr_provider', 'pps_addr_verify_classify_google', 'pps_zip_city_table', 'pps_zip_city_hint' );
 $have = array();
 foreach ( $want as $n ) { $f = lift( $src, $n ); if ( $f !== '' ) { eval( $f ); $have[ $n ] = true; } }
 $missing = array_diff( $want, array_keys( $have ) );
@@ -110,6 +111,50 @@ ok( 'a PO Box in line 2 counts', pps_is_po_box( 'Acme Inc', 'PO Box 9' ) );
 ok( 'the order note says to ship a PO Box Ground Advantage', strpos( $src, "PO BOX — UPS cannot deliver; ship Ground Advantage." ) !== false );
 ok( 'the order note carries line 2 (it dropped the unit: 87287, 87251, 87300)', strpos( $src, "\$addr['street1'] . ( \$addr['street2'] !== '' ? ', ' . \$addr['street2'] : '' )" ) !== false );
 
+// ── 2b. Google Address Validation answers ──
+echo "── classifying Google's answers ──\n";
+$g = function( $dpv, $gran, $action, $sa = null, $md = array( 'business' => true ), $missing = array() ) {
+    $r = array( 'result' => array( 'verdict' => array( 'validationGranularity' => $gran, 'possibleNextAction' => $action ), 'metadata' => $md,
+        'address' => array( 'missingComponentTypes' => $missing ) ) );
+    if ( $dpv !== null ) $r['result']['uspsData'] = array( 'dpvConfirmation' => $dpv, 'standardizedAddress' => $sa ?: array() );
+    return $r;
+};
+$lv = array( 'firstAddressLine' => '7000 LINDELL RD', 'city' => 'LAS VEGAS', 'state' => 'NV', 'zipCode' => '89118', 'zipCodeExtension' => '4702' );
+$c = pps_addr_verify_classify_google( array( 'street1' => '7000 Lindell Road', 'city' => 'Las Vegas', 'state' => 'NV', 'zip' => '89118' ), $g( 'Y', 'PREMISE', 'ACCEPT', $lv ) );
+ok( 'Google: deliverable and only standardised is verified, commercial', $c['status'] === 'verified' && $c['type'] === 'commercial', json_encode( $c ) );
+$c = pps_addr_verify_classify_google( array( 'street1' => '222 Disk Drive', 'city' => 'Rapid City', 'state' => 'AZ', 'zip' => '57701' ),
+    $g( 'Y', 'PREMISE', 'CONFIRM', array( 'firstAddressLine' => '222 DISK DR', 'city' => 'RAPID CITY', 'state' => 'SD', 'zipCode' => '57701', 'zipCodeExtension' => '7805' ) ) );
+ok( 'Google: a wrong state is a correction with the USPS form suggested (87238)', $c['status'] === 'corrected' && $c['suggested']['state'] === 'SD' && $c['suggested']['zip'] === '57701-7805', json_encode( $c ) );
+$c = pps_addr_verify_classify_google( array( 'street1' => '99999 Nowhere Rd', 'city' => 'Phoenix', 'state' => 'AZ', 'zip' => '85003' ), $g( 'N', 'ROUTE', 'FIX' ) );
+ok( 'Google: not deliverable and not placed is not_found', $c['status'] === 'not_found', json_encode( $c ) );
+$c = pps_addr_verify_classify_google( array( 'street1' => '501 S Nedderman Dr', 'street2' => 'Life Sciences Bldg Rm 206', 'city' => 'Arlington', 'state' => 'TX', 'zip' => '76010' ), $g( 'N', 'PREMISE', 'CONFIRM', null, array() ) );
+ok( 'Google: a building Google places but USPS does not deliver by name is verified, low confidence (87321)', $c['status'] === 'verified' && ! empty( $c['lowConfidence'] ) && $c['suggested'] === null, json_encode( $c ) );
+$c = pps_addr_verify_classify_google( array( 'street1' => '100 Main St', 'city' => 'Springfield', 'state' => 'IL', 'zip' => '62701' ), $g( 'D', 'PREMISE', 'CONFIRM_ADD_SUBPREMISES', null, array( 'residential' => true ) ) );
+ok( 'Google: a missing apartment number asks for one', $c['status'] === 'unit' && $c['type'] === 'residential', json_encode( $c ) );
+$c = pps_addr_verify_classify_google( array( 'street1' => '100 Main St', 'street2' => 'Apt 4', 'city' => 'Springfield', 'state' => 'IL', 'zip' => '62701' ), $g( 'D', 'PREMISE', 'CONFIRM_ADD_SUBPREMISES' ) );
+ok( 'Google: but not when one was typed', $c['status'] !== 'unit', json_encode( $c ) );
+$c = pps_addr_verify_classify_google( array( 'street1' => '3510 Scotts Lane', 'street2' => 'STE 3019', 'city' => 'Philadelphia', 'state' => 'PA', 'zip' => '19129' ),
+    $g( 'S', 'PREMISE', 'ACCEPT', array( 'firstAddressLine' => '3510 SCOTTS LN STE 3019', 'city' => 'PHILADELPHIA', 'state' => 'PA', 'zipCode' => '19129' ) ) );
+ok( 'Google: a suite USPS does not list is verified and noted (87318)', $c['status'] === 'verified' && ! empty( $c['unitUnconfirmed'] ), json_encode( $c ) );
+$c = pps_addr_verify_classify_google( array( 'street1' => '1 X', 'zip' => '85003' ), $g( null, 'OTHER', 'FIX' ) );
+ok( 'Google: no USPS answer and no building found says nothing rather than guess', in_array( $c['status'], array( 'unavailable', 'not_found' ), true ), json_encode( $c ) );
+ok( 'Google: an empty answer is unavailable', pps_addr_verify_classify_google( array(), array() )['status'] === 'unavailable' );
+$c = pps_addr_verify_classify_google( array( 'street1' => 'PO Box 12', 'city' => 'Phoenix', 'state' => 'AZ', 'zip' => '85001' ), $g( 'Y', 'PREMISE', 'ACCEPT', null, array( 'poBox' => true ) ) );
+ok( 'Google: a PO Box is typed po_box', $c['type'] === 'po_box', json_encode( $c ) );
+
+// ── 2c. The free ZIP → city hint ──
+echo "── ZIP → city ──\n";
+ok( 'the ZIP → city table loads', count( pps_zip_city_table()['z'] ?? array() ) > 40000 );
+ok( 'the right city gives no hint', pps_zip_city_hint( '85003', 'Phoenix' ) === null );
+ok( 'case, punctuation and Saint/St do not matter', pps_zip_city_hint( '63101', 'St. Louis' ) === null && pps_zip_city_hint( '85003', 'PHOENIX' ) === null );
+ok( 'another accepted name in the same ZIP area gives no hint (the shop: New River 85086, which GeoNames files as Phoenix)', pps_zip_city_hint( '85086', 'New River' ) === null );
+$h = pps_zip_city_hint( '85003', 'Pheonix' );
+ok( 'a misspelling is offered the ZIP\'s city', is_array( $h ) && $h['zipCity'] === 'Phoenix' && $h['typo'] === true, json_encode( $h ) );
+$h = pps_zip_city_hint( '85003', 'Tucson' );
+ok( 'a city from elsewhere gets a hint that is not called a typo', is_array( $h ) && $h['zipCity'] === 'Phoenix' && $h['typo'] === false, json_encode( $h ) );
+ok( 'an unknown ZIP or a blank city gives no hint', pps_zip_city_hint( '00000', 'X' ) === null && pps_zip_city_hint( '85003', '' ) === null );
+ok( 'the table is attributed to GeoNames (CC BY 4.0)', strpos( file_get_contents( __DIR__ . '/pps-zip-city.php', false, null, 0, 400 ), 'GeoNames' ) !== false );
+
 // ── 3. The endpoint ──
 echo "── /pps/v1/shipping/verify ──\n";
 $at = strpos( $src, "register_rest_route( 'pps/v1', '/shipping/verify'" );
@@ -126,6 +171,8 @@ function set_transient( $k, $v, $t = 0 ) { $GLOBALS['tr'][ $k ] = $v; return tru
 function get_option( $k, $d = false ) { return $GLOBALS['opt'][ $k ] ?? $d; }
 function update_option( $k, $v, $a = null ) { $GLOBALS['opt'][ $k ] = $v; return true; }
 function wp_remote_get( $url, $args ) { $GLOBALS['http'][] = array( $url, $args ); $r = $GLOBALS['http_reply']; if ( $r instanceof \Throwable ) throw $r; return $r; }
+function wp_remote_post( $url, $args ) { $GLOBALS['http'][] = array( $url, $args, 'POST' ); $r = $GLOBALS['http_reply']; if ( $r instanceof \Throwable ) throw $r; return $r; }
+function wp_json_encode( $x ) { return json_encode( $x ); }
 class WP_Error { public $m; function __construct( $c = '', $m = '' ) { $this->m = $m; } }
 function is_wp_error( $x ) { return $x instanceof WP_Error; }
 function wp_remote_retrieve_response_code( $r ) { return is_array( $r ) ? ( $r['code'] ?? 0 ) : 0; }
@@ -140,7 +187,7 @@ ok( 'off by default: answers "off" and spends nothing', ( $r['status'] ?? '' ) =
 $GLOBALS['cfg']['pcf']['address_verify'] = 1.0;   // the admin form saves numbers as floats
 $GLOBALS['cfg']['pcf']['shippo_api_token'] = '';
 $r = $cb( new FakeReq( $addr ) );
-ok( 'on without a Shippo token: still "off"', ( $r['status'] ?? '' ) === 'off' && ! $GLOBALS['http'], json_encode( $r ) );
+ok( 'on without any provider key: still "off"', ( $r['status'] ?? '' ) === 'off' && ! $GLOBALS['http'], json_encode( $r ) );
 $GLOBALS['cfg']['pcf']['shippo_api_token'] = 'shippo_live_x';
 $_SERVER['REMOTE_ADDR'] = '203.0.113.9';
 $GLOBALS['http_reply'] = $good;
@@ -186,6 +233,39 @@ ok( 'the daily cap stops spending for the day', ( $r['status'] ?? '' ) === 'unav
 $GLOBALS['opt']['pps_addrv_spend']['day'] = '2000-01-01';
 $cb( new FakeReq( array( 'street1' => '9 Cap St', 'zip' => '85003' ) ) );
 ok( 'and resets the next day, keeping the running total', count( $GLOBALS['http'] ) === $spent0 + 1 && $GLOBALS['opt']['pps_addrv_spend']['n'] === 1 && $GLOBALS['opt']['pps_addrv_spend']['total'] === 1000, json_encode( $GLOBALS['opt']['pps_addrv_spend'] ) );
+
+// Google as the provider
+$GLOBALS['tr'] = array(); $GLOBALS['opt'] = array(); $GLOBALS['http'] = array();
+$_SERVER['REMOTE_ADDR'] = '203.0.113.50';
+$GLOBALS['cfg'] = array( 'pcf' => array( 'shippo_api_token' => 'shippo_live_x', 'address_verify' => 1 ), 'seo' => array( 'places_api_key' => 'AIzaPLACES' ) );
+ok( 'a Google key (the Places key, when no dedicated one) makes Google the provider, ahead of Shippo', pps_addr_provider( $GLOBALS['cfg'] ) === 'google' );
+$GLOBALS['http_reply'] = array( 'code' => 200, 'body' => json_encode( $g( 'Y', 'PREMISE', 'ACCEPT', $lv ) ) );
+$r = $cb( new FakeReq( $addr ) );
+$call = $GLOBALS['http'][0] ?? array( '', array(), '' );
+$sent = json_decode( $call[1]['body'] ?? '{}', true );
+ok( 'Google: one POST to validateAddress, key in the header and never the URL',
+    count( $GLOBALS['http'] ) === 1 && ( $call[2] ?? '' ) === 'POST' && $call[0] === 'https://addressvalidation.googleapis.com/v1:validateAddress'
+    && ( $call[1]['headers']['X-Goog-Api-Key'] ?? '' ) === 'AIzaPLACES' && strpos( $call[0], 'AIza' ) === false, $call[0] );
+ok( 'Google: asks for the USPS answer, US region, the lines as typed',
+    ! empty( $sent['enableUspsCass'] ) && ( $sent['address']['regionCode'] ?? '' ) === 'US' && ( $sent['address']['addressLines'] ?? array() ) === array( '7000 Lindell Road' )
+    && ( $sent['address']['postalCode'] ?? '' ) === '89118', json_encode( $sent ) );
+ok( 'Google: answers verified and says which provider', ( $r['status'] ?? '' ) === 'verified' && ( $r['provider'] ?? '' ) === 'google', json_encode( $r ) );
+ok( 'and the spend counts it under google', ( $GLOBALS['opt']['pps_addrv_spend']['google'] ?? 0 ) === 1 );
+$GLOBALS['cfg']['pcf']['google_address_api_key'] = 'AIzaDEDICATED';
+ok( 'a dedicated address key wins over the Places key', pps_addr_google_key( $GLOBALS['cfg'] ) === 'AIzaDEDICATED' );
+
+// The free half, always on
+$GLOBALS['http'] = array();
+$r = $cb( new FakeReq( array( 'street1' => '100 N 1st Ave', 'city' => 'Pheonix', 'state' => 'AZ', 'zip' => '85003', 'localOnly' => 1 ) ) );
+ok( 'localOnly answers the city hint and spends nothing', ( $r['status'] ?? '' ) === 'off' && ( $r['cityHint']['zipCity'] ?? '' ) === 'Phoenix' && ! $GLOBALS['http'], json_encode( $r ) );
+$GLOBALS['cfg']['pcf']['address_verify'] = 0;
+$r = $cb( new FakeReq( array( 'street1' => '100 N 1st Ave', 'city' => 'Pheonix', 'state' => 'AZ', 'zip' => '85003' ) ) );
+ok( 'with verification off the hint still comes back, free', ( $r['status'] ?? '' ) === 'off' && ( $r['cityHint']['typo'] ?? false ) === true && ! $GLOBALS['http'], json_encode( $r ) );
+
+// Keys never reach the browser
+ok( 'the public config drops the Google address key and the Places key',
+    strpos( $src, "\$cfg['pcf']['google_address_api_key'],\n            \$cfg['pcf']['question_recipient_email']" ) !== false
+    && strpos( $src, "unset( \$cfg['seo']['places_api_key'] );" ) !== false );
 
 // ── 4. One ship-to per cart ──
 echo "── the checkout's address and the order's ship-to ──\n";
