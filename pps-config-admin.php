@@ -200,6 +200,12 @@ function pps_default_config() {
             // Shippo integration (leave token empty to use static transit map)
             'shippo_api_token'                  => '',
             'shippo_origin_zip'                 => '85027',
+            // PO Box delivery: UPS does not deliver to one, so it ships Ground Advantage,
+            // which takes this many more business days (owner 2026-10-04).
+            'po_box_extra_days'                 => 1,
+            // Check delivery addresses with Shippo at Add to Order (1 = on). Shippo charges
+            // per US address checked, so it is off until the owner turns it on.
+            'address_verify'                    => 0,
             // Site-wide sale discount. 0 = sale off; >0 = subtotal multiplied by (1 - pct).
             // Excludes shipping, rush surcharge, and turnaround add-ons. Per-preset rows
             // can override these via the Presets admin (Sale fields).
@@ -1603,6 +1609,8 @@ function pps_config_tab_production( $cfg ) {
         'Shippo Integration' => array(
             'shippo_api_token'     => array( 'API Token', '' ),
             'shippo_origin_zip'    => array( 'Origin ZIP', '' ),
+            'address_verify'       => array( 'Verify Addresses (1 = on, 2¢ each)', '' ),
+            'po_box_extra_days'    => array( 'PO Box Extra Transit', 'days' ),
         ),
     );
 

@@ -67,6 +67,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-order-fields-test.mjs` | **What the customer typed and chose reaches the order, on all eight.** A Canva order with no link is stopped; with one, the link and Special Instructions ride in the metadata and on the Job Ticket; a reorder says "Reorder of order #…"; a flat given a 4-page PDF names the pages that will not print; a booklet batch holding a PDF is refused and one holding an unreadable image names it. `PPS_FIELDS_PAGES` selects builds — the live builds failed every check. |
 | `tools-order-junctures-test.mjs`, `tools-order-inputs-test.mjs`, `tools-server-junctures-test.php`, `tools-upload-endpoint-test.php` | The 2026-09-27 juncture sweep (see "Junctures" below). Browser, all eight: a four-digit ZIP stops the order before upload and names the fix; a picked date that can no longer be met stops Add to Order; the quote re-runs when the shop day moves (Playwright clock); a hardcopy proof address survives an edit and a blank one stops the order. Inputs: bad values from links, reorders, defaults and the config either become a makeable job or say why. PHP: closures/timezone that cannot stop checkout, the stale-quote rule (and that a Friday cart is fine on Saturday), PPS-Spec for flats, art status by artwork option, the add-to-cart guards, the sticker paper report; the upload endpoint's sniffing. The live code fails 56/64, 32/33, 17/18 and 3/9. |
 | `tools-requote-storeapi-test.php` | **A cart paid on a later day, through WooCommerce's real request sequence.** Lifts the re-quote, its hooks and the price hook out of `pps-calculators.php` and drives them through a fake WooCommerce that sequences requests as 10.9 does (block checkout preload, checkout PUT, Place Order → `validate_cart` → 409 carrying the totals already computed, the session written only by `set_session()`; classic cart page and classic checkout in a second child process without `REST_REQUEST`). Every scenario checks two promises: the amount charged is the last total a response put on screen, and the order goes through by the second press. The 2026-09-27 code fails 17 of 28. |
+| `tools-address-check-test.mjs`, `tools-address-verify-test.php` | **The delivery address is checked, and nothing about it can block an order** (2026-10-04, see "Shipping address checks" below). Browser, all eight: a ZIP in another state is shown under the field and asked about at Add to Order (go back, or keep it); a state typed into City is tidied; a PO Box quotes exactly one more transit day and says so; with Verify Addresses on, Shippo's answers become questions ("Did you mean …?", missing apartment, not found), a correction that moves the ZIP re-quotes before ordering, and a failure or a 6 s timeout orders marked "not checked"; the proof address gets the same; every answer reaches the metadata and Job Ticket. PHP: Shippo answers classified as tuned on 50 real orders, the endpoint's gating, cache, per-IP limit and daily cap, PO Box recognition, one ship-to per cart, the digest section. The live builds fail every check. |
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
@@ -174,6 +175,49 @@ and each gated by a test that was first run against the live build and failed th
   and perfect bound kept page 1 of a multi-page PDF dropped on a slot. Both aligned with
   the saddle. `tools-order-fields-test.mjs` gates the field and batch items (the live
   builds fail all 45 field checks and all six batch checks).
+
+## Shipping address checks (2026-10-04)
+
+Until now nothing asked whether a delivery address was real: the calculator checked four
+fields were filled and the ZIP looked like a ZIP; the server re-checked the ZIP's shape. A
+sample of the 50 most recent orders through Shippo (2026-10-04) found one real error —
+87238, a South Dakota ZIP entered as AZ — plus campus/office suites postal data does not
+list, a campus ZIP filed under another, a state typed into City ("Fayetteville, TN" with TN
+chosen), and order notes that dropped line 2. Now, on all eight calculators and every one a
+question with a "keep it as entered" answer (owner: nobody is blocked at ordering):
+
+- **ZIP vs state**, local, free: `PPS_ZIP3_STATES` (USPS prefix → state). Shown under the
+  field as soon as both are filled, asked at Add to Order. Asked, not refused, because a ZIP
+  can straddle a state line. Military prefixes are not in the table (already refused).
+- **PO Box**: `ppsIsPoBox()` adds `PCF.po_box_extra_days` (default 1) to `transitDays` —
+  Ground Advantage, since UPS cannot deliver one. See MASTER_PRICING_LOGIC "PO Box delivery".
+- **Postal check**: `POST /pps/v1/shipping/verify` → Shippo v2 `addresses/validate`, once, at
+  Add to Order, **only when PPS Config → Shippo Integration → "Verify Addresses" is 1**
+  (`pcf.address_verify`, default 0 — Shippo charges 2¢ per US address). Public endpoint,
+  so: 30-day cache per address, 10 lookups/minute/IP, `PPS_ADDR_VERIFY_DAILY_CAP` (300) a day;
+  running count in `wp_options['pps_addrv_spend']`. Every failure answers `unavailable` with
+  HTTP 200 and the calculator orders, marked "not checked"; it also gives up after 6 s.
+  `pps_addr_verify_classify()` was tuned on the sample: abbreviations, case, a street suffix,
+  a direction word, `#` vs `Apt` and an added ZIP+4 are NOT corrections; a building postal
+  data does not hold (low confidence / `address_found_non_postal_match`) is verified, never
+  "not found", and gets no suggestion (its suggestion drops the building name); a suite the
+  data does not list (`address_confirmed_invalid_secondary`) is noted on the ticket, not
+  asked about; a different street, city, state or 5-digit ZIP is "Did you mean …?". A
+  correction that moves the ZIP, state or PO Box answer stops once ("check the date and
+  price, then press again"), because the quote on screen was for another destination.
+- **Hardcopy proof address** sent elsewhere gets the same questions, and the military refusal.
+- **What reaches the order**: `addrCheck`, `proofAddrCheck`, `poBox` in the metadata; Job
+  Ticket lines "Address check: …", "PO Box: …"; the order note names a PO Box and now carries
+  line 2; the daily email has "Address the postal check could not confirm (customer kept
+  it)" (`pps_addr_check_problems()`).
+- **One ship-to per cart**: the checkout used to be pre-filled from the calculator line
+  added LAST while the order shipped to the line added FIRST. `pps_prefill_from_cart()` now
+  fills it from the first calculator line with a whole address (the order's rule), after an
+  edit has removed the old line, and again when a line is removed — only when the cart's
+  ship-to actually changed, so an address typed over at checkout is left alone.
+
+The confirm dialogs read "OK: … / Cancel: …" because they are `window.confirm`, like the
+two-sided-flat question. OK is always the fixing path (go back / use the suggestion).
 
 ## Shop closures — the calculators are copies, not modules
 
