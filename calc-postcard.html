@@ -960,13 +960,18 @@ function ppsAddrTicketLines(config, result) {
 // field; ids differ between copies, and the proof fields say "section-proof"), so a
 // half-typed street is never checked and each finished address costs at most one call.
 // Whatever the customer answers here is remembered, and Add to Order does not ask again.
+// Hooks come from the destructure at the top of each calculator, never from the React
+// global: a WordPress page can load a second React after ours (wp-element, a block
+// plugin), which takes over window.React, and a hook called on that copy throws "Invalid
+// hook call" (minified #321) — the whole calculator fell over each time Shipping & Delivery
+// opened (production, 2026-10-05). useMemo, not useCallback: three of the eight lack it.
 function PpsShipNotes({ addr, state, onApply }) {
-  const [chk, setChk] = React.useState(null);
-  const [done, setDone] = React.useState("");
-  const live = React.useRef({ addr, state });
+  const [chk, setChk] = useState(null);
+  const [done, setDone] = useState("");
+  const live = useRef({ addr, state });
   live.current = { addr, state };
-  const last = React.useRef(null);
-  const run = React.useCallback(() => {
+  const last = useRef(null);
+  const run = useMemo(() => () => {
     const p = ppsAddrParts(live.current.addr, live.current.state);
     if (!p.street1 || !p.city || !p.state || !PPS_ZIP_RE.test(p.zip) || ppsIsMilitaryAddress(p.zip, p.state, p.city)) return;
     const key = ppsAddrKey(p);
@@ -979,7 +984,7 @@ function PpsShipNotes({ addr, state, onApply }) {
       setChk(last.current);
     });
   }, []);
-  React.useEffect(() => {
+  useEffect(() => {
     const onOut = (e) => {
       const t = e.target, ac = (t && t.getAttribute && t.getAttribute("autocomplete")) || "";
       if (/^shipping\b/.test(ac)) setTimeout(run, 0);
