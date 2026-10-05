@@ -134,6 +134,29 @@ for (const file of PAGES) {
     await t.ctx.close();
   }
 
+  console.log('\n── ' + file + ' / a second React on the page ──');
+  {
+    // Production, 2026-10-05: a WordPress page loaded another React after the calculator,
+    // which took over window.React; the address panel called its hooks on that copy and
+    // every open of Shipping & Delivery threw "Invalid hook call" (#321) and blanked the
+    // calculator. The harness only ever had one React, so nothing caught it.
+    const s = await open(file, { ...JOB, shipState: 'AZ', shipAddr: { ...AZ, city: 'Pheonix' } },
+      { local: (b) => ({ status: 'off', cityHint: { zipCity: 'Phoenix', typo: true } }) });
+    await s.p.addScriptTag({ url: '/node_modules/react/umd/react.development.js' });
+    await s.p.waitForTimeout(300);
+    const swapped = await s.p.evaluate(() => typeof React !== 'undefined' && /development/.test(String(React.version) + (React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED ? ' development' : '')));
+    await showShip(s.p);
+    await s.p.click('#pps-ship-city').catch(() => {});
+    await s.p.locator('#pps-ship-city').blur().catch(() => {});
+    await s.p.waitForTimeout(900);
+    const txt = await s.p.evaluate(() => document.body.innerText);
+    const hint = await s.p.evaluate(() => !!document.querySelector('[data-pps-addr="city"]'));
+    ok(`${file}: with a second React loaded after ours, Shipping & Delivery opens and the address panel works`,
+      swapped && !/display error/i.test(txt) && hint && !s.errs.some(e => /321|hook/i.test(e)),
+      'swapped=' + swapped + ' displayError=' + /display error/i.test(txt) + ' hint=' + hint + ' ' + s.errs.join(' | ').slice(0, 160));
+    await s.ctx.close();
+  }
+
   console.log('\n── ' + file + ' / the state typed into City ──');
   {
     // Order 87339: "Fayetteville, TN" in City with TN chosen printed "Fayetteville, TN TN".
