@@ -1015,6 +1015,12 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
     pps_paylink_log_outcome( 'minted', array(
         'token'        => $res['token'],
         'pay_source'   => $res['pay_source'],
+        // How many line items the command carried. Recorded because without it
+        // the log cannot answer "has the multi-product form ever been used, and
+        // did it work" -- which is exactly the question a week after shipping
+        // it, and exactly the kind of thing this log has had to be taught twice
+        // before (the empty 401 detail, the missing OAuth failure).
+        'lines'        => isset( $body['lines'] ) && is_array( $body['lines'] ) ? count( $body['lines'] ) : 1,
         'conversation' => '' !== $conversation,
     ) );
     pps_paylink_queue_note( $conversation, $note );
