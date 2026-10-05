@@ -2,9 +2,12 @@
 
 **For:** the owner (setting it up) and any Claude session (supporting it).
 **Written:** 2026-10-05. **Code:** draft on `claude/woocommerce-domain-search-ly4vff`
-(`a45bfa3`, `773e1d3`), source on the integration branch (`dbc569a`). **Not yet deployed.**
-The first version (ZIP vs state, PO Box, Shippo check at Add to Order) is live since
-2026-10-04 at `482509f`, with Verify Addresses **off**.
+(`a45bfa3`, `773e1d3`), source on the integration branch (`dbc569a`). **Deployed
+2026-10-05 at `8de48ce`** to staging and production, with Verify Addresses still **off** —
+so today only the free ZIP → city hint is new for customers. The postal check starts when
+the key is pasted in and Verify Addresses is set to 1 (section 3).
+The first version (ZIP vs state, PO Box, Shippo check at Add to Order) has been live since
+2026-10-04 at `482509f`.
 
 ---
 
@@ -54,9 +57,9 @@ Three limits keep it from ever running up a bill:
 
 ## 3. Setting it up
 
-**Before you start:** the draft must be deployed first, because the new field doesn't exist
-on the live site until then. Tell Claude "deploy the address check draft". It goes to staging,
-then production. The proofer session's saddle build on staging is left alone.
+**Before you start:** nothing. The code was deployed on 2026-10-05, so the **Google Address
+Key** field is already in PPS Config on both sites. (Staging's saddle is still the proofer
+session's build and does not have the checks. Try them on any other staging calculator.)
 
 1. **Open the Google Cloud project.** Go to console.cloud.google.com and sign in with the
    shop's Google account. If a Places API key already exists for the review-rating refresh,

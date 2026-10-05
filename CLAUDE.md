@@ -222,7 +222,7 @@ question with a "keep it as entered" answer (owner: nobody is blocked at orderin
 The confirm dialogs read "OK: … / Cancel: …" because they are `window.confirm`, like the
 two-sided-flat question. OK is always the fixing path (go back / use the suggestion).
 
-**Second version, DRAFT on the branch, not deployed (owner 2026-10-04: "suggest after the
+**Second version, deployed 2026-10-05 at `8de48ce` (owner 2026-10-04: "suggest after the
 street address is completed, not every keystroke"; cheaper provider):**
 
 - **Checked when the address is finished.** `PpsShipNotes` listens for focus leaving any
@@ -261,6 +261,16 @@ key scrub).
 staging (3 PHP files + seven calculators). Staging's saddle was left as the proofer session's
 build (`claude/proofer-parity-staging`, PR #56), which predates this, so the address checks are
 not on staging's saddle until that branch takes them. Verify Addresses is OFF on both sites.
+
+**Second version deployed 2026-10-05 at `8de48ce`**, pull-based, same shape: production (3 PHP
+files: `pps-calculators.php`, `pps-config-admin.php`, the new `pps-zip-city.php`, plus all
+eight calculators) and staging (the same 3 PHP files plus seven calculators; staging's saddle is
+still the proofer build). Before deploying, both servers' PHP matched `482509f` byte for byte.
+Verified on both sites: `/shipping/verify` with `localOnly` answers the city hint
+("Pheonix" 85003 → Phoenix, typo), the deploy log/archive shows every calculator at its
+`8de48ce` size. Gates at deploy: server 87/87, browser all eight with no failures. Verify
+Addresses is still OFF on both sites. The postal check waits on the owner's Google key
+(docs/ADDRESS_VALIDATION_SETUP.md §3), so only the free city hint is new for customers.
 
 ## Shop closures — the calculators are copies, not modules
 
