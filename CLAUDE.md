@@ -262,6 +262,20 @@ staging (3 PHP files + seven calculators). Staging's saddle was left as the proo
 build (`claude/proofer-parity-staging`, PR #56), which predates this, so the address checks are
 not on staging's saddle until that branch takes them. Verify Addresses is OFF on both sites.
 
+**Where the draft stands (2026-10-05).** Another session deployed `773e1d3` to production at
+08:45 UTC. Its PHP is backward compatible and is still live (the endpoint, the Google
+classifier, `pps-zip-city.php`, the key scrub). Its calculators were not: every one crashed
+with React error #321 as soon as Shipping & Delivery opened. The cause was that `PpsShipNotes`
+called `React.useState` and friends through the global, and WordPress loads a second React
+after the calculator, which takes `window.React` over. Hooks from that copy have no renderer,
+so they throw. The production calculators were rolled back to `482509f` at 10:24 UTC.
+
+**Rule: hooks always come from the destructure at the top of the calculator**
+(`const { useState, … } = React;`), never `React.useX`. `f845122` fixes this, and
+`tools-address-check-test.mjs` now loads a second React on the page; it fails on `773e1d3`.
+`f845122` is on staging (seven calculators; the saddle is still the proofer's build).
+Production gets it only when the owner says so.
+
 ## Shop closures — the calculators are copies, not modules
 
 Closures live at the **top level** of the injected config, beside `pcf`, never inside

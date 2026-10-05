@@ -2,7 +2,15 @@
 
 **For:** the owner (setting it up) and any Claude session (supporting it).
 **Written:** 2026-10-05. **Code:** draft on `claude/woocommerce-domain-search-ly4vff`
-(`a45bfa3`, `773e1d3`), source on the integration branch (`dbc569a`). **Not yet deployed.**
+(`a45bfa3`, `773e1d3`, then the fix `f845122`). Source is on the integration branch (`5fa8c85`).
+
+**Where it is deployed:**
+
+- The server half is live on production.
+- The calculator half is on **staging only** (`f845122`).
+- `773e1d3`'s calculators crashed with React error #321 on production. They were rolled
+  back the same morning.
+- Production calculators stay on `482509f` until the owner says go.
 The first version (ZIP vs state, PO Box, Shippo check at Add to Order) is live since
 2026-10-04 at `482509f`, with Verify Addresses **off**.
 
@@ -54,9 +62,10 @@ Three limits keep it from ever running up a bill:
 
 ## 3. Setting it up
 
-**Before you start:** the draft must be deployed first, because the new field doesn't exist
-on the live site until then. Tell Claude "deploy the address check draft". It goes to staging,
-then production. The proofer session's saddle build on staging is left alone.
+**Before you start:** the draft's calculators must be on production first. The admin fields
+are already there, but the inline suggestions are not. It is already on staging to try. Tell
+Claude "deploy the address check draft to production". The proofer session's saddle build on
+staging is left alone.
 
 1. **Open the Google Cloud project.** Go to console.cloud.google.com and sign in with the
    shop's Google account. If a Places API key already exists for the review-rating refresh,
@@ -117,7 +126,7 @@ screen to Claude.
 ## 6. For a Claude session supporting this
 
 The design is in `CLAUDE.md` → "Shipping address checks". The gates are
-`tools-address-check-test.mjs` (browser, all eight calculators; 241/241 at draft) and
+`tools-address-check-test.mjs` (browser, all eight calculators; 249/249 at `f845122`, including a second React on the page) and
 `tools-address-verify-test.php` (server; 87/87).
 
 Pieces:
