@@ -1930,13 +1930,20 @@ function pps_ajax_quote_question() {
     // depth in case wp_insert_post stores HTML escapes oddly.
     $post_title = sprintf( '%s — %s', $name, $calc_label !== '' ? $calc_label : 'Calculator' );
     if ( $total > 0 ) $post_title .= sprintf( ' · $%s', number_format( $total, 2 ) );
+    // Same judgment as the intake forms (pps-intake.php): a submission that reads as the
+    // October 2026 phishing run is kept as a draft and mailed to nobody.
+    $spam = function_exists( 'pps_intake_spam_reason' )
+        ? pps_intake_spam_reason( array( 'name' => $name, 'phone' => $phone, 'message' => $message ) )
+        : '';
+
     $post_id = wp_insert_post( array(
         'post_type'    => 'pps_question',
-        'post_status'  => 'publish',
+        'post_status'  => $spam === '' ? 'publish' : 'draft',
         'post_title'   => wp_strip_all_tags( $post_title ),
         'post_content' => $message,
     ), true );
     if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+        if ( $spam !== '' ) update_post_meta( $post_id, '_pps_q_spam', $spam );
         update_post_meta( $post_id, '_pps_q_name',         $name );
         update_post_meta( $post_id, '_pps_q_email',        $email );
         update_post_meta( $post_id, '_pps_q_phone',        $phone );
@@ -1952,44 +1959,38 @@ function pps_ajax_quote_question() {
         update_post_meta( $post_id, '_pps_q_user_ip',      isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '' );
     }
 
+    if ( $spam !== '' ) {
+        // Answer as though it worked, like the honeypot: a bot told it failed retries.
+        wp_send_json_success( array( 'message' => 'Thanks! We received your question and emailed you a confirmation. Expect a reply within 1 business day.' ) );
+    }
+
     $sent_staff = wp_mail( $recipient, $subject, $staff_body, $staff_headers );
     if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
         update_post_meta( $post_id, '_pps_q_email_sent', $sent_staff ? 1 : 0 );
     }
 
     // ── Compose customer confirmation ──
-    $site_name = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
-    $cust_subject = sprintf( 'We got your question — %s', $site_name );
-    $cust_lines = array();
-    $cust_lines[] = sprintf( 'Hi %s,', $name );
-    $cust_lines[] = '';
-    $cust_lines[] = 'Thanks for reaching out about your quote. We typically respond within 1 business day.';
-    $cust_lines[] = '';
-    $cust_lines[] = 'For reference, here is the quote you were looking at:';
-    $cust_lines[] = '';
-    if ( $calc_label !== '' ) $cust_lines[] = 'Calculator: ' . $calc_label;
-    if ( $total > 0 )         $cust_lines[] = 'Total:      $' . number_format( $total, 2 );
-    if ( $qty > 0 )           $cust_lines[] = 'Quantity:   ' . number_format( $qty );
-    if ( $summary !== '' ) {
-        $cust_lines[] = '';
-        foreach ( explode( "\n", $summary ) as $line ) $cust_lines[] = $line;
+    // It carries NOTHING the visitor posted: not the name, the question, the calculator
+    // label, the spec summary or the reopen link. Every one of those is free text (or a
+    // URL whose query is) sent to an address nobody has verified, so echoing any of them
+    // lets a bot have this server mail its words to a stranger under the shop's name — what
+    // the quote form's "Hi <name>" did in October 2026. Staff get the full detail above.
+    // Capped site-wide, because the per-IP limit does not hold a bot that rotates addresses.
+    if ( ! function_exists( 'pps_intake_confirm_allowed' ) || pps_intake_confirm_allowed() ) {
+        $site_name  = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
+        $cust_lines = array(
+            'Hello,',
+            '',
+            'Thanks for reaching out about your quote. We have your question and typically respond within 1 business day.',
+            '',
+            sprintf( '— The %s team', $site_name ),
+        );
+        wp_mail( $email, sprintf( 'We got your question — %s', $site_name ), implode( "\n", $cust_lines ),
+            array( 'Content-Type: text/plain; charset=UTF-8' ) );
     }
-    if ( $reorder_url !== '' ) {
-        $cust_lines[] = '';
-        $cust_lines[] = 'Re-open this quote in the calculator:';
-        $cust_lines[] = $reorder_url;
-    }
-    $cust_lines[] = '';
-    $cust_lines[] = 'Your question:';
-    $cust_lines[] = $message;
-    $cust_lines[] = '';
-    $cust_lines[] = sprintf( '— The %s team', $site_name );
-
-    $cust_headers = array( 'Content-Type: text/plain; charset=UTF-8' );
-    wp_mail( $email, $cust_subject, implode( "\n", $cust_lines ), $cust_headers );
 
     if ( $sent_staff ) {
-        wp_send_json_success( array( 'message' => 'Thanks! We received your question and emailed you a copy. Expect a reply within 1 business day.' ) );
+        wp_send_json_success( array( 'message' => 'Thanks! We received your question and emailed you a confirmation. Expect a reply within 1 business day.' ) );
     } else {
         wp_send_json_error( array( 'message' => 'Sorry — there was a problem submitting your question. Please try again or call us directly.' ) );
     }

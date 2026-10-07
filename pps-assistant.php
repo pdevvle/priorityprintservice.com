@@ -992,7 +992,8 @@ function pps_assistant_customer_transcript( array $session ) {
  *
  * Off by default — it is a courtesy, not a requirement, and an unwanted receipt for a
  * two-line chat is noise. Contains ONLY what they already saw: no reason, no summary, no
- * routing state, nothing about how the request was handled internally.
+ * routing state, nothing about how the request was handled internally. Sent only to an
+ * address verified against an order in this chat (see below).
  */
 function pps_assistant_send_customer_transcript( array $session ) {
     $cfg = pps_assistant_config();
@@ -1000,12 +1001,18 @@ function pps_assistant_send_customer_transcript( array $session ) {
 
     $to = (string) ( $session['email'] ?? '' );
     if ( ! is_email( $to ) ) return false;
+    // Only to an address the visitor has PROVED is theirs (verify_customer matched it to a
+    // real order). The transcript repeats what they typed, so sending it to whatever address
+    // was entered at the chat gate lets anyone have this server mail their words to a
+    // stranger under the shop's name — the intake forms' October 2026 phishing run.
+    $verified = strtolower( (string) ( $session['verified_email'] ?? '' ) );
+    if ( empty( $session['verified_order'] ) || $verified === '' || ! hash_equals( $verified, strtolower( $to ) ) ) return false;
+    if ( function_exists( 'pps_intake_confirm_allowed' ) && ! pps_intake_confirm_allowed() ) return false;
 
     $site = function_exists( 'get_bloginfo' ) ? wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES ) : 'Priority Print Service';
-    $them = trim( (string) ( $session['name'] ?? '' ) );
 
     $lines   = array();
-    $lines[] = $them !== '' ? sprintf( 'Hi %s,', $them ) : 'Hi,';
+    $lines[] = 'Hello,';
     $lines[] = '';
     $lines[] = 'Here is a copy of your chat with us, for your records.';
     $lines[] = '';
