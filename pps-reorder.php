@@ -500,9 +500,21 @@ function pps_order_lookup_shortcode() {
         $c_email   = sanitize_email( wp_unslash( $_POST['pps_contact_email'] ?? '' ) );
         $c_message = sanitize_textarea_field( wp_unslash( $_POST['pps_contact_message'] ?? '' ) );
 
-        if ( $c_order && $c_email && $c_message ) {
+        // This only ever mails the office, so it is not a relay, but anyone holding the
+        // page's public nonce can post it. Spam is dropped by the same judgment as the intake
+        // forms (answering as though it worked). A message from someone whose 30-minute
+        // lookup has lapsed still goes through — losing a real customer's question is worse
+        // than one unverified email — but says so, and staff reply to the verified address
+        // when there is one rather than the posted field.
+        $verified = pps_order_lookup_active_email();
+        $spam     = function_exists( 'pps_intake_spam_reason' )
+            ? pps_intake_spam_reason( array( 'message' => $c_message, 'order_ref' => $c_order ) ) : '';
+        if ( $verified !== '' && is_email( $verified ) ) $c_email = $verified;
+        if ( $spam !== '' ) {
+            $contact_sent = (bool) ( $c_order && $c_message );
+        } elseif ( $c_order && $c_email && $c_message ) {
             $to      = pps_reorder_contact_recipient();
-            $subject = 'Order Inquiry — #' . $c_order . ' — ' . $c_item;
+            $subject = ( $verified === '' ? '[lookup not verified] ' : '' ) . 'Order Inquiry — #' . $c_order . ' — ' . $c_item;
             $body    = "Customer inquiry from the order lookup page.\n\n";
             $body   .= "Order #: {$c_order}\n";
             $body   .= "Product: {$c_item}\n";
