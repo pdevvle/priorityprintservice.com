@@ -527,7 +527,11 @@ function pps_paylink_create( array $a ) {
         'product'    => $pid,
         'tiers'      => array( array( 'qty' => $qty, 'price' => $price ) ),
         'lines'      => $lines,
-        'specs'      => $description,
+        // A multi-line quote has no single spec: each line carries its own
+        // description. Leaving line one's text here put it at the top of the
+        // payment page as if it were the whole job, and duplicated it on both
+        // the order's first line item and its QuickBooks invoice row.
+        'specs'      => $lines ? '' : $description,
         'pay_source' => $source,
         'by'         => isset( $a['by'] ) ? (string) $a['by'] : 'missive',
         'note'       => isset( $a['note'] ) ? (string) $a['note'] : '',

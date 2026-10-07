@@ -529,8 +529,16 @@ function pps_quote_form_view( array $q, $error ) {
 
         <?php // The description IS the product here -- a conversation-minted job has
               // no catalogue page to explain it, so it carries the whole spec and is
-              // set at reading size rather than as a caption under a heading. ?>
-        <?php if ( $q['specs'] ) : ?>
+              // set at reading size rather than as a caption under a heading.
+              //
+              // A multi-line quote prints NOTHING here. Its spec was the first
+              // line's description, so the top of the page announced one item as
+              // though it were the whole job, with the other items appearing only
+              // further down -- a customer reading just the top would have thought
+              // they were paying $395 for the business cards. The itemised list
+              // below is the description. ?>
+        <?php if ( $lines ) : ?>
+        <?php elseif ( $q['specs'] ) : ?>
             <pre class="oc-specs pps-q-spec"><?php echo esc_html( $q['specs'] ); ?></pre>
         <?php else : ?>
             <h2 class="lookup-title"><?php echo esc_html( $product ? $product->get_name() : 'Print job' ); ?></h2>

@@ -465,5 +465,41 @@ ok('multi: description set',  $r['description'], 'Cards');
 $r = parse("[Cards] @500 \$95\n[Letterhead] @250 \$180 *qbo");
 ok('trailing *qbo still read', $r['qbo'], true);
 
+// --- what a multi-line mint hands the quote
+// The bug this pins: specs was line one's description, so the top of the
+// payment page announced the first item as though it were the whole job, and
+// the same text was duplicated onto the order's first line and its QuickBooks
+// invoice row.
+$res = pps_paylink_create(array(
+    'description' => 'Business cards',
+    'price'       => '395',
+    'lines'       => array(
+        array('description' => 'Business cards', 'qty' => 500, 'price' => 95),
+        array('description' => 'Letterhead',     'qty' => 250, 'price' => 180),
+        array('description' => 'Envelopes',      'qty' => 250, 'price' => 120),
+    ),
+));
+ok('multi-line mints',           is_array($res), true);
+ok('no single spec on the page', $GLOBALS['captured']['specs'], '');
+ok('lines reach the quote',      count($GLOBALS['captured']['lines']), 3);
+ok('a line keeps its qty',       $GLOBALS['captured']['lines'][1]['qty'], 250);
+ok('a line keeps its price',     $GLOBALS['captured']['lines'][1]['price'], 180.0);
+
+// A single-line mint is untouched: its spec still carries the description,
+// because there it IS the whole job.
+$res = pps_paylink_create(array('description' => '500 postcards', 'price' => '$250'));
+ok('single line keeps its spec', $GLOBALS['captured']['specs'], '500 postcards');
+ok('single line sends no lines', $GLOBALS['captured']['lines'], array());
+
+// A line with no payable price is dropped before it can reach an invoice.
+$res = pps_paylink_create(array(
+    'description' => 'A', 'price' => '100',
+    'lines' => array(
+        array('description' => 'A', 'qty' => 1, 'price' => 100),
+        array('description' => 'Free sample', 'qty' => 1, 'price' => 0),
+    ),
+));
+ok('unpayable line dropped', count($GLOBALS['captured']['lines']), 1);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
