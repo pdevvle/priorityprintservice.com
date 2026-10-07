@@ -985,6 +985,14 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         'price'       => isset( $body['price'] ) ? $body['price'] : '',
         'qty'         => isset( $body['qty'] ) ? $body['qty'] : 1,
         'qbo'         => isset( $body['qbo'] ) ? $body['qbo'] : false,
+        // The line items, when the command carried several. Missing from this
+        // list until 2026-10-07, which is why a multi-product command charged
+        // the right total -- the parser sums the lines into 'price' -- while
+        // storing a single item named after the first line. The parser and
+        // pps_paylink_create() were both tested and both correct; what was
+        // untested was the seam between them, and an allow-list silently drops
+        // whatever nobody remembered to add.
+        'lines'       => isset( $body['lines'] ) ? $body['lines'] : array(),
         'by'          => isset( $body['by'] ) ? $body['by'] : 'missive',
         'note'        => isset( $body['note'] ) ? $body['note'] : '',
         'reference'   => isset( $body['reference'] ) ? $body['reference'] : '',
