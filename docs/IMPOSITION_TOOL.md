@@ -743,6 +743,35 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Preview first, impose all on demand (1.52)
+
+  Owner: "add a button for the actual imposition so it doesn't try to run
+  immediately. Just auto impose the first two sheets and then a button for
+  doing all of them (or upon export)."
+
+  - The automatic run after every change now imposes only the **first 2
+    sheets** (`spec.previewSheets`, honoured by the saddle form loop and
+    the flats sheet loop; perfect bound inherits it per half). The plan —
+    form list, counts, warnings, parity preflight — is still the whole
+    job's, so every readout describes the full run; only the pages built
+    are capped. A result built that way carries `preview: {shown, total}`,
+    `sheetsImposed` keeps the full-run figure, and the sheet sequence /
+    slipsheet passes wait for the full run (noted). A job of 1–2 sheets is
+    complete at once and shows no preview.
+  - Toolbar on a preview: amber badge **PREVIEW · first 2 of N sheets**,
+    **⚡ Impose all N sheets**, and Download reads **Impose all & download**.
+    `runImpose(full)` is the one run function (the effect calls it capped;
+    the button, Download and Send to Drive uncapped); `ensureFull(i)`
+    returns the full result for the part on screen, re-running when what is
+    on screen is a preview — so **a preview can never be downloaded or
+    filed to Drive**. Bulk impose from the queue was already uncapped.
+  - Verified (`ui_preview.mjs`): a 16-page booklet previews 2 of 4 forms (4
+    sides on screen); Impose all gives 8 sides and the plain download label;
+    a margin change drops back to a preview; Download from a preview
+    delivers an 8-page file and leaves the full run on screen; a 1-form job
+    shows no preview. `ui_seq` and `ui_bookdrop` updated for the label; the
+    uncapped engine is content-identical to 1.51 (180 pages).
+
   ### The purple box, second pass: vector soft masks become clipping paths (1.51)
 
   Owner, after 1.49: "Still getting purple box." The luminosity rewrite is

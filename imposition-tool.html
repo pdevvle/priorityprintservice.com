@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 02:00 UTC · IMPOSE-V1.51</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 02:40 UTC · IMPOSE-V1.52</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2546,9 +2546,13 @@ async function imposeSaddle(artBytes, spec, layout) {
     }
   }
 
-  for (let f = 0; f < F; f++) {
+  // Preview (1.52): the screen asks for the first N forms only; the plan
+  // (forms[], counts, warnings) is the full job's, so every readout below
+  // still describes the whole run. Download / Send re-run without the cap.
+  const Flim = spec.previewSheets ? Math.min(F, Math.max(1, Math.floor(+spec.previewSheets))) : F;
+  for (let f = 0; f < Flim; f++) {
     const sigs = forms[f];
-    await progress(`Placing form ${f + 1} of ${F}`, 0.4 + 0.4 * f / F);
+    await progress(`Placing form ${f + 1} of ${Flim}${Flim < F ? ` (preview of ${F})` : ""}`, 0.4 + 0.4 * f / Flim);
     for (const inner of [false, true]) {
       const page = out.addPage([W, H]);
       const cells = inner ? mirrorCells(layout.cells, layout, flip) : layout.cells;
@@ -2610,7 +2614,7 @@ async function imposeSaddle(artBytes, spec, layout) {
   // Preflight
   const check = await PL.PDFDocument.load(bytes);
   const issues = [];
-  if (check.getPageCount() !== 2 * F) issues.push(`page count ${check.getPageCount()} ≠ ${2 * F} form sides`);
+  if (check.getPageCount() !== 2 * Flim) issues.push(`page count ${check.getPageCount()} ≠ ${2 * Flim} form sides`);
   // Every page of the book must appear exactly once across the forms — the
   // guard that a ganging or step-and-repeat mistake cannot silently drop or
   // duplicate a section.
@@ -2639,6 +2643,7 @@ async function imposeSaddle(artBytes, spec, layout) {
 
   return {
     bytes, layout, warnings, sheets: totalSheets, pageLabels,
+    preview: Flim < F ? { shown: Flim, total: F } : null,
     sideReports: [{ side: "BOOKLET", pages: n, padded: P, signatures: S, forms: F, sigMode: order,
       formPlan: forms.map(fm => fm.map(k => k + 1)), spreadsPerSide: bk.spreadsPerSide, tumble, srcRotPages: arts.filter(a => a.rot).length }],
   };
@@ -3571,7 +3576,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     p.fontsMissing = fontsMissing.slice();              // on every part AND the top-level result
     try {
       const empties = await emptySides(p.bytes);
-      p.sheetsImposed = Math.ceil(empties.total / (duplex ? 2 : 1));   // before any sheet sequence / slipsheets
+      p.sheetsImposed = p.preview ? p.preview.total : Math.ceil(empties.total / (duplex ? 2 : 1));   // before any sheet sequence / slipsheets
       if (empties.total > 0 && empties.empty.length === empties.total && srcInk !== null && srcInk <= 0.002) {
         p.warnings.push(`⚠ Every sheet side renders with no ink, and the artwork's first page is blank too — this file may be empty. Check it before it goes to press.`);
       }
@@ -3586,13 +3591,16 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     if (seqNote) p.warnings = [seqNote, ...(p.warnings || [])];
     // Sheet sequence BEFORE slipsheets, so a slipsheet's sheet number refers to
     // the physical sheets that will actually come off the press.
-    if (spec.sheetSeq) {
+    if (p.preview && (spec.sheetSeq || (spec.slip && spec.slip.on))) {
+      p.warnings = [...(p.warnings || []), `Preview shows the first ${p.preview.shown} of ${p.preview.total} sheets — the sheet sequence / slipsheets are applied on the full run (Impose all, Download or Send to Drive).`];
+    }
+    if (spec.sheetSeq && !p.preview) {
       await progress("Applying sheet sequence", 0.94);
       const r = await reorderSheetsBytes(p.bytes, spec.sheetSeq, duplex, p.pageLabels);
       p.bytes = r.bytes; if (r.labels) p.pageLabels = r.labels;
       p.warnings = [...(p.warnings || []), r.note];
     }
-    if (spec.slip && spec.slip.on) {
+    if (spec.slip && spec.slip.on && !p.preview) {
       await progress("Inserting slipsheets", 0.96);
       const r = await insertSlipsheets(p.bytes, spec.slip, duplex, p.pageLabels);
       p.bytes = r.bytes; if (r.labels) p.pageLabels = r.labels;
@@ -3824,8 +3832,9 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
 
   const pageLabels = [];
   let slugWarned = false, tumbleNoted = false;
-  for (let s = 0; s < D; s++) {
-    await progress(`Placing sheet ${s + 1} of ${D}`, 0.4 + 0.4 * s / D);
+  const Dlim = spec.previewSheets ? Math.min(D, Math.max(1, Math.floor(+spec.previewSheets))) : D;   // preview cap (1.52)
+  for (let s = 0; s < Dlim; s++) {
+    await progress(`Placing sheet ${s + 1} of ${Dlim}${Dlim < D ? ` (preview of ${D})` : ""}`, 0.4 + 0.4 * s / Dlim);
     for (const sideIdx of (sides === 2 ? [0, 1] : [0])) {
       const page = out.addPage([layout.sheet.long * PT, layout.sheet.short * PT]);
       const cellsForMarks = sideIdx === 0 ? layout.cells : mirroredAll;
@@ -3905,7 +3914,8 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   if (!layout.mismatch && !layout.efficient && !layout.manualGrid && !layout.unpriced && layout.imp !== Math.round(layout.pricedImp)) issues.push(`placed ${layout.imp}-up ≠ priced ${layout.pricedImp}-up`);
   if (issues.length) throw new Error("Preflight FAILED: " + issues.join("; "));
 
-  return { bytes, layout, warnings, sheets, sideReports, pageLabels, pieces: pieces.length, sheetsPerSet: D };
+  return { bytes, layout, warnings, sheets, sideReports, pageLabels, pieces: pieces.length, sheetsPerSet: D,
+           preview: Dlim < D ? { shown: Dlim, total: D } : null };
 }
 
 // ── Manifest parser: autofill spec from a *_manipulation_manifest.txt ──
@@ -4922,45 +4932,33 @@ function App() {
     }
   }, [layoutInfo, isPB]);
 
-  // Auto-regenerate the imposed PDF when spec or art changes
-  useEffect(() => {
+  // One run, two sizes (1.52). The automatic run after every change imposes
+  // only the first PREVIEW_SHEETS sheets — enough to see the layout, fast on a
+  // 60-sheet book — and the result is flagged `preview`. "Impose all", Download
+  // and Send to Drive run the same job uncapped. Returns the result (or null).
+  const PREVIEW_SHEETS = 2;
+  const runImpose = (full) => {
     const ganging = gangFiles.length >= 2;
-    // No artwork, or a refused layout: nothing may remain on screen — and an
-    // in-flight run started under the PREVIOUS spec must not land afterwards.
-    // (Found 1.45: loading a 12×3 order refused its priced 8-up, yet the run
-    // that had started under the default 11×8.5 spec finished a moment later
-    // and put "Download IMPOSED_11x8.5_2up" — the customer's art fit-scaled
-    // into letter cells — under the red refusal, with a Send-to-Drive button.)
-    if ((!art && !ganging) || (!layoutInfo.layout && !layoutInfo.pb)) { ++genSeq.current; setResult(null); setBusy(false); setProg(null); return; }
-    // The spec is debounced; artwork can arrive while a size change is still
-    // settling. Wait for it — the effect re-runs when debSpec catches up.
-    if (spec !== debSpec) return;
+    if ((!art && !ganging) || (!layoutInfo.layout && !layoutInfo.pb)) { ++genSeq.current; setResult(null); setBusy(false); setProg(null); return Promise.resolve(null); }
     const seq = ++genSeq.current;
     setBusy(true); setError(""); setErrStage(""); setUploadState({}); setProg({ label: "Starting", pct: 0 }); lastStageRef.current = "Starting";
     const onProgress = (label, frac) => {
       if (seq !== genSeq.current) return;
       lastStageRef.current = label;
-      // Monotonic: perfect bound runs the core twice, and the bar must not walk back.
       setProg(p => ({ label, pct: Math.max(p ? p.pct : 0, Math.round(frac * 100)) }));
     };
-    imposePdf(art ? art.bytes : null, (debSpec.calc === "perfect-bound" || debSpec.sides === 2) ? (backArt && backArt.bytes) : null, debSpec,
+    const runSpec = full ? debSpec : { ...debSpec, previewSheets: PREVIEW_SHEETS };
+    return imposePdf(art ? art.bytes : null, (debSpec.calc === "perfect-bound" || debSpec.sides === 2) ? (backArt && backArt.bytes) : null, runSpec,
               ganging ? gangFiles.map(g => ({ bytes: g.bytes, name: g.name, slots: g.slots === "" ? null : +g.slots })) : null, onProgress)
       .then(res => {
-        if (seq !== genSeq.current) return;
-        // An approval mismatch travels on the filename so the flag survives
-        // into the Drive folder and the press room, not just this screen.
+        if (seq !== genSeq.current) return null;
         const unappr = art && art.approval && art.approval.state === "mismatch";
-        // Likewise a font override: _FONTS on the filename, so the press room
-        // sees it on the file itself and not only in this session's report.
         const fontsFlag = !!(res.fontsMissing && res.fontsMissing.length);
         const flagIt = n => {
           if (fontsFlag) n = n.replace(/\.pdf$/i, "_FONTS.pdf");
           if (unappr) n = n.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
           return n;
         };
-        // Perfect bound returns two parts, each with its own layout and its own
-        // filename — the COVER and GUTS suffixes keep them apart in the order's
-        // Drive folder and in the queue's IMPOSED detection.
         if (res.parts) {
           res.parts.forEach(pt => {
             pt.filename = flagIt(imposedFilename({ ...debSpec, jobName: (debSpec.jobName || "book") + "_" + pt.part.toUpperCase() }, pt.layout));
@@ -4969,9 +4967,30 @@ function App() {
           res.filename = flagIt(imposedFilename(debSpec, res.layout));
         }
         setResult(res);
+        return res;
       })
-      .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); setErrStage(lastStageRef.current); } })
+      .catch(e => { if (seq === genSeq.current) { setResult(null); setError(e.message); setErrStage(lastStageRef.current); } return null; })
       .finally(() => { if (seq === genSeq.current) { setBusy(false); setProg(null); } });
+  };
+  // A part of a result (perfect bound has two) by position, else the result itself.
+  const partOf = (res, i) => res ? ((res.parts || [res])[Math.min(i, (res.parts || [res]).length - 1)] || null) : null;
+  // The full result for the part on screen — re-running uncapped when what is
+  // on screen is only a preview. Download and Send to Drive go through this.
+  const ensureFull = async (i) => {
+    const cur = partOf(result, i);
+    if (cur && !cur.preview) return cur;
+    const full = await runImpose(true);
+    return partOf(full, i);
+  };
+
+  // Auto-regenerate the imposed PDF (preview-sized) when spec or art changes
+  useEffect(() => {
+    const ganging = gangFiles.length >= 2;
+    if ((!art && !ganging) || (!layoutInfo.layout && !layoutInfo.pb)) { ++genSeq.current; setResult(null); setBusy(false); setProg(null); return; }
+    // The spec is debounced; artwork can arrive while a size change is still
+    // settling. Wait for it — the effect re-runs when debSpec catches up.
+    if (spec !== debSpec) return;
+    runImpose(false);
   }, [art, backArt, gangFiles, debSpec, layoutInfo.layout ? 1 : 0]);
 
   const makeCleanCopy = async () => {
@@ -5164,7 +5183,10 @@ function App() {
   const overUploadLimit = bytes => CFG && CFG.maxUpload > 0 && bytes.length > CFG.maxUpload
     ? `${(bytes.length / 1048576).toFixed(1)} MB is over the server's ${(CFG.maxUpload / 1048576).toFixed(0)} MB upload limit (PHP upload_max_filesize / post_max_size). Download it and file it to Drive by hand, or raise the limit in the hosting panel.`
     : null;
-  const sendToDrive = async (res) => {
+  const sendToDrive = async (res0) => {
+    if (!res0) return;
+    const res = res0.preview ? await ensureFull(viewIdx) : res0;   // a preview is never filed
+    if (!res) return;
     const over = overUploadLimit(res.bytes);
     if (over) { setUploadState(u => ({ ...u, [res.filename]: "failed: " + over })); setError(over); return; }
     if (!res || !activeOrder) return;
@@ -6332,13 +6354,19 @@ function App() {
             </div>
             {viewRes && (
               <div className="grp" style={{ marginLeft: "auto", borderRight: 0 }}>
-                <button className="imp-btn tb" style={{ fontWeight: 700 }} onClick={() => dlBytes(viewRes.bytes, viewRes.filename)}>⬇ Download {viewRes.filename}</button>
+                {viewRes.preview && (
+                  <>
+                    <span className="imp-badge" data-preview style={{ background: "rgba(251,191,36,.15)", color: "#fbbf24", borderColor: "rgba(251,191,36,.5)" }}>PREVIEW · first {viewRes.preview.shown} of {viewRes.preview.total} sheets</span>
+                    <button className="imp-btn tb" data-impose-all disabled={busy} onClick={() => runImpose(true)}>⚡ Impose all {viewRes.preview.total} sheets</button>
+                  </>
+                )}
+                <button className="imp-btn tb" data-download style={{ fontWeight: 700 }} disabled={busy} onClick={async () => { const r = await ensureFull(viewIdx); if (r) dlBytes(r.bytes, r.filename); }}>{viewRes.preview ? "⬇ Impose all & download" : `⬇ Download ${viewRes.filename}`}</button>
                 {CFG && activeOrder && (
                   <button className="imp-btn tb" disabled={uploadState[viewRes.filename] === "uploading" || uploadState[viewRes.filename] === "done"} onClick={() => sendToDrive(viewRes)}>
                     {uploadState[viewRes.filename] === "uploading" ? "Uploading…" : uploadState[viewRes.filename] === "done" ? "✓ Filed to Drive" : "📁 Send to order's Drive folder"}
                   </button>
                 )}
-                <span style={{ fontSize: 11, color: viewRes.fontsMissing && viewRes.fontsMissing.length ? "#f87171" : "rgba(255,255,255,.45)" }}>{(viewRes.bytes.length / 1048576).toFixed(2)} MB · {viewRes.fontsMissing && viewRes.fontsMissing.length ? "FONT OVERRIDE" : "preflight passed"}</span>
+                <span style={{ fontSize: 11, color: viewRes.fontsMissing && viewRes.fontsMissing.length ? "#f87171" : "rgba(255,255,255,.45)" }}>{viewRes.preview ? "preview" : `${(viewRes.bytes.length / 1048576).toFixed(2)} MB`} · {viewRes.fontsMissing && viewRes.fontsMissing.length ? "FONT OVERRIDE" : "preflight passed"}</span>
                 {String(uploadState[viewRes.filename] || "").startsWith("failed") && <span style={{ color: "#f87171", fontSize: 12 }}>{uploadState[viewRes.filename]}</span>}
               </div>
             )}
