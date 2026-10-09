@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-09-26 01:00 UTC · IMPOSE-V1.48</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 00:30 UTC · IMPOSE-V1.49</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1018,7 +1018,123 @@ async function loadPdf(bytes, what) {
     throw new Error(`"${what || "This file"}" is encrypted (an owner/permissions password). The browser cannot decrypt it, so its pages would impose as garbage and Fiery would print blank sheets. Remove the security first — Acrobat: File → Properties → Security → No Security (or re-export from the source) — then drop it again.`);
   }
   repairPageContents(doc, what || "This file");
+  convertAlphaMasks(doc, what || "This file");
   return doc;
+}
+
+// ── Alpha soft masks → luminosity masks (1.49) ───────────────────────────
+// Canva (and a few others) export an effect as a solid fill drawn through an
+// ExtGState soft mask of type /Alpha whose group paints the effect's shape
+// (here: a dark-purple rectangle masked to the headline's letter outlines —
+// the plum offset copy behind "How To Get Your School a Better Campus
+// Calendar"). Acrobat, pdf.js and MuPDF honour /S /Alpha; most RIPs ignore it
+// and print the fill unmasked — a dark purple BOX around the headline, with
+// the file looking perfect on every screen. A /S /Luminosity mask with a black
+// backdrop is the form every RIP has handled since PDF 1.4. The two are
+// equivalent when the mask group's content is turned WHITE: alpha mask value
+// = coverage × opacity; white-on-black luminosity = the same number. So each
+// alpha mask's group is copied with every colour operator stripped and white
+// set once at the top (nested form XObjects copied the same way), and the
+// mask dict becomes /S /Luminosity /BC [0] with its /TR kept. A mask group
+// that paints an image, a shading or an inline image cannot be recoloured by
+// stripping operators — it is left alone and named in the warning.
+const MASK_COLOR_OPS = new Set(["g", "G", "rg", "RG", "k", "K", "cs", "CS", "sc", "SC", "scn", "SCN"]);
+function tokenizeContent(src) {
+  const out = []; let i = 0; const n = src.length;
+  const isWs = c => c === " " || c === "\n" || c === "\r" || c === "\t" || c === "\f" || c === "\0";
+  const isDelim = c => "()<>[]{}/%".includes(c);
+  while (i < n) {
+    const c = src[i];
+    if (isWs(c)) { i++; continue; }
+    if (c === "%") { while (i < n && src[i] !== "\n" && src[i] !== "\r") i++; continue; }
+    const start = i;
+    if (c === "(") { let depth = 0; do { const ch = src[i]; if (ch === "\\") { i += 2; continue; } if (ch === "(") depth++; else if (ch === ")") depth--; i++; } while (i < n && depth > 0); out.push({ k: "str", v: src.slice(start, i) }); continue; }
+    if (c === "<" && src[i + 1] === "<") { let depth = 0; while (i < n) { if (src.startsWith("<<", i)) { depth++; i += 2; } else if (src.startsWith(">>", i)) { depth--; i += 2; if (!depth) break; } else i++; } out.push({ k: "dict", v: src.slice(start, i) }); continue; }
+    if (c === "<") { while (i < n && src[i] !== ">") i++; i++; out.push({ k: "str", v: src.slice(start, i) }); continue; }
+    if (c === "[") { let depth = 0; while (i < n) { const ch = src[i]; if (ch === "(") { let d2 = 0; do { if (src[i] === "\\") { i += 2; continue; } if (src[i] === "(") d2++; else if (src[i] === ")") d2--; i++; } while (i < n && d2 > 0); continue; } if (ch === "[") depth++; else if (ch === "]") depth--; i++; if (!depth) break; } out.push({ k: "arr", v: src.slice(start, i) }); continue; }
+    if (c === "/") { i++; while (i < n && !isWs(src[i]) && !isDelim(src[i])) i++; out.push({ k: "name", v: src.slice(start, i) }); continue; }
+    if (c === "]" || c === ">" || c === ")" || c === "{" || c === "}") { i++; out.push({ k: "op", v: c }); continue; }
+    while (i < n && !isWs(src[i]) && !isDelim(src[i])) i++;
+    const v = src.slice(start, i);
+    out.push({ k: /^[+-]?(\d+\.?\d*|\.\d+)$/.test(v) ? "num" : "op", v });
+  }
+  return out;
+}
+// Copy a form XObject with its colour removed and white set; returns a ref.
+function whitenedForm(doc, formRef, seen, why) {
+  const ctx = doc.context;
+  if (seen.has(formRef.toString())) return seen.get(formRef.toString());
+  const st = ctx.lookup(formRef);
+  if (!(st instanceof PL.PDFStream)) throw new Error("mask group is not a stream");
+  const src = new TextDecoder("latin1").decode(PL.decodePDFRawStream(st).decode());
+  const toks = tokenizeContent(src);
+  const res = asDict(ctx.lookup(st.dict.get(PL.PDFName.of("Resources"))));
+  const xo = res ? asDict(ctx.lookup(res.get(PL.PDFName.of("XObject")))) : null;
+  const remap = new Map();
+  const out = ["1 g 1 G"]; let pend = [];
+  for (const t of toks) {
+    if (t.k !== "op") { pend.push(t.v); continue; }
+    if (MASK_COLOR_OPS.has(t.v)) { pend = []; continue; }               // colour: dropped with its operands
+    if (t.v === "sh") throw new Error("mask group paints a shading");
+    if (t.v === "BI") throw new Error("mask group paints an inline image");
+    if (t.v === "Do") {
+      const name = pend[pend.length - 1];
+      const ref = xo && name ? xo.get(PL.PDFName.of(name.slice(1))) : null;
+      const sub = ref ? asDict(ctx.lookup(ref)) : null;
+      const subtype = sub && sub.get ? String(sub.get(PL.PDFName.of("Subtype"))) : "";
+      if (subtype !== "/Form") throw new Error(`mask group paints ${subtype === "/Image" ? "an image" : "an unknown XObject"}`);
+      remap.set(name.slice(1), whitenedForm(doc, ref, seen, why));
+    }
+    out.push(pend.concat(t.v).join(" ")); pend = [];
+  }
+  // Resources: same dict, XObject entries remapped to the whitened copies.
+  let newRes = res ? res.clone(ctx) : ctx.obj({});
+  if (remap.size) {
+    const nx = xo.clone(ctx);
+    for (const [name, ref] of remap) nx.set(PL.PDFName.of(name), ref);
+    newRes.set(PL.PDFName.of("XObject"), nx);
+  }
+  const d = { Type: "XObject", Subtype: "Form", Resources: newRes,
+              Group: ctx.obj({ Type: "Group", S: "Transparency", CS: "DeviceGray" }) };
+  for (const k of ["BBox", "Matrix"]) { const v = st.dict.get(PL.PDFName.of(k)); if (v) d[k] = v; }
+  const ref = ctx.register(ctx.flateStream(out.join("\n"), d));
+  seen.set(formRef.toString(), ref);
+  return ref;
+}
+function convertAlphaMasks(doc, what) {
+  const ctx = doc.context;
+  const visited = new Set(); const masks = []; const skipped = [];
+  const visit = obj => {
+    if (!obj || visited.has(obj)) return; visited.add(obj);
+    if (obj instanceof PL.PDFStream) { visit(obj.dict); return; }
+    if (obj instanceof PL.PDFArray) { for (const el of obj.asArray()) visit(el instanceof PL.PDFRef ? ctx.lookup(el) : el); return; }
+    if (!(obj instanceof PL.PDFDict)) return;
+    for (const [k, v] of obj.entries()) {
+      const val = v instanceof PL.PDFRef ? ctx.lookup(v) : v;
+      if (k.toString() === "/SMask" && val instanceof PL.PDFDict && !(val instanceof PL.PDFStream)
+          && String(val.get(PL.PDFName.of("S"))) === "/Alpha" && !masks.includes(val)) masks.push(val);
+      visit(val);
+    }
+  };
+  for (const [, obj] of ctx.enumerateIndirectObjects()) visit(obj);
+  let done = 0;
+  const seen = new Map();
+  for (const m of masks) {
+    try {
+      const g = m.get(PL.PDFName.of("G"));
+      if (!(g instanceof PL.PDFRef)) throw new Error("mask group is a direct object");
+      const ref = whitenedForm(doc, g, seen, what);
+      m.set(PL.PDFName.of("S"), PL.PDFName.of("Luminosity"));
+      m.set(PL.PDFName.of("G"), ref);
+      m.set(PL.PDFName.of("BC"), ctx.obj([0]));
+      done++;
+    } catch (e) { skipped.push(e.message); }
+  }
+  const notes = [];
+  if (done) notes.push(`"${what}": ${done} alpha soft mask${done === 1 ? "" : "s"} (/S /Alpha — a Canva-style export) rewritten as luminosity mask${done === 1 ? "" : "s"}. Screens honour alpha masks; most RIPs ignore them and print the masked fill as a solid box (the dark box around a headline). The rewrite is exact; check the preview.`);
+  if (skipped.length) notes.push(`⚠ "${what}": ${skipped.length} alpha soft mask${skipped.length === 1 ? "" : "s"} could NOT be rewritten (${[...new Set(skipped)].join("; ")}) — expect the masked fill to print as a solid box on the press. Ask for an export with transparency flattened (PDF/X-1a or Acrobat 4 compatibility).`);
+  doc.__ppsMaskNote = notes.length ? notes : null;
+  return { done, skipped };
 }
 
 // Content streams pdf-lib cannot decode (1.47). Some exporters write a blank
@@ -3195,6 +3311,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     const doc = await loadPdf(artBytes, "artwork");
     await progress("Checking fonts and page sizes", 0.06);
     if (doc.__ppsRepairNote) pre.push("⚠ " + doc.__ppsRepairNote);
+    if (doc.__ppsMaskNote) pre.push(...doc.__ppsMaskNote);
     pre.push(...fontNotes(doc, "artwork", spec, fontsMissing));
     try {
       // UserUnit scales a page's units; nothing here honours it, so say so.
@@ -3236,6 +3353,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
       if (lastRaster) { const n = rasterNote(lastRaster, tw, th); if (n) pre.push(n); lastRaster = null; }
       const bdoc = await loadPdf(bb, "back file");
       if (bdoc.__ppsRepairNote) pre.push("⚠ " + bdoc.__ppsRepairNote);
+      if (bdoc.__ppsMaskNote) pre.push(...bdoc.__ppsMaskNote);
       pre.push(...fontNotes(bdoc, "back file", spec, fontsMissing));
     } catch (e) { if (/FONTS NOT EMBEDDED|cannot be decompressed/.test(e.message)) throw e; /* anything else is reported by the core load */ }
   }
@@ -3248,6 +3366,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
         const gb = await ppsToPdfBytes(g.bytes, g.name || "gang");
         const gdoc = await loadPdf(gb, g.name || "gang file");
         if (gdoc.__ppsRepairNote) pre.push("⚠ " + gdoc.__ppsRepairNote);
+        if (gdoc.__ppsMaskNote) pre.push(...gdoc.__ppsMaskNote);
         pre.push(...fontNotes(gdoc, `gang file "${g.name || "?"}"`, spec, fontsMissing));
         const sv = pageSizeSurvey(gdoc, spec);
         const z = sv.sizes[0];
@@ -3734,7 +3853,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc };
+window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc, loadPdf, convertAlphaMasks };
 
 // ═══════════════════════════════════════════════════════════════
 // UI

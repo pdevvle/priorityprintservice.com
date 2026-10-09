@@ -743,6 +743,45 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### A dark box around a headline on the press, not on screen (1.49)
+
+  Owner, with the source and the imposed file: "when I impose this file it
+  looks fine but when it prints there is a dark purple box around 'How to
+  Get Your School a Better Campus Calendar'."
+
+  The source (a Canva export) draws that headline's plum offset copy as a
+  solid dark-purple RECTANGLE (`457 113 179 158 re f`, 2.5×2.2″) painted
+  through an ExtGState soft mask of type **/Alpha** whose group paints the
+  letter outlines (`/SMask << /S /Alpha /G 10 0 R /TR {0 gt {1}{0} ifelse} >>`).
+  Acrobat, pdf.js and MuPDF honour alpha masks, so every screen shows the
+  letters; most RIPs ignore /S /Alpha and print the fill unmasked — the
+  box. The page is also wrapped in a second alpha mask (a full-bbox black
+  rectangle: a no-op). The tool had copied both through untouched.
+
+  - `convertAlphaMasks(doc, what)` runs inside `loadPdf()` (every source
+    path). It walks every object for an `/SMask` dict with `/S /Alpha` and
+    rewrites it as `/S /Luminosity /BC [0]` (the /TR kept) over a COPY of the
+    mask group with every colour operator stripped and `1 g 1 G` set at the
+    top (`whitenedForm()`, a content tokenizer that understands strings,
+    hex, arrays, dicts and nested form XObjects, which are copied the same
+    way; the group gets `/CS /DeviceGray`). Alpha mask value = coverage ×
+    opacity; white-on-black luminosity = the same number, so the rewrite
+    is exact. A mask group that paints an image, a shading or an inline
+    image cannot be recoloured by stripping operators — it is left alone and
+    named in a ⚠ warning (expect a box; ask for a flattened export).
+  - Warning on success: "artwork: 2 alpha soft masks (/S /Alpha — a
+    Canva-style export) rewritten as luminosity masks. Screens honour alpha
+    masks; most RIPs ignore them…". The original is never edited; the
+    imposed output and the CLEAN copy carry the rewrite.
+  - Verified on the customer's file (`fx_canva.pdf`, `cases_canva.json`):
+    output has 0 alpha masks and 3 luminosity dicts, the whitened groups
+    start `1 g 1 G` with no colour operators left; a MuPDF render of the
+    v1.48 and v1.49 impositions at 100 DPI differs in **0 of 2,470,000
+    pixels**; every existing suite content-identical; UI suites pass.
+    Not verifiable here: the Fiery itself — but luminosity masks with a
+    black backdrop are what InDesign exports, and the press has printed
+    those for years.
+
   ### Pages larger than the finished size: crop at 100 %, not scale (1.48)
 
   Owner: "when I input a set of pages that measure 4.5×2.5 with crop marks,
