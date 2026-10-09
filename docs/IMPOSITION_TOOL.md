@@ -743,6 +743,63 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Press safety: the rest of the "fine on screen, wrong on the RIP" class (1.54)
+
+  Owner, once the purple box was gone: "look closely for any error like
+  that so it can be patched proactively … ensure no incompatibilities."
+  The box was one member of a family: constructs every viewer honours and
+  a RIP may not. `pressSafety(doc, what)` now runs inside `loadPdf()` after
+  the mask passes, on every source path, and either fixes or names each:
+
+  - **Overprint removed** (default on; "Remove overprint" in Specialty ›
+    Press safety, `spec.stripOverprint`). `/OP true` / `/op true` on any
+    graphics state → false. A white or light object set to overprint prints
+    as nothing on the press while every screen shows it; a digital press has
+    exact registration and loses nothing by knocking out. Off → a ⚠ naming
+    the count and Acrobat's Simulate Overprinting.
+  - **Transfer functions, halftones, black generation / UCR removed**
+    (`/TR` `/TR2` → `/Default`, `/HT`, `/BG` `/BG2` `/UCR` `/UCR2` deleted).
+    PDF/X forbids them because a RIP may apply them or not — a Photoshop
+    transfer curve inverts tones on one press and not the next.
+  - **Soft masks the earlier passes could not simplify** that carry a
+    transfer function or a non-black backdrop → ⚠ "proof on the press, or
+    Rasterise pages".
+  - **Zero-width hairlines** (`0 w`, one device pixel, invisible at
+    1200 dpi) → 0.25 pt in page and form content streams (default on,
+    `spec.fixHairlines`).
+  - **Annotations flattened** (default on, `spec.flattenAnnots`). The tool
+    used to delete every annotation for safety, which silently dropped
+    stamps, comment boxes, drawn shapes and filled form fields from the
+    press sheet. Each visible annotation's normal appearance (`/AP /N`,
+    the `/AS` state for checkbox-style sub-dictionaries; Link and Popup
+    skipped; Hidden and NoView flags honoured) is drawn into the page by
+    PDF 32000 §12.5.5 — appearance BBox through its Matrix, mapped onto
+    /Rect — appended after the content inside q … Q, with page-local
+    Resources (an inherited dict is cloned, never edited). The annotation
+    dictionaries are still stripped afterwards: the payload goes, the look
+    stays.
+  - **Named, not fixed:** JPEG 2000 (`/JPXDecode`) and JBIG2 images and
+    16-bit images (PostScript-path RIPs cannot decode them), OpenType font
+    programs (`/FontFile3 /OpenType`, older RIPs reject the wrapper), spot
+    colours by decoded name (Separation / DeviceN; the press prints the
+    alternate).
+  - **Rasterise pages (last resort)** — `spec.rasterPages` ("2, 5-6" of the
+    source), Specialty › Press safety: `forceGreyPagesBytes(bytes, pages,
+    colour)` now also renders in colour, 300 DPI, embedded as an RGB JPEG at
+    quality 0.92, replacing the page's content, resources and annotations.
+    Nothing is left on that page for a RIP to misread; vector sharpness and
+    CMYK fidelity are the price, and the note says so. Job-specific (not a
+    setup field).
+  - Verified (`cases_press.json`, `ui_press.mjs`, `fx_press.pdf` — a hand-
+    written PDF carrying white overprint text with a /TR inversion and a
+    halftone, a `0 w` line, a Square annotation with an appearance, a Hidden
+    annotation, a Link, a PANTONE 185 C Separation fill and a 16-bit JPX
+    image): the imposed output has no `/OP true`, `0.25 w` in the content,
+    the red appearance drawn at /Rect (seen in the render), the hidden one
+    absent, every note worded as above; toggles off → `/OP true` kept with
+    the ⚠; Rasterise page 1 → one DCTDecode image. Every existing suite
+    content-identical (none carries these constructs); all UI suites pass.
+
   ### A TrimBox at the bleed size (1.53)
 
   Owner's screenshot: "2026_Hamlet_Program_PRINT_5.75x8.75_bleed.pdf", 36
