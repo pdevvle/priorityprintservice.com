@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 03:20 UTC · IMPOSE-V1.53</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 04:30 UTC · IMPOSE-V1.54</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1020,7 +1020,187 @@ async function loadPdf(bytes, what) {
   repairPageContents(doc, what || "This file");
   flattenVectorMasks(doc, what || "This file");          // soft mask → clipping path where the mask is pure vector (no transparency left)
   convertAlphaMasks(doc, what || "This file");           // whatever remains: alpha → luminosity
+  pressSafety(doc, what || "This file");                 // overprint, transfer/halftone, hairlines, annotations, risky images/fonts/spots
   return doc;
+}
+
+// ── Press safety (1.54): the rest of the "fine on screen, wrong on the RIP" class ──
+// Each pass is a known silent failure on a digital press, fixed or named at
+// load so the imposed file carries the fix. PRESS_OPTS is set per run from
+// the spec by the imposePdf wrapper (every toggle defaults ON); a drop-time
+// load before any spec uses the defaults.
+let PRESS_OPTS = { overprint: true, hairline: true, annots: true };
+const HAIRLINE_PT = 0.25;
+function pressSafety(doc, what) {
+  const ctx = doc.context, notes = [];
+  const N = k => PL.PDFName.of(k);
+  const seen = new Set();
+  const gsDicts = [], images = [], fontDescs = [], spots = new Set();
+  // Every ExtGState, image, font and colour space reachable anywhere.
+  const visit = obj => {
+    if (!obj || seen.has(obj)) return; seen.add(obj);
+    if (obj instanceof PL.PDFStream) {
+      const st = String(obj.dict.get(N("Subtype")) || "");
+      if (st === "/Image") images.push(obj.dict);
+      visit(obj.dict); return;
+    }
+    if (obj instanceof PL.PDFArray) {
+      const a = obj.asArray();
+      const head = a.length ? String(a[0]) : "";
+      const nameOf = x => { const v = ctx.lookup(x); return v && v.decodeText ? v.decodeText() : String(v).replace(/^\//, ""); };
+      if (head === "/Separation" && a.length > 1) { const nm = nameOf(a[1]); if (nm !== "All" && nm !== "None") spots.add(nm); }
+      if (head === "/DeviceN" && a.length > 1) { const names = ctx.lookup(a[1]); if (names instanceof PL.PDFArray) names.asArray().forEach(n => { const nm = nameOf(n); if (nm !== "All" && nm !== "None" && !/^(Cyan|Magenta|Yellow|Black)$/.test(nm)) spots.add(nm); }); }
+      for (const el of a) visit(el instanceof PL.PDFRef ? ctx.lookup(el) : el); return;
+    }
+    if (!(obj instanceof PL.PDFDict)) return;
+    const type = String(obj.get(N("Type")) || "");
+    if ((type === "/ExtGState" || obj.has(N("OP")) || obj.has(N("op")) || obj.has(N("TR")) || obj.has(N("TR2")) || obj.has(N("HT")) || obj.has(N("BG")) || obj.has(N("BG2")) || obj.has(N("UCR")) || obj.has(N("UCR2")) || obj.has(N("SMask"))) && !gsDicts.includes(obj)) gsDicts.push(obj);
+    if (type === "/FontDescriptor") fontDescs.push(obj);
+    for (const [k, v] of obj.entries()) {
+      const key = k.toString();
+      const val = v instanceof PL.PDFRef ? ctx.lookup(v) : v;
+      if (key === "/ExtGState" && val instanceof PL.PDFDict) { for (const [, gv] of val.entries()) { const g = gv instanceof PL.PDFRef ? ctx.lookup(gv) : gv; if (g instanceof PL.PDFDict && !gsDicts.includes(g)) gsDicts.push(g); } }
+      visit(val);
+    }
+  };
+  for (const [, obj] of ctx.enumerateIndirectObjects()) visit(obj);
+
+  // 1. Overprint. White (or any light) object set to overprint vanishes on the
+  //    press while every screen shows it — the classic. A digital press has
+  //    perfect registration, so knocking everything out loses nothing.
+  let opCount = 0, trCount = 0, htCount = 0, bgCount = 0, maskRisk = 0;
+  for (const g of gsDicts) {
+    let opHere = false;
+    for (const k of ["OP", "op"]) { const v = g.get(N(k)); if (v && String(v) === "true") { if (PRESS_OPTS.overprint) g.set(N(k), PL.PDFBool.False); opHere = true; } }
+    if (opHere) opCount++;
+    // 2. Transfer functions, halftones, black generation / undercolour removal:
+    //    forbidden by PDF/X because a RIP may apply them or not — a Photoshop
+    //    transfer curve inverts tones on one press and not the next.
+    for (const k of ["TR", "TR2"]) { const v = g.get(N(k)); if (v && !/^\/(Identity|Default)$/.test(String(v))) { g.delete(N(k)); g.set(N("TR2"), N("Default")); trCount++; } }
+    const ht = g.get(N("HT")); if (ht && String(ht) !== "/Default") { g.delete(N("HT")); htCount++; }
+    for (const k of ["BG", "BG2", "UCR", "UCR2"]) { const v = g.get(N(k)); if (v && !/^\/(Identity|Default)$/.test(String(v))) { g.delete(N(k)); bgCount++; } }
+    // 3. Soft masks the passes above could not simplify, with a transfer
+    //    function or a non-black backdrop: honoured by Acrobat, not by every RIP.
+    const sm = g.get(N("SMask")); const smd = sm instanceof PL.PDFRef ? ctx.lookup(sm) : sm;
+    if (smd instanceof PL.PDFDict && !(smd instanceof PL.PDFStream)) {
+      const tr = smd.get(N("TR")); const bc = smd.get(N("BC"));
+      const bcv = bc instanceof PL.PDFRef ? ctx.lookup(bc) : bc;
+      const bcNonZero = bcv instanceof PL.PDFArray && bcv.asArray().some(x => { const n = ctx.lookup(x); return n && n.asNumber && Math.abs(n.asNumber()) > 1e-6; });
+      if ((tr && String(tr) !== "/Identity") || bcNonZero) maskRisk++;
+    }
+  }
+  if (opCount) notes.push(PRESS_OPTS.overprint
+    ? `"${what}": overprint was set on ${opCount} graphics state${opCount === 1 ? "" : "s"} — removed. A white or light object set to overprint prints as nothing on the press while every screen shows it; a digital press needs no overprint (its registration is exact). Untick "Remove overprint" in Specialty settings if an overprint effect is intended.`
+    : `⚠ "${what}": overprint is set on ${opCount} graphics state${opCount === 1 ? "" : "s"} and left in place (Remove overprint is off) — check Acrobat's Output Preview with Simulate Overprinting before this prints.`);
+  if (trCount || htCount || bgCount) notes.push(`"${what}": removed ${[trCount && `${trCount} transfer function${trCount === 1 ? "" : "s"}`, htCount && `${htCount} halftone${htCount === 1 ? "" : "s"}`, bgCount && `${bgCount} black-generation/UCR function${bgCount === 1 ? "" : "s"}`].filter(Boolean).join(", ")} from the graphics states — a RIP may or may not apply these (a transfer curve can invert tones on the press), which is why PDF/X forbids them.`);
+  if (maskRisk) notes.push(`⚠ "${what}": ${maskRisk} soft mask${maskRisk === 1 ? "" : "s"} carr${maskRisk === 1 ? "ies" : "y"} a transfer function or a non-black backdrop that could not be simplified — Acrobat honours it, not every RIP does. Proof this one on the press, or use Rasterise pages on the page it sits on.`);
+
+  // 4. Images and fonts the PostScript side of a RIP chokes on.
+  let jpx = 0, jbig2 = 0, deep = 0;
+  for (const d of images) {
+    const f = d.get(N("Filter")); const fv = f instanceof PL.PDFRef ? ctx.lookup(f) : f;
+    const filters = fv instanceof PL.PDFArray ? fv.asArray().map(String) : fv ? [String(fv)] : [];
+    if (filters.includes("/JPXDecode")) jpx++;
+    if (filters.includes("/JBIG2Decode")) jbig2++;
+    const bpc = d.get(N("BitsPerComponent")); if (bpc && bpc.asNumber && bpc.asNumber() === 16) deep++;
+  }
+  if (jpx) notes.push(`⚠ "${what}": ${jpx} JPEG 2000 image${jpx === 1 ? "" : "s"} (/JPXDecode) — a RIP on the PostScript path cannot decode these and prints them blank or errors; Adobe-engine RIPs are fine. If the press drops them, use Rasterise pages on those pages or ask for an export with JPEG/ZIP images (Acrobat: PDF Optimizer).`);
+  if (jbig2) notes.push(`⚠ "${what}": ${jbig2} JBIG2 image${jbig2 === 1 ? "" : "s"} (scanner output) — some RIPs cannot decode JBIG2; if a scanned page prints blank, Rasterise pages fixes it.`);
+  if (deep) notes.push(`⚠ "${what}": ${deep} 16-bit image${deep === 1 ? "" : "s"} — PostScript-path RIPs reject 16-bit data; if the press errors on this file, Rasterise pages or re-export with 8-bit images.`);
+  let otf = 0;
+  for (const fd of fontDescs) {
+    const ff3 = fd.get(N("FontFile3")); const st = ff3 instanceof PL.PDFRef ? ctx.lookup(ff3) : null;
+    if (st instanceof PL.PDFStream && String(st.dict.get(N("Subtype")) || "") === "/OpenType") otf++;
+  }
+  if (otf) notes.push(`"${what}": ${otf} font${otf === 1 ? "" : "s"} embedded as OpenType program${otf === 1 ? "" : "s"} (/FontFile3 /OpenType) — older RIPs reject this wrapper. If the press errors on fonts, re-export with fonts converted (Acrobat preflight "Convert fonts to outlines" or a PDF/X-1a export).`);
+  if (spots.size) notes.push(`"${what}": spot colour${spots.size === 1 ? "" : "s"} ${[...spots].slice(0, 6).join(", ")}${spots.size > 6 ? " …" : ""} — the press has no spot inks; the RIP prints the alternate (CMYK) value, so the shade is whatever the designer's alternate says, not the swatch book.`);
+
+  // 5. Hairlines: "0 w" means the thinnest line the device can draw — one
+  //    pixel at 1200 dpi, invisible on paper. PDF/X practice: 0.25 pt minimum.
+  if (PRESS_OPTS.hairline) {
+    let fixed = 0;
+    const holders = [];
+    for (const pg of doc.getPages()) holders.push({ page: pg.node });
+    for (const [, obj] of ctx.enumerateIndirectObjects()) if (obj instanceof PL.PDFStream && String(obj.dict.get(N("Subtype")) || "") === "/Form") holders.push({ st: obj });
+    for (const h of holders) {
+      let text, streams;
+      try {
+        if (h.page) { const c = h.page.get(N("Contents")); const cv = ctx.lookup(c); streams = cv instanceof PL.PDFArray ? cv.asArray() : [c]; text = streams.map(it => new TextDecoder("latin1").decode(PL.decodePDFRawStream(ctx.lookup(it)).decode())).join("\n"); }
+        else text = new TextDecoder("latin1").decode(PL.decodePDFRawStream(h.st).decode());
+      } catch (e) { continue; }
+      if (!/(^|[\s])0(\.0+)?\s+w(\s|$)/.test(text)) continue;
+      const toks = tokenizeContent(text); const out = []; let pend = []; let n = 0;
+      for (const t of toks) {
+        if (t.k !== "op") { pend.push(t.v); continue; }
+        if (t.v === "w" && pend.length && Number(pend[pend.length - 1]) === 0) { pend[pend.length - 1] = String(HAIRLINE_PT); n++; }
+        out.push(pend.concat(t.v).join(" ")); pend = [];
+      }
+      if (!n) continue;
+      const packed = ctx.flateStream(new TextEncoder().encode(out.join("\n")));
+      if (h.page) h.page.set(N("Contents"), ctx.register(packed));
+      else { h.st.contents = packed.contents; h.st.dict.set(N("Filter"), N("FlateDecode")); h.st.dict.delete(N("DecodeParms")); h.st.dict.set(N("Length"), PL.PDFNumber.of(packed.contents.length)); }
+      fixed += n;
+    }
+    if (fixed) notes.push(`"${what}": ${fixed} zero-width hairline${fixed === 1 ? "" : "s"} set to ${HAIRLINE_PT} pt — "0 w" is one device pixel, invisible on paper at 1200 dpi.`);
+  }
+
+  // 6. Annotations: a stamp, a comment box, a drawn shape or a filled form
+  //    field shows on screen through its appearance stream; the tool used to
+  //    delete every annotation for safety and print the page without them.
+  //    Draw each visible appearance into the page (PDF 32000 §12.5.5), then
+  //    drop the annotation dictionaries as before — the payload goes, the look stays.
+  if (PRESS_OPTS.annots) {
+    let drawn = 0; const kinds = new Map();
+    doc.getPages().forEach((pg, pi) => {
+      const node = pg.node;
+      const annRef = node.get(N("Annots")); const anns = annRef ? ctx.lookup(annRef) : null;
+      if (!(anns instanceof PL.PDFArray) || !anns.size()) return;
+      const draws = []; const xobjs = [];
+      anns.asArray().forEach((aRef, ai) => {
+        const a = aRef instanceof PL.PDFRef ? ctx.lookup(aRef) : aRef;
+        if (!(a instanceof PL.PDFDict)) return;
+        const sub = String(a.get(N("Subtype")) || "").slice(1);
+        if (sub === "Link" || sub === "Popup") return;
+        const fl = a.get(N("F")); const flags = fl && fl.asNumber ? fl.asNumber() : 0;
+        if (flags & 2 || flags & 32) return;                                   // Hidden, NoView
+        const ap = a.get(N("AP")); const apd = ap instanceof PL.PDFRef ? ctx.lookup(ap) : ap;
+        if (!(apd instanceof PL.PDFDict)) return;
+        let nRef = apd.get(N("N")); let nObj = nRef instanceof PL.PDFRef ? ctx.lookup(nRef) : nRef;
+        if (nObj instanceof PL.PDFDict && !(nObj instanceof PL.PDFStream)) {     // appearance sub-dictionary: pick the /AS state
+          const as = a.get(N("AS")); const pick = as ? nObj.get(as) : (nObj.entries()[0] || [])[1];
+          nRef = pick; nObj = pick instanceof PL.PDFRef ? ctx.lookup(pick) : pick;
+        }
+        if (!(nObj instanceof PL.PDFStream) || !(nRef instanceof PL.PDFRef)) return;
+        const rectA = ctx.lookup(a.get(N("Rect"))); if (!(rectA instanceof PL.PDFArray) || rectA.size() !== 4) return;
+        const r = rectA.asArray().map(x => ctx.lookup(x).asNumber());
+        const rx0 = Math.min(r[0], r[2]), ry0 = Math.min(r[1], r[3]), rx1 = Math.max(r[0], r[2]), ry1 = Math.max(r[1], r[3]);
+        const bb = ctx.lookup(nObj.dict.get(N("BBox"))); if (!(bb instanceof PL.PDFArray) || bb.size() !== 4) return;
+        const b = bb.asArray().map(x => ctx.lookup(x).asNumber());
+        const mA = ctx.lookup(nObj.dict.get(N("Matrix")));
+        const M = mA instanceof PL.PDFArray && mA.size() === 6 ? mA.asArray().map(x => ctx.lookup(x).asNumber()) : [1, 0, 0, 1, 0, 0];
+        const corners = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].map(([x, y]) => matApply(M, x, y));
+        const tx0 = Math.min(...corners.map(c => c[0])), tx1 = Math.max(...corners.map(c => c[0]));
+        const ty0 = Math.min(...corners.map(c => c[1])), ty1 = Math.max(...corners.map(c => c[1]));
+        const sx = tx1 - tx0 > 1e-9 ? (rx1 - rx0) / (tx1 - tx0) : 1, sy = ty1 - ty0 > 1e-9 ? (ry1 - ry0) / (ty1 - ty0) : 1;
+        const name = `PpsAn${pi}_${ai}`;
+        xobjs.push([name, nRef]);
+        draws.push(`q ${sx.toFixed(6)} 0 0 ${sy.toFixed(6)} ${(rx0 - tx0 * sx).toFixed(4)} ${(ry0 - ty0 * sy).toFixed(4)} cm /${name} Do Q`);
+        kinds.set(sub || "?", (kinds.get(sub || "?") || 0) + 1); drawn++;
+      });
+      if (!draws.length) return;
+      // Resources on the page itself (an inherited dict must not be edited in place).
+      let res = node.get(N("Resources")); let resD = res ? ctx.lookup(res) : null;
+      if (!(resD instanceof PL.PDFDict)) { const inh = ctx.lookup(node.getInheritableAttribute(N("Resources"))); resD = inh instanceof PL.PDFDict ? inh.clone(ctx) : ctx.obj({}); node.set(N("Resources"), resD); }
+      let xo = ctx.lookup(resD.get(N("XObject"))); if (!(xo instanceof PL.PDFDict)) { xo = ctx.obj({}); resD.set(N("XObject"), xo); }
+      for (const [nm, ref] of xobjs) xo.set(N(nm), ref);
+      const c = node.get(N("Contents")); const cv = c ? ctx.lookup(c) : null;
+      const existing = cv instanceof PL.PDFArray ? cv.asArray() : c ? [c] : [];
+      node.set(N("Contents"), ctx.obj([ctx.register(ctx.stream("q\n")), ...existing, ctx.register(ctx.stream("\nQ\n" + draws.join("\n") + "\n"))]));
+    });
+    if (drawn) notes.push(`"${what}": ${drawn} annotation${drawn === 1 ? "" : "s"} (${[...kinds].map(([k, v]) => `${v} ${k}`).join(", ")}) drawn into the page so ${drawn === 1 ? "it prints" : "they print"} as ${drawn === 1 ? "it displays" : "they display"} — the tool used to delete annotations outright, which dropped stamps, comment boxes and filled form fields from the press sheet.`);
+  }
+  doc.__ppsPressNotes = notes.length ? notes : null;
+  return notes;
 }
 
 // ── Vector soft masks → clipping paths (1.51) ────────────────────────────
@@ -3092,11 +3272,12 @@ function parsePageList(txt, max) {
 // page size are untouched; downstream never knows the difference. The cost is
 // that those pages are no longer vector — said plainly in the warning.
 const GREY_DPI = 300, GREY_MAX_PX = 40e6;
-async function forceGreyPagesBytes(bytes, pages) {
+async function forceGreyPagesBytes(bytes, pages, colour) {
   const doc = await loadPdf(bytes, "artwork");
   const n = doc.getPageCount();
   const want = pages.filter(p => p >= 1 && p <= n);
-  if (!want.length) return { bytes, note: `Force greyscale: no listed page exists in the ${n}-page file — nothing changed.` };
+  const label = colour ? "Rasterise pages" : "Force greyscale";
+  if (!want.length) return { bytes, note: `${label}: no listed page exists in the ${n}-page file — nothing changed.` };
   const pdfjs = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
   for (const pno of want) {
     const page = doc.getPage(pno - 1);
@@ -3112,11 +3293,19 @@ async function forceGreyPagesBytes(bytes, pages) {
     ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
     await src.render({ canvasContext: ctx, viewport: vp }).promise;
     const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    const g = new Uint8Array(canvas.width * canvas.height);
-    for (let i = 0, j = 0; i < d.length; i += 4, j++) g[j] = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114 + 0.5) | 0;
-    const img = doc.context.register(doc.context.flateStream(g, {
-      Type: "XObject", Subtype: "Image", Width: canvas.width, Height: canvas.height, ColorSpace: "DeviceGray", BitsPerComponent: 8,
-    }));
+    let img;
+    if (colour) {
+      // Colour: a JPEG at quality 0.92 (DCTDecode) — 300 DPI RGB raw would be 15 MB a page.
+      const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.92));
+      const jpg = new Uint8Array(await blob.arrayBuffer());
+      img = (await doc.embedJpg(jpg)).ref;
+    } else {
+      const g = new Uint8Array(canvas.width * canvas.height);
+      for (let i = 0, j = 0; i < d.length; i += 4, j++) g[j] = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114 + 0.5) | 0;
+      img = doc.context.register(doc.context.flateStream(g, {
+        Type: "XObject", Subtype: "Image", Width: canvas.width, Height: canvas.height, ColorSpace: "DeviceGray", BitsPerComponent: 8,
+      }));
+    }
     const content = `q ${mb.w} 0 0 ${mb.h} ${mb.x} ${mb.y} cm /ImG Do Q`;
     page.node.set(PL.PDFName.of("Contents"), doc.context.register(doc.context.stream(content)));
     page.node.set(PL.PDFName.of("Resources"), doc.context.obj({ XObject: { ImG: img } }));
@@ -3124,7 +3313,9 @@ async function forceGreyPagesBytes(bytes, pages) {
   }
   return {
     bytes: await doc.save({ useObjectStreams: false }),
-    note: `Force greyscale: page${want.length === 1 ? "" : "s"} ${want.join(", ")} rasterised at ${GREY_DPI} DPI as DeviceGray (K only) — no longer vector on those pages.`,
+    note: colour
+      ? `Rasterise pages: page${want.length === 1 ? "" : "s"} ${want.join(", ")} rasterised at ${GREY_DPI} DPI as an RGB JPEG — nothing left on ${want.length === 1 ? "that page" : "those pages"} for a RIP to misread (no fonts, masks, shadings, JPEG 2000, 16-bit or overprint), at the cost of vector sharpness and CMYK fidelity. A last resort for a page the press will not print right.`
+      : `Force greyscale: page${want.length === 1 ? "" : "s"} ${want.join(", ")} rasterised at ${GREY_DPI} DPI as DeviceGray (K only) — no longer vector on those pages.`,
   };
 }
 
@@ -3454,12 +3645,13 @@ async function emptySides(bytes) {
 //               sheet count the operator typed refers to the imposed sheets.
 async function imposePdf(artBytes, backBytes, spec, gangFiles, onProgress) {
   PROG = typeof onProgress === "function" ? onProgress : null;
+  PRESS_OPTS = { overprint: spec.stripOverprint !== false, hairline: spec.fixHairlines !== false, annots: spec.flattenAnnots !== false };
   try {
     await progress("Reading artwork", 0.02);
     const res = await imposePdfStages(artBytes, backBytes, spec, gangFiles);
     await progress("Done", 1);
     return res;
-  } finally { PROG = null; }
+  } finally { PROG = null; PRESS_OPTS = { overprint: true, hairline: true, annots: true }; }
 }
 async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
   const pre = [];
@@ -3477,6 +3669,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     if (doc.__ppsRepairNote) pre.push("⚠ " + doc.__ppsRepairNote);
     if (doc.__ppsClipNote) pre.push(doc.__ppsClipNote);
     if (doc.__ppsMaskNote) pre.push(...doc.__ppsMaskNote);
+    if (doc.__ppsPressNotes) pre.push(...doc.__ppsPressNotes);
     pre.push(...fontNotes(doc, "artwork", spec, fontsMissing));
     try {
       // UserUnit scales a page's units; nothing here honours it, so say so.
@@ -3520,6 +3713,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
       if (bdoc.__ppsRepairNote) pre.push("⚠ " + bdoc.__ppsRepairNote);
       if (bdoc.__ppsClipNote) pre.push(bdoc.__ppsClipNote);
       if (bdoc.__ppsMaskNote) pre.push(...bdoc.__ppsMaskNote);
+      if (bdoc.__ppsPressNotes) pre.push(...bdoc.__ppsPressNotes);
       pre.push(...fontNotes(bdoc, "back file", spec, fontsMissing));
     } catch (e) { if (/FONTS NOT EMBEDDED|cannot be decompressed/.test(e.message)) throw e; /* anything else is reported by the core load */ }
   }
@@ -3534,6 +3728,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
         if (gdoc.__ppsRepairNote) pre.push("⚠ " + gdoc.__ppsRepairNote);
         if (gdoc.__ppsClipNote) pre.push(gdoc.__ppsClipNote);
         if (gdoc.__ppsMaskNote) pre.push(...gdoc.__ppsMaskNote);
+        if (gdoc.__ppsPressNotes) pre.push(...gdoc.__ppsPressNotes);
         pre.push(...fontNotes(gdoc, `gang file "${g.name || "?"}"`, spec, fontsMissing));
         const sv = pageSizeSurvey(gdoc, spec);
         const z = sv.sizes[0];
@@ -3550,6 +3745,12 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     await progress(`Rasterising ${grey.length} greyscale page${grey.length === 1 ? "" : "s"}`, 0.1);
     const r = await forceGreyPagesBytes(artBytes, grey);
     artBytes = r.bytes; greyNote = r.note;
+  }
+  const rast = parsePageList(spec.rasterPages);
+  if (rast.length && artBytes) {
+    await progress(`Rasterising ${rast.length} page${rast.length === 1 ? "" : "s"}`, 0.12);
+    const r = await forceGreyPagesBytes(artBytes, rast, true);
+    artBytes = r.bytes; greyNote = greyNote ? greyNote + " " + r.note : r.note;
   }
   // Page sequence AFTER greyscale (whose numbers refer to the file as dropped)
   // and BEFORE the core, so every product path — flats, saddle signatures,
@@ -4667,7 +4868,11 @@ function App() {
   const [pageSeqTxt, setPageSeqTxt] = useState("");        // source page sequence (duplicate / repeat / reorder / blanks)
   const [sheetSeqTxt, setSheetSeqTxt] = useState("");      // imposed sheet sequence (repeat / reorder physical sheets)
   const [splitSpreads, setSplitSpreads] = useState(false); // cut 2-page reader spreads into single pages
-  const [oversize, setOversize] = useState("crop");        // a page larger than the finished size with no TrimBox: crop at 100% (centred) | scale to fit
+  const [oversize, setOversize] = useState("crop");
+  const [stripOverprint, setStripOverprint] = useState(true);   // press safety (1.54)
+  const [fixHairlines, setFixHairlines] = useState(true);
+  const [flattenAnnots, setFlattenAnnots] = useState(true);
+  const [rasterPagesTxt, setRasterPagesTxt] = useState("");     // last-resort page rasteriser (job-specific, not a setup field)        // a page larger than the finished size with no TrimBox: crop at 100% (centred) | scale to fit
   const [slipOn, setSlipOn] = useState(false);
   const [slipWhen, setSlipWhen] = useState("before");
   const [slipSheets, setSlipSheets] = useState("");
@@ -4697,6 +4902,7 @@ function App() {
     artScale: [artScale, setArtScale], creep: [creep, setCreep], spine: [spine, setSpine], pbPart: [pbPart, setPbPart], pbGutsOrder: [pbGutsOrder, setPbGutsOrder],
     artInset: [artInset, setArtInset], streakEps: [streakEps, setStreakEps], multiMode: [multiMode, setMultiMode],
     greyPagesTxt: [greyPagesTxt, setGreyPagesTxt], splitSpreads: [splitSpreads, setSplitSpreads], oversize: [oversize, setOversize],
+    stripOverprint: [stripOverprint, setStripOverprint], fixHairlines: [fixHairlines, setFixHairlines], flattenAnnots: [flattenAnnots, setFlattenAnnots],
     slipOn: [slipOn, setSlipOn], slipWhen: [slipWhen, setSlipWhen], slipSheets: [slipSheets, setSlipSheets], slipDesign: [slipDesign, setSlipDesign],
   };
   const SETUP_JOB_KEYS = ["calc", "trimLong", "trimShort", "sides", "spine", "pbPart"];
@@ -4865,7 +5071,8 @@ function App() {
     greyPages: greyPagesTxt.trim() || null,
     pageSeq: pageSeqTxt.trim() || null,
     sheetSeq: sheetSeqTxt.trim() || null,
-    splitSpreads, oversize,
+    splitSpreads, oversize, stripOverprint, fixHairlines, flattenAnnots,
+    rasterPages: rasterPagesTxt.trim() || null,
     slip: slipOn ? { on: true, when: slipWhen, sheets: slipSheets, design: slipDesign,
                      customBytes: slipCustom && slipCustom.bytes, customName: slipCustom && slipCustom.name } : null,
     // Per-half layout controls. Shaped for the engine (pbPartOverrides), which
@@ -4875,7 +5082,7 @@ function App() {
   }), [calc, trimLong, trimShort, allowMissingFonts, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin, sheetPortrait,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, artRotate, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, oversize, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, oversize, stripOverprint, fixHairlines, flattenAnnots, rasterPagesTxt, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -6122,6 +6329,21 @@ function App() {
                 A page number past the end refuses rather than skipping. Greyscale page numbers above refer to the file as dropped; the notes and slugs refer to this run. Artwork file only — a separate back file and gang files are untouched.
               </div>
             </Field>
+            <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 10, background: "rgba(255,255,255,.02)" }}>
+              <span className="lbl" style={{ margin: "0 0 6px", display: "block" }}>Press safety <span style={{ color: "rgba(255,255,255,.4)", fontWeight: 400 }}>— fixes for things that look right on screen and print wrong on the RIP; each is reported in the Job report</span></span>
+              {[["stripOverprint", stripOverprint, setStripOverprint, "Remove overprint", "white or light objects set to overprint vanish on the press"],
+                ["fixHairlines", fixHairlines, setFixHairlines, "Thicken zero-width hairlines to 0.25 pt", "\"0 w\" is one device pixel — invisible on paper"],
+                ["flattenAnnots", flattenAnnots, setFlattenAnnots, "Flatten annotations into the page", "stamps, comment boxes and filled form fields print as they display"]].map(([k, v, set, t, d]) => (
+                <label key={k} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, cursor: "pointer", marginBottom: 4 }}>
+                  <input type="checkbox" checked={v} onChange={e => set(e.target.checked)} style={{ width: "auto", marginTop: 3 }} />
+                  <span>{t} <span style={{ color: "rgba(255,255,255,.4)" }}>— {d}</span></span>
+                </label>
+              ))}
+              <Field label="Rasterise pages (last resort)" style={{ marginTop: 8, marginBottom: 0 }}>
+                <input type="text" value={rasterPagesTxt} onChange={e => setRasterPagesTxt(e.target.value)} placeholder="e.g. 2, 5-6  (source page numbers)" />
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>Turns those source pages into a 300 DPI RGB image — nothing left for a RIP to misread (JPEG 2000, 16-bit images, soft masks the tool could not simplify). Vector sharpness and CMYK fidelity are lost on those pages; use it when a page will not print right any other way.</div>
+              </Field>
+            </div>
             <Field label="Force greyscale print on pages">
               <input type="text" value={greyPagesTxt} onChange={e => setGreyPagesTxt(e.target.value)} placeholder="e.g. 3, 5-8  (source page numbers)" />
               <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
