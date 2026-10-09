@@ -743,6 +743,46 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### The purple box, second pass: vector soft masks become clipping paths (1.51)
+
+  Owner, after 1.49: "Still getting purple box." The luminosity rewrite is
+  exact but still a soft mask — it depends on the RIP honouring soft
+  masks, and the Fiery cannot be exercised from here. A soft mask whose
+  group is nothing but filled vector paths, with no /TR or a hard
+  threshold /TR, is EXACTLY a clipping path: the one construct every RIP
+  has executed since PostScript level 1, with no transparency for a
+  flattener to get wrong.
+
+  - `flattenVectorMasks(doc, what)` runs inside `loadPdf()` before the
+    luminosity converter. For every page and form XObject it looks at the
+    ExtGStates in that stream's Resources; each `/S /Alpha` mask whose
+    group `maskClipSegments()` can read as pure fills (`m l c v y h re` +
+    `f`/`f*`/`b`/`B`, one fill rule, `q/Q/cm` tracked, the group's /Matrix
+    and /BBox applied, only no-op `gs` inside; anything else — strokes,
+    nested clips, text, images, shadings, opacity, mixed rules, a non-step
+    /TR — leaves it to 1.49's converter) is turned into a clip: in the
+    content stream `/E3 gs` becomes `/E3_ppsclip gs` (the same ExtGState
+    without its SMask) followed by the BBox and the mask's paths in the
+    current coordinate system and `W n`. A clip set after `q` dies at the
+    matching `Q` — the lifetime the SMask had. Page contents are replaced;
+    a form's stream is rewritten in place. Note: "2 soft-mask uses
+    flattened to clipping paths — … no transparency left for the RIP to
+    drop."
+  - Bug found by the pixel compare on the first cut: segments were emitted
+    operator-first ("m 0 0"); PDF is postfix ("0 0 m"). Fixed; the compare
+    then dropped from 515 k differing pixels to 22.7 k of 2.47 M (0.9 %,
+    all at the letter edges: clip edges versus mask coverage), and the
+    headline crops are indistinguishable by eye.
+  - On the customer's file the imposed output still contains the (now
+    unused) luminosity dicts the 1.49 pass leaves in the resources; the
+    content streams no longer reference them. Every existing suite
+    content-identical; UI suites pass.
+  - If the press STILL prints the box after re-imposing with build 1.51
+    (check the chip and the "flattened to clipping paths" line in the Job
+    report), the cause is not transparency at all and the next suspect is
+    the ICC-based RGB colour space of the fill (`/C1 [/ICCBased …]`) on
+    the RIP's colour path — report back with that build's file.
+
   ### A dropped booklet imposes as a booklet (1.50)
 
   Owner: "When I drop a 8.5×5.5 saddlestitch book design in, it should

@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 01:10 UTC · IMPOSE-V1.50</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 02:00 UTC · IMPOSE-V1.51</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1018,8 +1018,167 @@ async function loadPdf(bytes, what) {
     throw new Error(`"${what || "This file"}" is encrypted (an owner/permissions password). The browser cannot decrypt it, so its pages would impose as garbage and Fiery would print blank sheets. Remove the security first — Acrobat: File → Properties → Security → No Security (or re-export from the source) — then drop it again.`);
   }
   repairPageContents(doc, what || "This file");
-  convertAlphaMasks(doc, what || "This file");
+  flattenVectorMasks(doc, what || "This file");          // soft mask → clipping path where the mask is pure vector (no transparency left)
+  convertAlphaMasks(doc, what || "This file");           // whatever remains: alpha → luminosity
   return doc;
+}
+
+// ── Vector soft masks → clipping paths (1.51) ────────────────────────────
+// 1.49 rewrote Canva's /S /Alpha masks as luminosity masks; the press still
+// printed the box, and the Fiery cannot be exercised from here. A soft mask
+// whose group is nothing but filled vector paths, with no TR or a hard
+// threshold TR, is EXACTLY a clipping path — the one construct every RIP has
+// executed since PostScript level 1, with no transparency for a flattener
+// to get wrong. So: in every content stream, each `/Ex gs` whose ExtGState
+// carries such a mask becomes `/Ex_ppsclip gs` (the same ExtGState without
+// the mask) followed by the mask's paths, transformed through the group's
+// own cm/q/Q and /Matrix into the current coordinate system, and `W n`. A
+// clip set after `q` dies at the matching `Q` — the same lifetime the
+// SMask had. Masks that paint text, images, shadings, strokes, nested
+// clips, opacity or mixed fill rules are left to convertAlphaMasks.
+const STEP_TR = /0\s+gt\s*\{\s*1\s*\}\s*\{\s*0\s*\}\s*ifelse/;
+function matMul(a, b) { // a then b (PDF convention: p' = p × a × b)
+  return [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3],
+          a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5]];
+}
+function matApply(m, x, y) { return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; }
+// The mask group as clip segments in the group's PARENT space, or null.
+function maskClipSegments(doc, gRef, smask) {
+  const ctx = doc.context;
+  const tr = smask.get(PL.PDFName.of("TR"));
+  if (tr) {
+    const trObj = ctx.lookup(tr);
+    if (!(trObj instanceof PL.PDFStream)) return null;             // a named/sampled TR — not a plain step
+    let code = ""; try { code = new TextDecoder("latin1").decode(PL.decodePDFRawStream(trObj).decode()); } catch (e) { return null; }
+    if (!STEP_TR.test(code)) return null;
+  }
+  const st = ctx.lookup(gRef);
+  if (!(st instanceof PL.PDFStream)) return null;
+  const res = asDict(ctx.lookup(st.dict.get(PL.PDFName.of("Resources"))));
+  const egs = res ? asDict(ctx.lookup(res.get(PL.PDFName.of("ExtGState")))) : null;
+  let src; try { src = new TextDecoder("latin1").decode(PL.decodePDFRawStream(st).decode()); } catch (e) { return null; }
+  const mArr = st.dict.get(PL.PDFName.of("Matrix"));
+  const M0 = mArr instanceof PL.PDFArray && mArr.size() === 6 ? mArr.asArray().map(n => ctx.lookup(n).asNumber()) : [1, 0, 0, 1, 0, 0];
+  const bboxArr = ctx.lookup(st.dict.get(PL.PDFName.of("BBox")));
+  const stack = []; let M = M0.slice();
+  const segs = [];                 // [op, ...numbers] in parent space
+  let cur = [];                    // the path being built
+  let rule = null;                 // "W" | "W*"
+  const f = n => +(+n).toFixed(4);
+  const P = (x, y) => matApply(M, +x, +y).map(f);
+  const toks = tokenizeContent(src);
+  let pend = [];
+  const IGN = new Set(["w", "J", "j", "M", "d", "ri", "i", "BMC", "BDC", "EMC", "MP", "DP", "g", "G", "rg", "RG", "k", "K", "cs", "CS", "sc", "SC", "scn", "SCN"]);
+  for (const t of toks) {
+    if (t.k !== "op") { pend.push(t.v); continue; }
+    const op = t.v, a = pend; pend = [];
+    if (IGN.has(op)) continue;
+    if (op === "q") { stack.push(M.slice()); continue; }
+    if (op === "Q") { M = stack.pop() || M0.slice(); continue; }
+    if (op === "cm") { if (a.length < 6) return null; M = matMul(a.slice(-6).map(Number), M); continue; }
+    if (op === "gs") {                                              // only a no-op ExtGState is allowed inside a mask
+      const g = egs ? asDict(ctx.lookup(egs.get(PL.PDFName.of(String(a[a.length - 1] || "").slice(1))))) : null;
+      if (!g) return null;
+      for (const [k, v] of g.entries()) {
+        const kk = k.toString(); const vv = ctx.lookup(v);
+        if (kk === "/SMask" && !(vv instanceof PL.PDFName && vv.toString() === "/None")) return null;
+        if ((kk === "/ca" || kk === "/CA") && vv && vv.asNumber && vv.asNumber() < 1) return null;
+        if (kk === "/BM" && !/^\/(Normal|Compatible)$/.test(String(vv))) return null;
+      }
+      continue;
+    }
+    if (op === "m" || op === "l") { if (a.length < 2) return null; cur.push([op, ...P(a[a.length - 2], a[a.length - 1])]); continue; }
+    if (op === "c") { if (a.length < 6) return null; const n = a.slice(-6); cur.push(["c", ...P(n[0], n[1]), ...P(n[2], n[3]), ...P(n[4], n[5])]); continue; }
+    if (op === "v" || op === "y") { if (a.length < 4) return null; const n = a.slice(-4); cur.push([op, ...P(n[0], n[1]), ...P(n[2], n[3])]); continue; }
+    if (op === "h") { cur.push(["h"]); continue; }
+    if (op === "re") {                                              // corners through the matrix — a rotated re is not a re
+      if (a.length < 4) return null; const [x, y, w, h] = a.slice(-4).map(Number);
+      cur.push(["m", ...P(x, y)], ["l", ...P(x + w, y)], ["l", ...P(x + w, y + h)], ["l", ...P(x, y + h)], ["h"]); continue;
+    }
+    if (op === "n") { cur = []; continue; }
+    if (op === "f" || op === "F" || op === "b" || op === "B" || op === "f*" || op === "b*" || op === "B*") {
+      const r = op.endsWith("*") ? "W*" : "W";
+      if (rule && rule !== r) return null;                          // mixed fill rules cannot share one clip
+      rule = r; segs.push(...cur); cur = []; continue;
+    }
+    return null;                                                    // S s W W* BT Tj Do sh BI d0 d1 … — not a plain filled mask
+  }
+  if (!segs.length) return { rule: "W", segs: [], empty: true };    // paints nothing: the mask hides everything
+  // The group is clipped to its BBox as well — intersect with it.
+  let bbox = null;
+  if (bboxArr instanceof PL.PDFArray && bboxArr.size() === 4) {
+    const b = bboxArr.asArray().map(n => ctx.lookup(n).asNumber()); M = M0.slice();
+    bbox = [["m", ...P(b[0], b[1])], ["l", ...P(b[2], b[1])], ["l", ...P(b[2], b[3])], ["l", ...P(b[0], b[3])], ["h"]];
+  }
+  return { rule: rule || "W", segs, bbox };
+}
+function clipText(c) {
+  const seg = x => x.slice(1).concat(x[0]).join(" ");                // operands first, operator last: "x y m"
+  const parts = [];
+  if (c.bbox) parts.push(c.bbox.map(seg).join(" ") + " W n");
+  parts.push(c.empty ? "0 0 0 0 re W n" : c.segs.map(seg).join("\n") + ` ${c.rule} n`);
+  return parts.join("\n");
+}
+function flattenVectorMasks(doc, what) {
+  const ctx = doc.context;
+  let flattened = 0; const holders = [];
+  for (const pg of doc.getPages()) holders.push({ kind: "page", node: pg.node });
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    if (obj instanceof PL.PDFStream && String(obj.dict.get(PL.PDFName.of("Subtype"))) === "/Form") holders.push({ kind: "form", st: obj, ref });
+  }
+  for (const h of holders) {
+    const resRef = h.kind === "page" ? h.node.getInheritableAttribute(PL.PDFName.of("Resources")) : h.st.dict.get(PL.PDFName.of("Resources"));
+    const res = asDict(ctx.lookup(resRef)); if (!res) continue;
+    const egs = asDict(ctx.lookup(res.get(PL.PDFName.of("ExtGState")))); if (!egs) continue;
+    const plan = new Map();                                         // name → { clip, newName }
+    for (const [k, v] of egs.entries()) {
+      const g = asDict(ctx.lookup(v)); if (!g) continue;
+      const sm = g.get(PL.PDFName.of("SMask")); const smd = sm ? ctx.lookup(sm) : null;
+      if (!(smd instanceof PL.PDFDict) || smd instanceof PL.PDFStream) continue;
+      const S = String(smd.get(PL.PDFName.of("S")));
+      if (S !== "/Alpha" && S !== "/Luminosity") continue;
+      if (S === "/Luminosity") {                                     // only a white-on-black luminosity mask is a pure shape
+        const bc = ctx.lookup(smd.get(PL.PDFName.of("BC")));
+        if (bc && !(bc instanceof PL.PDFArray && bc.asArray().every(n => ctx.lookup(n).asNumber() === 0))) continue;
+        continue;                                                   // colour inside a luminosity group changes the mask — leave it
+      }
+      const gRef = smd.get(PL.PDFName.of("G")); if (!(gRef instanceof PL.PDFRef)) continue;
+      const clip = maskClipSegments(doc, gRef, smd); if (!clip) continue;
+      const nm = k.toString().slice(1);
+      const copy = g.clone(ctx); copy.delete(PL.PDFName.of("SMask"));
+      const newName = nm + "_ppsclip";
+      egs.set(PL.PDFName.of(newName), copy);
+      plan.set(nm, { clip, newName });
+    }
+    if (!plan.size) continue;
+    // Rewrite the content: `/Name gs` → `/Name_ppsclip gs` + clip.
+    let text;
+    if (h.kind === "page") {
+      const c = h.node.get(PL.PDFName.of("Contents")); const cv = ctx.lookup(c);
+      const items = cv instanceof PL.PDFArray ? cv.asArray() : [c];
+      text = items.map(it => { const st = ctx.lookup(it); try { return new TextDecoder("latin1").decode(PL.decodePDFRawStream(st).decode()); } catch (e) { return null; } });
+      if (text.some(t => t === null)) continue; text = text.join("\n");
+    } else {
+      try { text = new TextDecoder("latin1").decode(PL.decodePDFRawStream(h.st).decode()); } catch (e) { continue; }
+    }
+    const toks = tokenizeContent(text); const out = []; let pend = []; let hits = 0;
+    for (const t of toks) {
+      if (t.k !== "op") { pend.push(t.v); continue; }
+      if (t.v === "gs" && pend.length && plan.has(String(pend[pend.length - 1]).slice(1))) {
+        const pl = plan.get(String(pend[pend.length - 1]).slice(1));
+        out.push(`/${pl.newName} gs`); out.push(clipText(pl.clip)); hits++; pend = []; continue;
+      }
+      out.push(pend.concat(t.v).join(" ")); pend = [];
+    }
+    if (!hits) continue;
+    const bytes = new TextEncoder().encode(out.join("\n"));           // latin1-safe: tokens are ASCII or already-escaped strings
+    const packed = ctx.flateStream(bytes);
+    if (h.kind === "page") h.node.set(PL.PDFName.of("Contents"), ctx.register(packed));
+    else { h.st.contents = packed.contents; h.st.dict.set(PL.PDFName.of("Filter"), PL.PDFName.of("FlateDecode")); h.st.dict.delete(PL.PDFName.of("DecodeParms")); h.st.dict.set(PL.PDFName.of("Length"), PL.PDFNumber.of(packed.contents.length)); }
+    flattened += hits;
+  }
+  doc.__ppsClipNote = flattened ? `"${what}": ${flattened} soft-mask use${flattened === 1 ? "" : "s"} flattened to clipping path${flattened === 1 ? "" : "s"} — the mask was pure vector (a Canva-style export), so the masked fill is now simply clipped to the shape, with no transparency left for the RIP to drop. On screen the result is identical; on the press the fill can no longer print as a solid box.` : null;
+  return flattened;
 }
 
 // ── Alpha soft masks → luminosity masks (1.49) ───────────────────────────
@@ -3311,6 +3470,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     const doc = await loadPdf(artBytes, "artwork");
     await progress("Checking fonts and page sizes", 0.06);
     if (doc.__ppsRepairNote) pre.push("⚠ " + doc.__ppsRepairNote);
+    if (doc.__ppsClipNote) pre.push(doc.__ppsClipNote);
     if (doc.__ppsMaskNote) pre.push(...doc.__ppsMaskNote);
     pre.push(...fontNotes(doc, "artwork", spec, fontsMissing));
     try {
@@ -3353,6 +3513,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
       if (lastRaster) { const n = rasterNote(lastRaster, tw, th); if (n) pre.push(n); lastRaster = null; }
       const bdoc = await loadPdf(bb, "back file");
       if (bdoc.__ppsRepairNote) pre.push("⚠ " + bdoc.__ppsRepairNote);
+      if (bdoc.__ppsClipNote) pre.push(bdoc.__ppsClipNote);
       if (bdoc.__ppsMaskNote) pre.push(...bdoc.__ppsMaskNote);
       pre.push(...fontNotes(bdoc, "back file", spec, fontsMissing));
     } catch (e) { if (/FONTS NOT EMBEDDED|cannot be decompressed/.test(e.message)) throw e; /* anything else is reported by the core load */ }
@@ -3366,6 +3527,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
         const gb = await ppsToPdfBytes(g.bytes, g.name || "gang");
         const gdoc = await loadPdf(gb, g.name || "gang file");
         if (gdoc.__ppsRepairNote) pre.push("⚠ " + gdoc.__ppsRepairNote);
+        if (gdoc.__ppsClipNote) pre.push(gdoc.__ppsClipNote);
         if (gdoc.__ppsMaskNote) pre.push(...gdoc.__ppsMaskNote);
         pre.push(...fontNotes(gdoc, `gang file "${g.name || "?"}"`, spec, fontsMissing));
         const sv = pageSizeSurvey(gdoc, spec);
@@ -3853,7 +4015,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc, loadPdf, convertAlphaMasks };
+window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc, loadPdf, convertAlphaMasks, flattenVectorMasks };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
