@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 00:30 UTC · IMPOSE-V1.49</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 01:10 UTC · IMPOSE-V1.50</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -4904,6 +4904,7 @@ function App() {
         const aNote = approvalNote(appr, f.name, activeOrder && activeOrder.order_id);
         if (aNote) setNotice(aNote);
         setDetTrim(det ? { w: det.w, h: det.h } : null);
+        let toBook = false;                                   // set when the drop switches the product to a booklet
         setAddBleedPages({}); // per-page overrides belong to the previous file
         if (!jobName) setJobName(f.name.replace(/\.pdf$/i, ""));
         if (det) {
@@ -4922,14 +4923,30 @@ function App() {
             if (differs) setNotice(aNote + `⚠ "${f.name}" measures ${det.w}×${det.h}″ (${det.method}) but the order spec is ${specL}×${specS}″ — check that this is the right file/spec before printing.`);
             else if (flipped) setNotice(aNote + `⚠ "${f.name}" is ${det.w}×${det.h}″ (${det.h > det.w ? "portrait" : "landscape"}) but the order spec reads ${trimLong}×${trimShort}″ — this product binds on the height edge, so imposing as-is would turn every page 90°. Swap the page width/height before printing.`);
           } else {
-            if (isBound) { setTrimLong(det.w); setTrimShort(det.h); }   // bound: width × height
-            else { setTrimLong(detL); setTrimShort(detS); }
-            setNotice(`Trim auto-detected: ${det.w}×${det.h}″ (${det.method}).` + (pageCount > (sides === 2 ? 2 : 1) && !isBook ? ` File has ${pageCount} pages — set "Multi-page file" to gang or cut & stack if they're different pieces.` : ""));
+            // A booklet dropped on the default product (1.50): a multi-page
+            // file whose pages are a saddle-stitch size IS a saddle-stitch
+            // book — nobody drops a 16-page 5.5×8.5 file to step-and-repeat
+            // page 1. Switch the product and let it impose in printer
+            // spreads at the priced count, saying so; the operator sets
+            // Product back if those really are separate flat pieces.
+            const bookSize = SADDLE_PRESETS.some(pr => Math.abs(pr.w - det.w) < 0.03 && Math.abs(pr.h - det.h) < 0.03);
+            if (!isBound && bookSize && pageCount >= 8) {
+              toBook = true;
+              const imp = resolveSaddleImp(det.w, det.h).imp;
+              setCalc("saddle"); setSides(2);
+              setTrimLong(det.w); setTrimShort(det.h);
+              setNotice(aNote + `"${f.name}" is a ${pageCount}-page file at ${det.w}×${det.h}″ — a saddle-stitch booklet size — so Product is now Saddle Stitch and it imposes ${imp / 2 === 1 ? "1 spread" : `${imp / 2}-up (${imp / 2} spreads)`} per side in printer spreads, ready to print${pageCount % 4 ? ` (${4 - pageCount % 4} blank page${4 - pageCount % 4 === 1 ? "" : "s"} padded at the back)` : ""}. Set Product back to Brochure / Flat if these are separate flat pieces.`);
+            } else {
+              if (isBound) { setTrimLong(det.w); setTrimShort(det.h); }   // bound: width × height
+              else { setTrimLong(detL); setTrimShort(detS); }
+              const bookHint = !isBound && bookSize && pageCount >= 4 ? ` ${pageCount} pages at a booklet size — choose Saddle Stitch under Product layout type if this is a ${pageCount}-page booklet.` : "";
+              setNotice(`Trim auto-detected: ${det.w}×${det.h}″ (${det.method}).` + (pageCount > (sides === 2 ? 2 : 1) && !isBook ? ` File has ${pageCount} pages — set "Multi-page file" to gang or cut & stack if they're different pieces.` : "") + bookHint);
+            }
           }
         }
         // A 2-page file usually means front+back — switch, but say so, since
         // page 2 could also be notes/a proof sheet the operator must exclude.
-        if (pageCount >= 2 && sides === 1 && !isBook) {
+        if (pageCount >= 2 && sides === 1 && !isBook && !toBook) {
           setSides(2);
           setNotice(aNote + `"${f.name}" has ${pageCount} pages — switched to 2-sided (page 1 = front, page 2 = back). Set Sides back to 1 if page 2 isn't the back.`);
         }
