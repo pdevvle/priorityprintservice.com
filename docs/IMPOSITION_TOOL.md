@@ -743,6 +743,35 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### A dropped booklet imposes as a booklet (1.50)
+
+  Owner: "When I drop a 8.5×5.5 saddlestitch book design in, it should
+  automatically be laid out 2-up, ready to print." The standalone tool
+  opens on Brochure / Flat, so a 16-page booklet dropped there imposed
+  page 1 step-and-repeat (with a "set Multi-page file to gang" hint).
+
+  - In the drop handler's no-order branch: a file of **8 or more pages**
+    whose detected page size (as it lies, width × height) matches a saddle
+    preset (`SADDLE_PRESETS` — the live `size_presets` in wp-admin, the
+    embedded table standalone) switches Product to Saddle Stitch, keeps
+    the page as width × height (5.5×8.5 and 8.5×5.5 are different books
+    and both are presets), forces 2-sided, and the normal saddle run lays
+    it out at the priced count — 4 pages per side = 2 spreads per side =
+    "2-up". Notice: "'x.pdf' is a 16-page file at 8.5×5.5″ — a saddle-
+    stitch booklet size — so Product is now Saddle Stitch and it imposes
+    2-up (2 spreads) per side in printer spreads, ready to print. Set
+    Product back to Brochure / Flat if these are separate flat pieces."
+    A count that is not a multiple of 4 is padded by the saddle path as
+    before and the notice says how many blanks.
+  - 4–7 pages at a booklet size only get a hint ("choose Saddle Stitch if
+    this is a 4-page booklet") — a 4-page file at 8.5×5.5 is as likely a
+    folded card. A 2-page file still means front + back. An order from the
+    queue is untouched: its spec is authoritative.
+  - Verified (`ui_bookdrop.mjs`): 16-page 5.5×8.5 and 8.5×5.5 fixtures
+    both switch, keep their orientation, and download as
+    `…_saddle_2spread_13x19.pdf`; a 2-page 6×4 flat stays a flat. Engine
+    untouched.
+
   ### A dark box around a headline on the press, not on screen (1.49)
 
   Owner, with the source and the imposed file: "when I impose this file it
