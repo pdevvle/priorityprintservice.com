@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 02:40 UTC · IMPOSE-V1.52</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 03:20 UTC · IMPOSE-V1.53</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -3952,20 +3952,38 @@ function parseManifest(text) {
 // trims are usually halves; quarter-inch values score lower). /Rotate is
 // honoured so the detected size matches the displayed orientation.
 const r16 = v => Math.round(v * 16) / 16;
+// Sizes a print shop actually trims to, beyond the saddle presets. Used only
+// to decide whether a box that is exactly one bleed bigger than one of these
+// is really the bleed size wearing the trim's name.
+const COMMON_TRIMS = [[3.5, 2], [4, 9], [11, 17], [8.5, 14], [12, 18], [3, 12], [2, 3.5], [9, 4], [17, 11], [14, 8.5], [18, 12], [12, 3]];
+function knownTrim(w, h) {
+  const near = (a, b) => Math.abs(a - b) < 0.03;
+  return SADDLE_PRESETS.some(pr => (near(pr.w, w) && near(pr.h, h)) || (near(pr.w, h) && near(pr.h, w)))
+      || COMMON_TRIMS.some(([a, b]) => (near(a, w) && near(b, h)) || (near(a, h) && near(b, w)));
+}
 function detectTrim(doc, bleed) {
   const page = doc.getPage(0);
   const rotSwap = (((page.getRotation().angle % 360) + 360) % 360) % 180 !== 0;
   const dims = (w, h) => rotSwap ? { w: h / PT, h: w / PT } : { w: w / PT, h: h / PT };
   const mb = pageBox(page);
   const tb = getPageBox(page, "TrimBox");
+  const b = isFinite(bleed) ? +bleed : BLEED;
+  const nice = v => Math.abs(v * 2 - Math.round(v * 2)) < 0.02 ? 2 : Math.abs(v * 4 - Math.round(v * 4)) < 0.02 ? 1 : 0;
   if (tb && (Math.abs(tb.w - mb.w) > 1 || Math.abs(tb.h - mb.h) > 1)) {
     const d = dims(tb.w, tb.h);
+    // A TrimBox that is exactly one bleed bigger than a size the shop trims
+    // to (1.53): the designer built the document at the BLEED size and the
+    // export wrote that as the trim — "2026_Hamlet_Program_5.75x8.75_bleed.pdf"
+    // came in as a 5.75×8.75 book, priced 3/side, placed 1 spread/side and
+    // flagged MISMATCH. 5.75×8.75 is nobody's booklet; 5.5×8.5 + 0.125″ is.
+    const ins = { w: d.w - 2 * b, h: d.h - 2 * b };
+    if (b > 0 && !knownTrim(r16(d.w), r16(d.h)) && knownTrim(r16(ins.w), r16(ins.h)) && nice(ins.w) + nice(ins.h) > nice(d.w) + nice(d.h)) {
+      return { w: r16(ins.w), h: r16(ins.h), method: `embedded TrimBox ${r16(d.w)}×${r16(d.h)}″ is a ${r16(ins.w)}×${r16(ins.h)}″ trim + ${2 * b}″ bleed — using ${r16(ins.w)}×${r16(ins.h)}″ (type the size if the piece really trims at ${r16(d.w)}×${r16(d.h)}″)`, bleedSized: true };
+    }
     return { w: r16(d.w), h: r16(d.h), method: "embedded TrimBox" };
   }
-  const b = isFinite(bleed) ? +bleed : BLEED;
   const media = dims(mb.w, mb.h);
   const inset = { w: media.w - 2 * b, h: media.h - 2 * b };
-  const nice = v => Math.abs(v * 2 - Math.round(v * 2)) < 0.02 ? 2 : Math.abs(v * 4 - Math.round(v * 4)) < 0.02 ? 1 : 0;
   if (b > 0 && inset.w >= 1 && inset.h >= 1 && nice(inset.w) + nice(inset.h) > nice(media.w) + nice(media.h)) {
     return { w: r16(inset.w), h: r16(inset.h), method: `media size − ${2 * b}″ bleed` };
   }

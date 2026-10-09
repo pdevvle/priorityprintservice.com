@@ -743,6 +743,29 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### A TrimBox at the bleed size (1.53)
+
+  Owner's screenshot: "2026_Hamlet_Program_PRINT_5.75x8.75_bleed.pdf", 36
+  pages, came in as a 5.75×8.75 book — priced 3/side, placed 1 spread/side,
+  MISMATCH badge, and the 1.50 booklet switch did not fire because
+  5.75×8.75 is no preset. The designer built the document at the bleed
+  size and the export wrote that as the TrimBox; `detectTrim()` trusted an
+  embedded TrimBox unconditionally.
+
+  - `detectTrim()` now treats a TrimBox that is exactly one bleed bigger
+    than a size the shop trims to (`knownTrim()`: the saddle presets in
+    either orientation plus `COMMON_TRIMS` — business card, rack card,
+    tabloid, legal, 12×18, 3×12) — and that is not itself such a size, and
+    whose inset is the "nicer" number — as the bleed size: the trim is the
+    inset. Method text names both sizes and how to override ("type the
+    size if the piece really trims at 5.75×8.75″"). A genuine TrimBox at a
+    real size, or an odd custom size, is still taken as written.
+  - With the trim right, the 1.50 switch fires: Product → Saddle Stitch,
+    2 spreads per side, no mismatch. Verified (`ui_hamlet.mjs`) on three
+    36-page 5.75×8.75 variants: MediaBox 6×9 + TrimBox 5.75×8.75 (InDesign
+    style), TrimBox = MediaBox at the bleed size, and no boxes at all — all
+    detect 5.5×8.5 and impose 2-up. Engine untouched (regression identical).
+
   ### Preview first, impose all on demand (1.52)
 
   Owner: "add a button for the actual imposition so it doesn't try to run
