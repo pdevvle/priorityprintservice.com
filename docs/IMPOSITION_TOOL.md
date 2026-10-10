@@ -743,6 +743,34 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### The perfect-bound cover goes through the same placement rules (1.58)
+
+  Owner's second photo, same hour: the job was a **Perfect Bound** 4×2 ticket
+  book, Crop selected, and the cover still showed the ticket design small
+  with the customer's crop marks inside ours. `pbBuildCover()` had its own
+  placement: it embedded each cover face's whole page box and scaled it to
+  fit the 4×2 panel ("fit-to-panel, never crop"), ignoring the TrimBox, the
+  fit mode and the 1.57 slug clip — so a 4.47×2.47 page with a 4×2 TrimBox
+  came out at 89 % with its marks printed, whatever the select said.
+
+  Each cover face now runs through `resolveSideArt()` → `placeArt()` exactly
+  like every other page: TrimBox / BleedBox located, the fit mode applied,
+  the file's own slug clipped. The flat is built **with bleed** (page =
+  flat + 2 × bleed, TrimBox inset) so the downstream flat run sees real
+  bleed instead of synthesising it; each face's bleed runs outward past the
+  flat's edges and inward only to the middle of the spine, so two faces can
+  never overlap through a narrow spine. Per-face notes ("cover front cover
+  (page 1): art located by embedded TrimBox", …) join the cover's report.
+  Template-pair covers (already flat) are untouched.
+
+  Verified (`cases_pbcover.json`, the tickets file as a 4×2 book with a
+  0.09″ spine): 1.57 render shows the marks and the design at 89 %; 1.58
+  shows the design at 100 % with the bleed ring and no marks, in Crop and
+  in Fit alike (the located trim equals the finished size, so Fit does not
+  scale either). `ui_pbrot.mjs`, `ui_prog.mjs` green. Regression: every PB
+  cover output differs (bleed and TrimBox added); guts and every non-PB
+  suite content-identical.
+
   ### The file's own crop marks never print (1.57)
 
   Owner, a photo of the viewport an hour after 1.56 went up: the 2026 Tickets
