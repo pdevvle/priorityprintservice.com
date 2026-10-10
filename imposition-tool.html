@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-10 02:00 UTC · IMPOSE-V1.57</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-10 03:00 UTC · IMPOSE-V1.58</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -3166,34 +3166,57 @@ function pbSpineOf(spec) {
 // flipping the sheet, so its left panel is the INSIDE FRONT (page 2) and its
 // right panel the inside back — get this backwards and the cover glues up with
 // the inside faces transposed.
-async function pbBuildCover(srcDoc, pw, ph, spine, bleed) {
+// Each cover face goes through the SAME location + fit rules as every other
+// page (resolveSideArt → placeArt): TrimBox / BleedBox honoured, the fit mode
+// (crop / fill / fit) applied, the file's own slug clipped away. Up to 1.57
+// this builder embedded the whole page box and scaled it to fit the panel —
+// so a 4×2 ticket-book cover with a 4×2 TrimBox on a 4.47×2.47 page came out
+// at 89 % with the customer's crop marks printed inside ours (owner's photo,
+// 2026-10-10), whatever the fit mode said. The flat is built WITH bleed
+// (page = flat + 2b, TrimBox inset b) so the downstream flat run sees real
+// bleed instead of synthesising it; each face's bleed runs outward past the
+// flat's edges and inward only to the middle of the spine, so the two faces
+// can never overlap through a narrow spine. Returns notes for the report.
+async function pbBuildCover(srcDoc, pw, ph, spine, bleed, fitMode, notesOut) {
   const n = srcDoc.getPageCount();
-  const W = (2 * pw + spine) * PT, H = ph * PT;
+  const b = Math.max(0, +bleed || 0);
+  const flatW = 2 * pw + spine, flatH = ph;
+  const W = (flatW + 2 * b) * PT, H = (flatH + 2 * b) * PT;
   const out = await PL.PDFDocument.create();
   const idx = { front: 0, insideFront: 1, insideBack: n - 2, back: n - 1 };
   const want = [idx.back, idx.front, idx.insideFront, idx.insideBack].filter(i => i >= 0 && i < n);
-  const emb = [];
-  for (const i of want) emb.push(await embedPageBox(out, srcDoc.getPage(i), `page ${i + 1}`));
-  const at = i => emb[want.indexOf(i)];
-  const place = (page, srcIdx, x) => {
-    const e = at(srcIdx);
-    if (!e) return;
-    // fit-to-panel, never crop — same rule the rest of the engine uses
-    const sc = Math.min(pw * PT / e.width, ph * PT / e.height);
-    page.drawPage(e, { x: x + (pw * PT - e.width * sc) / 2, y: (H - e.height * sc) / 2,
-                       xScale: sc, yScale: sc });
+  const emb = [], arts = [];
+  const faceName = { [idx.back]: "back cover", [idx.front]: "front cover", [idx.insideFront]: "inside front", [idx.insideBack]: "inside back" };
+  for (const i of want) {
+    const pg = srcDoc.getPage(i);
+    emb.push(await embedPageBox(out, pg, `page ${i + 1}`));
+    const a = resolveSideArt(pg, Math.max(pw, ph), Math.min(pw, ph), pw >= ph, b, fitMode);
+    arts.push(a);
+    if (notesOut) for (const t of a.notes) notesOut.push(`cover ${faceName[i]} (page ${i + 1}): ${t}`);
+  }
+  const at = i => want.indexOf(i);
+  // Panels in flat inches, y-up, origin at the bleed edge: back/inside-front
+  // on the left, front/inside-back on the right of the spine.
+  const leftX = b, rightX = b + pw + spine, midSpine = b + pw + spine / 2;
+  const place = (page, srcIdx, left) => {
+    const k = at(srcIdx);
+    if (k < 0) return;
+    const trim = { x: left ? leftX : rightX, y: b, w: pw, h: ph };
+    const clip = left ? { x: 0, y: 0, w: midSpine, h: flatH + 2 * b }
+                      : { x: midSpine, y: 0, w: W / PT - midSpine, h: flatH + 2 * b };
+    placeArt(page, emb[k], arts[k], trim, clip, 0);
   };
   await carryGroups(out, emb);
-  const rightX = (pw + spine) * PT;
   const outside = out.addPage([W, H]);
-  place(outside, idx.back, 0);
-  place(outside, idx.front, rightX);
+  place(outside, idx.back, true);
+  place(outside, idx.front, false);
   const inside = out.addPage([W, H]);
-  place(inside, idx.insideFront, 0);
-  place(inside, idx.insideBack, rightX);
+  place(inside, idx.insideFront, true);
+  place(inside, idx.insideBack, false);
   for (const pg of [outside, inside]) {
     pg.setMediaBox(0, 0, W, H); pg.setCropBox(0, 0, W, H);
-    pg.setTrimBox(0, 0, W, H); pg.setBleedBox(0, 0, W, H);
+    pg.setBleedBox(0, 0, W, H);
+    pg.setTrimBox(b * PT, b * PT, flatW * PT, flatH * PT);
   }
   return await out.save({ useObjectStreams: false });
 }
@@ -3252,6 +3275,7 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
 
   ensurePageContents(src);
   let coverB, gutsB, gutsN, assembled = false;
+  const coverNotes = [];
 
   if (!wantCover) {
     // Guts only: the file IS the book block, taken as-is. Splitting cover faces
@@ -3272,7 +3296,7 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
   } else {
     // Single reading-order file, saddle-style: split it.
     if (src.getPageCount() < 4) throw new Error(`Perfect bound from a single file needs at least 4 pages (front, inside front, inside back, back) — this file has ${src.getPageCount()}. Drop the guts and the cover as separate files, or choose Guts only.`);
-    coverB = await pbBuildCover(src, trimW, trimH, spine, bleed);
+    coverB = await pbBuildCover(src, trimW, trimH, spine, bleed, artFitOf(spec), coverNotes);
     if (wantGuts) { const g = await pbBuildGuts(src); gutsB = g.bytes; gutsN = g.count; }
     assembled = true;
   }
@@ -3316,7 +3340,7 @@ async function imposePerfectBound(artBytes, coverBytes, spec) {
     // imposeCore, not imposePdf: the wrapper runs the specialty passes once for
     // the whole job (greyscale on the reading-order source, slipsheets per part).
     const cover = await imposeCore(coverB, null, coverSpec);
-    cover.warnings = note.concat(cover.warnings);
+    cover.warnings = note.concat(coverNotes, cover.warnings);
     parts.push({ part: "cover", label: `Cover — ${(2 * trimW + spine).toFixed(3)}×${trimH}″ flat, ${spine}″ spine`, ...cover });
   }
   if (wantGuts) {
