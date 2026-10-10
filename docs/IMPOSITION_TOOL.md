@@ -743,6 +743,75 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Overflow is displayed, never refused; artwork vs the finished size is Crop / Fill / Fit (1.56)
+
+  Owner, two reports on the same day. First: "never show errors like this:
+  Gutters make the 2×6 layout 17.18×13.50″ — larger than the 13×19 sheet.
+  Reduce gutters or pieces. Stopped while: Laying out — Just display the
+  result." Second: "when a file is uploaded to the imposition tool and the
+  size is set it is to be rendered as CROPPED — not fill, not contain;
+  cropped."
+
+  **Overflow.** Four layout-time refusals are gone — the flats' and the
+  saddle's "Gutters make the … layout … larger than the sheet" and "Fill full
+  sheet: the block is … but the sheet inside its margin is …", plus the two
+  manual-grid "does not fit" refusals (flats and saddle signatures), which
+  now lay out the tightest near-miss `fitManualGrid` found. One helper,
+  `footprintCheck(grid, totalW, totalH, sheet, warnings, piece)`, compares
+  the block with the printable area (the sheet inside its imageable margin —
+  the whole sheet at the default 0″) and, when it is bigger, pushes one
+  warning that says how much falls off which edges and returns
+  `layout.overflow = {w, h, offLong, offShort, boundW, boundH}`.
+  `blockOrigin()` centres the block on any axis it overflows (so the spill is
+  split evenly between the two edges instead of all landing on one), and
+  suppresses the clamp / bleed-outside noise on that axis. The flag reaches
+  the operator four ways: a red **OVERFLOW 0.50″ TALL** badge in the viewport
+  toolbar (`[data-overflow]`, live before artwork is dropped), the slug line
+  (`OVERFLOW block 17.18x13.50in spills 0.000x0.500in off the sheet`), the
+  filename (`_OVERFLOW`, composes with `_FONTS` / `_UNAPPROVED`; bulk impose
+  files it the same way and lists it in the summary) and the grid panel header
+  ("— OVERFLOW (laid out anyway, centred)"). The manual-grid "what DOES fit"
+  alternatives are kept as a warning. What is still refused: a trim larger
+  than any press sheet, a priced count that does not physically fit (one tick
+  — "Allow best physical fit" — or a manual grid), and the cell-count cap.
+  Pieces that overflow print cut short at the sheet edge; the tool says so
+  instead of deciding for the operator.
+
+  **Artwork vs the finished size** (`spec.artFit`, General settings, in
+  setups; replaces 1.48's two-way "Artwork larger than the finished size",
+  whose `oversize:"scale"` still maps to Fit for old setups and the harness):
+
+  | mode | what happens when the located art trim ≠ finished size |
+  |---|---|
+  | **crop** (default) | 100 %, never scaled: a trim rect of exactly the finished size is centred on the art's own trim (TrimBox, BleedBox−bleed, or the page) in raw page space, and the bleed clip takes the rest. A page larger than the size loses its edges (crop marks, slug); a page SMALLER than the size sits inside it with paper white around, and a warning says so and points at Fill. |
+  | **fill** | scaled by `max(cellW/effW, cellH/effH)` so the art covers the finished size; the excess on the long axis is cropped symmetrically; the trim rect is re-centred the same way. |
+  | **fit** | scaled by `min(…)` to sit inside the finished size — paper white on one axis. Every build before 1.56 did this for every mismatch; it is now an explicit choice. |
+
+  The re-centred trim rect is computed in raw page space from the placed
+  size: placed → display (undo the cell rotation) → raw (undo `/Rotate`); a
+  rect turned about its own centre keeps that centre, so only the extents
+  need mapping. `hasBleed` / `ownBleed` follow from the new rect, so a cropped
+  page's cut-away ring is its bleed and a smaller page correctly has none.
+
+  Verified (`cases_artfit.json`, `fx_solid64.pdf` 6×4 solid, `fx_marks45.pdf`
+  4.5×2.5 marks for 4×2, `fx_seq16.pdf` booklet): ink measured per cell at
+  288 DPI — Crop of 6×4 into 7×5 leaves 0.500″ white on every side; Fill of
+  the same scales ×1.25, width cropped 0.25″ each side, height exact; Fit
+  scales ×1.1667, 0.167″ white top and bottom; 6×4 into 5×3.5 — Crop fills
+  the cell and the whole bleed ring, Fill ×0.875 (height cropped 0.125″),
+  Fit ×0.8333 (0.083″ white at the sides); marks file — Crop keeps the bleed
+  ring and cuts the marks, Fill ×0.8889, Fit ×0.8 (identical to the 1.48
+  "scale" output). Overflow (`cases_overflow.json`, `fx_tk85.pdf`): the
+  owner's 2×6 at 0.18 / 0.15 gaps lays out centred at y = −0.25 … 13.25 with
+  the OVERFLOW warning; 1×5 of 12.75×3 at 0° (refused since 1.44) lays out
+  at −1 … 14; a 3×1 saddle manual on 13×19 and a fill-mode block past a
+  0.25″ margin both display flagged. UI: `ui_overflow.mjs` (select present
+  and defaulting to crop, badge before and after artwork, filename
+  `_OVERFLOW`, no "Gutters make the" / "Stopped while" text, Download
+  offered). Regression: every earlier suite content-identical except the
+  cases that used to refuse (now files) — the engine for matched-size art is
+  untouched.
+
   ### "Preflight FAILED: page count 4 ≠ 38 sheet sides" (1.55)
 
   Owner, on a 38-page Canva ticket file imposed one piece per sheet:

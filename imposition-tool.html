@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 05:10 UTC · IMPOSE-V1.55</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-10 00:00 UTC · IMPOSE-V1.56</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -415,20 +415,25 @@ function blockOrigin(layout, offset, warnings) {
     x = s.long - right - totalW;
     y = bottom;
   }
-  const cx = Math.min(Math.max(x, P.x0), P.x1 - totalW);
-  const cy = Math.min(Math.max(y, P.y0), P.y1 - totalH);
-  if (mode !== "center" && (Math.abs(cx - x) > EPS || Math.abs(cy - y) > EPS)) {
+  // A block wider or taller than the printable area (layout.overflow, 1.56)
+  // is centred on that axis so the spill splits evenly between the two edges
+  // — pinning it to one edge would hide the whole loss on the other side.
+  const overX = totalW > (P.x1 - P.x0) + EPS, overY = totalH > (P.y1 - P.y0) + EPS;
+  const cx = overX ? (s.long - totalW) / 2 : Math.min(Math.max(x, P.x0), P.x1 - totalW);
+  const cy = overY ? (s.short - totalH) / 2 : Math.min(Math.max(y, P.y0), P.y1 - totalH);
+  if (mode !== "center" && ((!overX && Math.abs(cx - x) > EPS) || (!overY && Math.abs(cy - y) > EPS))) {
     warnings.push(`Layout offset clamped to keep the trim inside the printable area (${s.usableLong}×${s.usableShort}″).`);
   }
   // In fill mode the spill past the imageable area is intentional (guillotine
-  // cutting), so the "bleed falls outside" warning is suppressed.
+  // cutting), so the "bleed falls outside" warning is suppressed; an axis that
+  // overflows has already been reported by the OVERFLOW warning.
   if (!layout.fillSheet) {
     const clipped = [];
     const b = layout.bleed;
-    if (cx - b < P.x0 - EPS) clipped.push("left");
-    if (cx + totalW + b > P.x1 + EPS) clipped.push("right");
-    if (cy - b < P.y0 - EPS) clipped.push("bottom");
-    if (cy + totalH + b > P.y1 + EPS) clipped.push("top");
+    if (!overX && cx - b < P.x0 - EPS) clipped.push("left");
+    if (!overX && cx + totalW + b > P.x1 + EPS) clipped.push("right");
+    if (!overY && cy - b < P.y0 - EPS) clipped.push("bottom");
+    if (!overY && cy + totalH + b > P.y1 + EPS) clipped.push("top");
     if (clipped.length) warnings.push(`Outer bleed falls outside the printable area on the ${clipped.join("/")} edge(s) and will not image — cuts there may show paper white.`);
   }
   return { x0: cx, y0: cy };
@@ -585,6 +590,29 @@ function manualGridAlternatives(a, d, pieceLong, pieceShort, sheets, gutters, fi
   return out;
 }
 
+// The block's footprint against the printable area (the sheet inside its
+// imageable margin; the whole sheet at the default 0″). Up to 1.55 an
+// over-size block REFUSED ("Gutters make the 2×6 layout 17.18×13.50″ — larger
+// than the 13×19 sheet"). Owner, 2026-10-10: "never show errors like this …
+// just display the result." So it never refuses now: the operator asked for
+// THIS grid with THESE gutters, the tool lays it out centred so the spill is
+// split evenly, says in plain words how much falls off which edges, and flags
+// the job OVERFLOW on the badge, in the slug and in the filename. Returns the
+// overflow record for the layout, or null when the block fits.
+function footprintCheck(grid, totalW, totalH, sheet, warnings, piece) {
+  const bw = sheet.usableLong, bh = sheet.usableShort;
+  const offL = Math.max(0, totalW - bw), offS = Math.max(0, totalH - bh);
+  if (offL <= EPS && offS <= EPS) return null;
+  const m = sheetMarginOf(sheet);
+  const where = m > EPS ? `the ${stockOf(sheet)} sheet prints ${bw} wide × ${bh} tall inside its ${m}″ imageable margin`
+                        : `the ${stockOf(sheet)} sheet lies ${sheetWH(sheet)}`;
+  const edges = [];
+  if (offL > EPS) edges.push(`${(offL / 2).toFixed(3)}″ off the left and ${(offL / 2).toFixed(3)}″ off the right`);
+  if (offS > EPS) edges.push(`${(offS / 2).toFixed(3)}″ off the top and ${(offS / 2).toFixed(3)}″ off the bottom`);
+  warnings.push(`OVERFLOW: ${grid.a} × ${grid.d} ${piece}s with these gutters make a block ${totalW.toFixed(2)} wide × ${totalH.toFixed(2)} tall, but ${where}. Laid out as asked and centred, so ${edges.join(", and ")} do not print — the outer ${piece}s come out cut short. Reduce gutters or columns/rows, or change Sheet orientation / Artwork rotation${m > EPS ? ", or lower the imageable margin (0″ = the whole sheet)" : ""}. The badge, the slug and the filename say OVERFLOW.`);
+  return { w: totalW, h: totalH, offLong: offL, offShort: offS, boundW: bw, boundH: bh };
+}
+
 function computeLayout(calc, trimA, trimB, opts) {
   if (calc === "saddle") return computeSaddleLayout(trimA, trimB, opts); // trimA = page WIDTH, trimB = page HEIGHT (not normalized — spine is the height edge)
   const pieceLong = Math.max(trimA, trimB), pieceShort = Math.min(trimA, trimB);
@@ -654,14 +682,18 @@ function computeLayout(calc, trimA, trimB, opts) {
                 : opts && opts.manualSheet && SHEETS[opts.manualSheet] ? [SH(opts.manualSheet)]
                 : calc === "sticker" ? [SH("12x18")] : [SH("13x19"), SH("13x27.5")];
     const res = fitManualGrid(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, allowedRot, rawCol, rawRow, fillSheet);
+    // No candidate holds it: lay out the tightest near-miss anyway (1.56 — the
+    // operator dictated this grid; footprintCheck flags the spill OVERFLOW
+    // below) and say what WOULD hold the same count.
+    const hit = res.ok || res.best;
     if (!res.ok) {
       const b = res.best;
       const alts = manualGridAlternatives(manual.a, manual.d, pieceLong, pieceShort, cands, gutters, fillSheet, sheetMarginOf(b.sheet));
-      throw new Error(`${manual.a} column${manual.a === 1 ? "" : "s"} × ${manual.d} row${manual.d === 1 ? "" : "s"} of the artwork ${pieceWords(pieceLong, pieceShort, b.grid.rotated)} needs ${b.W.toFixed(2)} wide × ${b.H.toFixed(2)} tall, but ${sheetWords(b.sheet)} prints ${b.bw} wide × ${b.bh} tall inside its ${sheetMarginOf(b.sheet)}″ margin.`
-        + (alts.length ? `\n${manual.a * manual.d} pieces DO fit as: ${alts.map((t, i) => `(${i + 1}) ${t}`).join("; ")}. Set Sheet orientation and Artwork rotation in Layout settings to match.`
+      warnings.push(`${manual.a} column${manual.a === 1 ? "" : "s"} × ${manual.d} row${manual.d === 1 ? "" : "s"} of the artwork ${pieceWords(pieceLong, pieceShort, b.grid.rotated)} needs ${b.W.toFixed(2)} wide × ${b.H.toFixed(2)} tall, but ${sheetMarginOf(b.sheet) > EPS ? `${sheetWords(b.sheet)} prints ${b.bw} wide × ${b.bh} tall inside its ${sheetMarginOf(b.sheet)}″ margin` : `the ${stockOf(b.sheet)} sheet lies ${b.bw} wide × ${b.bh} tall`} — laid out as asked, see OVERFLOW.`
+        + (alts.length ? ` ${manual.a * manual.d} pieces DO fit as: ${alts.map((t, i) => `(${i + 1}) ${t}`).join("; ")}. Set Sheet orientation and Artwork rotation in Layout settings to match.`
                        : ` No sheet orientation, artwork rotation or margin down to 0″ holds ${manual.a * manual.d} pieces this size — reduce columns/rows or gutters.`));
     }
-    sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
+    sheet = hit.sheet; grid = hit.grid; manualGrid = true;
     const placed = grid.a * grid.d;
     // The pricing clause only means something when there IS a priced imp.
     // Perfect bound has none (priced = 0), so comparing against it would print
@@ -755,17 +787,12 @@ function computeLayout(calc, trimA, trimB, opts) {
   const cgA = colGaps || Array(Math.max(0, grid.a - 1)).fill(grid.g);
   const rgA = rowGaps || Array(Math.max(0, grid.d - 1)).fill(grid.g);
   const totalW = grid.a * cellW + sum(cgA), totalH = grid.d * cellH + sum(rgA);
-  if (totalW > sheet.long + EPS || totalH > sheet.short + EPS)
-    throw new Error(`Gutters make the ${grid.a}×${grid.d} layout ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ — larger than the ${sheet.label} sheet. Reduce gutters or pieces.`);
-  if (fillSheet && (totalW > sheet.usableLong + EPS || totalH > sheet.usableShort + EPS))
-    throw new Error(`Fill full sheet: the ${grid.a}×${grid.d} block is ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ but the ${sheet.label} inside its ${sheetMarginOf(sheet)}″ margin is ${sheet.usableLong}×${sheet.usableShort}″. Lower the imageable margin (0″ = the whole sheet) or reduce gutters/pieces.`);
-  if (!fillSheet && (totalW > sheet.usableLong + EPS || totalH > sheet.usableShort + EPS))
-    warnings.push(`Block ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ is larger than the printable area (${sheet.usableLong}×${sheet.usableShort}″) — the outer edges will not image. Tick “fill full sheet” only if this sheet is being guillotine-cut.`);
+  const overflow = footprintCheck(grid, totalW, totalH, sheet, warnings, "piece");
 
   const layout = {
     sheet, calc, pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet, overflow,
     imp: grid.a * grid.d, pricedImp: priced || grid.a * grid.d, unpriced: !priced, mismatch, efficient, manualGrid, warnings,
     cellW, cellH,
   };
@@ -836,11 +863,12 @@ function computeSaddleLayout(pw, ph, opts) {
     const cands = ovSheet ? [ovSheet] : [SH("13x19"), SH("13x27.5")];
     const res = fitManualGrid(manual.a, manual.d, spL, spS, cands, gutters, allowedRot,
                               opts && opts.saddleColGaps, opts && opts.saddleRowGaps, !!(opts && opts.saddleFillSheet));
+    const hit = res.ok || res.best;   // near-miss laid out anyway (1.56) — flagged OVERFLOW below
     if (!res.ok) {
       const b = res.best;
-      throw new Error(`Manual ${manual.a}×${manual.d} of a ${spreadW}×${spreadH}″ spread needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″. Reduce copies or gutters, lower the imageable margin (0″ = the whole sheet), or ${b.sheet.portrait ? "set Sheet orientation back to landscape" : "stand the sheet on end (Sheet orientation: portrait)"}.`);
+      warnings.push(`Manual ${manual.a}×${manual.d} of a ${spreadW}×${spreadH}″ spread needs ${b.W.toFixed(2)}×${b.H.toFixed(2)}″ but the ${b.sheet.label} inside its ${sheetMarginOf(b.sheet)}″ margin is ${b.bw}×${b.bh}″ — laid out as asked, see OVERFLOW. Reduce copies or gutters, lower the imageable margin (0″ = the whole sheet), or ${b.sheet.portrait ? "set Sheet orientation back to landscape" : "stand the sheet on end (Sheet orientation: portrait)"}.`);
     }
-    sheet = res.ok.sheet; grid = res.ok.grid; manualGrid = true;
+    sheet = hit.sheet; grid = hit.grid; manualGrid = true;
     const c = grid.a * grid.d;
     warnings.push(`Manual signatures: ${grid.a} across × ${grid.d} down = ${c} cop${c === 1 ? "y" : "ies"}/side on ${sheet.label}${grid.rotated ? " (spreads rotated 90°)" : ""}${c === target ? "" : ` — pricing assumed ${target} per 13×19-side, so sheet count and cost per book will differ`}.`);
   }
@@ -917,10 +945,7 @@ function computeSaddleLayout(pw, ph, opts) {
   const cgA = colGaps || Array(Math.max(0, grid.a - 1)).fill(grid.g);
   const rgA = rowGaps || Array(Math.max(0, grid.d - 1)).fill(grid.g);
   const totalW = grid.a * cellW + sum(cgA), totalH = grid.d * cellH + sum(rgA);
-  if (totalW > sheet.long + EPS || totalH > sheet.short + EPS)
-    throw new Error(`Gutters make the ${grid.a}×${grid.d} layout ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ — larger than the ${sheet.label} sheet. Reduce gutters or copies.`);
-  if (fillSheet && (totalW > sheet.usableLong + EPS || totalH > sheet.usableShort + EPS))
-    throw new Error(`Fill full sheet: the ${grid.a}×${grid.d} block is ${totalW.toFixed(2)}×${totalH.toFixed(2)}″ but the ${sheet.label} inside its ${sheetMarginOf(sheet)}″ margin is ${sheet.usableLong}×${sheet.usableShort}″. Lower the imageable margin (0″ = the whole sheet) or reduce gutters/copies.`);
+  const overflow = footprintCheck(grid, totalW, totalH, sheet, warnings, "spread");
 
   if (!colGaps && !rowGaps && grid.a * grid.d > 1) warnings.push(grid.g === 0
     ? "Spreads butt (default) — one cut line between signatures, interior bleed cropped at it. Set a Gutter to space them instead."
@@ -929,7 +954,7 @@ function computeSaddleLayout(pw, ph, opts) {
   const layout = {
     sheet, calc: "saddle", pieceLong, pieceShort, bleed,
     across: grid.a, down: grid.d, rotated: grid.rotated, gutter: grid.g,
-    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet, manualGrid, stepRepeat,
+    colGaps, rowGaps, fillSheet, sheetForced: !!ovSheet, manualGrid, stepRepeat, overflow,
     imp: grid.a * grid.d * 2,      // pages per sheet side actually placed
     pricedImp: imp,                 // pages per side the calculator priced
     mismatch, efficient, warnings,
@@ -1695,11 +1720,30 @@ async function sanitizePdf(bytes) {
 
 const DIM_EPS = 0.02; // inches — dimension match tolerance (~1.4pt)
 
+// How the artwork meets the finished size when the two disagree (1.56 —
+// owner: "when a file is uploaded and the size is set it is to be rendered
+// as CROPPED, not fill, not contain"):
+//   crop (default) — 100 %, centred on the art's own trim, cut to the
+//                    finished size; art smaller than the size sits inside it
+//                    with paper white around (reported, never scaled);
+//   fill           — scaled up/down until it covers the finished size, the
+//                    excess cropped (the "cover" of CSS);
+//   fit            — scaled to sit inside the finished size, paper white on
+//                    the short axis (the "contain" every build before 1.56
+//                    used). spec.oversize = "scale" from 1.48 maps to fit.
+function artFitOf(spec) {
+  const m = spec && spec.artFit;
+  if (m === "fill" || m === "fit" || m === "crop") return m;
+  return spec && spec.oversize === "scale" ? "fit" : "crop";
+}
+
 // Resolve where the finished piece lives on a source page + how it sits in a
 // layout cell. Box priority (fix c): TrimBox → BleedBox−0.125″ → MediaBox
-// heuristics. Scaling is always fit-to-trim (contain) — NEVER fill-crop.
-function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, oversize) {
+// heuristics. Then the fit mode (crop / fill / fit, see artFitOf) decides what
+// happens when that located trim is not the finished size.
+function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, fitMode) {
   const B = isFinite(bleed) ? bleed : BLEED;
+  const mode = fitMode === "fit" || fitMode === "scale" ? "fit" : fitMode === "fill" ? "fill" : "crop";
   const notes = [];
   const rot = ((page.getRotation().angle % 360) + 360) % 360;
   const mb = pageBox(page);                    // CropBox ∩ MediaBox, real origin
@@ -1735,7 +1779,7 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, overs
     } else if (Math.abs(aLong - pieceLong) < DIM_EPS && Math.abs(aShort - pieceShort) < DIM_EPS) {
       trimRaw = { x: 0, y: 0, w: W, h: H };
       notes.push("page size = exact trim — NO BLEED in source file");
-    } else if (oversize !== "scale" && aLong >= pieceLong - DIM_EPS && aShort >= pieceShort - DIM_EPS) {
+    } else if (mode === "crop" && aLong >= pieceLong - DIM_EPS && aShort >= pieceShort - DIM_EPS) {
       // Larger than the finished size on both axes and no box says where the
       // trim is: a page built with crop marks and slug around the design
       // (4.5×2.5 for a 4×2 card). Prepress places that at 100 %, centred on
@@ -1748,10 +1792,10 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, overs
       const tw = (rot % 180 ? tdH : tdW) * PT, th = (rot % 180 ? tdW : tdH) * PT;
       trimRaw = { x: (W - tw) / 2, y: (H - th) / 2, w: tw, h: th };
       const offL = (aLong - pieceLong) / 2, offS = (aShort - pieceShort) / 2;
-      notes.push(`page ${aLong.toFixed(2)}×${aShort.toFixed(2)}″ is larger than the ${pieceLong}×${pieceShort}″ finished size — placed at 100% and CROPPED to it, centred (${offL.toFixed(3)}″ and ${offS.toFixed(3)}″ off each edge; crop marks and slug beyond the bleed are cut away). If this file was not built centred on the finished size, set "Artwork larger than the finished size" to Scale to fit.`);
+      notes.push(`page ${aLong.toFixed(2)}×${aShort.toFixed(2)}″ is larger than the ${pieceLong}×${pieceShort}″ finished size — placed at 100% and CROPPED to it, centred (${offL.toFixed(3)}″ and ${offS.toFixed(3)}″ off each edge; crop marks and slug beyond the bleed are cut away). If this file was not built centred on the finished size, set "Artwork vs the finished size" to Fill or Fit.`);
     } else {
       trimRaw = { x: 0, y: 0, w: W, h: H };
-      notes.push(`page size ${aLong.toFixed(2)}×${aShort.toFixed(2)}″ matches neither trim nor trim+bleed — fit-to-trim scaled (content is never crop-filled)`);
+      notes.push(`page size ${aLong.toFixed(2)}×${aShort.toFixed(2)}″ matches neither trim nor trim+bleed — the whole page is taken as the art (${mode === "fit" ? "scaled to fit inside the finished size" : mode === "fill" ? "scaled to cover the finished size, excess cropped" : "placed at 100% and cropped to the finished size"})`);
     }
   }
 
@@ -1767,8 +1811,28 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, overs
   const cellH = cellLandscape ? pieceShort : pieceLong;
   let scale = 1;
   if (Math.abs(effW - cellW) >= DIM_EPS || Math.abs(effH - cellH) >= DIM_EPS) {
-    scale = Math.min(cellW / effW, cellH / effH); // contain — letterboxed, never cropped
-    notes.push(`art trim ${effW.toFixed(2)}×${effH.toFixed(2)}″ ≠ spec trim ${cellW}×${cellH}″ — fit-to-trim scaled ×${scale.toFixed(4)}`);
+    if (mode === "fit") {
+      scale = Math.min(cellW / effW, cellH / effH); // contain — letterboxed
+      notes.push(`art trim ${effW.toFixed(2)}×${effH.toFixed(2)}″ ≠ finished ${cellW}×${cellH}″ — Fit: scaled ×${scale.toFixed(4)} to sit inside it (paper white on the short axis)`);
+    } else {
+      if (mode === "fill") scale = Math.max(cellW / effW, cellH / effH); // cover — excess cropped
+      // Re-centre a trim rect of exactly the finished size (at this scale) on
+      // the located art, in RAW page space: placed → display (undo the cell
+      // rotation) → raw (undo /Rotate). A rect turned about its own centre
+      // keeps that centre, so only the extents need mapping.
+      const tw = cellW / scale, th = cellH / scale;                  // inches, placed orientation
+      const dW = cellRotate ? th : tw, dH = cellRotate ? tw : th;     // display orientation
+      const rW = (rot % 180 ? dH : dW) * PT, rH = (rot % 180 ? dW : dH) * PT;
+      const cx = trimRaw.x + trimRaw.w / 2, cy = trimRaw.y + trimRaw.h / 2;
+      trimRaw = { x: cx - rW / 2, y: cy - rH / 2, w: rW, h: rH };
+      const dx = (effW * scale - cellW) / 2, dy = (effH * scale - cellH) / 2; // + = cropped, − = paper white
+      const side = (v, a, b) => v > DIM_EPS / 2 ? `${v.toFixed(3)}″ cropped off each ${a}` : v < -DIM_EPS / 2 ? `${(-v).toFixed(3)}″ of paper white at each ${a}` : `${b} exact`;
+      if (mode === "fill") notes.push(`art trim ${effW.toFixed(2)}×${effH.toFixed(2)}″ ≠ finished ${cellW}×${cellH}″ — Fill: scaled ×${scale.toFixed(4)} to cover it, ${side(dx, "side", "width")}, ${side(dy, "top/bottom", "height")}`);
+      else {
+        notes.push(`art trim ${effW.toFixed(2)}×${effH.toFixed(2)}″ ≠ finished ${cellW}×${cellH}″ — Crop: placed at 100%, centred, ${side(dx, "side", "width")}, ${side(dy, "top/bottom", "height")}`);
+        if (dx < -DIM_EPS / 2 || dy < -DIM_EPS / 2) notes.push(`the artwork is SMALLER than the finished size — Crop never scales it up, so the piece prints with paper white around the art. Set "Artwork vs the finished size" to Fill to scale it up to cover (excess cropped) if that is wanted.`);
+      }
+    }
   }
   const hasBleed = (W - trimRaw.w > 1) || (H - trimRaw.h > 1);
   if (!hasBleed) notes.push("no bleed available — cut lines may show paper white");
@@ -2392,6 +2456,7 @@ function drawSlug(page, layout, font, info, cells) {
       : layout.manualGrid ? `MANUAL GRID ${layout.across}x${layout.down} (priced ${layout.pricedImp}-up)` : null,
     layout.efficient ? `EFFICIENT 13x27.5 (priced ${layout.pricedImp}-up/13x19)`
       : layout.fillSheet ? `FILL ${layout.across}x${layout.down} full-sheet (priced ${layout.pricedImp}-up)` : null,
+    layout.overflow ? `OVERFLOW block ${layout.overflow.w.toFixed(2)}x${layout.overflow.h.toFixed(2)}in spills ${layout.overflow.offLong.toFixed(3)}x${layout.overflow.offShort.toFixed(3)}in off the sheet` : null,
     (layout.colGaps || layout.rowGaps) ? "custom gutters"
       : layout.gutter !== 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
     Math.abs(layout.bleed - BLEED) > EPS ? `bleed ${layout.bleed}in` : null,
@@ -2593,7 +2658,7 @@ async function imposeSaddle(artBytes, spec, layout) {
       : `${p.getRotation().angle}|${mb.x},${mb.y},${mb.w},${mb.h}|${JSON.stringify(getPageBox(p, "TrimBox"))}|${JSON.stringify(getPageBox(p, "BleedBox"))}`;
     let art = artCache.get(key);
     if (!art) {
-      art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed, spec.oversize);
+      art = resolveSideArt(p, Math.max(bk.pw, bk.ph), Math.min(bk.pw, bk.ph), slotLandscape, layout.bleed, artFitOf(spec));
       applyArtScale(art, userScale);
       applyArtInset(art, inset);
       // A bleed ALLOWANCE is not bleed. Measure the ring whenever the page
@@ -3957,7 +4022,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   async function prepared(ref) {
     const key = keyOf(ref);
     if (!artCache.has(key)) {
-      const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed, spec.oversize);
+      const art = resolveSideArt(ref.doc.getPage(ref.pno), layout.pieceLong, layout.pieceShort, cellLandscape, layout.bleed, artFitOf(spec));
       const abm = ref.gi != null || ref.doc === backDoc
         ? (spec.addBleed && spec.addBleed !== "off" ? spec.addBleed : null) : abMode(ref.pno);
       applyArtScale(art, userScale);
@@ -4868,7 +4933,7 @@ function App() {
   const [pageSeqTxt, setPageSeqTxt] = useState("");        // source page sequence (duplicate / repeat / reorder / blanks)
   const [sheetSeqTxt, setSheetSeqTxt] = useState("");      // imposed sheet sequence (repeat / reorder physical sheets)
   const [splitSpreads, setSplitSpreads] = useState(false); // cut 2-page reader spreads into single pages
-  const [oversize, setOversize] = useState("crop");
+  const [artFit, setArtFit] = useState("crop");   // crop | fill | fit — see artFitOf()
   const [stripOverprint, setStripOverprint] = useState(true);   // press safety (1.54)
   const [fixHairlines, setFixHairlines] = useState(true);
   const [flattenAnnots, setFlattenAnnots] = useState(true);
@@ -4901,7 +4966,7 @@ function App() {
     bleedIn: [bleedIn, setBleedIn], addBleed: [addBleed, setAddBleed], addBleedSmart: [addBleedSmart, setAddBleedSmart],
     artScale: [artScale, setArtScale], creep: [creep, setCreep], spine: [spine, setSpine], pbPart: [pbPart, setPbPart], pbGutsOrder: [pbGutsOrder, setPbGutsOrder],
     artInset: [artInset, setArtInset], streakEps: [streakEps, setStreakEps], multiMode: [multiMode, setMultiMode],
-    greyPagesTxt: [greyPagesTxt, setGreyPagesTxt], splitSpreads: [splitSpreads, setSplitSpreads], oversize: [oversize, setOversize],
+    greyPagesTxt: [greyPagesTxt, setGreyPagesTxt], splitSpreads: [splitSpreads, setSplitSpreads], artFit: [artFit, setArtFit],
     stripOverprint: [stripOverprint, setStripOverprint], fixHairlines: [fixHairlines, setFixHairlines], flattenAnnots: [flattenAnnots, setFlattenAnnots],
     slipOn: [slipOn, setSlipOn], slipWhen: [slipWhen, setSlipWhen], slipSheets: [slipSheets, setSlipSheets], slipDesign: [slipDesign, setSlipDesign],
   };
@@ -5071,7 +5136,7 @@ function App() {
     greyPages: greyPagesTxt.trim() || null,
     pageSeq: pageSeqTxt.trim() || null,
     sheetSeq: sheetSeqTxt.trim() || null,
-    splitSpreads, oversize, stripOverprint, fixHairlines, flattenAnnots,
+    splitSpreads, artFit, stripOverprint, fixHairlines, flattenAnnots,
     rasterPages: rasterPagesTxt.trim() || null,
     slip: slipOn ? { on: true, when: slipWhen, sheets: slipSheets, design: slipDesign,
                      customBytes: slipCustom && slipCustom.bytes, customName: slipCustom && slipCustom.name } : null,
@@ -5082,7 +5147,7 @@ function App() {
   }), [calc, trimLong, trimShort, allowMissingFonts, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin, sheetPortrait,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, artRotate, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, oversize, stripOverprint, fixHairlines, flattenAnnots, rasterPagesTxt, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, artFit, stripOverprint, fixHairlines, flattenAnnots, rasterPagesTxt, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -5179,17 +5244,18 @@ function App() {
         if (seq !== genSeq.current) return null;
         const unappr = art && art.approval && art.approval.state === "mismatch";
         const fontsFlag = !!(res.fontsMissing && res.fontsMissing.length);
-        const flagIt = n => {
+        const flagIt = (n, L) => {
+          if (L && L.overflow) n = n.replace(/\.pdf$/i, "_OVERFLOW.pdf");
           if (fontsFlag) n = n.replace(/\.pdf$/i, "_FONTS.pdf");
           if (unappr) n = n.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
           return n;
         };
         if (res.parts) {
           res.parts.forEach(pt => {
-            pt.filename = flagIt(imposedFilename({ ...debSpec, jobName: (debSpec.jobName || "book") + "_" + pt.part.toUpperCase() }, pt.layout));
+            pt.filename = flagIt(imposedFilename({ ...debSpec, jobName: (debSpec.jobName || "book") + "_" + pt.part.toUpperCase() }, pt.layout), pt.layout);
           });
         } else {
-          res.filename = flagIt(imposedFilename(debSpec, res.layout));
+          res.filename = flagIt(imposedFilename(debSpec, res.layout), res.layout);
         }
         setResult(res);
         return res;
@@ -5462,6 +5528,7 @@ function App() {
         }
         const res = await imposePdf(bytes, null, s);
         let filename = imposedFilename(s, res.layout);
+        if (res.layout && res.layout.overflow) { filename = filename.replace(/\.pdf$/i, "_OVERFLOW.pdf"); advisories.push(`${label}: OVERFLOW — the block runs ${res.layout.overflow.offLong.toFixed(3)}×${res.layout.overflow.offShort.toFixed(3)}″ past the printable area; filed flagged _OVERFLOW.`); }
         if (appr.state === "mismatch") filename = filename.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
         const fd = new FormData();
         fd.append("action", "pps_impose_upload");
@@ -5576,10 +5643,11 @@ function App() {
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
             </div>
-            <Field label="Artwork larger than the finished size">
-              <select value={oversize} onChange={e => setOversize(e.target.value)} title="A page bigger than the finished size with no TrimBox — e.g. 4.5×2.5 pages carrying crop marks for a 4×2 card">
-                <option value="crop">Crop to the finished size at 100%, centred (marks cut away)</option>
-                <option value="scale">Scale the whole page down to fit the finished size</option>
+            <Field label="Artwork vs the finished size">
+              <select value={artFit} onChange={e => setArtFit(e.target.value)} data-art-fit title="What happens when the artwork's trim (TrimBox, or the page) is not the finished size typed above. Crop never scales: 100%, centred, cut to size — a 4.5×2.5 page with crop marks for a 4×2 card loses the marks; a smaller page sits inside the size with paper white around it.">
+                <option value="crop">Crop — 100%, centred, cut to the finished size (never scaled)</option>
+                <option value="fill">Fill — scale to cover the finished size, crop the excess</option>
+                <option value="fit">Fit — scale to sit inside the finished size (paper white on one axis)</option>
               </select>
             </Field>
             <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
@@ -5873,7 +5941,7 @@ function App() {
               const custom = G.cols || G.rows || G.fill != null;
               const tw = ok ? panelLay.across * panelLay.cellW + effCol.reduce((x, y) => x + gapNum(y), 0) : 0;
               const th = ok ? panelLay.down * panelLay.cellH + effRow.reduce((x, y) => x + gapNum(y), 0) : 0;
-              const over = ok && (tw > panelLay.sheet.long + 1e-6 || th > panelLay.sheet.short + 1e-6);
+              const over = ok && (tw > panelLay.sheet.usableLong + 1e-6 || th > panelLay.sheet.usableShort + 1e-6);
               // Changing the grid invalidates gap arrays sized to the old one.
               const setAcross = v => setG({ across: v, cols: null });
               const setDown = v => setG({ down: v, rows: null });
@@ -5883,7 +5951,7 @@ function App() {
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <span className="lbl" style={{ margin: 0 }}>{isSaddle ? "Signatures per sheet, creep & gutters" : "Manual grid & gutters"}</span>
                     <span style={{ fontSize: 11, color: over ? "#f87171" : "rgba(255,255,255,.4)" }}>
-                      {ok ? `block ${tw.toFixed(2)}×${th.toFixed(2)}″ / sheet ${panelLay.sheet.long}×${panelLay.sheet.short}″${!isSaddle ? ` · piece ${panelLay.cellW}×${panelLay.cellH}″ as placed${panelLay.rotated ? " (rotated 90°)" : ""}` : ""}${over ? " — OVERFLOW" : ""}`
+                      {ok ? `block ${tw.toFixed(2)}×${th.toFixed(2)}″ / sheet ${panelLay.sheet.long}×${panelLay.sheet.short}″${!isSaddle ? ` · piece ${panelLay.cellW}×${panelLay.cellH}″ as placed${panelLay.rotated ? " (rotated 90°)" : ""}` : ""}${over ? " — OVERFLOW (laid out anyway, centred)" : ""}`
                           : "layout refused — adjust or reset below"}
                     </span>
                   </div>
@@ -6582,6 +6650,7 @@ function App() {
               </div>
             )}
             <div className="grp" style={{ fontSize: 12, color: "rgba(255,255,255,.55)", gap: 8 }}>
+              {viewLay && viewLay.overflow && <span className="imp-badge err" data-overflow title="The block is larger than the printable area — laid out as asked and centred; the outer pieces print cut short.">OVERFLOW {viewLay.overflow.offLong > EPS ? `${viewLay.overflow.offLong.toFixed(2)}″ WIDE` : ""}{viewLay.overflow.offLong > EPS && viewLay.overflow.offShort > EPS ? " · " : ""}{viewLay.overflow.offShort > EPS ? `${viewLay.overflow.offShort.toFixed(2)}″ TALL` : ""}</span>}
               {parityBadge}
               <span>{sheetSummary}</span>
               {layoutInfo.error && <span style={{ color: "#f87171" }}>{layoutInfo.error}</span>}
