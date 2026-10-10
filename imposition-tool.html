@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 04:30 UTC · IMPOSE-V1.54</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-09 05:10 UTC · IMPOSE-V1.55</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -4103,7 +4103,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   // ── Preflight (fix a): reload and validate before anything ships ──
   const check = await PL.PDFDocument.load(bytes);
   const issues = [];
-  if (check.getPageCount() !== D * sides) issues.push(`page count ${check.getPageCount()} ≠ ${D * sides} sheet sides`);
+  if (check.getPageCount() !== Dlim * sides) issues.push(`page count ${check.getPageCount()} ≠ ${Dlim * sides} sheet sides`);   // Dlim: the preview cap (1.52) — the plan is D sheets, the preview builds Dlim
   check.getPages().forEach((p, i) => {
     const m = p.getMediaBox();
     if (Math.abs(m.width - layout.sheet.long * PT) > 0.5 || Math.abs(m.height - layout.sheet.short * PT) > 0.5)
