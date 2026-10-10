@@ -743,6 +743,35 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### The file's own crop marks never print (1.57)
+
+  Owner, a photo of the viewport an hour after 1.56 went up: the 2026 Tickets
+  file (4×2 TrimBox on a 4.47×2.47 page with crop marks drawn in the slug)
+  imposed into a larger finished size — "see how its crops are contained
+  within our crops". Crop at 100 % had re-centred the finished size on the
+  file's trim and the whole page, marks included, fell inside the cut.
+
+  A file that declares its trim also declares where its slug starts.
+  `resolveSideArt()` now records `art.ownClip` — the file's BleedBox when it
+  holds the TrimBox, otherwise TrimBox + the job bleed, or the BleedBox the
+  trim was derived from — and `placeArt()` applies it as a second clip
+  mapped through the same anchor + s·Rot transform as the art (axis-aligned
+  after a right-angle turn, so two corners suffice). Anything outside it —
+  crop marks, colour bars, job text — cannot reach the sheet whatever the
+  finished size, in every fit mode. Files with no boxes are unchanged (the
+  bleed clip and the 1.48 oversize crop already keep drawn marks out when
+  the page is at least the finished size; a page SMALLER than the finished
+  size with drawn marks and no TrimBox still prints them — nothing in the
+  file says where its trim is). Note in the report: "content outside the
+  file's own BleedBox (its crop marks / slug) is clipped away".
+
+  Verified (`cases_ownclip.json`, `fx_tickets.pdf`): at 7.5×2.5 Crop the
+  ink used to reach 1.515″ from the cell edge (the page edge, marks and
+  all); now 2.40″ (the design's own extent) and 0.39″ top/bottom; same at
+  4.5×2.5 and in Fit; the 4×2 case is pixel-identical. Regression against
+  1.56 content-identical except the ticket cases that now carry the extra
+  clip.
+
   ### Overflow is displayed, never refused; artwork vs the finished size is Crop / Fill / Fit (1.56)
 
   Owner, two reports on the same day. First: "never show errors like this:

@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-10 00:00 UTC · IMPOSE-V1.56</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-10 02:00 UTC · IMPOSE-V1.57</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1751,6 +1751,7 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, fitMo
   const rel = b => ({ x: b.x - mb.x, y: b.y - mb.y, w: b.w, h: b.h });
 
   let trimRaw = null;
+  let ownClip = null;   // the file's own BleedBox (or TrimBox + bleed), raw pts — everything outside it is slug
   let tb = getPageBox(page, "TrimBox");
   if (tb) {
     const r = rel(tb);
@@ -1761,12 +1762,17 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, fitMo
   }
   if (tb && (Math.abs(tb.w - W) > 1 || Math.abs(tb.h - H) > 1)) {
     trimRaw = rel(tb); notes.push("art located by embedded TrimBox");
+    const bb0 = getPageBox(page, "BleedBox");
+    const bbr = bb0 ? rel(bb0) : null;
+    const holds = bbr && bbr.x <= trimRaw.x + 1 && bbr.y <= trimRaw.y + 1 && bbr.x + bbr.w >= trimRaw.x + trimRaw.w - 1 && bbr.y + bbr.h >= trimRaw.y + trimRaw.h - 1;
+    ownClip = holds ? bbr : { x: trimRaw.x - B * PT, y: trimRaw.y - B * PT, w: trimRaw.w + 2 * B * PT, h: trimRaw.h + 2 * B * PT };
   }
   if (!trimRaw) {
     const bb = getPageBox(page, "BleedBox");
     if (bb && (Math.abs(bb.w - W) > 1 || Math.abs(bb.h - H) > 1)) {
       const r = rel(bb);
       trimRaw = { x: r.x + B * PT, y: r.y + B * PT, w: r.w - 2 * B * PT, h: r.h - 2 * B * PT };
+      ownClip = r;
       notes.push(`art located by embedded BleedBox − ${B}″ bleed`);
     }
   }
@@ -1843,7 +1849,16 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, fitMo
   const ownBleed = Math.max(0, Math.min(
     trimRaw.x, W - trimRaw.x - trimRaw.w, trimRaw.y, H - trimRaw.y - trimRaw.h)) * scale / PT;
 
-  return { page, rot, mediaW: W, mediaH: H, trimRaw, cellRotate, scale, hasBleed, ownBleed, notes,
+  // A file that declares its trim also declares where its slug starts: crop
+  // marks, colour bars and job text live outside the BleedBox. When the
+  // finished size is larger than that trim (Crop never scales — 1.56), the
+  // whole page would otherwise land inside the cut and the file's own crop
+  // marks would print inside ours (owner, 2026-10-10). ownClip is applied as
+  // a second clip in placeArt, so the slug can never reach the sheet.
+  if (ownClip && (ownClip.x > 1 || ownClip.y > 1 || ownClip.x + ownClip.w < W - 1 || ownClip.y + ownClip.h < H - 1))
+    notes.push(`content outside the file's own ${getPageBox(page, "BleedBox") ? "BleedBox" : `TrimBox + ${B}″`} (its crop marks / slug) is clipped away`);
+  else ownClip = null;
+  return { page, rot, mediaW: W, mediaH: H, trimRaw, ownClip, cellRotate, scale, hasBleed, ownBleed, notes,
            placedW: cellW, placedH: cellH };
 }
 
@@ -2270,6 +2285,15 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
     PL.clip(),
     PL.endPath(),
   );
+  if (art.ownClip) {
+    // The file's own BleedBox, through the same anchor + s·Rot map as the
+    // art — axis-aligned after a right-angle turn, so two corners suffice.
+    const oc = art.ownClip;
+    const map = (u, v) => drawRot === 90 ? [ax - s * v, ay + s * u] : drawRot === 180 ? [ax - s * u, ay - s * v] : drawRot === 270 ? [ax + s * v, ay - s * u] : [ax + s * u, ay + s * v];
+    const p1 = map(oc.x, oc.y), p2 = map(oc.x + oc.w, oc.y + oc.h);
+    const x0 = Math.min(p1[0], p2[0]), x1 = Math.max(p1[0], p2[0]), y0 = Math.min(p1[1], p2[1]), y1 = Math.max(p1[1], p2[1]);
+    outPage.pushOperators(PL.moveTo(x0, y0), PL.lineTo(x1, y0), PL.lineTo(x1, y1), PL.lineTo(x0, y1), PL.closePath(), PL.clip(), PL.endPath());
+  }
   outPage.drawPage(embedded, { x: ax, y: ay, xScale: s, yScale: s, rotate: PL.degrees(drawRot) });
   outPage.pushOperators(PL.popGraphicsState());
 
