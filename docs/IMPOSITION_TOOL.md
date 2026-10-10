@@ -743,6 +743,21 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### "Preflight FAILED: page count 4 ≠ 38 sheet sides" (1.55)
+
+  Owner, on a 38-page Canva ticket file imposed one piece per sheet:
+  "Preflight FAILED: page count 4 ≠ 38 sheet sides — Stopped while: Placing
+  sheet 2 of 2 (preview of 19)". A 1.52 omission: the preview cap was
+  applied to the saddle preflight (`2 × Flim`) but the flats' output
+  preflight still demanded `D × sides` pages while the preview had built
+  `Dlim` sheets. Every multi-sheet flat job (collated "each" or "cut and
+  stack" runs, large gang runs) failed its preview; single-sheet jobs and
+  booklets were unaffected, which is why the suites missed it. Fixed:
+  `Dlim × sides`. Verified on the owner's file (`fx_tickets.pdf`, 38
+  pages, 4×2 tickets): preview 4 pages / full 38 pages in per-piece mode,
+  2 sheets in gang mode, no preflight failure; `ui_flatprev.mjs`; every
+  suite content-identical.
+
   ### Press safety: the rest of the "fine on screen, wrong on the RIP" class (1.54)
 
   Owner, once the purple box was gone: "look closely for any error like
