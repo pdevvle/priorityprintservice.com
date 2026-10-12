@@ -2285,7 +2285,107 @@ function MobilePreviewBar(props){
 // SHEET PREVIEW — Upload + Proof for single-sheet products (postcards, flat printing)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug }) {
+/* ═══════════════════════════════════════════════════════════════
+   "DESIGN IT ONLINE" — PPS Designer in a same-origin frame
+   ═══════════════════════════════════════════════════════════════
+   The designer (pdevvle/priorityprintpad, built on DesignCraft) lets a customer
+   with no artwork make a postcard in the browser. It never prices, uploads or
+   touches the cart: this page sends it the size and the price to show, and it
+   hands back a print-ready PDF, which goes through processFile() exactly as an
+   uploaded PDF does — same preflight, same proof, same approval, same order
+   files. The handshake is `pps-design:*`, v 1 (PPS_DESIGNER_REPO_BRIEF §6).
+
+   Off unless PCF.designer_url (PPS Config -> Artwork -> Online Designer URL) is
+   set to the designer's same-origin URL, so this ships dark and is switched on
+   per site. PPS_CONFIG.designerUrl is honoured too, for a site that injects it. */
+function ppsDesignerUrl(){
+  const raw = (window.PPS_CONFIG || {}).designerUrl || (typeof PCF !== 'undefined' ? PCF.designer_url : '');
+  const u = (typeof raw === 'string') ? raw.trim() : '';
+  if (!u) return null;
+  // Same origin only: the messages carry the customer's artwork, and the designer
+  // answers same-origin messages only, so a cross-origin URL could never work.
+  try {
+    if (new URL(u, window.location.href).origin !== window.location.origin) {
+      console.warn('[pps] designer_url is not same-origin; the online designer stays off:', u);
+      return null;
+    }
+  } catch (e) { return null; }
+  return u;
+}
+
+/* Opens the designer over the page. Returns { done, setPrice }:
+     done resolves { action:'print', pdf:ArrayBuffer, design, thumbs, manifest }
+               or { action:'closed', design }  (Back: the work is kept)
+          rejects only if the designer could not be opened at all.
+     setPrice({ total, qty, turnaround }) updates the price chip while it is open
+     (display only — the designer computes nothing). */
+function ppsOpenDesigner({ url, product, spec, design, price }){
+  const origin = window.location.origin;
+  let frame = null, ready = false, lastPrice = price || null, done = false;
+  const post = (m) => { if (frame && frame.contentWindow) frame.contentWindow.postMessage(Object.assign({ v: 1 }, m), origin); };
+  const sendPrice = () => {
+    if (!ready || !lastPrice || typeof lastPrice.total !== 'number' || !isFinite(lastPrice.total)) return;
+    post({ type: 'pps-design:price', total: lastPrice.total, qty: lastPrice.qty, turnaround: lastPrice.turnaround });
+  };
+  const promise = new Promise((resolve, reject) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'pps-designer-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#eef0f4;display:flex';
+    frame = document.createElement('iframe');
+    frame.title = 'Design your ' + (product || 'artwork');
+    frame.style.cssText = 'width:100%;height:100%;border:0;background:#eef0f4';
+    const u = new URL(url, window.location.href);
+    if (product) u.searchParams.set('product', product);
+    frame.src = u.toString();
+    overlay.appendChild(frame);
+    const prevOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+
+    const cleanup = () => {
+      window.removeEventListener('message', onMsg);
+      clearTimeout(readyTimer);
+      document.documentElement.style.overflow = prevOverflow;
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+    const finish = (v) => { if (done) return; done = true; cleanup(); resolve(v); };
+    const fail = (e) => { if (done) return; done = true; cleanup(); reject(e); };
+
+    function onMsg(ev){
+      // Same origin AND from our frame: no other embed may hand this order artwork.
+      if (ev.origin !== origin || ev.source !== frame.contentWindow) return;
+      const m = ev.data;
+      if (!m || typeof m !== 'object' || m.v !== 1 || typeof m.type !== 'string') return;
+      if (m.type === 'pps-design:ready') {
+        clearTimeout(readyTimer);
+        ready = true;
+        const job = { type: 'pps-design:job', spec };
+        if (typeof design === 'string' && design) job.design = design;
+        post(job);
+        sendPrice();
+        return;
+      }
+      if (m.type === 'pps-design:error') { fail(new Error(String(m.message || 'the designer could not open'))); return; }
+      if (m.type === 'pps-design:print') {
+        if (!(m.pdf instanceof ArrayBuffer) || m.pdf.byteLength < 8) { fail(new Error('the designer sent no print file')); return; }
+        finish({ action: 'print', pdf: m.pdf, design: typeof m.design === 'string' ? m.design : null,
+                 thumbs: Array.isArray(m.thumbs) ? m.thumbs : [], manifest: m.manifest || null });
+        return;
+      }
+      if (m.type === 'pps-design:close') { finish({ action: 'closed', design: typeof m.design === 'string' ? m.design : null }); return; }
+      // pps-design:spec (a requested size or sides change) is not offered by this
+      // calculator yet; the order's options stay where the customer set them.
+    }
+    // The designer downloads its engine before it reports ready, which on a slow
+    // phone takes a while; it shows its own progress meanwhile. Two minutes with
+    // nothing is a deploy problem, not a slow connection.
+    const readyTimer = setTimeout(() => fail(new Error('the designer did not load')), 120000);
+    window.addEventListener('message', onMsg);
+    document.body.appendChild(overlay);
+  });
+  return { done: promise, setPrice: (p) => { lastPrice = p; sendPrice(); } };
+}
+
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug, designPrice, designProduct }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
@@ -2332,6 +2432,45 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const frontInputRef = useRef(null);
   const backInputRef = useRef(null);
   const rawFileRef = useRef(null);
+  // ── Design it online (see ppsOpenDesigner) ──
+  // Flat sheets only for now: the designer draws no fold lines, so a folded job keeps
+  // the upload path. designRef keeps the last design, so Back and "Edit design"
+  // reopen the work; it is reused only for the same size, orientation and sides.
+  const designerUrl = ppsDesignerUrl();
+  const canDesign = !!designerUrl && panels === 1;
+  const designRef = useRef(null);       // { key, design, portrait }
+  const designerRef = useRef(null);     // the open designer, for price updates
+  const [designing, setDesigning] = useState(false);
+  const [fromDesigner, setFromDesigner] = useState(false);
+  useEffect(() => { if (designerRef.current && designPrice) designerRef.current.setPrice(designPrice); }, [designPrice]);
+  async function openDesigner(portrait) {
+    if (!designerUrl || designing) return;
+    const long = Math.max(longEdge, shortEdge), short = Math.min(longEdge, shortEdge);
+    const w = portrait ? short : long, h = portrait ? long : short;
+    const pages = sides === 2 ? 2 : 1;
+    const key = w + "x" + h + "x" + pages;
+    const spec = { trimW: w * 72, trimH: h * 72, bleed: 9, safety: 9, pages, pageMultiple: 1, folds: [], bindEdge: null, spine: 0 };
+    const prior = designRef.current && designRef.current.key === key ? designRef.current.design : null;
+    setDesigning(true);
+    const d = ppsOpenDesigner({ url: designerUrl, product: designProduct || "Postcard", spec, design: prior, price: designPrice });
+    designerRef.current = d;
+    try {
+      const res = await d.done;
+      if (res.design) designRef.current = { key, design: res.design, portrait: !!portrait };
+      if (res.action === "print") {
+        // The designer's PDF is trim + bleed with a TrimBox, page 1 front and page 2
+        // back: the same intake as an upload, so the proof and approval are unchanged.
+        await processFile([new File([res.pdf], "online-design.pdf", { type: "application/pdf" })]);
+        setFromDesigner(true);
+      }
+    } catch (e) {
+      console.error("[pps] designer", e);
+      alert("The online designer couldn't open (" + ((e && e.message) || e) + "). You can still upload your artwork.");
+    } finally {
+      designerRef.current = null;
+      setDesigning(false);
+    }
+  }
   // Every original the customer supplied, as the order should receive it: the file
   // behind each side, front first (the first is the order's artwork path). The
   // effect below sends it to the order whenever the art changes or an approval is
@@ -2821,6 +2960,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     setFrontArt(null); setBackArt(null); setFileName(""); setApproved(false);
     setPageTransforms({}); setTxHistory([]);
     rawFileRef.current = null;
+    setFromDesigner(false);   // the design itself is kept (designRef), so the designer can still reopen it
     if (onArtwork) onArtwork({ type: "none" });
   }
 
@@ -3542,6 +3682,23 @@ generate();
 
   return (
     <div>
+      {/* Design it online — only when the site has switched the designer on */}
+      {!hasArt && canDesign && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10, padding: "12px 14px",
+          borderRadius: 8, border: `1px solid ${CC.border}`, background: "#fff" }}>
+          <div style={{ flex: "1 1 180px", fontSize: 13, color: CC.dark }}>
+            <strong>No artwork yet?</strong> <span style={{ color: CC.mid }}>Design your postcard right here: add text, photos and colours.</span>
+          </div>
+          <button type="button" data-pps-design="open" disabled={designing} onClick={() => openDesigner(false)} style={{
+            padding: "10px 18px", fontSize: 14, fontWeight: 700, borderRadius: 6, cursor: designing ? "default" : "pointer", fontFamily: "inherit",
+            border: "none", background: CK.cyan, color: "#fff", opacity: designing ? 0.6 : 1,
+          }}>{designing ? "Opening…" : "✏️ Design it online"}</button>
+          <button type="button" data-pps-design="portrait" disabled={designing} onClick={() => openDesigner(true)} title="Design it standing up (portrait) instead of landscape" style={{
+            padding: "6px 10px", fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: designing ? "default" : "pointer", fontFamily: "inherit",
+            border: `1px solid ${CC.border}`, background: "#fff", color: CC.mid,
+          }}>Portrait</button>
+        </div>
+      )}
       {/* Upload area */}
       {!hasArt ? (
         <div
@@ -3578,6 +3735,12 @@ generate();
                 padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
                 border: `1px solid ${CC.border}`, background: "#fff", color: CC.mid,
               }}>⇄ Swap front/back</button>
+            )}
+            {fromDesigner && canDesign && (
+              <button type="button" data-pps-design="edit" disabled={designing} onClick={() => openDesigner(designRef.current ? designRef.current.portrait : false)} title="Reopen your design to change it" style={{
+                padding: "3px 10px", fontSize: 10, fontWeight: 700, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                border: `1px solid ${CK.cyan}`, background: "#fff", color: CK.cyan,
+              }}>✏️ Edit design</button>
             )}
             <button type="button" onClick={handleClear} style={{
               padding: "3px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
@@ -6413,6 +6576,8 @@ function App() {
                   onCoverArt={setCoverArt}
                   openPreviewModalRef={openPreviewModalRef}
                   debug={proofDebug}
+                  designPrice={r.error ? null : { total: r.total, qty: r.qty, turnaround: r.days }}
+                  designProduct={"Postcard " + parseFloat(Math.max(dimLong, dimShort).toFixed(3)) + " × " + parseFloat(Math.min(dimLong, dimShort).toFixed(3))}
                 />
               </div>
             )}
