@@ -13,6 +13,11 @@
 //               the work and Back keeps it; then the normal proof, APPROVE NOW and
 //               Add to Order, with the designer's PDF as the order's artwork and the
 //               previews and manifest listed for Drive.
+//               Order options: the designer's slide-out panel offers this calculator's
+//               size, sides and quantity (plus orientation); a change there sets the
+//               calculator's own fields, its new price comes back to the designer, and
+//               a new size resizes the open design, so the print file and the order
+//               agree.
 //
 // Setup (everything is served on 127.0.0.1:8139 by this script):
 //   1. compile:  BABEL_DIR=<dir with @babel/core, @babel/preset-react> node tools-compile-calcs.mjs
@@ -139,6 +144,23 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   ok('on: the price chip shows the calculator\'s price (display only)', /^\$\d[\d,]*\.\d\d · [\d,]+ pcs$/.test(chip || ''), chip);
   ok('on: no demo notice inside the calculator', !(await frame.locator('#demo').isVisible()));
 
+  // Order options: the calculator's own fields, from inside the designer.
+  ok('on: the designer offers Order options', await frame.locator('#orderTab').isVisible());
+  await frame.locator('#orderTab').click();
+  ok('on: …size, orientation, sides and quantity, from the calculator', (await frame.locator('#orderFields label > span:first-child').allTextContents()).join(',') === 'Size,Orientation,Sides printed,Quantity');
+  await frame.locator('#orderFields select[data-key="size"]').selectOption('4×6');
+  await frame.locator('#productSize', { hasText: '6 × 4 in' }).waitFor({ timeout: 10000 });
+  ok('on: a size picked in the designer resizes the design (4×6 → 6 × 4 in, landscape)', (await frame.locator('#productSize').textContent()) === '6 × 4 in');
+  await p.waitForFunction(() => [...document.querySelectorAll('select')].some(s => s.value === '4×6'), null, { timeout: 5000 }).catch(() => {});
+  ok('on: …and sets the calculator\'s own size field', await p.evaluate(() => [...document.querySelectorAll('select')].some(s => s.value === '4×6')));
+  await frame.locator('#orderFields input[data-key="qty"]').fill('500');
+  await frame.locator('#orderFields input[data-key="qty"]').press('Enter');
+  await frame.locator('#price', { hasText: '500 pcs' }).waitFor({ timeout: 10000 });
+  const chip2 = await frame.locator('#price').textContent();
+  ok('on: a quantity change comes back as the calculator\'s new price', /· 500 pcs$/.test(chip2 || '') && chip2 !== chip, chip + ' → ' + chip2);
+  ok('on: …shown in the panel too', /\$[\d,]+\.\d\d/.test(await frame.locator('#orderPrice').textContent()));
+  await frame.locator('#orderClose').click();
+
   await frame.locator('[data-text="heading"]').click();
   await frame.locator('#textInput').fill('Grand Opening');
   await frame.locator('#textDone').click();
@@ -157,7 +179,7 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   ok('on: the design lands as the artwork (file name shown)', (await p.getByText('online-design.pdf').count()) >= 1);
   ok('on: "Edit design" is offered once a design is on the job', await p.locator('[data-pps-design="edit"]').isVisible());
   ok('on: the proof button is there, unapproved', (await p.locator('button', { hasText: '🔍 Proof' }).count()) >= 1);
-  ok('on: no surprise dialogs from the intake (size, page count)', t.dialogs.length === 0, t.dialogs.join(' || '));
+  ok('on: no surprise dialogs from the intake (the PDF is the size the order now is)', t.dialogs.length === 0, t.dialogs.join(' || '));
 
   // Edit, then Back: the work comes back, and Back leaves the artwork as it was.
   await p.click('[data-pps-design="edit"]');

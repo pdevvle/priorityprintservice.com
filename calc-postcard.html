@@ -2313,15 +2313,21 @@ function ppsDesignerUrl(){
   return u;
 }
 
-/* Opens the designer over the page. Returns { done, setPrice }:
+/* Opens the designer over the page. Returns { done, setPrice, setSpec, setOptions }:
      done resolves { action:'print', pdf:ArrayBuffer, design, thumbs, manifest }
                or { action:'closed', design }  (Back: the work is kept)
           rejects only if the designer could not be opened at all.
-     setPrice({ total, qty, turnaround }) updates the price chip while it is open
-     (display only — the designer computes nothing). */
-function ppsOpenDesigner({ url, product, spec, design, price }){
+     setPrice({ total, qty, turnaround }) updates the price while it is open
+     (display only — the designer computes nothing).
+     setOptions([...]) sends the Order options the designer shows in its slide-out
+     panel: [{ key, label, type: 'select'|'number', value, choices?: [{value, label,
+     group?}], min?, max?, step?, help? }]. A change there comes back through
+     onOption(key, value); the calculator applies it to its own state, and this
+     sends the results (setSpec for a new size or sides, setOptions, setPrice).
+     setSpec(spec) resizes the open design to a new trim / page count. */
+function ppsOpenDesigner({ url, product, spec, design, price, options, onOption }){
   const origin = window.location.origin;
-  let frame = null, ready = false, lastPrice = price || null, done = false;
+  let frame = null, ready = false, lastPrice = price || null, lastOptions = options || null, lastSpec = spec, done = false;
   const post = (m) => { if (frame && frame.contentWindow) frame.contentWindow.postMessage(Object.assign({ v: 1 }, m), origin); };
   const sendPrice = () => {
     if (!ready || !lastPrice || typeof lastPrice.total !== 'number' || !isFinite(lastPrice.total)) return;
@@ -2358,8 +2364,9 @@ function ppsOpenDesigner({ url, product, spec, design, price }){
       if (m.type === 'pps-design:ready') {
         clearTimeout(readyTimer);
         ready = true;
-        const job = { type: 'pps-design:job', spec };
+        const job = { type: 'pps-design:job', spec: lastSpec };
         if (typeof design === 'string' && design) job.design = design;
+        if (Array.isArray(lastOptions)) job.options = lastOptions;
         post(job);
         sendPrice();
         return;
@@ -2372,8 +2379,13 @@ function ppsOpenDesigner({ url, product, spec, design, price }){
         return;
       }
       if (m.type === 'pps-design:close') { finish({ action: 'closed', design: typeof m.design === 'string' ? m.design : null }); return; }
-      // pps-design:spec (a requested size or sides change) is not offered by this
-      // calculator yet; the order's options stay where the customer set them.
+      // A change in the designer's Order options panel. Only keys this calculator
+      // offered are taken; the value is checked again where it is applied.
+      if (m.type === 'pps-design:option') {
+        const offered = Array.isArray(lastOptions) && lastOptions.find(o => o.key === m.key);
+        if (offered && onOption && (typeof m.value === 'string' || typeof m.value === 'number')) onOption(m.key, m.value);
+        return;
+      }
     }
     // The designer downloads its engine before it reports ready, which on a slow
     // phone takes a while; it shows its own progress meanwhile. Two minutes with
@@ -2382,10 +2394,15 @@ function ppsOpenDesigner({ url, product, spec, design, price }){
     window.addEventListener('message', onMsg);
     document.body.appendChild(overlay);
   });
-  return { done: promise, setPrice: (p) => { lastPrice = p; sendPrice(); } };
+  return {
+    done: promise,
+    setPrice: (p) => { lastPrice = p; sendPrice(); },
+    setOptions: (o) => { lastOptions = o; if (ready) post({ type: 'pps-design:options', options: o }); },
+    setSpec: (s) => { lastSpec = s; if (ready) post({ type: 'pps-design:spec', spec: s }); },
+  };
 }
 
-function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug, designPrice, designProduct }) {
+function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCount, perfDir, perfPositions, onPerfPositions, frontColor, backColor, sides, onSizeOverride, onFoldChange, onFoldDirChange, sizeMode, onArtwork, onCoverArt, openPreviewModalRef, debug, designPrice, designProduct, designOptions, onDesignOption }) {
   const mob = useIsMobile();
   const hasIO = panels > 1 && foldType !== "z3";
   const fLabel = hasIO ? "Front / Outside" : "Front";
@@ -2439,24 +2456,58 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const designerUrl = ppsDesignerUrl();
   const canDesign = !!designerUrl && panels === 1;
   const designRef = useRef(null);       // { key, design, portrait }
-  const designerRef = useRef(null);     // the open designer, for price updates
+  const designerRef = useRef(null);     // the open designer, for price, option and size updates
   const [designing, setDesigning] = useState(false);
   const [fromDesigner, setFromDesigner] = useState(false);
-  useEffect(() => { if (designerRef.current && designPrice) designerRef.current.setPrice(designPrice); }, [designPrice]);
-  async function openDesigner(portrait) {
-    if (!designerUrl || designing) return;
+  // Orientation is the designer's choice, not the calculator's (the price is the same either
+  // way), so it lives here and joins the Order options the designer shows.
+  const [designPortrait, setDesignPortrait] = useState(false);
+  const designSpec = (portrait) => {
     const long = Math.max(longEdge, shortEdge), short = Math.min(longEdge, shortEdge);
     const w = portrait ? short : long, h = portrait ? long : short;
     const pages = sides === 2 ? 2 : 1;
-    const key = w + "x" + h + "x" + pages;
-    const spec = { trimW: w * 72, trimH: h * 72, bleed: 9, safety: 9, pages, pageMultiple: 1, folds: [], bindEdge: null, spine: 0 };
+    return { key: w + "x" + h + "x" + pages, spec: { trimW: w * 72, trimH: h * 72, bleed: 9, safety: 9, pages, pageMultiple: 1, folds: [], bindEdge: null, spine: 0 } };
+  };
+  const allDesignOptions = () => {
+    const square = Math.abs(longEdge - shortEdge) < 0.001;
+    const orient = square ? [] : [{ key: "orientation", label: "Orientation", type: "select", value: designPortrait ? "portrait" : "landscape",
+      choices: [{ value: "landscape", label: "Landscape (wide)" }, { value: "portrait", label: "Portrait (tall)" }] }];
+    const list = Array.isArray(designOptions) ? designOptions : [];
+    return list.length ? [list[0], ...orient, ...list.slice(1)] : orient;
+  };
+  const latestRef = useRef({});
+  latestRef.current = { designSpec, designPortrait };
+  useEffect(() => { if (designerRef.current && designPrice) designerRef.current.setPrice(designPrice); }, [designPrice]);
+  // A change made in the designer's Order options (or here) reaches the open design.
+  useEffect(() => {
+    if (!designerRef.current) return;
+    designerRef.current.setSpec(designSpec(designPortrait).spec);
+  }, [longEdge, shortEdge, sides, designPortrait]);
+  useEffect(() => {
+    if (designerRef.current) designerRef.current.setOptions(allDesignOptions());
+  }, [JSON.stringify(designOptions), designPortrait, longEdge, shortEdge]);
+  function onDesignerOption(key, value) {
+    if (key === "orientation") { setDesignPortrait(value === "portrait"); return; }
+    if (onDesignOption) onDesignOption(key, value);
+  }
+  async function openDesigner(portrait) {
+    if (!designerUrl || designing) return;
+    setDesignPortrait(!!portrait);
+    const { key, spec } = designSpec(portrait);
     const prior = designRef.current && designRef.current.key === key ? designRef.current.design : null;
     setDesigning(true);
-    const d = ppsOpenDesigner({ url: designerUrl, product: designProduct || "Postcard", spec, design: prior, price: designPrice });
+    const opts = (() => { const square = Math.abs(longEdge - shortEdge) < 0.001; const l = Array.isArray(designOptions) ? designOptions : [];
+      const o = square ? [] : [{ key: "orientation", label: "Orientation", type: "select", value: portrait ? "portrait" : "landscape",
+        choices: [{ value: "landscape", label: "Landscape (wide)" }, { value: "portrait", label: "Portrait (tall)" }] }];
+      return l.length ? [l[0], ...o, ...l.slice(1)] : o; })();
+    const d = ppsOpenDesigner({ url: designerUrl, product: designProduct || "Postcard", spec, design: prior, price: designPrice,
+      options: opts, onOption: onDesignerOption });
     designerRef.current = d;
     try {
       const res = await d.done;
-      if (res.design) designRef.current = { key, design: res.design, portrait: !!portrait };
+      // The design comes back at the size the order has now, which the panel may have changed.
+      const now = latestRef.current;
+      if (res.design) designRef.current = { key: now.designSpec(now.designPortrait).key, design: res.design, portrait: now.designPortrait };
       if (res.action === "print") {
         // The designer's PDF is trim + bleed with a TrimBox, page 1 front and page 2
         // back: the same intake as an upload, so the proof and approval are unchanged.
@@ -5717,6 +5768,33 @@ function App() {
 
   const r = result || {};
 
+  // The choices the online designer's Order options panel offers: the ones that change the
+  // design (size, sides) and quantity. Labels and values are this calculator's own; the
+  // designer only draws them and sends a change back (onDesignOption). Prices stay here.
+  const designOptions = useMemo(() => {
+    const sizeChoices = SIZE_PRESETS.map(s => ({ value: s.label, label: s.label, group: s.rack ? "Common Rack Card Sizes" : s.square ? "Square" : "" }))
+      .sort((a, b) => (a.group ? 1 : 0) - (b.group ? 1 : 0));
+    const custom = sizeMode !== "preset";
+    if (custom) sizeChoices.unshift({ value: "__custom", label: "Custom " + parseFloat(Math.max(longEdge, shortEdge).toFixed(3)) + " × " + parseFloat(Math.min(longEdge, shortEdge).toFixed(3)), group: "" });
+    return [
+      { key: "size", label: "Size", type: "select", value: custom ? "__custom" : sizeLabel, choices: sizeChoices },
+      { key: "sides", label: "Sides printed", type: "select", value: String(sides), choices: [{ value: "2", label: "Both sides" }, { value: "1", label: "Front only" }] },
+      { key: "qty", label: "Quantity", type: "number", value: qty, min: 1, max: 99999, step: 1 },
+    ];
+  }, [sizeMode, sizeLabel, longEdge, shortEdge, sides, qty]);
+  const onDesignOption = (key, value) => {
+    if (key === "size") {
+      const hit = SIZE_PRESETS.find(s => s.label === value);
+      if (hit) { setSizeMode("preset"); setSizeLabel(hit.label); }
+    } else if (key === "sides") {
+      const n = Number(value);
+      if (n === 1 || n === 2) setSides(n);
+    } else if (key === "qty") {
+      const n = Math.round(Number(value));
+      if (isFinite(n) && n >= 1 && n <= 99999) setQty(n);
+    }
+  };
+
   // Dimensions the preview is allowed to draw.
   //
   // calculate() rejects a sheet under 2 inches, and a cleared size field reads as 0, so
@@ -6577,6 +6655,8 @@ function App() {
                   openPreviewModalRef={openPreviewModalRef}
                   debug={proofDebug}
                   designPrice={r.error ? null : { total: r.total, qty: r.qty, turnaround: r.days }}
+                  designOptions={designOptions}
+                  onDesignOption={onDesignOption}
                   designProduct={"Postcard " + parseFloat(Math.max(dimLong, dimShort).toFixed(3)) + " × " + parseFloat(Math.min(dimLong, dimShort).toFixed(3))}
                 />
               </div>
