@@ -548,14 +548,17 @@ function availableFoldTypes(longE, shortE, isCardstock) {
   return FOLD_TYPES.filter(f => f.val !== "trifold_xbifold" || (is1125 && !isCardstock));
 }
 
+// Panel names, left to right as each side is SEEN: the back is the sheet turned over left to
+// right, so its first panel is the one behind the front's last (2026-10-12: z3, accordion4 and
+// roll4 listed the back in the front's order, which put "Innermost Inside" on the widest panel).
 const PANEL_LABELS = {
   bifold:    { front: ["Back","Front"], back: ["Inside Front","Inside Back"] },
   trifold:   { front: ["Inside Flap","Back","Front"], back: ["Inside Left","Inside Center","Inside Right"] },
   trifold_xbifold: { front: ["Inside Flap","Back","Front"], back: ["Inside Left","Inside Center","Inside Right"] },
-  z3:        { front: ["Back","Center","Front"], back: ["Back Inside","Center Inside","Front Inside"] },
+  z3:        { front: ["Back","Center","Front"], back: ["Front Inside","Center Inside","Back Inside"] },
   gate3:     { front: ["Left Flap","Front","Right Flap"], back: ["Inside Left","Inside Center","Inside Right"] },
-  accordion4:{ front: ["Back","Inside Right","Inside Left","Front"], back: ["Back Inside","Outside Right","Outside Left","Front Inside"] },
-  roll4:     { front: ["Innermost","Inner Flap","Back","Front"], back: ["Innermost Inside","Flap Inside","Inside Left","Inside Right"] },
+  accordion4:{ front: ["Back","Inside Right","Inside Left","Front"], back: ["Front Inside","Outside Left","Outside Right","Back Inside"] },
+  roll4:     { front: ["Innermost","Inner Flap","Back","Front"], back: ["Front Inside","Back Inside","Flap Inside","Innermost Inside"] },
   dgate4:    { front: ["Left Flap","Left Center","Right Center","Right Flap"], back: ["Inside Left","Inside Left Center","Inside Right Center","Inside Right"] },
   dparallel4:{ front: ["Inside Left","Back","Front","Inside Right"], back: ["Inside 1","Inside 2","Inside 3","Inside 4"] },
 };
@@ -2810,6 +2813,10 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     setLoading(true);
     setFileName(file.name);
     rawFileRef.current = file;
+    // New artwork starts square-on: a turn, fit or scale chosen for the last file (or set for a
+    // portrait design) is not this file's. Until 2026-10-12 it carried over, so a landscape upload
+    // after a portrait design printed sideways.
+    setPageTransforms({}); setTxHistory([]);
 
     try {
       if (file.type === "application/pdf") {
@@ -3742,6 +3749,7 @@ generate();
                     await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
                     const [x0, y0, x1, y1] = pg.view;
                     setArt({ dataUrl: c.toDataURL("image/jpeg", 0.85), file, pdfPage: 1, dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } });
+                    setPageTransforms(p => ({ ...p, [s]: DEFAULT_TX }));
                     setApproved(false);
                     return;
                   }
@@ -3750,6 +3758,7 @@ generate();
                   const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
                   if (!dims) { alert(ppsUnreadableImageMsg(file)); return; }
                   setArt({ dataUrl, file, dims });
+                  setPageTransforms(p => ({ ...p, [s]: DEFAULT_TX }));
                   setApproved(false);
                 } catch (e) { console.error("Slot file processing failed:", e); alert("We couldn't read that file: " + ((e && e.message) || e) + "\n\nPlease try a PDF, JPG or PNG, or send the file to us and we'll attach it to your order."); }
               };
@@ -3766,7 +3775,7 @@ generate();
                         <button type="button" onClick={e => { e.stopPropagation(); inputRef.current?.click(); }} style={{
                           width: 22, height: 22, borderRadius: 4, border: "none", background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                         }} title="Replace">↻</button>
-                        <button type="button" onClick={e => { e.stopPropagation(); setArt(null); setApproved(false); }} style={{
+                        <button type="button" onClick={e => { e.stopPropagation(); setArt(null); setApproved(false); setPageTransforms(p => ({ ...p, [s]: DEFAULT_TX })); }} style={{
                           width: 22, height: 22, borderRadius: 4, border: "none", background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                         }} title="Remove">✕</button>
                       </div>
@@ -4141,7 +4150,9 @@ generate();
                 const trimT = bleedPctY, trimB = 100 - bleedPctY;
                 const trimW = trimR - trimL, trimH = trimB - trimT;
                 // Panel bounds from panelFracs (handles unequal gate fold panels)
-                const edges = [0, ...panelFracs, 1];
+                // The back is the front turned over left to right: its panels run the other way.
+                const fr = foldingLong && onBackView ? panelFracs.map(f => 1 - f).reverse() : panelFracs;
+                const edges = [0, ...fr, 1];
                 const pStart = edges[i], pEnd = edges[i + 1];
                 const left = foldingLong ? (trimL + trimW * pStart) : trimL;
                 const right = foldingLong ? (100 - trimL - trimW * pEnd) : (100 - trimR);

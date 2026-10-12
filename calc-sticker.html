@@ -2036,6 +2036,10 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
     setLoading(true);
     setFileName(file.name);
     rawFileRef.current = file;
+    // New artwork starts square-on: a turn, fit or scale chosen for the last file (or set for a
+    // portrait design) is not this file's. Until 2026-10-12 it carried over, so a landscape upload
+    // after a portrait design printed sideways.
+    setPageTransforms({}); setTxHistory([]);
 
     try {
       if (file.type === "application/pdf") {
@@ -2425,6 +2429,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
                     await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
                     const [x0, y0, x1, y1] = pg.view;
                     setArt({ dataUrl: c.toDataURL("image/jpeg", 0.85), file, pdfPage: 1, dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } });
+                    setPageTransforms(p => ({ ...p, [s]: DEFAULT_TX }));
                     setApproved(false);
                     return;
                   }
@@ -2433,6 +2438,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
                   const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
                   if (!dims) { alert(ppsUnreadableImageMsg(file)); return; }
                   setArt({ dataUrl, file, dims });
+                  setPageTransforms(p => ({ ...p, [s]: DEFAULT_TX }));
                   setApproved(false);
                 } catch (e) { console.error("Slot file processing failed:", e); alert("We couldn't read that file: " + ((e && e.message) || e) + "\n\nPlease try a PDF, JPG or PNG, or send the file to us and we'll attach it to your order."); }
               };
@@ -2449,7 +2455,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
                         <button type="button" onClick={e => { e.stopPropagation(); inputRef.current?.click(); }} style={{
                           width: 22, height: 22, borderRadius: 4, border: "none", background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                         }} title="Replace">↻</button>
-                        <button type="button" onClick={e => { e.stopPropagation(); setArt(null); setApproved(false); }} style={{
+                        <button type="button" onClick={e => { e.stopPropagation(); setArt(null); setApproved(false); setPageTransforms(p => ({ ...p, [s]: DEFAULT_TX })); }} style={{
                           width: 22, height: 22, borderRadius: 4, border: "none", background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                         }} title="Remove">✕</button>
                       </div>

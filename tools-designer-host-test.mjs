@@ -179,6 +179,14 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   ok('on: picking Trifold in the designer folds the job (Outside / Inside)', (await frame.locator('#sides button').allTextContents()).join(',') === 'Outside,Inside');
   ok('on: …sets the calculator\'s own fold field', await p.evaluate(() => [...document.querySelectorAll('select')].some(s => s.value === 'trifold')));
   ok('on: …and offers no portrait for a folded sheet', (await frame.locator('#orderFields select[data-key="orientation"]').count()) === 0);
+  // A fold the calculator can't price at this size (accordion: 1.5 in panels) is said in the
+  // designer, not left showing the last price.
+  await frame.locator('#orderFields select[data-key="fold"]').selectOption('accordion4');
+  await frame.locator('#orderPrice.cant').waitFor({ timeout: 10000 }).catch(() => {});
+  const cant = await frame.locator('#orderPrice').textContent();
+  ok('on: a fold that can\'t be priced at this size says so in the designer', /can't be priced/.test(cant) && /too small/i.test(cant), cant);
+  await frame.locator('#orderFields select[data-key="fold"]').selectOption('trifold');
+  await frame.locator('#orderPrice:not(.cant)').waitFor({ timeout: 10000 });
   await frame.locator('#orderFields select[data-key="perforation"]').selectOption({ index: 1 });
   await frame.locator('#legendPerf:not([hidden])').waitFor({ timeout: 10000 });
   ok('on: a perforation picked in the designer is drawn there and shows in the legend', await frame.locator('#legendFold').isVisible() && await frame.locator('#legendPerf').isVisible());
@@ -188,6 +196,11 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   await frame.locator('[data-text="heading"]').click();
   await frame.locator('#textInput').fill('Grand Opening');
   await frame.locator('#textDone').click();
+  // Half see-through, set in Advanced: the designer's canvas shows it as it prints.
+  await frame.locator('#modeAdv').click();
+  await frame.locator('#ctlOpacity').fill('50');
+  await frame.locator('#ctlOpacity').press('Enter');
+  await frame.locator('#modeSimple').click();
   await frame.locator('[data-cat="background"]').click();
   await frame.locator('#bgSwatches button[title="Teal"]').click();
   await frame.locator('#sides button:nth-child(2)').click();
@@ -217,6 +230,7 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   await p.evaluate(() => { window.__manifests = 0; const OB = window.Blob; window.Blob = function (parts, opts) { const bl = new OB(parts, opts); if (opts && opts.type === 'text/plain') window.__manifests++; return bl; }; window.Blob.prototype = OB.prototype; });
   await p.evaluate(() => { const x = [...document.querySelectorAll('button')].find(y => /🔍 Proof/.test(y.textContent || '')); x && x.click(); });
   await p.waitForTimeout(2500);
+  ok('on: the designer\'s own transparency raises no "contact us before approving" banner', !/Uses [^\n]*transparen/.test(await p.evaluate(() => document.body.innerText)));
   await p.evaluate(() => { const ack = [...document.querySelectorAll('label')].find(l => /print anyway/i.test(l.textContent || '')); const cb = ack && ack.querySelector('input[type=checkbox]'); cb && cb.click(); });
   await p.waitForTimeout(300);
   await p.evaluate(() => { const btn = [...document.querySelectorAll('button')].find(y => /APPROVE NOW|^\s*Approve (artwork|Now)\s*$/i.test(y.textContent || '')); btn && btn.click(); });
@@ -295,6 +309,7 @@ const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('butto
   // The order changes size after the design: "Edit design" reopens the work at the new size.
   await p.locator('select:has(option[value="5×7"])').first().selectOption('5×7');
   await p.waitForTimeout(800);
+  ok('portrait: after a size change the job says the design is out of date', await p.locator('[data-pps-design="stale"]').isVisible());
   await p.click('[data-pps-design="edit"]');
   await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
   ok('portrait: after a size change, "Edit design" reopens the work, not a blank card', !(await frame.locator('#emptyHint').isVisible()));
@@ -306,6 +321,7 @@ const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('butto
   const second = await p.getByText(DESIGN_NAME).first().textContent().catch(() => '');
   ok('portrait: a second design gets a name of its own', DESIGN_NAME.test((second || '').trim()) && second !== first, first + ' → ' + second);
 
+  ok('portrait: …and once printed again, it is up to date', !(await p.locator('[data-pps-design="stale"]').isVisible()));
   ok('portrait: approving makes the package', await approve(p));
   ok('portrait: …and the job shows as approved', await approvedShown(p));
   // A change to the job's size after approval clears it: the approved file is the old size.
@@ -343,6 +359,60 @@ const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('butto
   ok('portrait: the Print File Check reads it as 2 pages on the 7.25 × 5.25 in sheet, with no warning', jh.pages === 2 && JSON.stringify(jh.sheet_in) === '[7.25,5.25]' && jh.warn === '', jh.summary);
   if (process.env.PPS_PRINT_READY) fs.writeFileSync(process.env.PPS_PRINT_READY, pr);
   ok('portrait: no page errors', t.errs.length === 0, t.errs.join(' | '));
+  await t.ctx.close();
+}
+
+// ── a dead designer link: the customer can always get out, and is told at once ──
+{
+  const t = await open(b, '/designer/not-there.html');
+  const { p } = t;
+  await p.click('[data-pps-design="open"]');
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+  ok('dead link: a designer page that isn\'t there closes at once with a message (not two minutes)', !(await p.locator('.pps-designer-overlay').count()) && t.dialogs.some(d => /couldn't open/.test(d)), t.dialogs.join(' || '));
+  await t.ctx.close();
+}
+{
+  // A designer that loads but never says ready: Close and Escape get the customer out.
+  const t = await open(b, '/designer/designer.html');
+  const { p } = t;
+  await p.route('**/designer/designer.js', route => route.fulfill({ status: 200, contentType: 'text/javascript', body: '/* never ready */' }));
+  await p.click('[data-pps-design="open"]');
+  await p.locator('.pps-designer-overlay button', { hasText: 'Close' }).waitFor({ timeout: 10000 });
+  await p.keyboard.press('Escape');
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
+  ok('stuck designer: Escape closes the overlay before it is ready', !(await p.locator('.pps-designer-overlay').count()));
+  await t.ctx.close();
+}
+
+// ── a portrait design, then the customer's own landscape PDF: it prints square-on ──
+{
+  const t = await open(b, '/designer/designer.html');
+  const { p } = t;
+  await p.locator('select:has(option[value="4×6"])').first().selectOption('4×6');
+  await p.waitForTimeout(800);
+  await p.click('[data-pps-design="portrait"]');
+  const frame = p.frameLocator('.pps-designer-overlay iframe');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  await frame.locator('[data-text="heading"]').click();
+  await frame.locator('#textDone').click();
+  await frame.locator('#print').click();
+  await frame.locator('#sheetGo').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+  await p.waitForTimeout(3000);
+  // Remove the front, then drop a landscape two-pager on the upload zone.
+  await p.locator('button[title="Remove"]').first().click();
+  await p.waitForTimeout(500);
+  const { jsPDF } = (await import('node:module')).createRequire(import.meta.url)(DEPS + '/jspdf/dist/jspdf.node.min.js');
+  const doc = new jsPDF({ unit: 'in', format: [6.25, 4.25], orientation: 'landscape' });
+  doc.text('UP FRONT', 2, 2); doc.addPage([6.25, 4.25], 'landscape'); doc.text('UP BACK', 2, 2);
+  const land = writeTmp(Buffer.from(doc.output('arraybuffer')));
+  await p.locator('input[type=file][accept=".pdf,.jpg,.jpeg,.png"]').first().setInputFiles(land);
+  await p.waitForTimeout(4000);
+  ok('upload after a portrait design: approving makes the package', await approve(p));
+  const clicked = await p.evaluate(() => { const bt = [...document.querySelectorAll('button')].find(x => /^Add to Order$/.test((x.textContent || '').trim()) && !x.disabled); if (!bt) return false; bt.click(); return true; });
+  for (let i = 0; i < 60 && clicked && !/cart\.html$/.test(p.url()); i++) await p.waitForTimeout(1000);
+  const man = Buffer.from(t.bodies[Object.keys(t.bodies).find(n => /manifest\.txt$/.test(n)) || ''] || '', 'latin1').toString('utf8');
+  ok('upload after a portrait design: the upload prints square-on (no turn carried over)', /rotate=0°/.test(man) && !/rotate=(90|270)°/.test(man), (man.match(/rotate=\d+°/g) || []).join(','));
   await t.ctx.close();
 }
 

@@ -353,6 +353,19 @@ From the print audit of the online designer, three changes that reach every flat
   90/270 page into the sheet it prints on (`pps-job-health.php`, so deploy that file with the
   calculator). Anything else, or pdf-lib failing to load, takes the raster path as an upload
   would. `tools-designer-host-test.mjs` and `tools-job-health-test.php` are the gates.
+- **New artwork starts square-on.** A turn, fit or scale chosen for the last file (or set for a
+  portrait design) carried over to the next upload or slot replacement, so a landscape PDF dropped
+  after a portrait design printed sideways. `processFile`, a slot replace and a slot ✕ reset it.
+- **Panel names read left to right as each side is seen.** z3, accordion4 and roll4 listed the
+  back in the front's order ("Innermost Inside" landed on the widest panel once the back was
+  mirrored); the proof's back panel names now sit on the mirrored panels.
+
+The postcard's online designer, from the same sweep: a design made for an older size or sides is
+said beside Edit design and refused at approval until it is printed again; the overlay has Close
+and Escape until the designer is up, and a designer URL that is not the designer fails at once
+(it held the page for two minutes); a job the calculator can't price is sent to the designer as
+`pps-design:price` with `error`; and the designer's perforation direction follows the proof's
+(fold direction included).
 
 ## Junctures: priced → placed → printed (2026-09-27)
 
