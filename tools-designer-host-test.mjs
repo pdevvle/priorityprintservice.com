@@ -18,6 +18,13 @@
 //               calculator's own fields, its new price comes back to the designer, and
 //               a new size resizes the open design, so the print file and the order
 //               agree.
+//   portrait  — a card designed standing up: the print-ready file is the wide sheet with
+//               the front turned 90° and the back 270° (it is turned over left to right),
+//               recorded in the manifest; after a size change "Edit design" reopens the
+//               work resized, each design has its own file name (Drive and the imposition
+//               tool find artwork by name), and approving then changing the size clears
+//               the approval, so the order can never carry a file of another size.
+//               PPS_PRINT_READY=<path> keeps that print-ready PDF to look at.
 //
 // Setup (everything is served on 127.0.0.1:8139 by this script):
 //   1. compile:  BABEL_DIR=<dir with @babel/core, @babel/preset-react> node tools-compile-calcs.mjs
@@ -72,6 +79,8 @@ const ok = (label, cond, detail) => {
   console.log('FAIL ' + label + (detail ? '\n       ' + detail : ''));
 };
 
+// Each design gets its own name, so two designed jobs in one order can't be confused on Drive.
+const DESIGN_NAME = /^online-design-[a-z0-9]+\.pdf$/;
 const field = (body, name) => { const m = body.match(new RegExp('name="' + name + '"\\r\\n\\r\\n([^\\r]*)')); return m ? m[1] : null; };
 const fileName = (body) => { const m = body.match(/name="artwork"; filename="([^"]*)"/); return m ? m[1] : null; };
 const reorder = Buffer.from(JSON.stringify({ shipState: 'AZ', shipAddr: { name: 'Test', street1: '1 Main St', city: 'Phoenix', zip: '85087' } }))
@@ -82,7 +91,7 @@ async function open(b, designerUrl) {
   const p = await ctx.newPage();
   const dialogs = []; p.on('dialog', async d => { dialogs.push(d.message()); await d.dismiss(); });
   const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 200)));
-  const uploads = []; let cartPost = null;
+  const uploads = [], bodies = {}; let cartPost = null;
   await p.addInitScript(([r, u]) => {
     window.PPS_CONFIG = { ajaxUrl: location.origin + '/wp-admin/admin-ajax.php', cartUrl: location.origin + '/cart.html',
       cartNonce: 'cartBaked', uploadNonce: 'upBaked', productId: 33670, maxUpload: 200 * 1048576, reorder: r,
@@ -95,6 +104,7 @@ async function open(b, designerUrl) {
     if (action === 'pps_upload_artwork') {
       const name = fileName(body);
       uploads.push(name);
+      bodies[name] = body;
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { path: 'pps-artwork/2026/10/' + uploads.length + '-' + name } }) });
     }
     if (action === 'pps_add_to_cart') {
@@ -106,7 +116,7 @@ async function open(b, designerUrl) {
   await p.route('**/cart.html', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<h1 id="cart">CART</h1>' }));
   await p.goto(BASE + '/calc.html', { waitUntil: 'domcontentloaded' });
   await p.waitForSelector('select'); await p.waitForTimeout(2500);
-  return { ctx, p, dialogs, errs, uploads, cart: () => cartPost };
+  return { ctx, p, dialogs, errs, uploads, bodies, cart: () => cartPost };
 }
 
 const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
@@ -187,7 +197,7 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
   ok('on: Print closes the designer', true);
   await p.waitForTimeout(4000);
-  ok('on: the design lands as the artwork (file name shown)', (await p.getByText('online-design.pdf').count()) >= 1);
+  ok('on: the design lands as the artwork (file name shown)', (await p.getByText(DESIGN_NAME).count()) >= 1);
   ok('on: "Edit design" is offered once a design is on the job', await p.locator('[data-pps-design="edit"]').isVisible());
   ok('on: the proof button is there, unapproved', (await p.locator('button', { hasText: '🔍 Proof' }).count()) >= 1);
   ok('on: no surprise dialogs from the intake (the PDF is the size the order now is)', t.dialogs.length === 0, t.dialogs.join(' || '));
@@ -198,7 +208,7 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   ok('on: "Edit design" reopens the work, not a blank card', !(await frame.locator('#emptyHint').isVisible()));
   await frame.locator('#back').click();
   await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 20000 });
-  ok('on: Back closes the designer and keeps the artwork', (await p.getByText('online-design.pdf').count()) >= 1);
+  ok('on: Back closes the designer and keeps the artwork', (await p.getByText(DESIGN_NAME).count()) >= 1);
 
   // The normal proof and approval, then the order.
   await p.evaluate(() => { window.__manifests = 0; const OB = window.Blob; window.Blob = function (parts, opts) { const bl = new OB(parts, opts); if (opts && opts.type === 'text/plain') window.__manifests++; return bl; }; window.Blob.prototype = OB.prototype; });
@@ -222,9 +232,98 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   ok('on: the order lands in the cart', landed, 'url=' + p.url() + ' dialogs=' + t.dialogs.join(' || '));
   const cartPost = t.cart();
   const listed = cartPost && cartPost.files ? JSON.parse(cartPost.files).map(f => f.name) : [];
-  ok('on: the designer\'s PDF is the order\'s artwork', t.uploads[0] === 'online-design.pdf' && cartPost && /1-online-design\.pdf$/.test(cartPost.path || ''), JSON.stringify({ first: t.uploads[0], path: cartPost && cartPost.path }));
+  ok('on: the designer\'s PDF is the order\'s artwork', DESIGN_NAME.test(t.uploads[0] || '') && cartPost && /^pps-artwork\/2026\/10\/1-online-design-[a-z0-9]+\.pdf$/.test(cartPost.path || ''), JSON.stringify({ first: t.uploads[0], path: cartPost && cartPost.path }));
   ok('on: previews and the manifest are listed for Drive', listed.some(n => /preview/.test(n)) && listed.some(n => /manifest\.txt$/.test(n)), listed.join(','));
   ok('on: no page errors', t.errs.length === 0, t.errs.join(' | '));
+  await t.ctx.close();
+}
+
+// The proof's APPROVE NOW, waiting for the package (its manifest) to be made.
+async function approve(p) {
+  await p.evaluate(() => { window.__manifests = 0; if (!window.__blobHooked) { window.__blobHooked = true; const OB = window.Blob; window.Blob = function (parts, opts) { const bl = new OB(parts, opts); if (opts && opts.type === 'text/plain') window.__manifests++; return bl; }; window.Blob.prototype = OB.prototype; } });
+  await p.evaluate(() => { const x = [...document.querySelectorAll('button')].find(y => /🔍 Proof/.test(y.textContent || '')); x && x.click(); });
+  await p.waitForTimeout(2500);
+  await p.evaluate(() => { const ack = [...document.querySelectorAll('label')].find(l => /print anyway/i.test(l.textContent || '')); const cb = ack && ack.querySelector('input[type=checkbox]'); cb && cb.click(); });
+  await p.waitForTimeout(300);
+  await p.evaluate(() => { const btn = [...document.querySelectorAll('button')].find(y => /APPROVE NOW|^\s*Approve (artwork|Now)\s*$/i.test(y.textContent || '')); btn && btn.click(); });
+  let man = 0;
+  for (let i = 0; i < 90 && man < 1; i++) { await p.waitForTimeout(1000); man = await p.evaluate(() => window.__manifests); }
+  await p.keyboard.press('Escape'); await p.waitForTimeout(500);
+  return man >= 1;
+}
+const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('button')].some(x => (x.textContent || '').trim() === 'Review' && x.offsetParent !== null));
+
+// ── portrait: a card designed standing up prints the right way round on the wide sheet ──
+{
+  const t = await open(b, '/designer/designer.html');
+  const { p } = t;
+  await p.locator('select:has(option[value="4×6"])').first().selectOption('4×6');
+  await p.waitForTimeout(800);
+  await p.click('[data-pps-design="portrait"]');
+  const frame = p.frameLocator('.pps-designer-overlay iframe');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  ok('portrait: the designer opens the card standing up (4 × 6 in)', (await frame.locator('#productSize').textContent()) === '4 × 6 in');
+  await frame.locator('[data-text="heading"]').click();
+  await frame.locator('#textInput').fill('Tall card');
+  await frame.locator('#textDone').click();
+  await frame.locator('[data-cat="background"]').click();
+  await frame.locator('#bgSwatches button[title="Teal"]').click();
+  await frame.locator('#sides button:nth-child(2)').click();
+  await frame.locator('[data-cat="text"]').click();
+  await frame.locator('[data-text="heading"]').click();
+  await frame.locator('#textInput').fill('Back top');
+  await frame.locator('#textDone').click();
+  await frame.locator('#print').click();
+  await frame.locator('#sheetGo').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+  await p.waitForTimeout(4000);
+  const first = await p.getByText(DESIGN_NAME).first().textContent().catch(() => '');
+  ok('portrait: the design lands under its own name', DESIGN_NAME.test((first || '').trim()), first);
+  ok('portrait: …with no dialogs', t.dialogs.length === 0, t.dialogs.join(' || '));
+
+  // The order changes size after the design: "Edit design" reopens the work at the new size.
+  await p.locator('select:has(option[value="5×7"])').first().selectOption('5×7');
+  await p.waitForTimeout(800);
+  await p.click('[data-pps-design="edit"]');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  ok('portrait: after a size change, "Edit design" reopens the work, not a blank card', !(await frame.locator('#emptyHint').isVisible()));
+  ok('portrait: …resized to the order (5 × 7 in, still standing up)', (await frame.locator('#productSize').textContent()) === '5 × 7 in');
+  await frame.locator('#print').click();
+  await frame.locator('#sheetGo').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+  await p.waitForTimeout(4000);
+  const second = await p.getByText(DESIGN_NAME).first().textContent().catch(() => '');
+  ok('portrait: a second design gets a name of its own', DESIGN_NAME.test((second || '').trim()) && second !== first, first + ' → ' + second);
+
+  ok('portrait: approving makes the package', await approve(p));
+  ok('portrait: …and the job shows as approved', await approvedShown(p));
+  // A change to the job's size after approval clears it: the approved file is the old size.
+  await p.locator('select:has(option[value="4×6"])').first().selectOption('4×6');
+  await p.waitForTimeout(1500);
+  ok('portrait: changing the size after approving clears the approval', !(await approvedShown(p)));
+  await p.locator('select:has(option[value="5×7"])').first().selectOption('5×7');
+  await p.waitForTimeout(1500);
+  ok('portrait: …and approving again makes a new package', await approve(p) && await approvedShown(p));
+  const clicked = await p.evaluate(() => {
+    const btns = [...document.querySelectorAll('button')].filter(x => /^Add to Order$/.test((x.textContent || '').trim()));
+    const bt = btns.find(x => x.offsetParent !== null && !x.disabled) || btns.find(x => !x.disabled);
+    if (!bt) return false; bt.click(); return true;
+  });
+  let landed = false;
+  for (let i = 0; i < 60 && clicked && !landed; i++) { await p.waitForTimeout(1000); landed = /cart\.html$/.test(p.url()); }
+  ok('portrait: the order lands in the cart', landed, t.dialogs.join(' || '));
+  const manName = Object.keys(t.bodies).find(n => /manifest\.txt$/.test(n)) || '';
+  const man = Buffer.from(t.bodies[manName] || '', 'latin1').toString('utf8');   // the manifest is UTF-8 text
+  ok('portrait: the manifest records the front turned 90° and the back 270° onto the sheet', /1: Front[\s\S]*?rotate=90°/.test(man) && /2: Back[\s\S]*?rotate=270°/.test(man), (man.match(/rotate=\d+°/g) || []).join(','));
+  ok('portrait: …at the order\'s size', /Trim size: 7″ × 5″/.test(man), (man.match(/Trim size: [^\r\n]*/) || [''])[0]);
+  const prName = Object.keys(t.bodies).find(n => /_print-ready\.pdf$/.test(n)) || '';
+  if (process.env.PPS_PRINT_READY) {   // keep the portrait print-ready file to look at
+    const raw = Buffer.from(t.bodies[prName] || '', 'latin1');
+    fs.writeFileSync(process.env.PPS_PRINT_READY, raw.subarray(raw.indexOf('%PDF'), raw.lastIndexOf('%%EOF') + 5));
+  }
+  const mbs = [...(t.bodies[prName] || '').matchAll(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/g)].map(m => [+m[1], +m[2]]);
+  ok('portrait: the print-ready file is the wide sheet with bleed, both sides (7.25 × 5.25 in)', mbs.length === 2 && mbs.every(([w, h]) => Math.abs(w - 522) < 1 && Math.abs(h - 378) < 1), JSON.stringify(mbs));
+  ok('portrait: no page errors', t.errs.length === 0, t.errs.join(' | '));
   await t.ctx.close();
 }
 

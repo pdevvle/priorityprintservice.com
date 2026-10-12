@@ -2520,7 +2520,9 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     if (!designerUrl || designing) return;
     setDesignPortrait(!!portrait);
     const { key, spec } = designSpec(portrait);
-    const prior = designRef.current && designRef.current.key === key ? designRef.current.design : null;
+    // The last design reopens even after the order's size, sides or folds changed: the designer
+    // resizes a design to the job it is given (pps-design:job), so the work is never lost.
+    const prior = designRef.current ? designRef.current.design : null;
     setDesigning(true);
     const opts = (() => { const square = Math.abs(longEdge - shortEdge) < 0.001 || panels > 1; const l = Array.isArray(designOptions) ? designOptions : [];
       const o = square ? [] : [{ key: "orientation", label: "Orientation", type: "select", value: portrait ? "portrait" : "landscape",
@@ -2535,9 +2537,28 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       const now = latestRef.current;
       if (res.design) designRef.current = { key: now.designSpec(now.designPortrait).key, design: res.design, portrait: now.designPortrait };
       if (res.action === "print") {
+        // It must be the job as the order stands now, or it is not taken.
+        const want = now.designSpec(now.designPortrait).spec;
+        const mf = res.manifest || {};
+        const got = Array.isArray(mf.trimPt) ? mf.trimPt : [];
+        if (!(Math.abs(got[0] - want.trimW) < 0.5 && Math.abs(got[1] - want.trimH) < 0.5 && mf.pages === want.pages)) {
+          alert("Your design came back at a different size or number of sides than this order, so it was not added. Please open the designer again.");
+          return;
+        }
         // The designer's PDF is trim + bleed with a TrimBox, page 1 front and page 2
         // back: the same intake as an upload, so the proof and approval are unchanged.
-        await processFile([new File([res.pdf], "online-design.pdf", { type: "application/pdf" })]);
+        // Each design gets its own name: Drive keeps one folder per order and the
+        // imposition tool finds artwork by name, so two designed jobs in one order
+        // must not both be "online-design.pdf".
+        const name = "online-design-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5) + ".pdf";
+        await processFile([new File([res.pdf], name, { type: "application/pdf" })]);
+        // The print file is always the sheet held wide. A portrait card is turned a quarter
+        // clockwise onto it; its back, turned over left to right as the designer shows it,
+        // lands a quarter anticlockwise (270°). Set every time, so a rotation left from an
+        // earlier design or upload never carries over.
+        const tall = want.trimH > want.trimW;
+        setPageTransforms({ front: { ...DEFAULT_TX, rotateSteps: tall ? 1 : 0 }, back: { ...DEFAULT_TX, rotateSteps: tall ? 3 : 0 } });
+        setTxHistory([]);
         setFromDesigner(true);
       }
     } catch (e) {
@@ -2695,6 +2716,18 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     setVpY(vpDragStart.current.vpY + (e.clientY - vpDragStart.current.y));
   };
   const vpOnMouseUp = () => { setVpDragging(false); vpDragStart.current = null; };
+
+  // Clear approval when the job changes under it: the approved print file is built at the
+  // size and sides of the moment (and its previews carry the folds and perforations), so a
+  // later change in the panel would otherwise order one job and ship the file of another.
+  const jobShapeKey = [longEdge, shortEdge, sides, foldType, foldDir, perfCount, perfDir, JSON.stringify(perfPositions || [])].join("|");
+  const prevJobShapeKey = useRef(jobShapeKey);
+  useEffect(() => {
+    if (prevJobShapeKey.current !== jobShapeKey) {
+      prevJobShapeKey.current = jobShapeKey;
+      if (approved) { setApproved(false); setApprovalPkg(null); }
+    }
+  }, [jobShapeKey]);
 
   // Clear approval when ANY side's transform changes
   const prevTxHash = useRef(txHash);
