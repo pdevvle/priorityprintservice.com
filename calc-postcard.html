@@ -2450,11 +2450,13 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   const backInputRef = useRef(null);
   const rawFileRef = useRef(null);
   // ── Design it online (see ppsOpenDesigner) ──
-  // Flat sheets only for now: the designer draws no fold lines, so a folded job keeps
-  // the upload path. designRef keeps the last design, so Back and "Edit design"
-  // reopen the work; it is reused only for the same size, orientation and sides.
+  // Flat and folded sheets: the designer draws this job's fold and perforation lines as
+  // guides (from getFoldFracs and the perf positions, exactly as the proof places them)
+  // and warns about words on them. The compound right-angle fold is left to upload: its
+  // cross fold is not drawn here either. designRef keeps the last design, so Back and
+  // "Edit design" reopen the work; it is reused only for the same size, orientation and sides.
   const designerUrl = ppsDesignerUrl();
-  const canDesign = !!designerUrl && panels === 1;
+  const canDesign = !!designerUrl && foldType !== "trifold_xbifold";
   const designRef = useRef(null);       // { key, design, portrait }
   const designerRef = useRef(null);     // the open designer, for price, option and size updates
   const [designing, setDesigning] = useState(false);
@@ -2462,14 +2464,38 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   // Orientation is the designer's choice, not the calculator's (the price is the same either
   // way), so it lives here and joins the Order options the designer shows.
   const [designPortrait, setDesignPortrait] = useState(false);
-  const designSpec = (portrait) => {
+  const designSpec = (portraitWanted) => {
     const long = Math.max(longEdge, shortEdge), short = Math.min(longEdge, shortEdge);
+    // A folded sheet is designed lying wide, as it prints and as this preview shows it:
+    // turning it upright would swap which panels are outside and inside.
+    const portrait = panels > 1 ? false : !!portraitWanted;
     const w = portrait ? short : long, h = portrait ? long : short;
     const pages = sides === 2 ? 2 : 1;
-    return { key: w + "x" + h + "x" + pages, spec: { trimW: w * 72, trimH: h * 72, bleed: 9, safety: 9, pages, pageMultiple: 1, folds: [], bindEdge: null, spine: 0 } };
+    // Lines in inches across the sheet held wide: folds as getFoldFracs places them (the proof's
+    // own positions, nesting offsets included), perforations at perfPositions (% of the
+    // dimension they cross). "length" perfs run the short way, so they sit along the long edge.
+    const foldAlongLong = foldDir === "long";
+    const foldAt = panels > 1 ? getFoldFracs(foldType, panels, foldAlongLong ? long : short).map(f => f * (foldAlongLong ? long : short)) : [];
+    const perfAlongLong = perfDir === "length";
+    const perfAt = (perfCount > 0 && perfPositions ? perfPositions.slice(0, perfCount) : []).map(pct => (Number(pct) / 100) * (perfAlongLong ? long : short));
+    // As each page is seen: a portrait card turns the wide sheet upright; the back is the
+    // sheet turned over left to right, so its vertical lines are mirrored.
+    const place = (alongLong, atIn, page) => {
+      let g = alongLong ? { axis: "v", at: atIn * 72 } : { axis: "h", at: atIn * 72 };
+      if (portrait) g = g.axis === "v" ? { axis: "h", at: g.at } : { axis: "v", at: (short - atIn) * 72 };
+      if (page === 1 && g.axis === "v") g = { axis: "v", at: w * 72 - g.at };
+      return { page, axis: g.axis, at: Math.round(g.at * 1000) / 1000 };
+    };
+    const pageList = pages === 2 ? [0, 1] : [0];
+    const folds = pageList.flatMap(pg => foldAt.map(a => place(foldAlongLong, a, pg)));
+    const perfs = pageList.flatMap(pg => perfAt.map(a => place(perfAlongLong, a, pg)));
+    const names = PANEL_LABELS[foldType];
+    const panelLabels = panels > 1 && names ? [names.front, names.back].slice(0, pages) : [];
+    const key = w + "x" + h + "x" + pages + "|" + foldType + "|" + foldDir + "|" + perfCount + "|" + perfDir + "|" + (perfPositions || []).slice(0, perfCount).join(",");
+    return { key, spec: { trimW: w * 72, trimH: h * 72, bleed: 9, safety: 9, pages, pageMultiple: 1, folds, perfs, panelLabels, bindEdge: null, spine: 0 } };
   };
   const allDesignOptions = () => {
-    const square = Math.abs(longEdge - shortEdge) < 0.001;
+    const square = Math.abs(longEdge - shortEdge) < 0.001 || panels > 1;
     const orient = square ? [] : [{ key: "orientation", label: "Orientation", type: "select", value: designPortrait ? "portrait" : "landscape",
       choices: [{ value: "landscape", label: "Landscape (wide)" }, { value: "portrait", label: "Portrait (tall)" }] }];
     const list = Array.isArray(designOptions) ? designOptions : [];
@@ -2482,10 +2508,10 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   useEffect(() => {
     if (!designerRef.current) return;
     designerRef.current.setSpec(designSpec(designPortrait).spec);
-  }, [longEdge, shortEdge, sides, designPortrait]);
+  }, [longEdge, shortEdge, sides, designPortrait, foldType, foldDir, panels, perfCount, perfDir, JSON.stringify(perfPositions)]);
   useEffect(() => {
     if (designerRef.current) designerRef.current.setOptions(allDesignOptions());
-  }, [JSON.stringify(designOptions), designPortrait, longEdge, shortEdge]);
+  }, [JSON.stringify(designOptions), designPortrait, longEdge, shortEdge, panels]);
   function onDesignerOption(key, value) {
     if (key === "orientation") { setDesignPortrait(value === "portrait"); return; }
     if (onDesignOption) onDesignOption(key, value);
@@ -2496,7 +2522,7 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     const { key, spec } = designSpec(portrait);
     const prior = designRef.current && designRef.current.key === key ? designRef.current.design : null;
     setDesigning(true);
-    const opts = (() => { const square = Math.abs(longEdge - shortEdge) < 0.001; const l = Array.isArray(designOptions) ? designOptions : [];
+    const opts = (() => { const square = Math.abs(longEdge - shortEdge) < 0.001 || panels > 1; const l = Array.isArray(designOptions) ? designOptions : [];
       const o = square ? [] : [{ key: "orientation", label: "Orientation", type: "select", value: portrait ? "portrait" : "landscape",
         choices: [{ value: "landscape", label: "Landscape (wide)" }, { value: "portrait", label: "Portrait (tall)" }] }];
       return l.length ? [l[0], ...o, ...l.slice(1)] : o; })();
@@ -5771,17 +5797,40 @@ function App() {
   // The choices the online designer's Order options panel offers: the ones that change the
   // design (size, sides) and quantity. Labels and values are this calculator's own; the
   // designer only draws them and sends a change back (onDesignOption). Prices stay here.
+  // The sheet's edges as the order has them (a preset's, or the custom size), for the options
+  // below; dimLong/dimShort further down are the same thing, defined after this.
+  const designDims = () => {
+    const ps = sizeMode === "preset" ? SIZE_PRESETS.find(x => x.label === sizeLabel) : null;
+    const a = ps ? ps.long : longEdge, b = ps ? ps.short : shortEdge;
+    return [parseFloat(Math.max(a, b).toFixed(3)), parseFloat(Math.min(a, b).toFixed(3))];
+  };
   const designOptions = useMemo(() => {
     const sizeChoices = SIZE_PRESETS.map(s => ({ value: s.label, label: s.label, group: s.rack ? "Common Rack Card Sizes" : s.square ? "Square" : "" }))
       .sort((a, b) => (a.group ? 1 : 0) - (b.group ? 1 : 0));
     const custom = sizeMode !== "preset";
     if (custom) sizeChoices.unshift({ value: "__custom", label: "Custom " + parseFloat(Math.max(longEdge, shortEdge).toFixed(3)) + " × " + parseFloat(Math.min(longEdge, shortEdge).toFixed(3)), group: "" });
-    return [
+    const [dL, dS] = designDims();
+    const panelsNow = (FOLD_TYPES.find(f => f.val === foldType) || { panels: 1 }).panels;
+    // The same lists and limits the form shows: fold types for this size, fold direction only
+    // where the form offers it (custom sizes), perforations up to what the sheet allows.
+    const pCrossDim = perfDir === "length" ? dL : dS;
+    const pMax = Math.max(0, Math.floor(pCrossDim - 1));
+    const pOpts = PERF_OPTS.filter(o => (o.count != null ? o.count : PERF_OPTS.indexOf(o)) <= pMax);
+    const pCount = (() => { const o = PERF_OPTS.find(x => x.val === perforation) || PERF_OPTS[0]; return Math.min(o.count != null ? o.count : PERF_OPTS.indexOf(o), pMax); })();
+    const list = [
       { key: "size", label: "Size", type: "select", value: custom ? "__custom" : sizeLabel, choices: sizeChoices },
       { key: "sides", label: "Sides printed", type: "select", value: String(sides), choices: [{ value: "2", label: "Both sides" }, { value: "1", label: "Front only" }] },
-      { key: "qty", label: "Quantity", type: "number", value: qty, min: 1, max: 99999, step: 1 },
+      { key: "fold", label: "Folding", type: "select", value: foldType, choices: availableFoldTypes(dL, dS, true).map(f => ({ value: f.val, label: f.label })) },
     ];
-  }, [sizeMode, sizeLabel, longEdge, shortEdge, sides, qty]);
+    if (panelsNow > 1 && custom) list.push({ key: "foldDir", label: "Fold direction", type: "select", value: foldDir,
+      choices: [{ value: "long", label: "Fold the long side (" + dL + "\")" }, { value: "short", label: "Fold the short side (" + dS + "\")" }] });
+    if (_AD.perforation !== false || perforation > 0) list.push({ key: "perforation", label: "Perforation", type: "select", value: String(perforation),
+      choices: pOpts.map(o => ({ value: String(o.val), label: o.label })), help: pCount > 0 ? "Drag the line in the calculator's preview to move it." : "" });
+    if (pCount > 0 && dS <= 14) list.push({ key: "perfDir", label: "Perforation direction", type: "select", value: perfDir,
+      choices: [{ value: "length", label: dS + "\" perf (across the long side)" }, { value: "width", label: dL + "\" perf (across the short side)" }] });
+    list.push({ key: "qty", label: "Quantity", type: "number", value: qty, min: 1, max: 99999, step: 1 });
+    return list;
+  }, [sizeMode, sizeLabel, longEdge, shortEdge, sides, qty, foldType, foldDir, perforation, perfDir]);
   const onDesignOption = (key, value) => {
     if (key === "size") {
       const hit = SIZE_PRESETS.find(s => s.label === value);
@@ -5792,6 +5841,17 @@ function App() {
     } else if (key === "qty") {
       const n = Math.round(Number(value));
       if (isFinite(n) && n >= 1 && n <= 99999) setQty(n);
+    } else if (key === "fold") {
+      const [dl, ds] = designDims();
+      const f = availableFoldTypes(dl, ds, true).find(x => x.val === value);
+      if (f) setFoldType(f.val);
+    } else if (key === "foldDir") {
+      if (value === "long" || value === "short") setFoldDir(value);
+    } else if (key === "perforation") {
+      const o = PERF_OPTS.find(x => String(x.val) === String(value));
+      if (o) setPerforation(o.val);
+    } else if (key === "perfDir") {
+      if (value === "length" || value === "width") setPerfDir(value);
     }
   };
 

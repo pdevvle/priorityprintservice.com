@@ -147,7 +147,7 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   // Order options: the calculator's own fields, from inside the designer.
   ok('on: the designer offers Order options', await frame.locator('#orderTab').isVisible());
   await frame.locator('#orderTab').click();
-  ok('on: …size, orientation, sides and quantity, from the calculator', (await frame.locator('#orderFields label > span:first-child').allTextContents()).join(',') === 'Size,Orientation,Sides printed,Quantity');
+  ok('on: …size, orientation, sides, folding, perforation and quantity, from the calculator', (await frame.locator('#orderFields label > span:first-child').allTextContents()).join(',') === 'Size,Orientation,Sides printed,Folding,Perforation,Quantity');
   await frame.locator('#orderFields select[data-key="size"]').selectOption('4×6');
   await frame.locator('#productSize', { hasText: '6 × 4 in' }).waitFor({ timeout: 10000 });
   ok('on: a size picked in the designer resizes the design (4×6 → 6 × 4 in, landscape)', (await frame.locator('#productSize').textContent()) === '6 × 4 in');
@@ -159,6 +159,17 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   const chip2 = await frame.locator('#price').textContent();
   ok('on: a quantity change comes back as the calculator\'s new price', /· 500 pcs$/.test(chip2 || '') && chip2 !== chip, chip + ' → ' + chip2);
   ok('on: …shown in the panel too', /\$[\d,]+\.\d\d/.test(await frame.locator('#orderPrice').textContent()));
+  // Folding and perforation from the designer: the calculator's fields change, and the
+  // designer draws the calculator's fold and perforation lines (as guides).
+  await frame.locator('#orderFields select[data-key="fold"]').selectOption('trifold');
+  await frame.locator('#sides button', { hasText: 'Outside' }).waitFor({ timeout: 10000 });
+  ok('on: picking Trifold in the designer folds the job (Outside / Inside)', (await frame.locator('#sides button').allTextContents()).join(',') === 'Outside,Inside');
+  ok('on: …sets the calculator\'s own fold field', await p.evaluate(() => [...document.querySelectorAll('select')].some(s => s.value === 'trifold')));
+  ok('on: …and offers no portrait for a folded sheet', (await frame.locator('#orderFields select[data-key="orientation"]').count()) === 0);
+  await frame.locator('#orderFields select[data-key="perforation"]').selectOption({ index: 1 });
+  await frame.locator('#legendPerf:not([hidden])').waitFor({ timeout: 10000 });
+  ok('on: a perforation picked in the designer is drawn there and shows in the legend', await frame.locator('#legendFold').isVisible() && await frame.locator('#legendPerf').isVisible());
+  ok('on: …and the calculator offers its direction', (await frame.locator('#orderFields select[data-key="perfDir"]').count()) === 1);
   await frame.locator('#orderClose').click();
 
   await frame.locator('[data-text="heading"]').click();
