@@ -32,7 +32,7 @@
 //      wasm.yml (designer.html, designer.js, designer.css, pps_bridge.js,
 //      pps_bridge_bg.wasm, designer-manifest.json), unpacked into a directory.
 //
-// Run: PPS_DEPS_DIR=<node_modules with react, react-dom, jspdf, pdfjs-dist@4.10.38> \
+// Run: PPS_DEPS_DIR=<node_modules with react, react-dom, jspdf, pdfjs-dist@4.10.38, pdf-lib@1.17.1> \
 //      PPS_DESIGNER_DIR=<designer site> node tools-designer-host-test.mjs
 
 import http from 'node:http';
@@ -79,8 +79,11 @@ const ok = (label, cond, detail) => {
   console.log('FAIL ' + label + (detail ? '\n       ' + detail : ''));
 };
 
+// One uploaded file's PDF out of its multipart body (kept as latin1 text by the route).
+const pdfOf = body => { const b = Buffer.from(body || '', 'latin1'); const i = b.indexOf('%PDF'), j = b.lastIndexOf('%%EOF'); return i < 0 || j < 0 ? Buffer.alloc(0) : b.subarray(i, j + 5); };
 // Each design gets its own name, so two designed jobs in one order can't be confused on Drive.
 const DESIGN_NAME = /^online-design-[a-z0-9]+\.pdf$/;
+const writeTmp = buf => { const f = path.join(fs.mkdtempSync('/tmp/pps-pr-'), 'f.pdf'); fs.writeFileSync(f, buf); return f; };
 const field = (body, name) => { const m = body.match(new RegExp('name="' + name + '"\\r\\n\\r\\n([^\\r]*)')); return m ? m[1] : null; };
 const fileName = (body) => { const m = body.match(/name="artwork"; filename="([^"]*)"/); return m ? m[1] : null; };
 const reorder = Buffer.from(JSON.stringify({ shipState: 'AZ', shipAddr: { name: 'Test', street1: '1 Main St', city: 'Phoenix', zip: '85087' } }))
@@ -233,6 +236,14 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   const cartPost = t.cart();
   const listed = cartPost && cartPost.files ? JSON.parse(cartPost.files).map(f => f.name) : [];
   ok('on: the designer\'s PDF is the order\'s artwork', DESIGN_NAME.test(t.uploads[0] || '') && cartPost && /^pps-artwork\/2026\/10\/1-online-design-[a-z0-9]+\.pdf$/.test(cartPost.path || ''), JSON.stringify({ first: t.uploads[0], path: cartPost && cartPost.path }));
+  // Nothing was changed in the proof, so the print file is the designer's own PDF, byte for byte:
+  // vector, CMYK, PDF/X-4, not a picture of it.
+  const rawPdf = pdfOf(t.bodies[t.uploads[0]]);
+  const prName0 = t.uploads.find(n => /_print-ready\.pdf$/.test(n)) || '';
+  const prPdf0 = pdfOf(t.bodies[prName0]);
+  ok('on: the print-ready file is the designer\'s own PDF, unchanged (vector, PDF/X-4)', rawPdf.length > 1000 && Buffer.compare(rawPdf, prPdf0) === 0 && prPdf0.includes('GTS_PDFX'), rawPdf.length + ' vs ' + prPdf0.length + ' bytes');
+  const man0 = Buffer.from(t.bodies[t.uploads.find(n => /manifest\.txt$/.test(n)) || ''] || '', 'latin1').toString('utf8');
+  ok('on: …and the manifest says so', /the online designer's own PDF, 2 side\(s\)/.test(man0) && /print source: the designer's own PDF, page 2, vector, unchanged/.test(man0), (man0.match(/2\. Print-ready PDF:[^\n]*/) || [''])[0]);
   ok('on: previews and the manifest are listed for Drive', listed.some(n => /preview/.test(n)) && listed.some(n => /manifest\.txt$/.test(n)), listed.join(','));
   ok('on: no page errors', t.errs.length === 0, t.errs.join(' | '));
   await t.ctx.close();
@@ -317,12 +328,20 @@ const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('butto
   ok('portrait: the manifest records the front turned 90° and the back 270° onto the sheet', /1: Front[\s\S]*?rotate=90°/.test(man) && /2: Back[\s\S]*?rotate=270°/.test(man), (man.match(/rotate=\d+°/g) || []).join(','));
   ok('portrait: …at the order\'s size', /Trim size: 7″ × 5″/.test(man), (man.match(/Trim size: [^\r\n]*/) || [''])[0]);
   const prName = Object.keys(t.bodies).find(n => /_print-ready\.pdf$/.test(n)) || '';
-  if (process.env.PPS_PRINT_READY) {   // keep the portrait print-ready file to look at
-    const raw = Buffer.from(t.bodies[prName] || '', 'latin1');
-    fs.writeFileSync(process.env.PPS_PRINT_READY, raw.subarray(raw.indexOf('%PDF'), raw.lastIndexOf('%%EOF') + 5));
-  }
-  const mbs = [...(t.bodies[prName] || '').matchAll(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/g)].map(m => [+m[1], +m[2]]);
-  ok('portrait: the print-ready file is the wide sheet with bleed, both sides (7.25 × 5.25 in)', mbs.length === 2 && mbs.every(([w, h]) => Math.abs(w - 522) < 1 && Math.abs(h - 378) < 1), JSON.stringify(mbs));
+  // The print file is the designer's PDF with each page turned onto the wide sheet by /Rotate
+  // (front 90°, back 270°): still vector, and 7.25 × 5.25 in as it sits on the sheet.
+  const pr = pdfOf(t.bodies[prName]);
+  const prPages = execFileSync('python3', ['-I', '-c', 'import sys,pikepdf,json; p=pikepdf.open(sys.argv[1]); print(json.dumps([[int(pg.obj.get("/Rotate",0))]+[float(x) for x in pg.obj.MediaBox] for pg in p.pages]+[[str(p.Root.get("/OutputIntents") is not None)]]))', writeTmp(pr)]).toString();
+  const info = JSON.parse(prPages), pagesInfo = info.slice(0, -1);
+  ok('portrait: the print-ready file is the designer\'s PDF turned onto the sheet by page rotation (front 90°, back 270°)', pagesInfo.length === 2 && pagesInfo[0][0] === 90 && pagesInfo[1][0] === 270, prPages.trim());
+  ok('portrait: …which sits on the sheet as 7.25 × 5.25 in (a 5.25 × 7.25 page turned)', pagesInfo.every(r => Math.abs(r[3] - r[1] - 378) < 1 && Math.abs(r[4] - r[2] - 522) < 1), prPages.trim());
+  ok('portrait: …and keeps its PDF/X output intent (nothing redrawn)', info[info.length - 1][0] === 'True' && pr.includes('GTS_PDFX'));
+  // The server's Print File Check (pps-job-health.php) reads it as production will: 2 pages on a
+  // 7.25 × 5.25 in sheet. It reads pages and boxes straight out of the file, so a PDF saved with
+  // object streams read as "0 pages, sheet size unknown".
+  const jh = JSON.parse(execFileSync('php', ['-r', "define('ABSPATH','/'); preg_match('/function pps_print_file_check\\(.*?\\n}\\n/s', file_get_contents($argv[1]), $m); eval($m[0]); echo json_encode(pps_print_file_check($argv[2]));", path.join(HERE, 'pps-job-health.php'), writeTmp(pr)]).toString());
+  ok('portrait: the Print File Check reads it as 2 pages on the 7.25 × 5.25 in sheet, with no warning', jh.pages === 2 && JSON.stringify(jh.sheet_in) === '[7.25,5.25]' && jh.warn === '', jh.summary);
+  if (process.env.PPS_PRINT_READY) fs.writeFileSync(process.env.PPS_PRINT_READY, pr);
   ok('portrait: no page errors', t.errs.length === 0, t.errs.join(' | '));
   await t.ctx.close();
 }

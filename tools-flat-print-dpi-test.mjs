@@ -123,9 +123,18 @@ const reorder = Buffer.from(JSON.stringify({ shipState: 'AZ', shipAddr: { name: 
 const field = (body, name) => { const m = body.match(new RegExp('name="' + name + '"\\r\\n\\r\\n([^\\r]*)')); return m ? m[1] : null; };
 const fileName = (body) => { const m = body.match(/name="artwork"; filename="([^"]*)"/); return m ? m[1] : null; };
 
-async function run(b, file) {
+// cap: play a phone. Safari on iPhone and iPad gives no 2D context for a canvas over about
+// 16.7 million pixels; the same is done here at a much smaller size, so even a business card's
+// 300 DPI sheet is over it. Until 2026-10-12 that failed approval outright on any sheet over
+// about 9 × 12 in; now the print file is made at the most the device can hold, and says so.
+async function run(b, file, cap) {
   const ctx = await b.newContext({ viewport: { width: 1400, height: 1000 } });
   const p = await ctx.newPage();
+  if (cap) await p.addInitScript((cap) => {
+    const get = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, opts) { return this.width * this.height > cap ? null : get.call(this, type, opts); };
+  }, cap);
+  const tag = cap ? file + ' (phone, ' + (cap / 1e6) + ' MP canvas limit)' : file;
   const dialogs = []; p.on('dialog', async d => { dialogs.push(d.message()); await d.dismiss(); });
   const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 200)));
   let printReady = null, manifest = null; const uploads = [];
@@ -168,9 +177,10 @@ async function run(b, file) {
   // "Render at full resolution (slow to load)": the proof on screen is the 144 DPI
   // upload preview (6″ art → 864 px) until the box is ticked; then a status bar shows
   // while each PDF side is rendered at 300 DPI, and the proof becomes the 1800 px render.
+  if (!cap) {
   const widest = () => p.evaluate(() => Math.max(0, ...[...document.querySelectorAll('img')].filter(i => /^data:image\/jpeg/.test(i.src)).map(i => i.naturalWidth)));
   const before = await widest();
-  ok(`${file}: the proof opens on the quick preview (144 DPI)`, before > 0 && before < 1000, 'widest data image ' + before + ' px');
+  ok(`${tag}: the proof opens on the quick preview (144 DPI)`, before > 0 && before < 1000, 'widest data image ' + before + ' px');
   // A small sheet renders in well under the poll interval, so the bar is watched with a
   // MutationObserver armed BEFORE the tick — a bar that appears and goes between two
   // polls still counts, and a bar that is never mounted still fails.
@@ -180,7 +190,7 @@ async function run(b, file) {
       .observe(document.body, { childList: true, subtree: true });
   });
   const ticked = await p.evaluate(() => { const l = [...document.querySelectorAll('label')].find(x => /Render at full resolution/i.test(x.textContent || '')); const cb = l && l.querySelector('input[type=checkbox]'); if (!cb || cb.disabled) return false; cb.click(); return true; });
-  ok(`${file}: the full-resolution checkbox is there and enabled for a PDF upload`, ticked);
+  ok(`${tag}: the full-resolution checkbox is there and enabled for a PDF upload`, ticked);
   let after = before;
   for (let i = 0; i < 120; i++) {
     await p.waitForTimeout(250);
@@ -188,17 +198,18 @@ async function run(b, file) {
     const busy = await p.evaluate(() => !!document.querySelector('[role=progressbar][aria-label="Rendering at full resolution"]'));
     if (!busy && after >= 1700) break;
   }
-  ok(`${file}: a status bar was shown while rendering`, await p.evaluate(() => window.__sawBar));
-  ok(`${file}: the proof now shows the 300 DPI render`, after >= 1700, 'widest data image ' + after + ' px');
-  ok(`${file}: the label confirms 300 DPI`, await p.evaluate(() => /✓ 300 DPI/.test(([...document.querySelectorAll('label')].find(x => /Render at full resolution/i.test(x.textContent || '')) || {}).textContent || '')));
+  ok(`${tag}: a status bar was shown while rendering`, await p.evaluate(() => window.__sawBar));
+  ok(`${tag}: the proof now shows the 300 DPI render`, after >= 1700, 'widest data image ' + after + ' px');
+  ok(`${tag}: the label confirms 300 DPI`, await p.evaluate(() => /✓ 300 DPI/.test(([...document.querySelectorAll('label')].find(x => /Render at full resolution/i.test(x.textContent || '')) || {}).textContent || '')));
+  }
 
   await p.evaluate(() => { const ack = [...document.querySelectorAll('label')].find(l => /print anyway/i.test(l.textContent || '')); const cb = ack && ack.querySelector('input[type=checkbox]'); cb && cb.click(); });
   await p.waitForTimeout(300);
   const approveClicked = await p.evaluate(() => { const btn = [...document.querySelectorAll('button')].find(y => /^\s*Approve (artwork|Now)\s*$/i.test(y.textContent || '')); if (!btn) return false; btn.click(); return true; });
-  ok(`${file}: the Approve button was found`, approveClicked);
+  ok(`${tag}: the Approve button was found`, approveClicked);
   let man = 0;
   for (let i = 0; i < 120 && man < 1; i++) { await p.waitForTimeout(1000); man = await p.evaluate(() => window.__manifests); }
-  ok(`${file}: the approval package was generated`, man >= 1, 'dialogs=' + dialogs.join(' || ') + ' errs=' + errs.join(' || '));
+  ok(`${tag}: the approval package was generated`, man >= 1, 'dialogs=' + dialogs.join(' || ') + ' errs=' + errs.join(' || '));
   await p.waitForTimeout(1500);
   await p.keyboard.press('Escape'); await p.waitForTimeout(500);
   await p.evaluate(() => {
@@ -207,26 +218,40 @@ async function run(b, file) {
     b && b.click();
   });
   for (let i = 0; i < 90 && !(printReady && manifest); i++) await p.waitForTimeout(1000);
-  ok(`${file}: the print-ready PDF and the manifest were uploaded`, !!(printReady && manifest), 'uploads=' + uploads.join(',') + ' dialogs=' + dialogs.join(' || '));
+  ok(`${tag}: the print-ready PDF and the manifest were uploaded`, !!(printReady && manifest), 'uploads=' + uploads.join(',') + ' dialogs=' + dialogs.join(' || '));
   await ctx.close();
   if (!(printReady && manifest)) return;
 
-  fs.writeFileSync('./flat-print-ready-' + file.replace(/\.html$/, '') + '.pdf', printReady);   // kept for eyeballing
+  fs.writeFileSync('./flat-print-ready-' + file.replace(/\.html$/, '') + (cap ? '-phone' : '') + '.pdf', printReady);   // kept for eyeballing
   const bm = manifest.match(/Bleed-inclusive size: ([\d.]+)″ × ([\d.]+)″/);
   const sides = jpegStreams(printReady);
-  ok(`${file}: the print-ready PDF carries one JPEG per side`, sides.length >= 1, sides.length + ' streams');
+  ok(`${tag}: the print-ready PDF carries one JPEG per side`, sides.length >= 1, sides.length + ' streams');
+  if (cap) {
+    const dm = manifest.match(/Print-ready PDF: \d+ side\(s\) at (\d+) DPI/);
+    const dpi = dm ? +dm[1] : 0;
+    const eW = bm ? Math.round(parseFloat(bm[1]) * dpi) : null, eH = bm ? Math.round(parseFloat(bm[2]) * dpi) : null;
+    ok(`${tag}: the print file is made at the most the phone can hold (under 300 DPI, within its limit, not far under it)`, dpi > 0 && dpi < 300 && eW * eH <= cap && eW * eH > cap * 0.7, dpi + ' DPI, ' + eW + '×' + eH + ' for a ' + cap + ' px limit');
+    ok(`${tag}: the manifest says so, for production`, /could not hold the whole sheet at 300 DPI/.test(manifest));
+    sides.forEach((jpg, i) => {
+      const r = decodeCentre(jpg, QR_MODULES[i]);
+      ok(`${tag}: side ${i + 1} is the bleed sheet at that DPI`, r.width === eW && r.height === eH, `${r.width}×${r.height} expected ${eW}×${eH}`);
+    });
+    return;
+  }
   const expW = bm ? Math.round(parseFloat(bm[1]) * DPI) : null, expH = bm ? Math.round(parseFloat(bm[2]) * DPI) : null;
   sides.forEach((jpg, i) => {
     const r = decodeCentre(jpg, QR_MODULES[i]);
-    ok(`${file}: side ${i + 1} is the bleed sheet at ${DPI} DPI`, expW && r.width === expW && r.height === expH, `${r.width}×${r.height} expected ${expW}×${expH}`);
-    ok(`${file}: side ${i + 1}'s QR code scans from the print-ready file`, r.text === PAYLOAD[i], 'decoded=' + JSON.stringify(r.text));
-    ok(`${file}: side ${i + 1}'s QR modules are crisp, not an upscaled preview`, r.midGrey < 0.05, 'mid-grey share ' + (r.midGrey * 100).toFixed(1) + '% (limit 5%)');
+    ok(`${tag}: side ${i + 1} is the bleed sheet at ${DPI} DPI`, expW && r.width === expW && r.height === expH, `${r.width}×${r.height} expected ${expW}×${expH}`);
+    ok(`${tag}: side ${i + 1}'s QR code scans from the print-ready file`, r.text === PAYLOAD[i], 'decoded=' + JSON.stringify(r.text));
+    ok(`${tag}: side ${i + 1}'s QR modules are crisp, not an upscaled preview`, r.midGrey < 0.05, 'mid-grey share ' + (r.midGrey * 100).toFixed(1) + '% (limit 5%)');
   });
-  ok(`${file}: the manifest says where the print pixels came from`, /print source: pdf page 1 rendered at 300 DPI/.test(manifest), (manifest.match(/print source:[^\n]*/g) || ['(absent)']).join(' | '));
+  ok(`${tag}: the manifest says where the print pixels came from`, /print source: pdf page 1 rendered at 300 DPI/.test(manifest), (manifest.match(/print source:[^\n]*/g) || ['(absent)']).join(' | '));
 }
 
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] });
-for (const f of FILES) { try { await run(b, f); } catch (e) { ok(`${f}: ran`, false, String(e && e.stack || e).slice(0, 400)); } }
+const CAP = Number(process.env.PPS_PHONE_CAP || 600000);
+if (!process.env.PPS_PHONE_ONLY) for (const f of FILES) { try { await run(b, f); } catch (e) { ok(`${f}: ran`, false, String(e && e.stack || e).slice(0, 400)); } }
+for (const f of FILES) { try { await run(b, f, CAP); } catch (e) { ok(`${f} (phone): ran`, false, String(e && e.stack || e).slice(0, 400)); } }
 await b.close();
 
 console.log('\n' + checks + ' checks, ' + failed + ' failed');

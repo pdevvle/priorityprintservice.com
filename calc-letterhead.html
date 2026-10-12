@@ -1442,7 +1442,7 @@ function generateLetterheadTemplate(longE, shortE, sizeLabel, perfCount, perfDir
         for (let i = 0; i < Math.min(perfCount, perfPositions.length); i++) {
           const frac = perfPositions[i] / 100;
           if (perfVertical2) {
-            const x = bleed + trimW * frac;
+            const x = bleed + trimW * (pg === 1 ? 1 - frac : frac);   // the back is turned over left to right
             drawDashedLine(pdf, x, bleed + 0.1, x, bleed + trimH - 0.1, 0.08, 0.04);
             pdf.setFontSize(6); pdf.setTextColor(139, 92, 246);
             pdf.text("PERF " + (i + 1), x + 0.04, bleed + trimH - 0.15);
@@ -1877,6 +1877,38 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
   // canvas, so nothing is re-encoded as JPEG on the way to the press. If the
   // print render fails, the preview raster is NOT used silently — the customer
   // gets the same "could not be rendered" refusal as any other broken page.
+  // The share (at most 1) of a w × h canvas this device can actually hold. Safari on iPhone and
+  // iPad stops at about 16.7 million pixels: past that a canvas gives no context or draws
+  // nothing, so a sheet over about 9 × 12 in at 300 DPI could not be approved there at all.
+  // Probed, not guessed from the browser's name.
+  function ppsCanvasScale(w, h) {
+    let k = 1;
+    for (let i = 0; i < 24; i++) {
+      const cw = Math.max(1, Math.floor(w * k)), ch = Math.max(1, Math.floor(h * k));
+      let fits = false;
+      try {
+        const c = document.createElement("canvas");
+        c.width = cw; c.height = ch;
+        const x = c.getContext("2d");
+        if (x) { x.fillStyle = "#000"; x.fillRect(cw - 1, ch - 1, 1, 1); fits = x.getImageData(cw - 1, ch - 1, 1, 1).data[3] === 255; }
+        c.width = 0; c.height = 0;
+      } catch (e) { fits = false; }
+      if (fits) return k;
+      k *= 0.9;
+    }
+    return k;
+  }
+  // The upload-time preview of a PDF page (scale 2, 144 DPI), no bigger than this device can hold:
+  // a poster-sized page at 144 DPI is past an iPhone's canvas limit before anything is approved.
+  function ppsPreviewViewport(pg) {
+    const b = pg.getViewport({ scale: 1 });
+    return pg.getViewport({ scale: 2 * ppsCanvasScale(Math.round(b.width * 2), Math.round(b.height * 2)) });
+  }
+  // The print DPI for a wIn × hIn image: what was asked for, or the most this device can hold.
+  function ppsPrintDpi(wIn, hIn, want) {
+    const k = ppsCanvasScale(Math.round(wIn * want), Math.round(hIn * want));
+    return k >= 1 ? want : Math.max(72, Math.floor(want * k));
+  }
   async function ppsPrintSourceCanvas(art, rotateSteps, dpi, fallbackDataUrl) {
     let src = null, from = "raster";
     const file = art && art.file;
@@ -1886,19 +1918,22 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
       try {
         const pageNo = Math.min(Math.max(1, art.pdfPage || 1), pdf.numPages);
         const pg = await pdf.getPage(pageNo);
-        const vp = pg.getViewport({ scale: dpi / 72 });
+        const base = pg.getViewport({ scale: 1 });
+        const useDpi = ppsPrintDpi(base.width / 72, base.height / 72, dpi);
+        const vp = pg.getViewport({ scale: useDpi / 72 });
         const c = document.createElement("canvas");
         c.width = Math.round(vp.width); c.height = Math.round(vp.height);
         await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
-        src = c; from = "pdf page " + pageNo + " rendered at " + dpi + " DPI";
+        src = c; from = "pdf page " + pageNo + " rendered at " + useDpi + " DPI" + (useDpi < dpi ? " (the most this device could hold; " + dpi + " asked)" : "");
       } finally { try { pdf.destroy(); } catch (_) {} }
     } else {
       src = await new Promise(resolve => {
         const img = new Image();
         img.onload = () => {
           const tc = document.createElement("canvas");
-          tc.width = img.naturalWidth; tc.height = img.naturalHeight;
-          tc.getContext("2d").drawImage(img, 0, 0);
+          const k = ppsCanvasScale(img.naturalWidth, img.naturalHeight);
+          tc.width = Math.max(1, Math.floor(img.naturalWidth * k)); tc.height = Math.max(1, Math.floor(img.naturalHeight * k));
+          tc.getContext("2d").drawImage(img, 0, 0, tc.width, tc.height);
           resolve(tc);
         };
         img.onerror = () => resolve(null);
@@ -1918,6 +1953,7 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
       ctx.translate(c.width / 2, c.height / 2);
       ctx.rotate((s * Math.PI) / 2);
       ctx.drawImage(src, -src.width / 2, -src.height / 2);
+      src.width = 0; src.height = 0;   // free it now: a phone runs out of canvas memory long before the page is done
       out = c;
     }
     out.__ppsFrom = from;
@@ -2094,7 +2130,7 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
       window.PPS_PDF_RISKS = window.PPS_PDF_RISKS || {};
       window.PPS_PDF_RISKS[riskKey] = await window.ppsAnalyzePdfRisks(pdf);
       const pg = await pdf.getPage(1);
-      const vp = pg.getViewport({ scale: 2 });
+      const vp = ppsPreviewViewport(pg);
       const c = document.createElement("canvas");
       c.width = vp.width; c.height = vp.height;
       await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
@@ -2128,7 +2164,7 @@ function SheetPreview({ longEdge, shortEdge, perfCount, perfDir, perfPositions, 
         window.PPS_PDF_RISKS.doc = await window.ppsAnalyzePdfRisks(pdf);
         const renderPage = async (num) => {
           const pg = await pdf.getPage(num);
-          const vp = pg.getViewport({ scale: 2 });
+          const vp = ppsPreviewViewport(pg);
           const c = document.createElement("canvas");
           c.width = vp.width; c.height = vp.height;
           await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
@@ -2247,7 +2283,7 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
     const SAFETY = 0.125;
     const bleedW = longEdge + BLEED * 2;
     const bleedH = shortEdge + BLEED * 2;
-    const DPI = 300;
+    const DPI = ppsPrintDpi(bleedW, bleedH, 300);
     const canvasW = Math.round(bleedW * DPI);
     const canvasH = Math.round(bleedH * DPI);
 
@@ -2360,14 +2396,17 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
         pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, bleedW, bleedH);
 
         setGenProgress({ step: "previews", page: i + 1, totalPages });
-        const prevW = Math.round(bleedW * 150);
-        const prevH = Math.round(bleedH * 150);
+        const prevDpi = ppsPrintDpi(bleedW, bleedH, 150);
+        const prevW = Math.round(bleedW * prevDpi);
+        const prevH = Math.round(bleedH * prevDpi);
         const pc = document.createElement("canvas");
         pc.width = prevW; pc.height = prevH;
         const pctx = pc.getContext("2d");
         pctx.drawImage(c, 0, 0, prevW, prevH);
         drawGuides(pctx, prevW, prevH, i);
         const prevBlob = await new Promise(res => pc.toBlob(res, "image/jpeg", 0.85));
+        c.width = 0; c.height = 0;
+        if (srcCanvas !== c) { srcCanvas.width = 0; srcCanvas.height = 0; }
         previewBlobs.push(prevBlob);
       }
 
@@ -2425,6 +2464,7 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
     });
     manifestLines.push("", "── Notes ──");
     if (noTransforms) manifestLines.push("No customer transforms were applied on either side.");
+    if (DPI < 300) manifestLines.push(`Print-ready rendered at ${DPI} DPI, not 300: the customer's device could not hold the whole sheet at 300 DPI. Re-render from the raw file before plating.`);
 
     const manifestBlob = new Blob([manifestLines.join("\n")], { type: "text/plain" });
 
@@ -2438,6 +2478,15 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
   const perfLines = (perfCount > 0 && perfPositions)
     ? perfPositions.slice(0, perfCount).map((pct, i) => ({ pct, vertical: perfVertical, index: i }))
     : [];
+
+  // The back is the sheet turned over like a book page, left to right (owner, 2026-10-12): a
+  // vertical fold or perforation x in from the left edge of the front is x in from the RIGHT edge
+  // of the back. Positions are kept as the front sees them; the Back view, its loupe and the back
+  // preview show (and the Back view edits) them as the back sees them. Until 2026-10-12 the back
+  // drew them where the front has them: a trifold's back folds 1/16 in out, a coupon perforation
+  // on the wrong end, and dragging one in the Back view moved the real perforation.
+  const seenPct = (pct, vertical, isBack) => (vertical && isBack ? 100 - pct : pct);
+  const onBackView = side === "back";
 
   // Perf constraint: 1" from edge, 1" between perfs, snap to 1/8"
   function clampPerfInches(inches, idx, trimDim, positions) {
@@ -2466,6 +2515,7 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
       ? ((e.clientX - rect.left) / rect.width * 100)
       : ((e.clientY - rect.top) / rect.height * 100);
     var rawInches = (mouseRel - bPct) / trimSpan * trimDim;
+    if (pl.vertical && onBackView) rawInches = trimDim - rawInches;   // the back is the front mirrored
     var clamped = clampPerfInches(rawInches, draggingPerf, trimDim, perfPositions);
     var updated = perfPositions.slice();
     updated[draggingPerf] = Math.round(clamped / trimDim * 1000) / 10;
@@ -2477,6 +2527,7 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
     var v = parseFloat(editPerfVal);
     if (isNaN(v)) { setEditingPerf(null); return; }
     var trimDim = perfVertical ? longEdge : shortEdge;
+    if (perfVertical && onBackView) v = trimDim - v;   // typed as the back sees it
     var clamped = clampPerfInches(v, idx, trimDim, perfPositions);
     var updated = perfPositions.slice();
     updated[idx] = Math.round(clamped / trimDim * 1000) / 10;
@@ -2563,7 +2614,7 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
                     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
                     window.PPS_PDF_RISKS[s] = await window.ppsAnalyzePdfRisks(pdf);
                     const pg = await pdf.getPage(1);
-                    const vp = pg.getViewport({ scale: 2 });
+                    const vp = ppsPreviewViewport(pg);
                     const c = document.createElement("canvas");
                     c.width = vp.width; c.height = vp.height;
                     await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
@@ -2866,9 +2917,9 @@ btnB.addEventListener('click',function(){if(btnB.disabled)return;wrap.classList.
               {/* Perf lines (purple dashed, draggable) — togglable with the Guides button */}
               {showGuides && perfLines.map((pl) => {
                 const bPct = pl.vertical ? bleedPctX : bleedPctY;
-                const pos = bPct + (100 - bPct * 2) * pl.pct / 100;
+                const pos = bPct + (100 - bPct * 2) * seenPct(pl.pct, pl.vertical, onBackView) / 100;
                 const trimDim = pl.vertical ? longEdge : shortEdge;
-                const inches = (pl.pct / 100 * trimDim);
+                const inches = (seenPct(pl.pct, pl.vertical, onBackView) / 100 * trimDim);
                 const inchLabel = (Math.round(inches * 8) / 8).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
                 const isDragging = draggingPerf === pl.index;
                 const isEditing = editingPerf === pl.index;

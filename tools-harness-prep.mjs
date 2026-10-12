@@ -9,6 +9,7 @@ const REPL=[
  ['https://unpkg.com/react@18.3.1/umd/react.production.min.js','./node_modules/react/umd/react.production.min.js'],
  ['https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js','./node_modules/react-dom/umd/react-dom.production.min.js'],
  ['https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js','./node_modules/jspdf/dist/jspdf.umd.min.js'],
+ ['https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js','./node_modules/pdf-lib/dist/pdf-lib.min.js'],
  ['https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/','./node_modules/pdfjs-dist/legacy/build/'],
  ['https://unpkg.com/pdfjs-dist@4.10.38/legacy/build/','./node_modules/pdfjs-dist/legacy/build/'],
 ];
