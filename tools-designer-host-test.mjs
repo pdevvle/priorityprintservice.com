@@ -89,7 +89,7 @@ const fileName = (body) => { const m = body.match(/name="artwork"; filename="([^
 const reorder = Buffer.from(JSON.stringify({ shipState: 'AZ', shipAddr: { name: 'Test', street1: '1 Main St', city: 'Phoenix', zip: '85087' } }))
   .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-async function open(b, designerUrl) {
+async function open(b, designerUrl, query = '') {
   const ctx = await b.newContext({ viewport: { width: 1400, height: 1000 } });
   const p = await ctx.newPage();
   const dialogs = []; p.on('dialog', async d => { dialogs.push(d.message()); await d.dismiss(); });
@@ -99,7 +99,9 @@ async function open(b, designerUrl) {
     window.PPS_CONFIG = { ajaxUrl: location.origin + '/wp-admin/admin-ajax.php', cartUrl: location.origin + '/cart.html',
       cartNonce: 'cartBaked', uploadNonce: 'upBaked', productId: 33670, maxUpload: 200 * 1048576, reorder: r,
       calc: { pcf: u ? { designer_url: u } : {} } };
+    // Every frame (the designer's too) keeps the last job it was sent, for the checks below.
   }, [reorder, designerUrl]);
+  await p.addInitScript(() => { addEventListener('message', e => { if (e.data && e.data.type === 'pps-design:job') window.__ppsJob = e.data.spec; }); });
   await p.route('**/wp-admin/admin-ajax.php**', async (route) => {
     const req = route.request();
     const body = (req.postDataBuffer() || Buffer.alloc(0)).toString('latin1');
@@ -117,7 +119,7 @@ async function open(b, designerUrl) {
     return route.fulfill({ status: 400, body: '0' });
   });
   await p.route('**/cart.html', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<h1 id="cart">CART</h1>' }));
-  await p.goto(BASE + '/calc.html', { waitUntil: 'domcontentloaded' });
+  await p.goto(BASE + '/calc.html' + query, { waitUntil: 'domcontentloaded' });
   await p.waitForSelector('select'); await p.waitForTimeout(2500);
   return { ctx, p, dialogs, errs, uploads, bodies, cart: () => cartPost };
 }
@@ -257,7 +259,7 @@ const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/op
   const prPdf0 = pdfOf(t.bodies[prName0]);
   ok('on: the print-ready file is the designer\'s own PDF, unchanged (vector, PDF/X-4)', rawPdf.length > 1000 && Buffer.compare(rawPdf, prPdf0) === 0 && prPdf0.includes('GTS_PDFX'), rawPdf.length + ' vs ' + prPdf0.length + ' bytes');
   const man0 = Buffer.from(t.bodies[t.uploads.find(n => /manifest\.txt$/.test(n)) || ''] || '', 'latin1').toString('utf8');
-  ok('on: …and the manifest says so', /the online designer's own PDF, 2 side\(s\)/.test(man0) && /print source: the designer's own PDF, page 2, vector, unchanged/.test(man0), (man0.match(/2\. Print-ready PDF:[^\n]*/) || [''])[0]);
+  ok('on: …and the manifest says so', /the online designer's own PDF\/X-4, 2 side\(s\)/.test(man0) && /print source: the designer's own PDF, page 2, vector, unchanged/.test(man0), (man0.match(/2\. Print-ready PDF:[^\n]*/) || [''])[0]);
   ok('on: previews and the manifest are listed for Drive', listed.some(n => /preview/.test(n)) && listed.some(n => /manifest\.txt$/.test(n)), listed.join(','));
   ok('on: no page errors', t.errs.length === 0, t.errs.join(' | '));
   await t.ctx.close();
@@ -352,6 +354,8 @@ const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('butto
   ok('portrait: the print-ready file is the designer\'s PDF turned onto the sheet by page rotation (front 90°, back 270°)', pagesInfo.length === 2 && pagesInfo[0][0] === 90 && pagesInfo[1][0] === 270, prPages.trim());
   ok('portrait: …which sits on the sheet as 7.25 × 5.25 in (a 5.25 × 7.25 page turned)', pagesInfo.every(r => Math.abs(r[3] - r[1] - 378) < 1 && Math.abs(r[4] - r[2] - 522) < 1), prPages.trim());
   ok('portrait: …and keeps its PDF/X output intent (nothing redrawn)', info[info.length - 1][0] === 'True' && pr.includes('GTS_PDFX'));
+  ok('portrait: …and its PDF/X-4 version (1.6), not pdf-lib\'s 1.7', Buffer.from(pr).subarray(0, 8).toString('latin1') === '%PDF-1.6', Buffer.from(pr).subarray(0, 8).toString('latin1'));
+  ok('portrait: the manifest says the output intent is the designer\'s placeholder (and claims no RGB photos on a card without any)', /own PDF\/X-4/.test(man) && /not the press profile/.test(man) && !/RGB/.test(man), (man.match(/2\. Print-ready PDF:[^\r\n]*/) || [''])[0]);
   // The server's Print File Check (pps-job-health.php) reads it as production will: 2 pages on a
   // 7.25 × 5.25 in sheet. It reads pages and boxes straight out of the file, so a PDF saved with
   // object streams read as "0 pages, sheet size unknown".
@@ -381,6 +385,23 @@ const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('butto
   await p.keyboard.press('Escape');
   await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
   ok('stuck designer: Escape closes the overlay before it is ready', !(await p.locator('.pps-designer-overlay').count()));
+  await t.ctx.close();
+}
+
+// ── a portrait card perforated off-centre: the designer's guide is where the order perforates ──
+{
+  // A 4 × 9 rack card, one perforation across the long edge at 78% (7.02 in from the sheet's left).
+  // Its print file turns the front 90° clockwise onto the sheet, so on the standing card the line
+  // is 1.98 in (142.56 pt) from the top, front and back. The pre-2026-10-13 build put it at 505.44.
+  const t = await open(b, '/designer/designer.html', '?size=4x9&sides=2&perf=2000&perfdir=length&perfpos=78');
+  const { p } = t;
+  await p.click('[data-pps-design="portrait"]');
+  const frame = p.frameLocator('.pps-designer-overlay iframe');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  const job = await p.frames().find(f => /designer\.html/.test(f.url())).evaluate(() => window.__ppsJob);
+  const perfs = (job && job.perfs) || [];
+  ok('portrait perforation: the designer shows it where the order perforates (142.56 pt from the top, both sides)',
+    job && job.trimW === 288 && job.trimH === 648 && perfs.length === 2 && perfs.every(g => g.axis === 'h' && Math.abs(g.at - 142.56) < 0.01), JSON.stringify(perfs));
   await t.ctx.close();
 }
 

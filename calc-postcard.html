@@ -2507,11 +2507,15 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
     // when the sheet folds the long way, horizontal when it folds the short way.
     const perfAlongLong = perfDir === "length" ? foldDir === "long" : foldDir !== "long";
     const perfAt = (perfCount > 0 && perfPositions ? perfPositions.slice(0, perfCount) : []).map(pct => (Number(pct) / 100) * (perfAlongLong ? long : short));
-    // As each page is seen: a portrait card turns the wide sheet upright; the back is the
-    // sheet turned over left to right, so its vertical lines are mirrored.
+    // As each page is seen: a portrait card is the wide sheet turned upright the way its print
+    // file turns it back onto the sheet (front /Rotate 90, clockwise: the page's top edge is the
+    // sheet's right edge), so a line x in from the sheet's left is (long - x) down from the page's
+    // top, and one y down from the sheet's top is y in from the page's left. Until 2026-10-13 this
+    // turned the other way and showed an off-centre perforation at the wrong end of the card.
+    // The back is the sheet turned over left to right, so its vertical lines are mirrored.
     const place = (alongLong, atIn, page) => {
       let g = alongLong ? { axis: "v", at: atIn * 72 } : { axis: "h", at: atIn * 72 };
-      if (portrait) g = g.axis === "v" ? { axis: "h", at: g.at } : { axis: "v", at: (short - atIn) * 72 };
+      if (portrait) g = alongLong ? { axis: "h", at: (long - atIn) * 72 } : { axis: "v", at: atIn * 72 };
       if (page === 1 && g.axis === "v") g = { axis: "v", at: w * 72 - g.at };
       return { page, axis: g.axis, at: Math.round(g.at * 1000) / 1000 };
     };
@@ -2583,7 +2587,8 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
         const designFile = new File([res.pdf], name, { type: "application/pdf" });
         // Marks it as the designer's: approval then ships this PDF itself as the print file
         // (generateApprovalPackage), as long as nothing is changed in the proof.
-        designFile.__ppsDesigner = { pages: want.pages, portrait: want.trimH > want.trimW };
+        designFile.__ppsDesigner = { pages: want.pages, portrait: want.trimH > want.trimW,
+          rgbPhotos: !!mf.rgbImages, placeholderIntent: !!mf.outputIntentPlaceholder };
         await processFile([designFile]);
         // The print file is always the sheet held wide. A portrait card is turned a quarter
         // clockwise onto it; its back, turned over left to right as the designer shows it,
@@ -3706,7 +3711,13 @@ generate();
           doc.getPages().forEach((pg, i) => pg.setRotation(PL.degrees(autoSteps(i) * 90)));
           // Plain page objects, no object streams: the server's Print File Check reads pages and
           // boxes straight out of the file.
-          printReadyBlob = new Blob([await doc.save({ useObjectStreams: false })], { type: "application/pdf" });
+          const out = await doc.save({ useObjectStreams: false });
+          // pdf-lib always writes a %PDF-1.7 header; PDF/X-4 files are PDF 1.6 at most, and a
+          // strict preflight rejects the claim. Nothing 1.7-only is written (no object streams),
+          // so the designer's own version is put back, same length, offsets unchanged.
+          const ver = String.fromCharCode(...bytes.subarray(0, 8)), outVer = String.fromCharCode(...out.subarray(0, 8));
+          if (/^%PDF-1\.[0-6]$/.test(ver) && outVer === "%PDF-1.7") out[7] = ver.charCodeAt(7);
+          printReadyBlob = new Blob([out], { type: "application/pdf" });
         } else {
           printReadyBlob = new Blob([bytes], { type: "application/pdf" });
         }
@@ -3842,7 +3853,7 @@ generate();
       "── Deliverables ──",
       `1. Raw file: ${fileName || "original upload"} (unmodified customer upload)`,
       designerVector
-        ? `2. Print-ready PDF: the online designer's own PDF, ${totalPages} side(s), ${bleedW}″ × ${bleedH}″: vector, CMYK, fonts embedded, not rasterised${dz && dz.portrait ? "; portrait card, each page turned onto the sheet by /Rotate (front 90°, back 270°)" : ""}`
+        ? `2. Print-ready PDF: the online designer's own PDF/X-4, ${totalPages} side(s), ${bleedW}″ × ${bleedH}″: vector, CMYK${dz && dz.rgbPhotos ? " with ICC-tagged RGB photos (converted at the RIP)" : ""}, fonts embedded, not rasterised${dz && dz.portrait ? "; portrait card, each page turned onto the sheet by /Rotate (front 90°, back 270°)" : ""}${dz && dz.placeholderIntent ? "; output intent is the designer's generic CMYK profile, not the press profile" : ""}`
         : `2. Print-ready PDF: ${totalPages} side(s) at ${DPI} DPI, ${bleedW}″ × ${bleedH}″, JPEG quality 0.95`,
       `3. Screen previews: ${previewBlobs.filter(b => b).length} side images at 150 DPI, JPEG quality 0.85 (fold lines rendered on previews only)`,
       `4. This manifest`,

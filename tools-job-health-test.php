@@ -119,6 +119,12 @@ ok( 'a vector PDF is named as such with its page count and size, no DPI claim, n
 $pt = pps_print_file_check( "$T/pps-artwork/portrait.pdf" );
 ok( 'a portrait designer PDF turned onto the sheet by /Rotate reads as the sheet it prints on (7.25×5.25 in)',
     $pt['kind'] === 'vector' && $pt['summary'] === 'vector PDF · 2 pages · 7.25×5.25 in' && $pt['warn'] === '', $pt['summary'] );
+// A landscape 6 × 4 designer card with one 3:2 photo per side (1200×800 px placed at 3.375 in:
+// 356 DPI): its PDF/X file has a sheet-proportioned image per page, but it is not a page image.
+file_put_contents( "$T/pps-artwork/designer_print-ready.pdf", str_replace( '/Type /Catalog', '/Type /Catalog /OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX >>]', make_pdf( 2, array( 450, 306 ), 1200, 800 ) ) );
+$dz = pps_print_file_check( "$T/pps-artwork/designer_print-ready.pdf" );
+ok( 'a designer PDF/X with one card-shaped photo per side is not called raster and raises no warning',
+    $dz['kind'] === 'mixed' && $dz['warn'] === '' && strpos( $dz['summary'], 'PDF with 2 placed images' ) === 0, $dz['summary'] . ' | ' . $dz['warn'] );
 $x = pps_print_file_check( "$T/pps-artwork/notes.txt" );
 ok( 'a non-PDF is refused, not guessed', $x['ok'] === false && $x['summary'] === 'not a PDF' );
 ok( 'a missing file is reported, not fatal', pps_print_file_check( "$T/nope.pdf" )['summary'] === 'print file not readable' );

@@ -348,10 +348,15 @@ From the print audit of the online designer, three changes that reach every flat
   `/Rotate` (front 90°, back 270°) with pdf-lib 1.17.1, fetched only then, saved without object
   streams; the imposition tool reads `/Rotate` (checked headless: it places the turned pages
   exactly as it places the old raster file). The file still goes up as `<base>_print-ready.pdf`,
-  so imposition and Drive see nothing new. The Print File Check reads it as "vector" (or "raster"
-  at the photo's own DPI when one photo fills each side), and since this date turns a `/Rotate`
-  90/270 page into the sheet it prints on (`pps-job-health.php`, so deploy that file with the
-  calculator). Anything else, or pdf-lib failing to load, takes the raster path as an upload
+  so imposition and Drive see nothing new. The Print File Check reads it as "vector" (or "PDF
+  with N placed images" when it has photos: a file with a PDF/X output intent is never read as a
+  calculator raster, which on 2026-10-13 stopped a card-shaped photo per side being measured
+  against the sheet and flagged "192 DPI" when it was 356), and turns a `/Rotate` 90/270 page into
+  the sheet it prints on (`pps-job-health.php`, so deploy that file with the calculator).
+  pdf-lib writes `%PDF-1.7`; the designer's 1.6 is put back (PDF/X-4 is 1.6 at most). The
+  manifest says when the photos are ICC-tagged RGB and that the output intent is the designer's
+  generic profile, not the press's. A portrait card's perforation reaches the designer turned the
+  way the print file turns (clockwise): until 2026-10-13 an off-centre one showed at the wrong end. Anything else, or pdf-lib failing to load, takes the raster path as an upload
   would. `tools-designer-host-test.mjs` and `tools-job-health-test.php` are the gates.
 - **New artwork starts square-on.** A turn, fit or scale chosen for the last file (or set for a
   portrait design) carried over to the next upload or slot replacement, so a landscape PDF dropped

@@ -120,7 +120,14 @@ function pps_print_file_check( $abs_path ) {
     // "62 DPI" in an order note (2026-09-25). When in doubt this falls through to
     // "mixed", which makes no resolution claim at all: a check that warns on good
     // files teaches people to ignore it.
-    if ( $out['pages'] > 0 && $sheet_imgs === $out['pages'] && count( $images ) === $out['pages'] && $min !== null ) {
+    //
+    // A file with a PDF/X output intent is never that shape: the calculators' jsPDF rasters carry
+    // none, and the online designer's vector PDFs (print-ready since 2026-10-12) always do. One
+    // photo per side in the card's proportions made a designer file read "raster · 192 DPI" with a
+    // BELOW PRINT RESOLUTION warning, measured against the sheet rather than the photo's placed
+    // size (it was 356 DPI). The designer warns the customer itself under 150 DPI.
+    $pdfx = strpos( $s, '/OutputIntents' ) !== false;
+    if ( ! $pdfx && $out['pages'] > 0 && $sheet_imgs === $out['pages'] && count( $images ) === $out['pages'] && $min !== null ) {
         $out['kind'] = 'raster'; $out['min_dpi'] = $min;
         $first = null; foreach ( $images as $im ) { if ( $im['dpi'] !== null ) { $first = $im; break; } }
         $out['summary'] = 'raster · ' . $pg_str . ' · ' . $sheet_str . ' · ' . $first['w'] . '×' . $first['h'] . ' px · ' . $min . ' DPI';
