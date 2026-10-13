@@ -2574,6 +2574,15 @@ add_action( 'woocommerce_cart_loaded_from_session', function( $cart ) {
  * line's. New artwork means a new upload, and the old files must not ride along.
  * The approval hash is deliberately NOT carried: the edit may have changed what
  * prints, and "unbound" is the honest state for the imposition tool to meet.
+ *
+ * An edit that changes the job itself — its size, sides, folds or perforations
+ * (pps_edit_shape_changed) — keeps the customer's own files but not the approval
+ * package: the print-ready PDF, previews and manifest were made for the old job,
+ * and until 2026-10-13 the new line carried them, so a 4×6 edited to 5×7 went to
+ * production with a 4×6 print file. A job the customer approved online (proof 0)
+ * is then marked for prepress review, NOT APPROVED, since nobody has seen the
+ * artwork on the new job. The calculator refuses that edit before it gets here;
+ * this is for a build or a request that does not.
  * tools-edit-artwork-test.php is the gate.
  */
 function pps_carry_edit_artwork( array $new, $old ) {
@@ -2581,11 +2590,14 @@ function pps_carry_edit_artwork( array $new, $old ) {
     $same = ! empty( $new['pps_artwork_path'] ) && ! empty( $old['pps_artwork_path'] )
         && (string) $new['pps_artwork_path'] === (string) $old['pps_artwork_path'];
     if ( ! $same ) return $new;
+    $reshaped = pps_edit_shape_changed( $old['pps_metadata'] ?? '', $new['pps_metadata'] ?? '' );
 
     if ( ! empty( $old['pps_artwork_files'] ) && is_array( $old['pps_artwork_files'] ) ) {
         $merged = array(); $seen = array();
         foreach ( array_merge( $old['pps_artwork_files'], (array) ( $new['pps_artwork_files'] ?? array() ) ) as $f ) {
             if ( ! is_array( $f ) || empty( $f['path'] ) || isset( $seen[ $f['path'] ] ) ) continue;
+            // The calculator's own deliverables, named as mustArrive names them.
+            if ( $reshaped && preg_match( '/(_print-ready\.pdf|_preview[^\/]*|_manipulation_manifest\.txt)$/i', (string) ( $f['name'] ?? basename( $f['path'] ) ) ) ) continue;
             $seen[ $f['path'] ] = true;
             $merged[] = $f;
         }
@@ -2595,7 +2607,53 @@ function pps_carry_edit_artwork( array $new, $old ) {
         $new['pps_prepress_review'] = $old['pps_prepress_review'];
         unset( $new['pps_proof_hash'] );
     }
+    if ( $reshaped ) {
+        unset( $new['pps_proof_hash'] );
+        $meta = json_decode( (string) ( $new['pps_metadata'] ?? '' ), true );
+        if ( empty( $new['pps_prepress_review'] ) && is_array( $meta ) && (float) ( $meta['proof'] ?? 0 ) <= 0 ) {
+            $new['pps_prepress_review'] = 'Edited in the cart after approval: the size, sides, folds or perforations changed, so the approved print file was for a different job. Needs a new proof before printing.';
+        }
+    }
     return $new;
+}
+
+/**
+ * Did a cart edit change what the line's artwork was made for? Compares the old and
+ * new line's pps_metadata the way the calculators' ppsEditShapeChanged() does: a
+ * preset size is its label, a custom size its inches (a preset leaves stale inches
+ * in longEdge/shortEdge), then sides, folds and perforations; a booklet's size label,
+ * custom inches and binding edge. Only keys both lines carry are compared, so a line
+ * from an older build is never called changed for lacking one. Unreadable metadata
+ * is "not changed": the old behaviour.
+ */
+function pps_edit_shape_changed( $old_json, $new_json ) {
+    $o = is_array( $old_json ) ? $old_json : json_decode( (string) $old_json, true );
+    $n = is_array( $new_json ) ? $new_json : json_decode( (string) $new_json, true );
+    if ( ! is_array( $o ) || ! is_array( $n ) ) return false;
+    $norm = function( $v ) {
+        if ( is_bool( $v ) ) return $v ? '1' : '0';
+        if ( is_numeric( $v ) ) return (string) round( (float) $v, 3 );
+        return is_scalar( $v ) ? trim( (string) $v ) : json_encode( $v );
+    };
+    $differs = function( $k ) use ( $o, $n, $norm ) {
+        return array_key_exists( $k, $o ) && array_key_exists( $k, $n ) && $norm( $o[ $k ] ) !== $norm( $n[ $k ] );
+    };
+    if ( array_key_exists( 'sizeMode', $o ) && array_key_exists( 'sizeMode', $n ) ) {
+        if ( $norm( $o['sizeMode'] ?: 'preset' ) !== $norm( $n['sizeMode'] ?: 'preset' ) ) return true;
+        if ( $n['sizeMode'] === 'custom' ? ( $differs( 'longEdge' ) || $differs( 'shortEdge' ) ) : $differs( 'sizeLabel' ) ) return true;
+    } elseif ( $differs( 'sizeLabel' ) ) {
+        return true;
+    } elseif ( ( $n['sizeLabel'] ?? '' ) === 'Custom Size' && ( $differs( 'customLong' ) || $differs( 'customShort' ) ) ) {
+        return true;
+    }
+    foreach ( array( 'sides', 'foldType', 'foldDir', 'perforation', 'perfDir', 'bindDir' ) as $k ) {
+        if ( $differs( $k ) ) return true;
+    }
+    if ( (float) ( $n['perforation'] ?? 0 ) > 0 && is_array( $o['perfPositions'] ?? null ) && is_array( $n['perfPositions'] ?? null ) ) {
+        $p = function( $a ) { return implode( ',', array_map( function( $v ) { return (string) round( (float) $v, 1 ); }, $a ) ); };
+        if ( $p( $o['perfPositions'] ) !== $p( $n['perfPositions'] ) ) return true;
+    }
+    return false;
 }
 
 /**

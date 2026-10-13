@@ -83,8 +83,10 @@ for (const file of PAGES) {
   await p.addInitScript(() => {
     window.PPS_CONFIG = { ajaxUrl: location.origin + '/wp-admin/admin-ajax.php', cartUrl: location.origin + '/cart.html', cartNonce: 'c', uploadNonce: 'u', productId: 1, maxUpload: 209715200 };
   });
-  // 1 perforation line (the calculators' own option value) on a sheet folded the long way.
-  await p.goto(BASE + '/' + file + '?perf=2000' + (TEMPLATE[calc] && TEMPLATE[calc][1] ? '&fold=trifold&folddir=long' : ''), { waitUntil: 'domcontentloaded' });
+  // 1 perforation line (the calculators' own option value) on a sheet folded the long way,
+  // printed both sides: a one-sided job has no back (letterhead's default is one side; until
+  // 2026-10-13 it took page 2 of the PDF as a back anyway, which this test leaned on).
+  await p.goto(BASE + '/' + file + '?perf=2000&sides=2' + (TEMPLATE[calc] && TEMPLATE[calc][1] ? '&fold=trifold&folddir=long' : ''), { waitUntil: 'domcontentloaded' });
   await p.waitForSelector('select'); await p.waitForTimeout(2500);
 
   // ── the proof ──

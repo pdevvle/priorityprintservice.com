@@ -372,6 +372,37 @@ and Escape until the designer is up, and a designer URL that is not the designer
 `pps-design:price` with `error`; and the designer's perforation direction follows the proof's
 (fold direction included).
 
+**Third sweep, 2026-10-13** (an adversarial pass over the shipped flats; each fix gated by
+`tools-flat-sweep3-test.mjs`, first run against the staging builds, where it fails):
+
+- **A change to the job clears the approval** on brochure, greeting card, letterhead and sticker,
+  as the postcard already did (`jobShapeKey`: size, sides, folds, perforations). They shipped the
+  old print file for the new job.
+- **Leaving "Upload Art" takes its files off the order.** Approve, switch to "Email Art After
+  Order", change the size, switch back: the empty drop zone ordered the old approved package.
+- **A page with `/Rotate` is measured as it is seen** (`getViewport({ scale: 1 })`, never
+  `pg.view`), on all five flats and in the three booklets' `extractPdfPages`, reader-spread split
+  and cover/slot readers. A portrait designer file uploaded again printed squashed.
+- **Page 2 of a PDF is a back only on a two-sided job**; made two-sided later, page 2 comes in
+  then. A designer file follows its own page count, not a stale copy of `sides`.
+- **A moved perforation survives a cart edit or reorder** (`restoredPerfRef`); the reset to the
+  middle that a new perforation count triggers overwrote it.
+- **"Design the front online, upload my own back"** (postcard) is not a stale design, and printing
+  the design again asks before its page 2 replaces the uploaded back.
+- **Back panel names for folds across the short side** read bottom to top: each back panel sits
+  behind the front panel at the same height (the back turns over left to right), in the proof,
+  the template and the designer's spec.
+- **The manifest lists every original** the order carries and names each side's source file; the
+  package is named for the front's file. The "TEST DOWNLOAD" panel is staff-only on all five. A
+  PDF's preflight warning goes with its file. The drop zone no longer promises TIFF, and a file
+  the browser cannot read is named instead of leaving "Processing...". The preview JPEGs draw
+  the perforations, mirrored on the back like the folds.
+- **A cart edit that changes size, sides, folds or perforations does not reuse the approval.**
+  The calculators refuse it at Add to Order on an online-approved job ("upload again and
+  approve"); on the server `pps_carry_edit_artwork()` keeps the customer's own files but drops
+  the old print-ready, previews and manifest, and marks an online-approved line for prepress
+  review (`pps_edit_shape_changed()`, `tools-edit-artwork-test.php`).
+
 ## Junctures: priced → placed → printed (2026-09-27)
 
 A sweep of every point a job passes between the quote and the press, asking at each one

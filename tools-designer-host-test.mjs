@@ -25,6 +25,10 @@
 //               tool find artwork by name), and approving then changing the size clears
 //               the approval, so the order can never carry a file of another size.
 //               PPS_PRINT_READY=<path> keeps that print-ready PDF to look at.
+//   own back  — "design the front online, upload my own back" (2026-10-13): a one-sided design,
+//               then Both Sides and the customer's own file in the Back box, is approved as it
+//               stands (it was refused as an out-of-date design); "Edit design" then Print asks
+//               before the design's page 2 replaces the uploaded back, and OK keeps it.
 //
 // Setup (everything is served on 127.0.0.1:8139 by this script):
 //   1. compile:  BABEL_DIR=<dir with @babel/core, @babel/preset-react> node tools-compile-calcs.mjs
@@ -89,10 +93,10 @@ const fileName = (body) => { const m = body.match(/name="artwork"; filename="([^
 const reorder = Buffer.from(JSON.stringify({ shipState: 'AZ', shipAddr: { name: 'Test', street1: '1 Main St', city: 'Phoenix', zip: '85087' } }))
   .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-async function open(b, designerUrl, query = '') {
+async function open(b, designerUrl, query = '', acceptDialogs = false) {
   const ctx = await b.newContext({ viewport: { width: 1400, height: 1000 } });
   const p = await ctx.newPage();
-  const dialogs = []; p.on('dialog', async d => { dialogs.push(d.message()); await d.dismiss(); });
+  const dialogs = []; p.on('dialog', async d => { dialogs.push(d.message()); if (acceptDialogs) await d.accept(); else await d.dismiss(); });
   const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 200)));
   const uploads = [], bodies = {}; let cartPost = null;
   await p.addInitScript(([r, u]) => {
@@ -434,6 +438,56 @@ const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('butto
   for (let i = 0; i < 60 && clicked && !/cart\.html$/.test(p.url()); i++) await p.waitForTimeout(1000);
   const man = Buffer.from(t.bodies[Object.keys(t.bodies).find(n => /manifest\.txt$/.test(n)) || ''] || '', 'latin1').toString('utf8');
   ok('upload after a portrait design: the upload prints square-on (no turn carried over)', /rotate=0°/.test(man) && !/rotate=(90|270)°/.test(man), (man.match(/rotate=\d+°/g) || []).join(','));
+  await t.ctx.close();
+}
+
+// ── own back: design the front online, upload my own back ──
+{
+  const t = await open(b, '/designer/designer.html', '?size=4x6&sides=1', true);
+  const { p } = t;
+  const printDesign = async () => {
+    const frame = p.frameLocator('.pps-designer-overlay iframe');
+    await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+    await frame.locator('#print').click();
+    await frame.locator('#sheetGo').click();
+    await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+    await p.waitForTimeout(3000);
+  };
+  await p.click('[data-pps-design="open"]');
+  {
+    const frame = p.frameLocator('.pps-designer-overlay iframe');
+    await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+    await frame.locator('[data-text="heading"]').click();
+    await frame.locator('#textInput').fill('Designed front');
+    await frame.locator('#textDone').click();
+  }
+  await printDesign();
+  await p.evaluate(() => { const bt = [...document.querySelectorAll('button')].find(x => (x.textContent || '').trim() === 'Both Sides'); bt && bt.click(); });
+  await p.waitForTimeout(1000);
+  const { jsPDF } = (await import('node:module')).createRequire(import.meta.url)(DEPS + '/jspdf/dist/jspdf.node.min.js');
+  const doc = new jsPDF({ unit: 'in', format: [6.25, 4.25], orientation: 'landscape' });
+  doc.text('MY OWN BACK', 2, 2);
+  const myBack = path.join(fs.mkdtempSync('/tmp/pps-pr-'), 'my-back.pdf'); fs.writeFileSync(myBack, Buffer.from(doc.output('arraybuffer')));
+  const boxes = p.locator('input[type=file][accept=".pdf,.jpg,.jpeg,.png"]:not([multiple])');
+  await boxes.nth((await boxes.count()) - 1).setInputFiles(myBack);
+  await p.waitForTimeout(3000);
+  ok('own back: a one-page design with my own back is not called out of date', (await p.locator('[data-pps-design="stale"]').count()) === 0,
+    await p.locator('[data-pps-design="stale"]').textContent().catch(() => ''));
+  ok('own back: approving it makes the package (it was refused as a stale design)', await approve(p), t.dialogs.slice(-1).join(' ').slice(0, 160));
+  t.dialogs.length = 0;
+  // A proof left open by a refused approval must not stop the run here.
+  await p.keyboard.press('Escape');
+  await p.evaluate(() => { const x = [...document.querySelectorAll('button')].filter(y => (y.textContent || '').trim() === '✕' && y.offsetParent && y.closest('[style*="z-index: 9999"]')); x.length && x[x.length - 1].click(); });
+  await p.waitForTimeout(500);
+  await p.evaluate(() => { const e = document.querySelector('[data-pps-design="edit"]'); e && e.click(); });
+  await printDesign().catch(e => t.dialogs.push('(designer did not print: ' + String(e.message).slice(0, 80) + ')'));
+  ok('own back: printing the design again asks before its page 2 replaces my back', t.dialogs.some(d => /You uploaded your own back \("my-back\.pdf"\)/.test(d)), t.dialogs.join(' | ').slice(0, 200));
+  ok('own back: …and OK keeps it, approved with the new design', await approve(p));
+  const clicked = await p.evaluate(() => { const bt = [...document.querySelectorAll('button')].find(x => /^Add to Order$/.test((x.textContent || '').trim()) && !x.disabled); if (!bt) return false; bt.click(); return true; });
+  for (let i = 0; i < 60 && clicked && !/cart\.html$/.test(p.url()); i++) await p.waitForTimeout(1000);
+  const man = Buffer.from(t.bodies[Object.keys(t.bodies).find(n => /manifest\.txt$/.test(n)) || ''] || '', 'latin1').toString('utf8');
+  ok('own back: the order carries my back, and the manifest prints the back from it', t.uploads.includes('my-back.pdf') && /2: Back[^\n]*\n[^\n]*\n    source file: my-back\.pdf/.test(man),
+    t.uploads.join(',') + ' | ' + (man.match(/source file:[^\n]*/g) || []).join(' | '));
   await t.ctx.close();
 }
 

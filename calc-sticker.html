@@ -616,6 +616,25 @@ function ppsFmtZip(v) {
   const d = s.replace(/-/g, "");
   return /^\d{9}$/.test(d) ? d.slice(0, 5) + "-" + d.slice(5) : s.slice(0, 10);
 }
+// A cart edit reopens its line with the artwork as "existing": already on the server, and
+// approved (with its print file and previews) for the job as it was. Did the edit change what
+// that artwork was made for? A preset size is its label, a custom size its inches; then sides,
+// folds and perforations. Only keys the old line carried are compared. The server applies the
+// same rule (pps_edit_shape_changed) when it carries the old line's files across (2026-10-13).
+function ppsEditShapeChanged(was, now) {
+  if (!was || !now) return false;
+  const norm = v => (typeof v === "number" || (typeof v === "string" && v.trim() !== "" && isFinite(Number(v))))
+    ? Math.round(Number(v) * 1000) / 1000 : String(v == null ? "" : v).trim();
+  const differs = k => (k in was) && (k in now) && norm(was[k]) !== norm(now[k]);
+  if (("sizeMode" in was) && norm(was.sizeMode || "preset") !== norm(now.sizeMode || "preset")) return true;
+  if (now.sizeMode === "custom" ? (differs("longEdge") || differs("shortEdge")) : differs("sizeLabel")) return true;
+  if (["sides", "foldType", "foldDir", "perforation", "perfDir"].some(differs)) return true;
+  if (Number(now.perforation) > 0 && Array.isArray(was.perfPositions) && Array.isArray(now.perfPositions)) {
+    const p = a => a.map(v => Math.round(Number(v) * 10) / 10).join(",");
+    if (p(was.perfPositions) !== p(now.perfPositions)) return true;
+  }
+  return false;
+}
 const PPS_ZIP_RE = /^\d{5}(?:[-\s]?\d{4})?$/;
 // APO / FPO / DPO: military mail is USPS-only, so no UPS ground quote or delivery date
 // means anything there (owner decision 2026-09-27: not orderable online; the shop arranges
@@ -1544,7 +1563,7 @@ function MobilePreviewBar(props){
 // SHEET PREVIEW — Upload + Proof for sticker (flat single-sided product)
 // ═══════════════════════════════════════════════════════════════
 
-function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, openPreviewModalRef, debug }) {
+function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, openPreviewModalRef, debug, staffUnlocked }) {
   const mob = useIsMobile();
   const fLabel = "Front";
   const sides = 1; // Stickers are always single-sided
@@ -1587,6 +1606,16 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
   const frontInputRef = useRef(null);
   const backInputRef = useRef(null);
   const rawFileRef = useRef(null);
+  // The proof's "Uses …" warning is the union of window.PPS_PDF_RISKS, keyed by where a PDF came
+  // in (doc = the drop zone, front, back). An entry outlived its file: Remove uploads, then an
+  // image, and the proof still warned about the removed PDF's transparency (2026-10-13). Each
+  // entry now remembers its file, and goes when no side shows that file any more.
+  const _riskFilesRef = useRef({});
+  useEffect(() => {
+    const o = window.PPS_PDF_RISKS || {}, files = _riskFilesRef.current;
+    const live = [frontArt && frontArt.file, backArt && backArt.file].filter(Boolean);
+    Object.keys(o).forEach(k => { if (!live.includes(files[k])) { delete o[k]; delete files[k]; } });
+  }, [frontArt, backArt]);
   // Every original the customer supplied, as the order should receive it: the file
   // behind each side, front first (the first is the order's artwork path). The
   // effect below sends it to the order whenever the art changes or an approval is
@@ -1605,6 +1634,10 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
     });
     return out;
   };
+  // The approval package's base name: the front's file, which is the first original and the
+  // order's artwork path. It was the drop zone's last file (fileName), so after a side was
+  // replaced through its own box the package was named for a file the order does not carry.
+  const pkgBaseName = () => (((frontArt && frontArt.file && frontArt.file.name) || fileName || "artwork").replace(/\.[^.]+$/, ""));
   const _origEmittedRef = useRef(false);
   useEffect(() => {
     if (approved || !onArtwork) return;
@@ -1734,6 +1767,19 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
     setVpY(vpDragStart.current.vpY + (e.clientY - vpDragStart.current.y));
   };
   const vpOnMouseUp = () => { setVpDragging(false); vpDragStart.current = null; };
+
+  // Clear approval when the job changes under it: the approved print file is built at the
+  // size and sides of the moment (and its previews carry the folds and perforations), so a
+  // later change in the panel would otherwise order one job and ship the file of another.
+  // The postcard had this; the other flats shipped the old file until 2026-10-13.
+  const jobShapeKey = [longEdge, shortEdge].join("|");
+  const prevJobShapeKey = useRef(jobShapeKey);
+  useEffect(() => {
+    if (prevJobShapeKey.current !== jobShapeKey) {
+      prevJobShapeKey.current = jobShapeKey;
+      if (approved) { setApproved(false); setApprovalPkg(null); }
+    }
+  }, [jobShapeKey]);
 
   // Clear approval when ANY side's transform changes
   const prevTxHash = useRef(txHash);
@@ -2002,9 +2048,9 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
   const safetyPctX = ((BLEED + 0.125) / bleedW) * 100;
   const safetyPctY = ((BLEED + 0.125) / bleedH) * 100;
 
-  // One side's art from one file: page 1 of a PDF (rendered for the screen; the
-  // print file re-renders it from the bytes) or the image itself.
-  async function ppsReadSideArt(file, riskKey) {
+  // One side's art from one file: page 1 of a PDF (or pageNo; rendered for the screen;
+  // the print file re-renders it from the bytes) or the image itself.
+  async function ppsReadSideArt(file, riskKey, pageNo) {
     if (!file) return null;
     if (file.type === "application/pdf") {
       const buf = await file.arrayBuffer();
@@ -2012,13 +2058,19 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
       window.PPS_PDF_RISKS = window.PPS_PDF_RISKS || {};
       window.PPS_PDF_RISKS[riskKey] = await window.ppsAnalyzePdfRisks(pdf);
-      const pg = await pdf.getPage(1);
+      _riskFilesRef.current[riskKey] = file;
+      const n = pageNo || 1;
+      if (n > pdf.numPages) return null;
+      const pg = await pdf.getPage(n);
       const vp = ppsPreviewViewport(pg);
       const c = document.createElement("canvas");
       c.width = vp.width; c.height = vp.height;
       await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
-      const [x0, y0, x1, y1] = pg.view;
-      return { dataUrl: c.toDataURL("image/jpeg", 0.85), file, pdfPage: 1, dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } };
+      // The page as it is seen: its /Rotate applied, as every render of it (preview and print)
+      // applies it. pg.view is the unrotated box, so a page turned 90° (the designer's portrait
+      // print file, uploaded again) was measured on its side and printed squashed (2026-10-13).
+      const v1 = pg.getViewport({ scale: 1 });
+      return { dataUrl: c.toDataURL("image/jpeg", 0.85), file, pdfPage: n, dims: { w: v1.width / 72, h: v1.height / 72 } };
     }
     const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
     if (!dataUrl) return null;
@@ -2046,17 +2098,18 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
         const buf = await file.arrayBuffer();
         await window.__ppsPdfJs;
         const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-        window.PPS_PDF_RISKS = {};
+        window.PPS_PDF_RISKS = window.PPS_PDF_RISKS || {};
         // Runs before the page renders below, so those reuse the operator lists this builds.
         window.PPS_PDF_RISKS.doc = await window.ppsAnalyzePdfRisks(pdf);
+        _riskFilesRef.current.doc = file;
         const renderPage = async (num) => {
           const pg = await pdf.getPage(num);
           const vp = ppsPreviewViewport(pg);
           const c = document.createElement("canvas");
           c.width = vp.width; c.height = vp.height;
           await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
-          const [x0, y0, x1, y1] = pg.view;
-          return { dataUrl: c.toDataURL("image/jpeg", 0.85), dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } };
+          const v1 = pg.getViewport({ scale: 1 });   // as seen, /Rotate applied (see ppsReadSideArt)
+          return { dataUrl: c.toDataURL("image/jpeg", 0.85), dims: { w: v1.width / 72, h: v1.height / 72 } };
         };
         _firstPdfPages = pdf.numPages;
         const front = await renderPage(1);
@@ -2067,7 +2120,9 @@ function SheetPreview({ longEdge, shortEdge, frontColor, onArtwork, onCoverArt, 
         }
       } else {
         const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
-        if (!dataUrl) return;
+        // A file the browser cannot read at all (a cloud placeholder, or moved or locked since it
+        // was chosen) left the drop zone on "Processing..." with no word (2026-10-13).
+        if (!dataUrl) { alert(ppsUnreadableImageMsg(file)); setLoading(false); return; }
         const dims = await new Promise((res) => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
         if (!dims) { alert(ppsUnreadableImageMsg(file)); setLoading(false); return; }
         setFrontArt({ dataUrl, file, dims });
@@ -2301,13 +2356,17 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
     const txSummaryRot = sameRot ? `${pageSources[0].tx.rotateSteps * 90}° clockwise${pageSources[0].tx.rotateSteps === 0 ? " (none)" : ""}` : "mixed (see Per-Side Detail)";
     const txSummaryScale = sameScale ? `${pageSources[0].tx.artScale}%` : "mixed (see Per-Side Detail)";
 
+    // Every original the order carries, and per side which file (and page) it was printed from.
+    // The manifest named the drop zone's last file as "the" raw file: replace a side through its
+    // own box and it described a file the order does not have (2026-10-13).
+    const _origNames = allOriginals().map(o => o.name);
     const manifestLines = [
       "ARTWORK MANIPULATION MANIFEST",
       "=" .repeat(50),
       `Generated: ${new Date().toISOString()}`,
       "",
       "── Source File ──",
-      `Filename: ${fileName || "unknown"}`,
+      `Filename: ${_origNames.join(" + ") || fileName || "unknown"}`,
       `Sides uploaded: ${pageSources.map(p => p.label).join(" + ")}`,
       "",
       "── Sticker Specifications ──",
@@ -2321,7 +2380,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
       `Scale: ${txSummaryScale}`,
       "",
       "── Deliverables ──",
-      `1. Raw file: ${fileName || "original upload"} (unmodified customer upload)`,
+      `1. Raw file${_origNames.length > 1 ? "s" : ""}: ${_origNames.join(", ") || fileName || "original upload"} (unmodified customer upload${_origNames.length > 1 ? "s" : ""})`,
       `2. Print-ready PDF: ${totalPages} side(s) at ${DPI} DPI, ${bleedW}″ × ${bleedH}″, JPEG quality 0.95`,
       `3. Screen previews: ${previewBlobs.filter(b => b).length} side images at 150 DPI, JPEG quality 0.85`,
       `4. This manifest`,
@@ -2332,6 +2391,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
       const dimsStr = p.ed ? `${p.ed.wIn}″ × ${p.ed.hIn}″ post-rotation` : "N/A";
       manifestLines.push(`  ${i + 1}: ${p.label}`);
       manifestLines.push(`    fit=${p.tx.fitMode} rotate=${p.tx.rotateSteps * 90}° scale=${p.tx.artScale}%  [${dimsStr}]`);
+      manifestLines.push(`    source file: ${p.art && p.art.file ? p.art.file.name + (p.art.pdfPage ? " (page " + p.art.pdfPage + ")" : "") : "unknown"}`);
       manifestLines.push(`    print source: ${p.renderedFrom || "unknown"}`);
     });
     manifestLines.push("", "── Notes ──");
@@ -2365,7 +2425,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
             {loading ? "Processing..." : "Drop your artwork here or click to upload"}
           </div>
           <div style={{ fontSize: 11, color: CC.light, marginTop: 4 }}>
-            PDF, JPG, PNG or TIFF · up to 200 MB — PDF: page 1 = front, page 2 = back (swappable after upload)
+            PDF, JPG or PNG · up to 200 MB — PDF: page 1 = front, page 2 = back (swappable after upload)
           </div>
         </div>
       ) : (
@@ -2422,19 +2482,20 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
                     await window.__ppsPdfJs;
                     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
                     window.PPS_PDF_RISKS[s] = await window.ppsAnalyzePdfRisks(pdf);
+                    _riskFilesRef.current[s] = file;
                     const pg = await pdf.getPage(1);
                     const vp = ppsPreviewViewport(pg);
                     const c = document.createElement("canvas");
                     c.width = vp.width; c.height = vp.height;
                     await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
-                    const [x0, y0, x1, y1] = pg.view;
-                    setArt({ dataUrl: c.toDataURL("image/jpeg", 0.85), file, pdfPage: 1, dims: { w: (x1 - x0) / 72, h: (y1 - y0) / 72 } });
+                    const v1 = pg.getViewport({ scale: 1 });   // as seen, /Rotate applied (see ppsReadSideArt)
+                    setArt({ dataUrl: c.toDataURL("image/jpeg", 0.85), file, pdfPage: 1, dims: { w: v1.width / 72, h: v1.height / 72 } });
                     setPageTransforms(p => ({ ...p, [s]: DEFAULT_TX }));
                     setApproved(false);
                     return;
                   }
                   const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(file); });
-                  if (!dataUrl) return;
+                  if (!dataUrl) { alert(ppsUnreadableImageMsg(file)); return; }
                   const dims = await new Promise(res => { const img = new Image(); img.onload = () => res({ w: img.naturalWidth / 300, h: img.naturalHeight / 300 }); img.onerror = () => res(null); img.src = dataUrl; });
                   if (!dims) { alert(ppsUnreadableImageMsg(file)); return; }
                   setArt({ dataUrl, file, dims });
@@ -2517,7 +2578,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
                     setApprovalPkg(pkg);
                     setApproved(true);
                     if (onArtwork) {
-                      const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
+                      const baseName = pkgBaseName();
                       const files = [];
                       // Every pristine original the customer gave us, byte-identical.
                       // rawFileRef only remembers the last file the main drop zone
@@ -2616,8 +2677,11 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
             <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <FitToggle />
             </div>
-            {approvalPkg && (approved || debug) && (() => {
-              const baseName = (fileName || "artwork").replace(/\.[^.]+$/, "");
+            {/* Approval-package downloads are a staff tool (%3414 unlock), not a customer control:
+                every customer saw "TEST DOWNLOAD" after approving until 2026-10-13. Same gate as
+                the brochure. */}
+            {approvalPkg && staffUnlocked && (() => {
+              const baseName = pkgBaseName();
               const sideNames = ["front", "back"];
               const dlFile = (blob, name) => {
                 if (!blob) return;
@@ -2629,7 +2693,7 @@ header{text-align:center;margin-bottom:20px}h1{font-size:1.3rem;font-weight:700;
               };
               const dlAll = async () => {
                 const files = [];
-                if (rawFileRef.current) files.push([rawFileRef.current, rawFileRef.current.name || baseName + "_raw"]);
+                allOriginals().forEach(o => files.push([o, o.name]));
                 if (approvalPkg.printReadyBlob) files.push([approvalPkg.printReadyBlob, baseName + "_print-ready.pdf"]);
                 approvalPkg.previewBlobs.forEach((b, i) => { if (b) files.push([b, `${baseName}_preview_${sideNames[i] || ("side_" + (i+1))}.jpg`]); });
                 if (approvalPkg.previewHtmlBlob) files.push([approvalPkg.previewHtmlBlob, baseName + "_preview.html"]);
@@ -3865,6 +3929,8 @@ function App() {
   const [qStatus, setQStatus] = useState("idle");
   const [qErrorMsg, setQErrorMsg] = useState("");
 
+  // The line being edited, as the cart has it, when its artwork comes back as "existing".
+  const editShapeRef = useRef(null);
   // ── Reorder: pre-fill from PPS_CONFIG.reorder (set by PHP from URL) ──
   useEffect(() => {
     const PPS = window.PPS_CONFIG || {};
@@ -3922,9 +3988,10 @@ function App() {
       if (rc.proofAddr && typeof rc.proofAddr === "object") setProofAddr(p => ({ ...p, ...rc.proofAddr }));
 
       // Existing artwork (edit mode — file already on server)
-      if (rc.artworkPath) setArtFiles({ type: "existing", path: rc.artworkPath });
+      if (rc.artworkPath) { setArtFiles({ type: "existing", path: rc.artworkPath }); editShapeRef.current = rc; }
       else if (PPS.existingArtwork && PPS.existingArtwork.path) {
         setArtFiles({ type: "existing", path: PPS.existingArtwork.path });
+        editShapeRef.current = rc;
       }
 
       // Open all sections so customer can see everything
@@ -4394,6 +4461,16 @@ function App() {
       return;
     }
     let _backBlank = false;   // stickers are one-sided: there is no back to be missing
+    // A cart edit that changes the size, sides, folds or perforations of a job the customer
+    // approved online: its approved print file and previews were made for the job as it was,
+    // and the edit used to carry them onto the new line (2026-10-13). Approve it again.
+    if (artFiles && artFiles.type === "existing" && proof === 0 && ppsEditShapeChanged(editShapeRef.current, { sizeMode, sizeLabel, longEdge: activeLongEdge, shortEdge: activeShortEdge })) {
+      alert("You've changed the size, sides, folds or perforations of this job since its artwork was approved. "
+        + "The approved print file was made for the job as it was, so it can't be used for this one.\n\n"
+        + "Please upload your artwork again under Artwork & Proofing and approve the new proof, "
+        + "or choose \"Email Art After Order\" and send it to us.");
+      return;
+    }
     if (artFiles && artFiles.type === "files" && !artFiles.approved && proof === 0) {
       alert("Please approve your artwork proof before ordering.\n\n"
         + "Open the proof in Artwork & Proofing, check your artwork against the bleed, "
@@ -4651,7 +4728,10 @@ function App() {
               the section must hide it, not unmount it. */}
           <Sec step={3} summary={secSummary.s3} keepMounted title="Artwork & Proofing" open={op.s3} onToggle={()=>tog("s3")}>
 
-            <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+            {/* Leaving "Upload Art" unmounts the uploader, but its files (approved package and all) stayed
+                on the order: change the size, come back, and Add to Order shipped the old print file at the
+                old size from an empty drop zone (2026-10-13). Leaving it now takes them off the order. */}
+            <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); if(Number(v)!==0.01) setArtFiles(a=>a&&a.type==="files"?{type:"none"}:a);}}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
 
             {artwork>=2&&artwork<4&&<TxtNum label={<Tip k="pages_edits">Pages Needing Edits</Tip>} value={artEditPages} onChange={setArtEditPages} min={0}/>}
 
@@ -4697,6 +4777,7 @@ function App() {
                   longEdge={activeLongEdge} shortEdge={activeShortEdge}
                   frontColor={frontColor}
                   onArtwork={setArtFiles}
+                  staffUnlocked={debugUnlocked}
                   onCoverArt={setCoverArt}
                   openPreviewModalRef={openPreviewModalRef}
                   debug={proofDebug}
