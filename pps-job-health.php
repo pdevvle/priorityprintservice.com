@@ -408,9 +408,13 @@ function pps_job_health_digest( $send = true ) {
     }
 }
 
+// The daily email is RETIRED (owner, 2026-10-15: "stop the daily exception briefs"; the
+// Paper Order screen in pps-paper-order.php is what replaced it). The event is unscheduled
+// on every site that still carries it and nothing listens for it, so a leftover event
+// fires into nothing. pps_job_health_digest( false ) still builds the text on demand, and
+// the per-order checks above (Print File Check, the order notes) are unchanged.
 add_action( 'init', function () {
-    if ( ! wp_next_scheduled( 'pps_job_health_digest' ) ) {
-        wp_schedule_event( time() + 300, 'daily', 'pps_job_health_digest' );
+    if ( wp_next_scheduled( 'pps_job_health_digest' ) && function_exists( 'wp_clear_scheduled_hook' ) ) {
+        wp_clear_scheduled_hook( 'pps_job_health_digest' );
     }
 } );
-add_action( 'pps_job_health_digest', function () { pps_job_health_digest( true ); } );
