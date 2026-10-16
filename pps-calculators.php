@@ -262,6 +262,11 @@ if ( file_exists( PPS_CALC_DIR . 'pps-paper-order.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-paper-order.php';
 }
 
+// Ship schedule: every open job by its must-ship date, also kept in an option.
+if ( file_exists( PPS_CALC_DIR . 'pps-ship-schedule.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-ship-schedule.php';
+}
+
 // Job health: the print file measured on the order. Its daily exceptions email was
 // retired on 2026-10-15 in favour of the Paper Order screen. Reads pps_reorder_contact_recipient() and
 // pps_paper_report_open_statuses() when they exist.
