@@ -196,5 +196,29 @@ ok( $denied, 'the screen refuses someone who cannot manage the shop' );
 $jh = file_get_contents( __DIR__ . '/pps-job-health.php' );
 ok( strpos( $jh, "wp_schedule_event( time() + 300, 'daily', 'pps_job_health_digest' )" ) === false && strpos( $jh, "wp_clear_scheduled_hook( 'pps_job_health_digest' )" ) !== false, 'the daily exceptions email is unscheduled, not scheduled' );
 
+// ── the Wednesday email (owner 2026-10-17) ──
+// Phoenix is UTC-7 all year. Fri Oct 16 2026 12:00 UTC → Wed Oct 21 07:00 MST = 14:00 UTC.
+ok( gmdate( 'Y-m-d H:i', pps_po_next_wednesday( strtotime( '2026-10-16 12:00 UTC' ) ) ) === '2026-10-21 14:00', 'from a Friday, the next send is Wednesday 7:00 shop time' );
+ok( gmdate( 'Y-m-d H:i', pps_po_next_wednesday( strtotime( '2026-10-21 13:00 UTC' ) ) ) === '2026-10-21 14:00', 'on a Wednesday before 7:00 it is that morning' );
+ok( gmdate( 'Y-m-d H:i', pps_po_next_wednesday( strtotime( '2026-10-21 14:00 UTC' ) ) ) === '2026-10-28 14:00', 'at or after 7:00 on a Wednesday it is the next week' );
+$GLOBALS['mails'] = array();
+function wp_mail( $to, $s, $b, $h = array() ) { $GLOBALS['mails'][] = compact( 'to', 's', 'b', 'h' ); return true; }
+if ( ! defined( 'DAY_IN_SECONDS' ) ) define( 'DAY_IN_SECONDS', 86400 );
+$built = pps_po_build();
+$mail  = pps_po_email( $built, pps_po_settings(), 'Wed Oct 21, 2026', 'https://x/wp-admin/admin.php?page=pps-paper-order' );
+ok( is_array( $mail ) && strpos( $mail['body'], 'parent sheets 28×40' ) !== false, 'the email carries the copy-paste order', $mail['body'] ?? null );
+ok( strpos( $mail['subject'], 'Paper order for Wed Oct 21, 2026: ' ) === 0 && strpos( $mail['subject'], 'to order' ) !== false, 'the subject says how many papers to order', $mail['subject'] );
+ok( strpos( $mail['body'], 'admin.php?page=pps-paper-order' ) !== false, 'the email links the screen' );
+ok( pps_po_email( array( 'jobs' => array(), 'needs' => array(), 'parked' => array(), 'scanned' => 3 ), pps_po_settings(), 'x', 'u' ) === null, 'no open job, no email' );
+$needs = array( 'jobs' => array(), 'parked' => array(), 'scanned' => 1, 'needs' => array( array( 'order' => 87455, 'customer' => 'Bahan Sadegh', 'product' => 'Custom Order' ) ) );
+$m2 = pps_po_email( $needs, pps_po_settings(), 'x', 'u' );
+ok( $m2 && strpos( $m2['body'], 'NOT COUNTED YET' ) !== false && strpos( $m2['body'], '#87455 Bahan Sadegh' ) !== false && strpos( $m2['subject'], '1 custom order to confirm' ) !== false, 'an unconfirmed custom order is named, not silently left out', $m2 );
+unset( $GLOBALS['opts'][ PPS_PO_EMAIL_LAST ] );
+pps_po_send_weekly();
+ok( count( $GLOBALS['mails'] ) === 1 && $GLOBALS['mails'][0]['to'] === 'Office@priorityprintservice.com', 'it mails the office, never orders@', $GLOBALS['mails'][0]['to'] ?? null );
+pps_po_send_weekly();
+ok( count( $GLOBALS['mails'] ) === 1, 'a second run inside six days does not mail twice' );
+ok( strpos( file_get_contents( __DIR__ . '/pps-paper-order.php' ), "wp_schedule_event( pps_po_next_wednesday(), 'weekly', PPS_PO_EMAIL_HOOK )" ) !== false, 'the event is scheduled weekly from a Wednesday' );
+
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> PAPER ORDER OK ($n checks)\n";
 exit( $fail ? 1 : 0 );

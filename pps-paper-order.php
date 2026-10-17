@@ -454,6 +454,77 @@ add_action( 'admin_post_pps_po_settings', function () {
     exit;
 } );
 
+/* ── The Wednesday email ─────────────────────────────────────────
+ * Owner, 2026-10-17: "email it weekly on wednesdays". The same copy-paste order the screen
+ * shows, mailed to the office (pps_reorder_contact_recipient(), never orders@) every
+ * Wednesday at 7:00 shop time, only when there is an open job. Custom lines still waiting for
+ * a paper plan are listed by name, because their paper is not in the totals until someone
+ * confirms it on the screen. The last send is kept in `pps_paper_order_last_email`; a send
+ * inside six days of the last one is skipped, so a doubled cron event cannot mail twice. */
+
+define( 'PPS_PO_EMAIL_HOOK', 'pps_paper_order_weekly' );
+define( 'PPS_PO_EMAIL_LAST', 'pps_paper_order_last_email' );
+
+function pps_po_email_tz() {
+    $tz = function_exists( 'pps_shop_timezone' ) ? pps_shop_timezone() : 'America/Phoenix';
+    try { return new DateTimeZone( $tz ); } catch ( \Throwable $e ) { return new DateTimeZone( 'America/Phoenix' ); }
+}
+
+/** The next Wednesday 07:00 in the shop's timezone, as a timestamp (today counts if before 7). */
+function pps_po_next_wednesday( $now = null ) {
+    $tz = pps_po_email_tz();
+    $d  = ( new DateTimeImmutable( '@' . ( $now ?? time() ) ) )->setTimezone( $tz );
+    $t  = $d->setTime( 7, 0 );
+    if ( (int) $d->format( 'N' ) !== 3 || $t->getTimestamp() <= $d->getTimestamp() ) $t = $d->modify( 'next wednesday' )->setTime( 7, 0 );
+    return $t->getTimestamp();
+}
+
+/** Subject and body, or null when there is no open job. Pure apart from what it is given. */
+function pps_po_email( array $built, array $settings, $when, $screen_url ) {
+    if ( ! $built['jobs'] && ! $built['needs'] ) return null;
+    $groups = pps_po_aggregate( $built['jobs'], $settings );
+    $body   = pps_po_text( $groups, $settings, $when, false );
+    $stocked = array();
+    foreach ( $groups as $g ) {
+        if ( ! $g['in_stock'] ) continue;
+        $stocked[] = '- ' . $g['label'] . ': ' . pps_po_n( $g['total'] ) . ' sheets ' . str_replace( 'x', '×', $g['sheet'] );
+    }
+    if ( $stocked ) $body .= "\nStocked papers these jobs also use (check the shelf):\n" . implode( "\n", $stocked ) . "\n";
+    if ( $built['needs'] ) {
+        $body .= "\nNOT COUNTED YET: custom orders with no paper confirmed. Set their paper on the screen:\n";
+        foreach ( $built['needs'] as $n ) $body .= '- #' . $n['order'] . ' ' . $n['customer'] . ' — ' . $n['product'] . "\n";
+    }
+    $body .= "\nOpen the Paper Order screen: " . $screen_url . "\n";
+    $to_order = 0;
+    foreach ( $groups as $g ) if ( ! $g['in_stock'] ) $to_order++;
+    $subject = 'Paper order for ' . $when . ': ' . ( $to_order ? $to_order . ' paper' . ( $to_order === 1 ? '' : 's' ) . ' to order' : 'nothing to order' )
+             . ( $built['needs'] ? ', ' . count( $built['needs'] ) . ' custom order' . ( count( $built['needs'] ) === 1 ? '' : 's' ) . ' to confirm' : '' );
+    return array( 'subject' => $subject, 'body' => $body );
+}
+
+function pps_po_send_weekly( $force = false ) {
+    $last = (int) get_option( PPS_PO_EMAIL_LAST, 0 );
+    if ( ! $force && $last && time() - $last < 6 * DAY_IN_SECONDS ) return false;
+    $when = ( new DateTimeImmutable( 'now', pps_po_email_tz() ) )->format( 'D M j, Y' );
+    $mail = pps_po_email( pps_po_build(), pps_po_settings(), $when, admin_url( 'admin.php?page=pps-paper-order' ) );
+    update_option( PPS_PO_EMAIL_LAST, time(), false );
+    if ( ! $mail ) return false;
+    $to = function_exists( 'pps_reorder_contact_recipient' ) ? pps_reorder_contact_recipient() : 'Office@priorityprintservice.com';
+    return wp_mail( $to, $mail['subject'], $mail['body'], array( 'Content-Type: text/plain; charset=UTF-8' ) );
+}
+add_action( PPS_PO_EMAIL_HOOK, 'pps_po_send_weekly' );
+
+/** Keep exactly one weekly event, landing on a Wednesday at 7:00 shop time. */
+add_action( 'init', function () {
+    $next = wp_next_scheduled( PPS_PO_EMAIL_HOOK );
+    if ( $next ) {
+        $d = ( new DateTimeImmutable( '@' . $next ) )->setTimezone( pps_po_email_tz() );
+        if ( (int) $d->format( 'N' ) === 3 && $d->format( 'H:i' ) === '07:00' ) return;
+        wp_clear_scheduled_hook( PPS_PO_EMAIL_HOOK );
+    }
+    wp_schedule_event( pps_po_next_wednesday(), 'weekly', PPS_PO_EMAIL_HOOK );
+} );
+
 /* ── The screen ──────────────────────────────────────────────── */
 
 add_action( 'admin_menu', function () {
@@ -487,6 +558,10 @@ function pps_po_render_admin() {
     echo '<p>Paper for every open job (' . esc_html( implode( ', ', pps_po_statuses() ) ) . '), from the yield each job was priced on, '
        . 'grouped by paper and press sheet, with overs, and converted to ' . esc_html( $parent ) . ' parent sheets. '
        . esc_html( sprintf( '%d open orders scanned.', (int) $built['scanned'] ) ) . '</p>';
+    $last = (int) get_option( PPS_PO_EMAIL_LAST, 0 );
+    echo '<p style="color:#555">Emailed to ' . esc_html( function_exists( 'pps_reorder_contact_recipient' ) ? pps_reorder_contact_recipient() : 'Office@priorityprintservice.com' )
+       . ' every Wednesday at 7:00 when there is an open job. '
+       . esc_html( $last ? 'Last checked ' . ( new DateTimeImmutable( '@' . $last ) )->setTimezone( pps_po_email_tz() )->format( 'D M j, g:i a' ) . '.' : 'Not sent yet.' ) . '</p>';
 
     echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin:8px 0 16px">'
        . wp_nonce_field( 'pps_po_settings', '_wpnonce', true, false ) . '<input type="hidden" name="action" value="pps_po_settings">'
