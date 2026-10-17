@@ -299,8 +299,8 @@ a{color:#2563eb;cursor:pointer;text-decoration:none}
 input{width:120px} .row{padding:4px 0;border-top:1px solid rgba(128,128,128,.12)}
 </style></head>
 <body><div id="app" class="muted">Loading…</div>
-<script src="https://integrations.missiveapp.com/missive.js"></script>
-<script>
+<script data-cfasync="false" src="https://integrations.missiveapp.com/missive.js"></script>
+<script data-cfasync="false">
 (function(){
 'use strict';
 var CFG = {$cfg};
