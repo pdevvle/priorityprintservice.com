@@ -148,6 +148,24 @@ function pps_job_invoice_is_unpaid( $order ) {
  */
 function pps_job_invoice_pay_link( $order ) {
     if ( ! $order || ! pps_job_invoice_is_unpaid( $order ) ) return '';
+
+    // Raised through the API: the invoice is created on first request and the
+    // link fetched fresh each time, because nothing authoritative says how long
+    // one stays valid and a stale link in the database is worse than a round
+    // trip. Idempotent, so asking twice does not invoice twice.
+    if ( 'qbo_api' === (string) $order->get_meta( '_pps_pay_source' )
+         && function_exists( 'pps_qbo_invoice_order' ) ) {
+        $link = pps_qbo_invoice_order( $order );
+        if ( is_wp_error( $link ) ) {
+            // Never silent: without this the customer simply sees no button and
+            // nobody finds out until they ask why they were not charged.
+            $order->add_order_note( 'Could not produce a QuickBooks payment link: ' . $link->get_error_message() );
+            $order->save();
+            return '';
+        }
+        return (string) $link;
+    }
+
     $ext = (string) $order->get_meta( '_pps_pay_link' );
     if ( $ext ) return $ext;
     return $order->needs_payment() ? $order->get_checkout_payment_url() : '';
