@@ -6,10 +6,18 @@
  * AJAX endpoints that bridge it to WooCommerce + the existing Google Drive
  * connection (pps-gdrive.php OAuth — no separate Drive login):
  *
- *   pps_impose_app       — stream the tool HTML with PPS_IMPOSE_CFG injected
- *   pps_impose_list      — recent orders with Drive artwork + parsed spec
- *   pps_impose_download  — proxy an artwork file from Drive to the browser
- *   pps_impose_upload    — file the imposed PDF back into the order's folder
+ *   pps_impose_app        — stream the tool HTML with PPS_IMPOSE_CFG injected
+ *   pps_impose_list       — open orders with Drive artwork + parsed spec
+ *   pps_impose_download   — proxy an artwork file from Drive to the browser
+ *   pps_impose_upload     — file the imposed PDF back into the order's folder
+ *   pps_impose_set_status — move an order to another WooCommerce status
+ *   pps_impose_set_hidden — park an order out of the queue without touching it
+ *
+ * Queue visibility: the queue is a WORK LIST, not an order report. It shows
+ * orders that still need imposing, so completed orders drop off it by status
+ * and anything else the operator is done with can be parked with Hide
+ * (`_pps_impose_hidden` order meta). Neither is destructive and both are
+ * reversible from the queue itself with "Show completed & hidden".
  *
  * The imposition engine itself runs entirely in the browser
  * (imposition-tool.html, pdf-lib) — no PDF processing happens in PHP.
@@ -63,14 +71,39 @@ add_action( 'wp_ajax_pps_impose_app', function() {
             $size_presets = $conf['size_presets'];
         }
     }
+    // Statuses come from WooCommerce itself (wc_get_order_statuses) so any
+    // custom status the shop registers shows up without touching this file.
+    $statuses = function_exists( 'wc_get_order_statuses' ) ? wc_get_order_statuses() : array();
     $cfg  = wp_json_encode( array(
-        'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
-        'nonce'       => wp_create_nonce( PPS_IMPOSE_NONCE ),
-        'gdrive'      => function_exists( 'pps_gdrive_is_connected' ) ? pps_gdrive_is_connected() : false,
-        'sizePresets' => $size_presets,
+        'ajaxUrl'       => admin_url( 'admin-ajax.php' ),
+        'nonce'         => wp_create_nonce( PPS_IMPOSE_NONCE ),
+        'gdrive'        => function_exists( 'pps_gdrive_is_connected' ) ? pps_gdrive_is_connected() : false,
+        'sizePresets'   => $size_presets,
+        'orderStatuses' => $statuses,          // { 'wc-processing': 'Processing', … }
+        'doneStatuses'  => pps_impose_done_statuses(),
+        // The imposed PDF comes back through admin-ajax as an ordinary form
+        // POST, so PHP's upload limits apply; tell the tool so it can refuse
+        // with the real reason instead of the "Unauthorized" a truncated POST
+        // produces (the nonce is lost with the rest of the body).
+        'maxUpload'     => (int) wp_max_upload_size(),
     ), JSON_HEX_TAG );
     $inject = '<script>window.PPS_IMPOSE_CFG = ' . $cfg . ';</script>';
     $html   = str_replace( '</head>', $inject . "\n</head>", $html );
+    // Serve the runtime libraries from the plugin, not from public CDNs. The
+    // tool is prepress infrastructure: if unpkg or cdnjs is slow, blocked by
+    // an office firewall, or simply down, the queue must still open. The
+    // standalone (GitHub Pages) copy keeps the CDN tags; only this wp-admin
+    // stream is rewritten, and only for a vendored file that is present and
+    // the right size. pps_impose_vendor_provision() fills the directory.
+    $vendor_dir = PPS_CALC_DIR . 'imposition-vendor/';
+    $vendor_url = PPS_CALC_URL . 'imposition-vendor/';
+    pps_impose_vendor_provision( $vendor_dir );
+    foreach ( pps_impose_vendor_map() as $cdn => $lib ) {
+        $path = $vendor_dir . $lib['file'];
+        if ( file_exists( $path ) && filesize( $path ) === $lib['bytes'] ) {
+            $html = str_replace( $cdn, esc_url( $vendor_url . $lib['file'] . '?v=' . filemtime( $path ) ), $html );
+        }
+    }
     header( 'Content-Type: text/html; charset=utf-8' );
     header( 'X-Frame-Options: SAMEORIGIN' );
     echo $html;
@@ -78,8 +111,88 @@ add_action( 'wp_ajax_pps_impose_app', function() {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// VENDORED RUNTIME (react, react-dom, babel, pdf.js + worker, pdf-lib)
+// ═══════════════════════════════════════════════════════════════
+// The six libraries the tool loads are pinned by URL, byte size AND SHA-256.
+// The reference copies live in the repo (imposition-vendor/ — the same bytes
+// the headless regression harness runs against). The server copy is
+// self-provisioned: the deploy tooling cannot create a sub-directory, so on
+// the first load of the imposition page PHP makes the directory and fetches
+// each file from its pinned CDN URL, keeping it only if the hash matches.
+// A file that fails (network, hash) is not written and the page falls back
+// to the CDN tag for that one file; a failed attempt is not retried for an
+// hour so a blocked CDN cannot slow every page load.
+//
+// Changing a library version means: new file in imposition-vendor/ in the
+// repo, new URL in imposition-tool.html, new hash/size here — same commit.
+function pps_impose_vendor_map() {
+    return array(
+        'https://unpkg.com/react@18.3.1/umd/react.production.min.js' => array(
+            'file' => 'react.production.min.js', 'bytes' => 10751,
+            'sha256' => 'd949f1c3687aedadcedac85261865f29b17cd273997e7f6b2bfc53b2f9d4c4dd' ),
+        'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js' => array(
+            'file' => 'react-dom.production.min.js', 'bytes' => 131835,
+            'sha256' => '35f4f974f4b2bcd44da73963347f8952e341f83909e4498227d4e26b98f66f0d' ),
+        'https://unpkg.com/@babel/standalone@7.26.9/babel.min.js' => array(
+            'file' => 'babel.min.js', 'bytes' => 3015411,
+            'sha256' => 'f94a254a8ff8019c28fcc560090860ea0918f30b5484a47eba1ef63c8dab1880' ),
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js' => array(
+            'file' => 'pdf.min.js', 'bytes' => 320004,
+            'sha256' => '5b5799e6f8c680663207ac5b42ee14eed2a406fa7af48f50c154f0c0b1566946' ),
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js' => array(
+            'file' => 'pdf.worker.min.js', 'bytes' => 1087212,
+            'sha256' => 'feabdf309770ed24bba31a5467836cdc8cf639c705af27d52b585b041bb8527b' ),
+        'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js' => array(
+            'file' => 'pdf-lib.min.js', 'bytes' => 525099,
+            'sha256' => '0f9a5cad07941f0826586c94e089d89b918c46e5c17cf2d5a3c6f666e3bc694f' ),
+    );
+}
+
+function pps_impose_vendor_provision( $dir ) {
+    $map     = pps_impose_vendor_map();
+    $missing = array();
+    foreach ( $map as $cdn => $lib ) {
+        $path = $dir . $lib['file'];
+        if ( ! file_exists( $path ) || filesize( $path ) !== $lib['bytes'] ) $missing[ $cdn ] = $lib;
+    }
+    if ( ! $missing ) return;
+    if ( get_transient( 'pps_impose_vendor_backoff' ) ) return;
+    if ( ! wp_mkdir_p( $dir ) ) { set_transient( 'pps_impose_vendor_backoff', 1, HOUR_IN_SECONDS ); return; }
+    if ( ! file_exists( $dir . 'index.html' ) ) {
+        @file_put_contents( $dir . 'index.html', "<!-- directory guard: the imposition tool's vendored runtime libraries live here; nothing to index. -->\n" );
+    }
+    $failed = 0;
+    foreach ( $missing as $cdn => $lib ) {
+        $r = wp_remote_get( $cdn, array( 'timeout' => 30, 'redirection' => 3 ) );
+        if ( is_wp_error( $r ) || 200 !== (int) wp_remote_retrieve_response_code( $r ) ) { $failed++; continue; }
+        $body = wp_remote_retrieve_body( $r );
+        if ( strlen( $body ) !== $lib['bytes'] || hash( 'sha256', $body ) !== $lib['sha256'] ) { $failed++; continue; }
+        if ( false === @file_put_contents( $dir . $lib['file'], $body ) ) { $failed++; continue; }
+    }
+    if ( $failed ) set_transient( 'pps_impose_vendor_backoff', 1, HOUR_IN_SECONDS );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // DRIVE HELPERS (read side — upload reuses pps_gdrive_upload_file)
 // ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// QUEUE VISIBILITY
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Statuses that mean "this job is off the prepress work list".
+ * Completed and the terminal states; filterable so the shop can add its own
+ * (e.g. a custom wc-shipped) without editing the plugin.
+ */
+function pps_impose_done_statuses() {
+    return apply_filters( 'pps_impose_done_statuses', array( 'completed', 'cancelled', 'refunded', 'failed', 'trash' ) );
+}
+
+/** Orders the operator has parked. Order meta, so it travels with the order. */
+function pps_impose_is_hidden( $order ) {
+    return $order->get_meta( '_pps_impose_hidden' ) === 'yes';
+}
 
 function pps_impose_drive_list( $folder_id, $bypass_cache = false ) {
     // The queue lists many orders in one request — cache each folder listing
@@ -192,21 +305,33 @@ function pps_impose_calc_type( $meta, $item ) {
  * else any other PDF that isn't one of our outputs or a preview deliverable.
  */
 function pps_impose_pick_artwork( $files ) {
+    // PDF wins when present, but a raster is artwork too. The engine wraps
+    // jpg/png into a single-page PDF at load, so anything here can be imposed.
+    // Order 87045 is why: the customer's two JPGs sat in Drive, correct and
+    // complete, while the queue reported no artwork at all — the filter below
+    // used to require .pdf and silently skipped everything else.
     $print_ready = null;
     $raw         = null;
+    $raster      = null;
     foreach ( $files as $f ) {
         $name = $f['name'] ?? '';
-        if ( ! preg_match( '/\.pdf$/i', $name ) ) continue;
+        $is_pdf    = (bool) preg_match( '/\.pdf$/i', $name );
+        $is_raster = (bool) preg_match( '/\.(jpe?g|png)$/i', $name );
+        if ( ! $is_pdf && ! $is_raster ) continue;   // tiff/eps/ai/indd: not impose-able here
         if ( pps_impose_is_output_name( $name ) ) continue;
         if ( preg_match( '/^CLEAN[_\s-]/i', $name ) ) continue; // sanitized copies are outputs, not artwork
         if ( preg_match( '/_preview/i', $name ) ) continue;
+        if ( $is_raster ) {
+            if ( ! $raster ) $raster = $f;
+            continue;
+        }
         if ( preg_match( '/_print-ready\.pdf$/i', $name ) ) {
             $print_ready = $f;
         } elseif ( ! $raw ) {
             $raw = $f;
         }
     }
-    return $print_ready ?: $raw;
+    return $print_ready ?: ( $raw ?: $raster );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -222,17 +347,34 @@ add_action( 'wp_ajax_pps_impose_list', function() {
     }
 
     $bypass = ! empty( $_POST['refresh'] );
+    // The queue is a work list: by default it carries only orders still to be
+    // imposed. "Show completed & hidden" widens it so nothing is unreachable —
+    // re-imposing a finished job stays possible, it just isn't the default view.
+    $show_all = ! empty( $_POST['show_hidden'] );
+    $open     = array( 'wc-processing', 'wc-on-hold', 'wc-pending' );
+    $done     = array_map( function( $s ) { return 'wc-' . $s; }, pps_impose_done_statuses() );
+    $done     = array_values( array_diff( $done, array( 'wc-trash' ) ) ); // never list trashed orders
+    // Hidden orders are filtered in PHP (the flag is order meta and HPOS/legacy
+    // meta queries differ), so ask for enough rows that filtering still fills
+    // the list. The hidden check runs BEFORE any Drive call, so skipped orders
+    // cost nothing.
     $orders = wc_get_orders( array(
-        'limit'   => 30,
+        'limit'   => 60,
         'orderby' => 'date',
         'order'   => 'DESC',
-        'status'  => array( 'wc-processing', 'wc-on-hold', 'wc-pending', 'wc-completed' ),
+        'status'  => $show_all ? array_merge( $open, $done ) : $open,
     ) );
 
     $items = array();
+    $shown = 0;
     foreach ( $orders as $order ) {
+        if ( $shown >= 30 ) break;
+        $hidden = pps_impose_is_hidden( $order );
+        if ( $hidden && ! $show_all ) continue;
+
         $folder_id = $order->get_meta( '_pps_gdrive_folder_id' );
         if ( ! $folder_id ) continue;
+        $shown++;
 
         $files = pps_impose_drive_list( $folder_id, $bypass );
 
@@ -253,8 +395,10 @@ add_action( 'wp_ajax_pps_impose_list', function() {
 
             // Trim dims: flat customs carry longEdge/shortEdge; saddle customs
             // carry customLong/customShort; presets parse out of the size
-            // label ("8.5×11 …"). Client re-derives width/height for saddle
-            // (spine orientation) from size_label / bind_dir.
+            // label ("8.5×11 …"). Client re-derives width/height for every
+            // BOUND product (saddle / perfect bound / coupon — spine on the
+            // height edge) from size_label / bind_dir; the long/short pair
+            // here cannot carry orientation.
             $long = 0; $short = 0;
             if ( ( $m['sizeMode'] ?? '' ) !== 'preset' && ! empty( $m['longEdge'] ) && ! empty( $m['shortEdge'] ) ) {
                 $long  = floatval( $m['longEdge'] );
@@ -278,6 +422,10 @@ add_action( 'wp_ajax_pps_impose_list', function() {
             $items[] = array(
                 'order_id'      => $order->get_id(),
                 'item_id'       => $item_id,
+                'status'        => $order->get_status(),
+                'status_label'  => function_exists( 'wc_get_order_status_name' ) ? wc_get_order_status_name( $order->get_status() ) : $order->get_status(),
+                'hidden'        => $hidden,
+                'order_url'     => $order->get_edit_order_url(),
                 'product'       => $item->get_name(),
                 'job_name'      => (string) ( $m['jobName'] ?? '' ),
                 'calc'          => pps_impose_calc_type( $m, $item ),
@@ -290,6 +438,12 @@ add_action( 'wp_ajax_pps_impose_list', function() {
                 'folder_url'    => 'https://drive.google.com/drive/folders/' . rawurlencode( $folder_id ),
                 'art_file_id'   => $art['id'] ?? '',
                 'art_file_name' => $art['name'] ?? '',
+                // Approval binding: the SHA-256 the calculator computed over the
+                // print-ready bytes at the moment of approval. The tool hashes
+                // the file it downloads and compares — a mismatch is advisory
+                // (it still imposes, flagged UNAPPROVED), never a refusal.
+                // Empty for pre-hash orders, which impose unflagged.
+                'proof_hash'    => (string) $item->get_meta( '_pps_proof_hash' ),
                 'imposed'       => $imposed,
                 'files_listed'  => is_array( $files ),
             );
@@ -298,6 +452,147 @@ add_action( 'wp_ajax_pps_impose_list', function() {
 
     wp_send_json_success( array( 'items' => $items ) );
 });
+
+// ═══════════════════════════════════════════════════════════════
+// ORDER STATUS — move an order from the queue
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'wp_ajax_pps_impose_set_status', function() {
+    if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( PPS_IMPOSE_NONCE, 'nonce', false ) ) {
+        wp_send_json_error( array( 'message' => 'Unauthorized' ), 403 );
+    }
+    if ( ! function_exists( 'wc_get_order' ) ) {
+        wp_send_json_error( array( 'message' => 'WooCommerce not active' ) );
+    }
+    $order_id = intval( $_POST['order_id'] ?? 0 );
+    $order    = $order_id ? wc_get_order( $order_id ) : false;
+    if ( ! $order ) wp_send_json_error( array( 'message' => 'Order not found' ) );
+
+    // Validate against WooCommerce's own registry rather than a hard-coded
+    // list, so custom statuses work and anything unregistered is refused.
+    $status = sanitize_key( wp_unslash( $_POST['status'] ?? '' ) );
+    $status = preg_replace( '/^wc-/', '', $status );
+    $valid  = array_map( function( $s ) { return preg_replace( '/^wc-/', '', $s ); },
+                         array_keys( wc_get_order_statuses() ) );
+    if ( ! $status || ! in_array( $status, $valid, true ) ) {
+        wp_send_json_error( array( 'message' => 'Unknown order status: ' . $status ) );
+    }
+    $from = $order->get_status();
+    if ( $from === $status ) {
+        wp_send_json_success( array( 'status' => $status, 'changed' => false ) );
+    }
+
+    // SILENT by owner's decision (2026-09-02): set_status() + save() writes the
+    // status without running the transition, so none of WooCommerce's
+    // customer-facing status emails fire. A prepress queue is a production-floor
+    // tool — moving a job through it must not mail the customer as a side
+    // effect. Use the order screen when a customer email IS wanted.
+    //
+    // Trade-off accepted with it: anything else hooked on the transition
+    // (woocommerce_order_status_* actions — stock reduction, analytics,
+    // fulfilment integrations) also does not run. The order note below is the
+    // audit trail.
+    $user = wp_get_current_user();
+    $order->set_status( $status );
+    $order->add_order_note( sprintf(
+        'Status changed from %s to %s in the Imposition queue by %s (silent — no customer email sent).',
+        $from,
+        $status,
+        $user && $user->display_name ? $user->display_name : 'an administrator'
+    ) );
+    $order->save();
+
+    wp_send_json_success( array(
+        'status'  => $order->get_status(),
+        'label'   => wc_get_order_status_name( $order->get_status() ),
+        'changed' => true,
+        'done'    => in_array( $order->get_status(), pps_impose_done_statuses(), true ),
+    ) );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// HIDE — park an order out of the queue (no order data touched)
+// ═══════════════════════════════════════════════════════════════
+
+add_action( 'wp_ajax_pps_impose_set_hidden', function() {
+    if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( PPS_IMPOSE_NONCE, 'nonce', false ) ) {
+        wp_send_json_error( array( 'message' => 'Unauthorized' ), 403 );
+    }
+    if ( ! function_exists( 'wc_get_order' ) ) {
+        wp_send_json_error( array( 'message' => 'WooCommerce not active' ) );
+    }
+    $order_id = intval( $_POST['order_id'] ?? 0 );
+    $order    = $order_id ? wc_get_order( $order_id ) : false;
+    if ( ! $order ) wp_send_json_error( array( 'message' => 'Order not found' ) );
+
+    $hidden = ! empty( $_POST['hidden'] );
+    // Visibility only — the order's status, items and artwork are untouched, so
+    // this is always reversible and never affects the customer.
+    if ( $hidden ) $order->update_meta_data( '_pps_impose_hidden', 'yes' );
+    else           $order->delete_meta_data( '_pps_impose_hidden' );
+    $order->save();
+
+    wp_send_json_success( array( 'order_id' => $order_id, 'hidden' => $hidden ) );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// SAVED SETUPS — named copies of the tool's control column
+// ═══════════════════════════════════════════════════════════════
+// One JSON list in wp_options, shared by everyone who uses the queue; the
+// tool sends the whole list on every save (last writer wins — a two-person
+// prepress desk, not a collaborative editor). Values are sanitised to
+// scalars and small nested arrays; nothing in a setup is ever executed.
+
+add_action( 'wp_ajax_pps_impose_setups', function() {
+    if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( PPS_IMPOSE_NONCE, 'nonce', false ) ) {
+        wp_send_json_error( array( 'message' => 'Unauthorized' ), 403 );
+    }
+    $op = sanitize_key( $_POST['op'] ?? 'get' );
+    if ( $op === 'save' ) {
+        $raw = (string) wp_unslash( $_POST['setups'] ?? '' );
+        if ( strlen( $raw ) > 512 * 1024 ) wp_send_json_error( array( 'message' => 'Setups list is too large (512 KB cap) — delete some.' ) );
+        $list = json_decode( $raw, true );
+        if ( ! is_array( $list ) ) wp_send_json_error( array( 'message' => 'Setups must be a JSON list.' ) );
+        $clean = pps_impose_setups_sanitize( $list );
+        update_option( 'pps_impose_setups', wp_json_encode( $clean ), false );
+        wp_send_json_success( array( 'setups' => $clean ) );
+    }
+    $stored = json_decode( (string) get_option( 'pps_impose_setups', '[]' ), true );
+    wp_send_json_success( array( 'setups' => is_array( $stored ) ? pps_impose_setups_sanitize( $stored ) : array() ) );
+});
+
+function pps_impose_setups_sanitize( $list ) {
+    $out = array();
+    foreach ( array_slice( array_values( $list ), 0, 200 ) as $s ) {
+        if ( ! is_array( $s ) || ! isset( $s['spec'] ) || ! is_array( $s['spec'] ) ) continue;
+        $id   = substr( preg_replace( '/[^a-z0-9_-]/i', '', (string) ( $s['id'] ?? '' ) ), 0, 40 );
+        $name = mb_substr( sanitize_text_field( (string) ( $s['name'] ?? '' ) ), 0, 80 );
+        if ( $id === '' || $name === '' ) continue;
+        $out[] = array(
+            'id'    => $id,
+            'name'  => $name,
+            'spec'  => pps_impose_setups_value( $s['spec'], 0 ),
+            'saved' => sanitize_text_field( (string) ( $s['saved'] ?? '' ) ),
+        );
+    }
+    return $out;
+}
+
+function pps_impose_setups_value( $v, $depth ) {
+    if ( $depth > 4 ) return null;
+    if ( is_bool( $v ) || is_null( $v ) || is_int( $v ) || is_float( $v ) ) return $v;
+    if ( is_string( $v ) ) return mb_substr( sanitize_text_field( $v ), 0, 200 );
+    if ( is_array( $v ) ) {
+        $o = array(); $n = 0;
+        foreach ( $v as $k => $x ) {
+            if ( ++$n > 500 ) break;
+            $key = is_int( $k ) ? $k : preg_replace( '/[^a-zA-Z0-9_.-]/', '', (string) $k );
+            $o[ $key ] = pps_impose_setups_value( $x, $depth + 1 );
+        }
+        return $o;
+    }
+    return null;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // DOWNLOAD — proxy an artwork PDF from Drive to the browser
@@ -358,8 +653,21 @@ add_action( 'wp_ajax_pps_impose_upload', function() {
     $folder_id = $order->get_meta( '_pps_gdrive_folder_id' );
     if ( ! $folder_id ) wp_send_json_error( array( 'message' => 'Order has no Drive folder' ) );
 
+    if ( ! empty( $_FILES['file']['error'] ) ) {
+        $codes = array(
+            UPLOAD_ERR_INI_SIZE  => 'the file exceeds PHP upload_max_filesize (' . size_format( wp_max_upload_size() ) . ')',
+            UPLOAD_ERR_FORM_SIZE => 'the file exceeds the form limit',
+            UPLOAD_ERR_PARTIAL   => 'the upload was cut off part-way',
+            UPLOAD_ERR_NO_FILE   => 'no file was sent',
+            UPLOAD_ERR_NO_TMP_DIR => 'the server has no temp directory',
+            UPLOAD_ERR_CANT_WRITE => 'the server could not write the temp file',
+            UPLOAD_ERR_EXTENSION => 'a PHP extension blocked the upload',
+        );
+        $why = $codes[ (int) $_FILES['file']['error'] ] ?? ( 'upload error ' . (int) $_FILES['file']['error'] );
+        wp_send_json_error( array( 'message' => 'Upload rejected: ' . $why . '.' ) );
+    }
     if ( empty( $_FILES['file'] ) || ! is_uploaded_file( $_FILES['file']['tmp_name'] ) ) {
-        wp_send_json_error( array( 'message' => 'No file received' ) );
+        wp_send_json_error( array( 'message' => 'No file received — if the PDF is large, PHP may have dropped the whole POST (post_max_size ' . ini_get( 'post_max_size' ) . ').' ) );
     }
     // IMPOSED_ = press-ready sheet layout; CLEAN_ = 1:1 sanitized copy of the
     // customer file (active content stripped) — safe for staff to open.
