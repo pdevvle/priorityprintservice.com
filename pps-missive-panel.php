@@ -292,7 +292,7 @@ h2{font-size:14px;margin:4px 0 6px} h3{font-size:12px;margin:12px 0 4px;text-tra
 .bar{position:relative;height:8px;background:rgba(128,128,128,.18);border-radius:4px;margin:6px 0 2px}
 .bar i{position:absolute;top:0;bottom:0;background:#3b82f6;border-radius:4px}
 .bar b{position:absolute;top:-3px;width:2px;height:14px;background:#c0392b}
-table{border-collapse:collapse;width:100%} td{padding:2px 4px;vertical-align:top;border-top:1px solid rgba(128,128,128,.12)}
+table{border-collapse:collapse;width:100%} td{padding:2px 4px;vertical-align:top;border-top:1px solid rgba(128,128,128,.12);overflow-wrap:anywhere}
 td:first-child{color:#888;white-space:nowrap}
 a{color:#2563eb;cursor:pointer;text-decoration:none}
 .preview{opacity:.65;font-size:12px} .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
