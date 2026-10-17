@@ -73,6 +73,12 @@ function pps_print_file_check( $abs_path ) {
         $h = abs( (float) $m[4] - (float) $m[2] ) / 72;
         if ( $w > 0 && $h > 0 ) $out['sheet_in'] = array( round( $w, 3 ), round( $h, 3 ) );
     }
+    // A page turned a quarter by /Rotate sits on the sheet the other way round: a portrait
+    // postcard from the online designer goes to print as its own PDF with each page turned onto
+    // the wide sheet (2026-10-12), so its 5.25×7.25 in page is a 7.25×5.25 in sheet.
+    if ( $out['sheet_in'] && preg_match( '/\/Rotate\s+(-?\d+)/', $s, $rm ) && ( ( (int) $rm[1] % 180 ) + 180 ) % 180 === 90 ) {
+        $out['sheet_in'] = array_reverse( $out['sheet_in'] );
+    }
 
     // Image XObjects: read /Width and /Height out of the dictionary around each one.
     $images = array();
@@ -114,7 +120,14 @@ function pps_print_file_check( $abs_path ) {
     // "62 DPI" in an order note (2026-09-25). When in doubt this falls through to
     // "mixed", which makes no resolution claim at all: a check that warns on good
     // files teaches people to ignore it.
-    if ( $out['pages'] > 0 && $sheet_imgs === $out['pages'] && count( $images ) === $out['pages'] && $min !== null ) {
+    //
+    // A file with a PDF/X output intent is never that shape: the calculators' jsPDF rasters carry
+    // none, and the online designer's vector PDFs (print-ready since 2026-10-12) always do. One
+    // photo per side in the card's proportions made a designer file read "raster · 192 DPI" with a
+    // BELOW PRINT RESOLUTION warning, measured against the sheet rather than the photo's placed
+    // size (it was 356 DPI). The designer warns the customer itself under 150 DPI.
+    $pdfx = strpos( $s, '/OutputIntents' ) !== false;
+    if ( ! $pdfx && $out['pages'] > 0 && $sheet_imgs === $out['pages'] && count( $images ) === $out['pages'] && $min !== null ) {
         $out['kind'] = 'raster'; $out['min_dpi'] = $min;
         $first = null; foreach ( $images as $im ) { if ( $im['dpi'] !== null ) { $first = $im; break; } }
         $out['summary'] = 'raster · ' . $pg_str . ' · ' . $sheet_str . ' · ' . $first['w'] . '×' . $first['h'] . ' px · ' . $min . ' DPI';

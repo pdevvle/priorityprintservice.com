@@ -58,6 +58,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-order-blockers-test.mjs` | The two guards from the 2026-09-15 checkout blocker: the registry (not the database) decides whether WCPA owns a product, and a refused checkout on a calculator cart is recorded to `pps_checkout_refusals` instead of costing a silent order. Also pins the things that stop the tripwire becoming the failure it watches for — wrapped, bounded, autoload-off, scoped to PPS carts. |
 | `tools-closure-engine-test.mjs` | **The shop closes, and every calculator has to know it.** Static half pins the config path (`_CFG.closures`, never the `pcf` sub-array) and that no bare weekend test survives in the counting loops; behavioural half extracts `isBusinessDay`/`addBusinessDays`/`businessDaysBetween` out of each COMPILED build and runs them against a real holiday. Confirmed to discriminate — against the pre-fix brochure, `addBusinessDays(Wed 25 Nov, 1)` returns Thanksgiving. 72 checks. |
 | `tools-flat-print-dpi-test.mjs` | **The print file a flat ships must be the upload at print resolution, not the screen preview blown up.** Drives each compiled flat build like a customer with a two-page PDF carrying a QR code at order 87171's module size, pulls the print-ready PDF out of the mocked upload, and checks: bleed sheet at 300 DPI, QR decodes on every side, modules crisp (mid-grey share under 5% — the old build measured 36%, a half-pixel placement 20%), manifest names the print source. Needs `flat-<calc>.html` harness copies on :8137; `PPS_FLAT_PAGES` selects builds, which is how it was run against the pre-fix brochure to prove it fails there. |
+| `tools-flat-back-mirror-test.mjs` | **The back of a flat is the front turned over left to right.** On the compiled brochure, postcard, greeting card and letterhead: a perforation typed at 1.5 in on the Front reads (long − 1.5) on the Back, one typed on the Back comes back mirrored on the Front, and Download Template draws the perforation and a trifold's folds mirrored on its back page (read back with pymupdf). `PPS_CALC_BASE` / `PPS_MIRROR_PAGES` select builds; the pre-fix builds fail 15 of 31. |
 | `tools-book-print-dpi-test.mjs` | The same measurement on the three booklets, because "they render at `DPI / 72`" was a line of code, not a file. An 8-page 6″ × 9″ PDF (misses the raw path by 0.25″, as order 87152 did) with a QR at the customer's module size on every page, through saddle, perfect bound and coupon; every page of the uploaded print-ready file must be the bleed sheet at 300 DPI, decode, and be crisp. First run, 2026-09-21: all three resampled every page through a half-pixel offset (20% mid-grey), and perfect bound + coupon printed the reconciled back cover from its 108 DPI thumbnail (50%) because they picked the PDF page by display index. Both fixed the same day. |
 | `tools-job-health-test.php` | Drives `pps-job-health.php` against stubs: a hand-built PDF with 300 DPI page images passes, one with 144 DPI page images (87171's shape) is flagged, a vector PDF is named as such, a non-PDF is refused; the line-item hook writes the check onto the order and the end of the Job Ticket, the raw PDF is measured when there is no print-ready file, image uploads are left alone, a file already moved to Drive reads "not checked"; the note lands exactly once across both order-processed hooks; the digest groups all six exception kinds, ignores non-calculator lines, strips tags, mails only the office and only when non-empty, and a first run does not replay the whole refusal log. |
 | `tools-job-ticket-test.mjs` | **The Job Ticket: one block, first on the order, that production runs the job from.** Runs `pps_job_ticket()` under php (calculator pairs first and in order, then art status, files, production start, must-ship, delivery with rush flag, ship-to on one line, shipment estimate; a legacy order still gets a block from its summary; prepress review reads NOT APPROVED) and runs `buildTicket()` out of every compiled build on sample configs (booklets name binding, inside and cover; flats name paper, print and fold; all name finishing, proof type and, for a hardcopy proof, where it goes). |
@@ -301,7 +302,9 @@ would not scan off the printed brochure.
 Now `ppsPrintSourceCanvas()` renders each PDF side again from its own bytes at the print
 DPI inside the generator, places it on whole pixels, and the manifest names the source per
 side (`print source: pdf page 1 rendered at 300 DPI`). The five flats still have no raw
-(vector) path — every flat order ships a raster print file, now genuinely at 300 DPI.
+(vector) path for uploads — every uploaded flat order ships a raster print file, now genuinely
+at 300 DPI. (A postcard designed in the online designer is the exception: see "Flats, the back
+side and big sheets" below.)
 `tools-flat-print-dpi-test.mjs` is the gate; it measures the print file, not the constant.
 Same lesson as the closures section above: the flats are copies, and a copy can drop the
 one line that matters. See `docs/PROOFER_BRIEF.md` §9.5.
@@ -318,6 +321,87 @@ a shifted page would have printed the WRONG page. They now carry `srcPdfPage` fr
 extraction and render by it, the fix the saddle took on 2026-08-24 and the copies never
 received. Rule that follows from all of it: **a resolution or DPI claim anywhere in this
 repo is unverified until a test has decoded the shipped file.**
+
+## Flats, the back side and big sheets (2026-10-12)
+
+From the print audit of the online designer, three changes that reach every flat:
+
+- **The back is the front turned over like a book page, left to right** (owner, 2026-10-12).
+  A vertical fold or perforation x in from the left of the front is x in from the RIGHT of the
+  back. Brochure, postcard, greeting card and letterhead drew the back's lines where the front
+  has them, in the proof's Back view, its loupe, the back preview JPEG and the template's back
+  page, and a perforation dragged or typed in the Back view was stored unmirrored, so the real
+  perforation moved to the mirror of where the customer put it. Positions are still stored as
+  the front sees them (`perfPositions`, `getFoldFracs`); `seenPct()` shows and edits them as the
+  back sees them. The preview JPEGs also drew folds as a share of the bleed sheet instead of the
+  trim. `tools-flat-back-mirror-test.mjs` is the gate (the old builds fail 15 of 31).
+- **A phone or tablet holds only so big a canvas** (Safari: about 16.7 million pixels; past it
+  a canvas gives no context or draws nothing). A sheet over about 9 × 12 in at 300 DPI, or a
+  poster-sized PDF previewed at upload, failed approval outright on an iPhone or iPad.
+  `ppsCanvasScale()` probes what the device can hold; print, preview and upload renders take
+  the most that fits (`ppsPrintDpi`, `ppsPreviewViewport`), and a print file under 300 DPI says
+  so in the manifest (and the Print File Check flags it under 280). Canvases are freed as soon
+  as they are used. `tools-flat-print-dpi-test.mjs` plays a phone with a small canvas limit.
+- **A postcard made in the online designer prints from the designer's own PDF** (vector, CMYK,
+  fonts embedded, PDF/X-4), when nothing was changed in the proof: same file, pages in order,
+  crop at 100%. A portrait card's quarter turn onto the wide sheet is written as each page's
+  `/Rotate` (front 90°, back 270°) with pdf-lib 1.17.1, fetched only then, saved without object
+  streams; the imposition tool reads `/Rotate` (checked headless: it places the turned pages
+  exactly as it places the old raster file). The file still goes up as `<base>_print-ready.pdf`,
+  so imposition and Drive see nothing new. The Print File Check reads it as "vector" (or "PDF
+  with N placed images" when it has photos: a file with a PDF/X output intent is never read as a
+  calculator raster, which on 2026-10-13 stopped a card-shaped photo per side being measured
+  against the sheet and flagged "192 DPI" when it was 356), and turns a `/Rotate` 90/270 page into
+  the sheet it prints on (`pps-job-health.php`, so deploy that file with the calculator).
+  pdf-lib writes `%PDF-1.7`; the designer's 1.6 is put back (PDF/X-4 is 1.6 at most). The
+  manifest says when the photos are ICC-tagged RGB and that the output intent is the designer's
+  generic profile, not the press's. A portrait card's perforation reaches the designer turned the
+  way the print file turns (clockwise): until 2026-10-13 an off-centre one showed at the wrong end. Anything else, or pdf-lib failing to load, takes the raster path as an upload
+  would. `tools-designer-host-test.mjs` and `tools-job-health-test.php` are the gates.
+- **New artwork starts square-on.** A turn, fit or scale chosen for the last file (or set for a
+  portrait design) carried over to the next upload or slot replacement, so a landscape PDF dropped
+  after a portrait design printed sideways. `processFile`, a slot replace and a slot ✕ reset it.
+- **Panel names read left to right as each side is seen.** z3, accordion4 and roll4 listed the
+  back in the front's order ("Innermost Inside" landed on the widest panel once the back was
+  mirrored); the proof's back panel names now sit on the mirrored panels.
+
+The postcard's online designer, from the same sweep: a design made for an older size or sides is
+said beside Edit design and refused at approval until it is printed again; the overlay has Close
+and Escape until the designer is up, and a designer URL that is not the designer fails at once
+(it held the page for two minutes); a job the calculator can't price is sent to the designer as
+`pps-design:price` with `error`; and the designer's perforation direction follows the proof's
+(fold direction included).
+
+**Third sweep, 2026-10-13** (an adversarial pass over the shipped flats; each fix gated by
+`tools-flat-sweep3-test.mjs`, first run against the staging builds, where it fails):
+
+- **A change to the job clears the approval** on brochure, greeting card, letterhead and sticker,
+  as the postcard already did (`jobShapeKey`: size, sides, folds, perforations). They shipped the
+  old print file for the new job.
+- **Leaving "Upload Art" takes its files off the order.** Approve, switch to "Email Art After
+  Order", change the size, switch back: the empty drop zone ordered the old approved package.
+- **A page with `/Rotate` is measured as it is seen** (`getViewport({ scale: 1 })`, never
+  `pg.view`), on all five flats and in the three booklets' `extractPdfPages`, reader-spread split
+  and cover/slot readers. A portrait designer file uploaded again printed squashed.
+- **Page 2 of a PDF is a back only on a two-sided job**; made two-sided later, page 2 comes in
+  then. A designer file follows its own page count, not a stale copy of `sides`.
+- **A moved perforation survives a cart edit or reorder** (`restoredPerfRef`); the reset to the
+  middle that a new perforation count triggers overwrote it.
+- **"Design the front online, upload my own back"** (postcard) is not a stale design, and printing
+  the design again asks before its page 2 replaces the uploaded back.
+- **Back panel names for folds across the short side** read bottom to top: each back panel sits
+  behind the front panel at the same height (the back turns over left to right), in the proof,
+  the template and the designer's spec.
+- **The manifest lists every original** the order carries and names each side's source file; the
+  package is named for the front's file. The "TEST DOWNLOAD" panel is staff-only on all five. A
+  PDF's preflight warning goes with its file. The drop zone no longer promises TIFF, and a file
+  the browser cannot read is named instead of leaving "Processing...". The preview JPEGs draw
+  the perforations, mirrored on the back like the folds.
+- **A cart edit that changes size, sides, folds or perforations does not reuse the approval.**
+  The calculators refuse it at Add to Order on an online-approved job ("upload again and
+  approve"); on the server `pps_carry_edit_artwork()` keeps the customer's own files but drops
+  the old print-ready, previews and manifest, and marks an online-approved line for prepress
+  review (`pps_edit_shape_changed()`, `tools-edit-artwork-test.php`).
 
 ## Junctures: priced → placed → printed (2026-09-27)
 
