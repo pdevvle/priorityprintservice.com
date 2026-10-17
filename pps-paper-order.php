@@ -502,17 +502,49 @@ function pps_po_email( array $built, array $settings, $when, $screen_url ) {
     return array( 'subject' => $subject, 'body' => $body );
 }
 
-function pps_po_send_weekly( $force = false ) {
+/**
+ * The weekly send. A TEST send ($test) goes out even with no open job, says TEST in the
+ * subject, and is not recorded — so it never uses up that week's Wednesday email.
+ */
+function pps_po_send_weekly( $test = false ) {
+    $test = $test === true;   // the cron hook passes no argument; only an explicit true is a test
     $last = (int) get_option( PPS_PO_EMAIL_LAST, 0 );
-    if ( ! $force && $last && time() - $last < 6 * DAY_IN_SECONDS ) return false;
-    $when = ( new DateTimeImmutable( 'now', pps_po_email_tz() ) )->format( 'D M j, Y' );
-    $mail = pps_po_email( pps_po_build(), pps_po_settings(), $when, admin_url( 'admin.php?page=pps-paper-order' ) );
-    update_option( PPS_PO_EMAIL_LAST, time(), false );
+    if ( ! $test && $last && time() - $last < 6 * DAY_IN_SECONDS ) return false;
+    $when  = ( new DateTimeImmutable( 'now', pps_po_email_tz() ) )->format( 'D M j, Y' );
+    $built = pps_po_build();
+    $mail  = pps_po_email( $built, pps_po_settings(), $when, admin_url( 'admin.php?page=pps-paper-order' ) );
+    if ( ! $test ) update_option( PPS_PO_EMAIL_LAST, time(), false );
+    if ( ! $mail && $test ) $mail = array( 'subject' => 'Paper order for ' . $when . ': no open jobs', 'body' => "No open jobs, so the Wednesday email would not be sent this week.\n" );
     if ( ! $mail ) return false;
+    if ( $test ) {
+        $mail['subject'] = 'TEST — ' . $mail['subject'];
+        $mail['body']    = "This is a test of the Wednesday paper order email. The real one goes out every Wednesday at 7:00.\n\n" . $mail['body'];
+    }
     $to = function_exists( 'pps_reorder_contact_recipient' ) ? pps_reorder_contact_recipient() : 'Office@priorityprintservice.com';
     return wp_mail( $to, $mail['subject'], $mail['body'], array( 'Content-Type: text/plain; charset=UTF-8' ) );
 }
 add_action( PPS_PO_EMAIL_HOOK, 'pps_po_send_weekly' );
+
+/** "Send test email" on the screen. */
+add_action( 'admin_post_pps_po_test', function () {
+    if ( ! current_user_can( 'manage_woocommerce' ) ) wp_die( 'Not allowed.' );
+    check_admin_referer( 'pps_po_test' );
+    $ok = pps_po_send_weekly( true );
+    wp_safe_redirect( admin_url( 'admin.php?page=pps-paper-order&pps_po_test=' . ( $ok ? 'sent' : 'failed' ) ) );
+    exit;
+} );
+
+/**
+ * A test requested without a browser: set option `pps_paper_order_send_test` to 1 and the
+ * next request sends one test and deletes the option. Claimed by deleting it first, so two
+ * requests at once cannot both send.
+ */
+add_action( 'init', function () {
+    if ( ! get_option( 'pps_paper_order_send_test' ) ) return;
+    if ( ! delete_option( 'pps_paper_order_send_test' ) ) return;
+    $ok = pps_po_send_weekly( true );
+    update_option( 'pps_paper_order_test_result', array( 'at' => time(), 'sent' => (bool) $ok ), false );
+}, 30 );
 
 /** Keep exactly one weekly event, landing on a Wednesday at 7:00 shop time. */
 add_action( 'init', function () {
@@ -561,7 +593,11 @@ function pps_po_render_admin() {
     $last = (int) get_option( PPS_PO_EMAIL_LAST, 0 );
     echo '<p style="color:#555">Emailed to ' . esc_html( function_exists( 'pps_reorder_contact_recipient' ) ? pps_reorder_contact_recipient() : 'Office@priorityprintservice.com' )
        . ' every Wednesday at 7:00 when there is an open job. '
-       . esc_html( $last ? 'Last checked ' . ( new DateTimeImmutable( '@' . $last ) )->setTimezone( pps_po_email_tz() )->format( 'D M j, g:i a' ) . '.' : 'Not sent yet.' ) . '</p>';
+       . esc_html( $last ? 'Last checked ' . ( new DateTimeImmutable( '@' . $last ) )->setTimezone( pps_po_email_tz() )->format( 'D M j, g:i a' ) . '.' : 'Not sent yet.' ) . ' '
+       . '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline">'
+       . wp_nonce_field( 'pps_po_test', '_wpnonce', true, false )
+       . '<input type="hidden" name="action" value="pps_po_test"><button class="button">Send test email</button></form>'
+       . ( isset( $_GET['pps_po_test'] ) ? ' <strong>' . ( $_GET['pps_po_test'] === 'sent' ? 'Test sent.' : 'Test could not be sent.' ) . '</strong>' : '' ) . '</p>';
 
     echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin:8px 0 16px">'
        . wp_nonce_field( 'pps_po_settings', '_wpnonce', true, false ) . '<input type="hidden" name="action" value="pps_po_settings">'

@@ -218,6 +218,17 @@ pps_po_send_weekly();
 ok( count( $GLOBALS['mails'] ) === 1 && $GLOBALS['mails'][0]['to'] === 'Office@priorityprintservice.com', 'it mails the office, never orders@', $GLOBALS['mails'][0]['to'] ?? null );
 pps_po_send_weekly();
 ok( count( $GLOBALS['mails'] ) === 1, 'a second run inside six days does not mail twice' );
+unset( $GLOBALS['opts'][ PPS_PO_EMAIL_LAST ] ); $GLOBALS['mails'] = array();
+pps_po_send_weekly( true );
+ok( count( $GLOBALS['mails'] ) === 1 && strpos( $GLOBALS['mails'][0]['s'], 'TEST — Paper order for ' ) === 0, 'a test send says TEST in the subject', $GLOBALS['mails'][0]['s'] ?? null );
+ok( empty( $GLOBALS['opts'][ PPS_PO_EMAIL_LAST ] ), 'a test send does not use up the week' );
+pps_po_send_weekly();
+ok( count( $GLOBALS['mails'] ) === 2 && strpos( $GLOBALS['mails'][1]['s'], 'TEST' ) === false, 'the Wednesday send still goes out after a test' );
+pps_po_send_weekly( '' );
+ok( count( $GLOBALS['mails'] ) === 2, 'whatever the cron hook passes is never taken as a test' );
+$GLOBALS['fake_orders'] = array(); $GLOBALS['mails'] = array();
+pps_po_send_weekly( true );
+ok( count( $GLOBALS['mails'] ) === 1 && strpos( $GLOBALS['mails'][0]['s'], 'no open jobs' ) !== false, 'a test with no open jobs still arrives and says so' );
 ok( strpos( file_get_contents( __DIR__ . '/pps-paper-order.php' ), "wp_schedule_event( pps_po_next_wednesday(), 'weekly', PPS_PO_EMAIL_HOOK )" ) !== false, 'the event is scheduled weekly from a Wednesday' );
 
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> PAPER ORDER OK ($n checks)\n";
