@@ -4,8 +4,8 @@
  *
  * Runs the bridge for real: this file is also the ROUTER of a `php -S` server, so uploads
  * arrive as real multipart uploads (is_uploaded_file) and downloads are streamed bytes. The
- * imposition side is the LIVE code, pulled from git — pps-imposition.php at bc62aa3 (v1.31)
- * for the artwork/imposed helpers and imposition-tool.html at b1bb91b (v1.32) for the page —
+ * imposition side is the LIVE code, pulled from git — pps-imposition.php and imposition-tool.html
+ * at 38d9be9 (v1.58, on production since 2026-10-18 06:10) for the helpers and the page —
  * so the rows this bridge builds are checked against the tool that actually reads them.
  *
  * Checks: the page needs the panel key and a real order; its token is good for that order
@@ -41,6 +41,11 @@ if ( PHP_SAPI === 'cli-server' ) {
     function admin_url( $p = '' ) { return '/wp-admin/' . $p; }
     function add_query_arg( $k, $v, $u ) { return $u . ( strpos( $u, '?' ) === false ? '?' : '&' ) . $k . '=' . rawurlencode( $v ); }
     function get_transient() { return false; } function set_transient() { return true; }
+    function get_option( $k, $d = false ) { $s = st(); return $s['options'][ $k ] ?? $d; }
+    function update_option( $k, $v ) { $s = st(); $s['options'][ $k ] = $v; st_put( $s ); return true; }
+    function sanitize_key( $v ) { return preg_replace( '/[^a-z0-9_-]/', '', strtolower( (string) $v ) ); }
+    function wp_max_upload_size() { return 67108864; }
+    function esc_url( $u ) { return $u; }
     function delete_transient( $k ) { $s = st(); $s['cleared'][] = $k; st_put( $s ); return true; }
     function is_wp_error( $x ) { return false; }
     function wp_tempnam( $p ) { return tempnam( sys_get_temp_dir(), $p ); }
@@ -85,6 +90,12 @@ if ( PHP_SAPI === 'cli-server' ) {
     }
     function wc_get_order_status_name( $s ) { return ucfirst( $s ); }
     define( 'PPS_CALC_DIR', getenv( 'PPS_MPI_DIR' ) . '/' );
+    define( 'PPS_CALC_URL', '/calcdir/' );
+    if ( strpos( $_SERVER['REQUEST_URI'], '/calcdir/' ) === 0 ) { // the plugin folder, served as the web server would
+        $f = PPS_CALC_DIR . substr( parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH ), 9 );
+        if ( strpos( $f, '..' ) === false && is_file( $f ) ) { header( 'Content-Type: application/javascript' ); readfile( $f ); exit; }
+        http_response_code( 404 ); exit;
+    }
     require getenv( 'PPS_MPI_IMPOSITION' );   // the live pps-imposition.php (helpers + wp-admin handlers)
     require __DIR__ . '/pps-missive-impose.php';
     $path = parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH );
@@ -105,9 +116,9 @@ function ok( $c, $w, $g = null ) { global $fail, $n; $n++; if ( ! $c ) { $fail++
 $tmp = sys_get_temp_dir() . '/pps-mpi-' . getmypid(); @mkdir( $tmp );
 $imp_php  = getenv( 'PPS_IMPOSE_PHP' ) ?: "$tmp/pps-imposition.php";
 $tool_dir = getenv( 'PPS_IMPOSE_TOOL_DIR' ) ?: $tmp;
-if ( ! getenv( 'PPS_IMPOSE_PHP' ) ) file_put_contents( $imp_php, shell_exec( 'git -C ' . escapeshellarg( __DIR__ ) . ' show bc62aa3:pps-imposition.php' ) );
-if ( ! getenv( 'PPS_IMPOSE_TOOL_DIR' ) ) file_put_contents( "$tmp/imposition-tool.html", shell_exec( 'git -C ' . escapeshellarg( __DIR__ ) . ' show b1bb91b:imposition-tool.html' ) );
-ok( filesize( $imp_php ) === 28869 && filesize( "$tool_dir/imposition-tool.html" ) === 286322, 'the live imposition files (28,869 and 286,322 bytes) are what this runs against', array( filesize( $imp_php ), filesize( "$tool_dir/imposition-tool.html" ) ) );
+if ( ! getenv( 'PPS_IMPOSE_PHP' ) ) file_put_contents( $imp_php, shell_exec( 'git -C ' . escapeshellarg( __DIR__ ) . ' show 38d9be9:pps-imposition.php' ) );
+if ( ! getenv( 'PPS_IMPOSE_TOOL_DIR' ) ) file_put_contents( "$tmp/imposition-tool.html", shell_exec( 'git -C ' . escapeshellarg( __DIR__ ) . ' show 38d9be9:imposition-tool.html' ) );
+ok( filesize( $imp_php ) === 38382 && filesize( "$tool_dir/imposition-tool.html" ) === 451423, 'the live imposition files (v1.58: 38,382 and 451,423 bytes) are what this runs against', array( filesize( $imp_php ), filesize( "$tool_dir/imposition-tool.html" ) ) );
 
 // A one-page 8.75×11.25″ PDF: an 8.5×11 flyer with bleed, the shape a print-ready file has.
 function tiny_pdf() {
@@ -160,6 +171,8 @@ ok( $r['code'] === 200 && strpos( $r['body'], 'PPS Imposition Tool' ) !== false,
 ok( is_array( $cfg ) && $cfg['nonce'] === $tok( 87347 ) && $cfg['ajaxUrl'] === '/wp-admin/admin-ajax.php?pps_mpi=87347', 'carrying the token for THIS order and the admin-ajax URL scoped to it', $cfg );
 ok( is_array( $cfg ) && strpos( $r['body'], 'PANELKEY' ) === false, 'the panel key itself is not written into the tool' );
 ok( is_array( $cfg ) && $cfg['orderStatuses'] === array(), 'the status menu is given nothing to move to' );
+ok( is_array( $cfg ) && $cfg['maxUpload'] === 67108864, 'the upload limit is passed, so the tool\'s size guard (v1.34) works in the frame', $cfg['maxUpload'] ?? null );
+ok( strpos( $r['body'], '"https://unpkg.com/react@18.3.1/umd/react.production.min.js"' ) !== false, 'with no vendored copy on the site, the CDN tag stays' );
 ok( substr_count( $r['body'], '<script data-cfasync="false">window.PPS_IMPOSE_CFG = ' ) === 1, 'the config is injected once' );
 preg_match_all( '/<script\b[^>]*>/i', $r['body'], $tags );
 ok( count( $tags[0] ) >= 8 && count( preg_grep( '/data-cfasync="false"/', $tags[0] ) ) === count( $tags[0] ), 'every script on the page tells Cloudflare Rocket Loader to leave it alone (it blanked the tool on the live site)', $tags[0] );
@@ -187,6 +200,21 @@ foreach ( array( 'pps_impose_set_status' => array( 'status' => 'completed' ), 'p
     ok( $r['code'] === 403 && strpos( $r['json']['data']['message'] ?? '', 'does not change orders' ) !== false, "$a is refused and says why", $r['json'] );
 }
 ok( S()['wrote'] === array(), 'and nothing was written to the order' );
+
+// ── saved setups (v1.37): the office's shared list, through the live sanitiser ──
+reset_state();
+$r = req( $ajax( 87347 ), array( 'action' => 'pps_impose_setups', 'nonce' => $tok( 87347 ) ) );
+ok( $r['json']['success'] === true && $r['json']['data']['setups'] === array(), 'setups are read (none saved yet)', $r['json'] );
+$list = json_encode( array( array( 'id' => 'a1', 'name' => '<b>Gloss 2-up</b>', 'spec' => array( 'sheet' => '13x19', 'marks' => true ), 'saved' => '2026-10-18' ), array( 'id' => '', 'name' => 'no id', 'spec' => array() ) ) );
+$r = req( $ajax( 87347 ), array( 'action' => 'pps_impose_setups', 'nonce' => $tok( 87347 ), 'op' => 'save', 'setups' => $list ) );
+$saved = json_decode( S()['options']['pps_impose_setups'] ?? 'null', true );
+ok( $r['json']['success'] === true && count( $saved ) === 1 && $saved[0]['name'] === 'Gloss 2-up' && $saved[0]['spec'] === array( 'sheet' => '13x19', 'marks' => true ), 'and saved to the same option the wp-admin screen uses, cleaned by its own sanitiser', $saved );
+$r = req( $ajax( 87400 ), array( 'action' => 'pps_impose_setups', 'nonce' => $tok( 87400 ) ) );
+ok( $r['json']['success'] === true && $r['json']['data']['setups'][0]['id'] === 'a1', 'every order\'s page sees the same list', $r['json'] );
+$r = req( $ajax( 87347 ), array( 'action' => 'pps_impose_setups', 'nonce' => $tok( 87400 ), 'op' => 'save', 'setups' => '[]' ) );
+ok( $r['code'] === 403 && count( json_decode( S()['options']['pps_impose_setups'], true ) ) === 1, 'a save without this page\'s token is refused and changes nothing', $r['code'] );
+$r = req( $ajax( 87347 ), array( 'action' => 'pps_impose_setups', 'nonce' => $tok( 87347 ), 'op' => 'save', 'setups' => 'not json' ) );
+ok( $r['json']['success'] === false, 'a save that is not a JSON list is refused' );
 
 // ── download ──
 reset_state();
@@ -263,6 +291,11 @@ const { chromium } = require(process.env.PW);
   out.errs = errs; console.log(JSON.stringify(out)); await b.close();
 })();
 JS;
+// a vendored library on the site is used instead of its CDN tag (v1.58), and must still load
+@mkdir( "$tool_dir/imposition-vendor" );
+file_put_contents( "$tool_dir/imposition-vendor/react.production.min.js", (string) shell_exec( 'curl -sS https://unpkg.com/react@18.3.1/umd/react.production.min.js' ) );
+$r = req( '/?pps_missive_impose=1&k=PANELKEY&order=87347' );
+ok( filesize( "$tool_dir/imposition-vendor/react.production.min.js" ) === 10751 && preg_match( '#<script data-cfasync="false" src="/calcdir/imposition-vendor/react\.production\.min\.js\?v=\d+"#', $r['body'] ) === 1, 'a vendored library already on the site replaces its CDN tag', filesize( "$tool_dir/imposition-vendor/react.production.min.js" ) );
 reset_state();
 file_put_contents( "$tmp/b.js", $js );
 $pw = trim( shell_exec( 'npm root -g' ) ) . '/playwright';
@@ -277,6 +310,7 @@ ok( ( $got['statusOptions'] ?? null ) === array( 'wc-processing' ), 'its status 
 ok( is_array( $got ) && $got['errs'] === array(), 'no script errors', $got['errs'] ?? null );
 
 proc_terminate( $srv ); proc_close( $srv );
-array_map( 'unlink', glob( "$tmp/*" ) ); @rmdir( $tmp );
+array_map( 'unlink', glob( "$tool_dir/imposition-vendor/*" ) ); @rmdir( "$tool_dir/imposition-vendor" );
+array_map( 'unlink', array_filter( glob( "$tmp/*" ), 'is_file' ) ); @rmdir( $tmp );
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> MISSIVE IMPOSE OK ($n checks)\n";
 exit( $fail ? 1 : 0 );

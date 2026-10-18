@@ -20,6 +20,8 @@
  *                           key must never become a way to read any of it)
  *   pps_impose_upload     — IMPOSED_*.pdf / CLEAN_*.pdf into that order's folder, with an
  *                           order note saying it came from the Missive panel
+ *   pps_impose_setups     — the office's saved setups (v1.37), the same shared list the
+ *                           wp-admin screen reads and saves, through its own sanitiser
  *   pps_impose_set_status — refused: the panel never changes an order's status
  *   pps_impose_set_hidden — refused, likewise
  *
@@ -29,7 +31,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'PPS_MPI_ACTIONS', 'pps_impose_list,pps_impose_download,pps_impose_upload,pps_impose_set_status,pps_impose_set_hidden' );
+define( 'PPS_MPI_ACTIONS', 'pps_impose_list,pps_impose_download,pps_impose_upload,pps_impose_setups,pps_impose_set_status,pps_impose_set_hidden' );
 
 /** The token a page for $order_id carries; '' when there is no panel key yet. */
 function pps_mpi_token( $order_id ) {
@@ -124,6 +126,22 @@ function pps_mpi_ajax() {
     if ( ! $order ) wp_send_json_error( array( 'message' => 'Order not found' ) );
     $folder_id = (string) $order->get_meta( '_pps_gdrive_folder_id' );
 
+    // Saved setups are imposition settings, not order data — one office-wide list
+    // (`pps_impose_setups`), read and saved exactly as pps-imposition.php v1.37+ does it.
+    if ( $action === 'pps_impose_setups' ) {
+        if ( ! function_exists( 'pps_impose_setups_sanitize' ) ) wp_send_json_error( array( 'message' => 'Saved setups need imposition v1.37 or later on the site.' ) );
+        if ( sanitize_key( $_POST['op'] ?? 'get' ) === 'save' ) {
+            $raw = (string) wp_unslash( $_POST['setups'] ?? '' );
+            if ( strlen( $raw ) > 512 * 1024 ) wp_send_json_error( array( 'message' => 'Setups list is too large (512 KB cap) — delete some.' ) );
+            $list = json_decode( $raw, true );
+            if ( ! is_array( $list ) ) wp_send_json_error( array( 'message' => 'Setups must be a JSON list.' ) );
+            $clean = pps_impose_setups_sanitize( $list );
+            update_option( 'pps_impose_setups', wp_json_encode( $clean ), false );
+            wp_send_json_success( array( 'setups' => $clean ) );
+        }
+        $stored = json_decode( (string) get_option( 'pps_impose_setups', '[]' ), true );
+        wp_send_json_success( array( 'setups' => is_array( $stored ) ? pps_impose_setups_sanitize( $stored ) : array() ) );
+    }
     if ( $action === 'pps_impose_list' ) {
         $files = ( $folder_id !== '' && function_exists( 'pps_impose_drive_list' ) ) ? pps_impose_drive_list( $folder_id, ! empty( $_POST['refresh'] ) ) : null;
         wp_send_json_success( array( 'items' => $folder_id !== '' ? pps_mpi_rows( $order, $files ) : array() ) );
@@ -187,11 +205,25 @@ function pps_mpi_page( $html, $order_id, $ajax_url ) {
         'sizePresets'   => ( function_exists( 'pps_get_config' ) && is_array( pps_get_config()['size_presets'] ?? null ) ) ? pps_get_config()['size_presets'] : null,
         'orderStatuses' => array(), // the status menu has nothing to move to: the panel never changes an order
         'doneStatuses'  => function_exists( 'pps_impose_done_statuses' ) ? pps_impose_done_statuses() : array( 'completed', 'cancelled', 'refunded', 'failed', 'trash' ),
+        // v1.34: the imposed PDF comes back as a form POST, so PHP's upload limit applies —
+        // the tool refuses an oversize one with the real reason instead of a failed upload.
+        'maxUpload'     => function_exists( 'wp_max_upload_size' ) ? (int) wp_max_upload_size() : 0,
     ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     $html = str_replace( '</head>', '<script>window.PPS_IMPOSE_CFG = ' . $cfg . ";</script>\n</head>", $html );
     // Cloudflare's Rocket Loader rewrites every script on a front-end page (wp-admin is exempt),
     // which left React and Babel unloaded and the tool blank (2026-10-18). Tell it to leave
     // them all alone, as the panel's own page does.
+    // v1.58: the libraries the site keeps in imposition-vendor/ (pinned by size), as the
+    // wp-admin stream uses them, so the tool opens even if a public CDN is slow or blocked.
+    // Only files already provisioned there; anything missing stays on its CDN tag.
+    if ( function_exists( 'pps_impose_vendor_map' ) && defined( 'PPS_CALC_DIR' ) && defined( 'PPS_CALC_URL' ) ) {
+        foreach ( pps_impose_vendor_map() as $cdn => $lib ) {
+            $path = PPS_CALC_DIR . 'imposition-vendor/' . $lib['file'];
+            if ( file_exists( $path ) && filesize( $path ) === $lib['bytes'] ) {
+                $html = str_replace( $cdn, esc_url( PPS_CALC_URL . 'imposition-vendor/' . $lib['file'] . '?v=' . filemtime( $path ) ), $html );
+            }
+        }
+    }
     return preg_replace( '/<script(?![^>]*data-cfasync)(?=[\s>])/i', '<script data-cfasync="false"', $html );
 }
 
