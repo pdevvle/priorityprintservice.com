@@ -53,6 +53,42 @@ function pps_mp_ymd( $v ) {
     return $t ? gmdate( 'Y-m-d', $t ) : '';
 }
 
+/** A Drive folder id → its web URL, or '' (ids are Drive's own: letters, digits, - and _). */
+function pps_mp_drive_folder_url( $id ) {
+    $id = (string) $id;
+    return preg_match( '/^[A-Za-z0-9_-]{10,}$/', $id ) ? 'https://drive.google.com/drive/folders/' . $id : '';
+}
+
+/**
+ * What the panel shows about an order's Google Drive folder (owner 2026-10-18: "an
+ * integration that opens google drive to the order in question"). The folder is the one the
+ * artwork uploader made (`_pps_gdrive_folder_id`); its files come from the imposition tool's
+ * own read-only listing (`pps_impose_drive_list`, cached 3 min). Links open in the browser,
+ * where Drive's own sign-in decides who can see them — the panel never downloads a file.
+ */
+function pps_mp_drive_info( $order, $list = null ) {
+    $id  = (string) $order->get_meta( '_pps_gdrive_folder_id' );
+    $out = array( 'folder' => pps_mp_drive_folder_url( $id ), 'files' => array(), 'state' => 'ok', 'note' => '' );
+    if ( $out['folder'] === '' ) {
+        $out['state'] = $order->get_meta( '_pps_drive_failed' ) ? 'failed' : ( (int) $order->get_meta( '_pps_drive_attempts' ) > 0 ? 'waiting' : 'none' );
+        $out['note']  = $out['state'] === 'failed' ? 'The artwork upload to Drive gave up — see the order notes.'
+                      : ( $out['state'] === 'waiting' ? 'The artwork is still being uploaded to Drive (it retries).' : 'No Drive folder for this order (no uploaded artwork).' );
+        return $out;
+    }
+    $files = $list !== null ? $list : ( function_exists( 'pps_impose_drive_list' ) ? pps_impose_drive_list( $id ) : null );
+    if ( ! is_array( $files ) ) { $out['state'] = 'unlisted'; $out['note'] = 'Could not list the folder just now — open it in Drive.'; return $out; }
+    foreach ( $files as $f ) {
+        $fid = (string) ( $f['id'] ?? '' );
+        if ( ! preg_match( '/^[A-Za-z0-9_-]{10,}$/', $fid ) ) continue;
+        $name = (string) ( $f['name'] ?? '' );
+        $out['files'][] = array( 'name' => $name, 'size' => (int) ( $f['size'] ?? 0 ),
+            'url' => ( ( $f['mimeType'] ?? '' ) === 'application/vnd.google-apps.folder' ? 'https://drive.google.com/drive/folders/' : 'https://drive.google.com/file/d/' ) . $fid . ( ( $f['mimeType'] ?? '' ) === 'application/vnd.google-apps.folder' ? '' : '/view' ),
+            'imposed' => (bool) preg_match( '/^IMPOSED[_\s-]/i', $name ) );
+    }
+    usort( $out['files'], function ( $a, $b ) { return ( $b['imposed'] <=> $a['imposed'] ) ?: strcasecmp( $a['name'], $b['name'] ); } );
+    return $out;
+}
+
 /** "Label: value" lines of the Job Ticket → [[label, value], …]. */
 function pps_mp_ticket_pairs( $text ) {
     $out = array();
@@ -92,6 +128,7 @@ function pps_mp_jobs( array $orders, array $paper = array() ) {
                 'printed' => (string) $item->get_meta( '_pps_paper_done' ) !== '',
                 'source' => $meta ? 'calculator' : 'custom',
                 'papers' => array(),
+                'drive' => pps_mp_drive_folder_url( method_exists( $order, 'get_meta' ) ? $order->get_meta( '_pps_gdrive_folder_id' ) : '' ),
             );
             if ( $j['delivery'] === '' && ! $meta ) $j['delivery'] = pps_mp_ymd( $item->get_meta( 'Requested delivery' ) );
             if ( ! $j['ticket'] && ! $meta ) {
@@ -312,7 +349,7 @@ function pps_mp_board_rows( array $open, array $tasks_by_order, $today, array $t
             'paper' => $p0 ? $p0['label'] : '', 'sheet' => $p0 ? $p0['sheet'] : '', 'paper_key' => $p0 ? $p0['key'] : '',
             'sheets' => array_sum( array_column( $j['papers'], 'sheets' ) ),
             'papers' => array_map( function ( $p ) { return array( 'label' => $p['label'], 'sheet' => $p['sheet'], 'sheets' => $p['sheets'], 'role' => $p['role'], 'key' => $p['key'] ); }, $j['papers'] ),
-            'task' => $task,
+            'task' => $task, 'drive' => $j['drive'] ?? '',
             // The team sets a task's due date to the job's START date (12 of 16 live on 2026-10-18), so that is what it is checked against.
             'due_mismatch' => $task && $task['due'] !== '' && $j['start'] !== '' && $task['due'] !== $j['start'],
         );
@@ -441,7 +478,7 @@ function pps_mp_answer( array $ids, $conv = '' ) {
         $out['orders'][] = array( 'order' => $id, 'status' => $order->get_status(),
             'admin_url' => admin_url( 'admin.php?page=wc-orders&action=edit&id=' . $id ), 'jobs' => $jobs,
             'conv_ok' => $conv !== '' && (int) ( $map[ $conv ] ?? 0 ) === $id, 'needs' => $needs,
-            'order_task' => $by[ $id ] ?? null );
+            'order_task' => $by[ $id ] ?? null, 'drive' => pps_mp_drive_info( $order ) );
     }
     $out['board'] = pps_mp_board_rows( $open, $by, $today, $by_item );
     return $out;
@@ -752,6 +789,7 @@ function boardRow(r, here){
   var late = r.must_ship && r.must_ship < DATA.today;
   var d = el('div',{cls:'row'+(here?' here':'')});
   d.appendChild(el('div',{},[ el('span',{cls:late?'late':'',text:md(r.must_ship)}), ' ', el('a',{text:'#'+r.order,on:function(){find(r.order);}}),
+    r.drive?el('a',{cls:'small',text:' [Drive]',title:'Open the order\'s Google Drive folder',on:function(){ open(r.drive); }}):null,
     ' '+r.customer+' — '+r.what, r.rush?el('span',{cls:'rush',text:' RUSH'}):null, r.printed?el('span',{cls:'muted',text:' · printed'}):null ]));
   var meta = [];
   r.papers.forEach(function(p){ meta.push(p.label+' '+p.sheet+' ('+p.sheets+')'); });
@@ -867,6 +905,20 @@ function render(){
         box.appendChild(el('div',{cls:'muted',text:'Open this order\'s own conversation in Missive to create its subtasks.'}));
       }
       app.appendChild(box);
+    }
+    if(o.drive){
+      var dv = o.drive, db = el('div',{cls:'card small'});
+      var head = el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:6px'},[ el('b',{text:'Google Drive'}) ]);
+      if(dv.folder) head.appendChild(el('button',{cls:'b',text:'Open folder',on:function(){ open(dv.folder); }}));
+      db.appendChild(head);
+      if(dv.note) db.appendChild(el('div',{cls:dv.state==='failed'?'late':'muted',text:dv.note}));
+      dv.files.forEach(function(f){
+        db.appendChild(el('div',{cls:'row',style:'padding:3px 0'},[ el('a',{text:f.name,on:function(){ open(f.url); }}),
+          f.imposed?el('span',{cls:'st st-closed',text:' IMPOSED',style:'margin-left:4px'}):null,
+          f.size?el('span',{cls:'muted',text:' · '+(f.size>1048576?(f.size/1048576).toFixed(1)+' MB':Math.max(1,Math.round(f.size/1024))+' KB')}):null ]));
+      });
+      if(dv.folder && !dv.files.length && dv.state==='ok') db.appendChild(el('div',{cls:'muted',text:'The folder is empty.'}));
+      app.appendChild(db);
     }
     o.jobs.forEach(function(j){ app.appendChild(jobCard(j, d.today)); });
     app = holder; app.appendChild(oc);

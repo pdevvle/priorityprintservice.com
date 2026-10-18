@@ -200,6 +200,23 @@ ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'Made 1' ) === 0 && is
 $GLOBALS['fail_after'] = 0; $GLOBALS['made'] = 5;
 ok( pps_mp_create_subtasks( 87601, 'c-601' ) === 1, 'trying again makes only the missing one' );
 
+// ── Google Drive (owner 2026-10-18) ──
+class OD extends O { public $m; function __construct( $id, $m ) { parent::__construct( $id, 'Ivy', array() ); $this->m = $m; } function get_meta( $k ) { return $this->m[ $k ] ?? ''; } }
+$fold = '19E4lFFtMfFZp8ON1mPg-6X6E1pBc86VK';
+$dv = pps_mp_drive_info( new OD( 87347, array( '_pps_gdrive_folder_id' => $fold ) ), array(
+    array( 'id' => '1VLv7Q9zNO5xO3_nLNmfhAYiUKhTQUIXT', 'name' => 'Pt-Handbook.pdf', 'mimeType' => 'application/pdf', 'size' => 19613756 ),
+    array( 'id' => '1sc8wYS38mK6NYOUG4LT4soaVB-ABb918', 'name' => 'IMPOSED_Order-87347_Pt-Handbook.pdf', 'mimeType' => 'application/pdf', 'size' => 15900992 ),
+    array( 'id' => 'bad id"><script>', 'name' => 'x', 'mimeType' => 'application/pdf' ),
+) );
+ok( $dv['folder'] === 'https://drive.google.com/drive/folders/' . $fold, 'the order opens its own Drive folder', $dv['folder'] );
+ok( count( $dv['files'] ) === 2 && $dv['files'][0]['imposed'] && $dv['files'][0]['url'] === 'https://drive.google.com/file/d/1sc8wYS38mK6NYOUG4LT4soaVB-ABb918/view', 'its files are listed, imposed file first, each opening in Drive; a malformed id is dropped', $dv['files'] );
+ok( pps_mp_drive_info( new OD( 1, array( '_pps_gdrive_folder_id' => $fold ) ), null )['state'] === 'unlisted', 'a folder that cannot be listed still offers the folder link' );
+ok( pps_mp_drive_info( new OD( 1, array( '_pps_drive_failed' => '2026-10-10' ) ) )['state'] === 'failed', 'a failed upload is said, with no folder link' );
+ok( pps_mp_drive_info( new OD( 1, array( '_pps_drive_attempts' => 3 ) ) )['state'] === 'waiting' && pps_mp_drive_info( new OD( 1, array() ) )['state'] === 'none', 'still uploading, and no artwork at all, are told apart' );
+ok( pps_mp_drive_folder_url( '../../etc' ) === '' && pps_mp_drive_folder_url( 'javascript:alert(1)' ) === '', 'nothing but a Drive id becomes a link' );
+$dsrc = file_get_contents( __DIR__ . '/pps-missive-panel.php' );
+ok( strpos( $dsrc, 'pps_impose_drive_download' ) === false && strpos( $dsrc, 'alt=media' ) === false, 'the panel never downloads a Drive file — it only links to Drive' );
+
 // ── read-only, by construction ──
 $src = file_get_contents( __DIR__ . '/pps-missive-panel.php' );
 $code = preg_replace( '#/\*.*?\*/#s', '', $src );
