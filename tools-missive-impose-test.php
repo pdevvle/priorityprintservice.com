@@ -94,7 +94,7 @@ if ( PHP_SAPI === 'cli-server' ) {
         do_hook( 'wp_ajax_nopriv_' . $a );
         echo '0'; exit; // what admin-ajax says when nothing answered
     }
-    do_hook( 'init' );
+    do_hook( 'init' ); do_hook( 'wp_loaded' );
     echo 'site page'; exit;
 }
 
@@ -230,6 +230,8 @@ $r = req( '/wp-admin/admin-ajax.php', array( 'action' => 'pps_impose_list', 'non
 ok( $r['body'] === '0', 'a call without pps_mpi is not answered by the bridge', $r['body'] );
 $src = file_get_contents( __DIR__ . '/pps-missive-impose.php' );
 ok( substr_count( $src, "add_action( 'wp_ajax_' . \$a, 'pps_mpi_ajax', 0 )" ) === 1 && substr_count( $src, "add_action( 'wp_ajax_nopriv_' . \$a, 'pps_mpi_ajax', 0 )" ) === 1, 'it answers first, logged in (browser) or not (Missive)' );
+ok( strpos( $src, "add_action( 'wp_loaded', function () {\n    if ( ! isset( \$_GET['pps_missive_impose'] ) ) return;" ) !== false && strpos( $src, "add_action( 'init'" ) === false,
+    'the page waits for wp_loaded — at init 1 WooCommerce has not registered orders yet, and every order read as missing' );
 ok( strpos( $src, 'wp_set_current_user' ) === false && strpos( $src, 'set_status(' ) === false && strpos( $src, 'update_meta_data' ) === false, 'it never signs anyone in and never changes an order' );
 
 // ── the panel offers it ──

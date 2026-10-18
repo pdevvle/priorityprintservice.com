@@ -191,7 +191,9 @@ function pps_mpi_page( $html, $order_id, $ajax_url ) {
     return str_replace( '</head>', '<script>window.PPS_IMPOSE_CFG = ' . $cfg . ";</script>\n</head>", $html );
 }
 
-add_action( 'init', function () {
+// wp_loaded, not init: the page looks the order up, and WooCommerce registers its order types
+// on init (priority 5) — at init 1 every order read as "No such order" (2026-10-18).
+add_action( 'wp_loaded', function () {
     if ( ! isset( $_GET['pps_missive_impose'] ) ) return;
     if ( ! defined( 'DONOTCACHEPAGE' ) ) define( 'DONOTCACHEPAGE', true );
     nocache_headers();
@@ -206,4 +208,4 @@ add_action( 'init', function () {
     header( 'Referrer-Policy: no-referrer' );
     echo pps_mpi_page( file_get_contents( $file ), $order_id, add_query_arg( 'pps_mpi', $order_id, admin_url( 'admin-ajax.php' ) ) );
     exit;
-}, 1 );
+} );
