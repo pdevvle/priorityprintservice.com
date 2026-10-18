@@ -213,6 +213,13 @@ ok( count( $dv['files'] ) === 2 && $dv['files'][0]['imposed'] && $dv['files'][0]
 ok( pps_mp_drive_info( new OD( 1, array( '_pps_gdrive_folder_id' => $fold ) ), null )['state'] === 'unlisted', 'a folder that cannot be listed still offers the folder link' );
 ok( pps_mp_drive_info( new OD( 1, array( '_pps_drive_failed' => '2026-10-10' ) ) )['state'] === 'failed', 'a failed upload is said, with no folder link' );
 ok( pps_mp_drive_info( new OD( 1, array( '_pps_drive_attempts' => 3 ) ) )['state'] === 'waiting' && pps_mp_drive_info( new OD( 1, array() ) )['state'] === 'none', 'still uploading, and no artwork at all, are told apart' );
+ok( $dv['all'] === false, 'without the read-all Drive grant the panel says its list is partial' );
+function pps_gdrive_can_read_all() { return ! empty( $GLOBALS['read_all'] ); }
+$GLOBALS['read_all'] = true;
+ok( pps_mp_drive_info( new OD( 1, array( '_pps_gdrive_folder_id' => $fold ) ), array() )['all'] === true, 'with it, the list is marked complete' );
+$gd = file_get_contents( __DIR__ . '/pps-gdrive.php' );
+ok( substr_count( $gd, "PPS_GDRIVE_SCOPE . ' ' . PPS_GDRIVE_READ_SCOPE" ) === 2 && strpos( $gd, "'https://www.googleapis.com/auth/drive.readonly'" ) !== false && strpos( $gd, "update_option( 'pps_gdrive_scope'" ) !== false, 'Drive (re)connects ask for read-only access to the rest of Drive, and the grant is recorded' );
+ok( strpos( $gd, "'https://www.googleapis.com/auth/drive'" ) === false && strpos( $gd, "define( 'PPS_GDRIVE_SCOPE', 'https://www.googleapis.com/auth/drive.file' )" ) !== false, 'writing stays limited to the files the site creates' );
 ok( pps_mp_drive_folder_url( '../../etc' ) === '' && pps_mp_drive_folder_url( 'javascript:alert(1)' ) === '', 'nothing but a Drive id becomes a link' );
 $dsrc = file_get_contents( __DIR__ . '/pps-missive-panel.php' );
 ok( strpos( $dsrc, 'pps_impose_drive_download' ) === false && strpos( $dsrc, 'alt=media' ) === false, 'the panel never downloads a Drive file — it only links to Drive' );

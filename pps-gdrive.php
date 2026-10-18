@@ -18,6 +18,16 @@ function pps_gdrive_client_id()     { return get_option( 'pps_gdrive_client_id',
 function pps_gdrive_client_secret() { return get_option( 'pps_gdrive_client_secret', '' ); }
 function pps_gdrive_parent_folder() { return get_option( 'pps_gdrive_parent_folder', '' ); }
 define( 'PPS_GDRIVE_SCOPE', 'https://www.googleapis.com/auth/drive.file' );
+// Read-only access to the rest of Drive (owner 2026-10-18: the Missive panel should list every
+// file in an order's folder, including ones added by hand — drive.file sees only the site's own).
+// Requested on every (re)connect; it changes nothing the site writes. The scopes Google actually
+// granted are kept in `pps_gdrive_scope`, and pps_gdrive_can_read_all() reads them.
+define( 'PPS_GDRIVE_READ_SCOPE', 'https://www.googleapis.com/auth/drive.readonly' );
+
+function pps_gdrive_can_read_all() {
+    $s = ' ' . (string) get_option( 'pps_gdrive_scope', '' ) . ' ';
+    return strpos( $s, '/auth/drive.readonly' ) !== false || strpos( $s, '/auth/drive ' ) !== false;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // THUMBNAIL DIRECTORY
@@ -151,6 +161,7 @@ function pps_gdrive_auth_page() {
 
             if ( ! empty( $body['refresh_token'] ) ) {
                 update_option( 'pps_gdrive_refresh_token', $body['refresh_token'], false );
+                update_option( 'pps_gdrive_scope', (string) ( $body['scope'] ?? '' ), false );
                 // Reconnected: pick up every open order whose art is still waiting.
                 pps_gdrive_resume_waiting();
 
@@ -186,7 +197,7 @@ function pps_gdrive_auth_page() {
         'client_id'     => pps_gdrive_client_id(),
         'redirect_uri'  => $redirect_uri,
         'response_type' => 'code',
-        'scope'         => PPS_GDRIVE_SCOPE . ' https://www.googleapis.com/auth/userinfo.email',
+        'scope'         => PPS_GDRIVE_SCOPE . ' ' . PPS_GDRIVE_READ_SCOPE . ' https://www.googleapis.com/auth/userinfo.email',
         'access_type'   => 'offline',
         'prompt'        => 'consent',
         'state'         => $oauth_state,
@@ -210,7 +221,7 @@ function pps_gdrive_auth_page() {
             'client_id'     => pps_gdrive_client_id(),
             'redirect_uri'  => $redirect_uri,
             'response_type' => 'code',
-            'scope'         => PPS_GDRIVE_SCOPE . ' https://www.googleapis.com/auth/userinfo.email',
+            'scope'         => PPS_GDRIVE_SCOPE . ' ' . PPS_GDRIVE_READ_SCOPE . ' https://www.googleapis.com/auth/userinfo.email',
             'access_type'   => 'offline',
             'prompt'        => 'consent',
             'state'         => $oauth_state,
@@ -257,6 +268,15 @@ function pps_gdrive_auth_page() {
                     Artwork files upload to Google Drive automatically after order payment.
                     Local files are deleted after successful upload.
                 </p>
+                <?php if ( pps_gdrive_can_read_all() ) : ?>
+                    <p style="font-size:13px;color:#555;margin:0 0 16px">Access: can read every file in the order folders (the Missive panel lists them all).</p>
+                <?php else : ?>
+                    <p style="font-size:13px;color:#555;margin:0 0 8px">Access: <strong>only the files the website uploaded</strong>. Files added to an order folder by hand do not show in the Missive panel's list.</p>
+                    <?php if ( pps_gdrive_client_id() && pps_gdrive_client_secret() ) : ?>
+                        <p style="margin:0 0 16px"><a href="<?php echo esc_url( $auth_url ); ?>" class="button">Reconnect to list every file</a>
+                        <span style="font-size:12px;color:#666;display:block;margin-top:6px">Sign in as <?php echo esc_html( $email ?: 'the same account' ); ?> and allow "See and download all your Google Drive files". The current connection keeps uploading artwork until Google grants the new one; if Google refuses, nothing changes.</span></p>
+                    <?php endif; ?>
+                <?php endif; ?>
                 <form method="post">
                     <?php wp_nonce_field( 'pps_gdrive_auth' ); ?>
                     <button type="submit" name="pps_gdrive_disconnect" class="button button-link-delete"

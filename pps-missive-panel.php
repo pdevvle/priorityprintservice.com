@@ -70,7 +70,8 @@ function pps_mp_drive_folder_url( $id ) {
  */
 function pps_mp_drive_info( $order, $list = null ) {
     $id  = (string) $order->get_meta( '_pps_gdrive_folder_id' );
-    $out = array( 'folder' => pps_mp_drive_folder_url( $id ), 'files' => array(), 'state' => 'ok', 'note' => '' );
+    $out = array( 'folder' => pps_mp_drive_folder_url( $id ), 'files' => array(), 'state' => 'ok', 'note' => '',
+                  'all' => function_exists( 'pps_gdrive_can_read_all' ) && pps_gdrive_can_read_all() );
     if ( $out['folder'] === '' ) {
         $out['state'] = $order->get_meta( '_pps_drive_failed' ) ? 'failed' : ( (int) $order->get_meta( '_pps_drive_attempts' ) > 0 ? 'waiting' : 'none' );
         $out['note']  = $out['state'] === 'failed' ? 'The artwork upload to Drive gave up — see the order notes.'
@@ -919,9 +920,9 @@ function render(){
           f.imposed?el('span',{cls:'st st-closed',text:' IMPOSED',style:'margin-left:4px'}):null,
           f.size?el('span',{cls:'muted',text:' · '+(f.size>1048576?(f.size/1048576).toFixed(1)+' MB':Math.max(1,Math.round(f.size/1024))+' KB')}):null ]));
       });
-      if(dv.folder && !dv.files.length && dv.state==='ok') db.appendChild(el('div',{cls:'muted',text:'No files the website uploaded.'}));
+      if(dv.folder && !dv.files.length && dv.state==='ok') db.appendChild(el('div',{cls:'muted',text:dv.all?'The folder is empty.':'No files the website uploaded.'}));
       // The site's Drive connection (drive.file scope) sees only files the site itself put there.
-      if(dv.folder) db.appendChild(el('div',{cls:'muted',style:'margin-top:4px',text:'Lists the files the website uploaded. Anything added to the folder by hand shows when you open the folder.'}));
+      if(dv.folder && !dv.all) db.appendChild(el('div',{cls:'muted',style:'margin-top:4px',text:'Lists the files the website uploaded. Anything added to the folder by hand shows when you open the folder — or reconnect Drive (PPS Calculators → Google Drive) to list everything here.'}));
       app.appendChild(db);
     }
     o.jobs.forEach(function(j){ app.appendChild(jobCard(j, d.today)); });
