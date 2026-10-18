@@ -69,6 +69,7 @@ if ( preg_match( '/^function pps_wcpa_drop_registry_products\(.*?^\}/ms', $src, 
     ok( pps_wcpa_drop_registry_products( false ) === false, 'an empty cache stays empty (WCPA rebuilds it)' );
 } else { ok( false, 'pps_wcpa_drop_registry_products is in the plugin' ); }
 ok( strpos( $src, "add_filter( 'transient_wcpa_products_transient_ver_3', 'pps_wcpa_drop_registry_products' );" ) !== false, 'and it is hooked on the key WCPA reads' );
+ok( strpos( $src, "add_filter( 'transient_wcpa_fields_' . \$id, '__return_false' );" ) !== false, 'and WCPA\'s cached fields for a registry product are never used' );
 
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> CONTRACT PRICE (server) OK ($n checks)\n";
 exit( $fail ? 1 : 0 );

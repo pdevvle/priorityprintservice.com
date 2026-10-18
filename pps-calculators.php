@@ -3376,6 +3376,13 @@ function pps_wcpa_drop_registry_products( $list ) {
     return $list;
 }
 add_filter( 'transient_wcpa_products_transient_ver_3', 'pps_wcpa_drop_registry_products' );
+// WCPA's per-product field cache (`wcpa_fields_<id>`, 24 h) is read as a miss for registry
+// products, so it is rebuilt from the product's own meta — no form, global forms excluded above.
+add_action( 'init', function () {
+    foreach ( pps_get_registry() as $meta ) {
+        foreach ( pps_registry_product_ids( $meta['products'] ?? '' ) as $id ) add_filter( 'transient_wcpa_fields_' . $id, '__return_false' );
+    }
+} );
 add_action( 'init', function () {
     if ( ! function_exists( 'pll_languages_list' ) ) return;
     foreach ( (array) pll_languages_list() as $l ) add_filter( 'transient_wcpa_products_transient_ver_3_' . $l, 'pps_wcpa_drop_registry_products' );
