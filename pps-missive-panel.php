@@ -34,12 +34,20 @@
  * Missive (Settings → Integrations → Add integration → Custom). Regenerating it there cuts
  * off the old URL. The key is in the URL because Missive loads the page by URL; it lets the
  * holder read open-job schedules and tickets (names, ship-to), nothing more.
+ *
+ * Imposition (2026-10-18, owner: "lets add the imposition for jobs. It runs on the site and
+ * the iframe pipes it in"): an Impose button on the order card and on each board row opens
+ * the site's own imposition tool for that order inside the panel (pps-missive-impose.php).
+ * It can file IMPOSED_/CLEAN_ PDFs into that order's Drive folder, and nothing else.
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'PPS_MP_KEY_OPTION', 'pps_missive_panel_key' );
 define( 'PPS_MP_CACHE', 'pps_missive_panel_open' );
+
+// The imposition tool, run on the site and shown inside the panel (owner 2026-10-18).
+require_once __DIR__ . '/pps-missive-impose.php';
 
 /* ─────────────────────────────────────────────────────────────
  * Pure helpers — the test drives these directly
@@ -621,12 +629,13 @@ add_action( 'init', function () {
     if ( ! pps_mp_key_ok( $k ) ) { status_header( 403 ); header( 'Content-Type: text/plain; charset=UTF-8' ); echo 'This panel link is not valid. Get the current one from PPS Calculators → Missive Panel.'; exit; }
     header( 'Content-Type: text/html; charset=UTF-8' );
     header( 'Referrer-Policy: no-referrer' );
-    echo pps_mp_page_html( $k, rest_url( 'pps/v1/missive/panel' ), rest_url( 'pps/v1/missive/task-state' ), rest_url( 'pps/v1/missive/create-subtasks' ) );
+    echo pps_mp_page_html( $k, rest_url( 'pps/v1/missive/panel' ), rest_url( 'pps/v1/missive/task-state' ), rest_url( 'pps/v1/missive/create-subtasks' ),
+        add_query_arg( array( 'pps_missive_impose' => 1, 'k' => $k ), home_url( '/' ) ) );
     exit;
 }, 1 );
 
-function pps_mp_page_html( $key, $api, $state_api = '', $create_api = '' ) {
-    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api, 'build' => substr( md5_file( __FILE__ ), 0, 8 ) ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
+function pps_mp_page_html( $key, $api, $state_api = '', $create_api = '', $impose_url = '' ) {
+    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api, 'impose' => $impose_url, 'build' => substr( md5_file( __FILE__ ), 0, 8 ) ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     return <<<HTML
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -654,6 +663,7 @@ a{color:#2563eb;cursor:pointer;text-decoration:none}
 details.oc>summary{cursor:pointer;font-weight:600;margin:0 0 6px} .ver{margin:14px 0 0;font-size:10px;color:#aaa}
 .grp{margin:10px 0 2px;font-weight:600;font-size:12px} button.b{font-size:11px;padding:1px 6px;margin:2px 4px 0 0;cursor:pointer}
 .preview{opacity:.65;font-size:12px}
+.impbar{display:flex;gap:6px;align-items:center;margin:0 0 6px} iframe.imp{width:100%;height:calc(100vh - 52px);border:1px solid rgba(128,128,128,.25);border-radius:6px;background:#0f172a}
 </style></head>
 <body><div id="app" class="muted">Loading…</div>
 <script data-cfasync="false" src="https://integrations.missiveapp.com/missive.js"></script>
@@ -663,7 +673,7 @@ details.oc>summary{cursor:pointer;font-weight:600;margin:0 0 6px} .ver{margin:14
 var CFG = {$cfg};
 var app = document.getElementById('app');
 var inMissive = typeof window.Missive !== 'undefined' && window.parent !== window;
-var LAST = { ids: [], conv: '' }, DATA = null;
+var LAST = { ids: [], conv: '' }, DATA = null, IMPOSE = 0;
 var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', rush: false, subOnly: true };
 try { var sp = JSON.parse(localStorage.getItem('ppsMpPref')||'null'); if (sp) for (var k in sp) PREF[k]=sp[k]; } catch(e){}
 function savePref(){ try { localStorage.setItem('ppsMpPref', JSON.stringify(PREF)); } catch(e){} }
@@ -679,6 +689,10 @@ function md(ymd){ if(!ymd) return '—'; var d=new Date(ymd+'T12:00:00Z'); retur
 function days(a,b){ return Math.round((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:00Z'))/864e5); }
 function open(url){ if(inMissive && Missive.openURL) Missive.openURL(url); else window.open(url,'_blank','noopener'); }
 function find(order){ if(inMissive && Missive.search) Missive.search(String(order)); }
+/* The site's imposition tool for one order, shown in the panel; "Open wide" opens the same
+   page in the browser. It files to that order's Drive folder only (pps-missive-impose.php). */
+function imposeUrl(order){ return CFG.impose ? CFG.impose + (CFG.impose.indexOf('?')<0?'?':'&') + 'order=' + encodeURIComponent(order) : ''; }
+function impose(order){ IMPOSE = order; render(); window.scrollTo(0,0); }
 
 /* Order numbers in what the conversation says: "#87347", "Order 87347", "order #87347". */
 function ppsOrderNumbers(text){
@@ -694,7 +708,7 @@ function load(ids, conv){
   var url = CFG.api + (CFG.api.indexOf('?')<0?'?':'&') + 'orders=' + encodeURIComponent(ids.join(',')) + '&conv=' + encodeURIComponent(conv||'');
   fetch(url,{headers:{'X-PPS-Panel-Key':CFG.key},credentials:'omit',cache:'no-store'})
     .then(function(r){ if(!r.ok) throw new Error('The site answered '+r.status+'.'); return r.json(); })
-    .then(function(d){ DATA=d; render(); })
+    .then(function(d){ DATA=d; if(!IMPOSE) render(); }) // never rebuild the tool's frame mid-job; Back shows the fresh data
     .catch(function(e){ app.className=''; app.textContent=''; app.appendChild(el('div',{cls:'late',text:'Could not load: '+e.message})); });
 }
 
@@ -793,6 +807,7 @@ function boardRow(r, here){
   var d = el('div',{cls:'row'+(here?' here':'')});
   d.appendChild(el('div',{},[ el('span',{cls:late?'late':'',text:md(r.must_ship)}), ' ', el('a',{text:'#'+r.order,on:function(){find(r.order);}}),
     r.drive?el('a',{cls:'small',text:' [Drive]',title:'Open the order\'s Google Drive folder',on:function(){ open(r.drive); }}):null,
+    r.drive&&CFG.impose?el('a',{cls:'small',text:' [Impose]',title:'Open the imposition tool for this order',on:function(){ impose(r.order); }}):null,
     ' '+r.customer+' — '+r.what, r.rush?el('span',{cls:'rush',text:' RUSH'}):null, r.printed?el('span',{cls:'muted',text:' · printed'}):null ]));
   var meta = [];
   r.papers.forEach(function(p){ meta.push(p.label+' '+p.sheet+' ('+p.sheets+')'); });
@@ -884,6 +899,14 @@ function renderBoard(here){
 
 function render(){
   var d = DATA; app.className=''; app.textContent='';
+  if(IMPOSE){
+    var u = imposeUrl(IMPOSE);
+    app.appendChild(el('div',{cls:'impbar'},[ el('button',{cls:'b',text:'← Back to the panel',on:function(){ IMPOSE=0; render(); }}),
+      el('b',{text:'Impose #'+IMPOSE}), el('a',{cls:'small',text:'Open wide ↗',title:'The same page in the browser, full width',on:function(){ open(u); }}) ]));
+    app.appendChild(el('iframe',{cls:'imp',src:u,title:'Imposition — order #'+IMPOSE}));
+    app.appendChild(el('div',{cls:'muted small',text:'Send to Drive files the imposed PDF into this order\'s folder. Nothing else about the order changes.'}));
+    return;
+  }
   if(!inMissive){ var i=el('input',{placeholder:'Order #'}); var b=el('button',{text:'Look up',on:function(){ load(ppsOrderNumbers('#'+i.value), ''); }});
     app.appendChild(el('div',{cls:'card'},[el('div',{cls:'muted',text:'Outside Missive: type an order number to test.'}), i, ' ', b])); }
   if(d.missive.error) app.appendChild(el('div',{cls:'warn small',text:'Missive tasks: '+d.missive.error}));
@@ -912,7 +935,8 @@ function render(){
     if(o.drive){
       var dv = o.drive, db = el('div',{cls:'card small'});
       var head = el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:6px'},[ el('b',{text:'Google Drive'}) ]);
-      if(dv.folder) head.appendChild(el('button',{cls:'b',text:'Open folder',on:function(){ open(dv.folder); }}));
+      if(dv.folder) head.appendChild(el('span',{},[ CFG.impose?el('button',{cls:'b',text:'Impose',title:'Open the imposition tool for this order',on:function(){ impose(o.order); }}):null,
+        el('button',{cls:'b',text:'Open folder',on:function(){ open(dv.folder); }}) ]));
       db.appendChild(head);
       if(dv.note) db.appendChild(el('div',{cls:dv.state==='failed'?'late':'muted',text:dv.note}));
       dv.files.forEach(function(f){
