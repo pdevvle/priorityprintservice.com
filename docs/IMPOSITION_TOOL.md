@@ -1817,3 +1817,24 @@ books may need shingling allowance later.
 3. Requirements on the site: Drive connected in **PPS Calculators → Google
    Drive**, WooCommerce active. The Imposition submenu appears under PPS
    Calculators for admins (`manage_options`).
+
+### Production state (2026-10-18)
+
+Owner: "push the latest imposition out to the site." Production went from
+v1.32 (tool 286,322 bytes, 2026-09-06) and the v1.31 host (28,869 bytes,
+2026-09-05) straight to **v1.58** (`imposition-tool.html` 451,423 bytes,
+`pps-imposition.php` 38,382 bytes), both pulled from commit `38d9be9`.
+Pre-overwrite check: both server sizes matched their repo commits exactly, so
+no in-place edit was lost. Staging and production now run the same build.
+
+Found on production during that check, **not in this repo**:
+`pps-missive-impose.php` (14,342 bytes, written 2026-10-18 by another
+session). It serves the same `imposition-tool.html` from disk inside the
+Missive panel with its own order-scoped token, and answers five of the
+tool's AJAX actions itself (priority 0) when the URL carries `pps_mpi`. It
+does not answer `pps_impose_setups` (1.37) and injects no `maxUpload`
+(1.34), so in that frame saved setups fall back to the browser
+("saved in this browser only — …") and the upload-size guard is off; the
+wp-admin screen is unaffected. The 1.37 host only adds functions, so nothing
+that file calls has moved. It still needs to come home to the repo — see
+"Server-side patches must come home the same session" in CLAUDE.md.
