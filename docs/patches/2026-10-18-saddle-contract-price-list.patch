@@ -1,0 +1,269 @@
+diff --git a/calc-preview-test.html b/calc-preview-test.html
+index be409a8..8ccfca3 100644
+--- a/calc-preview-test.html
++++ b/calc-preview-test.html
+@@ -465,6 +465,34 @@ const _cfgList = v => (Array.isArray(v) && v.length ? v : null);
+ // Per-calc add-on visibility flags injected by PHP. Shape: { vivid: bool, coating: bool, ... }.
+ // Only keys for this calc-type's supported add-ons appear. Absent key = treated as visible.
+ const _AD = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.addons) ? window.PPS_CONFIG.addons : {};
++// ── Contract price list (owner 2026-10-18, first for Armadillo Home Warranty) ──
++// A product can carry a customer's agreed prices (`_pps_contract` product meta, injected
++// as PPS_CONFIG.contract): { name, lock, prices: { qty: price } }. The book is then
++// priced from that list — quantity only, at exactly the listed price — with proofing,
++// artwork services and rush added on top as usual. `lock` (default on) fixes the spec
++// to the product's defaults: no size, page, paper, colour or finishing controls, and
++// nothing in a link, reorder or cart edit can change it. The server checks the price
++// against the same list at add to cart (pps_contract_check()).
++const _CONTRACT = (function () {
++  try {
++    const k = typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.contract;
++    if (!k || typeof k !== 'object' || !k.prices || typeof k.prices !== 'object') return null;
++    const prices = {};
++    Object.keys(k.prices).forEach(q => { const n = parseInt(q, 10), v = Number(k.prices[q]); if (n > 0 && v > 0) prices[n] = Math.round(v * 100) / 100; });
++    const qtys = Object.keys(prices).map(Number).sort((a, b) => a - b);
++    if (!qtys.length) return null;
++    return { name: String(k.name || 'Contract').slice(0, 80), lock: k.lock !== false, prices, qtys };
++  } catch (e) { return null; }
++})();
++const _LOCK = !!(_CONTRACT && _CONTRACT.lock);
++// The nearest listed quantity — a link or an old cart line asking for 600 lands on 500.
++function ppsContractQty(q) {
++  if (!_CONTRACT) return q;
++  if (_CONTRACT.prices[q]) return q;
++  let best = _CONTRACT.qtys[0];
++  _CONTRACT.qtys.forEach(x => { if (Math.abs(x - q) < Math.abs(best - q)) best = x; });
++  return best;
++}
+ 
+ const PCF = Object.assign({
+   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
+@@ -1373,7 +1401,19 @@ function calculate(c) {
+   const subBeforeSale=Object.values(P).reduce((s,v)=>s+v,0);
+   P.discSale=(PCF.sale_discount_pct>0)?-Math.round(subBeforeSale*PCF.sale_discount_pct*100)/100:0;
+ 
+-  const total=Object.values(P).reduce((s,v)=>s+v,0);
++  let total=Object.values(P).reduce((s,v)=>s+v,0);
++  // A contract product charges its listed price for the book itself, whatever the formula
++  // says. What the customer CHOOSES on top — a proof, artwork edits or a new design — is
++  // added as usual, and rush is worked out on the result below. The automatic "add bleeds"
++  // charge is not: there is no control for it (it switches on until uploaded art shows a
++  // bleed), so every contract quote would open above the agreed price.
++  let contract=null;
++  if(_CONTRACT){
++    const cp=_CONTRACT.prices[tQ];
++    if(!(cp>0)) return {error:[`Choose one of these quantities: ${_CONTRACT.qtys.map(q=>q.toLocaleString()).join(", ")}.`],sz};
++    contract={name:_CONTRACT.name,qty:tQ,price:cp};
++    total=cp+P.artwork+P.proof;
++  }
+ 
+   // Turnaround
+   // Material lead times STACK (run concurrently) rather than accumulating: the inside
+@@ -1515,7 +1555,10 @@ function calculate(c) {
+   const mustShipBiz = Math.max(0, effectiveDeliveryBiz - effectiveTransit);
+   const mustShipDate = addBusinessDays(shopToday, mustShipBiz);
+ 
+-  const bd=[
++  const bd=(contract?[
++    {l:`${contract.name} price · ${contract.qty.toLocaleString()} booklets`,v:contract.price,g:"con"},
++    {l:"Artwork",v:P.artwork,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
++  ]:[
+     {l:"Inside Paper",v:P.insidePaper,g:"mat"},{l:"Cover Paper",v:P.coverPaper,g:"mat"},
+     {l:"Inside Print",v:P.insidePrint,g:"mat"},{l:"Cover Print",v:P.coverPrint,g:"mat"},
+     {l:"Press",v:P.press,g:"lab"},{l:"Cutting",v:P.cutting,g:"lab"},
+@@ -1528,11 +1571,11 @@ function calculate(c) {
+     {l:"Difficult Size",v:P.diffSize,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
+     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
+     {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
+-  ].filter(r=>Math.abs(r.v)>0.005);
++  ]).filter(r=>Math.abs(r.v)>0.005);
+ 
+   // CMYK-derived group colors
+-  const gC={mat:CK.cyan,lab:CK.key,add:CK.yellow,art:CK.magenta,fee:"#c25050",disc:CK.cyan};
+-  const gL={mat:"Materials & Ink",lab:"Production Labor",add:"Addons",art:"Artwork & Proofing",fee:"Fees",disc:"Discounts"};
++  const gC={con:CK.key,mat:CK.cyan,lab:CK.key,add:CK.yellow,art:CK.magenta,fee:"#c25050",disc:CK.cyan};
++  const gL={con:"Contract price",mat:"Materials & Ink",lab:"Production Labor",add:"Addons",art:"Artwork & Proofing",fee:"Fees",disc:"Discounts"};
+   const grouped=Object.entries(gL).map(([k,label])=>{
+     const val=bd.filter(r=>r.g===k).reduce((s,r)=>s+r.v,0);
+     return {label,val,c:gC[k]};
+@@ -1625,10 +1668,10 @@ function calculate(c) {
+     minDaysConfig:PCF.minimum_turnaround_days,
+   };
+ 
+-  const saleActive=P.discSale<-0.005;
++  const saleActive=!contract&&P.discSale<-0.005;
+   const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
+   const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
+-  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,oneStapleOnly,q100,coatOK,vividOK:c.insidePaper.coatable,rcAll4OK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
++  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,oneStapleOnly,q100,coatOK,vividOK:c.insidePaper.coatable,rcAll4OK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale:contract?Math.round(grandTotal*100)/100:totalWithoutSale,contract,
+     shipping:{hasDest:_hasDest, poBox: !!c.shipPoBox, poBoxDays: _poBoxDays,estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday), shopTodayYMD: toYMD(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
+ }
+ 
+@@ -5965,6 +6008,7 @@ function buildTicket(config, result) {
+   const push = (k, v) => { v = v == null ? "" : String(v).trim(); if (v) t.push([k, v]); };
+   const colorName = v => v === "color" ? "Full Color" : "Black & White";
+   push("Product", "Saddle Stitch Booklet");
++  if (result && result.contract) push("Pricing", `${result.contract.name} price list · ${result.contract.qty.toLocaleString()} @ $${result.contract.price.toFixed(2)}`);
+   const _first = (config.sets && config.sets[0]) || {};
+   push("Job name", _first.name);
+   push("Size", (function () {
+@@ -6075,6 +6119,8 @@ function buildMetadata(config, result) {
+   return JSON.stringify({
+     addons: buildAddons(config),
+     ticket: buildTicket(config, result),
++    // The listed price this line was charged, for the server's check against the same list.
++    contract: result.contract || undefined,
+     // Customer selections
+     sizeLabel: config.sizeLabel,
+     customLong: config.customLong,
+@@ -6574,6 +6620,7 @@ function App(){
+       const _int = (v) => { const n = parseInt(v, 10); return isNaN(n) ? undefined : n; };
+       const _float = (v) => { const n = parseFloat(v); return isNaN(n) ? undefined : n; };
+       if (p.has("qty") && _int(p.get("qty"))) base.qty = _int(p.get("qty"));
++      if (!_LOCK) {
+       if (p.has("pages") && _int(p.get("pages"))) base.pages = _int(p.get("pages"));
+       if (p.has("size")) base.sizeLabel = p.get("size");
+       if (p.has("long") && _float(p.get("long"))) base.customLong = _float(p.get("long"));
+@@ -6591,6 +6638,7 @@ function App(){
+       if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
+       if (p.has("bundling") && _float(p.get("bundling")) != null) base.bundling = _float(p.get("bundling"));
+       if (p.has("corner") && _float(p.get("corner")) != null) base.roundCorner = _float(p.get("corner"));
++      }
+       if (p.has("state")) base.shipState = p.get("state");
+       if (p.has("artwork") && _float(p.get("artwork")) != null) base.artwork = _float(p.get("artwork"));
+       if (p.has("artedit") && _int(p.get("artedit")) != null) base.artEditPages = _int(p.get("artedit"));
+@@ -6602,7 +6650,7 @@ function App(){
+   })();
+   const _findPaper = (list, val) => { const f = list.find(p => String(p.val) === String(val)); return f || list[2] || list[0]; };
+ 
+-  const[sets,setSets]=useState([{qty:ppsSafeQty(D.qty), pages:ppsSnapPages(D.pages||8), name:""}]);
++  const[sets,setSets]=useState([{qty:ppsContractQty(ppsSafeQty(D.qty)), pages:ppsSnapPages(D.pages||8), name:""}]);
+   const debugUnlocked = sets.some(s => s.name === "%3414");
+   if (typeof window !== "undefined") window.__ppsTipEdit = debugUnlocked;
+   const[sizeLabel,setSizeLabel]=useState(D.sizeLabel || "5.5×8.5 (Opens to 8.5×11)");
+@@ -6715,12 +6763,14 @@ function App(){
+       // React render to throw silently and leave an empty calc root.
+       if (rc.sets && Array.isArray(rc.sets)) {
+         setSets(rc.sets.map(s => ({
+-          qty: ppsSafeQty(s.qty),
+-          pages: ppsSnapPages(Number(s.pages) || 8),
++          qty: ppsContractQty(ppsSafeQty(s.qty)),
++          pages: _LOCK ? ppsSnapPages(D.pages || 8) : ppsSnapPages(Number(s.pages) || 8),
+           name: s.name || "",
+         })));
+       }
+ 
++      // A locked contract spec comes from the product alone, never from the link.
++      if (!_LOCK) {
+       // Color
+       if (rc.insideColor) setInsideColor(rc.insideColor);
+       if (rc.coverColor) setCoverColor(rc.coverColor);
+@@ -6746,6 +6796,7 @@ function App(){
+       if (rc.coating != null) setCoating(rc.coating);
+       if (rc.bundling != null) setBundling(rc.bundling);
+       if (rc.roundCorner != null) setRoundCorner(rc.roundCorner);
++      }
+ 
+       // Artwork & proofing
+       if (rc.artwork != null) setArtwork(rc.artwork);
+@@ -6859,7 +6910,7 @@ function App(){
+     };
+     const currentQty = sets[0]?.qty || 100;
+     const currentPages = sets[0]?.pages || 8;
+-    const breakpoints = [25,50,100,250,500,1000,2500,5000].filter(q => q !== currentQty);
++    const breakpoints = (_CONTRACT ? _CONTRACT.qtys : [25,50,100,250,500,1000,2500,5000]).filter(q => q !== currentQty);
+     // Add current qty and sort
+     const qtys = [...breakpoints, currentQty].sort((a,b) => a - b);
+     const rows = qtys.map(q => {
+@@ -7536,7 +7587,7 @@ function App(){
+                   /* background + border live in .pps-jobtitle, not here: an inline
+                      background would outrank the :hover and :focus rules. */
+             }>
+-            <div style={r2}>
++            {!_LOCK && <><div style={r2}>
+               <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
+               {isCustom
+                 ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"20px 32px 20px 13px":"20px 34px 20px 14px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;
+@@ -7564,17 +7615,36 @@ function App(){
+               </div>
+             )}
+             </>}
++            </>}
++            {/* A locked contract spec is shown, not offered. */}
++            {_LOCK && (()=>{
++              const col=v=>v==="color"?"Full Color":"Greyscale";
++              const lbl=(arr,v)=>{const o=arr.find(x=>x.val===v);return o?o.label:null;};
++              const fin=[coating>0&&lbl(COATINGS,coating),bundling>0&&lbl(BUNDLING,bundling),roundCorner>0&&lbl(CORNERS,roundCorner),vividPrint&&"Enhanced Vivid Print"].filter(Boolean);
++              const rows=[
++                ["Size",isCustom?`${customLong}×${customShort}″`:sizeLabel],
++                ["Pages",`${sets[0].pages} pages · saddle stitched`+(r.twoAuto||twoStaple?" · two staples":"")],
++                ["Inside",`${insidePaper.label} · ${col(insideColor)}`],
++                ["Cover",coverMode==="same"?`Same paper as inside · ${col(coverColor)}`:`${coverPaper.label} · ${col(coverColor)}`],
++              ].concat(fin.length?[["Finishing",fin.join(", ")]]:[]);
++              return <div data-pps-contract-spec="1" style={{border:`1px solid ${CC.border}`,borderRadius:6,padding:"10px 12px",background:CC.tint,marginTop:4}}>
++                <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:CC.mid,marginBottom:6}}>{_CONTRACT.name} booklet · set specification</div>
++                {rows.map(([k,v])=><div key={k} style={{display:"flex",gap:10,fontSize:13,lineHeight:1.6}}><span style={{minWidth:72,color:CC.light}}>{k}</span><span style={{color:CC.dark,fontWeight:600}}>{v}</span></div>)}
++              </div>;
++            })()}
+             {r.error?.map((e,i)=><p key={i} style={ST.err}>{e}</p>)}
+ 
+             {/* Set 1 — always in the size section */}
+             <div style={ST.hr}/>
+             <div style={r2}>
+-              <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>
+-              <Sel label={<Tip k="page_count">Pages</Tip>} value={sets[0].pages} onChange={v=>upSet(0,{pages:parseInt(v)})}>{PAGE_COUNTS.map(p=><option key={p} value={p}>{p} Pages</option>)}</Sel>
++              {_CONTRACT
++                ? <Sel label={<Tip k="quantity">Quantity</Tip>} value={ppsContractQty(sets[0].qty)} onChange={v=>upSet(0,{qty:parseInt(v,10)})}>{_CONTRACT.qtys.map(q=><option key={q} value={q}>{q.toLocaleString()} booklets · ${_CONTRACT.prices[q].toFixed(2)}</option>)}</Sel>
++                : <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>}
++              {!_LOCK && <Sel label={<Tip k="page_count">Pages</Tip>} value={sets[0].pages} onChange={v=>upSet(0,{pages:parseInt(v)})}>{PAGE_COUNTS.map(p=><option key={p} value={p}>{p} Pages</option>)}</Sel>}
+             </div>
+ 
+             {/* Staple Binding — hidden when two_staple add-on is disabled and not pre-filled */}
+-            {(_AD.two_staple!==false || twoStaple===true) && (r.oneStapleOnly
++            {!_LOCK && (_AD.two_staple!==false || twoStaple===true) && (r.oneStapleOnly
+               ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip></label><div style={{fontSize:12.5,color:CC.dark,fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4,alignSelf:"flex-start"}}>Single Staple</div><div style={{fontSize:11,color:CC.mid,marginTop:4}}>Only one staple can be used on a binding edge under {ONE_STAPLE_MAX}″.</div></div>
+               : r.twoAuto
+               ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip><TurnBadge days={r.ti?.twoStaple}/></label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:"#0060cc",fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4}}>Two Staples — standard for this size</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#4f46e5",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
+@@ -7583,7 +7653,7 @@ function App(){
+           </Sec>
+ 
+           {/* SECTION 2: Printing & Paper */}
+-          <Sec step={2} summary={secSummary.s2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
++          {!_LOCK && <Sec step={2} summary={secSummary.s2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
+             <div style={r2}>
+               <Pil label={<Tip k="inside_print">Inside Printing</Tip>} value={insideColor} onChange={setInsideColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
+               <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
+@@ -7604,10 +7674,10 @@ function App(){
+               }
+             </div>
+             {coverMode==="separate"&&<PaperNote p={coverPaper} pool={coverPaperType==="cardstock"?"cs":"nc"}/>}
+-          </Sec>
++          </Sec>}
+ 
+           {/* SECTION 3: Finishing & Addons */}
+-          <Sec step={3} summary={secSummary.s3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
++          {!_LOCK && <Sec step={3} summary={secSummary.s3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
+             {/* Print Quality only exists on coated stock, so it is hidden rather than shown
+                 disabled next to a line explaining why it cannot be used. The effect on
+                 r.vividOK already clears vividPrint when the paper changes under it, so a
+@@ -7636,10 +7706,10 @@ function App(){
+                 );
+               })()}
+             </div>}
+-          </Sec>
++          </Sec>}
+ 
+           {/* SECTION 4: Artwork & Proofing */}
+-          <Sec step={4} summary={secSummary.s4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")} keepMounted>
++          <Sec step={_LOCK?2:4} summary={secSummary.s4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")} keepMounted>
+ 
+             {/* Art options dropdown */}
+             <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+@@ -7799,7 +7869,7 @@ function App(){
+           </Sec>
+ 
+           {/* SECTION 5: Shipping & Delivery */}
+-          <Sec step={5} summary={secSummary.s5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
++          <Sec step={_LOCK?3:5} summary={secSummary.s5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+ 
+             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
+             <div style={{...r2,marginTop:12}}>

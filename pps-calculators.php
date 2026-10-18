@@ -1321,6 +1321,9 @@ add_action( 'wp', function() {
         if ( ! empty( $product_defaults ) && is_array( $product_defaults ) ) {
             $config['defaults'] = $product_defaults;
         }
+        // A customer's agreed price list, when the product has one (pps_contract_parse()).
+        $contract = pps_contract_for_product( $product_id );
+        if ( $contract ) $config['contract'] = $contract;
 
         // Forward reorder config if present on the product page URL
         if ( ! empty( $_GET['pps_reorder'] ) ) {
@@ -2037,6 +2040,66 @@ function pps_ajax_quote_question() {
  *
  * @return float|null Floor in dollars, or null when it cannot be determined.
  */
+/**
+ * Contract price lists (owner 2026-10-18 — the Armadillo Home Warranty booklet moved off its
+ * WCPA form: "keep their price list", "lock it, quantity only").
+ *
+ * A product may carry `_pps_contract` meta: { name, lock, prices: { qty: price } }. The product
+ * page injects it as PPS_CONFIG.contract, and the calculator (saddle, for now) then offers only
+ * those quantities at exactly those prices, with proofing, artwork services and rush on top;
+ * `lock` fixes the spec to the product's PPS Defaults. Prices live in the database only — the
+ * repo is public. pps_contract_check() holds the price to the same list at add to cart.
+ */
+function pps_contract_parse( $raw ) {
+    if ( is_string( $raw ) && $raw !== '' ) $raw = json_decode( $raw, true );
+    if ( ! is_array( $raw ) || empty( $raw['prices'] ) || ! is_array( $raw['prices'] ) ) return null;
+    $prices = array();
+    foreach ( $raw['prices'] as $q => $p ) {
+        $q = (int) $q; $p = round( (float) $p, 2 );
+        if ( $q > 0 && $q <= 99999 && $p > 0 && $p < 1000000 ) $prices[ $q ] = $p;
+        if ( count( $prices ) >= 50 ) break;
+    }
+    if ( ! $prices ) return null;
+    ksort( $prices );
+    $name = trim( preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) ( $raw['name'] ?? '' ) ) ) );
+    return array(
+        'name'   => function_exists( 'mb_substr' ) ? mb_substr( $name !== '' ? $name : 'Contract', 0, 80 ) : substr( $name !== '' ? $name : 'Contract', 0, 80 ),
+        'lock'   => ! isset( $raw['lock'] ) || (bool) $raw['lock'],
+        'prices' => $prices,
+    );
+}
+
+function pps_contract_for_product( $product_id ) {
+    return $product_id ? pps_contract_parse( get_post_meta( $product_id, '_pps_contract', true ) ) : null;
+}
+
+/** "100 = 150.43" per line (also "100: $150.43", "100, 150.43") → [ qty => price ]. */
+function pps_contract_lines_to_prices( $text ) {
+    $out = array();
+    foreach ( preg_split( '/\r?\n/', (string) $text ) as $line ) {
+        if ( preg_match( '/^\s*([\d,]+)\s*[=:,\t]\s*\$?\s*([\d,]*\.?\d+)\s*$/', $line, $m ) ) {
+            $out[ (int) str_replace( ',', '', $m[1] ) ] = (float) str_replace( ',', '', $m[2] );
+        }
+    }
+    return $out;
+}
+
+/**
+ * '' when a posted line agrees with the product's price list, else the refusal. The quantity
+ * must be a listed one (taken from the job itself, not just the contract field) and the price
+ * at least the listed one — proofing, artwork services and rush only ever add to it.
+ */
+function pps_contract_check( $contract, $price, $metadata_json ) {
+    $meta = json_decode( (string) $metadata_json, true );
+    $msg  = 'This product has a set price list. Refresh the page and choose one of its quantities.';
+    if ( ! is_array( $meta ) || empty( $meta['contract'] ) || ! is_array( $meta['contract'] ) ) return $msg;
+    $qty = 0;
+    foreach ( (array) ( $meta['sets'] ?? array() ) as $set ) $qty += (int) ( $set['qty'] ?? 0 );
+    if ( $qty <= 0 || (int) ( $meta['contract']['qty'] ?? 0 ) !== $qty || ! isset( $contract['prices'][ $qty ] ) ) return $msg;
+    if ( (float) $price + 0.005 < (float) $contract['prices'][ $qty ] ) return 'Price below the agreed price for ' . $qty . '. Refresh and try again.';
+    return '';
+}
+
 function pps_materials_price_floor( $product_id, $metadata_json ) {
     $meta = json_decode( (string) $metadata_json, true );
     if ( ! is_array( $meta ) ) return null;
@@ -2238,6 +2301,16 @@ function pps_ajax_add_to_cart() {
         wp_send_json_error( 'Invalid product or price.' );
     }
 
+    // A contract product is held to its price list, not to the formula's floors below.
+    $contract = pps_contract_for_product( $product_id );
+    if ( $contract ) {
+        $refuse = pps_contract_check( $contract, $price, $metadata );
+        if ( $refuse !== '' ) {
+            error_log( sprintf( '[pps] add-to-cart contract check refused: pid=%d submitted=%.2f', $product_id, $price ) );
+            wp_send_json_error( $refuse );
+        }
+    }
+
     $meta_obj = json_decode( $metadata, true );
     // Valid JSON is not enough: a bare string or number here passed, and then threw a
     // TypeError while the order was being written (audit 2026-09-27).
@@ -2331,7 +2404,7 @@ function pps_ajax_add_to_cart() {
     // Scales with the job, unlike the flat product floor above: a large booklet order
     // can no longer be checked out near the $5/50%-of-regular_price minimum. Returns
     // null and skips whenever an input can't be resolved authoritatively.
-    $mat_floor = pps_materials_price_floor( $product_id, $metadata );
+    $mat_floor = $contract ? null : pps_materials_price_floor( $product_id, $metadata );
     if ( $mat_floor !== null && $price < $mat_floor ) {
         error_log( sprintf(
             '[pps] add-to-cart materials floor rejected: pid=%d submitted=%.2f required>=%.2f',
@@ -5321,7 +5394,31 @@ add_action( 'woocommerce_product_data_panels', function() {
             </span>
         </p>
         <?php
+        // ── Contract price list ──
+        $contract = function_exists( 'pps_contract_for_product' ) ? pps_contract_for_product( $post->ID ) : null;
+        $lines    = '';
+        if ( $contract ) foreach ( $contract['prices'] as $q => $p ) $lines .= $q . ' = ' . number_format( $p, 2, '.', '' ) . "\n";
         ?>
+        <div style="border-top:1px solid #eee;padding-top:12px;margin-top:8px">
+            <p style="margin:0 0 6px"><strong>Contract price list</strong> — a customer's agreed prices. When set, the calculator offers only these quantities and charges exactly these prices (proofs, artwork services and rush are added on top). Leave the list empty for normal pricing.</p>
+            <p class="form-field">
+                <label for="pps_contract_name">Customer / list name</label>
+                <input type="text" id="pps_contract_name" name="pps_contract_name" maxlength="80"
+                       value="<?php echo esc_attr( $contract ? $contract['name'] : '' ); ?>" placeholder="Armadillo Home Warranty" style="width:300px" />
+            </p>
+            <p class="form-field">
+                <label for="pps_contract_prices">Quantity = price</label>
+                <textarea id="pps_contract_prices" name="pps_contract_prices" rows="9" style="width:300px;font-family:monospace"
+                          placeholder="100 = 150.43&#10;250 = 198.48"><?php echo esc_textarea( $lines ); ?></textarea>
+                <span class="description" style="display:block;margin-left:0">One per line. The price is for the whole quantity.</span>
+            </p>
+            <p class="form-field">
+                <label for="pps_contract_lock">Lock the spec</label>
+                <input type="checkbox" id="pps_contract_lock" name="pps_contract_lock" value="1" <?php checked( ! $contract || $contract['lock'] ); ?> />
+                <span class="description">Size, pages, paper, colour and finishing are fixed to the defaults above; the customer chooses quantity, proof and artwork only.</span>
+            </p>
+            <input type="hidden" name="pps_contract_form" value="1" />
+        </div>
     </div>
     <?php
 } );
@@ -5388,6 +5485,17 @@ add_action( 'woocommerce_process_product_meta', function( $post_id ) {
         update_post_meta( $post_id, '_price', $price );
     } elseif ( $typed === '' && $url_price === null ) {
         delete_post_meta( $post_id, '_pps_defaults_price' );
+    }
+
+    // Contract price list. An empty list removes it — the product goes back to normal pricing.
+    if ( ! empty( $_POST['pps_contract_form'] ) ) {
+        $c = pps_contract_parse( array(
+            'name'   => sanitize_text_field( wp_unslash( $_POST['pps_contract_name'] ?? '' ) ),
+            'lock'   => ! empty( $_POST['pps_contract_lock'] ),
+            'prices' => pps_contract_lines_to_prices( wp_unslash( $_POST['pps_contract_prices'] ?? '' ) ),
+        ) );
+        if ( $c ) update_post_meta( $post_id, '_pps_contract', wp_json_encode( $c ) );
+        else      delete_post_meta( $post_id, '_pps_contract' );
     }
 } );
 
