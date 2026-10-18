@@ -175,7 +175,7 @@ function pps_mp_preview( array $j ) {
         if ( $a === '' ) continue;
         $labels[] = trim( strpos( $a, ':' ) !== false ? substr( $a, 0, strpos( $a, ':' ) ) : $a );
     }
-    return array( 'due' => $j['must_ship'], 'title' => $title, 'labels' => array_values( array_unique( array_filter( $labels ) ) ) );
+    return array( 'due' => $j['start'] !== '' ? $j['start'] : $j['must_ship'], 'title' => $title, 'labels' => array_values( array_unique( array_filter( $labels ) ) ) );
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -247,6 +247,8 @@ define( 'PPS_MP_CONV_OPTION', 'pps_missive_conv_orders' );
 define( 'PPS_MP_ALLOW_OPTION', 'pps_missive_allow_state' );
 define( 'PPS_MP_TASKS_CACHE', 'pps_missive_tasks' );
 define( 'PPS_MP_API', 'https://public.missiveapp.com/v1/' );
+define( 'PPS_MP_ITEMS_OPTION', 'pps_missive_item_tasks' );   // order line item id → the subtask the panel created for it
+define( 'PPS_MP_CREATE_OPTION', 'pps_missive_allow_create' );
 
 /** The first order number in a piece of text ("#87347", "Order 87347"), or 0. */
 function pps_mp_order_in( $text ) {
@@ -266,10 +268,13 @@ function pps_mp_unix_ymd( $ts ) {
  * Pair subtasks with orders. `$tasks` are Missive task objects; `$conv` maps conversation id →
  * order (0 = known to have none). A task whose title names an order wins over its
  * conversation. Where an order has several, the open one due soonest is kept.
- * Returns order → compact task, and the unpaired subtasks.
+ * A subtask the panel created for one job (`$items`: line item → task id) belongs to that job
+ * alone and is kept apart. Returns order → task, the unpaired subtasks, and item → task.
  */
-function pps_mp_pair_tasks( array $tasks, array $conv ) {
-    $by = array(); $unpaired = array();
+function pps_mp_pair_tasks( array $tasks, array $conv, array $items = array() ) {
+    $by = array(); $unpaired = array(); $by_item = array();
+    $item_of = array();
+    foreach ( $items as $item => $tid ) $item_of[ (string) $tid ] = (int) $item;
     $rank = array( 'in_progress' => 0, 'todo' => 1, 'closed' => 2 );
     foreach ( $tasks as $t ) {
         if ( ! is_array( $t ) || empty( $t['id'] ) || empty( $t['conversation'] ) ) continue;   // subtasks only
@@ -277,6 +282,7 @@ function pps_mp_pair_tasks( array $tasks, array $conv ) {
         $order = pps_mp_order_in( $t['title'] ?? '' ) ?: (int) ( $conv[ $cid ] ?? 0 );
         $row = array( 'id' => (string) $t['id'], 'title' => (string) ( $t['title'] ?? '' ), 'state' => (string) ( $t['state'] ?? 'todo' ),
                       'due' => pps_mp_unix_ymd( $t['due_at'] ?? 0 ), 'started' => pps_mp_unix_ymd( $t['started_at'] ?? 0 ), 'conversation' => $cid );
+        if ( isset( $item_of[ $row['id'] ] ) ) { $by_item[ $item_of[ $row['id'] ] ] = $row; continue; }   // one created per job
         if ( ! $order ) { $unpaired[] = $row; continue; }
         $cur = $by[ $order ] ?? null;
         $better = ! $cur
@@ -284,15 +290,15 @@ function pps_mp_pair_tasks( array $tasks, array $conv ) {
             || ( ( $rank[ $row['state'] ] ?? 1 ) === ( $rank[ $cur['state'] ] ?? 1 ) && $row['due'] !== '' && ( $cur['due'] === '' || $row['due'] < $cur['due'] ) );
         if ( $better ) $by[ $order ] = $row;
     }
-    return array( $by, $unpaired );
+    return array( $by, $unpaired, $by_item );
 }
 
 /** One board row per open job, with its subtask and whether the task's due date agrees. */
-function pps_mp_board_rows( array $open, array $tasks_by_order, $today ) {
+function pps_mp_board_rows( array $open, array $tasks_by_order, $today, array $tasks_by_item = array() ) {
     $rows = array();
     foreach ( $open as $j ) {
         list( $f, $t ) = pps_mp_window( $j, $today );
-        $task = $tasks_by_order[ $j['order'] ] ?? null;
+        $task = $tasks_by_item[ $j['item'] ] ?? ( $tasks_by_order[ $j['order'] ] ?? null );
         $fin = array();
         foreach ( preg_split( '/;\s*/', (string) $j['addons'] ) as $a ) {
             $a = trim( $a );
@@ -398,21 +404,22 @@ function pps_mp_answer( array $ids, $conv = '' ) {
     $open  = pps_mp_open_jobs();
     $ids   = array_values( array_filter( array_slice( array_unique( array_map( 'intval', $ids ) ), 0, 5 ) ) );
     $out   = array( 'today' => $today, 'orders' => array(), 'missing' => array(), 'board' => array(),
-                    'missive' => array( 'connected' => false, 'error' => '', 'can_change' => (bool) get_option( PPS_MP_ALLOW_OPTION, false ), 'unpaired' => 0 ) );
+                    'missive' => array( 'connected' => false, 'error' => '', 'can_change' => (bool) get_option( PPS_MP_ALLOW_OPTION, false ),
+                                        'can_create' => (bool) get_option( PPS_MP_CREATE_OPTION, false ), 'unpaired' => 0 ) );
 
     // What the panel saw: this conversation holds this order.
     $map = pps_mp_conv_map();
     $conv = preg_replace( '/[^A-Za-z0-9_-]/', '', (string) $conv );
     if ( $conv !== '' && count( $ids ) === 1 && ( $map[ $conv ] ?? null ) !== $ids[0] ) { $map[ $conv ] = $ids[0]; pps_mp_save_conv( $map ); }
 
-    $by = array();
+    $by = array(); $by_item = array();
     if ( pps_mp_token() !== '' ) {
         $tasks = pps_mp_tasks();
         if ( is_wp_error( $tasks ) ) {
             $out['missive']['error'] = $tasks->get_error_message();
         } else {
             $map = pps_mp_learn_from_api( $tasks, $map );
-            list( $by, $unpaired ) = pps_mp_pair_tasks( $tasks, $map );
+            list( $by, $unpaired, $by_item ) = pps_mp_pair_tasks( $tasks, $map, pps_mp_item_map() );
             $out['missive']['connected'] = true;
             $out['missive']['unpaired'] = count( $unpaired );
         }
@@ -426,13 +433,17 @@ function pps_mp_answer( array $ids, $conv = '' ) {
             $j['window']  = pps_mp_window( $j, $today );
             $j['batch']   = pps_mp_batch( $j, $open, $today );
             $j['preview'] = pps_mp_preview( $j );
-            $j['task']    = $by[ $id ] ?? null;
+            $j['task']    = $by_item[ $j['item'] ] ?? ( $by[ $id ] ?? null );
+            $j['own_task'] = isset( $by_item[ $j['item'] ] ) || isset( pps_mp_item_map()[ $j['item'] ] );
         }
         unset( $j );
+        $needs = count( array_filter( $jobs, function ( $j ) { return ! $j['own_task']; } ) );
         $out['orders'][] = array( 'order' => $id, 'status' => $order->get_status(),
-            'admin_url' => admin_url( 'admin.php?page=wc-orders&action=edit&id=' . $id ), 'jobs' => $jobs );
+            'admin_url' => admin_url( 'admin.php?page=wc-orders&action=edit&id=' . $id ), 'jobs' => $jobs,
+            'conv_ok' => $conv !== '' && (int) ( $map[ $conv ] ?? 0 ) === $id, 'needs' => $needs,
+            'order_task' => $by[ $id ] ?? null );
     }
-    $out['board'] = pps_mp_board_rows( $open, $by, $today );
+    $out['board'] = pps_mp_board_rows( $open, $by, $today, $by_item );
     return $out;
 }
 
@@ -442,14 +453,92 @@ function pps_mp_set_state( $task_id, $state ) {
     if ( ! in_array( $state, array( 'todo', 'in_progress', 'closed' ), true ) ) return new WP_Error( 'state', 'Unknown state.' );
     $tasks = pps_mp_tasks();
     if ( is_wp_error( $tasks ) ) return $tasks;
-    list( $by ) = pps_mp_pair_tasks( $tasks, pps_mp_conv_map() );
+    list( $by, , $by_item ) = pps_mp_pair_tasks( $tasks, pps_mp_conv_map(), pps_mp_item_map() );
     $ok = false;
-    foreach ( $by as $t ) if ( $t['id'] === $task_id ) { $ok = true; break; }
+    foreach ( array_merge( array_values( $by ), array_values( $by_item ) ) as $t ) if ( $t['id'] === $task_id ) { $ok = true; break; }
     if ( ! $ok ) return new WP_Error( 'unpaired', 'That task is not paired with an order, so the panel will not change it.' );
     $r = pps_mp_api( 'PATCH', 'tasks/' . rawurlencode( $task_id ), array(), array( 'tasks' => array( 'state' => $state ) ) );
     if ( is_wp_error( $r ) ) return $r;
     delete_transient( PPS_MP_TASKS_CACHE );
     return true;
+}
+
+/* ── Creating one subtask per job ─────────────────────────────
+ * Owner 2026-10-18: "create the tasks - one task per line item - in missive". From the panel,
+ * inside the order's own conversation (the panel tells the site which one is open, and the
+ * site only accepts a conversation it has seen holding that order). Each job that has no
+ * subtask of its own gets one: title "#87347 · Pt-Handbook · 500 × 8.5×11 · start Tue Oct 13 ·
+ * ship Mon Oct 19", the Job Ticket as its description, due on the job's START date at 17:00
+ * shop time (the team's convention). The created ids are kept in `pps_missive_item_tasks`, so
+ * a job never gets a second one, and the board pairs it with that job alone. Switched on
+ * separately from state changes (`pps_missive_allow_create`, off by default). */
+
+function pps_mp_item_map() { $m = get_option( PPS_MP_ITEMS_OPTION, array() ); return is_array( $m ) ? $m : array(); }
+
+/** A shop-day Y-m-d at 17:00 shop time, as a unix timestamp, or 0. */
+function pps_mp_due_unix( $ymd ) {
+    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', (string) $ymd ) ) return 0;
+    $tz = function_exists( 'pps_shop_timezone' ) ? pps_shop_timezone() : 'America/Phoenix';
+    try { return ( new DateTimeImmutable( $ymd . ' 17:00', new DateTimeZone( $tz ) ) )->getTimestamp(); }
+    catch ( \Throwable $e ) { return 0; }
+}
+
+/** The subtask a job would get: title, description, due. Pure. */
+function pps_mp_subtask_for( array $j, $n, $of, $admin_url ) {
+    $md = function ( $ymd ) { return $ymd !== '' ? gmdate( 'D M j', strtotime( $ymd . ' 12:00 UTC' ) ) : ''; };
+    $what  = $j['job'] !== '' ? $j['job'] : $j['product'];
+    $parts = array( '#' . $j['order'], $what );
+    $size  = trim( ( $j['qty'] !== '' ? $j['qty'] . ' × ' : '' ) . $j['size'] );
+    if ( $size !== '' && $size !== '×' ) $parts[] = rtrim( $size, ' ×' );
+    if ( $j['start'] !== '' ) $parts[] = 'start ' . $md( $j['start'] );
+    if ( $j['must_ship'] !== '' ) $parts[] = 'ship ' . $md( $j['must_ship'] );
+    if ( $j['rush'] ) $parts[] = 'RUSH';
+    $title = implode( ' · ', $parts ) . ( $of > 1 ? ' (job ' . $n . ' of ' . $of . ')' : '' );
+    $desc = array();
+    foreach ( $j['ticket'] as $p ) $desc[] = ( $p[0] !== '' ? $p[0] . ': ' : '' ) . $p[1];
+    if ( $admin_url !== '' ) $desc[] = 'Order: ' . $admin_url;
+    return array( 'title' => mb_substr( $title, 0, 1000 ), 'description' => mb_substr( implode( "\n", $desc ), 0, 10000 ),
+                  'due_at' => pps_mp_due_unix( $j['start'] !== '' ? $j['start'] : $j['must_ship'] ) );
+}
+
+/** Create the missing per-job subtasks for one order. Returns the number made, or a WP_Error. */
+function pps_mp_create_subtasks( $order_id, $conv ) {
+    $order_id = (int) $order_id;
+    $conv = preg_replace( '/[^A-Za-z0-9_-]/', '', (string) $conv );
+    if ( ! get_option( PPS_MP_CREATE_OPTION, false ) ) return new WP_Error( 'off', 'Creating subtasks from the panel is switched off (PPS Calculators → Missive Panel).' );
+    if ( $order_id <= 0 || $conv === '' || (int) ( pps_mp_conv_map()[ $conv ] ?? 0 ) !== $order_id )
+        return new WP_Error( 'conv', 'Open this order\'s own conversation in Missive first, so the subtasks land in it.' );
+    $order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+    if ( ! $order || ! is_object( $order ) || ! method_exists( $order, 'get_items' ) ) return new WP_Error( 'order', 'No such order.' );
+    $lock = 'pps_mp_create_' . $order_id;
+    if ( get_transient( $lock ) ) return new WP_Error( 'busy', 'Already creating this order\'s subtasks — give it a moment.' );
+    set_transient( $lock, 1, 30 );
+    $org = pps_mp_org();
+    if ( is_wp_error( $org ) ) { delete_transient( $lock ); return $org; }
+    $jobs  = pps_mp_jobs( array( $order ), pps_mp_paper_index( array( $order ) ) );
+    $items = pps_mp_item_map();
+    $admin = admin_url( 'admin.php?page=wc-orders&action=edit&id=' . $order_id );
+    $made = 0; $n = 0; $err = null;
+    foreach ( $jobs as $j ) {
+        $n++;
+        if ( isset( $items[ $j['item'] ] ) ) continue;
+        $t = pps_mp_subtask_for( $j, $n, count( $jobs ), $admin );
+        $body = array( 'tasks' => array_filter( array( 'organization' => $org, 'title' => $t['title'], 'description' => $t['description'],
+            'due_at' => $t['due_at'] ?: null, 'subtask' => true, 'conversation' => $conv ), function ( $v ) { return $v !== null && $v !== ''; } ) );
+        $r = pps_mp_api( 'POST', 'tasks', array(), $body );
+        if ( is_wp_error( $r ) ) { $err = $r; break; }
+        $task = $r['tasks'] ?? array();
+        if ( isset( $task[0] ) && is_array( $task[0] ) ) $task = $task[0];
+        $tid = (string) ( $task['id'] ?? '' );
+        if ( $tid === '' ) { $err = new WP_Error( 'noid', 'Missive did not return the new task.' ); break; }
+        $items[ $j['item'] ] = $tid;
+        update_option( PPS_MP_ITEMS_OPTION, $items, false );   // saved after each, so a failure part-way never duplicates
+        $made++;
+    }
+    delete_transient( $lock );
+    delete_transient( PPS_MP_TASKS_CACHE );
+    if ( $err && ! $made ) return $err;
+    return $err ? new WP_Error( 'partial', 'Made ' . $made . ', then: ' . $err->get_error_message() ) : $made;
 }
 
 add_action( 'rest_api_init', function () {
@@ -461,6 +550,14 @@ add_action( 'rest_api_init', function () {
             $res = new WP_REST_Response( pps_mp_answer( $ids, (string) $req->get_param( 'conv' ) ) );
             $res->header( 'Cache-Control', 'no-store' );
             return $res;
+        },
+    ) );
+    register_rest_route( 'pps/v1', '/missive/create-subtasks', array(
+        'methods' => 'POST', 'permission_callback' => $key_ok,
+        'callback' => function ( $req ) {
+            $r = pps_mp_create_subtasks( (int) $req->get_param( 'order' ), (string) $req->get_param( 'conv' ) );
+            return is_wp_error( $r ) ? new WP_REST_Response( array( 'ok' => false, 'error' => $r->get_error_message() ), 200 )
+                                     : new WP_REST_Response( array( 'ok' => true, 'made' => $r ), 200 );
         },
     ) );
     register_rest_route( 'pps/v1', '/missive/task-state', array(
@@ -484,12 +581,12 @@ add_action( 'init', function () {
     if ( ! pps_mp_key_ok( $k ) ) { status_header( 403 ); header( 'Content-Type: text/plain; charset=UTF-8' ); echo 'This panel link is not valid. Get the current one from PPS Calculators → Missive Panel.'; exit; }
     header( 'Content-Type: text/html; charset=UTF-8' );
     header( 'Referrer-Policy: no-referrer' );
-    echo pps_mp_page_html( $k, rest_url( 'pps/v1/missive/panel' ), rest_url( 'pps/v1/missive/task-state' ) );
+    echo pps_mp_page_html( $k, rest_url( 'pps/v1/missive/panel' ), rest_url( 'pps/v1/missive/task-state' ), rest_url( 'pps/v1/missive/create-subtasks' ) );
     exit;
 }, 1 );
 
-function pps_mp_page_html( $key, $api, $state_api = '' ) {
-    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
+function pps_mp_page_html( $key, $api, $state_api = '', $create_api = '' ) {
+    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     return <<<HTML
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -562,6 +659,15 @@ function setState(task, state, btn){
   fetch(CFG.stateApi,{method:'POST',headers:{'X-PPS-Panel-Key':CFG.key,'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({task:task.id,state:state})})
     .then(function(r){ return r.json(); })
     .then(function(d){ if(!d.ok){ alert(d.error||'Could not change the task.'); } load(LAST.ids, LAST.conv); })
+    .catch(function(){ alert('Could not reach the site.'); load(LAST.ids, LAST.conv); });
+}
+
+function createSubtasks(o, btn){
+  if(!confirm('Create '+o.needs+' Missive subtask'+(o.needs===1?'':'s')+' in this conversation — one per job, due on each job\'s start date?')) return;
+  btn.disabled = true; btn.textContent = 'Creating…';
+  fetch(CFG.createApi,{method:'POST',headers:{'X-PPS-Panel-Key':CFG.key,'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({order:o.order,conv:LAST.conv})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(!d.ok) alert(d.error||'Could not create the subtasks.'); load(LAST.ids, LAST.conv); })
     .catch(function(){ alert('Could not reach the site.'); load(LAST.ids, LAST.conv); });
 }
 
@@ -696,6 +802,19 @@ function render(){
   d.orders.forEach(function(o){
     here[o.order] = 1;
     app.appendChild(el('div',{style:'margin:0 0 6px'},[ el('b',{text:'Order #'+o.order}), ' · '+o.status+' · ', el('a',{text:'open in WooCommerce',on:function(){open(o.admin_url);}}) ]));
+    if(d.missive.connected && d.missive.can_create && o.needs > 0){
+      var box = el('div',{cls:'card small'});
+      if(o.conv_ok){
+        var cb = el('button',{cls:'b',text:'Create '+o.needs+' subtask'+(o.needs===1?'':'s')+' — one per job'});
+        cb.addEventListener('click',function(){ createSubtasks(o, cb); });
+        box.appendChild(el('div',{text:o.needs+' of '+o.jobs.length+' job'+(o.jobs.length===1?'':'s')+' in this order '+(o.needs===1?'has':'have')+' no subtask of '+(o.needs===1?'its':'their')+' own.'}));
+        if(o.order_task) box.appendChild(el('div',{cls:'muted',text:'This conversation already has a subtask ("'+o.order_task.title.slice(0,60)+'"). The new ones are added beside it; nothing is removed.'}));
+        box.appendChild(cb);
+      } else {
+        box.appendChild(el('div',{cls:'muted',text:'Open this order\'s own conversation in Missive to create its subtasks.'}));
+      }
+      app.appendChild(box);
+    }
     o.jobs.forEach(function(j){ app.appendChild(jobCard(j, d.today)); });
   });
   d.missing.forEach(function(id){ app.appendChild(el('div',{cls:'muted',text:'#'+id+' is not an order on the site.'})); });
@@ -746,6 +865,7 @@ add_action( 'admin_post_pps_mp_missive', function () {
             delete_option( PPS_MP_ORG_OPTION ); delete_transient( PPS_MP_TASKS_CACHE );
         }
         update_option( PPS_MP_ALLOW_OPTION, empty( $_POST['allow_state'] ) ? 0 : 1, false );
+        update_option( PPS_MP_CREATE_OPTION, empty( $_POST['allow_create'] ) ? 0 : 1, false );
     }
     wp_safe_redirect( admin_url( 'admin.php?page=pps-missive-panel&missive=' . $msg ) );
     exit;
@@ -768,6 +888,8 @@ function pps_mp_render_admin() {
        . '<p><input type="password" name="token" autocomplete="off" placeholder="' . esc_attr( $tok !== '' ? 'Saved — ends in …' . substr( $tok, -4 ) . ' (paste a new one to replace it)' : 'missive_pat-…' ) . '" style="width:100%;max-width:600px"></p>'
        . '<p><label><input type="checkbox" name="allow_state" value="1"' . ( get_option( PPS_MP_ALLOW_OPTION, false ) ? ' checked' : '' ) . '> Let the panel change subtask state (Start / Done / Reopen buttons). '
        . 'Off: the panel only reads. On: it changes the <em>state</em> of a subtask the site has paired with an order — nothing else.</label></p>'
+       . '<p><label><input type="checkbox" name="allow_create" value="1"' . ( get_option( PPS_MP_CREATE_OPTION, false ) ? ' checked' : '' ) . '> Let the panel create subtasks — one per job, in the order\'s own conversation, '
+       . 'titled with the order, job, quantity, size and window, the Job Ticket as the description, due on the job\'s start date. A job never gets a second one.</label></p>'
        . '<p><button class="button button-primary">Save</button> '
        . ( $tok !== '' ? '<button class="button" name="remove_token" value="1" onclick="return confirm(\'Remove the Missive API token?\')">Remove token</button>' : '' ) . '</p></form>';
 

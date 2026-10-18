@@ -37,6 +37,7 @@ function wp_remote_request( $url, $args ) {
     if ( $path === '/v1/tasks' && $args['method'] === 'GET' ) { $t = array_values( array_filter( $GLOBALS['mtasks'], function ( $t ) use ( $q ) { return $t['state'] === $q['state']; } ) ); return array( 'code' => 200, 'body' => json_encode( array( 'tasks' => $t ) ) ); }
     if ( strpos( $path, '/v1/conversations/' ) === 0 ) { $id = substr( $path, 18 ); return array( 'code' => 200, 'body' => json_encode( array( 'conversations' => array( array( 'id' => $id, 'subject' => $GLOBALS['msubjects'][ $id ] ?? 'Question about paper' ) ) ) ) ); }
     if ( strpos( $path, '/v1/tasks/' ) === 0 && $args['method'] === 'PATCH' ) return array( 'code' => 200, 'body' => '{"tasks":{}}' );
+    if ( $path === '/v1/tasks' && $args['method'] === 'POST' ) { $GLOBALS['made'] = ( $GLOBALS['made'] ?? 0 ) + 1; if ( ! empty( $GLOBALS['fail_after'] ) && $GLOBALS['made'] > $GLOBALS['fail_after'] ) return array( 'code' => 500, 'body' => '{}' ); return array( 'code' => 201, 'body' => json_encode( array( 'tasks' => array( 'id' => 'new-' . $GLOBALS['made'], 'state' => 'todo' ) ) ) ); }
     return array( 'code' => 404, 'body' => '{}' );
 }
 function wp_remote_retrieve_response_code( $r ) { return $r['code']; }
@@ -95,7 +96,7 @@ $custom = $open[5];
 ok( $custom['source'] === 'custom' && $custom['delivery'] === '2026-10-30' && $custom['ticket'][0] === array( 'Specs', '500 postcards 4x6 14pt' ), 'a custom line shows its own text and requested delivery', $custom );
 
 $p = pps_mp_preview( $a );
-ok( $p['due'] === '2026-10-22' && $p['title'] === '#87501 Job 1000 · start Oct 19 · ship Oct 22', 'the preview task has the must-ship due date and the window in its title', $p );
+ok( $p['due'] === '2026-10-19' && $p['title'] === '#87501 Job 1000 · start Oct 19 · ship Oct 22', 'the preview task is due on the start date (the team convention) with the window in its title', $p );
 ok( $p['labels'] === array( '100lb Gloss Text', '13×19', 'RUSH', 'Coating', 'Fold' ), 'the preview labels: paper, sheet, rush, finishing', $p['labels'] );
 
 $ans = pps_mp_answer( array( 87501, 99999 ) );
@@ -158,6 +159,47 @@ $GLOBALS['opts'][ PPS_MP_TOKEN_OPTION ] = 'wrong';  $GLOBALS['tr'] = array(); un
 $bad = pps_mp_answer( array() );
 ok( $bad['missive']['connected'] === false && strpos( $bad['missive']['error'], 'refused' ) !== false && count( $bad['board'] ) === 6, 'a refused token is said on the panel and the board still shows', $bad['missive'] );
 
+// ── creating one subtask per job ──
+$GLOBALS['opts'][ PPS_MP_TOKEN_OPTION ] = 'missive_pat-TEST'; $GLOBALS['opts'][ PPS_MP_ORG_OPTION ] = 'org-1'; $GLOBALS['tr'] = array();
+$two = new O( 87600, 'Gus', array( 21 => new I( 'Flyer', flat( $gloss, 200, 2, '2026-10-20', '2026-10-23' ) ), 22 => new I( 'Flyer', flat( $matte, 300, 2, '2026-10-21', '2026-10-23', array( 'jobName' => 'Menu' ) ) ) ) );
+$GLOBALS['extra'][ 87600 ] = $two;
+$st = pps_mp_subtask_for( pps_mp_jobs( array( $two ) )[0], 1, 2, 'https://x/order' );
+ok( $st['title'] === '#87600 · Job 200 · 200 × 8.5×11 · start Tue Oct 20 · ship Fri Oct 23 (job 1 of 2)', 'a subtask title names the order, job, quantity, size and window', $st['title'] );
+ok( strpos( $st['description'], "Paper: 100lb Gloss Text" ) !== false && substr( $st['description'], -22 ) === 'Order: https://x/order', 'its description is the Job Ticket and a link to the order', $st['description'] );
+ok( gmdate( 'Y-m-d H:i', $st['due_at'] ) === '2026-10-21 00:00', 'it is due on the start date at 17:00 shop time (00:00 UTC next day in Phoenix)', gmdate( 'c', $st['due_at'] ) );
+$GLOBALS['http'] = array();
+$r = pps_mp_create_subtasks( 87600, 'c-600' );
+ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'switched off' ) !== false && ! $GLOBALS['http'], 'creating is refused while its setting is off, without calling Missive', $r );
+$GLOBALS['opts'][ PPS_MP_CREATE_OPTION ] = 1;
+$r = pps_mp_create_subtasks( 87600, 'c-600' );
+ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'own conversation' ) !== false, 'a conversation the panel has not seen holding this order is refused', $r );
+pps_mp_answer( array( 87600 ), 'c-600' );   // the panel opens the order's conversation
+$GLOBALS['http'] = array(); $GLOBALS['made'] = 0;
+$r = pps_mp_create_subtasks( 87600, 'c-600' );
+$posts = array_values( array_filter( $GLOBALS['http'], function ( $h ) { return $h['args']['method'] === 'POST'; } ) );
+$b0 = json_decode( $posts[0]['args']['body'], true )['tasks'] ?? array();
+ok( $r === 2 && count( $posts ) === 2, 'one subtask per job', array( $r, count( $posts ) ) );
+ok( $b0['subtask'] === true && $b0['conversation'] === 'c-600' && $b0['organization'] === 'org-1' && strpos( $b0['title'], '#87600' ) === 0 && $b0['due_at'] === $st['due_at'], 'each is a subtask in that conversation, with title and due date', $b0 );
+ok( ! isset( $b0['assignees'] ) && ! isset( $b0['add_to_inbox'] ) && ! isset( $b0['add_users'] ), 'it assigns nobody and moves nothing into anyone\'s inbox' );
+ok( pps_mp_item_map() === array( 21 => 'new-1', 22 => 'new-2' ), 'each job remembers its subtask', pps_mp_item_map() );
+$GLOBALS['http'] = array();
+ok( pps_mp_create_subtasks( 87600, 'c-600' ) === 0 && ! array_filter( $GLOBALS['http'], function ( $h ) { return $h['args']['method'] === 'POST'; } ), 'pressing again creates nothing: a job never gets a second subtask' );
+$GLOBALS['mtasks'][] = array( 'id' => 'new-1', 'title' => '#87600 · Job 200', 'state' => 'todo', 'due_at' => $st['due_at'], 'conversation' => 'c-600', 'last_activity_at' => 9 );
+$GLOBALS['mtasks'][] = array( 'id' => 'new-2', 'title' => '#87600 · Menu', 'state' => 'in_progress', 'due_at' => pps_mp_due_unix( '2026-10-21' ), 'conversation' => 'c-600', 'last_activity_at' => 9 );
+$GLOBALS['tr'] = array();
+$a6 = pps_mp_answer( array( 87600 ), 'c-600' );
+$jt = array_column( array_column( $a6['orders'][0]['jobs'], 'task' ), 'id' );
+ok( $jt === array( 'new-1', 'new-2' ) && $a6['orders'][0]['needs'] === 0, 'each job now shows its own subtask, and the order needs none', $jt );
+ok( pps_mp_set_state( 'new-2', 'closed' ) === true, 'a created subtask can be started and finished from the panel' );
+// a failure part-way keeps what was made and never duplicates it
+$three = new O( 87601, 'Hal', array( 31 => new I( 'Flyer', flat( $gloss, 100, 2, '2026-10-20', '2026-10-23' ) ), 32 => new I( 'Flyer', flat( $gloss, 110, 2, '2026-10-20', '2026-10-23' ) ) ) );
+$GLOBALS['extra'][ 87601 ] = $three; pps_mp_answer( array( 87601 ), 'c-601' );
+$GLOBALS['made'] = 0; $GLOBALS['fail_after'] = 1;
+$r = pps_mp_create_subtasks( 87601, 'c-601' );
+ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'Made 1' ) === 0 && isset( pps_mp_item_map()[31] ) && ! isset( pps_mp_item_map()[32] ), 'a failure part-way says how many were made and keeps them', $r );
+$GLOBALS['fail_after'] = 0; $GLOBALS['made'] = 5;
+ok( pps_mp_create_subtasks( 87601, 'c-601' ) === 1, 'trying again makes only the missing one' );
+
 // ── read-only, by construction ──
 $src = file_get_contents( __DIR__ . '/pps-missive-panel.php' );
 $code = preg_replace( '#/\*.*?\*/#s', '', $src );
@@ -167,7 +209,7 @@ foreach ( array( 'createTask', 'addLabels', 'removeLabels', 'assign(', 'addAssig
 foreach ( array( 'update_status', '->save(', 'wc_update_order_item_meta', 'update_meta_data', 'add_order_note', 'wp_mail' ) as $w ) {
     ok( strpos( $code, $w ) === false, "the server never calls $w" );
 }
-ok( substr_count( $code, "pps_mp_api( 'PATCH'" ) === 1 && substr_count( $code, "'methods' => 'POST'" ) === 1 && strpos( $code, "pps_mp_api( 'POST'" ) === false && strpos( $code, "pps_mp_api( 'DELETE'" ) === false, 'the only Missive write is the one PATCH of a task state' );
+ok( substr_count( $code, "pps_mp_api( 'PATCH'" ) === 1 && substr_count( $code, "pps_mp_api( 'POST', 'tasks'" ) === 1 && substr_count( $code, "pps_mp_api( 'POST'" ) === 1 && strpos( $code, "pps_mp_api( 'DELETE'" ) === false, 'the only Missive writes are a task state change and creating a subtask' );
 ok( strpos( $src, "'methods' => 'GET', 'permission_callback' => \$key_ok" ) !== false && strpos( $src, "'methods' => 'POST', 'permission_callback' => \$key_ok" ) !== false && strpos( $src, 'pps_mp_key_ok( (string) $req->get_header' ) !== false, 'both endpoints need the key header' );
 $html = pps_mp_page_html( 'KEY123', 'https://x/wp-json/pps/v1/missive/panel' );
 ok( strpos( $html, '"key":"KEY123"' ) !== false && strpos( $html, 'textContent' ) !== false && strpos( $html, 'innerHTML' ) === false, 'the page carries its key and writes text, never HTML' );
