@@ -334,6 +334,41 @@ function pps_impose_pick_artwork( $files ) {
     return $print_ready ?: ( $raw ?: $raster );
 }
 
+/**
+ * Every file in the order folder the engine can impose (PDF, JPEG, PNG),
+ * tagged by role, so the queue can offer ANY of them — owner, 2026-10-18:
+ * "I want it to read any file in the directed folder." The matched artwork
+ * (pps_impose_item_artwork) stays the default and the bulk pick; this list is
+ * what the operator chooses from when the match is wrong or there are several
+ * candidates. Outputs and previews are listed too, marked, never defaulted.
+ */
+function pps_impose_folder_files( $files ) {
+    if ( ! is_array( $files ) ) return array();
+    $out = array();
+    foreach ( $files as $f ) {
+        $name = (string) ( $f['name'] ?? '' );
+        $id   = (string) ( $f['id'] ?? '' );
+        if ( $id === '' || $name === '' ) continue;
+        $is_pdf    = (bool) preg_match( '/\.pdf$/i', $name );
+        $is_raster = (bool) preg_match( '/\.(jpe?g|png)$/i', $name );
+        if ( ! $is_pdf && ! $is_raster ) continue;
+        if ( pps_impose_is_output_name( $name ) )          $role = 'imposed';
+        elseif ( preg_match( '/^CLEAN[_\s-]/i', $name ) )   $role = 'clean';
+        elseif ( preg_match( '/_preview/i', $name ) )       $role = 'preview';
+        elseif ( preg_match( '/_print-ready\.pdf$/i', $name ) ) $role = 'print-ready';
+        elseif ( $is_raster )                                $role = 'raster';
+        else                                                 $role = 'pdf';
+        $out[] = array( 'id' => $id, 'name' => $name, 'size' => intval( $f['size'] ?? 0 ), 'role' => $role );
+    }
+    // Candidates first (print-ready, pdf, raster), then previews, then our own outputs.
+    $rank = array( 'print-ready' => 0, 'pdf' => 1, 'raster' => 2, 'preview' => 3, 'clean' => 4, 'imposed' => 5 );
+    usort( $out, function ( $a, $b ) use ( $rank ) {
+        $d = $rank[ $a['role'] ] - $rank[ $b['role'] ];
+        return $d !== 0 ? $d : strcasecmp( $a['name'], $b['name'] );
+    } );
+    return $out;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // LIST — recent orders with Drive artwork + parsed spec
 // ═══════════════════════════════════════════════════════════════
@@ -385,6 +420,7 @@ add_action( 'wp_ajax_pps_impose_list', function() {
             if ( $it->get_meta( '_pps_metadata' ) ) $pps_items[ $iid ] = $it;
         }
         $sole_item = count( $pps_items ) === 1;
+        $folder_files = pps_impose_folder_files( $files );
 
         foreach ( $pps_items as $item_id => $item ) {
             $meta_json = $item->get_meta( '_pps_metadata' );
@@ -438,6 +474,9 @@ add_action( 'wp_ajax_pps_impose_list', function() {
                 'folder_url'    => 'https://drive.google.com/drive/folders/' . rawurlencode( $folder_id ),
                 'art_file_id'   => $art['id'] ?? '',
                 'art_file_name' => $art['name'] ?? '',
+                // Every imposable file in the folder (the operator may pick
+                // any of them for this item; art_file_id is only the default).
+                'files'         => $folder_files,
                 // Approval binding: the SHA-256 the calculator computed over the
                 // print-ready bytes at the moment of approval. The tool hashes
                 // the file it downloads and compares — a mismatch is advisory

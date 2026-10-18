@@ -743,6 +743,42 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Any file in the order folder (1.59)
+
+  Owner, 2026-10-18: "to be clear I want it to read any file in the directed
+  folder." The queue used to expose exactly one file per line item — the one
+  `pps_impose_item_artwork()` matched (the item's `*_print-ready.pdf`, else
+  its raw upload, else, for a single-item order, the folder's best PDF). A
+  wrong or missing match left the row NO ART with no way through except
+  downloading from Drive and dragging the file in by hand.
+
+  `pps_impose_list` now sends every imposable file in the order folder with
+  each row — `files: [{id, name, size, role}]`, role one of `print-ready`,
+  `pdf`, `raster`, `preview`, `clean`, `imposed`, candidates first
+  (`pps_impose_folder_files()`). The Artwork column becomes a select whenever
+  there is a choice; the matched file is the default and is tagged
+  "· matched", the tool's own outputs and previews are listed last and
+  tagged, and a row with files but no match offers the first candidate with
+  "no file matched this item — pick checked by hand". Impose loads the pick
+  (`loadOrder(row, pick)`): a JPEG/PNG is wrapped exactly as a dropped one
+  (`ppsToPdfBytes`), the approval hash is computed on the bytes as filed, and
+  an off-match pick says so in the notice ("Imposing "x" — NOT the file the
+  queue matched for this item (y)"). The output filename is still
+  `IMPOSED_Order-<id>-i<item>_…`, so the per-item IMPOSED badge follows.
+  Bulk impose is unchanged: it takes the matched file only and skips rows
+  without one — a headless run must never guess. Rows without a `files`
+  array (an older host) behave as before. `pps_impose_download` was already
+  admin-only and id-based, so no server change was needed to fetch a pick.
+
+  Harness: `ui_pick.mjs` — the tool served from the repo with the vendored
+  libraries, admin-ajax mocked with Playwright routes (list, download,
+  setups, upload). Checks: a 4-file row gets a picker with roles and the
+  matched default; the default downloads the matched id; an alternate PDF
+  downloads its id, warns under the select and in the notice, and offers
+  Download; a PNG pick wraps to one page (the only complaint being the
+  order's 2-sided/1-page one); an unmatched row with one folder file still
+  offers Impose and loads it; a legacy row without `files` loads as before.
+
   ### The perfect-bound cover goes through the same placement rules (1.58)
 
   Owner's second photo, same hour: the job was a **Perfect Bound** 4×2 ticket
