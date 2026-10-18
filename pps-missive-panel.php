@@ -624,7 +624,7 @@ var CFG = {$cfg};
 var app = document.getElementById('app');
 var inMissive = typeof window.Missive !== 'undefined' && window.parent !== window;
 var LAST = { ids: [], conv: '' }, DATA = null;
-var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', rush: false };
+var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', rush: false, subOnly: true };
 try { var sp = JSON.parse(localStorage.getItem('ppsMpPref')||'null'); if (sp) for (var k in sp) PREF[k]=sp[k]; } catch(e){}
 function savePref(){ try { localStorage.setItem('ppsMpPref', JSON.stringify(PREF)); } catch(e){} }
 
@@ -806,13 +806,17 @@ function renderBoard(here){
   q.addEventListener('input',function(){ PREF.q=q.value; savePref(); clearTimeout(window.__ppsT); window.__ppsT=setTimeout(function(){ render(); var n=document.querySelector('.tools input[type=search]'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },300); });
   var rush = el('input',{type:'checkbox'}); rush.checked=PREF.rush; rush.addEventListener('change',function(){ PREF.rush=rush.checked; savePref(); render(); });
   var hide = el('input',{type:'checkbox'}); hide.checked=PREF.hide; hide.addEventListener('change',function(){ PREF.hide=hide.checked; savePref(); render(); });
-  var reset = el('a',{cls:'small',text:'reset',on:function(){ PREF={ sort:'ship', group:'none', q:'', hide:true, st:'all', when:'all', paper:'', rush:false }; savePref(); render(); }});
+  var sub = el('input',{type:'checkbox'}); sub.checked=PREF.subOnly!==false; sub.addEventListener('change',function(){ PREF.subOnly=sub.checked; savePref(); render(); });
+  var reset = el('a',{cls:'small',text:'reset',on:function(){ PREF={ sort:'ship', group:'none', q:'', hide:true, st:'all', when:'all', paper:'', rush:false, subOnly:true }; savePref(); render(); }});
   tools.appendChild(el('div',{cls:'ctl'},[q]));
-  tools.appendChild(el('div',{cls:'ctl'},[el('label',{cls:'small'},[rush,' rush only']), el('label',{cls:'small'},[hide,' hide printed / done']), reset]));
+  tools.appendChild(el('div',{cls:'ctl'},[DATA.missive.connected ? el('label',{cls:'small'},[sub,' subtasks only']) : null, el('label',{cls:'small'},[rush,' rush only']), el('label',{cls:'small'},[hide,' hide printed / done']), reset]));
   var needle = PREF.q.trim().toLowerCase();
   var rows = DATA.board.filter(function(r){
     var st = stateOf(r);
     if(PREF.st!=='all' && st!==PREF.st) return false;
+    // "subtasks only" (on by default): jobs with no Missive subtask are left out, unless the
+    // "No subtask" chip is chosen, which asks for exactly those.
+    if(DATA.missive.connected && PREF.subOnly!==false && PREF.st!=='none' && !r.task) return false;
     if(PREF.hide && PREF.st!=='closed' && (r.printed || st==='closed')) return false;
     if(PREF.rush && !r.rush) return false;
     if(!whenOk(r)) return false;

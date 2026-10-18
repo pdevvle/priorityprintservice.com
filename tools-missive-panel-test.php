@@ -217,6 +217,7 @@ ok( substr_count( strtolower( $html ), '</script>' ) === 2, 'no stray script clo
 ok( substr_count( $html, 'data-cfasync="false"' ) === 2, 'Cloudflare Rocket Loader is told to leave both scripts alone' );
 ok( strpos( $html, "class:'tools'" ) === false && strpos( $html, "{cls:'tools'}" ) !== false && strpos( $html, ".tools{position:sticky" ) !== false, 'the filter bar stays at the top while the board scrolls' );
 foreach ( array( "['todo','To do']", "['in_progress','In progress']", "['closed','Done']", "['none','No subtask']", "'Ships within 7 days'", "'Any paper'", "' rush only'" ) as $w ) ok( strpos( $html, $w ) !== false, "the panel offers the filter $w" );
+ok( strpos( $html, "subOnly: true }" ) !== false && strpos( $html, "' subtasks only'" ) !== false && strpos( $html, "PREF.subOnly!==false && PREF.st!=='none' && !r.task" ) !== false, 'a subtasks-only filter is offered and on by default' );
 ok( preg_match( '/"build":"[0-9a-f]{8}"/', $html ) === 1, 'the page carries a build stamp, so the version Missive shows can be told apart' );
 
 // ── the order-number finder, run as the browser runs it ──
