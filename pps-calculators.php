@@ -5322,6 +5322,9 @@ add_filter( 'woocommerce_product_data_tabs', function( $tabs ) {
 add_action( 'woocommerce_product_data_panels', function() {
     global $post;
     $defaults = get_post_meta( $post->ID, '_pps_defaults', true ) ?: array();
+    // Stored as JSON text by tools that write meta from outside (the product page already reads
+    // it that way). Shown as blank fields it would be wiped by the next save of this screen.
+    if ( is_string( $defaults ) ) { $defaults = json_decode( $defaults, true ); if ( ! is_array( $defaults ) ) $defaults = array(); }
     ?>
     <div id="pps_defaults_data" class="panel woocommerce_options_panel" style="padding:12px 20px">
         <p style="color:#666;font-size:12px">Set default calculator values for this product. Leave blank to use the global defaults. URL parameters override these.</p>

@@ -58,5 +58,7 @@ ok( $at !== false && $floor !== false && $at < $floor, 'add to cart checks the c
 ok( strpos( $src, "\$mat_floor = \$contract ? null : pps_materials_price_floor( \$product_id, \$metadata );" ) !== false, 'and a contract product skips the materials floor (its price is agreed, not computed)' );
 ok( strpos( $src, "if ( ! empty( \$_POST['pps_contract_form'] ) ) {" ) !== false && strpos( $src, "delete_post_meta( \$post_id, '_pps_contract' );" ) !== false, 'the admin box saves, and an empty list removes the contract' );
 
+ok( strpos( $src, "if ( is_string( \$defaults ) ) { \$defaults = json_decode( \$defaults, true );" ) !== false, 'the PPS Defaults tab reads defaults stored as JSON text, so a save cannot wipe them' );
+
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> CONTRACT PRICE (server) OK ($n checks)\n";
 exit( $fail ? 1 : 0 );
