@@ -586,7 +586,7 @@ add_action( 'init', function () {
 }, 1 );
 
 function pps_mp_page_html( $key, $api, $state_api = '', $create_api = '' ) {
-    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
+    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api, 'build' => substr( md5_file( __FILE__ ), 0, 8 ) ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     return <<<HTML
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -608,6 +608,10 @@ a{color:#2563eb;cursor:pointer;text-decoration:none}
 .st-todo{background:rgba(128,128,128,.18)} .st-in_progress{background:#dbeafe;color:#1e40af} .st-closed{background:#dcfce7;color:#166534} .st-none{background:#fef3c7;color:#92400e}
 .row{padding:6px 0;border-top:1px solid rgba(128,128,128,.15)} .row.here{background:rgba(59,130,246,.08)}
 .ctl{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:0 0 6px} .ctl select,.ctl input{font-size:12px;max-width:100%}
+.tools{position:sticky;top:0;z-index:5;background:var(--missive-background-color,#fff);padding:6px 0 4px;margin:0 0 4px;border-bottom:1px solid rgba(128,128,128,.25)}
+@media (prefers-color-scheme: dark){.tools{background:var(--missive-background-color,#1e1e1e)}}
+.chip{font-size:11px;padding:2px 7px;border:1px solid rgba(128,128,128,.45);border-radius:10px;background:transparent;color:inherit;cursor:pointer} .chip.on{background:#2563eb;border-color:#2563eb;color:#fff}
+details.oc>summary{cursor:pointer;font-weight:600;margin:0 0 6px} .ver{margin:14px 0 0;font-size:10px;color:#aaa}
 .grp{margin:10px 0 2px;font-weight:600;font-size:12px} button.b{font-size:11px;padding:1px 6px;margin:2px 4px 0 0;cursor:pointer}
 .preview{opacity:.65;font-size:12px}
 </style></head>
@@ -620,7 +624,7 @@ var CFG = {$cfg};
 var app = document.getElementById('app');
 var inMissive = typeof window.Missive !== 'undefined' && window.parent !== window;
 var LAST = { ids: [], conv: '' }, DATA = null;
-var PREF = { sort: 'ship', group: 'none', q: '', hide: true };
+var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', rush: false };
 try { var sp = JSON.parse(localStorage.getItem('ppsMpPref')||'null'); if (sp) for (var k in sp) PREF[k]=sp[k]; } catch(e){}
 function savePref(){ try { localStorage.setItem('ppsMpPref', JSON.stringify(PREF)); } catch(e){} }
 
@@ -760,28 +764,68 @@ function boardRow(r, here){
   return d;
 }
 
+function whenOk(r){
+  var t = r.must_ship, today = DATA.today; if(PREF.when==='all') return true; if(!t) return false;
+  var d = days(today, t);
+  if(PREF.when==='late') return d < 0;
+  if(PREF.when==='today') return d === 0;
+  if(PREF.when==='week') return d >= 0 && d <= 7;
+  if(PREF.when==='two') return d >= 0 && d <= 14;
+  return true;
+}
+function stateOf(r){ return r.task ? r.task.state : 'none'; }
+
 function renderBoard(here){
   var wrap = el('div');
-  wrap.appendChild(el('h2',{text:'Open jobs'}));
+  var tools = el('div',{cls:'tools'});
+  tools.appendChild(el('h2',{text:'Open jobs',style:'margin:0 0 4px'}));
+  // status filter chips, with counts
+  var counts = { all: 0, todo: 0, in_progress: 0, closed: 0, none: 0 };
+  DATA.board.forEach(function(r){ counts.all++; counts[stateOf(r)]++; });
+  var chips = el('div',{cls:'ctl'});
+  [['all','All'],['todo','To do'],['in_progress','In progress'],['closed','Done'],['none','No subtask']].forEach(function(c){
+    if(c[0]!=='all' && !DATA.missive.connected) return;
+    var b = el('button',{cls:'chip'+(PREF.st===c[0]?' on':''),text:c[1]+' '+counts[c[0]]});
+    b.addEventListener('click',function(){ PREF.st=c[0]; savePref(); render(); });
+    chips.appendChild(b);
+  });
+  tools.appendChild(chips);
   var sortSel = el('select',{change:function(){ PREF.sort=sortSel.value; savePref(); render(); }});
   Object.keys(SORTS).forEach(function(k){ var o=el('option',{value:k,text:'Sort: '+SORTS[k][0]}); if(k===PREF.sort) o.selected=true; sortSel.appendChild(o); });
   var grpSel = el('select',{change:function(){ PREF.group=grpSel.value; savePref(); render(); }});
   Object.keys(GROUPS).forEach(function(k){ var o=el('option',{value:k,text:'Group: '+GROUPS[k][0]}); if(k===PREF.group) o.selected=true; grpSel.appendChild(o); });
-  var q = el('input',{type:'search',placeholder:'Filter (paper, name, UV…)'}); q.value=PREF.q;
-  q.addEventListener('input',function(){ PREF.q=q.value; savePref(); clearTimeout(window.__ppsT); window.__ppsT=setTimeout(render,250); });
+  tools.appendChild(el('div',{cls:'ctl'},[sortSel, grpSel]));
+  var whenSel = el('select',{change:function(){ PREF.when=whenSel.value; savePref(); render(); }});
+  [['all','Any ship date'],['late','Late'],['today','Ships today'],['week','Ships within 7 days'],['two','Ships within 14 days']].forEach(function(w){ var o=el('option',{value:w[0],text:w[1]}); if(w[0]===PREF.when) o.selected=true; whenSel.appendChild(o); });
+  var papers = {}; DATA.board.forEach(function(r){ r.papers.forEach(function(p){ papers[p.label+' · '+p.sheet]=1; }); });
+  var paperSel = el('select',{change:function(){ PREF.paper=paperSel.value; savePref(); render(); }});
+  paperSel.appendChild(el('option',{value:'',text:'Any paper'}));
+  Object.keys(papers).sort().forEach(function(k){ var o=el('option',{value:k,text:k}); if(k===PREF.paper) o.selected=true; paperSel.appendChild(o); });
+  tools.appendChild(el('div',{cls:'ctl'},[whenSel, paperSel]));
+  var q = el('input',{type:'search',placeholder:'Search (name, order, UV…)'}); q.value=PREF.q;
+  q.addEventListener('input',function(){ PREF.q=q.value; savePref(); clearTimeout(window.__ppsT); window.__ppsT=setTimeout(function(){ render(); var n=document.querySelector('.tools input[type=search]'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },300); });
+  var rush = el('input',{type:'checkbox'}); rush.checked=PREF.rush; rush.addEventListener('change',function(){ PREF.rush=rush.checked; savePref(); render(); });
   var hide = el('input',{type:'checkbox'}); hide.checked=PREF.hide; hide.addEventListener('change',function(){ PREF.hide=hide.checked; savePref(); render(); });
-  wrap.appendChild(el('div',{cls:'ctl'},[sortSel, grpSel]));
-  wrap.appendChild(el('div',{cls:'ctl'},[q, el('label',{cls:'small'},[hide,' hide printed / done'])]));
+  var reset = el('a',{cls:'small',text:'reset',on:function(){ PREF={ sort:'ship', group:'none', q:'', hide:true, st:'all', when:'all', paper:'', rush:false }; savePref(); render(); }});
+  tools.appendChild(el('div',{cls:'ctl'},[q]));
+  tools.appendChild(el('div',{cls:'ctl'},[el('label',{cls:'small'},[rush,' rush only']), el('label',{cls:'small'},[hide,' hide printed / done']), reset]));
   var needle = PREF.q.trim().toLowerCase();
   var rows = DATA.board.filter(function(r){
-    if(PREF.hide && (r.printed || (r.task && r.task.state==='closed'))) return false;
+    var st = stateOf(r);
+    if(PREF.st!=='all' && st!==PREF.st) return false;
+    if(PREF.hide && PREF.st!=='closed' && (r.printed || st==='closed')) return false;
+    if(PREF.rush && !r.rush) return false;
+    if(!whenOk(r)) return false;
+    if(PREF.paper && !r.papers.some(function(p){ return p.label+' · '+p.sheet===PREF.paper; })) return false;
     if(!needle) return true;
     var hay = [r.order, r.customer, r.what, r.paper, r.sheet, r.size, r.finishing.join(' '), r.rush?'rush':'', r.task?STATE_WORD[r.task.state]:'no subtask'].concat(r.papers.map(function(p){return p.label;})).join(' ').toLowerCase();
     return hay.indexOf(needle) >= 0;
   });
   rows.sort(SORTS[PREF.sort] ? SORTS[PREF.sort][1] : SORTS.ship[1]);
-  wrap.appendChild(el('div',{cls:'muted small',text:rows.length+' of '+DATA.board.length+' jobs'}));
-  var g = GROUPS[PREF.group] ? GROUPS[PREF.group][1] : GROUPS.none[1], cur = null;
+  var tot = rows.reduce(function(s,r){ return s+r.sheets; },0);
+  tools.appendChild(el('div',{cls:'muted small',text:rows.length+' of '+DATA.board.length+' jobs'+(tot?' · '+tot+' sheets':'')}));
+  wrap.appendChild(tools);
+  var g = GROUPS[PREF.group] ? GROUPS[PREF.group][1] : GROUPS.none[1];
   var groups = {}, order = [];
   rows.forEach(function(r){ var k=g(r); if(!(k in groups)){ groups[k]=[]; order.push(k); } groups[k].push(r); });
   order.forEach(function(k){
@@ -789,6 +833,7 @@ function renderBoard(here){
       wrap.appendChild(el('div',{cls:'grp'},[k+' ', el('span',{cls:'muted',text:'· '+groups[k].length+' job'+(groups[k].length===1?'':'s')+(sheets?' · '+sheets+' sheets':'')})])); }
     groups[k].forEach(function(r){ wrap.appendChild(boardRow(r, here[r.order])); });
   });
+  if(!rows.length) wrap.appendChild(el('div',{cls:'muted',text:'No jobs match these filters.'}));
   return wrap;
 }
 
@@ -801,7 +846,11 @@ function render(){
   var here = {};
   d.orders.forEach(function(o){
     here[o.order] = 1;
-    app.appendChild(el('div',{style:'margin:0 0 6px'},[ el('b',{text:'Order #'+o.order}), ' · '+o.status+' · ', el('a',{text:'open in WooCommerce',on:function(){open(o.admin_url);}}) ]));
+    var oc = el('details',{cls:'oc'}); if(PREF.cardOpen!==false) oc.open = true;
+    oc.addEventListener('toggle',function(){ PREF.cardOpen = oc.open; savePref(); });
+    oc.appendChild(el('summary',{},['Order #'+o.order+' · '+o.status+' · '+o.jobs.length+' job'+(o.jobs.length===1?'':'s')]));
+    oc.appendChild(el('div',{style:'margin:0 0 6px'},[ el('a',{text:'Open in WooCommerce',on:function(){open(o.admin_url);}}) ]));
+    var holder = app; app = oc;
     if(d.missive.connected && d.missive.can_create && o.needs > 0){
       var box = el('div',{cls:'card small'});
       if(o.conv_ok){
@@ -816,9 +865,11 @@ function render(){
       app.appendChild(box);
     }
     o.jobs.forEach(function(j){ app.appendChild(jobCard(j, d.today)); });
+    app = holder; app.appendChild(oc);
   });
   d.missing.forEach(function(id){ app.appendChild(el('div',{cls:'muted',text:'#'+id+' is not an order on the site.'})); });
   app.appendChild(renderBoard(here));
+  app.appendChild(el('div',{cls:'ver',text:'PPS panel · build '+CFG.build}));
 }
 
 if(inMissive){

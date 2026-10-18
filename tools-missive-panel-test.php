@@ -215,6 +215,9 @@ $html = pps_mp_page_html( 'KEY123', 'https://x/wp-json/pps/v1/missive/panel' );
 ok( strpos( $html, '"key":"KEY123"' ) !== false && strpos( $html, 'textContent' ) !== false && strpos( $html, 'innerHTML' ) === false, 'the page carries its key and writes text, never HTML' );
 ok( substr_count( strtolower( $html ), '</script>' ) === 2, 'no stray script close inside the page script' );
 ok( substr_count( $html, 'data-cfasync="false"' ) === 2, 'Cloudflare Rocket Loader is told to leave both scripts alone' );
+ok( strpos( $html, "class:'tools'" ) === false && strpos( $html, "{cls:'tools'}" ) !== false && strpos( $html, ".tools{position:sticky" ) !== false, 'the filter bar stays at the top while the board scrolls' );
+foreach ( array( "['todo','To do']", "['in_progress','In progress']", "['closed','Done']", "['none','No subtask']", "'Ships within 7 days'", "'Any paper'", "' rush only'" ) as $w ) ok( strpos( $html, $w ) !== false, "the panel offers the filter $w" );
+ok( preg_match( '/"build":"[0-9a-f]{8}"/', $html ) === 1, 'the page carries a build stamp, so the version Missive shows can be told apart' );
 
 // ── the order-number finder, run as the browser runs it ──
 if ( preg_match( '/function ppsOrderNumbers\(text\)\{.*?\n\}/s', $html, $m ) ) {
