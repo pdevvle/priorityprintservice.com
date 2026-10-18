@@ -307,7 +307,8 @@ function pps_mp_board_rows( array $open, array $tasks_by_order, $today ) {
             'sheets' => array_sum( array_column( $j['papers'], 'sheets' ) ),
             'papers' => array_map( function ( $p ) { return array( 'label' => $p['label'], 'sheet' => $p['sheet'], 'sheets' => $p['sheets'], 'role' => $p['role'], 'key' => $p['key'] ); }, $j['papers'] ),
             'task' => $task,
-            'due_mismatch' => $task && $task['due'] !== '' && $t !== '' && $task['due'] !== $t,
+            // The team sets a task's due date to the job's START date (12 of 16 live on 2026-10-18), so that is what it is checked against.
+            'due_mismatch' => $task && $task['due'] !== '' && $j['start'] !== '' && $task['due'] !== $j['start'],
         );
     }
     return $rows;
@@ -572,7 +573,7 @@ function taskLine(t, mustShip, mismatch){
   box.appendChild(el('span',{cls:'st st-'+t.state,text:STATE_WORD[t.state]||t.state}));
   box.appendChild(document.createTextNode(' due '+md(t.due)));
   if(t.started) box.appendChild(el('span',{cls:'muted',text:' · started '+md(t.started)}));
-  if(mismatch) box.appendChild(el('span',{cls:'warn',text:' · ≠ must-ship '+md(mustShip)}));
+  if(mismatch) box.appendChild(el('span',{cls:'warn',text:' · ≠ start '+md(mustShip)}));
   if(DATA.missive.can_change){
     var acts = t.state==='todo' ? [['in_progress','Start'],['closed','Done']] : t.state==='in_progress' ? [['closed','Done'],['todo','Back to to-do']] : [['todo','Reopen']];
     acts.forEach(function(a){ var b=el('button',{cls:'b',text:a[1]}); b.addEventListener('click',function(){ setState(t,a[0],b); }); box.appendChild(el('br')); box.lastChild.remove(); box.appendChild(document.createTextNode(' ')); box.appendChild(b); });
@@ -595,7 +596,7 @@ function jobCard(j, today){
   c.appendChild(el('h2',{},[ (j.job||j.product), j.rush?el('span',{cls:'rush',text:' RUSH'}):null, j.printed?el('span',{cls:'muted',text:' · marked printed'}):null ]));
   c.appendChild(el('div',{cls:'muted',text:[j.qty?j.qty+' qty':'',j.size].filter(Boolean).join(' · ')}));
   c.appendChild(windowBar(j, today));
-  var tl = taskLine(j.task, j.window[1], j.task && j.task.due && j.window[1] && j.task.due!==j.window[1]); if(tl) c.appendChild(tl);
+  var tl = taskLine(j.task, j.start, j.task && j.task.due && j.start && j.task.due!==j.start); if(tl) c.appendChild(tl);
   if(j.papers.length){ c.appendChild(el('h3',{text:'Paper'}));
     j.papers.forEach(function(p){ c.appendChild(el('div',{},[p.label+' · '+p.sheet+' · '+p.sheets+' sheets'+(p.role!=='stock'?' ('+p.role+')':''), p.in_stock?null:el('span',{cls:'rush',text:' to order'})])); }); }
   c.appendChild(el('h3',{text:'Run together'}));
@@ -649,7 +650,7 @@ function boardRow(r, here){
   if(r.finishing.length) meta.push(r.finishing.join(', '));
   meta.push('start '+md(r.start));
   d.appendChild(el('div',{cls:'muted small',text:meta.join(' · ')}));
-  var tl = taskLine(r.task, r.must_ship, r.due_mismatch); if(tl) d.appendChild(tl);
+  var tl = taskLine(r.task, r.start, r.due_mismatch); if(tl) d.appendChild(tl);
   return d;
 }
 

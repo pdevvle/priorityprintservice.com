@@ -135,7 +135,10 @@ $auth = array_unique( array_map( function ( $h ) { return $h['args']['headers'][
 ok( $auth === array( 'Bearer missive_pat-TEST' ) && strpos( $GLOBALS['http'][0]['url'], 'https://public.missiveapp.com/v1/' ) === 0, 'the token goes only in the Authorization header, to Missive', $auth );
 ok( $withconv['missive']['connected'] && $withconv['orders'][0]['jobs'][0]['task']['id'] === 't1', 'the order in view shows its subtask' );
 $rows = array(); foreach ( $withconv['board'] as $r ) $rows[ $r['order'] ] = $r;
-ok( $rows[87502]['task']['state'] === 'in_progress' && $rows[87502]['due_mismatch'] === true && $rows[87501]['due_mismatch'] === false, 'a subtask due on a different day from the must-ship date is flagged; a matching one is not', $rows[87502] );
+ok( $rows[87502]['task']['state'] === 'in_progress' && $rows[87502]['due_mismatch'] === true, 'a subtask due on a different day from the job start date is flagged', $rows[87502] );
+$GLOBALS['mtasks'][0]['due_at'] = strtotime( '2026-10-19 17:00 America/Phoenix' ); $GLOBALS['tr'] = array();
+$rs = array(); foreach ( pps_mp_answer( array() )['board'] as $r ) $rs[ $r['order'] ] = $r;
+ok( $rs[87501]['due_mismatch'] === false, 'a subtask due on the job start date (the team convention) is not flagged', $rs[87501]['task'] );
 ok( $rows[87503]['task']['state'] === 'closed', 'a done subtask shows as done' );
 ok( strpos( pps_mp_page_html( 'K', 'a', 'b' ), 'missive_pat' ) === false, 'the token never reaches the page' );
 // state changes
