@@ -63,7 +63,9 @@ function pps_mp_drive_folder_url( $id ) {
  * What the panel shows about an order's Google Drive folder (owner 2026-10-18: "an
  * integration that opens google drive to the order in question"). The folder is the one the
  * artwork uploader made (`_pps_gdrive_folder_id`); its files come from the imposition tool's
- * own read-only listing (`pps_impose_drive_list`, cached 3 min). Links open in the browser,
+ * own read-only listing (`pps_impose_drive_list`, cached 3 min) — which, under the site's
+ * `drive.file` scope, sees only files the SITE created, never ones added to the folder by hand
+ * (87347's imposed PDF, added by hand, is not listed). Links open in the browser,
  * where Drive's own sign-in decides who can see them — the panel never downloads a file.
  */
 function pps_mp_drive_info( $order, $list = null ) {
@@ -917,7 +919,9 @@ function render(){
           f.imposed?el('span',{cls:'st st-closed',text:' IMPOSED',style:'margin-left:4px'}):null,
           f.size?el('span',{cls:'muted',text:' · '+(f.size>1048576?(f.size/1048576).toFixed(1)+' MB':Math.max(1,Math.round(f.size/1024))+' KB')}):null ]));
       });
-      if(dv.folder && !dv.files.length && dv.state==='ok') db.appendChild(el('div',{cls:'muted',text:'The folder is empty.'}));
+      if(dv.folder && !dv.files.length && dv.state==='ok') db.appendChild(el('div',{cls:'muted',text:'No files the website uploaded.'}));
+      // The site's Drive connection (drive.file scope) sees only files the site itself put there.
+      if(dv.folder) db.appendChild(el('div',{cls:'muted',style:'margin-top:4px',text:'Lists the files the website uploaded. Anything added to the folder by hand shows when you open the folder.'}));
       app.appendChild(db);
     }
     o.jobs.forEach(function(j){ app.appendChild(jobCard(j, d.today)); });
