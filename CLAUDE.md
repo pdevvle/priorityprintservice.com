@@ -846,7 +846,29 @@ Two things now hold the line, and the second is the one that matters:
    database — a product added to the registry tomorrow is covered the moment it is added,
    with no tick to remember and nothing to re-do after a database refresh from production.
 
-Adding a product to the registry therefore no longer requires touching WCPA at all. If you
+Adding a product to the registry therefore no longer requires touching WCPA at all.
+
+**Product-level WCPA forms are held off the same way (2026-10-18).** WCPA decides a product
+"has a form" from one cached list, the transient `wcpa_products_transient_ver_3` (never expires,
+lives in the persistent object cache, rebuilt only by WCPA's own admin screens), and renders from a
+per-product cache `wcpa_fields_<id>` (24 h). Its checkout check refuses with "Addon data missing"
+for any product on that list whose line carries no form data. When the Armadillo product moved off
+its form, deleting `_wcpa_product_meta` was not enough — both caches still named the form. So
+`pps_wcpa_drop_registry_products()` filters the cached list as it is read (registry products are
+dropped) and `transient_wcpa_fields_<id>` reads as a miss for every registry product. Moving a
+WCPA product into the registry is now: add it to the registry, set `_virtual` yes, delete its
+`_wcpa_product_meta` — nothing to clear by hand.
+
+**The Armadillo cutover (2026-10-18), and how to undo it.** Product 35765 ("Armadillo 4-4 8p
+Booklets", `/product/armadillo-12p-booklets/`) is on the saddle calculator with a contract price
+list (see the contract row in the file table). Done on production: `_pps_defaults` (6.125×9.25
+bound on the long edge, 8 pages, full colour, inside 80lb Matte Text `0.002`, cover 80lb Matte
+Cardstock `0.02`, qty 500), `_pps_contract` (nine quantities, house wording for the papers),
+`_virtual` = yes, 35765 added to `calc-preview-test.html` in `pps_calculators_registry`, and
+`_wcpa_product_meta` (was `[35764]`) deleted. To put the WCPA form back: remove 35765 from the
+registry, set `_virtual` no, and re-attach "IH - Armadillo Booklets" in the product's Product
+Addons tab (saving there also refreshes WCPA's caches). The form (35764) and "IH - Business
+Suite" (35264) are untouched. If you
 ever see "Addon data missing" on a PPS product again, that filter is what to check first.
 
 **And a refused checkout on a calculator cart is now recorded.** We cannot enumerate
