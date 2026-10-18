@@ -39,7 +39,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'PPS_MS_OPTION', 'pps_missive_ship' );
 define( 'PPS_MS_API', 'https://api.goshippo.com/' );
-define( 'PPS_MS_MAX_BOXES', 10 );
+define( 'PPS_MS_MAX_BOXES', 30 );
 
 /* ── Settings ─────────────────────────────────────────────────────────────── */
 
@@ -249,7 +249,7 @@ function pps_ms_suggest_boxes( $weight, $cartons, array $boxes, array $products 
     }
     $one = $pick ? array( 'box' => $pick['id'], 'l' => $pick['l'], 'w' => $pick['w'], 'h' => $pick['h'], 'weight' => $each ?: $pick['weight'] )
                  : array( 'box' => '', 'l' => 12, 'w' => 9, 'h' => 7, 'weight' => $each ?: 1 );
-    return array_fill( 0, $n, $one );
+    return array( $one + array( 'count' => $n ) );
 }
 
 function pps_ms_view( $order ) {
@@ -290,23 +290,51 @@ function pps_ms_clean_addr( $a ) {
     return $out;
 }
 
+/**
+ * Box rows → groups of identical boxes. A row may carry `count` ("12 boxes like this"),
+ * so a 12-carton job is one row, not twelve. At most PPS_MS_MAX_BOXES labels in all.
+ */
 function pps_ms_clean_parcels( $p ) {
     if ( ! is_array( $p ) || ! $p ) return new WP_Error( 'box', 'Add at least one box.' );
-    if ( count( $p ) > PPS_MS_MAX_BOXES ) return new WP_Error( 'box', 'At most ' . PPS_MS_MAX_BOXES . ' boxes at a time.' );
-    $out = array();
+    $groups = array(); $total = 0;
     foreach ( array_values( $p ) as $i => $b ) {
         $l = (float) ( $b['l'] ?? 0 ); $w = (float) ( $b['w'] ?? 0 ); $h = (float) ( $b['h'] ?? 0 ); $lb = (float) ( $b['weight'] ?? 0 );
+        $n = isset( $b['count'] ) ? (int) $b['count'] : 1;
         if ( $l <= 0 || $w <= 0 || $h <= 0 || $l > 120 || $w > 120 || $h > 120 ) return new WP_Error( 'box', 'Box ' . ( $i + 1 ) . ' needs a length, width and height (inches).' );
         if ( $lb <= 0 || $lb > 150 ) return new WP_Error( 'box', 'Box ' . ( $i + 1 ) . ' needs a weight between 0 and 150 lb.' );
-        $out[] = array( 'length' => (string) round( $l, 2 ), 'width' => (string) round( $w, 2 ), 'height' => (string) round( $h, 2 ), 'distance_unit' => 'in',
-                        'weight' => (string) round( $lb, 2 ), 'mass_unit' => 'lb' );
+        if ( $n < 1 ) return new WP_Error( 'box', 'Box ' . ( $i + 1 ) . ' needs a count of at least 1.' );
+        $parcel = array( 'length' => (string) round( $l, 2 ), 'width' => (string) round( $w, 2 ), 'height' => (string) round( $h, 2 ), 'distance_unit' => 'in',
+                         'weight' => (string) round( $lb, 2 ), 'mass_unit' => 'lb' );
+        $k = implode( '|', $parcel );
+        if ( isset( $groups[ $k ] ) ) $groups[ $k ]['count'] += $n; else $groups[ $k ] = array( 'parcel' => $parcel, 'count' => $n );
+        $total += $n;
     }
+    if ( $total > PPS_MS_MAX_BOXES ) return new WP_Error( 'box', 'At most ' . PPS_MS_MAX_BOXES . ' labels at a time — buy the rest in a second run.' );
+    return array_values( $groups );
+}
+
+function pps_ms_signatures() {
+    return array( '' => 'No signature', 'STANDARD' => 'Signature required', 'ADULT' => 'Adult signature (21+)', 'INDIRECT' => 'Indirect signature (FedEx)', 'CERTIFIED' => 'Certified Mail (USPS)' );
+}
+
+/** Signature and insurance as Shippo's shipment `extra`; a carrier that cannot do them is not quoted. */
+function pps_ms_clean_extra( $x ) {
+    $x = is_array( $x ) ? $x : array();
+    $out = array();
+    $sig = strtoupper( (string) ( $x['signature'] ?? '' ) );
+    if ( $sig !== '' ) {
+        if ( ! array_key_exists( $sig, pps_ms_signatures() ) ) return new WP_Error( 'extra', 'Pick a signature option from the list.' );
+        $out['signature_confirmation'] = $sig;
+    }
+    $ins = round( (float) ( $x['insure'] ?? 0 ), 2 );
+    if ( $ins < 0 || $ins > 50000 ) return new WP_Error( 'extra', 'Insure each box for between $0 and $50,000.' );
+    if ( $ins > 0 ) $out['insurance'] = array( 'amount' => number_format( $ins, 2, '.', '' ), 'currency' => 'USD', 'content' => 'Printed materials' );
     return $out;
 }
 
 /** Carrier notes worth a person's attention (the routine ones every quote carries are dropped). */
 function pps_ms_notes( array $msgs ) {
-    $skip = '/doesn.t support one or more shipment options|RatedShipmentAlert|End of Day|master account doesn.t support shipments to inside|must not be empty/i';
+    $skip = '/doesn.t support one or more shipment options|RatedShipmentAlert: Your invoice may vary|End of Day|master account doesn.t support shipments to inside|must not be empty|out of the service area|filtered from rate response due to|option is unavailable with the selected service/i';
     $out = array();
     foreach ( $msgs as $m ) {
         $t = trim( (string) ( $m['text'] ?? '' ) );
@@ -316,13 +344,28 @@ function pps_ms_notes( array $msgs ) {
     return array_slice( array_keys( $out ), 0, 8 );
 }
 
-function pps_ms_rates( $order_id, $to, $parcels, $ship_ymd = '' ) {
+function pps_ms_rate_key( $rt ) {
+    $sl = (array) ( $rt['servicelevel'] ?? array() );
+    return ( $rt['carrier_account'] ?? '' ) . '|' . ( $sl['token'] ?? '' ) . '|' . ( $sl['terms'] ?? '' );
+}
+
+/** The Shippo shipment body for one box: everything but the box comes from the quote. */
+function pps_ms_shipment_body( array $base, array $parcel, $account = '' ) {
+    $b = $base + array( 'parcels' => array( $parcel ), 'async' => false );
+    $b['parcels'] = array( $parcel );
+    if ( $account !== '' ) $b['carrier_accounts'] = array( $account );   // a repeat label asks only the carrier already chosen
+    return $b;
+}
+
+function pps_ms_rates( $order_id, $to, $parcels, $ship_ymd = '', $extra = array() ) {
     $order = function_exists( 'wc_get_order' ) ? wc_get_order( (int) $order_id ) : null;
     if ( ! $order ) return new WP_Error( 'order', 'No such order.' );
     $to = pps_ms_clean_addr( $to );
     if ( is_wp_error( $to ) ) return $to;
-    $parcels = pps_ms_clean_parcels( $parcels );
-    if ( is_wp_error( $parcels ) ) return $parcels;
+    $groups = pps_ms_clean_parcels( $parcels );
+    if ( is_wp_error( $groups ) ) return $groups;
+    $extra = pps_ms_clean_extra( $extra );
+    if ( is_wp_error( $extra ) ) return $extra;
     $s = pps_ms_settings();
     $from = $s['from'] + array( 'country' => 'US' );
     if ( trim( $from['street1'] ) === '' || trim( $from['zip'] ) === '' ) return new WP_Error( 'from', 'The ship-from address is not set (PPS Calculators → Missive Shipping).' );
@@ -331,20 +374,22 @@ function pps_ms_rates( $order_id, $to, $parcels, $ship_ymd = '' ) {
     $view = pps_ms_view( $order );
     $accounts = pps_ms_accounts();
     $accounts = is_wp_error( $accounts ) ? array() : $accounts;
+    $base = array( 'address_from' => $from, 'address_to' => $to, 'address_return' => $from,
+                   'shipment_date' => pps_ms_shipment_date( $ship ), 'metadata' => 'Order ' . (int) $order_id );
+    if ( $extra ) $base['extra'] = $extra;
+    $boxes = array_sum( array_column( $groups, 'count' ) );
 
-    $sets = array(); $ids = array(); $msgs = array();
-    foreach ( $parcels as $p ) {
-        $r = pps_ms_api( 'POST', 'shipments/', array( 'address_from' => $from, 'address_to' => $to, 'address_return' => $from, 'parcels' => array( $p ),
-            'shipment_date' => pps_ms_shipment_date( $ship ), 'async' => false, 'metadata' => 'Order ' . (int) $order_id ) );
+    // One shipment per DIFFERENT box: twelve identical cartons are quoted once.
+    $sets = array(); $msgs = array();
+    foreach ( $groups as $g ) {
+        $r = pps_ms_api( 'POST', 'shipments/', pps_ms_shipment_body( $base, $g['parcel'] ) );
         if ( is_wp_error( $r ) ) return $r;
-        $ids[] = (string) ( $r['object_id'] ?? '' );
         $msgs = array_merge( $msgs, (array) ( $r['messages'] ?? array() ) );
         $set = array();
         foreach ( (array) ( $r['rates'] ?? array() ) as $rt ) {
             if ( empty( $rt['object_id'] ) ) continue;
             $msgs = array_merge( $msgs, (array) ( $rt['messages'] ?? array() ) );
-            $sl = (array) ( $rt['servicelevel'] ?? array() );
-            $set[ ( $rt['carrier_account'] ?? '' ) . '|' . ( $sl['token'] ?? '' ) . '|' . ( $sl['terms'] ?? '' ) ] = $rt;
+            $set[ pps_ms_rate_key( $rt ) ] = $rt;
         }
         $sets[] = $set;
     }
@@ -355,33 +400,44 @@ function pps_ms_rates( $order_id, $to, $parcels, $ship_ymd = '' ) {
     foreach ( $keys as $key ) {
         $rs = array_map( function ( $set ) use ( $key ) { return $set[ $key ]; }, $sets );
         $first = $rs[0]; $sl = (array) ( $first['servicelevel'] ?? array() );
-        $amount = round( array_sum( array_map( function ( $r ) { return (float) ( $r['amount'] ?? 0 ); }, $rs ) ), 2 );
+        $amount = 0; foreach ( $rs as $gi => $r ) $amount += (float) ( $r['amount'] ?? 0 ) * $groups[ $gi ]['count'];
+        $amount = round( $amount, 2 );
         $days = null;
         // FedEx answers 0 for its overnight services; nothing arrives the day it ships.
         foreach ( $rs as $r ) if ( isset( $r['estimated_days'] ) && is_numeric( $r['estimated_days'] ) ) $days = max( 1, (int) $days, (int) $r['estimated_days'] );
         $arrives = $days !== null ? pps_ms_add_weekdays( $ship, $days ) : '';
-        $acct = $accounts[ (string) ( $first['carrier_account'] ?? '' ) ] ?? array( 'name' => 'account not listed', 'shippo' => false );
+        $acct_id = (string) ( $first['carrier_account'] ?? '' );
+        $acct = $accounts[ $acct_id ] ?? array( 'name' => 'account not listed', 'shippo' => false );
         $id = substr( md5( $key ), 0, 10 );
+        $service = (string) ( ( $sl['display_name'] ?? '' ) ?: ( $sl['name'] ?? '' ) ) . ( ( $sl['terms'] ?? '' ) === 'ONERATE' ? ' (One Rate)' : '' );
+        $ins = 0; foreach ( $rs as $gi => $r ) $ins += (float) ( $r['included_insurance_price'] ?? 0 ) * $groups[ $gi ]['count'];
         $options[] = array(
-            'id' => $id, 'carrier' => (string) ( $first['provider'] ?? '' ),
-            'service' => (string) ( ( $sl['display_name'] ?? '' ) ?: ( $sl['name'] ?? '' ) ) . ( ( $sl['terms'] ?? '' ) === 'ONERATE' ? ' (One Rate)' : '' ),
+            'id' => $id, 'carrier' => (string) ( $first['provider'] ?? '' ), 'service' => $service,
             'account' => $acct['name'], 'own_account' => ! $acct['shippo'],
-            'amount' => $amount, 'currency' => (string) ( $first['currency'] ?? 'USD' ), 'days' => $days, 'arrives' => $arrives,
+            'amount' => $amount, 'each' => $boxes > 1 && count( $groups ) === 1 ? round( (float) $first['amount'], 2 ) : null,
+            'insurance' => $ins > 0 ? round( $ins, 2 ) : null,
+            'currency' => (string) ( $first['currency'] ?? 'USD' ), 'days' => $days, 'arrives' => $arrives,
             'by' => (string) ( $first['arrives_by'] ?? '' ), 'terms' => (string) ( $first['duration_terms'] ?? '' ),
             'on_time' => ( $arrives !== '' && $view['delivery'] !== '' ) ? $arrives <= $view['delivery'] : null,
-            'tags' => count( $rs ) === 1 ? array_values( (array) ( $first['attributes'] ?? array() ) ) : array(),
+            'tags' => $boxes === 1 ? array_values( (array) ( $first['attributes'] ?? array() ) ) : array(),
         );
-        $store[ $id ] = array( 'rates' => array_map( function ( $r ) { return array( (string) $r['object_id'], (float) ( $r['amount'] ?? 0 ) ); }, $rs ),
-            'carrier' => (string) ( $first['provider'] ?? '' ), 'service' => end( $options )['service'], 'account' => $acct['name'], 'amount' => $amount );
+        $grp = array();
+        foreach ( $rs as $gi => $r ) $grp[] = array( 'parcel' => $groups[ $gi ]['parcel'], 'count' => $groups[ $gi ]['count'], 'rate' => array( (string) $r['object_id'], (float) ( $r['amount'] ?? 0 ) ) );
+        $store[ $id ] = array( 'key' => $key, 'account_id' => $acct_id, 'groups' => $grp, 'carrier' => (string) ( $first['provider'] ?? '' ),
+                               'service' => $service, 'account' => $acct['name'], 'amount' => $amount );
     }
     usort( $options, function ( $a, $b ) { return $a['amount'] <=> $b['amount']; } );
     $qid = bin2hex( random_bytes( 6 ) );
-    set_transient( 'pps_ms_q_' . (int) $order_id, array( 'qid' => $qid, 'ship' => $ship, 'to' => $to, 'boxes' => count( $parcels ), 'shipments' => $ids, 'options' => $store ), 30 * 60 );
+    set_transient( 'pps_ms_q_' . (int) $order_id, array( 'qid' => $qid, 'ship' => $ship, 'to' => $to, 'boxes' => $boxes, 'base' => $base, 'extra' => $extra, 'options' => $store ), 30 * 60 );
     return array( 'quote' => $qid, 'ship_date' => $ship, 'delivery' => $view['delivery'], 'must_ship' => $view['must_ship'],
-                  'boxes' => count( $parcels ), 'options' => $options, 'notes' => pps_ms_notes( $msgs ) );
+                  'boxes' => $boxes, 'extra' => array( 'signature' => $extra['signature_confirmation'] ?? '', 'insure' => isset( $extra['insurance'] ) ? (float) $extra['insurance']['amount'] : 0 ),
+                  'options' => $options, 'notes' => pps_ms_notes( $msgs ) );
 }
 
 /* ── Buy ──────────────────────────────────────────────────────────────────── */
+
+/** How far a repeat label's price may differ from the quote before the run stops (carriers round). */
+define( 'PPS_MS_DRIFT', 0.02 );
 
 function pps_ms_buy( $order_id, $qid, $option, $again = false ) {
     $s = pps_ms_settings();
@@ -396,35 +452,64 @@ function pps_ms_buy( $order_id, $qid, $option, $again = false ) {
     if ( $have && ! $again ) return new WP_Error( 'again', 'This order already has ' . count( $have ) . ' label' . ( count( $have ) === 1 ? '' : 's' ) . ' from the panel. Confirm to buy another.' );
     $lock = 'pps_ms_lock_' . (int) $order_id;
     if ( get_transient( $lock ) ) return new WP_Error( 'busy', 'A label is already being bought for this order.' );
-    set_transient( $lock, 1, 120 );
+    set_transient( $lock, 1, 600 );
     delete_transient( 'pps_ms_q_' . (int) $order_id );   // one purchase per quote: a second press cannot buy twice
+    if ( function_exists( 'set_time_limit' ) ) @set_time_limit( 300 );   // a dozen labels is two dozen Shippo calls
 
     $number = method_exists( $order, 'get_order_number' ) ? $order->get_order_number() : $order->get_id();
     $sorder = pps_ms_shippo_order( $number );
-    $made = array(); $err = null; $n = count( $opt['rates'] );
-    foreach ( $opt['rates'] as $i => $rate ) {
-        $body = array( 'rate' => $rate[0], 'async' => false, 'metadata' => 'Order ' . $number );
-        if ( $s['label_type'] !== '' ) $body['label_file_type'] = $s['label_type'];
-        if ( $sorder !== '' ) $body['order'] = $sorder;
-        $r = pps_ms_api( 'POST', 'transactions/', $body );
-        if ( is_wp_error( $r ) ) { $err = $r; break; }
-        if ( ( $r['status'] ?? '' ) !== 'SUCCESS' ) { $err = new WP_Error( 'label', 'Shippo could not make the label: ' . ( pps_ms_err_text( (array) ( $r['messages'] ?? array() ) ) ?: 'status ' . ( $r['status'] ?? 'unknown' ) ) ); break; }
-        $rec = array( 'at' => gmdate( 'c' ), 'carrier' => $opt['carrier'], 'service' => $opt['service'], 'account' => $opt['account'],
-                      'amount' => round( $rate[1], 2 ), 'tracking' => (string) ( $r['tracking_number'] ?? '' ), 'track_url' => (string) ( $r['tracking_url_provider'] ?? '' ),
-                      'label' => (string) ( $r['label_url'] ?? '' ), 'transaction' => (string) ( $r['object_id'] ?? '' ),
-                      'box' => ( $i + 1 ) . ' of ' . $n, 'ship_date' => (string) $q['ship'], 'shippo_order' => $sorder, 'via' => 'missive' );
-        $have[] = $rec; $made[] = $rec;
-        $order->update_meta_data( '_pps_shipments', $have );   // saved per label, so a failure part-way loses none
-        $order->save();
+    $n = (int) $q['boxes'];
+    $made = array(); $err = null; $box = 0;
+    $sig = (string) ( $q['extra']['signature_confirmation'] ?? '' );
+    $ins = isset( $q['extra']['insurance'] ) ? (float) $q['extra']['insurance']['amount'] : 0;
+    foreach ( $opt['groups'] as $g ) {
+        for ( $c = 0; $c < (int) $g['count'] && ! $err; $c++ ) {
+            $rate = $g['rate'];
+            if ( $c > 0 ) {
+                // A rate buys one label. Each further box of the same size gets its own shipment,
+                // asked of the chosen account only, and must come back as the same service at
+                // the quoted price (within PPS_MS_DRIFT).
+                $r = pps_ms_api( 'POST', 'shipments/', pps_ms_shipment_body( (array) $q['base'], (array) $g['parcel'], (string) $opt['account_id'] ) );
+                if ( is_wp_error( $r ) ) { $err = $r; break; }
+                $match = null;
+                foreach ( (array) ( $r['rates'] ?? array() ) as $rt ) if ( ! empty( $rt['object_id'] ) && pps_ms_rate_key( $rt ) === $opt['key'] ) { $match = $rt; break; }
+                if ( ! $match ) { $err = new WP_Error( 'gone', $opt['carrier'] . ' ' . $opt['service'] . ' was not offered for box ' . ( $box + 1 ) . '.' ); break; }
+                if ( abs( (float) $match['amount'] - (float) $g['rate'][1] ) > max( 0.01, PPS_MS_DRIFT * (float) $g['rate'][1] ) ) {
+                    $err = new WP_Error( 'price', 'The price for box ' . ( $box + 1 ) . ' came back as $' . number_format( (float) $match['amount'], 2 ) . ' instead of $' . number_format( (float) $g['rate'][1], 2 ) . ' — stopped. Get rates again.' );
+                    break;
+                }
+                $rate = array( (string) $match['object_id'], (float) $match['amount'] );
+            }
+            $body = array( 'rate' => $rate[0], 'async' => false, 'metadata' => 'Order ' . $number . ' · box ' . ( $box + 1 ) . ' of ' . $n );
+            if ( $s['label_type'] !== '' ) $body['label_file_type'] = $s['label_type'];
+            if ( $sorder !== '' ) $body['order'] = $sorder;
+            $r = pps_ms_api( 'POST', 'transactions/', $body );
+            if ( is_wp_error( $r ) ) { $err = $r; break; }
+            if ( ( $r['status'] ?? '' ) !== 'SUCCESS' ) { $err = new WP_Error( 'label', 'Shippo could not make the label for box ' . ( $box + 1 ) . ': ' . ( pps_ms_err_text( (array) ( $r['messages'] ?? array() ) ) ?: 'status ' . ( $r['status'] ?? 'unknown' ) ) ); break; }
+            $box++;
+            $rec = array( 'at' => gmdate( 'c' ), 'carrier' => $opt['carrier'], 'service' => $opt['service'], 'account' => $opt['account'],
+                          'amount' => round( $rate[1], 2 ), 'tracking' => (string) ( $r['tracking_number'] ?? '' ), 'track_url' => (string) ( $r['tracking_url_provider'] ?? '' ),
+                          'label' => (string) ( $r['label_url'] ?? '' ), 'transaction' => (string) ( $r['object_id'] ?? '' ),
+                          'box' => $box . ' of ' . $n, 'ship_date' => (string) $q['ship'], 'shippo_order' => $sorder, 'via' => 'missive',
+                          'signature' => $sig, 'insured' => $ins );
+            $have[] = $rec; $made[] = $rec;
+            $order->update_meta_data( '_pps_shipments', $have );   // saved per label, so a failure part-way loses none
+            $order->save();
+        }
+        if ( $err ) break;
     }
     delete_transient( $lock );
     if ( $made ) {
         $sum = array_sum( array_column( $made, 'amount' ) );
-        $order->add_order_note( sprintf( 'Shipping label%s bought from the Missive panel: %s %s (%s), %d box%s, $%s — tracking %s.%s%s',
+        $extras = trim( ( $sig !== '' ? ' ' . pps_ms_signatures()[ $sig ] . '.' : '' ) . ( $ins > 0 ? ' Insured for $' . number_format( $ins, 2 ) . ' a box.' : '' ) );
+        $links = array();
+        foreach ( $made as $m ) $links[] = 'Box ' . $m['box'] . ': ' . ( $m['tracking'] !== '' ? $m['tracking'] : '—' ) . ( $m['track_url'] !== '' ? ' ' . $m['track_url'] : '' );
+        $order->add_order_note( sprintf( "Shipping label%s bought from the Missive panel: %s %s (%s), %d box%s, $%s.%s%s%s\n%s",
             count( $made ) === 1 ? '' : 's', $opt['carrier'], $opt['service'], $opt['account'], count( $made ), count( $made ) === 1 ? '' : 'es',
-            number_format( $sum, 2 ), implode( ', ', array_filter( array_column( $made, 'tracking' ) ) ) ?: '—',
+            number_format( $sum, 2 ), $extras !== '' ? ' ' . $extras : '',
             $sorder !== '' ? ' Attached to the order in Shippo.' : ' Not attached to a Shippo order (the store sync had not brought this order in).',
-            $err ? ' Stopped after ' . count( $made ) . ' of ' . $n . ': ' . $err->get_error_message() : '' ) );
+            $err ? ' Stopped after ' . count( $made ) . ' of ' . $n . ': ' . $err->get_error_message() : '',
+            implode( "\n", $links ) ) );
     }
     if ( $err && ! $made ) return $err;
     return array( 'labels' => $made, 'error' => $err ? 'Bought ' . count( $made ) . ' of ' . $n . ', then: ' . $err->get_error_message() : '', 'attached' => $sorder !== '' );
@@ -441,7 +526,7 @@ add_action( 'rest_api_init', function () {
     };
     register_rest_route( 'pps/v1', '/missive/ship/rates', array(
         'methods' => 'POST', 'permission_callback' => $ok,
-        'callback' => function ( $req ) use ( $out ) { return $out( pps_ms_rates( (int) $req->get_param( 'order' ), $req->get_param( 'to' ), $req->get_param( 'boxes' ), (string) $req->get_param( 'ship_date' ) ) ); },
+        'callback' => function ( $req ) use ( $out ) { return $out( pps_ms_rates( (int) $req->get_param( 'order' ), $req->get_param( 'to' ), $req->get_param( 'boxes' ), (string) $req->get_param( 'ship_date' ), $req->get_param( 'extra' ) ) ); },
     ) );
     register_rest_route( 'pps/v1', '/missive/ship/buy', array(
         'methods' => 'POST', 'permission_callback' => $ok,
@@ -456,6 +541,7 @@ function pps_ms_page_html( $order, $rates_api, $buy_api ) {
     $cfg = wp_json_encode( array(
         'order' => (int) $order->get_id(), 'token' => pps_ms_token( $order->get_id() ), 'rates' => $rates_api, 'buy' => $buy_api,
         'view' => pps_ms_view( $order ), 'from' => $s['from'], 'canBuy' => $s['allow_buy'], 'hasKey' => pps_ms_shippo_key() !== '',
+        'signatures' => pps_ms_signatures(), 'maxBoxes' => PPS_MS_MAX_BOXES,
     ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     return <<<HTML
 <!DOCTYPE html>
@@ -475,7 +561,7 @@ button{font:inherit;font-size:12px;padding:3px 9px;cursor:pointer} button.go{bac
 .rate .p{margin-left:auto;font-weight:700;white-space:nowrap} .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin-left:4px;font-size:10px}
 .own{background:#fef3c7;color:#92400e;border-color:#f59e0b} a{color:#2563eb;cursor:pointer;text-decoration:none}
 .chips{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0} .chip{font-size:11px;padding:1px 7px;border:1px solid rgba(128,128,128,.45);border-radius:10px;background:transparent;color:inherit;cursor:pointer} .chip.on{background:#2563eb;border-color:#2563eb;color:#fff}
-.err{color:#c0392b;margin:6px 0}
+.err{color:#c0392b;margin:6px 0} .box input.n{width:44px} textarea.links{width:100%;box-sizing:border-box;font:11px/1.4 ui-monospace,Menlo,monospace;margin-top:6px}
 </style></head>
 <body><div id="app"></div>
 <script data-cfasync="false">
@@ -483,7 +569,9 @@ button{font:inherit;font-size:12px;padding:3px 9px;cursor:pointer} button.go{bac
 'use strict';
 var CFG = {$cfg};
 var V = CFG.view, app = document.getElementById('app');
-var ST = { to: JSON.parse(JSON.stringify(V.to)), boxes: JSON.parse(JSON.stringify(V.suggest)), ship: V.today, quote: null, sel: '', sort: 'price', carrier: '', busy: false, err: '', done: null };
+var ST = { to: JSON.parse(JSON.stringify(V.to)), boxes: JSON.parse(JSON.stringify(V.suggest)), ship: V.today, extra: { signature: '', insure: '' }, quote: null, sel: '', sort: 'price', carrier: '', busy: false, err: '', done: null };
+function boxCount(){ return ST.boxes.reduce(function(n,b){ return n + Math.max(1, parseInt(b.count,10)||1); }, 0); }
+function stale(){ ST.quote=null; ST.sel=''; }
 
 function el(tag, attrs, kids){ var e=document.createElement(tag); attrs=attrs||{};
   for (var k in attrs){ if(k==='text') e.textContent=attrs[k]; else if(k==='cls') e.className=attrs[k]; else if(k==='on') e.addEventListener('click',attrs[k]);
@@ -502,14 +590,16 @@ function field(obj, k, ph, cls){ var i=el('input',{placeholder:ph,input:function
 
 function getRates(){
   ST.busy=true; ST.err=''; ST.quote=null; ST.sel=''; render();
-  post(CFG.rates,{order:CFG.order,to:ST.to,boxes:ST.boxes,ship_date:ST.ship}).then(function(d){
+  post(CFG.rates,{order:CFG.order,to:ST.to,boxes:ST.boxes,ship_date:ST.ship,extra:{signature:ST.extra.signature,insure:Number(ST.extra.insure)||0}}).then(function(d){
     ST.busy=false; if(!d.ok){ ST.err=d.error||'Could not get rates.'; } else { ST.quote=d; } render();
   }).catch(function(e){ ST.busy=false; ST.err=e.message; render(); });
 }
 function buy(again){
   var o = ST.quote.options.filter(function(x){ return x.id===ST.sel; })[0]; if(!o) return;
   var t = ST.to, n = ST.quote.boxes;
-  var msg = 'Buy '+n+' label'+(n===1?'':'s')+' for order #'+CFG.order+'?\\n\\n'+o.carrier+' '+o.service+' — '+money(o.amount)+'\\nBilled to: '+o.carrier+' · '+o.account+
+  var x = ST.quote.extra || {};
+  var msg = 'Buy '+n+' label'+(n===1?'':'s')+' for order #'+CFG.order+'?\\n\\n'+o.carrier+' '+o.service+' — '+money(o.amount)+(n>1?' ('+n+' labels)':'')+
+    (x.signature?'\\n'+CFG.signatures[x.signature]:'')+(x.insure?'\\nInsured for '+money(x.insure)+' a box'+(o.insurance?' (insurance '+money(o.insurance)+', included)':''):'')+'\\nBilled to: '+o.carrier+' · '+o.account+
     (o.own_account?'  (NOT Shippo\'s own account)':'')+'\\nShips '+md(ST.quote.ship_date)+(o.arrives?', arrives '+md(o.arrives):'')+'\\n\\nTo: '+[t.name,t.company,t.street1,t.street2,t.city+', '+t.state+' '+t.zip].filter(Boolean).join(', ');
   if(!again && !confirm(msg)) return;
   ST.busy=true; ST.err=''; render();
@@ -563,16 +653,27 @@ function boxCard(){
     var sel = el('select',{change:function(){ var t = V.boxes.filter(function(x){ return x.id===sel.value; })[0]; b.box=sel.value; if(t){ b.l=t.l; b.w=t.w; b.h=t.h; } ST.quote=null; ST.sel=''; render(); }});
     sel.appendChild(el('option',{value:'',text:'Custom size'}));
     V.boxes.forEach(function(t){ var o=el('option',{value:t.id,text:t.name+' ('+t.l+'×'+t.w+'×'+t.h+')'}); if(t.id===b.box) o.selected=true; sel.appendChild(o); });
-    var num = function(k, ph){ var x=el('input',{type:'number',step:'0.1',min:'0',placeholder:ph,title:ph,input:function(){ b[k]=x.value; ST.quote=null; ST.sel=''; }}); x.value=b[k]; return x; };
-    c.appendChild(el('div',{cls:'box'},[ el('b',{text:'#'+(i+1)}), sel, num('l','L'), '×', num('w','W'), '×', num('h','H'), 'in', num('weight','lb'), 'lb',
-      ST.boxes.length>1?el('a',{cls:'small',text:'remove',on:function(){ ST.boxes.splice(i,1); ST.quote=null; render(); }}):null ]));
+    var num = function(k, ph){ var x=el('input',{type:'number',step:'0.1',min:'0',placeholder:ph,title:ph,input:function(){ b[k]=x.value; stale(); }}); x.value=b[k]; return x; };
+    // "× 12": twelve boxes like this one, each its own label to the same address.
+    var cnt = el('input',{type:'number',step:'1',min:'1',max:String(CFG.maxBoxes),cls:'n',title:'How many boxes like this',change:function(){ b.count=Math.max(1,parseInt(cnt.value,10)||1); stale(); render(); }});
+    cnt.value = b.count || 1;
+    c.appendChild(el('div',{cls:'box'},[ sel, num('l','L'), '×', num('w','W'), '×', num('h','H'), 'in', num('weight','lb'), 'lb each ×', cnt,
+      ST.boxes.length>1?el('a',{cls:'small',text:'remove',on:function(){ ST.boxes.splice(i,1); stale(); render(); }}):null ]));
   });
   var row = el('div',{style:'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px'});
-  if(ST.boxes.length<10) row.appendChild(el('a',{cls:'small',text:'+ add a box',on:function(){ ST.boxes.push(JSON.parse(JSON.stringify(ST.boxes[ST.boxes.length-1]))); ST.quote=null; render(); }}));
+  var total = boxCount();
+  row.appendChild(el('b',{cls:'small',text:total+' label'+(total===1?'':'s')}));
+  if(ST.boxes.length<10) row.appendChild(el('a',{cls:'small',text:'+ a box of another size',on:function(){ var nb=JSON.parse(JSON.stringify(ST.boxes[ST.boxes.length-1])); nb.count=1; ST.boxes.push(nb); stale(); render(); }}));
+  if(total>CFG.maxBoxes) row.appendChild(el('span',{cls:'late small',text:'At most '+CFG.maxBoxes+' labels at a time.'}));
   var d = el('input',{type:'date',min:V.today,change:function(){ ST.ship=d.value||V.today; ST.quote=null; render(); }}); d.value=ST.ship;
   row.appendChild(el('span',{cls:'small',style:'margin-left:auto'},['Ship on ', d]));
   c.appendChild(row);
-  var go = el('button',{cls:'go',text:ST.busy&&!ST.quote?'Getting rates…':'Get rates',on:getRates}); if(ST.busy||!CFG.hasKey) go.disabled=true;
+  var sig = el('select',{change:function(){ ST.extra.signature=sig.value; stale(); render(); }});
+  Object.keys(CFG.signatures).forEach(function(k){ var o=el('option',{value:k,text:CFG.signatures[k]}); if(k===ST.extra.signature) o.selected=true; sig.appendChild(o); });
+  var ins = el('input',{type:'number',step:'1',min:'0',placeholder:'0',style:'width:80px',title:'Declared value of each box',change:function(){ ST.extra.insure=ins.value; stale(); render(); }}); ins.value=ST.extra.insure;
+  c.appendChild(el('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px'},[ el('span',{cls:'small'},['Signature ', sig]), el('span',{cls:'small'},['Insure each box for $', ins]) ]));
+  if(ST.extra.signature || Number(ST.extra.insure)>0) c.appendChild(el('div',{cls:'muted small',text:(ST.extra.signature?'Carriers that cannot take a signature are left out of the rates. ':'')+(Number(ST.extra.insure)>0?'Insurance is through Shippo; its cost is included in each rate below.':'')}));
+  var go = el('button',{cls:'go',text:ST.busy&&!ST.quote?'Getting rates…':'Get rates',on:getRates}); if(ST.busy||!CFG.hasKey||total>CFG.maxBoxes) go.disabled=true;
   c.appendChild(el('div',{style:'margin-top:8px'},[go, CFG.hasKey?null:el('span',{cls:'warn small',text:' No Shippo API token is set (PPS Config → Shippo Integration).'})]));
   return c;
 }
@@ -580,7 +681,8 @@ function boxCard(){
 function ratesCard(){
   var q = ST.quote; if(!q) return null;
   var c = el('div',{cls:'card'});
-  c.appendChild(el('h3',{text:'Rates — '+q.boxes+' box'+(q.boxes===1?'':'es')+', ships '+md(q.ship_date),style:'margin-top:0'}));
+  var qx = q.extra || {};
+  c.appendChild(el('h3',{text:'Rates — '+q.boxes+' label'+(q.boxes===1?'':'s')+', ships '+md(q.ship_date)+(qx.signature?' · '+CFG.signatures[qx.signature]:'')+(qx.insure?' · insured '+money(qx.insure)+'/box':''),style:'margin-top:0'}));
   if(q.must_ship && q.ship_date>q.must_ship) c.appendChild(el('div',{cls:'late small',text:'This ship date is after the must-ship date ('+md(q.must_ship)+').'}));
   if(!q.options.length){ c.appendChild(el('div',{cls:'muted',text:'No carrier offered a service for '+(q.boxes>1?'every one of these boxes':'this box')+'.'})); }
   var carriers = {}; q.options.forEach(function(o){ carriers[o.carrier]=1; });
@@ -599,13 +701,14 @@ function ratesCard(){
       el('div',{},[el('b',{text:o.carrier+' '+o.service})].concat(o.tags.map(function(t){ return el('span',{cls:'tag',text:t==='BESTVALUE'?'BEST VALUE':t}); }),
         [el('span',{cls:'tag'+(o.own_account?' own':''),text:o.account})])),
       el('div',{cls:'small'},[when, o.on_time===true?el('span',{cls:'ok',text:' · on time'}):o.on_time===false?el('span',{cls:'late',text:' · LATE vs promised '+md(q.delivery)}):null]),
+      o.insurance?el('div',{cls:'muted small',text:'includes '+money(o.insurance)+' insurance'}):null,
       o.terms?el('div',{cls:'muted small',text:o.terms}):null ]));
-    r.appendChild(el('div',{cls:'p',text:money(o.amount)}));
+    r.appendChild(el('div',{cls:'p'},[money(o.amount), o.each?el('div',{cls:'muted small',style:'font-weight:400',text:money(o.each)+' each'}):null]));
     c.appendChild(r);
   });
   if(q.notes.length){ var dt=el('details',{},[el('summary',{cls:'muted small',text:'Carrier notes ('+q.notes.length+')'})]); q.notes.forEach(function(n){ dt.appendChild(el('div',{cls:'small muted',text:n})); }); c.appendChild(dt); }
   var o = q.options.filter(function(x){ return x.id===ST.sel; })[0];
-  var b = el('button',{cls:'go',text:ST.busy?'Buying…':o?'Buy label'+(q.boxes===1?'':'s')+' — '+money(o.amount):'Pick a rate',on:function(){ buy(false); }});
+  var b = el('button',{cls:'go',text:ST.busy?'Buying '+q.boxes+' label'+(q.boxes===1?'':'s')+'…':o?'Buy '+(q.boxes===1?'label':q.boxes+' labels')+' — '+money(o.amount):'Pick a rate',on:function(){ buy(false); }});
   if(!o || ST.busy || !CFG.canBuy) b.disabled = true;
   c.appendChild(el('div',{style:'margin-top:8px'},[b, CFG.canBuy?null:el('div',{cls:'muted small',text:'Buying is switched off. Turn on "Let the panel buy labels" on PPS Calculators → Missive Shipping — until then the panel only shows rates.'})]));
   return c;
@@ -615,7 +718,15 @@ function doneCard(){
   var d = ST.done; if(!d || !d.labels || !d.labels.length) return null;
   var c = el('div',{cls:'card',style:'border-color:#22c55e'});
   c.appendChild(el('div',{cls:'ok',text:'✓ '+d.labels.length+' label'+(d.labels.length===1?'':'s')+' bought'}));
-  d.labels.forEach(function(s){ c.appendChild(el('div',{},[ 'Box '+s.box+': ', el('a',{text:'Open label PDF',on:function(){ open(s.label); }}), ' · ', s.track_url?el('a',{text:s.tracking,on:function(){ open(s.track_url); }}):s.tracking ])); });
+  c.appendChild(el('h3',{text:'Tracking links'}));
+  d.labels.forEach(function(s){ c.appendChild(el('div',{cls:'small',style:'padding:2px 0'},[ 'Box '+s.box+' · ', s.track_url?el('a',{text:s.tracking||s.track_url,on:function(){ open(s.track_url); }}):(s.tracking||'—'), ' · ', el('a',{text:'label PDF',on:function(){ open(s.label); }}) ])); });
+  // the same list as text, to paste into a reply to the customer
+  var text = d.labels.map(function(s){ return 'Box '+s.box+': '+(s.track_url||s.tracking); }).join('\\n');
+  var ta = el('textarea',{cls:'links',rows:String(Math.min(12,d.labels.length+1)),readonly:'readonly'}); ta.value = text;
+  var cp = el('button',{text:'Copy tracking links',on:function(){ ta.select(); var done=function(){ cp.textContent='Copied ✓'; };
+    if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function(){ try{ document.execCommand('copy'); done(); }catch(e){} }); else { try{ document.execCommand('copy'); done(); }catch(e){} } }});
+  var all = d.labels.length>1 ? el('button',{text:'Open all '+d.labels.length+' label PDFs',on:function(){ d.labels.forEach(function(s){ open(s.label); }); }}) : null;
+  c.appendChild(ta); c.appendChild(el('div',{style:'display:flex;gap:6px;margin-top:4px'},[cp, all]));
   c.appendChild(el('div',{cls:'muted small',text:d.attached?'Attached to this order in Shippo, as a label bought there would be. A note is on the WooCommerce order.':'Shippo has no copy of this order from the store sync, so the label stands alone in Shippo. A note is on the WooCommerce order.'}));
   return c;
 }
