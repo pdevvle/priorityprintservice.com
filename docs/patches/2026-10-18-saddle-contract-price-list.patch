@@ -1,8 +1,8 @@
 diff --git a/calc-preview-test.html b/calc-preview-test.html
-index be409a8..6c20362 100644
+index be409a8..7b1abe8 100644
 --- a/calc-preview-test.html
 +++ b/calc-preview-test.html
-@@ -465,6 +465,44 @@ const _cfgList = v => (Array.isArray(v) && v.length ? v : null);
+@@ -465,6 +465,47 @@ const _cfgList = v => (Array.isArray(v) && v.length ? v : null);
  // Per-calc add-on visibility flags injected by PHP. Shape: { vivid: bool, coating: bool, ... }.
  // Only keys for this calc-type's supported add-ons appear. Absent key = treated as visible.
  const _AD = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.addons) ? window.PPS_CONFIG.addons : {};
@@ -31,11 +31,14 @@ index be409a8..6c20362 100644
 +})();
 +const _LOCK = !!(_CONTRACT && _CONTRACT.lock);
 +// The nearest listed quantity — a link or an old cart line asking for 600 lands on 500.
-+// A paper as the order names it: the contract's wording when there is one, with the real stock
-+// in brackets — the customer reads what they were sold, production reads what to pull.
++// A paper as anything the CUSTOMER reads names it (Job Ticket, cart summary, the copied
++// price table): the contract's wording when it has one, never the stock — owner 2026-10-18,
++// "paper should not mention on the front end to the customer what type of paper it is". The
++// real stock still travels in the metadata (insidePaper / coverPaper), which is what the
++// Paper Order, PPS-Spec and the staff-only "Production Paper" line read.
 +function ppsPaperWords(field, label) {
 +  const shown = _CONTRACT && _CONTRACT.show && _CONTRACT.show[field];
-+  return shown ? `${shown} (${label})` : label;
++  return shown || label;
 +}
 +function ppsContractQty(q) {
 +  if (!_CONTRACT) return q;
@@ -47,7 +50,7 @@ index be409a8..6c20362 100644
  
  const PCF = Object.assign({
    printing_fullcolor_cost:0.05, printing_black_cost:0.01,
-@@ -1373,7 +1411,19 @@ function calculate(c) {
+@@ -1373,7 +1414,19 @@ function calculate(c) {
    const subBeforeSale=Object.values(P).reduce((s,v)=>s+v,0);
    P.discSale=(PCF.sale_discount_pct>0)?-Math.round(subBeforeSale*PCF.sale_discount_pct*100)/100:0;
  
@@ -68,7 +71,7 @@ index be409a8..6c20362 100644
  
    // Turnaround
    // Material lead times STACK (run concurrently) rather than accumulating: the inside
-@@ -1515,7 +1565,10 @@ function calculate(c) {
+@@ -1515,7 +1568,10 @@ function calculate(c) {
    const mustShipBiz = Math.max(0, effectiveDeliveryBiz - effectiveTransit);
    const mustShipDate = addBusinessDays(shopToday, mustShipBiz);
  
@@ -80,7 +83,7 @@ index be409a8..6c20362 100644
      {l:"Inside Paper",v:P.insidePaper,g:"mat"},{l:"Cover Paper",v:P.coverPaper,g:"mat"},
      {l:"Inside Print",v:P.insidePrint,g:"mat"},{l:"Cover Print",v:P.coverPrint,g:"mat"},
      {l:"Press",v:P.press,g:"lab"},{l:"Cutting",v:P.cutting,g:"lab"},
-@@ -1528,11 +1581,11 @@ function calculate(c) {
+@@ -1528,11 +1584,11 @@ function calculate(c) {
      {l:"Difficult Size",v:P.diffSize,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
      {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
      {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
@@ -95,7 +98,7 @@ index be409a8..6c20362 100644
    const grouped=Object.entries(gL).map(([k,label])=>{
      const val=bd.filter(r=>r.g===k).reduce((s,r)=>s+r.v,0);
      return {label,val,c:gC[k]};
-@@ -1625,10 +1678,10 @@ function calculate(c) {
+@@ -1625,10 +1681,10 @@ function calculate(c) {
      minDaysConfig:PCF.minimum_turnaround_days,
    };
  
@@ -108,7 +111,7 @@ index be409a8..6c20362 100644
      shipping:{hasDest:_hasDest, poBox: !!c.shipPoBox, poBoxDays: _poBoxDays,estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday), shopTodayYMD: toYMD(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
  }
  
-@@ -5965,6 +6018,7 @@ function buildTicket(config, result) {
+@@ -5965,6 +6021,7 @@ function buildTicket(config, result) {
    const push = (k, v) => { v = v == null ? "" : String(v).trim(); if (v) t.push([k, v]); };
    const colorName = v => v === "color" ? "Full Color" : "Black & White";
    push("Product", "Saddle Stitch Booklet");
@@ -116,7 +119,7 @@ index be409a8..6c20362 100644
    const _first = (config.sets && config.sets[0]) || {};
    push("Job name", _first.name);
    push("Size", (function () {
-@@ -5977,9 +6031,9 @@ function buildTicket(config, result) {
+@@ -5977,9 +6034,9 @@ function buildTicket(config, result) {
    })());
    push("Sets", (config.sets || []).map(s => `${Number(s.qty || 0).toLocaleString()} × ${s.pages} pages` + (s.name ? ` "${s.name}"` : "")).join("; "));
    push("Binding", (result && result.twoAuto) || (config.twoStaple && !(result && result.oneStapleOnly)) ? "Saddle stitch · two staples" : "Saddle stitch · single staple");
@@ -128,7 +131,7 @@ index be409a8..6c20362 100644
      : "Self-cover (same stock as inside)");
    const _ad = buildAddons(config); push("Finishing", _ad.length ? _ad.join("; ") : "None");
    push("Proof", config.proof >= 3 ? "Hardcopy proof, mailed before printing" : config.proof > 0 ? "Digital proof by staff before printing" : "Self-approved online (no staff proof)");
-@@ -6032,9 +6086,9 @@ function buildSummary(config, result) {
+@@ -6032,9 +6089,9 @@ function buildSummary(config, result) {
  
    // Paper
    const colorName = v => v === "color" ? "Full Color" : "Black & White";
@@ -140,7 +143,7 @@ index be409a8..6c20362 100644
    } else {
      lines.push(`Cover: Self-cover (same as inside)`);
    }
-@@ -6075,6 +6129,8 @@ function buildMetadata(config, result) {
+@@ -6075,6 +6132,8 @@ function buildMetadata(config, result) {
    return JSON.stringify({
      addons: buildAddons(config),
      ticket: buildTicket(config, result),
@@ -149,7 +152,7 @@ index be409a8..6c20362 100644
      // Customer selections
      sizeLabel: config.sizeLabel,
      customLong: config.customLong,
-@@ -6574,6 +6630,7 @@ function App(){
+@@ -6574,6 +6633,7 @@ function App(){
        const _int = (v) => { const n = parseInt(v, 10); return isNaN(n) ? undefined : n; };
        const _float = (v) => { const n = parseFloat(v); return isNaN(n) ? undefined : n; };
        if (p.has("qty") && _int(p.get("qty"))) base.qty = _int(p.get("qty"));
@@ -157,7 +160,7 @@ index be409a8..6c20362 100644
        if (p.has("pages") && _int(p.get("pages"))) base.pages = _int(p.get("pages"));
        if (p.has("size")) base.sizeLabel = p.get("size");
        if (p.has("long") && _float(p.get("long"))) base.customLong = _float(p.get("long"));
-@@ -6591,6 +6648,7 @@ function App(){
+@@ -6591,6 +6651,7 @@ function App(){
        if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
        if (p.has("bundling") && _float(p.get("bundling")) != null) base.bundling = _float(p.get("bundling"));
        if (p.has("corner") && _float(p.get("corner")) != null) base.roundCorner = _float(p.get("corner"));
@@ -165,7 +168,7 @@ index be409a8..6c20362 100644
        if (p.has("state")) base.shipState = p.get("state");
        if (p.has("artwork") && _float(p.get("artwork")) != null) base.artwork = _float(p.get("artwork"));
        if (p.has("artedit") && _int(p.get("artedit")) != null) base.artEditPages = _int(p.get("artedit"));
-@@ -6602,7 +6660,7 @@ function App(){
+@@ -6602,7 +6663,7 @@ function App(){
    })();
    const _findPaper = (list, val) => { const f = list.find(p => String(p.val) === String(val)); return f || list[2] || list[0]; };
  
@@ -174,7 +177,7 @@ index be409a8..6c20362 100644
    const debugUnlocked = sets.some(s => s.name === "%3414");
    if (typeof window !== "undefined") window.__ppsTipEdit = debugUnlocked;
    const[sizeLabel,setSizeLabel]=useState(D.sizeLabel || "5.5×8.5 (Opens to 8.5×11)");
-@@ -6715,12 +6773,14 @@ function App(){
+@@ -6715,12 +6776,14 @@ function App(){
        // React render to throw silently and leave an empty calc root.
        if (rc.sets && Array.isArray(rc.sets)) {
          setSets(rc.sets.map(s => ({
@@ -191,7 +194,7 @@ index be409a8..6c20362 100644
        // Color
        if (rc.insideColor) setInsideColor(rc.insideColor);
        if (rc.coverColor) setCoverColor(rc.coverColor);
-@@ -6746,6 +6806,7 @@ function App(){
+@@ -6746,6 +6809,7 @@ function App(){
        if (rc.coating != null) setCoating(rc.coating);
        if (rc.bundling != null) setBundling(rc.bundling);
        if (rc.roundCorner != null) setRoundCorner(rc.roundCorner);
@@ -199,7 +202,7 @@ index be409a8..6c20362 100644
  
        // Artwork & proofing
        if (rc.artwork != null) setArtwork(rc.artwork);
-@@ -6859,7 +6920,7 @@ function App(){
+@@ -6859,7 +6923,7 @@ function App(){
      };
      const currentQty = sets[0]?.qty || 100;
      const currentPages = sets[0]?.pages || 8;
@@ -208,7 +211,18 @@ index be409a8..6c20362 100644
      // Add current qty and sort
      const qtys = [...breakpoints, currentQty].sort((a,b) => a - b);
      const rows = qtys.map(q => {
-@@ -7536,7 +7597,7 @@ function App(){
+@@ -7092,8 +7156,8 @@ function App(){
+       "Saddle Stitch Booklets",
+       `Size: ${sz}`,
+       `Pages: ${sets[0].pages}`,
+-      `Cover: ${coverColor === "color" ? "Full Color" : "B&W"} · ${cvr.label}`,
+-      `Inside: ${insideColor === "color" ? "Full Color" : "B&W"} · ${insidePaper.label}`,
++      `Cover: ${coverColor === "color" ? "Full Color" : "B&W"} · ${coverMode === "same" ? ppsPaperWords("inside", cvr.label) : ppsPaperWords("cover", cvr.label)}`,
++      `Inside: ${insideColor === "color" ? "Full Color" : "B&W"} · ${ppsPaperWords("inside", insidePaper.label)}`,
+     ];
+     // The copied table has to say what the on-screen one says, or a quote pasted into
+     // an email quietly drops the discount and gets sent at list price.
+@@ -7536,7 +7600,7 @@ function App(){
                    /* background + border live in .pps-jobtitle, not here: an inline
                       background would outrank the :hover and :focus rules. */
              }>
@@ -217,7 +231,7 @@ index be409a8..6c20362 100644
                <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
                {isCustom
                  ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"20px 32px 20px 13px":"20px 34px 20px 14px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;
-@@ -7564,17 +7625,36 @@ function App(){
+@@ -7564,17 +7628,36 @@ function App(){
                </div>
              )}
              </>}
@@ -257,7 +271,7 @@ index be409a8..6c20362 100644
                ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip></label><div style={{fontSize:12.5,color:CC.dark,fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4,alignSelf:"flex-start"}}>Single Staple</div><div style={{fontSize:11,color:CC.mid,marginTop:4}}>Only one staple can be used on a binding edge under {ONE_STAPLE_MAX}″.</div></div>
                : r.twoAuto
                ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip><TurnBadge days={r.ti?.twoStaple}/></label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:"#0060cc",fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4}}>Two Staples — standard for this size</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#4f46e5",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
-@@ -7583,7 +7663,7 @@ function App(){
+@@ -7583,7 +7666,7 @@ function App(){
            </Sec>
  
            {/* SECTION 2: Printing & Paper */}
@@ -266,7 +280,7 @@ index be409a8..6c20362 100644
              <div style={r2}>
                <Pil label={<Tip k="inside_print">Inside Printing</Tip>} value={insideColor} onChange={setInsideColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
                <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
-@@ -7604,10 +7684,10 @@ function App(){
+@@ -7604,10 +7687,10 @@ function App(){
                }
              </div>
              {coverMode==="separate"&&<PaperNote p={coverPaper} pool={coverPaperType==="cardstock"?"cs":"nc"}/>}
@@ -279,7 +293,7 @@ index be409a8..6c20362 100644
              {/* Print Quality only exists on coated stock, so it is hidden rather than shown
                  disabled next to a line explaining why it cannot be used. The effect on
                  r.vividOK already clears vividPrint when the paper changes under it, so a
-@@ -7636,10 +7716,10 @@ function App(){
+@@ -7636,10 +7719,10 @@ function App(){
                  );
                })()}
              </div>}
@@ -292,7 +306,7 @@ index be409a8..6c20362 100644
  
              {/* Art options dropdown */}
              <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-@@ -7799,7 +7879,7 @@ function App(){
+@@ -7799,7 +7882,7 @@ function App(){
            </Sec>
  
            {/* SECTION 5: Shipping & Delivery */}

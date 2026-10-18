@@ -71,5 +71,16 @@ if ( preg_match( '/^function pps_wcpa_drop_registry_products\(.*?^\}/ms', $src, 
 ok( strpos( $src, "add_filter( 'transient_wcpa_products_transient_ver_3', 'pps_wcpa_drop_registry_products' );" ) !== false, 'and it is hooked on the key WCPA reads' );
 ok( strpos( $src, "add_filter( 'transient_wcpa_fields_' . \$id, '__return_false' );" ) !== false, 'and WCPA\'s cached fields for a registry product are never used' );
 
+// the real stock reaches staff only
+if ( preg_match( '/^function pps_production_paper_line\(.*?^\}/ms', $src, $m ) ) {
+    eval( $m[0] );
+    $pl = pps_production_paper_line( array( 'contract' => array( 'qty' => 500 ), 'insidePaper' => array( 'label' => '80lb Matte Text' ), 'coverMode' => 'separate', 'coverPaper' => array( 'label' => '80lb Matte Cardstock' ) ) );
+    ok( $pl === 'Inside: 80lb Matte Text · Cover: 80lb Matte Cardstock', 'a contract line carries its real stock on a "Production Paper" line', $pl );
+    ok( pps_production_paper_line( array( 'insidePaper' => array( 'label' => 'x' ) ) ) === '', 'an ordinary line gets none (its ticket already names the paper)' );
+    ok( pps_production_paper_line( array( 'contract' => array( 'qty' => 100 ), 'insidePaper' => array( 'label' => '80lb Matte Text' ), 'coverMode' => 'same' ) ) === 'Inside: 80lb Matte Text · Cover: same as inside', 'a self-cover contract says so' );
+} else { ok( false, 'pps_production_paper_line is in the plugin' ); }
+ok( strpos( $src, "'PPS-Data-Error', 'Production Paper' );" ) !== false, 'and "Production Paper" is staff-only: off the receipt, the order-received page and My Account' );
+ok( strpos( $src, "if ( \$pp !== '' ) \$item->add_meta_data( 'Production Paper', \$pp, true );" ) !== false, 'it is written beside PPS-Spec on the order item' );
+
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> CONTRACT PRICE (server) OK ($n checks)\n";
 exit( $fail ? 1 : 0 );

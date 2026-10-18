@@ -102,7 +102,7 @@ const CONTRACT = { name: 'Armadillo Home Warranty', lock: true, prices: PRICES, 
   ok(t.includes('Armadillo Home Warranty booklet · set specification'.toUpperCase()) || t.includes('Armadillo Home Warranty booklet · set specification'), 'the spec is shown as a card');
   ok(/Size\s*6\.125×9\.25″/.test(t) && /Pages\s*8 pages/.test(t), 'with the product\'s size and page count', t.slice(0, 0));
   ok(!(await page.evaluate(() => [...document.querySelectorAll('select')].some(s => [...s.options].some(o => / Pages$/.test(o.textContent))))), 'there is no Pages control');
-  ok(/Inside\s*House-provided text weight paper · Full Color/.test(t) && /Cover\s*House-provided cardstock · Full Color/.test(t) && !/80lb Matte/.test(t.split('Artwork & Proofing')[0]), 'the papers read as the house wording, not the stock names', t.slice(t.indexOf('set specification') - 40, t.indexOf('set specification') + 260));
+  ok(/Inside\s*House-provided text weight paper · Full Color/.test(t) && /Cover\s*House-provided cardstock · Full Color/.test(t) && !/80lb|Matte|Gloss|Uncoated|Cardstock\b(?! ·)/.test(t.replace(/House-provided cardstock/g, '')), 'the papers read as the house wording, and no stock name appears anywhere on the page', t.slice(t.indexOf('set specification') - 40, t.indexOf('set specification') + 260));
   // the regular Shipping & Delivery step is there, and rush is charged on top of the list price
   ok(t.includes('Shipping & Delivery'), 'the Shipping & Delivery step is there');
   await page.evaluate(() => {
@@ -184,7 +184,8 @@ const CONTRACT = { name: 'Armadillo Home Warranty', lock: true, prices: PRICES, 
   ok(/contract:\s*result\.contract\s*\|\|\s*undefined/.test(src), 'the order metadata carries the contract line');
   ok(/push\("Pricing",\s*`\$\{result\.contract\.name\} price list/.test(src), 'the Job Ticket names the price list');
   const flat = src.replace(/\s+/g, '');
-  ok(flat.includes('push("Inside",config.insidePaper&&config.insidePaper.label?`${ppsPaperWords("inside",') && flat.includes('returnshown?`${shown}(${label})`:label;'), 'the ticket names the paper as "house wording (real stock)"');
+  ok(flat.includes('push("Inside",config.insidePaper&&config.insidePaper.label?`${ppsPaperWords("inside",') && flat.includes('returnshown||label;'), 'the ticket and cart summary name the paper in the house wording only, never the stock');
+  ok(flat.includes('${coverMode==="same"?ppsPaperWords("inside",cvr.label):ppsPaperWords("cover",cvr.label)}'), 'and so does the copied price table');
   await page.close();
 }
 

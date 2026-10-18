@@ -4001,6 +4001,11 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
             // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
             list( $spec, $addons ) = pps_build_spec( $full, (string) ( $values['pps_summary'] ?? '' ), $prepress, $biz_days );
             $item->add_meta_data( 'PPS-Spec', $spec, true );
+            // A contract that names its papers in the customer's words ("House-provided
+            // cardstock") keeps the stock off everything the customer reads, so production
+            // gets it here — staff-only, like PPS-Spec (owner 2026-10-18).
+            $pp = pps_production_paper_line( $full );
+            if ( $pp !== '' ) $item->add_meta_data( 'Production Paper', $pp, true );
 
             // The add-ons as their own visible line — on the admin notification, the
             // customer's receipt and the order screen — so a coating or a perforation is
@@ -4310,7 +4315,17 @@ function pps_order_addons( $full, $summary ) {
 function pps_internal_item_meta_keys() {
     // 'Print File Check' is a prepress measurement ("BELOW PRINT RESOLUTION … before
     // plating") — it was reaching customers' receipts (audit 2026-09-27).
-    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset', 'PPS-Prepress-Review', 'Print File Check', 'PPS-Data-Error' );
+    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset', 'PPS-Prepress-Review', 'Print File Check', 'PPS-Data-Error', 'Production Paper' );
+}
+
+/** The real stocks of a contract line whose papers are worded for the customer, or ''. */
+function pps_production_paper_line( $meta ) {
+    if ( ! is_array( $meta ) || empty( $meta['contract'] ) ) return '';
+    $label = function ( $p ) { return is_array( $p ) ? trim( (string) ( $p['label'] ?? '' ) ) : trim( (string) $p ); };
+    $in    = $label( $meta['insidePaper'] ?? '' );
+    if ( $in === '' ) return '';
+    $cover = ( $meta['coverMode'] ?? 'same' ) === 'same' ? 'same as inside' : $label( $meta['coverPaper'] ?? '' );
+    return 'Inside: ' . $in . ( $cover !== '' ? ' · Cover: ' . $cover : '' );
 }
 
 // WooCommerce renders both notifications through the same meta accessor, so the filter
