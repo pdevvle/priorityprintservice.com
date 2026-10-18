@@ -82,5 +82,14 @@ if ( preg_match( '/^function pps_production_paper_line\(.*?^\}/ms', $src, $m ) )
 ok( strpos( $src, "'PPS-Data-Error', 'Production Paper' );" ) !== false, 'and "Production Paper" is staff-only: off the receipt, the order-received page and My Account' );
 ok( strpos( $src, "if ( \$pp !== '' ) \$item->add_meta_data( 'Production Paper', \$pp, true );" ) !== false, 'it is written beside PPS-Spec on the order item' );
 
+// simpleArt: no proof step
+ok( pps_contract_parse( array( 'prices' => array( 10 => 1 ), 'simpleArt' => true ) )['simpleArt'] === true, 'simpleArt is kept when set' );
+ok( pps_contract_parse( array( 'prices' => array( 10 => 1 ) ) )['simpleArt'] === false, 'and off when not' );
+ok( json_decode( json_encode( pps_contract_parse( json_encode( array( 'prices' => array( 10 => 1 ), 'simpleArt' => true ) ) ) ), true )['simpleArt'] === true, 'and survives being stored and read back' );
+ok( strpos( $src, "'simpleArt' => ! empty( \$_POST['pps_contract_simple_art'] )," ) !== false && strpos( $src, 'name="pps_contract_simple_art"' ) !== false, 'the admin box has a "No proof step" tick that saves' );
+ok( strpos( $src, "( ! empty( \$full['noProof'] ) ? 'AsSupplied' :" ) !== false, 'PPS-Spec reads AsSupplied, never SelfApproved, for a no-proof contract line' );
+$ia = strpos( $src, "} elseif ( ! empty( \$full['noProof'] ) ) {" ); $ie = strpos( $src, "} elseif ( abs( \$art - 0.04 ) < 0.001 ) {" );
+ok( $ia !== false && $ie !== false && $ia > $ie && strpos( $src, "'Uploaded as supplied — no proof on this contract; print the file as received'" ) !== false, 'the Job Ticket says uploaded as supplied (after email / discussed, which keep their own words)' );
+
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> CONTRACT PRICE (server) OK ($n checks)\n";
 exit( $fail ? 1 : 0 );

@@ -2074,6 +2074,8 @@ function pps_contract_parse( $raw ) {
         'lock'   => ! isset( $raw['lock'] ) || (bool) $raw['lock'],
         'prices' => $prices,
         'show'   => (object) $show,
+        // No online proof: the customer uploads as supplied, emails it, or it was discussed.
+        'simpleArt' => ! empty( $raw['simpleArt'] ),
     );
 }
 
@@ -4057,7 +4059,7 @@ function pps_build_spec( array $full, $summary, $prepress, $biz_days ) {
     // An order that took the prepress escape hatch was never approved by
     // anyone; saying SelfApproved on its ticket would be a lie prepress acts on.
     $proof    = $prepress !== '' ? 'PREPRESS-REVIEW'
-        : ( ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' ) );
+        : ( ! empty( $full['noProof'] ) ? 'AsSupplied' : ( ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' ) ) );
     $rush     = ( $full['rushCost'] ?? 0 ) > 0 ? 'RUSH' : 'Standard';
     $days     = intval( $full['days'] ?? $biz_days );
     $sets_ct  = $is_flat ? 1 : count( $sets );
@@ -4220,6 +4222,9 @@ function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepre
             $put( 'Art status', 'Artwork already discussed with us — confirm which files before printing' );
         } elseif ( abs( $art - 0.04 ) < 0.001 ) {
             $put( 'Art status', 'Canva design — download from the link above; no proof approved' );
+        } elseif ( ! empty( $full['noProof'] ) ) {
+            // A contract with no proof step (simpleArt): nobody approved it, and nobody was asked to.
+            $put( 'Art status', 'Uploaded as supplied — no proof on this contract; print the file as received' );
         } else {
             $put( 'Art status', $proof_hash ? 'Self-approved online (approval bound to the print file)' : 'Self-approved online' );
         }
@@ -5485,6 +5490,11 @@ add_action( 'woocommerce_product_data_panels', function() {
                 <input type="checkbox" id="pps_contract_lock" name="pps_contract_lock" value="1" <?php checked( ! $contract || $contract['lock'] ); ?> />
                 <span class="description">Size, pages, paper, colour and finishing are fixed to the defaults above; the customer chooses quantity, proof and artwork only.</span>
             </p>
+            <p class="form-field">
+                <label for="pps_contract_simple_art">No proof step</label>
+                <input type="checkbox" id="pps_contract_simple_art" name="pps_contract_simple_art" value="1" <?php checked( $contract && ! empty( $contract['simpleArt'] ) ); ?> />
+                <span class="description">Artwork is uploaded as supplied, emailed after ordering, or already discussed — no online proof, no approval, no proof options.</span>
+            </p>
             <input type="hidden" name="pps_contract_form" value="1" />
         </div>
     </div>
@@ -5560,6 +5570,7 @@ add_action( 'woocommerce_process_product_meta', function( $post_id ) {
         $c = pps_contract_parse( array(
             'name'   => sanitize_text_field( wp_unslash( $_POST['pps_contract_name'] ?? '' ) ),
             'lock'   => ! empty( $_POST['pps_contract_lock'] ),
+            'simpleArt' => ! empty( $_POST['pps_contract_simple_art'] ),
             'prices' => pps_contract_lines_to_prices( wp_unslash( $_POST['pps_contract_prices'] ?? '' ) ),
             'show'   => array(
                 'inside' => sanitize_text_field( wp_unslash( $_POST['pps_contract_show_inside'] ?? '' ) ),

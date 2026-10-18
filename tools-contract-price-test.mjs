@@ -248,6 +248,47 @@ const upload = async (page, pages = 12, w, h) => {
   await page.close();
 }
 
+// ── 5. simpleArt: upload as supplied, email, or already discussed — no proof, no approval ──
+const artMenu = page => page.evaluate(() => {
+  const s = [...document.querySelectorAll('select')].find(x => [...x.options].some(o => /Email Art After Order/.test(o.textContent)));
+  return s ? [...s.options].map(o => o.textContent.trim()) : null;
+});
+const hasProofMenu = page => page.evaluate(() => [...document.querySelectorAll('select')].some(x => [...x.options].some(o => /Hardcopy Proof/.test(o.textContent))));
+{
+  const { page } = await open({ defaults: DEFAULTS, contract: CONTRACT });
+  const m = await artMenu(page);
+  ok(m && m.length === 6, 'a contract without simpleArt keeps every artwork option', m);
+  ok(await hasProofMenu(page), 'and the proofing menu');
+  await upload(page, 8);
+  ok(await page.evaluate(() => [...document.querySelectorAll('button')].some(b => /Approve artwork/i.test(b.textContent))) || /required/.test(await text(page)), 'and an upload still asks for approval');
+  await page.close();
+}
+{
+  const { page, errs } = await open({ defaults: { ...DEFAULTS, artwork: 4.01, proof: 3.01 }, contract: { ...CONTRACT, simpleArt: true } });
+  const m = await artMenu(page);
+  ok(JSON.stringify(m) === JSON.stringify(['Upload Art with Order', 'Email Art After Order', 'Artwork already discussed']), 'simpleArt offers exactly upload, email after, already discussed', m);
+  ok(!(await hasProofMenu(page)), 'there is no proofing menu');
+  ok((await total(page)) === 315.23, 'a default asking for design and a hardcopy proof cannot add either: the listed price', await total(page));
+  await page.getByText('Artwork & Proofing', { exact: true }).first().click();
+  await page.waitForTimeout(300);
+  ok(/no proof to approve/i.test(await text(page)), 'the step says the file is printed as supplied');
+  await upload(page, 8);
+  const t = await text(page);
+  ok(/Printed as supplied/.test(t), 'after an upload the customer is told it is printed as supplied');
+  ok(!(await page.evaluate(() => [...document.querySelectorAll('button')].some(b => /Approve artwork|Proof Approved/i.test(b.textContent)))) && !/Open proof to review|approve artwork/i.test(t), 'nothing asks for an approval');
+  ok(await page.evaluate(() => [...document.querySelectorAll('button')].some(b => /View pages/.test(b.textContent))), 'the pages can still be looked at');
+  ok((await total(page)) === 315.23, 'and the price is the listed one', await total(page));
+  ok(errs.length === 0, 'no script errors with simpleArt', errs);
+  await page.close();
+}
+{
+  const flat = html.replace(/\s+/g, '');
+  ok(flat.includes('if(artFiles&&artFiles.type==="files"&&!artFiles.approved&&proof===0&&!_NOPROOF){'), 'Add to Order does not stop an unapproved upload on a simpleArt contract (and still does everywhere else)');
+  ok(flat.includes('push("Proof",_NOPROOF?"None—printassupplied(contract)"'), 'the Job Ticket says no proof, printed as supplied');
+  ok(flat.includes('noProof:_NOPROOF||undefined'), 'and the metadata carries noProof');
+  ok(flat.includes('if(rc.proof!=null&&!_NOPROOF)setProof(rc.proof);'), 'a reorder or cart edit cannot bring a proof back');
+}
+
 await browser.close(); srv.close();
 console.log(fail ? `>>> ${fail} of ${n} checks FAILED` : `>>> CONTRACT PRICE OK (${n} checks)`);
 process.exit(fail ? 1 : 0);
