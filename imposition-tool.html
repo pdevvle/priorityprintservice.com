@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-10 03:00 UTC · IMPOSE-V1.58</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-18 07:00 UTC · IMPOSE-V1.59</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -4623,8 +4623,23 @@ function rowPending(r) {
     && r.art_file_id && !UNSUPPORTED_BOOKLETS.includes(r.calc);
 }
 
+// Which file a row will impose: the operator's pick, else the matched artwork,
+// else the first candidate in the folder (never an output or a preview unless
+// chosen by hand). Owner, 2026-10-18: "I want it to read any file in the
+// directed folder" — the match is a default, not a gate.
+const ROLE_TAG = { "print-ready": "print-ready", pdf: "PDF", raster: "image", preview: "preview", clean: "CLEAN copy", imposed: "imposed output" };
+function rowFiles(r) { return Array.isArray(r.files) ? r.files : []; }
+function rowPick(r, picks) {
+  const files = rowFiles(r);
+  const chosen = picks && picks[r.order_id + ":" + r.item_id];
+  if (chosen) { const f = files.find(x => x.id === chosen); if (f) return f; }
+  if (r.art_file_id) return { id: r.art_file_id, name: r.art_file_name, role: "matched" };
+  return files.find(f => f.role === "print-ready" || f.role === "pdf" || f.role === "raster") || null;
+}
+
 function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
   const STATUSES = (CFG && CFG.orderStatuses) || {};
+  const [picks, setPicks] = useState({});
   if (err) return <div style={{ color: "#f87171", fontSize: 13 }}>Order list failed: {err}</div>;
   if (!rows) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>Loading orders…</div>;
   if (!rows.length) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>No recent orders with Drive artwork found.</div>;
@@ -4635,7 +4650,9 @@ function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
         {rows.map(r => {
           const key = r.order_id + ":" + r.item_id;
           const specOk = r.calc && r.long_edge && r.short_edge;
-          const artOk = !!(r.art_file_id);
+          const files = rowFiles(r);
+          const pick = rowPick(r, picks);
+          const artOk = !!pick;
           const bookish = UNSUPPORTED_BOOKLETS.includes(r.calc);
           const driveErr = !r.files_listed; // Drive listing failed ≠ empty folder
           const orderBusy = rowBusy === String(r.order_id);
@@ -4644,7 +4661,18 @@ function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
               <td><a href={r.folder_url} target="_blank" rel="noreferrer" style={{ color: "#7ab8ff" }}>#{r.order_id}</a></td>
               <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.job_name || r.product || "—"}</td>
               <td style={{ fontSize: 12 }}>{r.calc || "?"} · {r.long_edge}×{r.short_edge}″ · {isBookCalc(r.calc) ? "booklet" : r.sides === 2 ? "2-sided" : "1-sided"} · qty {r.qty}</td>
-              <td style={{ fontSize: 12 }}>{artOk ? r.art_file_name : <span style={{ color: "#f87171" }}>{driveErr ? "Drive list failed" : "none found"}</span>}</td>
+              <td style={{ fontSize: 12, maxWidth: 260 }}>
+                {files.length > 1 || (files.length === 1 && !r.art_file_id) ? (
+                  <select data-file-pick value={pick ? pick.id : ""} title="Any PDF, JPEG or PNG in this order's Drive folder can be imposed for this item. The matched artwork is the default; outputs and previews are listed last."
+                          style={{ fontSize: 12, padding: "3px 4px", maxWidth: 250 }}
+                          onChange={e => setPicks(p => ({ ...p, [key]: e.target.value }))}>
+                    {!files.some(f => f.id === r.art_file_id) && r.art_file_id && <option value={r.art_file_id}>{r.art_file_name} · matched</option>}
+                    {files.map(f => <option key={f.id} value={f.id}>{f.name}{f.id === r.art_file_id ? " · matched" : ROLE_TAG[f.role] ? ` · ${ROLE_TAG[f.role]}` : ""}</option>)}
+                  </select>
+                ) : artOk ? pick.name : <span style={{ color: "#f87171" }}>{driveErr ? "Drive list failed" : "none found"}</span>}
+                {pick && r.art_file_id && pick.id !== r.art_file_id && <div style={{ color: "#fbbf24", fontSize: 11, marginTop: 2 }}>not the matched artwork ({r.art_file_name})</div>}
+                {pick && !r.art_file_id && <div style={{ color: "#fbbf24", fontSize: 11, marginTop: 2 }}>no file matched this item — pick checked by hand</div>}
+              </td>
               <td>{driveErr ? <span className="imp-badge err">DRIVE ERROR</span>
                 : r.imposed ? <span className="imp-badge ok">IMPOSED</span>
                 : bookish ? <span className="imp-badge warn">{r.calc.toUpperCase()} — v2</span>
@@ -4665,7 +4693,7 @@ function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
               </td>
               <td style={{ whiteSpace: "nowrap" }}>{specOk && artOk && !bookish &&
                 <button className="imp-btn sec" style={{ padding: "6px 12px", fontSize: 12 }}
-                  disabled={busyId === key} onClick={() => onLoad(r)}>
+                  disabled={busyId === key} onClick={() => onLoad(r, pick)}>
                   {busyId === key ? "Working…" : r.imposed ? "Re-impose" : "Impose"}
                 </button>}
                 <button className="imp-btn sec" title={r.hidden ? "Put this order back on the queue" : "Park this order — visibility only, nothing about the order changes"}
@@ -5475,33 +5503,42 @@ function App() {
   };
 
   // ── WP queue: load an order row, fetch its artwork, impose ──
-  const loadOrder = async (row) => {
+  const loadOrder = async (row, pick) => {
     const key = row.order_id + ":" + row.item_id;
+    // The file to impose: the operator's pick from the folder, else the match.
+    const fileId = (pick && pick.id) || row.art_file_id;
+    const fileName = (pick && pick.name) || row.art_file_name || "artwork";
+    const offMatch = !!(row.art_file_id && fileId !== row.art_file_id);
     setQueueBusy(key); setError(""); setNotice(""); setUploadState({});
     try {
+      if (!fileId) throw new Error(`Order #${row.order_id} has no imposable file in its Drive folder (PDF, JPEG or PNG).`);
       const s = specFromRow(row);
       setItemRef(s.itemRef); setCalc(s.calc);
       setTrimLong(s.trimLong); setTrimShort(s.trimShort);
       setSides(s.sides); setQty(s.qty);
       setJobName(s.jobName); setOrderRef(s.orderRef);
-      setActiveOrder(row);
-      const r = await ajax("pps_impose_download", { file_id: row.art_file_id });
+      setActiveOrder({ ...row, art_file_id: fileId, art_file_name: fileName });
+      const r = await ajax("pps_impose_download", { file_id: fileId });
       if (!r.ok) throw await ajaxFail(r, "artwork download");
       const bytes = new Uint8Array(await r.arrayBuffer());
       // Approval binding — checked before anything is staged so the operator
       // sees the verdict on the same screen as the artwork. Advisory only: a
-      // mismatch still loads, it just travels flagged.
+      // mismatch still loads, it just travels flagged. Hashed on the bytes as
+      // filed, before any raster wrapping.
       const appr = await approvalState(bytes, row.proof_hash);
-      const doc = await loadPdf(bytes, row.art_file_name || "artwork");
+      // A JPEG/PNG picked from the folder is wrapped exactly as a dropped one.
+      const pdfBytes = await ppsToPdfBytes(bytes, fileName);
+      const doc = await loadPdf(pdfBytes, fileName);
       const pageCount = doc.getPageCount();
       let threats = [];
       try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
-      setArt({ bytes, name: row.art_file_name, pageCount, threats, approval: appr });
+      setArt({ bytes, name: fileName, pageCount, threats, approval: appr });
       setAddBleedPages({});
       setBackArt(null);
-      let note = `Loaded order #${row.order_id} artwork (${row.art_file_name}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
+      let note = `Loaded order #${row.order_id} artwork (${fileName}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
+      if (offMatch) note = `Imposing "${fileName}" from the order folder — NOT the file the queue matched for this item (${row.art_file_name}). ` + note;
       if (appr.state === "verified") note = `✓ Approval hash verified — byte-for-byte the file the customer approved. ` + note;
-      else note = approvalNote(appr, row.art_file_name, row.order_id) + note;
+      else note = approvalNote(appr, fileName, row.order_id) + note;
       try {
         const det = detectTrim(doc, +bleedIn);
         const specL = Math.max(s.trimLong, s.trimShort), specS = Math.min(s.trimLong, s.trimShort);
