@@ -48,6 +48,7 @@ define( 'PPS_MP_CACHE', 'pps_missive_panel_open' );
 
 // The imposition tool, run on the site and shown inside the panel (owner 2026-10-18).
 require_once __DIR__ . '/pps-missive-impose.php';
+require_once __DIR__ . '/pps-missive-ship.php';
 
 /* ─────────────────────────────────────────────────────────────
  * Pure helpers — the test drives these directly
@@ -489,7 +490,8 @@ function pps_mp_answer( array $ids, $conv = '' ) {
         $out['orders'][] = array( 'order' => $id, 'status' => $order->get_status(),
             'admin_url' => admin_url( 'admin.php?page=wc-orders&action=edit&id=' . $id ), 'jobs' => $jobs,
             'conv_ok' => $conv !== '' && (int) ( $map[ $conv ] ?? 0 ) === $id, 'needs' => $needs,
-            'order_task' => $by[ $id ] ?? null, 'drive' => pps_mp_drive_info( $order ) );
+            'order_task' => $by[ $id ] ?? null, 'drive' => pps_mp_drive_info( $order ),
+            'ship' => function_exists( 'pps_ms_summary' ) ? pps_ms_summary( $order ) : null );
     }
     $out['board'] = pps_mp_board_rows( $open, $by, $today, $by_item );
     return $out;
@@ -630,12 +632,13 @@ add_action( 'init', function () {
     header( 'Content-Type: text/html; charset=UTF-8' );
     header( 'Referrer-Policy: no-referrer' );
     echo pps_mp_page_html( $k, rest_url( 'pps/v1/missive/panel' ), rest_url( 'pps/v1/missive/task-state' ), rest_url( 'pps/v1/missive/create-subtasks' ),
-        add_query_arg( array( 'pps_missive_impose' => 1, 'k' => $k ), home_url( '/' ) ) );
+        add_query_arg( array( 'pps_missive_impose' => 1, 'k' => $k ), home_url( '/' ) ),
+        add_query_arg( array( 'pps_missive_ship' => 1, 'k' => $k ), home_url( '/' ) ) );
     exit;
 }, 1 );
 
-function pps_mp_page_html( $key, $api, $state_api = '', $create_api = '', $impose_url = '' ) {
-    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api, 'impose' => $impose_url, 'build' => substr( md5_file( __FILE__ ), 0, 8 ) ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
+function pps_mp_page_html( $key, $api, $state_api = '', $create_api = '', $impose_url = '', $ship_url = '' ) {
+    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api, 'impose' => $impose_url, 'ship' => $ship_url, 'build' => substr( md5_file( __FILE__ ), 0, 8 ) ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     return <<<HTML
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -673,7 +676,7 @@ details.oc>summary{cursor:pointer;font-weight:600;margin:0 0 6px} .ver{margin:14
 var CFG = {$cfg};
 var app = document.getElementById('app');
 var inMissive = typeof window.Missive !== 'undefined' && window.parent !== window;
-var LAST = { ids: [], conv: '' }, DATA = null, IMPOSE = 0;
+var LAST = { ids: [], conv: '' }, DATA = null, IMPOSE = 0, FRAME = 'impose';
 var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', rush: false, subOnly: true };
 try { var sp = JSON.parse(localStorage.getItem('ppsMpPref')||'null'); if (sp) for (var k in sp) PREF[k]=sp[k]; } catch(e){}
 function savePref(){ try { localStorage.setItem('ppsMpPref', JSON.stringify(PREF)); } catch(e){} }
@@ -692,7 +695,12 @@ function find(order){ if(inMissive && Missive.search) Missive.search(String(orde
 /* The site's imposition tool for one order, shown in the panel; "Open wide" opens the same
    page in the browser. It files to that order's Drive folder only (pps-missive-impose.php). */
 function imposeUrl(order){ return CFG.impose ? CFG.impose + (CFG.impose.indexOf('?')<0?'?':'&') + 'order=' + encodeURIComponent(order) : ''; }
-function impose(order){ IMPOSE = order; render(); window.scrollTo(0,0); }
+function impose(order){ FRAME = 'impose'; IMPOSE = order; render(); window.scrollTo(0,0); }
+/* Shipping for one order: rates from every Shippo account, and the label (pps-missive-ship.php).
+   It shows in the same frame; its label and tracking links come back here to open through Missive. */
+function shipUrl(order){ return CFG.ship ? CFG.ship + (CFG.ship.indexOf('?')<0?'?':'&') + 'order=' + encodeURIComponent(order) : ''; }
+function ship(order){ FRAME = 'ship'; IMPOSE = order; render(); window.scrollTo(0,0); }
+window.addEventListener('message', function(e){ if(e.origin===location.origin && e.data && typeof e.data.ppsOpen==='string' && /^https:\/\//.test(e.data.ppsOpen)) open(e.data.ppsOpen); });
 
 /* Order numbers in what the conversation says: "#87347", "Order 87347", "order #87347". */
 function ppsOrderNumbers(text){
@@ -808,6 +816,7 @@ function boardRow(r, here){
   d.appendChild(el('div',{},[ el('span',{cls:late?'late':'',text:md(r.must_ship)}), ' ', el('a',{text:'#'+r.order,on:function(){find(r.order);}}),
     r.drive?el('a',{cls:'small',text:' [Drive]',title:'Open the order\'s Google Drive folder',on:function(){ open(r.drive); }}):null,
     r.drive&&CFG.impose?el('a',{cls:'small',text:' [Impose]',title:'Open the imposition tool for this order',on:function(){ impose(r.order); }}):null,
+    CFG.ship?el('a',{cls:'small',text:' [Ship]',title:'Shipping rates and labels for this order',on:function(){ ship(r.order); }}):null,
     ' '+r.customer+' — '+r.what, r.rush?el('span',{cls:'rush',text:' RUSH'}):null, r.printed?el('span',{cls:'muted',text:' · printed'}):null ]));
   var meta = [];
   r.papers.forEach(function(p){ meta.push(p.label+' '+p.sheet+' ('+p.sheets+')'); });
@@ -900,11 +909,11 @@ function renderBoard(here){
 function render(){
   var d = DATA; app.className=''; app.textContent='';
   if(IMPOSE){
-    var u = imposeUrl(IMPOSE);
-    app.appendChild(el('div',{cls:'impbar'},[ el('button',{cls:'b',text:'← Back to the panel',on:function(){ IMPOSE=0; render(); }}),
-      el('b',{text:'Impose #'+IMPOSE}), el('a',{cls:'small',text:'Open wide ↗',title:'The same page in the browser, full width',on:function(){ open(u); }}) ]));
-    app.appendChild(el('iframe',{cls:'imp',src:u,title:'Imposition — order #'+IMPOSE}));
-    app.appendChild(el('div',{cls:'muted small',text:'Send to Drive files the imposed PDF into this order\'s folder. Nothing else about the order changes.'}));
+    var shipping = FRAME==='ship', u = shipping ? shipUrl(IMPOSE) : imposeUrl(IMPOSE);
+    app.appendChild(el('div',{cls:'impbar'},[ el('button',{cls:'b',text:'← Back to the panel',on:function(){ IMPOSE=0; render(); load(LAST.ids, LAST.conv); }}),
+      el('b',{text:(shipping?'Ship #':'Impose #')+IMPOSE}), el('a',{cls:'small',text:'Open wide ↗',title:'The same page in the browser, full width',on:function(){ open(u); }}) ]));
+    app.appendChild(el('iframe',{cls:'imp',src:u,title:(shipping?'Shipping':'Imposition')+' — order #'+IMPOSE,style:shipping?'background:transparent':''}));
+    app.appendChild(el('div',{cls:'muted small',text:shipping?'Labels are bought only after you confirm the carrier, account and price. The order\'s status is not changed.':'Send to Drive files the imposed PDF into this order\'s folder. Nothing else about the order changes.'}));
     return;
   }
   if(!inMissive){ var i=el('input',{placeholder:'Order #'}); var b=el('button',{text:'Look up',on:function(){ load(ppsOrderNumbers('#'+i.value), ''); }});
@@ -918,6 +927,13 @@ function render(){
     oc.addEventListener('toggle',function(){ PREF.cardOpen = oc.open; savePref(); });
     oc.appendChild(el('summary',{},['Order #'+o.order+' · '+o.status+' · '+o.jobs.length+' job'+(o.jobs.length===1?'':'s')]));
     oc.appendChild(el('div',{style:'margin:0 0 6px'},[ el('a',{text:'Open in WooCommerce',on:function(){open(o.admin_url);}}) ]));
+    if(CFG.ship){
+      var sh = o.ship || { labels: 0 }, sb = el('div',{cls:'card small',style:'display:flex;justify-content:space-between;align-items:center;gap:6px'});
+      sb.appendChild(el('div',{},[ el('b',{text:'Shipping'}), sh.labels ? el('span',{},[' · '+sh.labels+' label'+(sh.labels===1?'':'s')+' bought · '+sh.last+' ',
+        sh.track_url?el('a',{text:sh.tracking,on:function(){ open(sh.track_url); }}):sh.tracking ]) : el('span',{cls:'muted',text:' · no label bought from the panel yet'}) ]));
+      sb.appendChild(el('button',{cls:'b',text:sh.labels?'Ship again':'Ship',title:'Rates from every carrier, and the label',on:function(){ ship(o.order); }}));
+      oc.appendChild(sb);
+    }
     var holder = app; app = oc;
     if(d.missive.connected && d.missive.can_create && o.needs > 0){
       var box = el('div',{cls:'card small'});
