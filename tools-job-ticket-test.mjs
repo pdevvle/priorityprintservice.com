@@ -153,6 +153,11 @@ const CALCS = {
     ok('saddle: custom size named, sets, staples from the auto rule, self-cover says so — never the cover stock', get(t, 'Size') === 'Custom 4×4"' && get(t, 'Sets') === '500 × 12 pages "Fall Program"' && get(t, 'Binding') === 'Saddle stitch · two staples' && get(t, 'Inside') === '100lb Gloss Text · Full Color' && get(t, 'Cover') === 'Self-cover (same stock as inside)' && get(t, 'Job name') === 'Fall Program', JSON.stringify(t));
     const bd = build({ sizeLabel: 'Custom Size', customShort: 5.5, customLong: 8.5, bindDir: 'short', sets: [{ qty: 100, pages: 8 }], insidePaper: { label: 'X' }, insideColor: 'color', coverMode: 'same', coating: 0, bundling: 0, roundCorner: 0, artwork: 0.01, bleed: 0, proof: 0 }, {});
     ok('saddle: a custom book names its binding edge', get(bd, 'Size') === 'Custom 5.5×8.5" · bound on the short edge', get(bd, 'Size'));
+    if (build.contract) {
+      const K = { name: 'Armadillo Home Warranty', lock: true, simpleArt: true, show: { inside: 'House-provided text weight paper', cover: 'House-provided cardstock' } };
+      const ar = build.contract(K)({ sizeLabel: 'Custom Size', customShort: 6.125, customLong: 9.25, bindDir: 'long', sets: [{ qty: 500, pages: 8 }], insidePaper: { label: '80lb Matte Text' }, insideColor: 'color', coverMode: 'separate', coverPaper: { label: '80lb Matte Cardstock' }, coverColor: 'color', coating: 0, bundling: 0, roundCorner: 0, artwork: 0.01, bleed: 0, proof: 0 }, { contract: { name: K.name, qty: 500, price: 315.23 } });
+      ok('saddle contract: house paper wording, no stock name, price list named, no proof', get(ar, 'Inside') === 'House-provided text weight paper · Full Color' && get(ar, 'Cover') === 'House-provided cardstock · Full Color' && !/80lb|Matte/.test(JSON.stringify(ar)) && /^Armadillo Home Warranty price list/.test(get(ar, 'Pricing') || '') && get(ar, 'Proof') === 'None — print as supplied (contract)', JSON.stringify(ar));
+    }
   } },
   'calc-perfect-bound.html': { tables: ['COATINGS', 'BUNDLING', 'CORNERS', 'OUTFOLD_OPTS', 'PERF_OPTS', 'ART_OPTS', 'BLEED_OPTS'], run(build) {
     const t = build({ sizeLabel: '6×9', sets: [{ qty: 200, pages: 120 }], insidePaper: { label: '60lb Offset' }, insideColor: 'bw', coverMode: 'cover', coverPaper: { label: '12pt C1S' }, coverColor: 'color', coating: 750, bundling: 0, roundCorner: 0, outfold: 1000, perforation: 0, vividPrint: false, artwork: 0.01, bleed: 0, proof: 3.01, proofAddrSame: true }, {});
@@ -179,9 +184,11 @@ for (const [f, spec] of Object.entries(CALCS)) {
   const tables = spec.tables.map(n => constSrc(src, n));
   if (tables.some(t => !t)) { ok(`${short}: option tables extractable`, false, spec.tables.filter((n, i) => !tables[i]).join(',')); continue; }
   // The address-check lines (2026-10-04) are appended by buildTicket from these two.
-  const addrParts = [fnSrc(src, 'ppsAddrLine'), fnSrc(src, 'ppsAddrTicketLines')].filter(Boolean);
+  // ppsPaperWords + _CONTRACT/_NOPROOF: the saddle's contract price list (2026-10-18).
+  const addrParts = [fnSrc(src, 'ppsAddrLine'), fnSrc(src, 'ppsAddrTicketLines'), fnSrc(src, 'ppsPaperWords')].filter(Boolean);
+  const make = (contract = null) => new Function('_CFG', '_CONTRACT', '_NOPROOF', tables.join('\n') + '\n' + addrParts.concat(parts).join('\n') + '\nreturn buildTicket;')({}, contract, !!(contract && contract.simpleArt));
   let build;
-  try { build = new Function('_CFG', tables.join('\n') + '\n' + addrParts.concat(parts).join('\n') + '\nreturn buildTicket;')({}); }
+  try { build = make(); if (fnSrc(src, 'ppsPaperWords')) build.contract = make; }
   catch (e) { ok(`${short}: buildTicket evaluates`, false, String(e.message)); continue; }
   try { spec.run(build); } catch (e) { ok(`${short}: sample configs run`, false, String(e.stack || e).slice(0, 300)); }
 }
