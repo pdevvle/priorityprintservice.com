@@ -25,6 +25,22 @@ function set_transient( $k, $v ) { $GLOBALS['tr'][ $k ] = $v; return true; }
 function wp_next_scheduled() { return true; }
 function admin_url( $p = '' ) { return 'https://x/wp-admin/' . $p; }
 function wp_json_encode( $v, $f = 0 ) { return json_encode( $v, $f ); }
+function delete_transient( $k ) { unset( $GLOBALS['tr'][ $k ] ); return true; }
+class WP_Error { public $c; public $m; function __construct( $c = '', $m = '' ) { $this->c = $c; $this->m = $m; } function get_error_message() { return $this->m; } }
+function is_wp_error( $x ) { return $x instanceof WP_Error; }
+$GLOBALS['http'] = array();
+function wp_remote_request( $url, $args ) {
+    $GLOBALS['http'][] = array( 'url' => $url, 'args' => $args );
+    $path = parse_url( $url, PHP_URL_PATH ); parse_str( (string) parse_url( $url, PHP_URL_QUERY ), $q );
+    if ( ( $args['headers']['Authorization'] ?? '' ) !== 'Bearer missive_pat-TEST' ) return array( 'code' => 401, 'body' => '{}' );
+    if ( $path === '/v1/organizations' ) return array( 'code' => 200, 'body' => json_encode( array( 'organizations' => array( array( 'id' => 'org-1' ) ) ) ) );
+    if ( $path === '/v1/tasks' && $args['method'] === 'GET' ) { $t = array_values( array_filter( $GLOBALS['mtasks'], function ( $t ) use ( $q ) { return $t['state'] === $q['state']; } ) ); return array( 'code' => 200, 'body' => json_encode( array( 'tasks' => $t ) ) ); }
+    if ( strpos( $path, '/v1/conversations/' ) === 0 ) { $id = substr( $path, 18 ); return array( 'code' => 200, 'body' => json_encode( array( 'conversations' => array( array( 'id' => $id, 'subject' => $GLOBALS['msubjects'][ $id ] ?? 'Question about paper' ) ) ) ) ); }
+    if ( strpos( $path, '/v1/tasks/' ) === 0 && $args['method'] === 'PATCH' ) return array( 'code' => 200, 'body' => '{"tasks":{}}' );
+    return array( 'code' => 404, 'body' => '{}' );
+}
+function wp_remote_retrieve_response_code( $r ) { return $r['code']; }
+function wp_remote_retrieve_body( $r ) { return $r['body']; }
 function pps_get_config() { return array( 'papers_nc' => array( array( 'val' => 0.01, 'label' => '100lb Gloss Text' ), array( 'val' => 0.005, 'label' => '80lb Matte Text' ) ), 'papers_cs' => array() ); }
 function wc_get_orders( $a ) { $GLOBALS['asked'] = $a; return $GLOBALS['orders']; }
 function wc_get_order( $id ) { foreach ( $GLOBALS['orders'] as $o ) if ( $o->get_id() === $id ) return $o; return $GLOBALS['extra'][ $id ] ?? false; }
@@ -86,7 +102,10 @@ $ans = pps_mp_answer( array( 87501, 99999 ) );
 ok( count( $ans['orders'] ) === 1 && $ans['orders'][0]['jobs'][0]['batch']['mates'][0]['order'] === 87502, 'the endpoint answers for the order in view, with its batch', $ans['orders'] );
 ok( $ans['missing'] === array( 99999 ), 'a number that is not an order is said, not guessed' );
 $board = pps_mp_answer( array() )['board'];
-ok( count( $board ) === 6 && $board[0]['must_ship'] === '2026-10-22' && end( $board )['must_ship'] === '2026-11-12', 'no order in view → every open job by ship date', array_column( $board, 'must_ship' ) );
+ok( count( $board ) === 6 && count( $ans['board'] ) === 6, 'the board is always there, with an order in view or not', count( $board ) );
+$r1 = $board[0];
+ok( $r1['paper'] === '100lb Gloss Text' && $r1['sheet'] === '13×19' && $r1['sheets'] === 500 && $r1['finishing'] === array( 'Coating', 'Fold' ) && $r1['delivery'] === '2026-10-22', 'a board row carries the sortable attributes: paper, sheet, sheets, finishing, dates', $r1 );
+ok( $r1['task'] === null && $ans['missive']['connected'] === false, 'with no token, no tasks and no Missive call', $GLOBALS['http'] );
 $GLOBALS['extra'][ 87000 ] = new O( 87000, 'Old', array( 9 => new I( 'Flyer', flat( $gloss, 100, 2, '2026-09-01', '2026-09-04' ) ) ), 'completed' );
 ok( pps_mp_answer( array( 87000 ) )['orders'][0]['status'] === 'completed', 'a completed order still shows (for reference)' );
 
@@ -95,6 +114,46 @@ ok( pps_mp_key_ok( 'anything' ) === false, 'with no key made, nothing gets in' )
 $k = pps_mp_key( true );
 ok( strlen( $k ) === 40 && pps_mp_key_ok( $k ) && ! pps_mp_key_ok( '' ) && ! pps_mp_key_ok( substr( $k, 0, 39 ) . 'x' ), 'only the exact key gets in' );
 ok( pps_mp_key( true ) === $k, 'the key is made once' );
+
+// ── Missive subtasks ──
+$GLOBALS['mtasks'] = array(
+    array( 'id' => 't1', 'title' => 'Print job', 'state' => 'todo', 'due_at' => strtotime( '2026-10-22 17:00 America/Phoenix' ), 'conversation' => 'c-501', 'last_activity_at' => 5 ),
+    array( 'id' => 't2', 'title' => 'Run #87502', 'state' => 'in_progress', 'due_at' => strtotime( '2026-10-20 17:00 America/Phoenix' ), 'started_at' => strtotime( '2026-10-17 09:00 America/Phoenix' ), 'conversation' => 'c-x', 'last_activity_at' => 4 ),
+    array( 'id' => 't3', 'title' => 'Proof call', 'state' => 'todo', 'due_at' => 0, 'conversation' => 'c-q', 'last_activity_at' => 3 ),
+    array( 'id' => 't4', 'title' => 'Standalone', 'state' => 'todo', 'due_at' => 0, 'conversation' => null, 'last_activity_at' => 2 ),
+    array( 'id' => 't5', 'title' => 'Old', 'state' => 'closed', 'due_at' => 0, 'conversation' => 'c-503', 'last_activity_at' => 1 ),
+);
+$GLOBALS['msubjects'] = array( 'c-503' => '[Priority Print Service]: New order #87503' );
+list( $pby, $pun ) = pps_mp_pair_tasks( $GLOBALS['mtasks'], array( 'c-501' => 87501 ) );
+ok( array_keys( $pby ) === array( 87501, 87502 ) && $pby[87501]['due'] === '2026-10-22' && $pby[87502]['started'] === '2026-10-17', 'subtasks pair by their conversation, or by an order number in their title; a standalone task is ignored', $pby );
+ok( count( $pun ) === 2, 'a subtask whose conversation names no order is left unpaired, not guessed', $pun );
+$GLOBALS['tr'] = array(); $GLOBALS['opts'][ PPS_MP_TOKEN_OPTION ] = 'missive_pat-TEST';
+$withconv = pps_mp_answer( array( 87501 ), 'c-501' );
+ok( ( $GLOBALS['opts'][ PPS_MP_CONV_OPTION ]['c-501'] ?? null ) === 87501, 'what the panel saw (this conversation holds this order) is remembered' );
+ok( ( $GLOBALS['opts'][ PPS_MP_CONV_OPTION ]['c-503'] ?? null ) === 87503 && ( $GLOBALS['opts'][ PPS_MP_CONV_OPTION ]['c-q'] ?? null ) === 0, 'other subtasks pair from their conversation subject, and a subject with no order is remembered as none', $GLOBALS['opts'][ PPS_MP_CONV_OPTION ] );
+$auth = array_unique( array_map( function ( $h ) { return $h['args']['headers']['Authorization']; }, $GLOBALS['http'] ) );
+ok( $auth === array( 'Bearer missive_pat-TEST' ) && strpos( $GLOBALS['http'][0]['url'], 'https://public.missiveapp.com/v1/' ) === 0, 'the token goes only in the Authorization header, to Missive', $auth );
+ok( $withconv['missive']['connected'] && $withconv['orders'][0]['jobs'][0]['task']['id'] === 't1', 'the order in view shows its subtask' );
+$rows = array(); foreach ( $withconv['board'] as $r ) $rows[ $r['order'] ] = $r;
+ok( $rows[87502]['task']['state'] === 'in_progress' && $rows[87502]['due_mismatch'] === true && $rows[87501]['due_mismatch'] === false, 'a subtask due on a different day from the must-ship date is flagged; a matching one is not', $rows[87502] );
+ok( $rows[87503]['task']['state'] === 'closed', 'a done subtask shows as done' );
+ok( strpos( pps_mp_page_html( 'K', 'a', 'b' ), 'missive_pat' ) === false, 'the token never reaches the page' );
+// state changes
+$GLOBALS['http'] = array();
+$r = pps_mp_set_state( 't1', 'in_progress' );
+ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'switched off' ) !== false && ! $GLOBALS['http'], 'changing a subtask is refused while the setting is off, without calling Missive', $r );
+$GLOBALS['opts'][ PPS_MP_ALLOW_OPTION ] = 1;
+$r = pps_mp_set_state( 't3', 'closed' );
+ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'not paired' ) !== false, 'an unpaired subtask is never changed', $r );
+ok( is_wp_error( pps_mp_set_state( 't1', 'deleted' ) ), 'only to do / in progress / done are accepted' );
+$GLOBALS['http'] = array();
+$r = pps_mp_set_state( 't1', 'in_progress' );
+$last = end( $GLOBALS['http'] );
+ok( $r === true && $last['args']['method'] === 'PATCH' && strpos( $last['url'], '/v1/tasks/t1' ) !== false && $last['args']['body'] === '{"tasks":{"state":"in_progress"}}', 'allowed: a paired subtask gets exactly its state changed, nothing else', $last );
+ok( ! isset( $GLOBALS['tr'][ PPS_MP_TASKS_CACHE ] ), 'the task cache is dropped after a change so the board shows it' );
+$GLOBALS['opts'][ PPS_MP_TOKEN_OPTION ] = 'wrong';  $GLOBALS['tr'] = array(); unset( $GLOBALS['opts'][ PPS_MP_ORG_OPTION ] );
+$bad = pps_mp_answer( array() );
+ok( $bad['missive']['connected'] === false && strpos( $bad['missive']['error'], 'refused' ) !== false && count( $bad['board'] ) === 6, 'a refused token is said on the panel and the board still shows', $bad['missive'] );
 
 // ── read-only, by construction ──
 $src = file_get_contents( __DIR__ . '/pps-missive-panel.php' );
@@ -105,7 +164,8 @@ foreach ( array( 'createTask', 'addLabels', 'removeLabels', 'assign(', 'addAssig
 foreach ( array( 'update_status', '->save(', 'wc_update_order_item_meta', 'update_meta_data', 'add_order_note', 'wp_mail' ) as $w ) {
     ok( strpos( $code, $w ) === false, "the server never calls $w" );
 }
-ok( strpos( $src, "'methods' => 'GET'" ) !== false && strpos( $src, 'pps_mp_key_ok( (string) $req->get_header' ) !== false, 'the endpoint is GET-only and needs the key header' );
+ok( substr_count( $code, "pps_mp_api( 'PATCH'" ) === 1 && substr_count( $code, "'methods' => 'POST'" ) === 1 && strpos( $code, "pps_mp_api( 'POST'" ) === false && strpos( $code, "pps_mp_api( 'DELETE'" ) === false, 'the only Missive write is the one PATCH of a task state' );
+ok( strpos( $src, "'methods' => 'GET', 'permission_callback' => \$key_ok" ) !== false && strpos( $src, "'methods' => 'POST', 'permission_callback' => \$key_ok" ) !== false && strpos( $src, 'pps_mp_key_ok( (string) $req->get_header' ) !== false, 'both endpoints need the key header' );
 $html = pps_mp_page_html( 'KEY123', 'https://x/wp-json/pps/v1/missive/panel' );
 ok( strpos( $html, '"key":"KEY123"' ) !== false && strpos( $html, 'textContent' ) !== false && strpos( $html, 'innerHTML' ) === false, 'the page carries its key and writes text, never HTML' );
 ok( substr_count( strtolower( $html ), '</script>' ) === 2, 'no stray script close inside the page script' );

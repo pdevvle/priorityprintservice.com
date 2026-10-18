@@ -17,10 +17,17 @@
  * - The data (`GET /wp-json/pps/v1/missive/panel`) answers only with the panel key, sent
  *   in the `X-PPS-Panel-Key` header.
  *
- * NOTHING HERE WRITES. The page calls only Missive's read and navigation methods
- * (on, fetchConversations, search, openURL) — never createTask, addLabels, assign, comment
- * or any other method that changes Missive — and the endpoint never changes an order.
- * tools-missive-panel-test.php checks both.
+ * The page calls only Missive's read and navigation methods (on, fetchConversations,
+ * search, openURL) — never createTask, addLabels, assign, comment or any other method that
+ * changes Missive — and nothing here ever changes an order. The one write is a paired
+ * subtask's STATE, made by the site through the owner's API token, only when the owner has
+ * switched it on (see "Missive subtasks" below). tools-missive-panel-test.php checks all of it.
+ *
+ * Since 2026-10-18 (owner: "Base it on subtasks. The panel should show the board with
+ * sortable job attributes") the board is always shown — sortable by must-ship, start,
+ * delivery, paper, press sheet, sheets, quantity, task state, task due date, date mismatch,
+ * order or customer; groupable by paper + sheet, sheet, task state, finishing, ship date or
+ * rush; filterable by text — with the open conversation's order in full above it.
  *
  * The key lives in `wp_options['pps_missive_panel_key']` (autoload off) and is made on the
  * first visit to PPS Calculators → Missive Panel, which shows the URL to paste into
@@ -216,48 +223,251 @@ function pps_mp_open_jobs() {
     return $jobs;
 }
 
-/** The endpoint's answer. `$ids` are order numbers found in the conversation. */
-function pps_mp_answer( array $ids ) {
+/* ─────────────────────────────────────────────────────────────
+ * Missive subtasks (owner 2026-10-17: "Base it on subtasks")
+ *
+ * Each job's Missive task is a SUBTASK inside the order's conversation. The site reads the
+ * organization's open subtasks with the owner's API token (`pps_missive_api_token`,
+ * autoload off, never sent to a browser) and pairs each with its order through the
+ * conversation it sits in. Conversation → order comes from, in order: what the panel saw
+ * (it knows the open conversation's id and the order number in it), an order number in the
+ * task's own title, and — at most 8 per refresh — the conversation's subject from the API.
+ * Pairs are kept in `pps_missive_conv_orders` (a conversation with no order number is
+ * remembered as 0 so it is not looked up again).
+ *
+ * Changing a subtask's state (Start / Done / Reopen) happens only when PPS Calculators →
+ * Missive Panel → "Let the panel change subtask state" is ticked
+ * (`pps_missive_allow_state`, off by default), only for a subtask the site has paired with
+ * an order, and only its `state` — never its title, due date, assignees or anything else.
+ * ───────────────────────────────────────────────────────────── */
+
+define( 'PPS_MP_TOKEN_OPTION', 'pps_missive_api_token' );
+define( 'PPS_MP_ORG_OPTION', 'pps_missive_org' );
+define( 'PPS_MP_CONV_OPTION', 'pps_missive_conv_orders' );
+define( 'PPS_MP_ALLOW_OPTION', 'pps_missive_allow_state' );
+define( 'PPS_MP_TASKS_CACHE', 'pps_missive_tasks' );
+define( 'PPS_MP_API', 'https://public.missiveapp.com/v1/' );
+
+/** The first order number in a piece of text ("#87347", "Order 87347"), or 0. */
+function pps_mp_order_in( $text ) {
+    return preg_match( '/(?:order\s*#?\s*|#\s?)(\d{5,6})\b/i', (string) $text, $m ) ? (int) $m[1] : 0;
+}
+
+/** A unix timestamp as a shop-day Y-m-d, or ''. */
+function pps_mp_unix_ymd( $ts ) {
+    $ts = (int) $ts;
+    if ( $ts <= 0 ) return '';
+    $tz = function_exists( 'pps_shop_timezone' ) ? pps_shop_timezone() : 'America/Phoenix';
+    try { return ( new DateTimeImmutable( '@' . $ts ) )->setTimezone( new DateTimeZone( $tz ) )->format( 'Y-m-d' ); }
+    catch ( \Throwable $e ) { return gmdate( 'Y-m-d', $ts ); }
+}
+
+/**
+ * Pair subtasks with orders. `$tasks` are Missive task objects; `$conv` maps conversation id →
+ * order (0 = known to have none). A task whose title names an order wins over its
+ * conversation. Where an order has several, the open one due soonest is kept.
+ * Returns order → compact task, and the unpaired subtasks.
+ */
+function pps_mp_pair_tasks( array $tasks, array $conv ) {
+    $by = array(); $unpaired = array();
+    $rank = array( 'in_progress' => 0, 'todo' => 1, 'closed' => 2 );
+    foreach ( $tasks as $t ) {
+        if ( ! is_array( $t ) || empty( $t['id'] ) || empty( $t['conversation'] ) ) continue;   // subtasks only
+        $cid   = is_array( $t['conversation'] ) ? (string) ( $t['conversation']['id'] ?? '' ) : (string) $t['conversation'];
+        $order = pps_mp_order_in( $t['title'] ?? '' ) ?: (int) ( $conv[ $cid ] ?? 0 );
+        $row = array( 'id' => (string) $t['id'], 'title' => (string) ( $t['title'] ?? '' ), 'state' => (string) ( $t['state'] ?? 'todo' ),
+                      'due' => pps_mp_unix_ymd( $t['due_at'] ?? 0 ), 'started' => pps_mp_unix_ymd( $t['started_at'] ?? 0 ), 'conversation' => $cid );
+        if ( ! $order ) { $unpaired[] = $row; continue; }
+        $cur = $by[ $order ] ?? null;
+        $better = ! $cur
+            || ( $rank[ $row['state'] ] ?? 1 ) < ( $rank[ $cur['state'] ] ?? 1 )
+            || ( ( $rank[ $row['state'] ] ?? 1 ) === ( $rank[ $cur['state'] ] ?? 1 ) && $row['due'] !== '' && ( $cur['due'] === '' || $row['due'] < $cur['due'] ) );
+        if ( $better ) $by[ $order ] = $row;
+    }
+    return array( $by, $unpaired );
+}
+
+/** One board row per open job, with its subtask and whether the task's due date agrees. */
+function pps_mp_board_rows( array $open, array $tasks_by_order, $today ) {
+    $rows = array();
+    foreach ( $open as $j ) {
+        list( $f, $t ) = pps_mp_window( $j, $today );
+        $task = $tasks_by_order[ $j['order'] ] ?? null;
+        $fin = array();
+        foreach ( preg_split( '/;\s*/', (string) $j['addons'] ) as $a ) {
+            $a = trim( $a );
+            if ( $a !== '' ) $fin[] = trim( strpos( $a, ':' ) !== false ? substr( $a, 0, strpos( $a, ':' ) ) : $a );
+        }
+        $p0 = $j['papers'][0] ?? null;
+        $rows[] = array(
+            'order' => $j['order'], 'item' => $j['item'], 'customer' => $j['customer'], 'what' => $j['job'] !== '' ? $j['job'] : $j['product'],
+            'qty' => $j['qty'], 'size' => $j['size'], 'start' => $f, 'must_ship' => $t, 'delivery' => $j['delivery'],
+            'rush' => $j['rush'], 'printed' => $j['printed'], 'source' => $j['source'], 'finishing' => array_values( array_unique( $fin ) ),
+            'paper' => $p0 ? $p0['label'] : '', 'sheet' => $p0 ? $p0['sheet'] : '', 'paper_key' => $p0 ? $p0['key'] : '',
+            'sheets' => array_sum( array_column( $j['papers'], 'sheets' ) ),
+            'papers' => array_map( function ( $p ) { return array( 'label' => $p['label'], 'sheet' => $p['sheet'], 'sheets' => $p['sheets'], 'role' => $p['role'], 'key' => $p['key'] ); }, $j['papers'] ),
+            'task' => $task,
+            'due_mismatch' => $task && $task['due'] !== '' && $t !== '' && $task['due'] !== $t,
+        );
+    }
+    return $rows;
+}
+
+function pps_mp_token() { return trim( (string) get_option( PPS_MP_TOKEN_OPTION, '' ) ); }
+
+/** One call to Missive's API. Returns the decoded body or a WP_Error. Never logs the token. */
+function pps_mp_api( $method, $path, array $query = array(), $body = null ) {
+    $token = pps_mp_token();
+    if ( $token === '' ) return new WP_Error( 'no_token', 'No Missive API token saved.' );
+    $url  = PPS_MP_API . ltrim( $path, '/' ) . ( $query ? '?' . http_build_query( $query ) : '' );
+    $args = array( 'method' => $method, 'timeout' => 8, 'headers' => array( 'Authorization' => 'Bearer ' . $token, 'Accept' => 'application/json' ) );
+    if ( $body !== null ) { $args['headers']['Content-Type'] = 'application/json'; $args['body'] = wp_json_encode( $body ); }
+    $r = wp_remote_request( $url, $args );
+    if ( is_wp_error( $r ) ) return $r;
+    $code = (int) wp_remote_retrieve_response_code( $r );
+    $data = json_decode( (string) wp_remote_retrieve_body( $r ), true );
+    if ( $code < 200 || $code >= 300 ) return new WP_Error( 'missive_' . $code, 'Missive answered ' . $code . ( $code === 401 ? ' (the token was refused)' : '' ) . '.' );
+    return is_array( $data ) ? $data : array();
+}
+
+/** The organization the token belongs to (first one), remembered. */
+function pps_mp_org() {
+    $org = (string) get_option( PPS_MP_ORG_OPTION, '' );
+    if ( $org !== '' ) return $org;
+    $d = pps_mp_api( 'GET', 'organizations' );
+    if ( is_wp_error( $d ) ) return $d;
+    $org = (string) ( $d['organizations'][0]['id'] ?? '' );
+    if ( $org === '' ) return new WP_Error( 'no_org', 'The token sees no Missive organization.' );
+    update_option( PPS_MP_ORG_OPTION, $org, false );
+    return $org;
+}
+
+/** Open subtasks (to do, in progress) plus recently closed ones, cached two minutes. */
+function pps_mp_tasks( $fresh = false ) {
+    if ( ! $fresh ) { $c = get_transient( PPS_MP_TASKS_CACHE ); if ( is_array( $c ) ) return $c; }
+    $org = pps_mp_org();
+    if ( is_wp_error( $org ) ) return $org;
+    $all = array();
+    foreach ( array( 'in_progress' => 4, 'todo' => 4, 'closed' => 1 ) as $state => $pages ) {
+        $until = null;
+        for ( $p = 0; $p < $pages; $p++ ) {
+            $q = array( 'organization' => $org, 'type' => 'task', 'state' => $state, 'limit' => 50 );
+            if ( $until ) $q['until'] = $until;
+            $d = pps_mp_api( 'GET', 'tasks', $q );
+            if ( is_wp_error( $d ) ) return $d;
+            $batch = is_array( $d['tasks'] ?? null ) ? $d['tasks'] : array();
+            foreach ( $batch as $t ) $all[] = $t;
+            if ( count( $batch ) < 50 ) break;
+            $last  = end( $batch );
+            $until = (int) ( $last['last_activity_at'] ?? 0 ) - 1;
+            if ( $until <= 0 ) break;
+        }
+    }
+    set_transient( PPS_MP_TASKS_CACHE, $all, 2 * 60 );
+    return $all;
+}
+
+/** Fill conversation → order for subtasks not yet known, from the API (at most `$max`). */
+function pps_mp_learn_from_api( array $tasks, array $conv, $max = 8 ) {
+    $asked = 0; $changed = false;
+    foreach ( $tasks as $t ) {
+        if ( $asked >= $max ) break;
+        $cid = is_array( $t['conversation'] ?? null ) ? (string) ( $t['conversation']['id'] ?? '' ) : (string) ( $t['conversation'] ?? '' );
+        if ( $cid === '' || array_key_exists( $cid, $conv ) || pps_mp_order_in( $t['title'] ?? '' ) ) continue;
+        $asked++;
+        $d = pps_mp_api( 'GET', 'conversations/' . rawurlencode( $cid ) );
+        if ( is_wp_error( $d ) ) break;
+        $c = $d['conversations'][0] ?? array();
+        $conv[ $cid ] = pps_mp_order_in( ( $c['subject'] ?? '' ) . ' ' . ( $c['latest_message_subject'] ?? '' ) );
+        $changed = true;
+    }
+    if ( $changed ) pps_mp_save_conv( $conv );
+    return $conv;
+}
+
+function pps_mp_conv_map() { $m = get_option( PPS_MP_CONV_OPTION, array() ); return is_array( $m ) ? $m : array(); }
+function pps_mp_save_conv( array $m ) {
+    if ( count( $m ) > 3000 ) $m = array_slice( $m, -3000, null, true );
+    update_option( PPS_MP_CONV_OPTION, $m, false );
+}
+
+/** The endpoint's answer. `$ids`: order numbers in the open conversation; `$conv`: its id. */
+function pps_mp_answer( array $ids, $conv = '' ) {
     $today = pps_mp_today();
     $open  = pps_mp_open_jobs();
-    $out   = array( 'today' => $today, 'orders' => array(), 'missing' => array(), 'board' => array() );
-    foreach ( array_slice( array_unique( array_map( 'intval', $ids ) ), 0, 5 ) as $id ) {
-        if ( $id <= 0 ) continue;
+    $ids   = array_values( array_filter( array_slice( array_unique( array_map( 'intval', $ids ) ), 0, 5 ) ) );
+    $out   = array( 'today' => $today, 'orders' => array(), 'missing' => array(), 'board' => array(),
+                    'missive' => array( 'connected' => false, 'error' => '', 'can_change' => (bool) get_option( PPS_MP_ALLOW_OPTION, false ), 'unpaired' => 0 ) );
+
+    // What the panel saw: this conversation holds this order.
+    $map = pps_mp_conv_map();
+    $conv = preg_replace( '/[^A-Za-z0-9_-]/', '', (string) $conv );
+    if ( $conv !== '' && count( $ids ) === 1 && ( $map[ $conv ] ?? null ) !== $ids[0] ) { $map[ $conv ] = $ids[0]; pps_mp_save_conv( $map ); }
+
+    $by = array();
+    if ( pps_mp_token() !== '' ) {
+        $tasks = pps_mp_tasks();
+        if ( is_wp_error( $tasks ) ) {
+            $out['missive']['error'] = $tasks->get_error_message();
+        } else {
+            $map = pps_mp_learn_from_api( $tasks, $map );
+            list( $by, $unpaired ) = pps_mp_pair_tasks( $tasks, $map );
+            $out['missive']['connected'] = true;
+            $out['missive']['unpaired'] = count( $unpaired );
+        }
+    }
+
+    foreach ( $ids as $id ) {
         $order = function_exists( 'wc_get_order' ) ? wc_get_order( $id ) : null;
         if ( ! $order || ! is_object( $order ) || ! method_exists( $order, 'get_items' ) ) { $out['missing'][] = $id; continue; }
         $jobs = pps_mp_jobs( array( $order ), pps_mp_paper_index( array( $order ) ) );
         foreach ( $jobs as &$j ) {
-            $j['window'] = pps_mp_window( $j, $today );
-            $j['batch']  = pps_mp_batch( $j, $open, $today );
+            $j['window']  = pps_mp_window( $j, $today );
+            $j['batch']   = pps_mp_batch( $j, $open, $today );
             $j['preview'] = pps_mp_preview( $j );
+            $j['task']    = $by[ $id ] ?? null;
         }
         unset( $j );
         $out['orders'][] = array( 'order' => $id, 'status' => $order->get_status(),
             'admin_url' => admin_url( 'admin.php?page=wc-orders&action=edit&id=' . $id ), 'jobs' => $jobs );
     }
-    if ( ! $out['orders'] ) {
-        foreach ( $open as $j ) {
-            list( $f, $t ) = pps_mp_window( $j, $today );
-            $out['board'][] = array( 'order' => $j['order'], 'customer' => $j['customer'], 'what' => $j['job'] !== '' ? $j['job'] : $j['product'],
-                'qty' => $j['qty'], 'size' => $j['size'], 'start' => $f, 'must_ship' => $t, 'rush' => $j['rush'], 'printed' => $j['printed'],
-                'papers' => array_map( function ( $p ) { return $p['label'] . ' ' . $p['sheet'] . ' (' . $p['sheets'] . ')'; }, $j['papers'] ) );
-        }
-        usort( $out['board'], function ( $a, $b ) {
-            return strcmp( $a['must_ship'] !== '' ? $a['must_ship'] : '9999', $b['must_ship'] !== '' ? $b['must_ship'] : '9999' ) ?: $a['order'] <=> $b['order'];
-        } );
-    }
+    $out['board'] = pps_mp_board_rows( $open, $by, $today );
     return $out;
 }
 
+/** Change one paired subtask's state. Returns true or a WP_Error naming why not. */
+function pps_mp_set_state( $task_id, $state ) {
+    if ( ! get_option( PPS_MP_ALLOW_OPTION, false ) ) return new WP_Error( 'off', 'Changing subtasks from the panel is switched off (PPS Calculators → Missive Panel).' );
+    if ( ! in_array( $state, array( 'todo', 'in_progress', 'closed' ), true ) ) return new WP_Error( 'state', 'Unknown state.' );
+    $tasks = pps_mp_tasks();
+    if ( is_wp_error( $tasks ) ) return $tasks;
+    list( $by ) = pps_mp_pair_tasks( $tasks, pps_mp_conv_map() );
+    $ok = false;
+    foreach ( $by as $t ) if ( $t['id'] === $task_id ) { $ok = true; break; }
+    if ( ! $ok ) return new WP_Error( 'unpaired', 'That task is not paired with an order, so the panel will not change it.' );
+    $r = pps_mp_api( 'PATCH', 'tasks/' . rawurlencode( $task_id ), array(), array( 'tasks' => array( 'state' => $state ) ) );
+    if ( is_wp_error( $r ) ) return $r;
+    delete_transient( PPS_MP_TASKS_CACHE );
+    return true;
+}
+
 add_action( 'rest_api_init', function () {
+    $key_ok = function ( $req ) { return pps_mp_key_ok( (string) $req->get_header( 'x_pps_panel_key' ) ); };
     register_rest_route( 'pps/v1', '/missive/panel', array(
-        'methods' => 'GET',
-        'permission_callback' => function ( $req ) { return pps_mp_key_ok( (string) $req->get_header( 'x_pps_panel_key' ) ); },
+        'methods' => 'GET', 'permission_callback' => $key_ok,
         'callback' => function ( $req ) {
             $ids = array_filter( array_map( 'intval', explode( ',', (string) $req->get_param( 'orders' ) ) ) );
-            $res = new WP_REST_Response( pps_mp_answer( $ids ) );
+            $res = new WP_REST_Response( pps_mp_answer( $ids, (string) $req->get_param( 'conv' ) ) );
             $res->header( 'Cache-Control', 'no-store' );
             return $res;
+        },
+    ) );
+    register_rest_route( 'pps/v1', '/missive/task-state', array(
+        'methods' => 'POST', 'permission_callback' => $key_ok,
+        'callback' => function ( $req ) {
+            $r = pps_mp_set_state( (string) $req->get_param( 'task' ), (string) $req->get_param( 'state' ) );
+            return is_wp_error( $r ) ? new WP_REST_Response( array( 'ok' => false, 'error' => $r->get_error_message() ), 200 )
+                                     : new WP_REST_Response( array( 'ok' => true ), 200 );
         },
     ) );
 } );
@@ -273,12 +483,12 @@ add_action( 'init', function () {
     if ( ! pps_mp_key_ok( $k ) ) { status_header( 403 ); header( 'Content-Type: text/plain; charset=UTF-8' ); echo 'This panel link is not valid. Get the current one from PPS Calculators → Missive Panel.'; exit; }
     header( 'Content-Type: text/html; charset=UTF-8' );
     header( 'Referrer-Policy: no-referrer' );
-    echo pps_mp_page_html( $k, rest_url( 'pps/v1/missive/panel' ) );
+    echo pps_mp_page_html( $k, rest_url( 'pps/v1/missive/panel' ), rest_url( 'pps/v1/missive/task-state' ) );
     exit;
 }, 1 );
 
-function pps_mp_page_html( $key, $api ) {
-    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
+function pps_mp_page_html( $key, $api, $state_api = '' ) {
+    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     return <<<HTML
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -288,15 +498,20 @@ function pps_mp_page_html( $key, $api ) {
 body{font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;padding:10px;color:var(--missive-text-color-a,#222)}
 h2{font-size:14px;margin:4px 0 6px} h3{font-size:12px;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.04em;color:#777}
 .card{border:1px solid rgba(128,128,128,.25);border-radius:6px;padding:8px;margin:0 0 10px}
-.muted{color:#888} .rush{color:#c0392b;font-weight:600} .late{color:#c0392b} .ok{color:#2e7d32}
+.muted{color:#888} .small{font-size:12px} .rush{color:#c0392b;font-weight:600} .late{color:#c0392b} .ok{color:#2e7d32} .warn{color:#b45309}
 .bar{position:relative;height:8px;background:rgba(128,128,128,.18);border-radius:4px;margin:6px 0 2px}
 .bar i{position:absolute;top:0;bottom:0;background:#3b82f6;border-radius:4px}
 .bar b{position:absolute;top:-3px;width:2px;height:14px;background:#c0392b}
 table{border-collapse:collapse;width:100%} td{padding:2px 4px;vertical-align:top;border-top:1px solid rgba(128,128,128,.12);overflow-wrap:anywhere}
 td:first-child{color:#888;white-space:nowrap}
 a{color:#2563eb;cursor:pointer;text-decoration:none}
-.preview{opacity:.65;font-size:12px} .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
-input{width:120px} .row{padding:4px 0;border-top:1px solid rgba(128,128,128,.12)}
+.tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
+.st{display:inline-block;border-radius:3px;padding:0 5px;font-size:11px;font-weight:600}
+.st-todo{background:rgba(128,128,128,.18)} .st-in_progress{background:#dbeafe;color:#1e40af} .st-closed{background:#dcfce7;color:#166534} .st-none{background:#fef3c7;color:#92400e}
+.row{padding:6px 0;border-top:1px solid rgba(128,128,128,.15)} .row.here{background:rgba(59,130,246,.08)}
+.ctl{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:0 0 6px} .ctl select,.ctl input{font-size:12px;max-width:100%}
+.grp{margin:10px 0 2px;font-weight:600;font-size:12px} button.b{font-size:11px;padding:1px 6px;margin:2px 4px 0 0;cursor:pointer}
+.preview{opacity:.65;font-size:12px}
 </style></head>
 <body><div id="app" class="muted">Loading…</div>
 <script data-cfasync="false" src="https://integrations.missiveapp.com/missive.js"></script>
@@ -306,12 +521,17 @@ input{width:120px} .row{padding:4px 0;border-top:1px solid rgba(128,128,128,.12)
 var CFG = {$cfg};
 var app = document.getElementById('app');
 var inMissive = typeof window.Missive !== 'undefined' && window.parent !== window;
+var LAST = { ids: [], conv: '' }, DATA = null;
+var PREF = { sort: 'ship', group: 'none', q: '', hide: true };
+try { var sp = JSON.parse(localStorage.getItem('ppsMpPref')||'null'); if (sp) for (var k in sp) PREF[k]=sp[k]; } catch(e){}
+function savePref(){ try { localStorage.setItem('ppsMpPref', JSON.stringify(PREF)); } catch(e){} }
 
-/* READ-ONLY: this page may call Missive.on, Missive.fetchConversations, Missive.search and
-   Missive.openURL — nothing that changes a conversation, task, label or assignee. */
+/* Missive is only read here (on, fetchConversations, search, openURL). A subtask's state is
+   changed by the SITE, through its own API token, and only when the owner has allowed it. */
 
 function el(tag, attrs, kids){ var e=document.createElement(tag); attrs=attrs||{};
-  for (var k in attrs){ if(k==='text') e.textContent=attrs[k]; else if(k==='cls') e.className=attrs[k]; else if(k==='on') e.addEventListener('click',attrs[k]); else if(k==='style') e.setAttribute('style',attrs[k]); }
+  for (var k in attrs){ if(k==='text') e.textContent=attrs[k]; else if(k==='cls') e.className=attrs[k]; else if(k==='on') e.addEventListener('click',attrs[k]);
+    else if(k==='change') e.addEventListener('change',attrs[k]); else if(k==='input') e.addEventListener('input',attrs[k]); else e.setAttribute(k,attrs[k]); }
   (kids||[]).forEach(function(c){ if(c) e.appendChild(typeof c==='string'?document.createTextNode(c):c); }); return e; }
 function md(ymd){ if(!ymd) return '—'; var d=new Date(ymd+'T12:00:00Z'); return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',timeZone:'UTC'}); }
 function days(a,b){ return Math.round((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:00Z'))/864e5); }
@@ -326,13 +546,38 @@ function ppsOrderNumbers(text){
 }
 window.ppsOrderNumbers = ppsOrderNumbers;
 
-function load(ids){
-  app.className='muted'; app.textContent='Loading…';
-  var url = CFG.api + (CFG.api.indexOf('?')<0?'?':'&') + 'orders=' + encodeURIComponent(ids.join(','));
+function load(ids, conv){
+  LAST = { ids: ids, conv: conv||'' };
+  if(!DATA){ app.className='muted'; app.textContent='Loading…'; }
+  var url = CFG.api + (CFG.api.indexOf('?')<0?'?':'&') + 'orders=' + encodeURIComponent(ids.join(',')) + '&conv=' + encodeURIComponent(conv||'');
   fetch(url,{headers:{'X-PPS-Panel-Key':CFG.key},credentials:'omit',cache:'no-store'})
     .then(function(r){ if(!r.ok) throw new Error('The site answered '+r.status+'.'); return r.json(); })
-    .then(render)
+    .then(function(d){ DATA=d; render(); })
     .catch(function(e){ app.className=''; app.textContent=''; app.appendChild(el('div',{cls:'late',text:'Could not load: '+e.message})); });
+}
+
+function setState(task, state, btn){
+  btn.disabled = true; btn.textContent = '…';
+  fetch(CFG.stateApi,{method:'POST',headers:{'X-PPS-Panel-Key':CFG.key,'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({task:task.id,state:state})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(!d.ok){ alert(d.error||'Could not change the task.'); } load(LAST.ids, LAST.conv); })
+    .catch(function(){ alert('Could not reach the site.'); load(LAST.ids, LAST.conv); });
+}
+
+var STATE_WORD = { todo:'To do', in_progress:'In progress', closed:'Done' };
+function taskLine(t, mustShip, mismatch){
+  var box = el('div',{cls:'small'});
+  if(!DATA.missive.connected){ return null; }
+  if(!t){ box.appendChild(el('span',{cls:'st st-none',text:'No subtask'})); return box; }
+  box.appendChild(el('span',{cls:'st st-'+t.state,text:STATE_WORD[t.state]||t.state}));
+  box.appendChild(document.createTextNode(' due '+md(t.due)));
+  if(t.started) box.appendChild(el('span',{cls:'muted',text:' · started '+md(t.started)}));
+  if(mismatch) box.appendChild(el('span',{cls:'warn',text:' · ≠ must-ship '+md(mustShip)}));
+  if(DATA.missive.can_change){
+    var acts = t.state==='todo' ? [['in_progress','Start'],['closed','Done']] : t.state==='in_progress' ? [['closed','Done'],['todo','Back to to-do']] : [['todo','Reopen']];
+    acts.forEach(function(a){ var b=el('button',{cls:'b',text:a[1]}); b.addEventListener('click',function(){ setState(t,a[0],b); }); box.appendChild(el('br')); box.lastChild.remove(); box.appendChild(document.createTextNode(' ')); box.appendChild(b); });
+  }
+  return box;
 }
 
 function windowBar(j, today){
@@ -350,6 +595,7 @@ function jobCard(j, today){
   c.appendChild(el('h2',{},[ (j.job||j.product), j.rush?el('span',{cls:'rush',text:' RUSH'}):null, j.printed?el('span',{cls:'muted',text:' · marked printed'}):null ]));
   c.appendChild(el('div',{cls:'muted',text:[j.qty?j.qty+' qty':'',j.size].filter(Boolean).join(' · ')}));
   c.appendChild(windowBar(j, today));
+  var tl = taskLine(j.task, j.window[1], j.task && j.task.due && j.window[1] && j.task.due!==j.window[1]); if(tl) c.appendChild(tl);
   if(j.papers.length){ c.appendChild(el('h3',{text:'Paper'}));
     j.papers.forEach(function(p){ c.appendChild(el('div',{},[p.label+' · '+p.sheet+' · '+p.sheets+' sheets'+(p.role!=='stock'?' ('+p.role+')':''), p.in_stock?null:el('span',{cls:'rush',text:' to order'})])); }); }
   c.appendChild(el('h3',{text:'Run together'}));
@@ -359,52 +605,118 @@ function jobCard(j, today){
     j.batch.mates.forEach(function(m){ c.appendChild(el('div',{cls:'row'},[ el('a',{text:'#'+m.order,on:function(){find(m.order);}}), ' '+m.customer+' — '+m.what+' · ship '+md(m.must_ship), m.rush?el('span',{cls:'rush',text:' RUSH'}):null ])); });
   }
   if(j.addons){ c.appendChild(el('h3',{text:'Finishing'})); c.appendChild(el('div',{text:j.addons})); }
-  if(j.ticket.length){ c.appendChild(el('h3',{text:'Job Ticket'})); var t=el('table');
-    j.ticket.forEach(function(p){ t.appendChild(el('tr',{},[el('td',{text:p[0]}),el('td',{text:p[1]})])); }); c.appendChild(t); }
-  var pv=el('div',{cls:'preview'},[ el('h3',{text:'Automation preview (not sent)'}),
-    el('div',{text:'Task: '+j.preview.title}), el('div',{text:'Due: '+md(j.preview.due)}) ]);
-  var tags=el('div'); j.preview.labels.forEach(function(l){ tags.appendChild(el('span',{cls:'tag',text:l})); }); pv.appendChild(tags);
-  c.appendChild(pv);
+  if(j.ticket.length){ var det=el('details'); det.appendChild(el('summary',{cls:'small muted',text:'Job Ticket'})); var t=el('table');
+    j.ticket.forEach(function(p){ t.appendChild(el('tr',{},[el('td',{text:p[0]}),el('td',{text:p[1]})])); }); det.appendChild(t); c.appendChild(det); }
   return c;
 }
 
-function render(d){
-  app.className=''; app.textContent='';
-  if(!inMissive){ var i=el('input',{}); i.placeholder='Order #'; var b=el('button',{text:'Look up',on:function(){ load(ppsOrderNumbers('#'+i.value)); }});
+/* ── the board ── */
+var SORTS = {
+  ship:     ['Must-ship date', function(a,b){ return cmp(a.must_ship||'9999',b.must_ship||'9999') || a.order-b.order; }],
+  start:    ['Start date',     function(a,b){ return cmp(a.start||'9999',b.start||'9999') || cmp(a.must_ship,b.must_ship); }],
+  delivery: ['Delivery date',  function(a,b){ return cmp(a.delivery||'9999',b.delivery||'9999') || cmp(a.must_ship,b.must_ship); }],
+  paper:    ['Paper',          function(a,b){ return cmp((a.paper||'~').toLowerCase(),(b.paper||'~').toLowerCase()) || cmp(a.sheet,b.sheet) || cmp(a.must_ship,b.must_ship); }],
+  sheet:    ['Press sheet',    function(a,b){ return cmp(a.sheet||'~',b.sheet||'~') || cmp(a.paper,b.paper) || cmp(a.must_ship,b.must_ship); }],
+  sheets:   ['Sheets (most first)', function(a,b){ return b.sheets-a.sheets || cmp(a.must_ship,b.must_ship); }],
+  qty:      ['Quantity (most first)', function(a,b){ return (parseInt(b.qty,10)||0)-(parseInt(a.qty,10)||0); }],
+  task:     ['Task state',     function(a,b){ return tr(a)-tr(b) || cmp(a.must_ship||'9999',b.must_ship||'9999'); }],
+  due:      ['Task due date',  function(a,b){ return cmp((a.task&&a.task.due)||'9999',(b.task&&b.task.due)||'9999'); }],
+  mismatch: ['Date mismatches first', function(a,b){ return (b.due_mismatch?1:0)-(a.due_mismatch?1:0) || cmp(a.must_ship||'9999',b.must_ship||'9999'); }],
+  order:    ['Order number',   function(a,b){ return a.order-b.order; }],
+  customer: ['Customer',       function(a,b){ return cmp(a.customer.toLowerCase(),b.customer.toLowerCase()); }]
+};
+var GROUPS = {
+  none:      ['No grouping', function(){ return ''; }],
+  paper:     ['Paper + sheet', function(r){ return r.paper ? r.paper+' · '+r.sheet : 'Paper not known'; }],
+  sheet:     ['Press sheet', function(r){ return r.sheet || 'Sheet not known'; }],
+  task:      ['Task state', function(r){ return r.task ? (STATE_WORD[r.task.state]||r.task.state) : 'No subtask'; }],
+  finishing: ['Finishing', function(r){ return r.finishing.length ? r.finishing.join(' + ') : 'No finishing'; }],
+  ship:      ['Ship date', function(r){ return r.must_ship ? md(r.must_ship) : 'No date'; }],
+  rush:      ['Rush', function(r){ return r.rush ? 'RUSH' : 'Standard'; }]
+};
+function cmp(a,b){ a=a||''; b=b||''; return a<b?-1:a>b?1:0; }
+function tr(r){ return r.task ? ({in_progress:0,todo:1,closed:3})[r.task.state] : 2; }
+
+function boardRow(r, here){
+  var late = r.must_ship && r.must_ship < DATA.today;
+  var d = el('div',{cls:'row'+(here?' here':'')});
+  d.appendChild(el('div',{},[ el('span',{cls:late?'late':'',text:md(r.must_ship)}), ' ', el('a',{text:'#'+r.order,on:function(){find(r.order);}}),
+    ' '+r.customer+' — '+r.what, r.rush?el('span',{cls:'rush',text:' RUSH'}):null, r.printed?el('span',{cls:'muted',text:' · printed'}):null ]));
+  var meta = [];
+  r.papers.forEach(function(p){ meta.push(p.label+' '+p.sheet+' ('+p.sheets+')'); });
+  if(!r.papers.length && r.source==='custom') meta.push('custom order');
+  if(r.qty) meta.push(r.qty+' qty'); if(r.size) meta.push(r.size);
+  if(r.finishing.length) meta.push(r.finishing.join(', '));
+  meta.push('start '+md(r.start));
+  d.appendChild(el('div',{cls:'muted small',text:meta.join(' · ')}));
+  var tl = taskLine(r.task, r.must_ship, r.due_mismatch); if(tl) d.appendChild(tl);
+  return d;
+}
+
+function renderBoard(here){
+  var wrap = el('div');
+  wrap.appendChild(el('h2',{text:'Open jobs'}));
+  var sortSel = el('select',{change:function(){ PREF.sort=sortSel.value; savePref(); render(); }});
+  Object.keys(SORTS).forEach(function(k){ var o=el('option',{value:k,text:'Sort: '+SORTS[k][0]}); if(k===PREF.sort) o.selected=true; sortSel.appendChild(o); });
+  var grpSel = el('select',{change:function(){ PREF.group=grpSel.value; savePref(); render(); }});
+  Object.keys(GROUPS).forEach(function(k){ var o=el('option',{value:k,text:'Group: '+GROUPS[k][0]}); if(k===PREF.group) o.selected=true; grpSel.appendChild(o); });
+  var q = el('input',{type:'search',placeholder:'Filter (paper, name, UV…)'}); q.value=PREF.q;
+  q.addEventListener('input',function(){ PREF.q=q.value; savePref(); clearTimeout(window.__ppsT); window.__ppsT=setTimeout(render,250); });
+  var hide = el('input',{type:'checkbox'}); hide.checked=PREF.hide; hide.addEventListener('change',function(){ PREF.hide=hide.checked; savePref(); render(); });
+  wrap.appendChild(el('div',{cls:'ctl'},[sortSel, grpSel]));
+  wrap.appendChild(el('div',{cls:'ctl'},[q, el('label',{cls:'small'},[hide,' hide printed / done'])]));
+  var needle = PREF.q.trim().toLowerCase();
+  var rows = DATA.board.filter(function(r){
+    if(PREF.hide && (r.printed || (r.task && r.task.state==='closed'))) return false;
+    if(!needle) return true;
+    var hay = [r.order, r.customer, r.what, r.paper, r.sheet, r.size, r.finishing.join(' '), r.rush?'rush':'', r.task?STATE_WORD[r.task.state]:'no subtask'].concat(r.papers.map(function(p){return p.label;})).join(' ').toLowerCase();
+    return hay.indexOf(needle) >= 0;
+  });
+  rows.sort(SORTS[PREF.sort] ? SORTS[PREF.sort][1] : SORTS.ship[1]);
+  wrap.appendChild(el('div',{cls:'muted small',text:rows.length+' of '+DATA.board.length+' jobs'}));
+  var g = GROUPS[PREF.group] ? GROUPS[PREF.group][1] : GROUPS.none[1], cur = null;
+  var groups = {}, order = [];
+  rows.forEach(function(r){ var k=g(r); if(!(k in groups)){ groups[k]=[]; order.push(k); } groups[k].push(r); });
+  order.forEach(function(k){
+    if(k!==''){ var sheets = groups[k].reduce(function(s,r){ return s+r.sheets; },0);
+      wrap.appendChild(el('div',{cls:'grp'},[k+' ', el('span',{cls:'muted',text:'· '+groups[k].length+' job'+(groups[k].length===1?'':'s')+(sheets?' · '+sheets+' sheets':'')})])); }
+    groups[k].forEach(function(r){ wrap.appendChild(boardRow(r, here[r.order])); });
+  });
+  return wrap;
+}
+
+function render(){
+  var d = DATA; app.className=''; app.textContent='';
+  if(!inMissive){ var i=el('input',{placeholder:'Order #'}); var b=el('button',{text:'Look up',on:function(){ load(ppsOrderNumbers('#'+i.value), ''); }});
     app.appendChild(el('div',{cls:'card'},[el('div',{cls:'muted',text:'Outside Missive: type an order number to test.'}), i, ' ', b])); }
+  if(d.missive.error) app.appendChild(el('div',{cls:'warn small',text:'Missive tasks: '+d.missive.error}));
+  else if(!d.missive.connected) app.appendChild(el('div',{cls:'muted small',text:'Missive tasks are not connected (no API token saved).'}));
+  var here = {};
   d.orders.forEach(function(o){
+    here[o.order] = 1;
     app.appendChild(el('div',{style:'margin:0 0 6px'},[ el('b',{text:'Order #'+o.order}), ' · '+o.status+' · ', el('a',{text:'open in WooCommerce',on:function(){open(o.admin_url);}}) ]));
     o.jobs.forEach(function(j){ app.appendChild(jobCard(j, d.today)); });
   });
   d.missing.forEach(function(id){ app.appendChild(el('div',{cls:'muted',text:'#'+id+' is not an order on the site.'})); });
-  if(!d.orders.length){
-    app.appendChild(el('h2',{text:'Open jobs by ship date'}));
-    if(!d.board.length) app.appendChild(el('div',{cls:'muted',text:'No open jobs.'}));
-    d.board.forEach(function(r){
-      var late = r.must_ship && r.must_ship < d.today;
-      app.appendChild(el('div',{cls:'row'},[ el('span',{cls:late?'late':'',text:md(r.must_ship)}), ' ', el('a',{text:'#'+r.order,on:function(){find(r.order);}}),
-        ' '+r.customer+' — '+r.what, r.rush?el('span',{cls:'rush',text:' RUSH'}):null, r.printed?el('span',{cls:'muted',text:' · printed'}):null,
-        el('div',{cls:'muted',text:r.papers.join(', ')}) ]));
-    });
-  }
+  app.appendChild(renderBoard(here));
 }
 
 if(inMissive){
   Missive.on('change:conversations', function(ids){
-    if(!ids || ids.length!==1){ load([]); return; }
+    if(!ids || ids.length!==1){ load([], ''); return; }
     Missive.fetchConversations(ids).then(function(cs){
-      var c=cs&&cs[0]; if(!c){ load([]); return; }
+      var c=cs&&cs[0]; if(!c){ load([], ''); return; }
       var m=c.latest_message||{}, body=String(m.body||'').replace(/<[^>]+>/g,' ');
-      load(ppsOrderNumbers([c.subject,m.subject,m.preview,body].join(' \\n ')));
-    }, function(){ load([]); });
+      load(ppsOrderNumbers([c.subject,m.subject,m.preview,body].join(' \\n ')), c.id||ids[0]);
+    }, function(){ load([], ''); });
   }, { retroactive: true });
-} else { load([]); }
+} else { load([], ''); }
 })();
 </script></body></html>
 HTML;
 }
 
-/* ── Admin: the link to paste into Missive ────────────────────── */
+/* ── Admin: the link to paste into Missive, and the API token ─── */
 
 add_action( 'admin_menu', function () {
     add_submenu_page( 'pps-calculators', 'Missive Panel', '🧭 Missive Panel', 'manage_woocommerce', 'pps-missive-panel', 'pps_mp_render_admin' );
@@ -419,17 +731,63 @@ add_action( 'admin_post_pps_mp_regen', function () {
     exit;
 } );
 
+add_action( 'admin_post_pps_mp_missive', function () {
+    if ( ! current_user_can( 'manage_woocommerce' ) ) wp_die( 'Not allowed.' );
+    check_admin_referer( 'pps_mp_missive' );
+    $msg = 'saved';
+    if ( isset( $_POST['remove_token'] ) ) {
+        delete_option( PPS_MP_TOKEN_OPTION ); delete_option( PPS_MP_ORG_OPTION ); delete_transient( PPS_MP_TASKS_CACHE );
+        $msg = 'removed';
+    } else {
+        $tok = trim( (string) wp_unslash( $_POST['token'] ?? '' ) );
+        if ( $tok !== '' ) {
+            update_option( PPS_MP_TOKEN_OPTION, preg_replace( '/\s+/', '', $tok ), false );
+            delete_option( PPS_MP_ORG_OPTION ); delete_transient( PPS_MP_TASKS_CACHE );
+        }
+        update_option( PPS_MP_ALLOW_OPTION, empty( $_POST['allow_state'] ) ? 0 : 1, false );
+    }
+    wp_safe_redirect( admin_url( 'admin.php?page=pps-missive-panel&missive=' . $msg ) );
+    exit;
+} );
+
 function pps_mp_render_admin() {
     if ( ! current_user_can( 'manage_woocommerce' ) ) wp_die( 'Insufficient permissions.' );
     $url = add_query_arg( array( 'pps_missive_panel' => 1, 'k' => pps_mp_key( true ) ), home_url( '/' ) );
+    $tok = pps_mp_token();
     echo '<div class="wrap"><h1>Missive Panel</h1>'
-       . '<p>A read-only production view in Missive\'s sidebar: the open conversation\'s order, its window, paper and the jobs it could run with. It never changes Missive or an order.</p>'
+       . '<p>A production board in Missive\'s sidebar: every open job, sortable and groupable by date, paper, sheet, finishing and task state, with the open conversation\'s order shown in full at the top. Each job is paired with its Missive <strong>subtask</strong> in the order\'s conversation.</p>'
        . ( isset( $_GET['regen'] ) ? '<div class="notice notice-success"><p>New link made. The old one no longer works — update it in Missive.</p></div>' : '' )
-       . '<h2>Add it to Missive</h2><ol>'
+       . ( ( $_GET['missive'] ?? '' ) === 'saved' ? '<div class="notice notice-success"><p>Missive settings saved.</p></div>' : '' )
+       . ( ( $_GET['missive'] ?? '' ) === 'removed' ? '<div class="notice notice-success"><p>Missive API token removed.</p></div>' : '' );
+
+    echo '<h2>1. Missive API token</h2>'
+       . '<p>Create it in Missive: Preferences → <strong>API</strong> → <strong>Create a new token</strong> (needs Missive\'s Productive plan). Paste it here. It is stored on this site only, never shown again and never sent to a browser.</p>'
+       . '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">' . wp_nonce_field( 'pps_mp_missive', '_wpnonce', true, false )
+       . '<input type="hidden" name="action" value="pps_mp_missive">'
+       . '<p><input type="password" name="token" autocomplete="off" placeholder="' . esc_attr( $tok !== '' ? 'Saved — ends in …' . substr( $tok, -4 ) . ' (paste a new one to replace it)' : 'missive_pat-…' ) . '" style="width:100%;max-width:600px"></p>'
+       . '<p><label><input type="checkbox" name="allow_state" value="1"' . ( get_option( PPS_MP_ALLOW_OPTION, false ) ? ' checked' : '' ) . '> Let the panel change subtask state (Start / Done / Reopen buttons). '
+       . 'Off: the panel only reads. On: it changes the <em>state</em> of a subtask the site has paired with an order — nothing else.</label></p>'
+       . '<p><button class="button button-primary">Save</button> '
+       . ( $tok !== '' ? '<button class="button" name="remove_token" value="1" onclick="return confirm(\'Remove the Missive API token?\')">Remove token</button>' : '' ) . '</p></form>';
+
+    if ( $tok !== '' ) {
+        $tasks = pps_mp_tasks( true );
+        if ( is_wp_error( $tasks ) ) {
+            echo '<div class="notice notice-error inline"><p>Connection check failed: ' . esc_html( $tasks->get_error_message() ) . '</p></div>';
+        } else {
+            $map = pps_mp_learn_from_api( $tasks, pps_mp_conv_map(), 20 );
+            list( $by, $unpaired ) = pps_mp_pair_tasks( $tasks, $map );
+            $subs = 0; foreach ( $tasks as $t ) if ( ! empty( $t['conversation'] ) ) $subs++;
+            echo '<div class="notice notice-success inline"><p>Connected. ' . esc_html( sprintf( '%d subtasks read (open and recently done); %d paired with an order; %d not yet paired.', $subs, count( $by ), count( $unpaired ) ) )
+               . ' Unpaired subtasks pair themselves as their conversations are opened with the panel showing, or when their conversation subject names the order.</p></div>';
+        }
+    }
+
+    echo '<h2>2. Add the panel to Missive</h2><ol>'
        . '<li>In Missive: Settings → Integrations → Add integration → <strong>Custom</strong> (iFrame).</li>'
        . '<li>Name it "PPS Production" and paste this URL:</li></ol>'
        . '<p><input type="text" readonly value="' . esc_attr( $url ) . '" style="width:100%;max-width:900px" onclick="this.select()"></p>'
-       . '<p>Open the link in a browser to try it outside Missive (it offers an order-number box). Anyone with the link can read open-job schedules and tickets, so share it only inside Missive.</p>'
+       . '<p>Anyone with the link can read open-job schedules and tickets (and, if allowed above, start or finish a paired subtask), so share it only inside Missive.</p>'
        . '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">' . wp_nonce_field( 'pps_mp_regen', '_wpnonce', true, false )
        . '<input type="hidden" name="action" value="pps_mp_regen"><button class="button">Make a new link (cuts off the old one)</button></form></div>';
 }
