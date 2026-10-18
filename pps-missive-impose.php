@@ -188,7 +188,11 @@ function pps_mpi_page( $html, $order_id, $ajax_url ) {
         'orderStatuses' => array(), // the status menu has nothing to move to: the panel never changes an order
         'doneStatuses'  => function_exists( 'pps_impose_done_statuses' ) ? pps_impose_done_statuses() : array( 'completed', 'cancelled', 'refunded', 'failed', 'trash' ),
     ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
-    return str_replace( '</head>', '<script>window.PPS_IMPOSE_CFG = ' . $cfg . ";</script>\n</head>", $html );
+    $html = str_replace( '</head>', '<script>window.PPS_IMPOSE_CFG = ' . $cfg . ";</script>\n</head>", $html );
+    // Cloudflare's Rocket Loader rewrites every script on a front-end page (wp-admin is exempt),
+    // which left React and Babel unloaded and the tool blank (2026-10-18). Tell it to leave
+    // them all alone, as the panel's own page does.
+    return preg_replace( '/<script(?![^>]*data-cfasync)(?=[\s>])/i', '<script data-cfasync="false"', $html );
 }
 
 // wp_loaded, not init: the page looks the order up, and WooCommerce registers its order types

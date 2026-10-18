@@ -160,7 +160,9 @@ ok( $r['code'] === 200 && strpos( $r['body'], 'PPS Imposition Tool' ) !== false,
 ok( is_array( $cfg ) && $cfg['nonce'] === $tok( 87347 ) && $cfg['ajaxUrl'] === '/wp-admin/admin-ajax.php?pps_mpi=87347', 'carrying the token for THIS order and the admin-ajax URL scoped to it', $cfg );
 ok( is_array( $cfg ) && strpos( $r['body'], 'PANELKEY' ) === false, 'the panel key itself is not written into the tool' );
 ok( is_array( $cfg ) && $cfg['orderStatuses'] === array(), 'the status menu is given nothing to move to' );
-ok( substr_count( $r['body'], '<script>window.PPS_IMPOSE_CFG = ' ) === 1, 'the config is injected once' );
+ok( substr_count( $r['body'], '<script data-cfasync="false">window.PPS_IMPOSE_CFG = ' ) === 1, 'the config is injected once' );
+preg_match_all( '/<script\b[^>]*>/i', $r['body'], $tags );
+ok( count( $tags[0] ) >= 8 && count( preg_grep( '/data-cfasync="false"/', $tags[0] ) ) === count( $tags[0] ), 'every script on the page tells Cloudflare Rocket Loader to leave it alone (it blanked the tool on the live site)', $tags[0] );
 
 // ── list ──
 $r = req( $ajax( 87347 ), array( 'action' => 'pps_impose_list', 'nonce' => $tok( 87347 ) ) );
