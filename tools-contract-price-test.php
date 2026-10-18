@@ -60,5 +60,15 @@ ok( strpos( $src, "if ( ! empty( \$_POST['pps_contract_form'] ) ) {" ) !== false
 
 ok( strpos( $src, "if ( is_string( \$defaults ) ) { \$defaults = json_decode( \$defaults, true );" ) !== false, 'the PPS Defaults tab reads defaults stored as JSON text, so a save cannot wipe them' );
 
+// WCPA's cached product list is read through a filter that drops registry products
+if ( preg_match( '/^function pps_wcpa_drop_registry_products\(.*?^\}/ms', $src, $m ) ) {
+    function pps_get_calculator_for_product( $id ) { return in_array( $id, array( 35765, 22754 ), true ) ? 'calc-preview-test.html' : false; }
+    eval( $m[0] );
+    $l = pps_wcpa_drop_registry_products( array( 'full' => array( 100, 35765, '22754', 200 ), 'direct_purchasable' => array( 35765 ) ) );
+    ok( $l === array( 'full' => array( 100, 200 ), 'direct_purchasable' => array() ), 'a registry product is never on WCPA\'s product list, whatever WCPA cached', $l );
+    ok( pps_wcpa_drop_registry_products( false ) === false, 'an empty cache stays empty (WCPA rebuilds it)' );
+} else { ok( false, 'pps_wcpa_drop_registry_products is in the plugin' ); }
+ok( strpos( $src, "add_filter( 'transient_wcpa_products_transient_ver_3', 'pps_wcpa_drop_registry_products' );" ) !== false, 'and it is hooked on the key WCPA reads' );
+
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> CONTRACT PRICE (server) OK ($n checks)\n";
 exit( $fail ? 1 : 0 );

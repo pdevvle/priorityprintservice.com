@@ -3357,6 +3357,30 @@ add_filter( 'get_post_metadata', function( $value, $object_id, $meta_key, $singl
     return $single ? '1' : array( '1' );
 }, 10, 4 );
 
+/* The same rule for forms assigned to the PRODUCT itself (2026-10-18). WCPA decides that a
+ * product "has a form" from one cached list (the `wcpa_products_transient_ver_3` transient,
+ * which never expires and is rebuilt only by WCPA's own admin screens), then renders that
+ * form and refuses checkout with "Addon data missing" when the line carries no form data.
+ * Moving product 35765 (Armadillo) from its WCPA form into the registry left it on that list
+ * — the meta was gone, the cache was not, and the cache lives in the object cache where
+ * nothing here can clear it. So the list is filtered as it is read: a product the registry
+ * owns is never a WCPA product, whatever WCPA cached. Language-suffixed copies (`…_en`) are
+ * covered by the same filter on each key WCPA might read.
+ */
+function pps_wcpa_drop_registry_products( $list ) {
+    if ( ! is_array( $list ) || ! function_exists( 'pps_get_calculator_for_product' ) ) return $list;
+    foreach ( array( 'full', 'direct_purchasable' ) as $k ) {
+        if ( empty( $list[ $k ] ) || ! is_array( $list[ $k ] ) ) continue;
+        $list[ $k ] = array_values( array_filter( $list[ $k ], function ( $id ) { return ! pps_get_calculator_for_product( (int) $id ); } ) );
+    }
+    return $list;
+}
+add_filter( 'transient_wcpa_products_transient_ver_3', 'pps_wcpa_drop_registry_products' );
+add_action( 'init', function () {
+    if ( ! function_exists( 'pll_languages_list' ) ) return;
+    foreach ( (array) pll_languages_list() as $l ) add_filter( 'transient_wcpa_products_transient_ver_3_' . $l, 'pps_wcpa_drop_registry_products' );
+} );
+
 /* A refused checkout on a PPS cart must not be silent.
  *
  * The WCPA collision above cost a customer four days and a rush-mail bill, and we
