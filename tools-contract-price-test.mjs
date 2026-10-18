@@ -38,7 +38,7 @@ const base = `http://127.0.0.1:${srv.address().port}`;
 
 const PRICES = { 100: 150.43, 250: 198.48, 500: 315.23, 750: 445.13, 1000: 580.44, 1250: 743.75, 1500: 837.44, 1750: 984.53, 2000: 1125.18 };
 const DEFAULTS = { qty: 500, pages: 8, sizeLabel: 'Custom Size', customLong: 6.125, customShort: 9.25, bindDir: 'long',
-  insideColor: 'color', coverColor: 'color', insidePaperType: 'noncardstock', coverMode: 'separate', coverPaperType: 'cardstock' };
+  insideColor: 'color', coverColor: 'color', insidePaperType: 'noncardstock', insidePaper: '0.002', coverMode: 'separate', coverPaperType: 'cardstock', coverPaper: '0.02' };
 
 const browser = await pw.chromium.launch();
 async function open(cfg, query = '') {
@@ -90,7 +90,7 @@ const qtySelect = page => page.evaluate(() => {
 }
 
 // ── 2. Contract ──
-const CONTRACT = { name: 'Armadillo Home Warranty', lock: true, prices: PRICES };
+const CONTRACT = { name: 'Armadillo Home Warranty', lock: true, prices: PRICES, show: { inside: 'House-provided text weight paper', cover: 'House-provided cardstock' } };
 {
   const { page, errs } = await open({ defaults: DEFAULTS, contract: CONTRACT });
   const q = await qtySelect(page);
@@ -102,6 +102,9 @@ const CONTRACT = { name: 'Armadillo Home Warranty', lock: true, prices: PRICES }
   ok(t.includes('Armadillo Home Warranty booklet · set specification'.toUpperCase()) || t.includes('Armadillo Home Warranty booklet · set specification'), 'the spec is shown as a card');
   ok(/Size\s*6\.125×9\.25″/.test(t) && /Pages\s*8 pages/.test(t), 'with the product\'s size and page count', t.slice(0, 0));
   ok(!(await page.evaluate(() => [...document.querySelectorAll('select')].some(s => [...s.options].some(o => / Pages$/.test(o.textContent))))), 'there is no Pages control');
+  ok(/Inside\s*House-provided text weight paper · Full Color/.test(t) && /Cover\s*House-provided cardstock · Full Color/.test(t) && !/80lb Matte/.test(t.split('Artwork & Proofing')[0]), 'the papers read as the house wording, not the stock names', t.slice(t.indexOf('set specification') - 40, t.indexOf('set specification') + 260));
+  // the regular Shipping & Delivery step is there, and rush is charged on top of the list price
+  ok(t.includes('Shipping & Delivery'), 'the Shipping & Delivery step is there');
   await page.evaluate(() => {
     const s = [...document.querySelectorAll('select')].find(x => [...x.options].some(o => /booklets · \$/.test(o.textContent)));
     const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; set.call(s, '100'); s.dispatchEvent(new Event('change', { bubbles: true }));
@@ -123,6 +126,45 @@ const CONTRACT = { name: 'Armadillo Home Warranty', lock: true, prices: PRICES }
   await page.close();
 }
 
+// ── 2b. Shipping & Delivery: an address, then a date inside the rush window ──
+{
+  const { page, errs } = await open({ defaults: DEFAULTS, contract: CONTRACT });
+  // open the step and fill a ship-to the way a customer does
+  await page.getByText('Shipping & Delivery', { exact: false }).first().click();
+  await page.waitForTimeout(300);
+  const filled = await page.evaluate(() => {
+    const set = (el, v) => { const d = Object.getOwnPropertyDescriptor(el.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype, 'value'); d.set.call(el, v); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };
+    const byAuto = a => document.querySelector(`[autocomplete~="${a}"]`);
+    const st = [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.value === 'MO'));
+    const zip = byAuto('postal-code');
+    if (!st || !zip) return 'no state/zip field';
+    set(st, 'MO'); set(zip, '65738');
+    return 'ok';
+  });
+  await page.waitForTimeout(800);
+  const t = await text(page);
+  ok(filled === 'ok' && /Free delivery|delivery/i.test(t) && /UPS|Ground|transit|business day/i.test(t), 'a ship-to gives the delivery estimate, as on the regular calculator', filled);
+  ok((await total(page)) === 315.23, 'a ship-to adds nothing: delivery is included in the listed price', await total(page));
+  // open the delivery-date picker and take the first day shaded as rush (between earliest and free)
+  // the picker opens on the free-delivery date; its trigger follows the "Select a specific date" label
+  await page.locator('xpath=//*[normalize-space(text())="Select a specific date"]/following::div[contains(@style,"cursor: pointer")][1]').first().click();
+  await page.waitForTimeout(300);
+  const pickRush = () => page.evaluate(() => {
+    const cells = [...document.querySelectorAll('div')].filter(d => /^\d{1,2}$/.test(d.textContent.trim()) && getComputedStyle(d).backgroundColor === 'rgb(254, 245, 224)');
+    if (!cells.length) return 'no rush day';
+    cells[0].click(); return 'picked ' + cells[0].textContent.trim();
+  });
+  // it opens on the month of the free date; the rush days may be in the month before
+  let rushed = await pickRush();
+  if (rushed === 'no rush day') { await page.getByRole('button', { name: '◀' }).first().click(); await page.waitForTimeout(250); rushed = await pickRush(); }
+  await page.waitForTimeout(600);
+  const rt = await total(page);
+  // grandTotal = total × free ÷ days-left, so the rush share is a multiple of the listed price
+  ok(/^picked/.test(rushed) && rt > 315.23, 'a rush date adds rush on top of the listed price', [rushed, rt]);
+  ok(errs.length === 0, 'no script errors in Shipping & Delivery', errs);
+  await page.close();
+}
+
 // ── 3. A link cannot change the locked spec ──
 {
   const { page, errs } = await open({ defaults: DEFAULTS, contract: CONTRACT }, '?pages=24&qty=600&size=8.5%C3%9711%20(Opens%20to%2011%C3%9717)&covermode=same&color=bw');
@@ -141,6 +183,8 @@ const CONTRACT = { name: 'Armadillo Home Warranty', lock: true, prices: PRICES }
   const src = html;
   ok(/contract:\s*result\.contract\s*\|\|\s*undefined/.test(src), 'the order metadata carries the contract line');
   ok(/push\("Pricing",\s*`\$\{result\.contract\.name\} price list/.test(src), 'the Job Ticket names the price list');
+  const flat = src.replace(/\s+/g, '');
+  ok(flat.includes('push("Inside",config.insidePaper&&config.insidePaper.label?`${ppsPaperWords("inside",') && flat.includes('returnshown?`${shown}(${label})`:label;'), 'the ticket names the paper as "house wording (real stock)"');
   await page.close();
 }
 

@@ -2062,10 +2062,18 @@ function pps_contract_parse( $raw ) {
     if ( ! $prices ) return null;
     ksort( $prices );
     $name = trim( preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) ( $raw['name'] ?? '' ) ) ) );
+    // What the customer is told the papers are ("House-provided cardstock"); the order still
+    // carries the real stock, which is what the Paper Order and the Job Ticket count.
+    $show = array();
+    foreach ( array( 'inside', 'cover' ) as $f ) {
+        $v = trim( preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) ( $raw['show'][ $f ] ?? '' ) ) ) );
+        if ( $v !== '' ) $show[ $f ] = function_exists( 'mb_substr' ) ? mb_substr( $v, 0, 80 ) : substr( $v, 0, 80 );
+    }
     return array(
         'name'   => function_exists( 'mb_substr' ) ? mb_substr( $name !== '' ? $name : 'Contract', 0, 80 ) : substr( $name !== '' ? $name : 'Contract', 0, 80 ),
         'lock'   => ! isset( $raw['lock'] ) || (bool) $raw['lock'],
         'prices' => $prices,
+        'show'   => (object) $show,
     );
 }
 
@@ -5413,6 +5421,17 @@ add_action( 'woocommerce_product_data_panels', function() {
                 <span class="description" style="display:block;margin-left:0">One per line. The price is for the whole quantity.</span>
             </p>
             <p class="form-field">
+                <label for="pps_contract_show_inside">Inside paper, as the customer sees it</label>
+                <input type="text" id="pps_contract_show_inside" name="pps_contract_show_inside" maxlength="80"
+                       value="<?php echo esc_attr( $contract && ! empty( $contract['show']->inside ) ? $contract['show']->inside : '' ); ?>" placeholder="House-provided text weight paper" style="width:300px" />
+            </p>
+            <p class="form-field">
+                <label for="pps_contract_show_cover">Cover paper, as the customer sees it</label>
+                <input type="text" id="pps_contract_show_cover" name="pps_contract_show_cover" maxlength="80"
+                       value="<?php echo esc_attr( $contract && ! empty( $contract['show']->cover ) ? $contract['show']->cover : '' ); ?>" placeholder="House-provided cardstock" style="width:300px" />
+                <span class="description" style="display:block;margin-left:0">Optional. The real papers are the defaults above — that is what the Job Ticket and the Paper Order use; the customer's page shows these words (the receipt shows both).</span>
+            </p>
+            <p class="form-field">
                 <label for="pps_contract_lock">Lock the spec</label>
                 <input type="checkbox" id="pps_contract_lock" name="pps_contract_lock" value="1" <?php checked( ! $contract || $contract['lock'] ); ?> />
                 <span class="description">Size, pages, paper, colour and finishing are fixed to the defaults above; the customer chooses quantity, proof and artwork only.</span>
@@ -5493,6 +5512,10 @@ add_action( 'woocommerce_process_product_meta', function( $post_id ) {
             'name'   => sanitize_text_field( wp_unslash( $_POST['pps_contract_name'] ?? '' ) ),
             'lock'   => ! empty( $_POST['pps_contract_lock'] ),
             'prices' => pps_contract_lines_to_prices( wp_unslash( $_POST['pps_contract_prices'] ?? '' ) ),
+            'show'   => array(
+                'inside' => sanitize_text_field( wp_unslash( $_POST['pps_contract_show_inside'] ?? '' ) ),
+                'cover'  => sanitize_text_field( wp_unslash( $_POST['pps_contract_show_cover'] ?? '' ) ),
+            ),
         ) );
         if ( $c ) update_post_meta( $post_id, '_pps_contract', wp_json_encode( $c ) );
         else      delete_post_meta( $post_id, '_pps_contract' );

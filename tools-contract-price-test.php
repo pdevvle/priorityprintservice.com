@@ -31,6 +31,10 @@ ok( $c['prices'] === array( 100 => 150.43, 500 => 315.23 ) && $c['name'] === 'Ar
 ok( pps_contract_parse( json_encode( array( 'name' => 'A', 'lock' => false, 'prices' => array( 100 => 1 ) ) ) )['lock'] === false, 'stored as JSON it reads back, lock off when saved off' );
 ok( pps_contract_parse( '' ) === null && pps_contract_parse( array( 'prices' => array() ) ) === null && pps_contract_parse( array( 'prices' => array( 5 => 0 ) ) ) === null, 'no usable price means no contract (normal pricing)' );
 ok( pps_contract_parse( array( 'prices' => array( 10 => 1 ) ) )['name'] === 'Contract', 'a list with no name is still a contract' );
+$sh = pps_contract_parse( array( 'prices' => array( 10 => 1 ), 'show' => array( 'inside' => ' House-provided <i>text</i> weight paper ', 'cover' => '', 'evil' => 'x' ) ) );
+ok( json_encode( $sh['show'] ) === '{"inside":"House-provided text weight paper"}', 'the customer-facing paper words are kept as plain text, inside and cover only', $sh['show'] );
+ok( json_encode( pps_contract_parse( array( 'prices' => array( 10 => 1 ) ) )['show'] ) === '{}', 'with none set it is an empty object, not a list' );
+ok( json_decode( json_encode( pps_contract_parse( json_encode( array( 'prices' => array( 10 => 1 ), 'show' => array( 'cover' => 'House-provided cardstock' ) ) ) ) ), true )['show'] === array( 'cover' => 'House-provided cardstock' ), 'and it survives being stored and read back' );
 $big = array(); for ( $i = 1; $i <= 80; $i++ ) $big[ $i * 10 ] = $i;
 ok( count( pps_contract_parse( array( 'prices' => $big ) )['prices'] ) === 50, 'at most 50 quantities are kept' );
 ok( json_decode( json_encode( $c ), true )['prices'] == array( '100' => 150.43, '500' => 315.23 ) && strpos( json_encode( $c ), '"prices":{' ) !== false, 'it is stored and injected as a quantity → price object, not a list' );
