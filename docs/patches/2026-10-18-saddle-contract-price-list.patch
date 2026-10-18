@@ -1,5 +1,5 @@
 diff --git a/calc-preview-test.html b/calc-preview-test.html
-index be409a8..7b1abe8 100644
+index be409a8..052be26 100644
 --- a/calc-preview-test.html
 +++ b/calc-preview-test.html
 @@ -465,6 +465,47 @@ const _cfgList = v => (Array.isArray(v) && v.length ? v : null);
@@ -306,7 +306,27 @@ index be409a8..7b1abe8 100644
  
              {/* Art options dropdown */}
              <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
-@@ -7799,7 +7882,7 @@ function App(){
+@@ -7703,14 +7786,17 @@ function App(){
+                 proof={proof} setProof={setProof}
+                 pageTransforms={pageTransforms} setPageTransforms={setPageTransforms}
+                 artDims={artDims} setArtDims={setArtDims}
+-                onPagesDetected={(pg) => upSet(0, { pages: pg })}
++                // A locked contract's spec is never changed by the artwork: a longer PDF is
++                // reconciled/trimmed and flagged like any other mismatch, and there is no
++                // "use my artwork's size" offer (the prop being absent hides it).
++                onPagesDetected={_LOCK ? undefined : (pg) => upSet(0, { pages: pg })}
+                 onCoverArt={setCoverArt}
+                 onBackCoverArt={setBackCoverArt}
+                 openPreviewModalRef={openPreviewModalRef}
+                 debug={proofDebug}
+                 onArtwork={setArtFiles}
+                 onBleedDetected={(has) => { if(has) setBleed(0); else setBleed(1); }}
+-                onSizeOverride={(w, h) => {
++                onSizeOverride={_LOCK ? undefined : (w, h) => {
+                   setSizeMode("custom"); setSizeLabel("Custom Size");
+                   const long = Math.max(w, h), short = Math.min(w, h);
+                   setCustomLong(parseFloat(long.toFixed(3))); setCustomShort(parseFloat(short.toFixed(3)));
+@@ -7799,7 +7885,7 @@ function App(){
            </Sec>
  
            {/* SECTION 5: Shipping & Delivery */}

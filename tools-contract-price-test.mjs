@@ -177,6 +177,65 @@ const CONTRACT = { name: 'Armadillo Home Warranty', lock: true, prices: PRICES, 
   await page.close();
 }
 
+// ── 3b. An upload never changes a locked spec ──
+// A 12-page PDF, 6.375×9.5in (6.125×9.25 trim with bleed), written by hand so no PDF library is needed.
+function pdfOf(pages, w = 459, h = 684) {
+  const objs = ['<< /Type /Catalog /Pages 2 0 R >>', null, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+  const kids = [];
+  for (let i = 0; i < pages; i++) {
+    const c = `0.2 0.4 0.8 rg 0 0 ${w} ${h} re f 1 1 1 rg BT /F1 60 Tf 150 300 Td (P${i + 1}) Tj ET`;
+    objs.push(`<< /Length ${c.length} >>\nstream\n${c}\nendstream`);
+    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Contents ${objs.length} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`);
+    kids.push(`${objs.length} 0 R`);
+  }
+  objs[1] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages} >>`;
+  let out = '%PDF-1.4\n'; const off = [];
+  objs.forEach((o, i) => { off.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const x = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + off.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  return Buffer.from(out + `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`, 'latin1');
+}
+const upload = async (page, pages = 12, w, h) => {
+  await page.locator('input[type=file][accept=".pdf,.jpg,.jpeg,.png"][multiple]').first().setInputFiles({ name: 'armadillo-12pp.pdf', mimeType: 'application/pdf', buffer: pdfOf(pages, w, h) });
+  // wait until the upload has been read (its page thumbnails appear) or 30s
+  await page.waitForFunction(() => /armadillo-12pp\.pdf|12 pages|page 12|P12/i.test(document.body.innerText) || document.querySelectorAll('img[src^="data:image"]').length > 3, null, { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+};
+{
+  // without a contract the same upload DOES set the page count — so the check below can fail
+  const { page } = await open({ defaults: DEFAULTS });
+  await upload(page);
+  const pg = await page.evaluate(() => { const s = [...document.querySelectorAll('select')].find(x => [...x.options].some(o => / Pages$/.test(o.textContent))); return s ? s.value : null; });
+  ok(pg === '12', 'without a contract a 12-page PDF sets the job to 12 pages (the uploader works as before)', pg);
+  await page.close();
+}
+{
+  const { page, errs } = await open({ defaults: DEFAULTS, contract: CONTRACT });
+  await upload(page);
+  const t = await text(page);
+  ok(/Pages\s*8 pages/.test(t), 'on a locked contract a 12-page PDF leaves the job at 8 pages', (t.match(/Pages\s*[^\n]*/) || [])[0]);
+  ok(/Size\s*6\.125×9\.25″/.test(t), 'and the size as the product sets it');
+  await page.close();
+}
+{
+  // artwork of the wrong size (8.5×11): the regular calculator offers to resize the job to it
+  const { page } = await open({ defaults: DEFAULTS });
+  await upload(page, 8, 612, 792);
+  // the Artwork step may be folded shut, so look for the button itself (body text would include the inline script)
+  ok(await page.evaluate(() => [...document.querySelectorAll('button')].some(b => b.textContent.includes('Match ordered size to art'))), 'without a contract, wrong-size art offers "Match ordered size to art"');
+  await page.close();
+}
+{
+  const { page, errs } = await open({ defaults: DEFAULTS, contract: CONTRACT });
+  await upload(page, 8, 612, 792);
+  const t = await text(page);
+  const fileSeen = await page.evaluate(() => [...document.querySelectorAll('div')].some(d => d.children.length === 0 && d.textContent.includes('armadillo-12pp.pdf')));
+  ok(fileSeen && !(await page.evaluate(() => [...document.querySelectorAll('button')].some(b => b.textContent.includes('Match ordered size to art')))) && /Size\s*6\.125×9\.25″/.test(t), 'on a locked contract it does not — the size stays', fileSeen);
+  ok((await total(page)) === 315.23, 'and the price is still the listed one', await total(page));
+  ok(errs.length === 0, 'no script errors on upload', errs);
+  await page.close();
+}
+
 // ── 4. What the order carries (buildMetadata is the function Add to Order posts) ──
 {
   const { page } = await open({ defaults: DEFAULTS, contract: CONTRACT });
