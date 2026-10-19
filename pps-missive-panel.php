@@ -679,7 +679,7 @@ var CFG = {$cfg};
 var app = document.getElementById('app');
 var inMissive = typeof window.Missive !== 'undefined' && window.parent !== window;
 var LAST = { ids: [], conv: '' }, DATA = null, IMPOSE = 0, FRAME = 'impose';
-var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', addon: '', rush: false, subOnly: true };
+var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', addon: '', rush: false, lateStart: false, subOnly: true };
 try { var sp = JSON.parse(localStorage.getItem('ppsMpPref')||'null'); if (sp) for (var k in sp) PREF[k]=sp[k]; } catch(e){}
 function savePref(){ try { localStorage.setItem('ppsMpPref', JSON.stringify(PREF)); } catch(e){} }
 
@@ -826,7 +826,7 @@ function boardRow(r, here){
   if(r.qty) meta.push(r.qty+' qty'); if(r.size) meta.push(r.size);
   if(r.finishing.length) meta.push(r.finishing.join(', '));
   meta.push('start '+md(r.start));
-  d.appendChild(el('div',{cls:'muted small',text:meta.join(' · ')}));
+  d.appendChild(el('div',{cls:'muted small'},[meta.join(' · '), lateStart(r)?el('span',{cls:'late',text:' · LATE START'}):null]));
   var tl = taskLine(r.task, r.start, r.due_mismatch); if(tl) d.appendChild(tl);
   return d;
 }
@@ -841,6 +841,9 @@ function whenOk(r){
   return true;
 }
 function stateOf(r){ return r.task ? r.task.state : 'none'; }
+// Late start: the start date has passed and work has not begun — not marked printed, and the
+// subtask (if there is one) still to do. In progress or done is not late, whatever the date.
+function lateStart(r){ return !!(r.start && r.start < DATA.today && !r.printed && (!r.task || r.task.state==='todo')); }
 function addonOk(r){
   var a = PREF.addon || '', fin = r.finishing || [];
   if(a==='') return true;
@@ -895,12 +898,14 @@ function renderBoard(here){
   tools.appendChild(el('div',{cls:'ctl'},[whenSel, paperSel, addSel]));
   var q = el('input',{type:'search',placeholder:'Search (name, order, UV…)'}); q.value=PREF.q;
   q.addEventListener('input',function(){ PREF.q=q.value; savePref(); clearTimeout(window.__ppsT); window.__ppsT=setTimeout(function(){ render(); var n=document.querySelector('.tools input[type=search]'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },300); });
+  var ls = el('input',{type:'checkbox'}); ls.checked=!!PREF.lateStart; ls.addEventListener('change',function(){ PREF.lateStart=ls.checked; savePref(); render(); });
+  var lsN = DATA.board.filter(lateStart).length;
   var rush = el('input',{type:'checkbox'}); rush.checked=PREF.rush; rush.addEventListener('change',function(){ PREF.rush=rush.checked; savePref(); render(); });
   var hide = el('input',{type:'checkbox'}); hide.checked=PREF.hide; hide.addEventListener('change',function(){ PREF.hide=hide.checked; savePref(); render(); });
   var sub = el('input',{type:'checkbox'}); sub.checked=PREF.subOnly!==false; sub.addEventListener('change',function(){ PREF.subOnly=sub.checked; savePref(); render(); });
-  var reset = el('a',{cls:'small',text:'reset',on:function(){ PREF={ sort:'ship', group:'none', q:'', hide:true, st:'all', when:'all', paper:'', addon:'', rush:false, subOnly:true }; savePref(); render(); }});
+  var reset = el('a',{cls:'small',text:'reset',on:function(){ PREF={ sort:'ship', group:'none', q:'', hide:true, st:'all', when:'all', paper:'', addon:'', rush:false, lateStart:false, subOnly:true }; savePref(); render(); }});
   tools.appendChild(el('div',{cls:'ctl'},[q]));
-  tools.appendChild(el('div',{cls:'ctl'},[DATA.missive.connected ? el('label',{cls:'small'},[sub,' subtasks only']) : null, el('label',{cls:'small'},[rush,' rush only']), el('label',{cls:'small'},[hide,' hide printed / done']), reset]));
+  tools.appendChild(el('div',{cls:'ctl'},[DATA.missive.connected ? el('label',{cls:'small'},[sub,' subtasks only']) : null, el('label',{cls:'small'},[rush,' rush only']), el('label',{cls:'small'+(lsN?' late':'')},[ls,' late start ('+lsN+')']), el('label',{cls:'small'},[hide,' hide printed / done']), reset]));
   var needle = PREF.q.trim().toLowerCase();
   var rows = DATA.board.filter(function(r){
     var st = stateOf(r);
@@ -910,6 +915,7 @@ function renderBoard(here){
     if(DATA.missive.connected && PREF.subOnly!==false && PREF.st!=='none' && !r.task) return false;
     if(PREF.hide && PREF.st!=='closed' && (r.printed || st==='closed')) return false;
     if(PREF.rush && !r.rush) return false;
+    if(PREF.lateStart && !lateStart(r)) return false;
     if(!whenOk(r)) return false;
     if(PREF.paper && !r.papers.some(function(p){ return p.label+' · '+p.sheet===PREF.paper; })) return false;
     if(!addonOk(r)) return false;

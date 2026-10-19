@@ -262,6 +262,14 @@ if ( preg_match( '/function addonOk\(r\)\{.*?\n\}/s', $html, $m ) ) {
     ok( $got === array( '' => array( true, true, true ), '*' => array( true, true, false ), '-' => array( false, false, true ), 'k:Coating' => array( true, true, false ), 'k:Fold' => array( true, false, false ), 'v:Coating: UV Gloss (both sides)' => array( true, false, false ) ),
         'the Add-ons filter: any, with add-ons, none, every job with a kind (all coatings), and one exact choice (UV, not aqueous)', $got );
 } else { ok( false, 'addonOk is in the page' ); }
+// ── late start, run as the browser runs it ──
+if ( preg_match( '/function lateStart\(r\)\{.*?\}\n/s', $html, $m ) ) {
+    $js = "var DATA={today:'2026-10-19'};" . $m[0] . "\nconsole.log(JSON.stringify([{start:'2026-10-16'},{start:'2026-10-16',task:{state:'todo'}},{start:'2026-10-16',task:{state:'in_progress'}},{start:'2026-10-16',task:{state:'closed'}},{start:'2026-10-16',printed:true},{start:'2026-10-19'},{start:'2026-10-22'},{start:''}].map(lateStart)));";
+    $f = tempnam( sys_get_temp_dir(), 'mp' ) . '.js'; file_put_contents( $f, $js );
+    $got = json_decode( (string) shell_exec( 'node ' . escapeshellarg( $f ) . ' 2>&1' ), true ); @unlink( $f );
+    ok( $got === array( true, true, false, false, false, false, false, false ), 'late start: start date passed and not begun (no subtask, or to do); in progress, done, printed, starting today or later, or no start date is not late', $got );
+} else { ok( false, 'lateStart is in the page' ); }
+ok( strpos( $html, "if(PREF.lateStart && !lateStart(r)) return false;" ) !== false && strpos( $html, "' late start ('" ) !== false && strpos( $html, "rush:false, lateStart:false, subOnly:true }" ) !== false, 'the board offers a late-start filter with a count, applies it, and reset clears it' );
 ok( strpos( $html, "'Any add-ons'" ) !== false && strpos( $html, "if(!addonOk(r)) return false;" ) !== false && strpos( $html, "paper:'', addon:'', rush:false" ) !== false, 'the board offers the Add-ons filter, applies it, and reset clears it' );
 
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> MISSIVE PANEL OK ($n checks)\n";
