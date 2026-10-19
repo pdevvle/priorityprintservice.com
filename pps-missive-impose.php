@@ -55,6 +55,8 @@ function pps_mpi_rows( $order, $files ) {
     }
     $sole_item = count( $pps_items ) === 1;
     $folder_id = (string) $order->get_meta( '_pps_gdrive_folder_id' );
+    // v1.59: every imposable file in the folder, so the operator can pick another than the match.
+    $folder_files = function_exists( 'pps_impose_folder_files' ) ? pps_impose_folder_files( $files ) : array();
     $items = array();
     foreach ( $pps_items as $item_id => $item ) {
         $m = json_decode( (string) $item->get_meta( '_pps_metadata' ), true );
@@ -95,6 +97,7 @@ function pps_mpi_rows( $order, $files ) {
             'folder_url'    => 'https://drive.google.com/drive/folders/' . rawurlencode( $folder_id ),
             'art_file_id'   => $art['id'] ?? '',
             'art_file_name' => $art['name'] ?? '',
+            'files'         => $folder_files,
             'proof_hash'    => (string) $item->get_meta( '_pps_proof_hash' ),
             'imposed'       => $imposed,
             'files_listed'  => is_array( $files ),

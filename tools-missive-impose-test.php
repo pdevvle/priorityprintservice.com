@@ -5,7 +5,7 @@
  * Runs the bridge for real: this file is also the ROUTER of a `php -S` server, so uploads
  * arrive as real multipart uploads (is_uploaded_file) and downloads are streamed bytes. The
  * imposition side is the LIVE code, pulled from git — pps-imposition.php and imposition-tool.html
- * at 38d9be9 (v1.58, on production since 2026-10-18 06:10) for the helpers and the page —
+ * at ff116ac (v1.59, on production since 2026-10-18 21:40) for the helpers and the page —
  * so the rows this bridge builds are checked against the tool that actually reads them.
  *
  * Checks: the page needs the panel key and a real order; its token is good for that order
@@ -116,9 +116,9 @@ function ok( $c, $w, $g = null ) { global $fail, $n; $n++; if ( ! $c ) { $fail++
 $tmp = sys_get_temp_dir() . '/pps-mpi-' . getmypid(); @mkdir( $tmp );
 $imp_php  = getenv( 'PPS_IMPOSE_PHP' ) ?: "$tmp/pps-imposition.php";
 $tool_dir = getenv( 'PPS_IMPOSE_TOOL_DIR' ) ?: $tmp;
-if ( ! getenv( 'PPS_IMPOSE_PHP' ) ) file_put_contents( $imp_php, shell_exec( 'git -C ' . escapeshellarg( __DIR__ ) . ' show 38d9be9:pps-imposition.php' ) );
-if ( ! getenv( 'PPS_IMPOSE_TOOL_DIR' ) ) file_put_contents( "$tmp/imposition-tool.html", shell_exec( 'git -C ' . escapeshellarg( __DIR__ ) . ' show 38d9be9:imposition-tool.html' ) );
-ok( filesize( $imp_php ) === 38382 && filesize( "$tool_dir/imposition-tool.html" ) === 451423, 'the live imposition files (v1.58: 38,382 and 451,423 bytes) are what this runs against', array( filesize( $imp_php ), filesize( "$tool_dir/imposition-tool.html" ) ) );
+if ( ! getenv( 'PPS_IMPOSE_PHP' ) ) file_put_contents( $imp_php, shell_exec( 'git -C ' . escapeshellarg( __DIR__ ) . ' show ff116ac:pps-imposition.php' ) );
+if ( ! getenv( 'PPS_IMPOSE_TOOL_DIR' ) ) file_put_contents( "$tmp/imposition-tool.html", shell_exec( 'git -C ' . escapeshellarg( __DIR__ ) . ' show ff116ac:imposition-tool.html' ) );
+ok( filesize( $imp_php ) === 40591 && filesize( "$tool_dir/imposition-tool.html" ) === 454464, 'the live imposition files (v1.59: 40,591 and 454,464 bytes) are what this runs against', array( filesize( $imp_php ), filesize( "$tool_dir/imposition-tool.html" ) ) );
 
 // A one-page 8.75×11.25″ PDF: an 8.5×11 flyer with bleed, the shape a print-ready file has.
 function tiny_pdf() {
@@ -183,7 +183,7 @@ $it = $r['json']['data']['items'] ?? array();
 ok( $r['json']['success'] === true && count( $it ) === 1 && $it[0]['order_id'] === 87347 && $it[0]['item_id'] === 11, 'the list is that order\'s jobs only', $r['json'] );
 ok( ( $it[0]['art_file_id'] ?? '' ) === 'artPRINTREADY01' && $it[0]['calc'] === 'brochure' && $it[0]['long_edge'] == 11 && $it[0]['short_edge'] == 8.5 && $it[0]['qty'] === 500 && $it[0]['files_listed'] === true,
     'with the print-ready file picked by the live helper, and the spec the tool reads', $it[0] ?? null );
-$live_keys = array( 'order_id', 'item_id', 'status', 'status_label', 'hidden', 'order_url', 'product', 'job_name', 'calc', 'size_label', 'long_edge', 'short_edge', 'sides', 'bind_dir', 'qty', 'folder_url', 'art_file_id', 'art_file_name', 'proof_hash', 'imposed', 'files_listed' );
+$live_keys = array( 'order_id', 'item_id', 'status', 'status_label', 'hidden', 'order_url', 'product', 'job_name', 'calc', 'size_label', 'long_edge', 'short_edge', 'sides', 'bind_dir', 'qty', 'folder_url', 'art_file_id', 'art_file_name', 'files', 'proof_hash', 'imposed', 'files_listed' );
 ok( array_keys( $it[0] ?? array() ) === $live_keys, 'every field the wp-admin list sends, in the same order' );
 preg_match_all( "/'([a-z_]+)'\s*=>/", substr( file_get_contents( $imp_php ), strpos( file_get_contents( $imp_php ), '$items[] = array(' ), 3000 ), $mm );
 ok( array_slice( $mm[1], 0, count( $live_keys ) ) === $live_keys, 'and the live list builds exactly those fields (the two cannot drift unseen)', array_slice( $mm[1], 0, 22 ) );
@@ -286,7 +286,9 @@ const { chromium } = require(process.env.PW);
     await p.click('button:has-text("Send to order")');
     await p.waitForSelector('button:has-text("Filed to Drive")', { timeout: 30000 });
     out.filed = true;
-    out.statusOptions = await p.$$eval('table.imp-q select option', o => o.map(x => x.value));
+    out.statusOptions = await p.$$eval('table.imp-q select option', o => o.map(x => x.value).filter(v => /^wc-/.test(v)));
+    // v1.59: the row's file picker, fed by the bridge's `files`
+    out.fileOptions = await p.$$eval('table.imp-q select option', o => o.map(x => x.textContent).filter(t => !/^wc-|Processing/i.test(t)));
   } catch (e) { out.err = e.message; out.text = (await p.innerText('body')).slice(0, 1500); }
   out.errs = errs; console.log(JSON.stringify(out)); await b.close();
 })();
@@ -307,6 +309,7 @@ ok( count( $s['uploads'] ) === 1 && preg_match( '/^IMPOSED_Order-87347-i11_Flyer
     'as a real imposed PDF, named for the order and line, in its folder', $s['uploads'] );
 ok( $s['fetched'] === array( 'https://www.googleapis.com/drive/v3/files/artPRINTREADY01?alt=media' ), 'from the artwork it downloaded through the bridge', $s['fetched'] );
 ok( ( $got['statusOptions'] ?? null ) === array( 'wc-processing' ), 'its status menu holds only the current status', $got['statusOptions'] ?? null );
+ok( count( $got['fileOptions'] ?? array() ) >= 2 && strpos( implode( '|', $got['fileOptions'] ), 'Flyer_print-ready.pdf' ) !== false, 'v1.59: the row offers every imposable file in the folder, not only the match', $got['fileOptions'] ?? null );
 ok( is_array( $got ) && $got['errs'] === array(), 'no script errors', $got['errs'] ?? null );
 
 proc_terminate( $srv ); proc_close( $srv );
