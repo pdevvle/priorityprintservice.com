@@ -268,7 +268,7 @@ ok( strpos( $src, 'wp_set_current_user' ) === false && strpos( $src, 'set_status
 $panel = file_get_contents( __DIR__ . '/pps-missive-panel.php' );
 ok( strpos( $panel, "require_once __DIR__ . '/pps-missive-impose.php';" ) !== false, 'the panel loads the bridge' );
 ok( strpos( $panel, "text:'Impose'" ) !== false && strpos( $panel, "text:' [Impose]'" ) !== false && strpos( $panel, "el('iframe',{cls:'imp',src:u" ) !== false, 'an Impose button on the order card and each board row opens it in the panel' );
-ok( strpos( $panel, "DATA=d; if(!IMPOSE) render();" ) !== false, 'a conversation change never reloads the tool mid-job' );
+ok( strpos( $panel, "DATA=d; if(!IMPOSE && !AN) render();" ) !== false, 'a conversation change never reloads the tool mid-job' );
 
 // ── the browser: impose the order from its queue and file it ──
 $js = <<<'JS'
