@@ -267,6 +267,11 @@ if ( file_exists( PPS_CALC_DIR . 'pps-ship-schedule.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-ship-schedule.php';
 }
 
+// Production analytics: intake, fulfilment, sheets and paper + colour cost by week.
+if ( file_exists( PPS_CALC_DIR . 'pps-analytics.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-analytics.php';
+}
+
 // Missive panel: a read-only production view for Missive's sidebar (key-protected).
 if ( file_exists( PPS_CALC_DIR . 'pps-missive-panel.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-missive-panel.php';
