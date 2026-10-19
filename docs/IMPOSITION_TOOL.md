@@ -743,6 +743,68 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### The controls column, reorganised (1.60)
+
+  Owner: "Improve the UI, reconsider the organization of the options in the
+  sidebar to be more sensible. Reconsider whether something needs drop downs
+  or not." The 1.33 column had six sections whose names said little (General
+  · Layout · Product · Bleed · Specialty · Markings), Layout held everything
+  from the press sheet to the duplex flip to the saddle signature rules, and
+  twelve of the controls were dropdowns with two to six short choices — a
+  dropdown hides the alternatives and costs a click to see them.
+
+  Nine sections now, in the order a job is set up, each with a badge that
+  says the one thing worth knowing while it is collapsed:
+
+  | section | holds | badge |
+  |---|---|---|
+  | **Job** | product, finished size, sides, quantity, name, order # | — |
+  | **Artwork** | Crop / Fill / Fit, rotation on the sheet (flats) with the piece-as-placed readout, split spreads, multi-page handling, back-side file, gang combo (flats/stickers) | GANG / N PAGES |
+  | **Press sheet** | sheet, custom size, imageable margin, orientation, the sheet line, efficient mode | the forced sheet |
+  | **Layout on the sheet** | position, gutter, piece pattern, grid / spread orientation, manual pattern, allow best fit, the manual grid & gutters panel (PB halves inside it) | MANUAL / OVERFLOW |
+  | **Duplex** (only when 2-sided or a book) | flip edge, back rotation | the flip edge |
+  | **Saddle stitch — signatures** / **Perfect bound — two press jobs** (books only) | saddle: signatures onto the sheet, copies per sheet, creep; PB: which halves, leaves onto the sheet, spine, cover file | the arrangement / the halves |
+  | **Bleed** | bleed, add-bleed mode, art scale and pull-off, smart edge detect, streak sampler, per-page overrides | ADD mode |
+  | **Press prep** | press safety ticks, rasterise, greyscale, page sequence, sheet sequence, slipsheets, CLEAN copy | ON |
+  | **Marks** | crop marks, fold guides, slug | NO MARKS |
+
+  **Segments instead of dropdowns.** `Seg` is a segmented control — every
+  choice visible, the current one highlighted, a `data-*` attribute carrying
+  the value for the harness — and `Check` is one tick with its explanation.
+  Converted: sides, artwork vs finished size, rotation on the sheet, press
+  sheet, sheet orientation (labelled from the STOCK as it would lie, "19 wide
+  × 13 tall" / "↕ 13 wide × 19 tall"), position, gutter, piece pattern, PB
+  grid orientation, saddle spread orientation, flip edge, back rotation,
+  signatures onto the sheet, PB part, leaves onto the sheet, multi-page
+  handling, add-bleed mode, slipsheet when and design. Where the options
+  need a sentence, the chosen one is explained under the segment (pattern,
+  signatures, leaves, multi-page, add-bleed, art fit) instead of every
+  option carrying its explanation at once. The only dropdown left in the
+  column is the nine-way product list. Radios are gone too.
+
+  **Shared figures.** `sheetCtx()` in `App` computes the sheet, margin,
+  printable area, piece-as-placed and fill state once for the Artwork, Press
+  sheet and Layout sections, so the three never disagree — `dims` is the
+  stock as [long, short], never the oriented sheet (the first cut labelled
+  the orientation segment from the oriented sheet, so the two buttons swapped
+  text whenever portrait was on).
+
+  **Found on the way:** the imageable-margin box started at 0.25″, so the
+  1.46 "default margin is 0" decision never applied to a fresh page — every
+  job silently ran with a 0.25″ margin unless the operator cleared the box.
+  It starts empty now (placeholder 0); setups that saved a margin keep it.
+  Gang combo is hidden for books (it was shown for perfect bound, which
+  cannot use it). `secOpen` keys are the new section ids; the all/none
+  buttons read `SECS`.
+
+  Harness: `ui_sidebar.mjs` — 29 checks: section order and conditional
+  sections (Duplex with 2-sided, Book with saddle/PB), every segment switches
+  state and its readout (flip badge, art-fit hint, piece-as-placed rotated,
+  portrait sheet line, gutter ¼″, custom offsets, cut-and-stack badge, guts
+  only hides the spine, ADD MIRROR, slipsheet segments), creep in the Book
+  section, the only dropdown is the product list, all/none. `ui_pick.mjs`
+  unchanged, 17 green. No engine change: output bytes identical to 1.59.
+
   ### Any file in the order folder (1.59)
 
   Owner, 2026-10-18: "to be clear I want it to read any file in the directed
