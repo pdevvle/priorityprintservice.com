@@ -1423,6 +1423,7 @@ add_action( 'wp', function() {
 
         // ── Config ──
         echo '<script data-cfasync="false">window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+        echo pps_question_token_script();
 
         // ── Edit mode banner + button text override ──
         if ( ! empty( $config['editMode'] ) ) {
@@ -1824,6 +1825,26 @@ function pps_quote_question_rate_key() {
     return 'pps_qq_' . substr( hash( 'sha256', $ip . $salt ), 0, 24 );
 }
 
+/**
+ * The intake forms' form token (pps-intake.php), for the calculators' "Ask a question". The
+ * eight calculators post that form from compiled code, so rather than rebuild them this
+ * script, printed beside PPS_CONFIG, fetches a token on the visitor's first pointer, touch or
+ * key on the page and adds it to any pps_quote_question post (holding the post until the token
+ * is in; a failed fetch posts without one, and the server keeps that as a draft). A question
+ * posted without running the page carries none.
+ */
+function pps_question_token_script() {
+    return '<script data-cfasync="false">(function(){if(window.__ppsQTok||!window.fetch)return;window.__ppsQTok=1;'
+      . 'var u=' . wp_json_encode( admin_url( 'admin-ajax.php?action=pps_intake_token' ) ) . ',p=null,of=window.fetch;'
+      . 'function get(){if(!p)p=of.call(window,u,{credentials:"same-origin",cache:"no-store"}).then(function(x){return x.ok?x.text():""})'
+        . '.then(function(t){return /^\d+\.[0-9a-f]{32}$/.test(t)?t:""}).catch(function(){return ""});return p}'
+      . '["pointerdown","touchstart","keydown"].forEach(function(e){document.addEventListener(e,get,{once:true,passive:true,capture:true})});'
+      . 'window.fetch=function(r,o){var b=o&&o.body,a=arguments,s=this;'
+        . 'if(window.FormData&&b instanceof FormData&&b.get("action")==="pps_quote_question"&&!b.has("pps_tok"))'
+        . 'return get().then(function(t){b.append("pps_tok",t);return of.apply(s,a)});'
+        . 'return of.apply(this,a)}})();</script>';
+}
+
 function pps_ajax_quote_question() {
     check_ajax_referer( 'pps_add_to_cart', 'nonce' );
 
@@ -1951,8 +1972,12 @@ function pps_ajax_quote_question() {
     if ( $total > 0 ) $post_title .= sprintf( ' · $%s', number_format( $total, 2 ) );
     // Same judgment as the intake forms (pps-intake.php): a submission that reads as the
     // October 2026 phishing run is kept as a draft and mailed to nobody.
+    // And, like them, a question with no form token (posted without running the page, as the
+    // 2026-10-18 subscription-bombing run did) or one sent under 2 s after the first touch.
     $spam = function_exists( 'pps_intake_spam_reason' )
-        ? pps_intake_spam_reason( array( 'name' => $name, 'phone' => $phone, 'message' => $message ) )
+        ? pps_intake_spam_reason( array(
+            '__spam'  => function_exists( 'pps_intake_token_reason' ) ? pps_intake_token_reason( wp_unslash( $_POST['pps_tok'] ?? '' ) ) : '',
+            'name'    => $name, 'phone' => $phone, 'message' => $message ) )
         : '';
 
     $post_id = wp_insert_post( array(
@@ -7190,6 +7215,7 @@ function pps_render_preset_calculator( $preset ) {
     ob_start();
 
     echo '<script data-cfasync="false">window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+    echo pps_question_token_script();
 
     // Scoped styles (mirror existing logic at line ~537)
     if ( $parts['styles'] ) {

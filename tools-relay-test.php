@@ -79,8 +79,10 @@ function pps_assistant_customer_transcript( $s ) { return 'USER: ' . ( $s['said'
 
 $fail = 0; $n = 0;
 function check( $ok, $what ) { global $fail, $n; $n++; if ( ! $ok ) { $fail++; echo "FAIL: $what\n"; } }
+// A person's form token (pps-intake.php): made 30 s ago, as the page script fetches it.
+function tok() { return pps_intake_token_make( time() - 30 ); }
 function ask( array $post ) {
-    $GLOBALS['mail'] = array(); $GLOBALS['tr'] = array(); $_POST = $post; $_SERVER['REMOTE_ADDR'] = '203.0.113.' . mt_rand( 1, 250 );
+    $GLOBALS['mail'] = array(); $GLOBALS['tr'] = array(); $_POST = $post + array( 'pps_tok' => tok() ); $_SERVER['REMOTE_ADDR'] = '203.0.113.' . mt_rand( 1, 250 );
     try { pps_ajax_quote_question(); } catch ( Done $d ) { return $d; }
     return null;
 }
@@ -115,12 +117,46 @@ check( $office && strpos( $office[0]['b'], 'refund-example' ) !== false, 'questi
 // Hourly cap on confirmations, shared with the intake forms.
 $GLOBALS['tr'] = array(); $conf = 0;
 for ( $i = 0; $i < 35; $i++ ) {
-    $GLOBALS['mail'] = array(); $_POST = array( 'name' => 'Pat Lee', 'email' => "p$i@example.org", 'message' => 'Quote for flyers please.' );
+    $GLOBALS['mail'] = array(); $_POST = array( 'name' => 'Pat Lee', 'email' => "p$i@example.org", 'message' => 'Quote for flyers please.', 'pps_tok' => tok() );
     $_SERVER['REMOTE_ADDR'] = "198.51.100.$i";
     try { pps_ajax_quote_question(); } catch ( Done $d ) {}
     $conf += count( to_stranger( "p$i@example.org" ) );
 }
 check( $conf === 30, "question: confirmations capped at 30 an hour site-wide ($conf)" );
+
+// The form token: a question posted without running the page (the 2026-10-18 bombing run)
+$bomb = array( 'name' => 'Nora Quinn', 'email' => 'victim2@example.org', 'phone' => '+1 (555) 201-3344', 'message' => 'My goldfinch loves to play with it.' );
+foreach ( array( 'none' => '', 'forged' => '1792358000.' . str_repeat( 'ab', 16 ), 'too fast' => pps_intake_token_make( time() ) ) as $why => $t ) {
+    $d = ask( $bomb + array( 'pps_tok' => $t ) );
+    $last = end( $GLOBALS['posts'] ); $lid = key( $GLOBALS['posts'] );
+    check( $d && $d->ok && count( $GLOBALS['mail'] ) === 0 && ( $last['post_status'] ?? '' ) === 'draft' && ( $GLOBALS['meta'][ $lid ]['_pps_q_spam'] ?? '' ) !== '',
+        "question: token $why — answered as sent, kept as a spam draft, mailed to nobody" );
+}
+$d = ask( $bomb );
+check( $d && $d->ok && count( $GLOBALS['mail'] ) === 2, 'question: the same text with a person\'s token goes through (office + confirmation)' );
+$cs = file_get_contents( $calc );
+check( substr_count( $cs, "window.PPS_CONFIG=' . wp_json_encode( \$config ) . ';</script>';\n" ) === 2 && substr_count( $cs, "echo pps_question_token_script();" ) === 2, 'question: both calculator render paths (product page, preset) print the token script beside PPS_CONFIG' );
+
+// ── 1b. category wizard (pps-term-shortcodes.php), through the shared intake pipeline ──
+$terms = getenv( 'PPS_TERMS_PHP' ) ?: __DIR__ . '/pps-term-shortcodes.php';
+eval( lift( $terms, 'pps_wizard_email_handler' ) );
+function wiz( array $post ) {
+    $GLOBALS['mail'] = array(); $GLOBALS['tr'] = array(); $_POST = $post; $_FILES = array(); $_SERVER['REMOTE_ADDR'] = '203.0.113.' . mt_rand( 1, 250 );
+    try { pps_wizard_email_handler(); } catch ( Done $d ) { return $d; }
+    return null;
+}
+$wq = array( 'name' => 'Pat Lee', 'email' => 'pat@example.org', 'phone' => '602-555-0100', 'callback' => '1', 'calc' => 'brochure', 'specs' => '500 tri-fold', 'url' => 'https://priorityprintservice.com/product/brochures/?qty=500', 'message' => 'Need these by Friday.' );
+foreach ( array( 'none' => '', 'forged' => '1792358000.' . str_repeat( 'ab', 16 ), 'too fast' => pps_intake_token_make( time() ) ) as $why => $t ) {
+    $d = wiz( $wq + array( 'pps_tok' => $t ) );
+    $last = end( $GLOBALS['posts'] ); $lid = key( $GLOBALS['posts'] );
+    check( $d && $d->ok && count( $GLOBALS['mail'] ) === 0 && ( $last['post_status'] ?? '' ) === 'draft' && ( $GLOBALS['meta'][ $lid ]['_pps_q_spam'] ?? '' ) !== '',
+        "wizard: token $why — answered as sent, kept as a spam draft, mailed to nobody" );
+}
+$d = wiz( $wq + array( 'pps_tok' => tok() ) );
+$last = end( $GLOBALS['posts'] );
+check( $d && $d->ok && ( $last['post_status'] ?? '' ) === 'publish' && count( array_filter( $GLOBALS['mail'], function ( $m ) { return $m['to'] !== 'pat@example.org'; } ) ) >= 1, 'wizard: with a person\'s token the request is published and the office is mailed' );
+$ts = file_get_contents( $terms );
+check( strpos( $ts, "\$uploads = \$values['__spam'] === '' ? pps_intake_take_uploads() :" ) !== false, 'wizard: no files are kept from a request without a token' );
 
 // ── 2. assistant transcript ──
 $GLOBALS['tr'] = array();
