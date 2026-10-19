@@ -348,16 +348,18 @@ function pps_mp_board_rows( array $open, array $tasks_by_order, $today, array $t
     foreach ( $open as $j ) {
         list( $f, $t ) = pps_mp_window( $j, $today );
         $task = $tasks_by_item[ $j['item'] ] ?? ( $tasks_by_order[ $j['order'] ] ?? null );
-        $fin = array();
+        $fin = array(); $add = array();
         foreach ( preg_split( '/;\s*/', (string) $j['addons'] ) as $a ) {
             $a = trim( $a );
-            if ( $a !== '' ) $fin[] = trim( strpos( $a, ':' ) !== false ? substr( $a, 0, strpos( $a, ':' ) ) : $a );
+            if ( $a === '' ) continue;
+            $fin[] = trim( strpos( $a, ':' ) !== false ? substr( $a, 0, strpos( $a, ':' ) ) : $a );
+            $add[] = $a;
         }
         $p0 = $j['papers'][0] ?? null;
         $rows[] = array(
             'order' => $j['order'], 'item' => $j['item'], 'customer' => $j['customer'], 'what' => $j['job'] !== '' ? $j['job'] : $j['product'],
             'qty' => $j['qty'], 'size' => $j['size'], 'start' => $f, 'must_ship' => $t, 'delivery' => $j['delivery'],
-            'rush' => $j['rush'], 'printed' => $j['printed'], 'source' => $j['source'], 'finishing' => array_values( array_unique( $fin ) ),
+            'rush' => $j['rush'], 'printed' => $j['printed'], 'source' => $j['source'], 'finishing' => array_values( array_unique( $fin ) ), 'addons' => array_values( array_unique( $add ) ),
             'paper' => $p0 ? $p0['label'] : '', 'sheet' => $p0 ? $p0['sheet'] : '', 'paper_key' => $p0 ? $p0['key'] : '',
             'sheets' => array_sum( array_column( $j['papers'], 'sheets' ) ),
             'papers' => array_map( function ( $p ) { return array( 'label' => $p['label'], 'sheet' => $p['sheet'], 'sheets' => $p['sheets'], 'role' => $p['role'], 'key' => $p['key'] ); }, $j['papers'] ),
@@ -677,7 +679,7 @@ var CFG = {$cfg};
 var app = document.getElementById('app');
 var inMissive = typeof window.Missive !== 'undefined' && window.parent !== window;
 var LAST = { ids: [], conv: '' }, DATA = null, IMPOSE = 0, FRAME = 'impose';
-var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', rush: false, subOnly: true };
+var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', addon: '', rush: false, subOnly: true };
 try { var sp = JSON.parse(localStorage.getItem('ppsMpPref')||'null'); if (sp) for (var k in sp) PREF[k]=sp[k]; } catch(e){}
 function savePref(){ try { localStorage.setItem('ppsMpPref', JSON.stringify(PREF)); } catch(e){} }
 
@@ -839,6 +841,15 @@ function whenOk(r){
   return true;
 }
 function stateOf(r){ return r.task ? r.task.state : 'none'; }
+function addonOk(r){
+  var a = PREF.addon || '', fin = r.finishing || [];
+  if(a==='') return true;
+  if(a==='*') return fin.length > 0;
+  if(a==='-') return fin.length === 0;
+  if(a.indexOf('k:')===0) return fin.indexOf(a.slice(2)) >= 0;
+  if(a.indexOf('v:')===0) return (r.addons||[]).indexOf(a.slice(2)) >= 0;
+  return true;
+}
 
 function renderBoard(here){
   var wrap = el('div');
@@ -866,13 +877,28 @@ function renderBoard(here){
   var paperSel = el('select',{change:function(){ PREF.paper=paperSel.value; savePref(); render(); }});
   paperSel.appendChild(el('option',{value:'',text:'Any paper'}));
   Object.keys(papers).sort().forEach(function(k){ var o=el('option',{value:k,text:k}); if(k===PREF.paper) o.selected=true; paperSel.appendChild(o); });
-  tools.appendChild(el('div',{cls:'ctl'},[whenSel, paperSel]));
+  // Add-ons: any / none, each kind ("Coating" — every coating), and each exact choice
+  // ("Coating: UV Gloss (both sides)"). Values: '*' any, '-' none, 'k:<kind>', 'v:<choice>'.
+  var kinds = {}, choices = {};
+  DATA.board.forEach(function(r){ (r.finishing||[]).forEach(function(k){ kinds[k]=1; }); (r.addons||[]).forEach(function(a){ choices[a]=1; }); });
+  var addSel = el('select',{change:function(){ PREF.addon=addSel.value; savePref(); render(); }});
+  [['','Any add-ons'],['*','With add-ons'],['-','No add-ons']].forEach(function(a){ var o=el('option',{value:a[0],text:a[1]}); if(a[0]===(PREF.addon||'')) o.selected=true; addSel.appendChild(o); });
+  Object.keys(kinds).sort().forEach(function(k){
+    var og = document.createElement('optgroup'); og.label = k;
+    var all = el('option',{value:'k:'+k,text:'Any '+k}); if('k:'+k===PREF.addon) all.selected=true; og.appendChild(all);
+    Object.keys(choices).sort().forEach(function(a){
+      if(a===k || a.indexOf(k+':')!==0) return;
+      var o = el('option',{value:'v:'+a,text:a.slice(k.length+1).trim()}); if('v:'+a===PREF.addon) o.selected=true; og.appendChild(o);
+    });
+    addSel.appendChild(og);
+  });
+  tools.appendChild(el('div',{cls:'ctl'},[whenSel, paperSel, addSel]));
   var q = el('input',{type:'search',placeholder:'Search (name, order, UV…)'}); q.value=PREF.q;
   q.addEventListener('input',function(){ PREF.q=q.value; savePref(); clearTimeout(window.__ppsT); window.__ppsT=setTimeout(function(){ render(); var n=document.querySelector('.tools input[type=search]'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },300); });
   var rush = el('input',{type:'checkbox'}); rush.checked=PREF.rush; rush.addEventListener('change',function(){ PREF.rush=rush.checked; savePref(); render(); });
   var hide = el('input',{type:'checkbox'}); hide.checked=PREF.hide; hide.addEventListener('change',function(){ PREF.hide=hide.checked; savePref(); render(); });
   var sub = el('input',{type:'checkbox'}); sub.checked=PREF.subOnly!==false; sub.addEventListener('change',function(){ PREF.subOnly=sub.checked; savePref(); render(); });
-  var reset = el('a',{cls:'small',text:'reset',on:function(){ PREF={ sort:'ship', group:'none', q:'', hide:true, st:'all', when:'all', paper:'', rush:false, subOnly:true }; savePref(); render(); }});
+  var reset = el('a',{cls:'small',text:'reset',on:function(){ PREF={ sort:'ship', group:'none', q:'', hide:true, st:'all', when:'all', paper:'', addon:'', rush:false, subOnly:true }; savePref(); render(); }});
   tools.appendChild(el('div',{cls:'ctl'},[q]));
   tools.appendChild(el('div',{cls:'ctl'},[DATA.missive.connected ? el('label',{cls:'small'},[sub,' subtasks only']) : null, el('label',{cls:'small'},[rush,' rush only']), el('label',{cls:'small'},[hide,' hide printed / done']), reset]));
   var needle = PREF.q.trim().toLowerCase();
@@ -886,6 +912,7 @@ function renderBoard(here){
     if(PREF.rush && !r.rush) return false;
     if(!whenOk(r)) return false;
     if(PREF.paper && !r.papers.some(function(p){ return p.label+' · '+p.sheet===PREF.paper; })) return false;
+    if(!addonOk(r)) return false;
     if(!needle) return true;
     var hay = [r.order, r.customer, r.what, r.paper, r.sheet, r.size, r.finishing.join(' '), r.rush?'rush':'', r.task?STATE_WORD[r.task.state]:'no subtask'].concat(r.papers.map(function(p){return p.label;})).join(' ').toLowerCase();
     return hay.indexOf(needle) >= 0;

@@ -106,6 +106,7 @@ $board = pps_mp_answer( array() )['board'];
 ok( count( $board ) === 6 && count( $ans['board'] ) === 6, 'the board is always there, with an order in view or not', count( $board ) );
 $r1 = $board[0];
 ok( $r1['paper'] === '100lb Gloss Text' && $r1['sheet'] === '13×19' && $r1['sheets'] === 500 && $r1['finishing'] === array( 'Coating', 'Fold' ) && $r1['delivery'] === '2026-10-22', 'a board row carries the sortable attributes: paper, sheet, sheets, finishing, dates', $r1 );
+ok( count( $r1['addons'] ) === 2 && strpos( $r1['addons'][0], 'Coating' ) === 0 && count( array_filter( $board, function ( $r ) { return $r['addons'] === array() && $r['finishing'] === array(); } ) ) >= 1, 'a board row also carries each add-on as chosen, for the Add-ons filter', array_column( $board, 'addons' ) );
 ok( $r1['task'] === null && $ans['missive']['connected'] === false, 'with no token, no tasks and no Missive call', $GLOBALS['http'] );
 $GLOBALS['extra'][ 87000 ] = new O( 87000, 'Old', array( 9 => new I( 'Flyer', flat( $gloss, 100, 2, '2026-09-01', '2026-09-04' ) ) ), 'completed' );
 ok( pps_mp_answer( array( 87000 ) )['orders'][0]['status'] === 'completed', 'a completed order still shows (for reference)' );
@@ -251,6 +252,17 @@ if ( preg_match( '/function ppsOrderNumbers\(text\)\{.*?\n\}/s', $html, $m ) ) {
     $got = json_decode( (string) shell_exec( 'node ' . escapeshellarg( $f ) . ' 2>&1' ), true ); @unlink( $f );
     ok( $got === array( array( '87347' ), array( '87301', '87302' ), array(), array( '87455' ) ), 'order numbers come from "#87347" and "order 87301", never from a phone number or a sheet count', $got );
 } else { ok( false, 'ppsOrderNumbers is in the page' ); }
+
+// ── the Add-ons filter, run as the browser runs it ──
+if ( preg_match( '/function addonOk\(r\)\{.*?\n\}/s', $html, $m ) ) {
+    $js = 'var PREF={};' . $m[0] . "\nvar uv={finishing:['Coating','Fold'],addons:['Coating: UV Gloss (both sides)','Fold: Tri-fold']},aq={finishing:['Coating'],addons:['Coating: Aqueous']},none={finishing:[],addons:[]};"
+        . "var out={};['', '*', '-', 'k:Coating', 'k:Fold', 'v:Coating: UV Gloss (both sides)'].forEach(function(a){PREF.addon=a;out[a]=[uv,aq,none].map(addonOk);});console.log(JSON.stringify(out));";
+    $f = tempnam( sys_get_temp_dir(), 'mp' ) . '.js'; file_put_contents( $f, $js );
+    $got = json_decode( (string) shell_exec( 'node ' . escapeshellarg( $f ) . ' 2>&1' ), true ); @unlink( $f );
+    ok( $got === array( '' => array( true, true, true ), '*' => array( true, true, false ), '-' => array( false, false, true ), 'k:Coating' => array( true, true, false ), 'k:Fold' => array( true, false, false ), 'v:Coating: UV Gloss (both sides)' => array( true, false, false ) ),
+        'the Add-ons filter: any, with add-ons, none, every job with a kind (all coatings), and one exact choice (UV, not aqueous)', $got );
+} else { ok( false, 'addonOk is in the page' ); }
+ok( strpos( $html, "'Any add-ons'" ) !== false && strpos( $html, "if(!addonOk(r)) return false;" ) !== false && strpos( $html, "paper:'', addon:'', rush:false" ) !== false, 'the board offers the Add-ons filter, applies it, and reset clears it' );
 
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> MISSIVE PANEL OK ($n checks)\n";
 exit( $fail ? 1 : 0 );
