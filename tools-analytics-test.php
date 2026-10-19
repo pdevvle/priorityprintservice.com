@@ -21,6 +21,10 @@ function add_action() {} function add_filter() {} function add_submenu_page() {}
 function esc_html( $s ) { return htmlspecialchars( (string) $s, ENT_QUOTES ); } function esc_attr( $s ) { return esc_html( $s ); } function esc_url( $s ) { return esc_html( $s ); }
 function admin_url( $p = '' ) { return 'https://x/wp-admin/' . $p; } function add_query_arg( $k, $v = null, $u = '' ) { return is_array( $k ) ? $v . '&' . http_build_query( $k ) : $u . '&' . $k . '=' . $v; }
 function wp_nonce_url( $u ) { return $u . '&_wpnonce=n'; } function home_url( $p = '' ) { return 'https://x' . $p; } function check_admin_referer() { return 1; } function current_user_can() { return true; } function wp_die( $m ) { throw new Exception( $m ); }
+define( 'MINUTE_IN_SECONDS', 60 );
+function get_option( $k, $d = false ) { return $GLOBALS['opt'][ $k ] ?? $d; } function update_option( $k, $v ) { $GLOBALS['opt'][ $k ] = $v; return true; }
+function pps_shop_timezone() { return 'America/Phoenix'; }
+class WP_Error { public $m; function __construct( $c, $m ) { $this->m = $m; } function get_error_message() { return $this->m; } } function is_wp_error( $x ) { return $x instanceof WP_Error; }
 function get_transient( $k ) { return $GLOBALS['tr'][ $k ] ?? false; } function set_transient( $k, $v ) { $GLOBALS['tr'][ $k ] = $v; }
 function current_time() { return '2026-10-19 08:00'; } function pps_mp_today() { return '2026-10-19'; }
 function pps_get_config() { return array( 'pcf' => array( 'printing_black_cost' => 0.01, 'printing_fullcolor_cost' => 0.05 ),
@@ -123,7 +127,7 @@ ok( count( $qs ) === 3 && ! array_filter( $qs, function ( $q ) { return ( $q['re
 $gen = pps_an_orders( '2026-09-20' );
 ok( $gen instanceof Generator && count( iterator_to_array( $gen, false ) ) === count( $orders ), 'orders come one at a time, each once' );
 $src = file_get_contents( getenv( 'PPS_AN_PHP' ) ?: __DIR__ . '/pps-analytics.php' );
-ok( strpos( $src, "add_action( 'pps_analytics_refresh', function () { pps_an_get( 90, true ); pps_an_get( 30, true ); } );" ) !== false, 'the 30- and 90-day windows are built hourly in the background' );
+ok( strpos( $src, "add_action( 'pps_analytics_refresh', function () { pps_an_get( 90, true ); pps_an_get( 30, true ); pps_an_labels( true ); } );" ) !== false, 'the 30- and 90-day windows and the labels are built hourly in the background' );
 ok( strpos( $src, "echo 'The analytics could not be built: '" ) !== false, 'the panel frame says what failed instead of a bare critical error' );
 ok( pps_an_svg_bars( array(), array() ) === '<p class="description">No data in this window.</p>', 'an empty chart says so' );
 
@@ -137,5 +141,54 @@ ok( strpos( $src, "if ( ! function_exists( 'pps_mp_key_ok' ) || ! pps_mp_key_ok(
 ok( strpos( $src, "\$refresh = ! empty( \$_GET['refresh'] ) && ! get_transient( 'pps_an_frame_refresh' );" ) !== false, 'a rebuild from the frame page is allowed once a minute' );
 ok( strpos( $src, "minmax(min(100%,420px),1fr)" ) !== false, 'the chart grid folds to one column in a narrow sidebar' );
 
+
+// shipping labels bought, per day (Shippo's transaction list)
+ok( strpos( $html, 'Shipping labels bought, per day' ) !== false && strpos( $html, 'pps-missive-ship.php) is not loaded' ) !== false, 'without the shipping file the section says so instead of failing' );
+$lab = function ( $id, $at, $rate, $meta, $order, $st = 'SUCCESS' ) {
+    return array( 'object_id' => $id, 'object_created' => $at, 'status' => $st, 'rate' => $rate, 'metadata' => $meta, 'order' => $order,
+                  'tracking_number' => 'TRK' . $id, 'tracking_url_provider' => 'https://track.example/' . $id, 'label_url' => 'https://deliver.goshippo.com/' . $id . '.pdf?Expires=1&Signature=s' );
+};
+$GLOBALS['shippo'] = array(
+    'page1' => array( $lab( 'a', '2026-10-19T23:23:09.364Z', 'r1', 'Order 87485 · box 1 of 2', 'so1' ), $lab( 'b', '2026-10-19T23:24:09Z', 'r1', 'Order 87485 · box 2 of 2', 'so1' ) ),
+    'page2' => array( $lab( 'c', '2026-10-19T06:30:00Z', 'r2', '', 'so9' ),                // 11:30 pm on the 18th in Phoenix
+                      $lab( 'd', '2026-10-17T18:00:00Z', 'r3', '', 'so8', 'REFUNDED' ),
+                      $lab( 'e', '2026-10-17T18:05:00Z', 'r3', '', '', 'ERROR' ) ) );
+$GLOBALS['calls'] = array();
+if ( true ) {
+    function pps_ms_api( $m, $path ) {
+        $GLOBALS['calls'][] = $path; $S = $GLOBALS['shippo'];
+        if ( strpos( $path, 'transactions/' ) === 0 ) return strpos( $path, 'page=1&' ) ? array( 'results' => $S['page1'], 'next' => 'x' ) : array( 'results' => $S['page2'], 'next' => null );
+        if ( $path === 'rates/r1' ) return array( 'provider' => 'UPS', 'servicelevel' => array( 'name' => 'Ground' ), 'amount' => '12.50' );
+        if ( $path === 'rates/r2' ) return array( 'provider' => 'USPS', 'servicelevel' => array( 'name' => 'Priority Mail' ), 'amount' => '9.10' );
+        if ( $path === 'rates/r3' ) return new WP_Error( 'shippo', 'gone' );
+        if ( $path === 'orders/so9' ) return array( 'order_number' => '#87401' );
+        if ( $path === 'orders/so8' ) return array( 'order_number' => '87390' );
+        return new WP_Error( 'x', 'unexpected ' . $path );
+    }
+}
+$L = pps_an_labels( true );
+$tq = array_values( array_filter( $GLOBALS['calls'], function ( $c ) { return strpos( $c, 'transactions/' ) === 0; } ) );
+ok( count( $tq ) === 2 && strpos( $tq[0], 'object_created_gte=2026-09-20T07%3A00%3A00' ) !== false, 'Shippo is asked for 30 days of labels from midnight shop time (07:00 UTC), page by page', $tq );
+ok( count( $L['list'] ) === 4, 'every label is listed, a failed one (ERROR) is not', $L['list'] );
+$byid = array(); foreach ( $L['list'] as $r ) $byid[ basename( parse_url( $r['label'], PHP_URL_PATH ), '.pdf' ) ] = $r;
+ok( $byid['a']['day'] === '2026-10-19' && $byid['a']['time'] === '4:23 pm' && $byid['a']['order'] === '87485' && $byid['a']['from_panel'] && $byid['a']['carrier'] === 'UPS' && $byid['a']['service'] === 'Ground' && $byid['a']['amount'] === 12.5, 'a panel label: shop day and time, order from its metadata, carrier, service and postage from its rate', $byid['a'] );
+ok( $byid['c']['day'] === '2026-10-18' && $byid['c']['order'] === '87401' && ! $byid['c']['from_panel'], 'a label bought in Shippo\'s app: the day is the shop\'s (11:30 pm the 18th, not UTC\'s 19th), the order from its Shippo order', $byid['c'] );
+ok( $byid['d']['status'] === 'REFUNDED' && $byid['d']['amount'] === null && $L['pending'] === 1, 'a rate Shippo no longer gives is said as still to look up, not guessed', $L );
+ok( count( array_filter( $GLOBALS['calls'], function ( $c ) { return $c === 'rates/r1'; } ) ) === 1, 'each rate is looked up once, though two labels share it' );
+ok( ( $GLOBALS['opt']['pps_an_label_rates']['r1']['amount'] ?? 0 ) === 12.5 && ( $GLOBALS['opt']['pps_an_label_orders']['so9'] ?? '' ) === '87401', 'rates and Shippo orders are kept, so the next build does not ask again' );
+$GLOBALS['calls'] = array();
+pps_an_labels( true );
+ok( ! array_filter( $GLOBALS['calls'], function ( $c ) { return in_array( $c, array( 'rates/r1', 'rates/r2', 'orders/so9', 'orders/so8' ), true ); } ), 'the next build reads the kept answers', $GLOBALS['calls'] );
+ok( is_array( $GLOBALS['tr']['pps_an_labels'] ?? null ), 'the list is cached (10 minutes)' );
+ob_start(); pps_an_labels_output( $L ); $lh = ob_get_clean();
+ok( strpos( $lh, 'Mon Oct 19 — 2 labels · $25.00' ) !== false && strpos( $lh, 'Sun Oct 18 — 1 label · $9.10' ) !== false && strpos( $lh, 'Sat Oct 17 — 0 labels · $0.00 · 1 refunded' ) !== false, 'each day: labels and postage, refunded ones listed but not counted', $lh );
+ok( substr_count( $lh, '>Label PDF</a>' ) === 4 && strpos( $lh, 'href="https://deliver.goshippo.com/a.pdf?Expires=1&amp;Signature=s"' ) !== false, 'every label links to its Shippo PDF', $lh );
+ok( strpos( $lh, 'href="https://track.example/a">TRKa</a>' ) !== false && strpos( $lh, 'page=wc-orders&amp;action=edit&amp;id=87485">#87485</a>' ) !== false, 'tracking and the order link', $lh );
+ok( substr_count( $lh, '<details' ) === 3 && substr_count( $lh, '<details open' ) === 1 && strpos( $lh, '<details open style="margin:6px 0"><summary style="cursor:pointer;font-weight:600">Mon Oct 19' ) !== false, 'one fold per day, the newest open' );
+ok( substr_count( $lh, '<svg class="pps-an-chart"' ) === 2 && strpos( $lh, '<script' ) === false, 'labels and postage per day as two charts, no script' );
+$GLOBALS['tr'] = array();
+$fr2 = pps_an_frame_html( pps_an_get( 30 ) + array( 'labels' => $L ), 'KEY9' );
+ok( strpos( $fr2, '>Label PDF</a>' ) !== false && strpos( $fr2, 'if(!/^https:\/\//.test(u))return;if(window.parent!==window)window.parent.postMessage({ppsOpen:u}' ) !== false, 'in the Missive frame, a label link is handed to the panel to open (https only)' );
+ok( ! $warn, 'no PHP warnings in the labels section', $warn );
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> ANALYTICS OK ($n checks)\n";
 exit( $fail ? 1 : 0 );

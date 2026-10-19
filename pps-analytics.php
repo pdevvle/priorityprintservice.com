@@ -281,7 +281,7 @@ function pps_an_get( $days, $refresh = false ) {
 
 /* The 30- and 90-day windows are built hourly in the background, so opening the screen (or
    the Missive panel's Analytics) normally reads a finished result. */
-add_action( 'pps_analytics_refresh', function () { pps_an_get( 90, true ); pps_an_get( 30, true ); } );
+add_action( 'pps_analytics_refresh', function () { pps_an_get( 90, true ); pps_an_get( 30, true ); pps_an_labels( true ); } );
 add_action( 'init', function () {
     if ( function_exists( 'wp_next_scheduled' ) && ! wp_next_scheduled( 'pps_analytics_refresh' ) ) wp_schedule_event( time() + 300, 'hourly', 'pps_analytics_refresh' );
 } );
@@ -338,6 +338,149 @@ function pps_an_svg_bars( array $labels, array $series, $stack = false, $fmt = n
     return $o . '</svg>';
 }
 
+/* ── Shipping labels bought, per day ───────────────────────────────
+ * Owner, 2026-10-19: "all shipping labels bought per day with links to the shippo label
+ * downloads for that day". Read from Shippo's own transaction list, so it holds every label on
+ * the account — bought from the Missive panel or in Shippo's web app alike. The label PDF links
+ * are Shippo's (signed, about a year). Carrier, service and price live on each label's RATE,
+ * one lookup each; rates never change, so each is looked up once and kept in
+ * `pps_an_label_rates` (at most PPS_AN_LABEL_LOOKUPS new ones per build, so a long history
+ * fills in over a few builds rather than in one slow request). The WooCommerce order is the
+ * label's metadata ("Order 87485 · box 1 of 1", the panel's) or its Shippo order's number
+ * (`pps_an_label_orders`, also kept). Last PPS_AN_LABEL_DAYS days whatever the window, cached
+ * 10 minutes (`pps_an_labels` transient); read-only — it never buys, voids or changes a label. */
+
+define( 'PPS_AN_LABEL_DAYS', 30 );
+define( 'PPS_AN_LABEL_LOOKUPS', 40 );
+
+function pps_an_shop_tz() {
+    try { return new DateTimeZone( function_exists( 'pps_shop_timezone' ) ? pps_shop_timezone() : 'America/Phoenix' ); }
+    catch ( \Throwable $e ) { return new DateTimeZone( 'America/Phoenix' ); }
+}
+
+/** Shippo's UTC timestamp as the shop's day and time. */
+function pps_an_label_when( $iso ) {
+    try { $t = new DateTime( (string) $iso, new DateTimeZone( 'UTC' ) ); } catch ( \Throwable $e ) { return array( '', '' ); }
+    $t->setTimezone( pps_an_shop_tz() );
+    return array( $t->format( 'Y-m-d' ), $t->format( 'g:i a' ) );
+}
+
+/** The day $days ago at 00:00 shop time, in UTC, as Shippo's lower bound. */
+function pps_an_label_since( $today, $days ) {
+    $t = new DateTime( $today . ' 00:00:00', pps_an_shop_tz() );
+    $t->modify( '-' . ( max( 1, (int) $days ) - 1 ) . ' days' );
+    $t->setTimezone( new DateTimeZone( 'UTC' ) );
+    return $t->format( 'Y-m-d\TH:i:s' );
+}
+
+function pps_an_labels( $refresh = false ) {
+    if ( ! $refresh ) { $c = get_transient( 'pps_an_labels' ); if ( is_array( $c ) ) return $c; }
+    $today = pps_an_today();
+    $out = array( 'days' => PPS_AN_LABEL_DAYS, 'today' => $today, 'list' => array(), 'pending' => 0, 'error' => '', 'built_at' => current_time( 'mysql' ) );
+    if ( ! function_exists( 'pps_ms_api' ) ) { $out['error'] = 'The Missive Shipping file (pps-missive-ship.php) is not loaded.'; return $out; }
+    $since = pps_an_label_since( $today, PPS_AN_LABEL_DAYS );
+    $tx = array();
+    for ( $page = 1; $page <= 20; $page++ ) {
+        $r = pps_ms_api( 'GET', 'transactions/?results=100&page=' . $page . '&object_created_gte=' . rawurlencode( $since ) );
+        if ( is_wp_error( $r ) ) { $out['error'] = $r->get_error_message(); break; }
+        foreach ( (array) ( $r['results'] ?? array() ) as $t ) if ( is_array( $t ) ) $tx[] = $t;
+        if ( empty( $r['next'] ) ) break;
+    }
+    $rates  = get_option( 'pps_an_label_rates', array() );  $rates  = is_array( $rates ) ? $rates : array();
+    $orders = get_option( 'pps_an_label_orders', array() ); $orders = is_array( $orders ) ? $orders : array();
+    $known  = get_transient( 'pps_ms_orders' );
+    if ( is_array( $known ) ) foreach ( $known as $num => $id ) if ( ! isset( $orders[ $id ] ) ) $orders[ $id ] = (string) $num;
+    $lookups = 0; $grew = false;
+    foreach ( $tx as $t ) {
+        $st = (string) ( $t['status'] ?? '' );
+        if ( ! in_array( $st, array( 'SUCCESS', 'REFUNDPENDING', 'REFUNDED', 'REFUNDREJECTED' ), true ) || empty( $t['label_url'] ) ) continue;
+        $rid = (string) ( $t['rate'] ?? '' );
+        if ( $rid !== '' && ! isset( $rates[ $rid ] ) && $lookups < PPS_AN_LABEL_LOOKUPS ) {
+            $lookups++;
+            $rt = pps_ms_api( 'GET', 'rates/' . rawurlencode( $rid ) );
+            if ( ! is_wp_error( $rt ) ) {
+                $rates[ $rid ] = array( 'carrier' => (string) ( $rt['provider'] ?? '' ), 'service' => (string) ( $rt['servicelevel']['name'] ?? '' ),
+                                        'amount' => (float) ( $rt['amount'] ?? 0 ), 'currency' => (string) ( $rt['currency'] ?? 'USD' ) );
+                $grew = true;
+            }
+        }
+        $num = '';
+        if ( preg_match( '/Order\s+#?(\d+)/i', (string) ( $t['metadata'] ?? '' ), $m ) ) $num = $m[1];
+        $sid = (string) ( $t['order'] ?? '' );
+        if ( $num === '' && $sid !== '' ) {
+            if ( ! isset( $orders[ $sid ] ) && $lookups < PPS_AN_LABEL_LOOKUPS ) {
+                $lookups++;
+                $so = pps_ms_api( 'GET', 'orders/' . rawurlencode( $sid ) );
+                if ( ! is_wp_error( $so ) ) { $orders[ $sid ] = preg_replace( '/\D/', '', (string) ( $so['order_number'] ?? '' ) ); $grew = true; }
+            }
+            $num = (string) ( $orders[ $sid ] ?? '' );
+        }
+        $rate = $rates[ $rid ] ?? null;
+        if ( ! $rate ) $out['pending']++;
+        list( $day, $time ) = pps_an_label_when( $t['object_created'] ?? '' );
+        if ( $day === '' ) continue;
+        $out['list'][] = array(
+            'day' => $day, 'time' => $time, 'at' => (string) ( $t['object_created'] ?? '' ), 'order' => $num,
+            'carrier' => $rate['carrier'] ?? '', 'service' => $rate['service'] ?? '', 'amount' => $rate ? (float) $rate['amount'] : null,
+            'tracking' => (string) ( $t['tracking_number'] ?? '' ), 'tracking_url' => (string) ( $t['tracking_url_provider'] ?? '' ),
+            'label' => (string) $t['label_url'], 'status' => $st,
+            'from_panel' => (bool) preg_match( '/·\s*box\s+\d+\s+of\s+\d+/u', (string) ( $t['metadata'] ?? '' ) ),
+        );
+    }
+    if ( $grew ) {
+        if ( count( $rates ) > 3000 ) $rates = array_slice( $rates, -3000, null, true );
+        if ( count( $orders ) > 3000 ) $orders = array_slice( $orders, -3000, null, true );
+        update_option( 'pps_an_label_rates', $rates, false );
+        update_option( 'pps_an_label_orders', $orders, false );
+    }
+    usort( $out['list'], function ( $a, $b ) { return strcmp( $b['at'], $a['at'] ); } );
+    if ( $out['error'] === '' ) set_transient( 'pps_an_labels', $out, 10 * MINUTE_IN_SECONDS );
+    return $out;
+}
+
+/** The labels section of the screen. $L is pps_an_labels(). */
+function pps_an_labels_output( array $L ) {
+    echo '<div class="card"><h2>Shipping labels bought, per day <span class="description">(last ' . (int) $L['days'] . ' days, every label on the Shippo account)</span></h2>';
+    if ( $L['error'] !== '' ) echo '<p class="late">Shippo could not be read: ' . esc_html( $L['error'] ) . '</p>';
+    $by = array();
+    foreach ( $L['list'] as $l ) $by[ $l['day'] ][] = $l;
+    $labels = array(); $counts = array(); $spend = array();
+    $t = new DateTime( $L['today'] . ' 12:00:00', new DateTimeZone( 'UTC' ) ); $t->modify( '-' . ( $L['days'] - 1 ) . ' days' );
+    for ( $i = 0; $i < $L['days']; $i++ ) {
+        $ymd = $t->format( 'Y-m-d' ); $rows = $by[ $ymd ] ?? array();
+        $labels[] = $t->format( 'M j' );
+        $counts[] = count( array_filter( $rows, function ( $r ) { return $r['status'] !== 'REFUNDED'; } ) );
+        $spend[]  = array_sum( array_map( function ( $r ) { return $r['status'] === 'REFUNDED' ? 0 : (float) $r['amount']; }, $rows ) );
+        $t->modify( '+1 day' );
+    }
+    if ( $L['list'] ) {
+        echo '<div class="grid2"><div>' . pps_an_svg_bars( $labels, array( array( 'Labels', '#2271b1', $counts ) ) ) . '</div><div>'
+           . pps_an_svg_bars( $labels, array( array( 'Postage', '#00a32a', $spend ) ), false, function ( $v ) { return '$' . number_format( $v ); } ) . '</div></div>';
+    } elseif ( $L['error'] === '' ) echo '<p>No labels bought in the last ' . (int) $L['days'] . ' days.</p>';
+    $first = true;
+    foreach ( $by as $day => $rows ) {
+        $live = array_filter( $rows, function ( $r ) { return $r['status'] !== 'REFUNDED'; } );
+        $sum  = array_sum( array_map( function ( $r ) { return (float) $r['amount']; }, $live ) );
+        $head = gmdate( 'D M j', strtotime( $day . ' 12:00:00 UTC' ) ) . ' — ' . count( $live ) . ' label' . ( count( $live ) === 1 ? '' : 's' ) . ' · $' . number_format( $sum, 2 )
+              . ( count( $rows ) > count( $live ) ? ' · ' . ( count( $rows ) - count( $live ) ) . ' refunded' : '' );
+        echo '<details' . ( $first ? ' open' : '' ) . ' style="margin:6px 0"><summary style="cursor:pointer;font-weight:600">' . esc_html( $head ) . '</summary>';
+        echo '<table class="widefat striped" style="margin-top:4px"><thead><tr><th>Time</th><th>Order</th><th>Carrier · service</th><th>Tracking</th><th>Postage</th><th>Label</th></tr></thead><tbody>';
+        foreach ( $rows as $r ) {
+            $ord = $r['order'] !== '' ? '<a href="' . esc_url( admin_url( 'admin.php?page=wc-orders&action=edit&id=' . (int) $r['order'] ) ) . '">#' . (int) $r['order'] . '</a>' : '<span class="description">not linked</span>';
+            $svc = trim( $r['carrier'] . ( $r['service'] !== '' ? ' · ' . $r['service'] : '' ) );
+            $trk = $r['tracking'] === '' ? '—' : ( preg_match( '#^https://#', $r['tracking_url'] ) ? '<a href="' . esc_url( $r['tracking_url'] ) . '">' . esc_html( $r['tracking'] ) . '</a>' : esc_html( $r['tracking'] ) );
+            $st  = $r['status'] === 'SUCCESS' ? '' : ' <span class="late">' . esc_html( strtolower( str_replace( 'REFUND', 'refund ', $r['status'] ) ) ) . '</span>';
+            echo '<tr><td>' . esc_html( $r['time'] ) . ( $r['from_panel'] ? ' <span class="description" title="Bought from the Missive panel">panel</span>' : '' ) . '</td><td>' . $ord . '</td><td>' . ( $svc !== '' ? esc_html( $svc ) : '<span class="description">—</span>' ) . $st . '</td><td>' . $trk . '</td>'
+               . '<td>' . ( $r['amount'] === null ? '—' : '$' . number_format( $r['amount'], 2 ) ) . '</td>'
+               . '<td>' . ( preg_match( '#^https://#', $r['label'] ) ? '<a href="' . esc_url( $r['label'] ) . '">Label PDF</a>' : '—' ) . '</td></tr>';
+        }
+        echo '</tbody></table></details>';
+        $first = false;
+    }
+    if ( $L['pending'] ) echo '<p class="description">Carrier, service and postage are still being looked up for ' . (int) $L['pending'] . ' label' . ( $L['pending'] === 1 ? '' : 's' ) . ' — they fill in on the next refresh.</p>';
+    echo '<p class="description">Read from Shippo ' . esc_html( $L['built_at'] ) . ' (kept 10 minutes). Refunded labels are listed but not counted.</p></div>';
+}
+
 /* ── Screen ─────────────────────────────────────────────────── */
 
 add_action( 'admin_menu', function () {
@@ -351,6 +494,7 @@ function pps_an_render() {
     $days    = (int) ( $_GET['days'] ?? 90 );
     $refresh = ! empty( $_GET['refresh'] ) && check_admin_referer( 'pps_an_refresh' );
     $d   = pps_an_get( $days, $refresh );
+    $d['labels'] = pps_an_labels( $refresh );
     $url = admin_url( 'admin.php?page=pps-analytics' );
     echo '<div class="wrap pps-an"><h1>📊 Production Analytics</h1>';
     pps_an_output( $d, function ( $n ) use ( $url ) { return add_query_arg( 'days', $n, $url ); },
@@ -424,6 +568,8 @@ function pps_an_output( array $d, $days_url, $refresh_url ) {
     }
     echo '</div></div>';
 
+    if ( isset( $d['labels'] ) && is_array( $d['labels'] ) ) pps_an_labels_output( $d['labels'] );
+
     echo '<div class="card"><h2>How these are estimated</h2><ul style="list-style:disc;margin-left:20px">';
     echo '<li><b>Fulfilled</b> = the order reached Completed in the window (Shippo completes an order when its label is bought), so the completed date stands in for the ship date. <b>On time</b> = completed on or before the job\'s must-ship date; ' . (int) $t['no_date'] . ' fulfilled order' . ( $t['no_date'] === 1 ? '' : 's' ) . ' had no must-ship date (custom orders) and ' . ( $t['no_date'] === 1 ? 'is' : 'are' ) . ' left out of that rate.</li>';
     echo '<li><b>Sheets</b> are press sheets as the Paper Order counts them (the yield each job was priced on, or the saved paper plan for a custom line), without overs.';
@@ -466,7 +612,7 @@ add_action( 'wp_loaded', function () {
     if ( ! function_exists( 'pps_mp_key_ok' ) || ! pps_mp_key_ok( $k ) ) { status_header( 403 ); header( 'Content-Type: text/plain; charset=UTF-8' ); echo 'This link is not valid. Open analytics from the Missive panel.'; exit; }
     $refresh = ! empty( $_GET['refresh'] ) && ! get_transient( 'pps_an_frame_refresh' );
     if ( $refresh ) set_transient( 'pps_an_frame_refresh', 1, 60 );
-    try { $d = pps_an_get( (int) ( $_GET['days'] ?? 90 ), $refresh ); }
+    try { $d = pps_an_get( (int) ( $_GET['days'] ?? 90 ), $refresh ); $d['labels'] = pps_an_labels( $refresh ); }
     catch ( \Throwable $e ) {
         error_log( 'PPS analytics: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine() );
         header( 'Content-Type: text/plain; charset=UTF-8' );
