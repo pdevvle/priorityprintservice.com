@@ -267,6 +267,12 @@ if ( file_exists( PPS_CALC_DIR . 'pps-ship-schedule.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-ship-schedule.php';
 }
 
+// Ship-to changes: the order's address is the source; Job Tickets, the Missive panel's subtasks
+// and conversation notes follow, and Shippo's copy is checked.
+if ( file_exists( PPS_CALC_DIR . 'pps-shipto.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-shipto.php';
+}
+
 // Production analytics: intake, fulfilment, sheets and paper + colour cost by week.
 if ( file_exists( PPS_CALC_DIR . 'pps-analytics.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-analytics.php';

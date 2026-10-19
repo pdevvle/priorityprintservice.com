@@ -60,6 +60,37 @@ ok(apiCalls > calls && await p.evaluate(() => !!document.querySelector('iframe.i
 await p.click('button:has-text("Back to the panel")'); await p.waitForTimeout(200);
 ok(await p.evaluate(() => !document.querySelector('iframe.imp') && document.querySelectorAll('.row').length === 3), 'Back returns to the board');
 ok(await p.evaluate(() => { const r = document.querySelector('.pill-late').getBoundingClientRect(); return r.height < 30 && r.width < 200; }), 'a late-start pill is a small pill, not a full-screen overlay (Missive\'s own .alert class)');
+// ship-to: the order card's box, change it, what is posted
+const html2 = html.replace('"shipTo":""', '"shipTo":"https:\\/\\/site.test\\/wp-json\\/pps\\/v1\\/missive\\/ship-to"');
+const answer2 = Object.assign({}, answer, { orders: [{ order: 87001, status: 'processing', admin_url: 'https://site.test/wp-admin/x', jobs: [], conv_ok: false, needs: 0, order_task: null, drive: null, ship: null,
+  ship_to: { addr: { name: 'Ann Lee', company: '', street1: '1 Old Rd', street2: '', city: 'Mesa', state: 'AZ', zip: '85201', phone: '' }, line: 'Ann Lee, 1 Old Rd, Mesa AZ 85201',
+    last: { at: '2026-10-18 10:00', who: 'Pat (order screen)', from: 'Ann Lee, 9 Elm, Mesa AZ 85201', shippo: 'stale', shippo_words: 'Shippo still shows the OLD address (x).' }, can_edit: true } }] });
+const t2 = await b.newPage({ viewport: { width: 380, height: 900 } }); const posted = []; const dialogs = [];
+t2.on('pageerror', e => errs.push('2: ' + e.message)); t2.on('dialog', d => { dialogs.push(d.message()); d.accept(); });
+await t2.addInitScript(() => { if (window.parent === window) return; window.Missive = { _h: {}, on(ev, fn) { this._h[ev] = fn; fn([]); }, fetchConversations: () => Promise.resolve([]), search: () => Promise.resolve([]), openURL() {} }; });
+await t2.route('https://integrations.missiveapp.com/**', r => r.fulfill({ contentType: r.request().url().endsWith('.css') ? 'text/css' : 'application/javascript', body: '' }));
+await t2.route('https://site.test/**', async r => {
+  const u = r.request().url();
+  if (u.endsWith('/wrap')) return r.fulfill({ contentType: 'text/html', body: '<!doctype html><body style="margin:0"><iframe src="https://site.test/panel-page" style="border:0;width:380px;height:900px"></iframe>' });
+  if (u.includes('/panel-page')) return r.fulfill({ contentType: 'text/html', body: html2 });
+  if (u.includes('/missive/ship-to')) { const body = JSON.parse(r.request().postData() || '{}'); posted.push({ body, key: r.request().headers()['x-pps-panel-key'] });
+    return r.fulfill({ contentType: 'application/json', body: JSON.stringify(body.check ? { ok: true, shippo: 'match', words: 'Shippo has the new address.' } : { ok: true, result: { items: 2, missive: { tasks: 1, posts: 1 } }, view: { last: { shippo_words: 'Shippo has the new address.' } } }) }); }
+  return r.fulfill({ contentType: 'application/json', body: JSON.stringify(answer2) });
+});
+await t2.goto('https://site.test/wrap'); await t2.waitForTimeout(500);
+const q = t2.frames().find(f => f.url().includes('/panel-page'));
+const card = await q.evaluate(() => { const c = [...document.querySelectorAll('.card')].find(x => /^Ship to/.test(x.textContent)); return c ? c.innerText : ''; });
+ok(/Ship to · Ann Lee, 1 Old Rd, Mesa AZ 85201/.test(card) && /Changed 2026-10-18 10:00 by Pat \(order screen\) — was Ann Lee, 9 Elm/.test(card) && /Shippo still shows the OLD address/.test(card) && /Check Shippo again/.test(card), 'the order card shows the ship-to, its last change and that Shippo is behind', card);
+await q.click('a:has-text("Check Shippo again")'); await t2.waitForTimeout(200);
+ok(posted.length === 1 && posted[0].body.check === 1 && posted[0].key === 'KEY123', 'Check Shippo again asks the site, with the panel key', posted);
+await q.click('button:has-text("Change")');
+await q.fill('input[placeholder="Street"]', '22 New Ave'); await q.fill('input[placeholder="City"]', 'Tempe'); await q.fill('input[placeholder="ZIP"]', '85281');
+await q.fill('input[placeholder="Your name (for the note)"]', 'Sam');
+await q.click('button:has-text("Save the new ship-to")'); await t2.waitForTimeout(300);
+ok(dialogs.length === 1 && /Change the ship-to for order #87001 to:\nAnn Lee, 22 New Ave, Tempe, AZ 85281/.test(dialogs[0]) && /delivery date is not re-quoted/.test(dialogs[0]), 'saving asks first, naming the new address', dialogs);
+const save = posted.find(x => x.body.address);
+ok(save && save.body.order === 87001 && save.body.address.street1 === '22 New Ave' && save.body.address.name === 'Ann Lee' && save.body.who === 'Sam', 'it posts the order, the whole address and who changed it', save);
+ok(await q.evaluate(() => /Saved\. Updated on 2 job\(s\), 1 subtask\(s\), note posted in 1 conversation\(s\)\. Shippo has the new address\./.test(document.body.innerText)), 'and says what followed');
 ok(errs.length === 0, 'no script errors', errs);
 await b.close();
 console.log(JSON.stringify({ checks }));

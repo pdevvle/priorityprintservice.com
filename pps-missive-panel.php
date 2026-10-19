@@ -493,7 +493,8 @@ function pps_mp_answer( array $ids, $conv = '' ) {
             'admin_url' => admin_url( 'admin.php?page=wc-orders&action=edit&id=' . $id ), 'jobs' => $jobs,
             'conv_ok' => $conv !== '' && (int) ( $map[ $conv ] ?? 0 ) === $id, 'needs' => $needs,
             'order_task' => $by[ $id ] ?? null, 'drive' => pps_mp_drive_info( $order ),
-            'ship' => function_exists( 'pps_ms_summary' ) ? pps_ms_summary( $order ) : null );
+            'ship' => function_exists( 'pps_ms_summary' ) ? pps_ms_summary( $order ) : null,
+            'ship_to' => function_exists( 'pps_st_view' ) ? pps_st_view( $order ) : null );
     }
     $out['board'] = pps_mp_board_rows( $open, $by, $today, $by_item );
     return $out;
@@ -641,7 +642,7 @@ add_action( 'init', function () {
 }, 1 );
 
 function pps_mp_page_html( $key, $api, $state_api = '', $create_api = '', $impose_url = '', $ship_url = '', $analytics_url = '' ) {
-    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api, 'impose' => $impose_url, 'ship' => $ship_url, 'analytics' => $analytics_url, 'build' => substr( md5_file( __FILE__ ), 0, 8 ) ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
+    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api, 'impose' => $impose_url, 'ship' => $ship_url, 'analytics' => $analytics_url, 'shipTo' => function_exists( 'pps_st_view' ) ? rest_url( 'pps/v1/missive/ship-to' ) : '', 'build' => substr( md5_file( __FILE__ ), 0, 8 ) ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     return <<<HTML
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -705,6 +706,56 @@ function impose(order){ FRAME = 'impose'; IMPOSE = order; render(); window.scrol
    It shows in the same frame; its label and tracking links come back here to open through Missive. */
 function shipUrl(order){ return CFG.ship ? CFG.ship + (CFG.ship.indexOf('?')<0?'?':'&') + 'order=' + encodeURIComponent(order) : ''; }
 function ship(order){ FRAME = 'ship'; IMPOSE = order; render(); window.scrollTo(0,0); }
+/* Ship-to (pps-shipto.php): change where the order goes. The site brings every copy in step —
+   Job Tickets, the Ship page, the panel's subtasks, a note in the order's conversations — and
+   says whether Shippo's copy has caught up. */
+function shipToCard(o){
+  var st = o.ship_to, box = el('div',{cls:'card small'}), msg = el('div',{cls:'small'});
+  var form = el('div',{style:'display:none;margin-top:6px'});
+  box.appendChild(el('div',{style:'display:flex;justify-content:space-between;align-items:flex-start;gap:6px'},[
+    el('div',{},[ el('b',{text:'Ship to'}), ' · ', st.line ? st.line : el('span',{cls:'muted',text:'no shipping address on the order'}) ]),
+    st.can_edit ? el('button',{cls:'b',text:'Change',on:function(){ form.style.display = form.style.display==='none' ? '' : 'none'; }}) : null ]));
+  if(st.last){
+    box.appendChild(el('div',{cls:'muted small',text:'Changed '+st.last.at+' by '+st.last.who+(st.last.from?' — was '+st.last.from:'')}));
+    box.appendChild(el('div',{cls:'small '+(st.last.shippo==='stale'||st.last.shippo==='unknown'?'late':(st.last.shippo==='match'?'ok':'muted')),text:st.last.shippo_words}));
+    if(st.last.shippo==='stale'||st.last.shippo==='unknown') box.appendChild(el('a',{cls:'small',text:'Check Shippo again',on:function(){ checkShippo(o.order, msg); }}));
+  }
+  var a = st.addr || {}, f = {};
+  [['name','Name'],['company','Company'],['street1','Street'],['street2','Apt, suite'],['city','City'],['state','State (AZ)'],['zip','ZIP'],['phone','Phone']].forEach(function(x){
+    f[x[0]] = el('input',{placeholder:x[1],value:a[x[0]]||'',title:x[1],style:'width:'+(x[0]==='state'?'60px':(x[0]==='zip'?'90px':'100%'))+';margin:2px 0;box-sizing:border-box'});
+    form.appendChild(f[x[0]]);
+  });
+  var who = el('input',{placeholder:'Your name (for the note)',value:PREF.who||'',style:'width:100%;margin:2px 0;box-sizing:border-box'});
+  form.appendChild(who);
+  var save = el('button',{cls:'b',text:'Save the new ship-to'});
+  save.addEventListener('click',function(){
+    var addr = {}; for(var k in f) addr[k] = f[k].value;
+    if(!confirm('Change the ship-to for order #'+o.order+' to:\\n'+[addr.name,addr.company,addr.street1,addr.street2,addr.city+', '+addr.state+' '+addr.zip].filter(Boolean).join(', ')+'?\\n\\nThe Job Tickets, the Ship page and the order\'s subtasks follow, and a note is posted in its conversations. The delivery date is not re-quoted.')) return;
+    PREF.who = who.value; savePref();
+    save.disabled = true; save.textContent = 'Saving…';
+    fetch(CFG.shipTo,{method:'POST',headers:{'X-PPS-Panel-Key':CFG.key,'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({order:o.order,address:addr,who:who.value})})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        save.disabled = false; save.textContent = 'Save the new ship-to';
+        if(!d.ok){ msg.className='late small'; msg.textContent = d.error || 'Could not save.'; return; }
+        var m = d.result && d.result.missive || {};
+        alertDone('Saved. Updated on '+((d.result&&d.result.items)||0)+' job(s)'+(m.tasks?', '+m.tasks+' subtask(s)':'')+(m.posts?', note posted in '+m.posts+' conversation(s)':'')+'. '+((d.view&&d.view.last&&d.view.last.shippo_words)||''));
+        load(LAST.ids, LAST.conv);
+      })
+      .catch(function(){ save.disabled = false; save.textContent = 'Save the new ship-to'; msg.className='late small'; msg.textContent = 'Could not reach the site — nothing was changed.'; });
+  });
+  form.appendChild(save);
+  box.appendChild(form); box.appendChild(msg);
+  return box;
+}
+function alertDone(t){ var n = el('div',{cls:'card small ok',text:t}); document.body.insertBefore(n, document.body.firstChild); setTimeout(function(){ if(n.parentNode) n.parentNode.removeChild(n); }, 12000); }
+function checkShippo(order, msg){
+  msg.className='muted small'; msg.textContent='Checking Shippo…';
+  fetch(CFG.shipTo,{method:'POST',headers:{'X-PPS-Panel-Key':CFG.key,'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({order:order,check:1})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ msg.className = 'small '+(d.shippo==='match'?'ok':'late'); msg.textContent = d.ok ? d.words : (d.error||'Could not check.'); if(d.shippo==='match') load(LAST.ids, LAST.conv); })
+    .catch(function(){ msg.className='late small'; msg.textContent='Could not reach the site.'; });
+}
 // Production Analytics (pps-analytics.php) in the same frame, opened with the panel key.
 var AN = false;
 function analytics(){ AN = true; render(); window.scrollTo(0,0); }
@@ -987,6 +1038,7 @@ function render(){
       sb.appendChild(el('button',{cls:'b',text:sh.labels?'Ship again':'Ship',title:'Rates from every carrier, and the label',on:function(){ ship(o.order); }}));
       oc.appendChild(sb);
     }
+    if(o.ship_to && CFG.shipTo) oc.appendChild(shipToCard(o));
     var holder = app; app = oc;
     if(d.missive.connected && d.missive.can_create && o.needs > 0){
       var box = el('div',{cls:'card small'});
@@ -1071,6 +1123,7 @@ add_action( 'admin_post_pps_mp_missive', function () {
         }
         update_option( PPS_MP_ALLOW_OPTION, empty( $_POST['allow_state'] ) ? 0 : 1, false );
         update_option( PPS_MP_CREATE_OPTION, empty( $_POST['allow_create'] ) ? 0 : 1, false );
+        update_option( 'pps_missive_allow_address', empty( $_POST['allow_address'] ) ? 0 : 1, false );
     }
     wp_safe_redirect( admin_url( 'admin.php?page=pps-missive-panel&missive=' . $msg ) );
     exit;
@@ -1095,6 +1148,8 @@ function pps_mp_render_admin() {
        . 'Off: the panel only reads. On: it changes the <em>state</em> of a subtask the site has paired with an order — nothing else.</label></p>'
        . '<p><label><input type="checkbox" name="allow_create" value="1"' . ( get_option( PPS_MP_CREATE_OPTION, false ) ? ' checked' : '' ) . '> Let the panel create subtasks — one per job, in the order\'s own conversation, '
        . 'titled with the order, job, quantity, size and window, the Job Ticket as the description, due on the job\'s start date. A job never gets a second one.</label></p>'
+       . '<p><label><input type="checkbox" name="allow_address" value="1"' . ( get_option( 'pps_missive_allow_address', 1 ) ? ' checked' : '' ) . '> Let the panel change an order\'s ship-to (on unless switched off). '
+       . 'Wherever it is changed — here or on the order screen — the Job Tickets, the Ship page, the panel\'s subtasks and a note in the order\'s conversations follow, and the panel says whether Shippo\'s copy has caught up.</label></p>'
        . '<p><button class="button button-primary">Save</button> '
        . ( $tok !== '' ? '<button class="button" name="remove_token" value="1" onclick="return confirm(\'Remove the Missive API token?\')">Remove token</button>' : '' ) . '</p></form>';
 
