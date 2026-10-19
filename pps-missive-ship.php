@@ -126,6 +126,8 @@ function pps_ms_accounts( $fresh = false ) {
             'carrier' => (string) ( $a['carrier_name'] ?? $a['carrier'] ?? '' ),
             'shippo'  => $own,
             'name'    => $own ? 'Shippo rates' : ( trim( (string) ( $a['metadata'] ?? '' ) ) ?: ( strpos( $acct, '*' ) === false && $acct !== '' ? 'account ' . $acct : 'own account' ) ),
+            // A carrier login Shippo is still waiting on ("authorization_pending"): its rates do not come back.
+            'needs_auth' => ( $a['object_info']['authentication']['type'] ?? '' ) === 'oauth' && ! in_array( (string) ( $a['object_info']['authentication']['status'] ?? '' ), array( '', 'authorized', 'active' ), true ),
         );
     }
     set_transient( 'pps_ms_accounts', $out, HOUR_IN_SECONDS );
@@ -351,13 +353,22 @@ function pps_ms_clean_extra( $x ) {
 }
 
 /** Carrier notes worth a person's attention (the routine ones every quote carries are dropped). */
-function pps_ms_notes( array $msgs ) {
+function pps_ms_notes( array $msgs, array $accounts = array() ) {
+    // Shippo's "missing authorization … reconnect your carrier account" names no account; say which.
+    $stuck = array();
+    foreach ( $accounts as $a ) if ( ! empty( $a['needs_auth'] ) ) $stuck[ $a['carrier'] ][] = '"' . $a['name'] . '"';
     $skip = '/doesn.t support one or more shipment options|RatedShipmentAlert: Your invoice may vary|End of Day|master account doesn.t support shipments to inside|must not be empty|out of the service area|filtered from rate response due to|option is unavailable with the selected service/i';
     $out = array();
     foreach ( $msgs as $m ) {
         $t = trim( (string) ( $m['text'] ?? '' ) );
         if ( $t === '' || preg_match( $skip, $t ) ) continue;
-        $out[ trim( ( $m['source'] ?? '' ) . ': ' . $t, ': ' ) ] = 1;
+        $src = trim( (string) ( $m['source'] ?? '' ) );
+        if ( preg_match( '/missing authorization|reconnect your carrier account/i', $t ) ) {
+            $names = $stuck[ $src ] ?? array();
+            $t = ( $names ? $src . ' account ' . implode( ' and ', $names ) : 'A ' . $src . ' account' ) . ' needs reconnecting in Shippo (Settings → Carriers → Reconnect, signing in to that carrier account). Its rates are missing until then; the others are unaffected.';
+            $out[ $t ] = 1; continue;
+        }
+        $out[ trim( $src . ': ' . $t, ': ' ) ] = 1;
     }
     return array_slice( array_keys( $out ), 0, 8 );
 }
@@ -451,7 +462,7 @@ function pps_ms_rates( $order_id, $to, $parcels, $ship_ymd = '', $extra = array(
     set_transient( 'pps_ms_q_' . (int) $order_id, array( 'qid' => $qid, 'ship' => $ship, 'to' => $to, 'boxes' => $boxes, 'base' => $base, 'extra' => $extra, 'options' => $store ), 30 * 60 );
     return array( 'quote' => $qid, 'ship_date' => $ship, 'delivery' => $view['delivery'], 'must_ship' => $view['must_ship'],
                   'boxes' => $boxes, 'extra' => array( 'signature' => $extra['signature_confirmation'] ?? '', 'insure' => isset( $extra['insurance'] ) ? (float) $extra['insurance']['amount'] : 0 ),
-                  'options' => $options, 'notes' => pps_ms_notes( $msgs ) );
+                  'options' => $options, 'notes' => pps_ms_notes( $msgs, $accounts ) );
 }
 
 /* ── Buy ──────────────────────────────────────────────────────────────────── */

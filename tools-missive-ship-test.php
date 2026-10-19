@@ -166,7 +166,7 @@ $td = array( pps_ms_transit_days( 'FedEx', 'fedex_priority_overnight', 0 ), pps_
              pps_ms_transit_days( 'FedEx', 'fedex_ground', 3 ), pps_ms_transit_days( 'UPS', 'ups_second_day_air', 2 ), pps_ms_transit_days( 'UPS', 'ups_next_day_air', 1 ), pps_ms_transit_days( 'USPS', 'usps_ground_advantage', 3 ), pps_ms_transit_days( 'UPS', 'ups_ground', null ) );
 ok( $td === array( 1, 2, 2, 3, 3, 2, 1, 3, null ), 'business days: FedEx overnight 1, 2Day 2, Express Saver 3 (their promise); FedEx Ground, UPS and USPS as the carrier says; none when none given', $td );
 ok( $byid['UPS Ground']['tags'] === array(), 'a single box\'s "best value" tag is not claimed for a set of boxes' );
-ok( $q['notes'] === array( 'UPS: Request failed due to missing authorization. Please reconnect your carrier account.' ), 'routine carrier messages are dropped; one a person should act on is kept', $q['notes'] );
+ok( count( $q['notes'] ) === 1 && strpos( $q['notes'][0], 'A UPS account needs reconnecting in Shippo' ) === 0, 'routine carrier messages are dropped; one a person should act on is kept', $q['notes'] );
 $stored = $GLOBALS['tr']['pps_ms_q_87551'];
 $sg = $stored['options'][ $byid['UPS Ground']['id'] ];
 ok( $stored['qid'] === $q['quote'] && count( $stored['options'] ) === 4 && $sg['groups'][0]['count'] === 2 && $sg['groups'][0]['rate'] === array( 'r1-upsg', 12.4 ) && $sg['account_id'] === 'acc-ups', 'the quote keeps, on the server, each option\'s box groups and their rate', $sg );
@@ -281,6 +281,16 @@ ok( strpos( $panel, "require_once __DIR__ . '/pps-missive-ship.php';" ) !== fals
 ok( strpos( $panel, "text:' [Ship]'" ) !== false && strpos( $panel, "text:sh.labels?'Ship again':'Ship'" ) !== false && strpos( $panel, "u = shipping ? shipUrl(IMPOSE) : imposeUrl(IMPOSE)" ) !== false, 'a Ship button on the order card and each board row, in the panel\'s frame' );
 ok( strpos( $panel, "e.origin===location.origin && e.data && typeof e.data.ppsOpen==='string'" ) !== false, 'label and tracking links open through Missive, only from the site\'s own pages' );
 ok( strpos( $panel, "DATA=d; if(!IMPOSE && !AN) render();" ) !== false, 'new panel data never reloads the shipping page mid-purchase' );
+
+// a carrier account whose login Shippo is still waiting on is named, not left as Shippo's raw error
+$acc = array( 'a1' => array( 'carrier' => 'UPS', 'shippo' => true, 'name' => 'Shippo rates', 'needs_auth' => false ),
+              'a2' => array( 'carrier' => 'UPS', 'shippo' => false, 'name' => 'Cogent Promo', 'needs_auth' => true ) );
+$nt = pps_ms_notes( array( array( 'source' => 'UPS', 'text' => 'Request failed due to missing authorization. Please reconnect your carrier account and try again or contact Shippo support at https://shippo.com/get-help for assistance.' ),
+                           array( 'source' => 'UPS', 'text' => 'Request failed due to missing authorization. Please reconnect your carrier account and try again.' ) ), $acc );
+ok( count( $nt ) === 1 && strpos( $nt[0], 'UPS account "Cogent Promo" needs reconnecting in Shippo' ) === 0 && strpos( $nt[0], 'the others are unaffected' ) !== false, 'Shippo\'s "missing authorization" note names the account to reconnect, once', $nt );
+ok( strpos( pps_ms_notes( array( array( 'source' => 'FedEx', 'text' => 'missing authorization, reconnect your carrier account' ) ) )[0], 'A FedEx account needs reconnecting' ) === 0, 'and still says what to do when the account is not known' );
+$src_ms = file_get_contents( __DIR__ . '/pps-missive-ship.php' );
+ok( strpos( $src_ms, "'needs_auth' => ( \$a['object_info']['authentication']['type'] ?? '' ) === 'oauth'" ) !== false, 'an OAuth account Shippo has not authorized is marked from the account list' );
 
 // ── the page in a browser ──
 $tmp = sys_get_temp_dir() . '/pps-ms-' . getmypid() . '.html';
