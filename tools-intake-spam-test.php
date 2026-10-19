@@ -153,6 +153,7 @@ const pw = require(require('path').join(execSync('npm root -g').toString().trim(
       posted = r.request().postData(); return r.fulfill({ contentType: 'text/html', body: 'ok' });
     });
     await p.goto('https://site.test/page');
+    await p.waitForTimeout(200); if (mode === 'click') out.onView = await p.inputValue('[name=pps_tok]');
     if (mode === 'click') { await p.click('[name=name]'); await p.waitForTimeout(200); out.afterClick = await p.inputValue('[name=pps_tok]'); }
     await p.fill('[name=name]', 'Pat'); await p.click('button'); await p.waitForTimeout(500);
     out[mode] = { toks, posted };
@@ -164,7 +165,9 @@ JS;
 file_put_contents( "$tmp.js", $js );
 $r = json_decode( (string) shell_exec( 'node ' . escapeshellarg( "$tmp.js" ) . ' ' . escapeshellarg( $tmp ) . ' 2>&1' ), true );
 @unlink( $tmp ); @unlink( "$tmp.js" );
-check( is_array( $r ) && $r['afterClick'] === '1792358000.' . str_repeat( 'ab', 16 ), 'browser: a person clicking into the form fetches the token' );
+check( is_array( $r ) && $r['onView'] === '1792358000.' . str_repeat( 'ab', 16 ), 'browser: the token is fetched as soon as the form is on screen' );
+check( is_array( $r ) && $r['afterClick'] === '1792358000.' . str_repeat( 'ab', 16 ), 'and is still there when a person clicks into the form' );
+check( substr_count( $src, '<script data-cfasync="false">(function(){var r=document.getElementById(%s)' ) === 2, 'both form scripts tell Cloudflare Rocket Loader to leave them alone (it deferred them past the first click on 2026-10-19)' );
 check( is_array( $r ) && $r['click']['toks'] === 1 && strpos( (string) $r['click']['posted'], 'pps_tok=1792358000.' ) !== false, 'and it is posted with the form, fetched once' );
 check( is_array( $r ) && strpos( (string) $r['submit-first']['posted'], 'pps_tok=1792358000.' ) !== false, 'browser: a submit before any token waits for one, then posts it' );
 check( is_array( $r ) && $r['fetch-fails']['posted'] !== null && strpos( (string) $r['fetch-fails']['posted'], 'name=Pat' ) !== false, 'browser: if the token cannot be fetched the form still submits (kept as a draft, never lost)' );

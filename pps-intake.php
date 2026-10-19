@@ -247,7 +247,9 @@ function pps_intake_forms() {
  *
  * What such a bot does not do is run the page: it POSTs to admin-post.php. So the form
  * carries an empty `pps_tok`, and its script fetches a signed timestamp from an uncached
- * endpoint the first time a person clicks, taps or types in the form (or at submit). The
+ * endpoint as soon as the form is on screen or a person clicks, taps or types in it (or at
+ * submit). Cloudflare's Rocket Loader would otherwise defer the script to after page load
+ * (2026-10-19), hence data-cfasync="false". The
  * pages are cached, so the token cannot be printed into them — the same reason the form
  * has no nonce. A submission without a good token, or sent within
  * PPS_INTAKE_TOKEN_MIN_AGE seconds of the first touch, is not refused (the visitor sees
@@ -289,18 +291,21 @@ add_action( 'wp_ajax_nopriv_pps_intake_token', 'pps_intake_token_endpoint' );
 add_action( 'wp_ajax_pps_intake_token',        'pps_intake_token_endpoint' );
 
 /**
- * The form's token script. Fetches once, on the first pointer, touch or key in the form;
+ * The form's token script. Fetches once: when the form scrolls into view, or on the first
+ * pointer, touch or key in it;
  * if submit comes first it holds the submit until the token is in (or the fetch fails —
  * then it submits anyway and the server keeps the request as a draft, never lost).
  */
 function pps_intake_token_script( $anchor, $url ) {
     return sprintf(
-        '<script>(function(){var r=document.getElementById(%s),f=r&&r.querySelector("form");if(!f)return;'
+        '<script data-cfasync="false">(function(){var r=document.getElementById(%s),f=r&&r.querySelector("form");if(!f)return;'
       . 'var i=f.querySelector(\'[name="pps_tok"]\'),p=null,go=false;if(!i)return;'
       . 'function get(){if(!p)p=fetch(%s,{credentials:"same-origin",cache:"no-store"})'
         . '.then(function(x){return x.ok?x.text():""}).then(function(t){if(/^\\d+\\.[0-9a-f]{32}$/.test(t))i.value=t})'
         . '.catch(function(){});return p}'
       . '["pointerdown","touchstart","keydown"].forEach(function(e){f.addEventListener(e,get,{once:true,passive:true})});'
+      // ...and as soon as the form is on screen, so the token's age is time spent on the form.
+      . 'if(window.IntersectionObserver){var o=new IntersectionObserver(function(es){if(es.some(function(x){return x.isIntersecting})){get();o.disconnect()}});o.observe(f)}else get();'
       . 'f.addEventListener("submit",function(ev){if(i.value||go)return;ev.preventDefault();'
         . 'var b=f.querySelector("[type=submit]");if(b)b.disabled=true;'
         . 'get().then(function(){go=true;HTMLFormElement.prototype.submit.call(f)})})})();</script>',
@@ -449,7 +454,7 @@ add_shortcode( 'pps_intake', function ( $atts ) {
     // terminator, and the HTML parser would not recognise the escaped form, swallowing the
     // rest of the page as script content.
     printf(
-        '<script>(function(){var r=document.getElementById(%s);if(!r)return;'
+        '<script data-cfasync="false">(function(){var r=document.getElementById(%s);if(!r)return;'
       . 'var c=r.querySelectorAll("[data-show-if]");if(!c.length)return;'
       . 'function sync(){Array.prototype.forEach.call(c,function(el){'
         . 'var want=el.getAttribute("data-show-if-value"),on=false;'
