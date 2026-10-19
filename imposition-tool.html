@@ -60,6 +60,20 @@
   .imp-acc-h .chev { margin-left:auto; color:rgba(255,255,255,.4); font-size:11px; }
   .imp-acc-b { padding:12px 12px 4px; }
   .imp-acc-b .lbl { margin-top:2px; }
+  /* Segmented control (1.60): two to six short choices, every option visible — no dropdown to open. */
+  .imp-seg { display:inline-flex; flex-wrap:wrap; border:1px solid rgba(255,255,255,.14); border-radius:8px; overflow:hidden; background:#2a2e36; max-width:100%; }
+  .imp-seg-b { background:none; border:0; border-right:1px solid rgba(255,255,255,.1); color:#cfd3dc; font-size:12px; padding:6px 10px; cursor:pointer; line-height:1.25; white-space:nowrap; }
+  .imp-seg-b:last-child { border-right:0; }
+  .imp-seg-b:hover { background:rgba(255,255,255,.06); }
+  .imp-seg-b.on { background:rgba(78,161,255,.18); color:#4ea1ff; font-weight:700; }
+  .imp-seg-b:disabled { opacity:.4; cursor:not-allowed; }
+  .imp-seg.block { display:flex; } .imp-seg.block .imp-seg-b { flex:1; text-align:center; }
+  .imp-hint { font-size:11px; color:rgba(255,255,255,.4); margin-top:4px; line-height:1.45; }
+  .imp-row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  .imp-check { font-size:13px; display:flex; gap:8px; align-items:flex-start; cursor:pointer; margin-bottom:8px; }
+  .imp-check input { width:auto; margin-top:3px; }
+  .imp-check .d { color:rgba(255,255,255,.4); }
+  .imp-sub { font-size:11px; font-weight:700; color:rgba(255,255,255,.35); text-transform:uppercase; letter-spacing:.5px; margin:10px 0 6px; padding-top:10px; border-top:1px dashed rgba(255,255,255,.1); }
   .imp-main { flex:1; min-width:0; }
   .imp-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:#1a1d23; border:1px solid rgba(255,255,255,.08);
                  border-radius:12px; padding:8px 12px; margin:12px 0; }
@@ -107,7 +121,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-18 07:00 UTC · IMPOSE-V1.59</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-19 02:00 UTC · IMPOSE-V1.60</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -4381,6 +4395,32 @@ function Field({ label, children, style }) {
   return <div style={{ marginBottom: 12, ...style }}><span className="lbl">{label}</span>{children}</div>;
 }
 
+// Segmented control: every choice on screen at once. A dropdown hides the
+// alternatives and costs a click to see them; for two to six short options
+// the operator should see the whole set and the current one highlighted
+// (1.60 sidebar rework). `dataAttr` exposes the value for the harness.
+function Seg({ value, onChange, options, title, dataAttr, block, style }) {
+  const extra = dataAttr ? { [dataAttr]: String(value) } : {};
+  return (
+    <div className={"imp-seg" + (block ? " block" : "")} title={title} style={style} {...extra}>
+      {options.map(o => (
+        <button key={String(o.v)} type="button" className={"imp-seg-b" + (String(value) === String(o.v) ? " on" : "")}
+                title={o.title} disabled={o.disabled} onClick={() => onChange(o.v)}>{o.l}</button>
+      ))}
+    </div>
+  );
+}
+// One tick with its explanation, the same everywhere.
+function Check({ checked, onChange, label, hint, disabled, style, dataAttr }) {
+  const extra = dataAttr ? { [dataAttr]: checked ? "1" : "0" } : {};
+  return (
+    <label className="imp-check" style={{ cursor: disabled ? "default" : "pointer", ...style }} {...extra}>
+      <input type="checkbox" checked={!!checked} disabled={disabled} onChange={e => onChange(e.target.checked)} />
+      <span>{label}{hint ? <span className="d"> — {hint}</span> : null}</span>
+    </label>
+  );
+}
+
 function DropZone({ label, sub, accept, onFiles, fileName }) {
   const [over, setOver] = useState(false);
   const inputRef = useRef(null);
@@ -4915,7 +4955,7 @@ function App() {
   const [sheetSel, setSheetSel] = useState("auto");  // parent sheet override
   const [sheetLong, setSheetLong] = useState(19);
   const [sheetShort, setSheetShort] = useState(13);
-  const [sheetMargin, setSheetMargin] = useState(0.25);
+  const [sheetMargin, setSheetMargin] = useState("");   // empty = SHEET_MARGIN (0 since 1.46); the box used to start at 0.25 and quietly override the owner's default
   const [sheetPortrait, setSheetPortrait] = useState(false); // parent sheet stood on end (short edge across)
   const [allowBestFit, setAllowBestFit] = useState(false);
   const [efficient, setEfficient] = useState(false);      // lay out on 13×27.5, multiple expands
@@ -4999,7 +5039,11 @@ function App() {
   const [refOpen, setRefOpen] = useState(false);           // metadata reference panel
   // 1.33 layout: which accordion sections are open, the sheet viewport, and
   // the two specialty features.
-  const [secOpen, setSecOpen] = useState({ general: true, layout: true, product: true, bleed: false, specialty: false, marks: false });
+  // 1.60: the column reads top-down in the order a job is set up — what it is,
+  // how the art meets the size, which sheet, how it lies, duplex, the book,
+  // bleed, press prep, marks.
+  const SECS = ["job", "artwork", "sheet", "layout", "duplex", "book", "bleed", "press", "marks"];
+  const [secOpen, setSecOpen] = useState({ job: true, artwork: true, sheet: true, layout: true, duplex: false, book: true, bleed: false, press: false, marks: false });
   const toggleSec = k => setSecOpen(o => ({ ...o, [k]: !o[k] }));
   const [queueOpen, setQueueOpen] = useState(true);
   const [zoom, setZoom] = useState(null);                  // px per inch; null = fit two sheets
@@ -5671,6 +5715,36 @@ function App() {
   const showProduct = isPB || !isSaddle;
   const fitCount = 2;
 
+  // Sidebar figures shared by the Artwork, Sheet and Layout sections (1.60):
+  // the one job, or the perfect-bound half the grid panel is pointed at.
+  // Written once so the sheet line, the piece readout, the gutter and the
+  // position rows all agree.
+  const sheetCtx = () => {
+    const pbParts = isPB && layoutInfo.pbLayouts ? ["cover", "guts"].filter(p => layoutInfo.pbLayouts[p]) : [];
+    const part = isPB ? (pbParts.includes(pbGridPart) ? pbGridPart : pbParts[0]) : null;
+    const tLay = isPB ? (part && layoutInfo.pbLayouts[part] && layoutInfo.pbLayouts[part].layout) : lay;
+    const tG = isPB ? (part ? pbGrids[part] : null) : { cols: gapCols, rows: gapRows, fill: gapFill };
+    const customGaps = !!(tG && (tG.cols || tG.rows));
+    const fillOn = tG && tG.fill != null ? !!tG.fill : !!(tLay && tLay.fillSheet);
+    const clearGaps = () => isPB
+      ? setPbGrids(p => ({ cover: { ...p.cover, cols: null, rows: null }, guts: { ...p.guts, cols: null, rows: null } }))
+      : (setGapCols(null), setGapRows(null));
+    const shL = tLay ? tLay.sheet : null;
+    const m = marginOf({ sheetMargin }) == null ? SHEET_MARGIN : marginOf({ sheetMargin });
+    // dims = the STOCK as [long, short], never the oriented sheet — the
+    // orientation segment labels both ways round from it.
+    const dims = shL ? [Math.max(shL.long, shL.short), Math.min(shL.long, shL.short)]
+      : sheetSel === "custom" ? [Math.max(+sheetLong || 0, +sheetShort || 0), Math.min(+sheetLong || 0, +sheetShort || 0)]
+      : SHEETS[sheetSel] ? [SHEETS[sheetSel].long, SHEETS[sheetSel].short] : [19, 13];
+    const printable = shL ? `${shL.usableLong}×${shL.usableShort}` : `${(dims[0] - 2 * m).toFixed(2)}×${(dims[1] - 2 * m).toFixed(2)}`;
+    const pL = Math.max(+trimLong || 0, +trimShort || 0) || "long", pS = Math.min(+trimLong || 0, +trimShort || 0) || "short";
+    const lyW = shL ? shL.long : (sheetPortrait ? dims[1] : dims[0]), lyH = shL ? shL.short : (sheetPortrait ? dims[0] : dims[1]);
+    return { pbParts, part, tLay, tG, customGaps, fillOn, clearGaps, shL, m, dims, printable, pL, pS, lyW, lyH };
+  };
+  const fitWords = { crop: "100 %, centred on the art's own trim and cut to the finished size — never scaled. A page bigger than the size loses its edges (crop marks, slug); a smaller page sits inside it with paper white around.",
+                     fill: "scaled up or down until the art covers the finished size; the excess on the long axis is cropped evenly.",
+                     fit: "scaled to sit inside the finished size — paper white on one axis. What every build before 1.56 did." };
+
   return (
     <div className="imp-app">
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
@@ -5692,9 +5766,9 @@ function App() {
             <span>Imposition controls</span>
             <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)", fontWeight: 400 }}>
               <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }}
-                      onClick={() => setSecOpen({ general: true, layout: true, product: true, bleed: true, specialty: true, marks: true })}>all</button>{" "}
+                      onClick={() => setSecOpen(Object.fromEntries(SECS.map(k => [k, true])))}>all</button>{" "}
               <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }}
-                      onClick={() => setSecOpen({ general: false, layout: false, product: false, bleed: false, specialty: false, marks: false })}>none</button>
+                      onClick={() => setSecOpen(Object.fromEntries(SECS.map(k => [k, false])))}>none</button>
             </span>
           </div>
           <div className="imp-setups" data-setups>
@@ -5714,40 +5788,31 @@ function App() {
             </div>
           )}
 
-          <Acc id="general" title="General settings" open={secOpen.general} onToggle={() => toggleSec("general")}>
-            <Field label="Product layout type">
+          <Acc id="job" title="Job" open={secOpen.job} onToggle={() => toggleSec("job")}>
+            <Field label="Product">
               <select value={calc} onChange={e => setCalc(e.target.value)}>
                 {CALC_TYPES.map(c => <option key={c.val} value={c.val}>{c.label}</option>)}
               </select>
             </Field>
-            <div style={{ display: "flex", gap: 10 }}>
-              <Field label={isBound ? "Finished size — page width (in)" : "Finished size — long (in)"} style={{ flex: 1 }}>
+            <div className="imp-row">
+              <Field label={isBound ? "Page width (in)" : "Finished size — long (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimLong} onChange={e => setTrimLong(e.target.value)} />
               </Field>
               <Field label={isBound ? "Page height (in) — spine edge" : "Short (in)"} style={{ flex: 1 }}>
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
             </div>
-            <Field label="Artwork vs the finished size">
-              <select value={artFit} onChange={e => setArtFit(e.target.value)} data-art-fit title="What happens when the artwork's trim (TrimBox, or the page) is not the finished size typed above. Crop never scales: 100%, centred, cut to size — a 4.5×2.5 page with crop marks for a 4×2 card loses the marks; a smaller page sits inside the size with paper white around it.">
-                <option value="crop">Crop — 100%, centred, cut to the finished size (never scaled)</option>
-                <option value="fill">Fill — scale to cover the finished size, crop the excess</option>
-                <option value="fit">Fit — scale to sit inside the finished size (paper white on one axis)</option>
-              </select>
-            </Field>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-              <Field label="Duplexed sheets" style={{ flex: "0 0 150px" }}>
-                <label style={{ fontSize: 13, display: "flex", gap: 7, alignItems: "center", cursor: isBook ? "default" : "pointer", padding: "8px 0" }}>
-                  <input type="checkbox" checked={isBook ? true : sides === 2} disabled={isBook} style={{ width: "auto" }}
-                         onChange={e => setSides(e.target.checked ? 2 : 1)} />
-                  {isBook ? "always (book)" : sides === 2 ? "2-sided" : "1-sided"}
-                </label>
+            <div className="imp-row">
+              <Field label="Sides" style={{ flex: "0 0 auto" }}>
+                {isBook
+                  ? <div style={{ fontSize: 13, padding: "7px 0", color: "rgba(255,255,255,.55)" }}>2-sided (book)</div>
+                  : <Seg value={sides === 2 ? 2 : 1} onChange={v => setSides(v)} dataAttr="data-sides" options={[{ v: 1, l: "1-sided" }, { v: 2, l: "2-sided" }]} />}
               </Field>
               <Field label={isBook ? "Quantity (books)" : gangFiles.length >= 2 ? "Quantity (press sheets)" : multiMode === "each" ? "Quantity (per piece)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
                 <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} />
               </Field>
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
+            <div className="imp-row">
               <Field label="Name" style={{ flex: 1 }}>
                 <input type="text" value={jobName} onChange={e => setJobName(e.target.value)} placeholder="job name — filename + slug" />
               </Field>
@@ -5757,174 +5822,210 @@ function App() {
             </div>
           </Acc>
 
-          <Acc id="layout" title="Layout settings" open={secOpen.layout} onToggle={() => toggleSec("layout")}
-               badge={lay && lay.manualGrid ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>MANUAL</span> : null}>
-            {(() => {
-              // What the rest of this section is pointed at: the one job, or the
-              // perfect-bound half the grid panel below is editing. Written once
-              // here so the sheet, gutter and offset rows all agree.
-              const pbParts = isPB && layoutInfo.pbLayouts ? ["cover", "guts"].filter(p => layoutInfo.pbLayouts[p]) : [];
-              const part = isPB ? (pbParts.includes(pbGridPart) ? pbGridPart : pbParts[0]) : null;
-              const tLay = isPB ? (part && layoutInfo.pbLayouts[part] && layoutInfo.pbLayouts[part].layout) : lay;
-              const tG = isPB ? (part ? pbGrids[part] : null)
-                              : { cols: gapCols, rows: gapRows, fill: gapFill };
-              const customGaps = !!(tG && (tG.cols || tG.rows));
-              const fillOn = tG && tG.fill != null ? !!tG.fill : !!(tLay && tLay.fillSheet);
-              const clearGaps = () => isPB
-                ? setPbGrids(p => ({ cover: { ...p.cover, cols: null, rows: null }, guts: { ...p.guts, cols: null, rows: null } }))
-                : (setGapCols(null), setGapRows(null));
-              const shL = tLay ? tLay.sheet : null;
-              const m = marginOf({ sheetMargin }) == null ? SHEET_MARGIN : marginOf({ sheetMargin });
-              const dims = shL ? [shL.long, shL.short]
-                : sheetSel === "custom" ? [Math.max(+sheetLong || 0, +sheetShort || 0), Math.min(+sheetLong || 0, +sheetShort || 0)]
-                : SHEETS[sheetSel] ? [SHEETS[sheetSel].long, SHEETS[sheetSel].short] : [19, 13];
-              const printable = shL ? `${shL.usableLong}×${shL.usableShort}` : `${(dims[0] - 2 * m).toFixed(2)}×${(dims[1] - 2 * m).toFixed(2)}`;
-              const pL = Math.max(+trimLong || 0, +trimShort || 0) || "long", pS = Math.min(+trimLong || 0, +trimShort || 0) || "short";
-              const lyW = shL ? shL.long : (sheetPortrait ? dims[1] : dims[0]), lyH = shL ? shL.short : (sheetPortrait ? dims[0] : dims[1]);
-              return (
-                <>
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-                    <Field label={isPB ? "Press sheet (job default — each half can pick its own below)" : "Press sheet"} style={{ flex: "1 1 200px", marginBottom: 8 }}>
-                      <select value={sheetSel} onChange={e => setSheetSel(e.target.value)}>
-                        <option value="auto">Auto — the product's own press sheet</option>
-                        <option value="13x19">13×19</option>
-                        <option value="13x27.5">13×27.5 (oversize)</option>
-                        <option value="12x18">12×18 crack-n-peel</option>
-                        <option value="custom">Custom size…</option>
-                      </select>
-                    </Field>
-                    <Field label="Imageable margin (in)" style={{ flex: "0 0 110px", marginBottom: 8 }}>
-                      <input type="number" step="0.0625" min="0" value={sheetMargin} placeholder={String(SHEET_MARGIN)}
-                             onChange={e => setSheetMargin(e.target.value)} />
-                    </Field>
-                    <Field label="Sheet orientation" style={{ flex: "0 0 150px", marginBottom: 8 }}>
-                      <select value={sheetPortrait ? "portrait" : "landscape"} onChange={e => setSheetPortrait(e.target.value === "portrait")} title="Which way the parent sheet lies under the layout">
-                        <option value="landscape">{`${dims[0]} wide × ${dims[1]} tall (landscape)`}</option>
-                        <option value="portrait">{`${dims[1]} wide × ${dims[0]} tall (portrait)`}</option>
-                      </select>
-                    </Field>
-                    {!isSaddle && !isPB && (
-                      <Field label="Artwork rotation on the sheet" style={{ flex: "1 1 220px", marginBottom: 8 }}>
-                        <select value={artRotate} onChange={e => setArtRotate(e.target.value)} title="How each piece lies in its cell. Columns × rows below count the piece as placed.">
-                          <option value="auto">{`Auto — ${pL} × ${pS} or ${pS} × ${pL}, whichever fits`}</option>
-                          <option value="0">{`${pL} wide × ${pS} tall (0°)`}</option>
-                          <option value="90">{`${pS} wide × ${pL} tall (90°)`}</option>
-                          <option value="180">{`${pL} wide × ${pS} tall, upside down (180°)`}</option>
-                          <option value="270">{`${pS} wide × ${pL} tall, upside down (270°)`}</option>
-                        </select>
-                      </Field>
-                    )}
-                  </div>
-                  {!isSaddle && !isPB && tLay && (
-                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: -4, marginBottom: 8 }}>
-                      Piece as placed: <b style={{ color: "rgba(255,255,255,.8)" }}>{tLay.cellW}×{tLay.cellH}″</b>{tLay.rotated ? " (rotated 90°)" : ""}{artRotate === "180" || artRotate === "270" ? ", head-down" : ""} · {tLay.across} column{tLay.across === 1 ? "" : "s"} × {tLay.down} row{tLay.down === 1 ? "" : "s"} · block {(tLay.across * tLay.cellW + (tLay.colGaps ? tLay.colGaps.reduce((a, b) => a + b, 0) : (tLay.across - 1) * tLay.gutter)).toFixed(2)}×{(tLay.down * tLay.cellH + (tLay.rowGaps ? tLay.rowGaps.reduce((a, b) => a + b, 0) : (tLay.down - 1) * tLay.gutter)).toFixed(2)}″ on the {tLay.sheet.long}×{tLay.sheet.short}″ sheet
-                    </div>
-                  )}
-                  {sheetSel === "custom" && (
-                    <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 8, flexWrap: "wrap" }}>
-                      <div>
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet long (in)</div>
-                        <input type="number" step="0.25" min="3" max="60" value={sheetLong} style={{ width: 84 }}
-                               onChange={e => setSheetLong(e.target.value)} />
-                      </div>
-                      <span style={{ paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
-                      <div>
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Sheet short (in)</div>
-                        <input type="number" step="0.25" min="3" max="60" value={sheetShort} style={{ width: 84 }}
-                               onChange={e => setSheetShort(e.target.value)} />
-                      </div>
-                    </div>
-                  )}
-                  <div className="imp-sheetline" style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: -2, marginBottom: 10 }}>
-                    Sheet <b style={{ color: "rgba(255,255,255,.8)" }}>{shL ? stockOf(shL) : `${dims[1]}×${dims[0]}`}</b> lying <b style={{ color: "rgba(255,255,255,.8)" }}>{lyW} wide × {lyH} tall</b>
-                    {" · "}prints <b style={{ color: "rgba(255,255,255,.8)" }}>{printable}″</b> inside a {m}″ margin
-                    {fillOn ? <span style={{ color: "#fbbf24" }}> · fill mode — block centred inside that margin; set it to 0 for the whole sheet</span> : null}
-                    {sheetSel !== "auto" && <span> · physical sheet only; the priced imp stays what the calculator quoted</span>}
-                  </div>
-
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                    {fillOn ? (
-                      <Field label="Layout position" style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12.5, padding: "8px 0", color: "rgba(255,255,255,.55)" }}>
-                          Centred inside the margin <span style={{ color: "rgba(255,255,255,.4)" }}>— fill mode centres the block, so no jog/offset applies{isPB ? " to this half" : ""}; the imageable margin above is the only edge kept clear.</span>
-                        </div>
-                      </Field>
-                    ) : (
-                      <Field label="Layout position offset" style={{ flex: 1 }}>
-                        <select value={offsetMode} onChange={e => setOffsetMode(e.target.value)}>
-                          <option value="jog">Jog lower-right 0.5″ (back: lower-left)</option>
-                          <option value="center">Centered</option>
-                          <option value="custom">Custom offset…</option>
-                        </select>
-                      </Field>
-                    )}
-                    {customGaps ? (
-                      <Field label="Gutter" style={{ flex: "0 0 150px" }}>
-                        <div style={{ fontSize: 12.5, padding: "6px 0", display: "flex", gap: 8, alignItems: "center" }}>
-                          <span>custom per gap</span>
-                          <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }}
-                                  onClick={clearGaps}>uniform</button>
-                        </div>
-                      </Field>
-                    ) : (
-                      <Field label="Gutter" style={{ flex: "0 0 110px" }}>
-                        <select value={gutterMode} onChange={e => { setGutterMode(e.target.value); clearGaps(); }}>
-                          <option value="auto">{isSaddle ? "Butt (default)" : "Auto"}</option>
-                          <option value="0">0″ (butt)</option>
-                          <option value="0.125">0.125″</option>
-                          <option value="0.25">0.25″</option>
-                          <option value="0.375">0.375″</option>
-                          <option value="0.5">0.5″</option>
-                        </select>
-                      </Field>
-                    )}
-                  </div>
-                </>
-              );
-            })()}
-            {offsetMode === "custom" && !(isPB ? false : (gapFill != null ? gapFill : !!(lay && lay.fillSheet))) && (
-              <div style={{ display: "flex", gap: 10 }}>
-                <Field label="From right edge (in)" style={{ flex: 1 }}>
-                  <input type="number" step="0.125" min="0" value={offsetRight} onChange={e => setOffsetRight(e.target.value)} />
-                </Field>
-                <Field label="From bottom edge (in)" style={{ flex: 1 }}>
-                  <input type="number" step="0.125" min="0" value={offsetBottom} onChange={e => setOffsetBottom(e.target.value)} />
-                </Field>
-              </div>
+          <Acc id="artwork" title="Artwork" open={secOpen.artwork} onToggle={() => toggleSec("artwork")}
+               badge={gangFiles.length >= 2 ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>GANG</span> : (art && art.pageCount > 1 && !isBook && multiMode !== "repeat") ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>{art.pageCount} PAGES</span> : null}>
+            {(() => { const C = sheetCtx(); return (<>
+            <Field label="When the artwork is not the finished size">
+              <Seg value={artFit} onChange={setArtFit} dataAttr="data-art-fit" block
+                   options={[{ v: "crop", l: "Crop" }, { v: "fill", l: "Fill" }, { v: "fit", l: "Fit" }]} />
+              <div className="imp-hint">{fitWords[artFit] || fitWords.crop}</div>
+            </Field>
+            {!isSaddle && !isPB && (
+              <Field label="Rotation on the sheet">
+                <Seg value={artRotate} onChange={setArtRotate} dataAttr="data-art-rotate"
+                     options={[{ v: "auto", l: "Auto", title: `${C.pL} × ${C.pS} or ${C.pS} × ${C.pL}, whichever fits` },
+                               { v: "0", l: "0°", title: `${C.pL} wide × ${C.pS} tall` }, { v: "90", l: "90°", title: `${C.pS} wide × ${C.pL} tall` },
+                               { v: "180", l: "180°", title: `${C.pL} wide × ${C.pS} tall, upside down` }, { v: "270", l: "270°", title: `${C.pS} wide × ${C.pL} tall, upside down` }]} />
+                <div className="imp-hint">
+                  {artRotate === "auto" ? `Auto — ${C.pL} × ${C.pS} or ${C.pS} × ${C.pL}, whichever fits.` : artRotate === "0" ? `${C.pL} wide × ${C.pS} tall.` : artRotate === "90" ? `${C.pS} wide × ${C.pL} tall.` : artRotate === "180" ? `${C.pL} wide × ${C.pS} tall, head-down.` : `${C.pS} wide × ${C.pL} tall, head-down.`}
+                  {C.tLay ? <> Piece as placed: <b style={{ color: "rgba(255,255,255,.8)" }}>{C.tLay.cellW}×{C.tLay.cellH}″</b>{C.tLay.rotated ? " (rotated 90°)" : ""} · {C.tLay.across} × {C.tLay.down} · block {(C.tLay.across * C.tLay.cellW + (C.tLay.colGaps ? C.tLay.colGaps.reduce((a, b) => a + b, 0) : (C.tLay.across - 1) * C.tLay.gutter)).toFixed(2)}×{(C.tLay.down * C.tLay.cellH + (C.tLay.rowGaps ? C.tLay.rowGaps.reduce((a, b) => a + b, 0) : (C.tLay.down - 1) * C.tLay.gutter)).toFixed(2)}″ on the {C.tLay.sheet.long}×{C.tLay.sheet.short}″ sheet.</> : null}
+                </div>
+              </Field>
             )}
-            {!isSaddle && (
-              <div style={{ display: "flex", gap: 10 }}>
-                <Field label="Piece pattern" style={{ flex: 1 }}>
-                  <select value={pattern} onChange={e => setPattern(e.target.value)}>
-                    <option value="straight">Straight (all same)</option>
-                    <option value="h2h">Head-to-head (row pairs)</option>
-                    <option value="f2f">Foot-to-foot (row pairs)</option>
-                    <option value="reversal">Reversal (alt. columns 180°)</option>
-                    <option value="revalt">Reversal alternate (checkerboard)</option>
-                    <option value="manual">Manual (tap cells)…</option>
-                  </select>
+            </>); })()}
+            <Check checked={splitSpreads} onChange={setSplitSpreads} label="Split 2-page spreads into single pages"
+                   hint="for a file exported as reader spreads (page 1 alone, then 2|3, 4|5 …) — each spread-sized page is cut at its centre line; bound products refuse a spreads file until this is ticked" />
+            {showProduct && (<div>
+            {!isBook && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
+              <div style={{ marginTop: 10 }}>
+                <Field label={`Multi-page file — ${art.pageCount} pages, one design or many?`}>
+                  {(() => {
+                    const MM = [
+                      { v: "repeat", l: "One design", d: `page 1${spec.sides === 2 ? " + page 2 as its back" : ""} only, stepped across the sheet; the other pages are ignored.` },
+                      { v: "gang", l: "Gang in order", d: "different pieces per sheet — pages fill the cells sheet by sheet in reading order." },
+                      { v: "stack", l: "Cut & stack", d: "pages dealt pile by pile so the cut piles, stacked, come out collated." },
+                      { v: "each", l: "Each page its own sheet", d: "every page gets a full step-and-repeat sheet — for per-design run quantities." },
+                    ];
+                    return (<>
+                      <Seg value={multiMode} onChange={setMultiMode} dataAttr="data-multi-mode" options={MM} />
+                      <div className="imp-hint">{(MM.find(o => o.v === multiMode) || MM[0]).d}</div>
+                    </>);
+                  })()}
                 </Field>
-                {isPB && (
-                  <Field label="Grid orientation (job default)" style={{ flex: "0 0 140px" }}>
-                    <select value={forceRotated} onChange={e => setForceRotated(e.target.value)}>
-                      <option value="auto">Auto</option>
-                      <option value="no">Force unrotated</option>
-                      <option value="yes">Force rotated 90°</option>
-                    </select>
-                  </Field>
+                {spec.sides === 2 && multiMode !== "repeat" && !backArt && (
+                  <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginTop: -6, marginBottom: 8 }}>
+                    2-sided collated: pages read front/back interleaved (p1=front of piece 1, p2=its back, …) — or drop a separate back file below.
+                  </div>
                 )}
               </div>
             )}
+            {!isPB && spec.sides === 2 && art && (art.pageCount < 2 || multiMode !== "repeat") && (
+              <div style={{ marginTop: 10 }}>
+                <DropZone label="Drop BACK side PDF" sub={multiMode !== "repeat" ? "optional — separate collated back file (page i backs piece i)" : "2-sided job but the front file has one page"}
+                  accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
+              </div>
+            )}
+            {!isBook && (
+              <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 10 }}>
+                <span className="lbl">Gang combo — multiple designs on one sheet</span>
+                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginBottom: 6 }}>
+                  Add 2+ same-trim PDFs and each takes a share of the {lay ? `${lay.cells.length} cells` : "cells"} — blank slots = split evenly,
+                  or set counts per file. Each design uses its page 1{spec.sides === 2 ? " + page 2 (back)" : ""}.
+                  Qty = press sheets. Pieces fill contiguous blocks in reading order for clean cutting.
+                </div>
+                <input type="file" multiple accept=".pdf" onChange={e => { addGangFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
+                {gangFiles.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    {gangFiles.map((g, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 4 }}>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name} ({g.pageCount}p)</span>
+                        <input type="number" min="1" placeholder="auto" value={g.slots} style={{ width: 58 }}
+                               title="cells for this design (blank = even split)"
+                               onChange={e => setGangFiles(prev => prev.map((x, j) => j === i ? { ...x, slots: e.target.value } : x))} />
+                        <button type="button" className="imp-btn sec" style={{ padding: "2px 8px" }}
+                                onClick={() => setGangFiles(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                      </div>
+                    ))}
+                    {gangFiles.length === 1 && <div style={{ fontSize: 11, color: "#e91e63" }}>Add at least one more file to gang — with one file use the normal drop zone.</div>}
+                    {gangFiles.length >= 2 && (
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>
+                        Gang combo active — the main drop zone, multi-page mode, and separate back file are ignored.
+                        <button type="button" className="imp-btn sec" style={{ marginLeft: 8, padding: "2px 8px" }} onClick={() => setGangFiles([])}>clear gang</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            </div>)}
+          </Acc>
+
+          <Acc id="sheet" title="Press sheet" open={secOpen.sheet} onToggle={() => toggleSec("sheet")}
+               badge={sheetSel !== "auto" ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>{sheetSel === "custom" ? "CUSTOM" : sheetSel.toUpperCase()}</span> : null}>
+            {(() => { const C = sheetCtx(); return (<>
+              <div className="imp-row">
+                <Field label={isPB ? "Press sheet (job default — each half can pick its own in Layout)" : "Press sheet"} style={{ flex: "1 1 200px" }}>
+                  <Seg value={sheetSel} onChange={setSheetSel} dataAttr="data-press-sheet"
+                       options={[{ v: "auto", l: "Auto", title: "the product's own press sheet" }, { v: "13x19", l: "13×19" }, { v: "13x27.5", l: "13×27.5", title: "oversize" }, { v: "12x18", l: "12×18", title: "crack-n-peel" }, { v: "custom", l: "Custom…" }]} />
+                </Field>
+                <Field label="Imageable margin (in)" style={{ flex: "0 0 110px" }}>
+                  <input type="number" step="0.0625" min="0" value={sheetMargin} placeholder={String(SHEET_MARGIN)}
+                         onChange={e => setSheetMargin(e.target.value)} />
+                </Field>
+              </div>
+              {sheetSel === "custom" && (
+                <div className="imp-row" style={{ marginBottom: 10 }}>
+                  <div>
+                    <div className="imp-hint" style={{ marginTop: 0, marginBottom: 3 }}>Sheet long (in)</div>
+                    <input type="number" step="0.25" min="3" max="60" value={sheetLong} style={{ width: 84 }} onChange={e => setSheetLong(e.target.value)} />
+                  </div>
+                  <span style={{ paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
+                  <div>
+                    <div className="imp-hint" style={{ marginTop: 0, marginBottom: 3 }}>Sheet short (in)</div>
+                    <input type="number" step="0.25" min="3" max="60" value={sheetShort} style={{ width: 84 }} onChange={e => setSheetShort(e.target.value)} />
+                  </div>
+                </div>
+              )}
+              <Field label="Sheet orientation">
+                <Seg value={sheetPortrait ? "portrait" : "landscape"} onChange={v => setSheetPortrait(v === "portrait")} dataAttr="data-sheet-orient"
+                     options={[{ v: "landscape", l: `${C.dims[0]} wide × ${C.dims[1]} tall` }, { v: "portrait", l: `↕ ${C.dims[1]} wide × ${C.dims[0]} tall` }]} />
+              </Field>
+              <div className="imp-sheetline imp-hint" style={{ marginTop: -4, marginBottom: 10 }}>
+                Sheet <b style={{ color: "rgba(255,255,255,.8)" }}>{C.shL ? stockOf(C.shL) : `${C.dims[1]}×${C.dims[0]}`}</b> lying <b style={{ color: "rgba(255,255,255,.8)" }}>{C.lyW} wide × {C.lyH} tall</b>
+                {" · "}prints <b style={{ color: "rgba(255,255,255,.8)" }}>{C.printable}″</b> inside a {C.m}″ margin
+                {C.fillOn ? <span style={{ color: "#fbbf24" }}> · fill mode — block centred inside that margin; set it to 0 for the whole sheet</span> : null}
+                {sheetSel !== "auto" && <span> · physical sheet only; the priced imp stays what the calculator quoted</span>}
+              </div>
+            </>); })()}
+            {(FLAT_CALCS.includes(calc) || isSaddle) && (
+              <Check checked={efficient} onChange={setEfficient} label="Lay out on 13×27.5 (efficient mode)"
+                     hint={isSaddle ? "more signature copies per sheet" : "the multiple expands to fill the 27″ axis"} />
+            )}
+          </Acc>
+
+          <Acc id="layout" title="Layout on the sheet" open={secOpen.layout} onToggle={() => toggleSec("layout")}
+               badge={lay && lay.manualGrid ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>MANUAL</span> : lay && lay.overflow ? <span className="imp-badge err" style={{ marginLeft: 8 }}>OVERFLOW</span> : null}>
+            {(() => { const C = sheetCtx(); return (<>
+              <div className="imp-row">
+                {C.fillOn ? (
+                  <Field label="Position" style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12.5, padding: "7px 0", color: "rgba(255,255,255,.55)" }}>
+                      Centred inside the margin <span style={{ color: "rgba(255,255,255,.4)" }}>— fill mode centres the block, so no jog applies{isPB ? " to this half" : ""}.</span>
+                    </div>
+                  </Field>
+                ) : (
+                  <Field label="Position" style={{ flex: "0 0 auto" }}>
+                    <Seg value={offsetMode} onChange={setOffsetMode} dataAttr="data-offset-mode"
+                         options={[{ v: "jog", l: "Jog to corner", title: "lower-right 0.5″ (back: lower-left) — one registration corner for the cutter" }, { v: "center", l: "Centred" }, { v: "custom", l: "Custom…" }]} />
+                  </Field>
+                )}
+                {C.customGaps ? (
+                  <Field label="Gutter" style={{ flex: "0 0 auto" }}>
+                    <div style={{ fontSize: 12.5, padding: "6px 0", display: "flex", gap: 8, alignItems: "center" }}>
+                      <span>custom per gap</span>
+                      <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }} onClick={C.clearGaps}>uniform</button>
+                    </div>
+                  </Field>
+                ) : (
+                  <Field label="Gutter" style={{ flex: "0 0 auto" }}>
+                    <Seg value={gutterMode} onChange={v => { setGutterMode(v); C.clearGaps(); }} dataAttr="data-gutter"
+                         options={[{ v: "auto", l: isSaddle ? "Butt" : "Auto" }, { v: "0", l: "0" }, { v: "0.125", l: "⅛″" }, { v: "0.25", l: "¼″" }, { v: "0.375", l: "⅜″" }, { v: "0.5", l: "½″" }]} />
+                  </Field>
+                )}
+              </div>
+              {offsetMode === "custom" && !C.fillOn && (
+                <div className="imp-row">
+                  <Field label="From right edge (in)" style={{ flex: 1 }}>
+                    <input type="number" step="0.125" min="0" value={offsetRight} onChange={e => setOffsetRight(e.target.value)} />
+                  </Field>
+                  <Field label="From bottom edge (in)" style={{ flex: 1 }}>
+                    <input type="number" step="0.125" min="0" value={offsetBottom} onChange={e => setOffsetBottom(e.target.value)} />
+                  </Field>
+                </div>
+              )}
+            </>); })()}
+            {!isSaddle && (
+              <Field label="Piece pattern">
+                {(() => {
+                  const PT = [
+                    { v: "straight", l: "Straight", d: "every piece the same way up." },
+                    { v: "h2h", l: "Head-to-head", d: "row pairs meet head to head at their shared cut." },
+                    { v: "f2f", l: "Foot-to-foot", d: "row pairs meet foot to foot — the phase-shifted complement." },
+                    { v: "reversal", l: "Reversal", d: "alternate columns turned 180°." },
+                    { v: "revalt", l: "Checkerboard", d: "reversal alternating by row as well — every neighbour turned." },
+                    { v: "manual", l: "Manual…", d: "tap cells below to turn them 180° one by one." },
+                  ];
+                  return (<>
+                    <Seg value={pattern} onChange={setPattern} dataAttr="data-pattern" options={PT} />
+                    <div className="imp-hint">{(PT.find(o => o.v === pattern) || PT[0]).d} Backs inherit each cell's turn, so the pattern registers through the duplex flip.</div>
+                  </>);
+                })()}
+              </Field>
+            )}
+            {isPB && (
+              <Field label="Grid orientation (job default — each half can override in the panel below)">
+                <Seg value={forceRotated} onChange={setForceRotated} dataAttr="data-grid-orient"
+                     options={[{ v: "auto", l: "Auto" }, { v: "no", l: "Unrotated" }, { v: "yes", l: "Rotated 90°" }]} />
+              </Field>
+            )}
             {isSaddle && (
               <Field label="Spread orientation on the sheet">
-                <select value={forceRotated} onChange={e => setForceRotated(e.target.value)}>
-                  <option value="auto">Auto — whichever fits the priced count, fewest cuts first</option>
-                  <option value="no">Spread's long edge along the sheet's long edge</option>
-                  <option value="yes">Spread's long edge across the sheet (rotated 90°)</option>
-                </select>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
-                  A square-ish book (4×4 pages is an 8×4″ spread) fits either way; pick the one that suits the folder and the cutter.
-                  Pagination, tumbling and the fold line follow the spread — only its direction on the press sheet changes.
+                <Seg value={forceRotated} onChange={setForceRotated} dataAttr="data-spread-orient"
+                     options={[{ v: "auto", l: "Auto" }, { v: "no", l: "Along the long edge" }, { v: "yes", l: "Across (90°)" }]} />
+                <div className="imp-hint">
+                  {forceRotated === "auto" ? "Whichever fits the priced count, fewest cuts first." : forceRotated === "no" ? "The spread's long edge along the sheet's long edge." : "The spread's long edge across the sheet, rotated 90°."}
+                  {" "}Pagination, tumbling and the fold line follow the spread; only its direction on the press sheet changes.
                   {lay && lay.booklet ? ` Now: ${lay.across} × ${lay.down}, spreads ${lay.booklet.spreadAlongX ? "along" : "across"} the sheet.` : ""}
                 </div>
               </Field>
@@ -5953,35 +6054,8 @@ function App() {
               </div>
             )}
 
-            {(spec.sides === 2 || isBook) && (
-              <div style={{ display: "flex", gap: 10 }}>
-                <Field label="Press flips sheet on" style={{ flex: 1 }}>
-                  <select value={sheetFlip} onChange={e => setSheetFlip(e.target.value)}>
-                    <option value="short">Short edge (default — Fiery SEF)</option>
-                    <option value="long">Long edge</option>
-                  </select>
-                </Field>
-                {!isSaddle && (
-                  <Field label="Back rotation" style={{ flex: 1 }}>
-                    <select value={backRotate} onChange={e => setBackRotate(e.target.value)}>
-                      <option value="auto">Auto (register with front)</option>
-                      <option value="0">Force none</option>
-                      <option value="180">Force 180° (tumble)</option>
-                    </select>
-                  </Field>
-                )}
-              </div>
-            )}
-            {(FLAT_CALCS.includes(calc) || isSaddle) && (
-              <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 8 }}>
-                <input type="checkbox" checked={efficient} onChange={e => setEfficient(e.target.checked)} style={{ width: "auto" }} />
-                <span>Lay out on 13×27.5 (efficient mode) <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "more signature copies per sheet" : "multiple expands to fill the 27″ axis"}</span></span>
-              </label>
-            )}
-            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 10 }}>
-              <input type="checkbox" checked={allowBestFit} onChange={e => setAllowBestFit(e.target.checked)} style={{ width: "auto" }} />
-              <span>Allow best physical fit if the priced imp can't be placed <span style={{ color: "rgba(255,255,255,.4)" }}>(mismatch is flagged on sheet + slug)</span></span>
-            </label>
+            <Check checked={allowBestFit} onChange={setAllowBestFit} label="Allow best physical fit if the priced imp cannot be placed"
+                   hint="the mismatch is flagged on the sheet and in the slug" />
             {(() => {
               // Perfect bound edits ONE HALF at a time. The cover and the book
               // block are different pieces on different stock, so they each
@@ -6105,7 +6179,7 @@ function App() {
                                  if (on && !isPB) setRepOn(false);   // the two are alternative ways to say the same thing
                                  setG({ on, cols: null, rows: null, ...seed });
                                }} />
-                        <span>{isSaddle ? "Set cells per sheet manually" : "Set columns × rows manually"} <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "how many signature slots the sheet carries (consecutive signatures fill them, unless step and repeat is on below)" : "places exactly this many"}; {isPB ? "perfect bound is unpriced, so this grid is the layout" : "the count is flagged against the priced imp"}</span></span>
+                        <span>{isSaddle ? "Set cells per sheet manually" : "Set columns × rows manually"} <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "how many signature slots the sheet carries (consecutive signatures fill them, unless step and repeat is on in the Book section)" : "places exactly this many"}; {isPB ? "perfect bound is unpriced, so this grid is the layout" : "the count is flagged against the priced imp"}</span></span>
                       </label>
                       {G.on && (
                         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
@@ -6124,54 +6198,6 @@ function App() {
                             {ok ? <>on <b>{panelLay.sheet.label}</b> · </> : null}= <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{ok && panelLay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(panelLay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(panelLay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
                           </div>
                         </div>
-                      )}
-                      {isSaddle && (
-                        <div style={{ marginTop: 9, paddingTop: 9, borderTop: "1px dashed rgba(255,255,255,.12)" }}>
-                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 5 }}>
-                            Signatures onto the sheet — what goes in each cell (pagination into signatures is the same in all three)
-                          </div>
-                          {[
-                            { v: "repeat", t: "Step and repeat", d: "every cell is the SAME signature, stepped across the sheet. One form per signature; the run divides by the number of cells. Cut, then collate the lifts into books." },
-                            { v: "cutstack", t: "Cut and stack", d: "the signature list runs DOWN the columns — 9 signatures 2-up gives 1|6, 2|7, 3|8, 4|9, 5|·. Cut the pile once and drop each lift under the one left of it and the stack is already in order 1–9." },
-                            { v: "gang", t: "Gang in order", d: "consecutive signatures side by side — 1+2, 3+4, 5+6, 7+8, 9. One sheet through the press is one book's worth of those signatures." },
-                          ].map(o => (
-                            <label key={o.v} style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 4 }}>
-                              <input type="radio" name="pps-sigorder" checked={sigOrder === o.v} style={{ width: "auto", marginTop: 3 }}
-                                     onChange={() => { setSigOrder(o.v); if (o.v !== "repeat") setRepOn(false); setGapCols(null); setGapRows(null); }} />
-                              <span><b style={{ fontWeight: 600 }}>{o.t}</b> <span style={{ color: "rgba(255,255,255,.4)" }}>— {o.d}</span></span>
-                            </label>
-                          ))}
-                          {sigOrder === "repeat" && (
-                            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7, paddingLeft: 22 }}>
-                              <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer", paddingBottom: 6 }}>
-                                <input type="checkbox" checked={repOn} style={{ width: "auto" }}
-                                       onChange={e => { const on = e.target.checked; if (on) setGridOn(false); setGapCols(null); setGapRows(null); setRepOn(on); }} />
-                                Set copies per sheet
-                              </label>
-                              {repOn && <div>
-                                <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Copies of each signature</div>
-                                <input type="number" min="1" step="1" value={repN} style={{ width: 74, fontSize: 12 }}
-                                       onChange={e => { setRepN(e.target.value); setGapCols(null); setGapRows(null); }} />
-                              </div>}
-                              <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                                {ok ? <>{panelLay.across} × {panelLay.down} on <b>{panelLay.sheet.label}</b></> : null}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {isSaddle && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, marginBottom: 9, flexWrap: "wrap" }}>
-                      <b style={{ fontWeight: 600 }}>Creep (total):</b>
-                      <input type="number" step="0.0078125" min="0" max="0.5" value={creep} style={{ width: 88 }}
-                             onChange={e => setCreep(e.target.value)} />
-                      <span>″ at the innermost signature</span>
-                      {+creep > 0 && (
-                        <span style={{ color: "rgba(255,255,255,.5)" }}>
-                          — cover 0″, stepping spine-ward to {(+creep).toFixed(4)}″; cut lines unchanged
-                        </span>
                       )}
                     </div>
                   )}
@@ -6236,62 +6262,108 @@ function App() {
 
           </Acc>
 
-          <Acc id="product" title={isPB ? "Perfect bound — two press jobs" : "Product settings"} open={secOpen.product} onToggle={() => toggleSec("product")}>
-            <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 10 }}>
-              <input type="checkbox" checked={splitSpreads} onChange={e => setSplitSpreads(e.target.checked)} style={{ width: "auto", marginTop: 3 }} />
-              <span>Split 2-page spreads into single pages <span style={{ color: "rgba(255,255,255,.4)" }}>— for a file exported as reader spreads (page 1 alone, then 2|3, 4|5 …). Each spread-sized page is cut at its centre line. Bound products refuse a spreads file until this is ticked.</span></span>
-            </label>
-            {showProduct && (<div>
-            {!isBook && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
-              <div style={{ marginTop: 10 }}>
-                <Field label={`Multi-page file (${art.pageCount} pages)`}>
-                  <select value={multiMode} onChange={e => setMultiMode(e.target.value)}>
-                    <option value="repeat">Repeat single design (page 1{spec.sides === 2 ? "+2" : ""} only)</option>
-                    <option value="gang">Gang pages in order (different pieces per sheet)</option>
-                    <option value="stack">Cut &amp; stack (piles collate after cutting)</option>
-                    <option value="each">Repeat each page (full sheet per piece)</option>
-                  </select>
+          {(spec.sides === 2 || isBook) && (
+            <Acc id="duplex" title="Duplex" open={secOpen.duplex} onToggle={() => toggleSec("duplex")}
+                 badge={<span className="imp-badge ok" style={{ marginLeft: 8 }}>{sheetFlip === "long" ? "LONG-EDGE FLIP" : "SHORT-EDGE FLIP"}</span>}>
+              <div className="imp-row">
+                <Field label="Press flips the sheet on" style={{ flex: "0 0 auto" }}>
+                  <Seg value={sheetFlip} onChange={setSheetFlip} dataAttr="data-sheet-flip"
+                       options={[{ v: "short", l: "Short edge", title: "Fiery SEF — the default" }, { v: "long", l: "Long edge" }]} />
                 </Field>
-                {spec.sides === 2 && multiMode !== "repeat" && !backArt && (
-                  <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginTop: -6, marginBottom: 8 }}>
-                    2-sided collated: pages read front/back interleaved (p1=front of piece 1, p2=its back, …) — or drop a separate back file below.
-                  </div>
+                {!isSaddle && (
+                  <Field label="Back rotation" style={{ flex: "0 0 auto" }}>
+                    <Seg value={backRotate} onChange={setBackRotate} dataAttr="data-back-rotate"
+                         options={[{ v: "auto", l: "Auto", title: "register with the front" }, { v: "0", l: "None" }, { v: "180", l: "180° (tumble)" }]} />
+                  </Field>
                 )}
               </div>
-            )}
+              <div className="imp-hint" style={{ marginTop: -4, marginBottom: 8 }}>The back of every sheet is mirrored through this flip so the pieces register front to back; the slug names the edge so the Fiery job can match it.</div>
+            </Acc>
+          )}
+
+          {(isSaddle || isPB) && (
+            <Acc id="book" title={isPB ? "Perfect bound — two press jobs" : "Saddle stitch — signatures"} open={secOpen.book} onToggle={() => toggleSec("book")}
+                 badge={isPB ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>{pbPart === "both" ? "COVER + GUTS" : pbPart.toUpperCase()}</span> : sigOrder !== "repeat" ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>{sigOrder === "gang" ? "GANG" : "CUT & STACK"}</span> : null}>
+              {isSaddle && (() => {
+                const panelLay = lay && lay.booklet ? lay : null;
+                const ok = !!panelLay;
+                return (<>
+                      {isSaddle && (
+                        <div>
+                          <Field label="Signatures onto the sheet" style={{ marginBottom: 6 }}>
+                          <div className="imp-hint" style={{ marginTop: 0, marginBottom: 6 }}>What goes in each cell — pagination into signatures is the same in all three.</div>
+                          {(() => {
+                            const SIG = [
+                              { v: "repeat", l: "Step and repeat", d: "every cell is the SAME signature, stepped across the sheet. One form per signature; the run divides by the number of cells. Cut, then collate the lifts into books." },
+                              { v: "cutstack", l: "Cut and stack", d: "the signature list runs DOWN the columns — 9 signatures 2-up gives 1|6, 2|7, 3|8, 4|9, 5|·. Cut the pile once and drop each lift under the one left of it and the stack is already in order 1–9." },
+                              { v: "gang", l: "Gang in order", d: "consecutive signatures side by side — 1+2, 3+4, 5+6, 7+8, 9. One sheet through the press is one book's worth of those signatures." },
+                            ];
+                            return (<>
+                              <Seg value={sigOrder} dataAttr="data-sig-order" options={SIG}
+                                   onChange={v => { setSigOrder(v); if (v !== "repeat") setRepOn(false); setGapCols(null); setGapRows(null); }} />
+                              <div className="imp-hint">{(SIG.find(o => o.v === sigOrder) || SIG[0]).d}</div>
+                            </>);
+                          })()}
+                          {sigOrder === "repeat" && (
+                            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7, paddingLeft: 22 }}>
+                              <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer", paddingBottom: 6 }}>
+                                <input type="checkbox" checked={repOn} style={{ width: "auto" }}
+                                       onChange={e => { const on = e.target.checked; if (on) setGridOn(false); setGapCols(null); setGapRows(null); setRepOn(on); }} />
+                                Set copies per sheet
+                              </label>
+                              {repOn && <div>
+                                <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Copies of each signature</div>
+                                <input type="number" min="1" step="1" value={repN} style={{ width: 74, fontSize: 12 }}
+                                       onChange={e => { setRepN(e.target.value); setGapCols(null); setGapRows(null); }} />
+                              </div>}
+                              <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
+                                {ok ? <>{panelLay.across} × {panelLay.down} on <b>{panelLay.sheet.label}</b></> : null}
+                              </div>
+                            </div>
+                          )}
+                          </Field>
+                        </div>
+                      )}
+                  {isSaddle && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, marginBottom: 9, flexWrap: "wrap" }}>
+                      <b style={{ fontWeight: 600 }}>Creep (total):</b>
+                      <input type="number" step="0.0078125" min="0" max="0.5" value={creep} style={{ width: 88 }}
+                             onChange={e => setCreep(e.target.value)} />
+                      <span>″ at the innermost signature</span>
+                      {+creep > 0 && (
+                        <span style={{ color: "rgba(255,255,255,.5)" }}>
+                          — cover 0″, stepping spine-ward to {(+creep).toFixed(4)}″; cut lines unchanged
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </>);
+              })()}
             {isPB && (
               <div style={{ marginTop: 4 }}>
-                <span className="lbl">Perfect bound — two press jobs</span>
                 <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", marginBottom: 9 }}>
                   A perfect-bound book images as two press jobs on different stock. Emit both, or just the half you need —
                   a guts reprint needs no spine and no cover file. With a single reading-order PDF the cover is built from
                   pages 1, 2 and the last two; or drop the guts here and the template cover file below.
                 </div>
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
-                  {[["both","Cover + guts"],["guts","Guts only"],["cover","Cover only"]].map(([v,t]) => (
-                    <label key={v} style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                      <input type="radio" name="pps-pbpart" checked={pbPart === v} style={{ width: "auto" }}
-                             onChange={() => setPbPart(v)} />
-                      {t}
-                    </label>
-                  ))}
+                <div style={{ marginBottom: 10 }}>
+                  <Seg value={pbPart} onChange={setPbPart} dataAttr="data-pb-part"
+                       options={[{ v: "both", l: "Cover + guts" }, { v: "guts", l: "Guts only" }, { v: "cover", l: "Cover only" }]} />
                 </div>
                 {pbPart !== "cover" && (
                   <div style={{ marginBottom: 10, paddingBottom: 9, borderBottom: "1px dashed rgba(255,255,255,.12)" }}>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 5 }}>
-                      Leaves onto the sheet — what goes in each cell of the GUTS (pagination into leaves is the same in all three; each leaf is a front/back pair)
-                    </div>
-                    {[
-                      { v: "gang",     t: "Gang in order",   d: "consecutive leaves side by side — a 4-up sheet carries pages 1,3,5,7 on the front and 2,4,6,8 on the back. One sheet through the press is one book's worth of those leaves; quantity = books." },
-                      { v: "repeat",   t: "Step and repeat", d: "every cell is the SAME leaf, stepped across the sheet. One form per leaf; the run divides by the number of cells. Cut, then collate the lifts into books." },
-                      { v: "cutstack", t: "Cut and stack",   d: "the leaf list runs DOWN the piles — 18 leaves 4-up gives 1|6|11|16 on sheet 1. Cut the pile once, drop each lift under the one before it, and the block is already in order." },
-                    ].map(o => (
-                      <label key={o.v} style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 4 }}>
-                        <input type="radio" name="pps-pbgutsorder" checked={pbGutsOrder === o.v} style={{ width: "auto", marginTop: 3 }}
-                               onChange={() => setPbGutsOrder(o.v)} />
-                        <span><b style={{ fontWeight: 600 }}>{o.t}</b> <span style={{ color: "rgba(255,255,255,.4)" }}>— {o.d}</span></span>
-                      </label>
-                    ))}
+                    <span className="lbl">Leaves onto the sheet (guts)</span>
+                    {(() => {
+                      const GO = [
+                        { v: "gang",     l: "Gang in order",   d: "consecutive leaves side by side — a 4-up sheet carries pages 1,3,5,7 on the front and 2,4,6,8 on the back. One sheet through the press is one book's worth of those leaves; quantity = books." },
+                        { v: "repeat",   l: "Step and repeat", d: "every cell is the SAME leaf, stepped across the sheet. One form per leaf; the run divides by the number of cells. Cut, then collate the lifts into books." },
+                        { v: "cutstack", l: "Cut and stack",   d: "the leaf list runs DOWN the piles — 18 leaves 4-up gives 1|6|11|16 on sheet 1. Cut the pile once, drop each lift under the one before it, and the block is already in order." },
+                      ];
+                      return (<>
+                        <Seg value={pbGutsOrder} onChange={setPbGutsOrder} dataAttr="data-guts-order" options={GO} />
+                        <div className="imp-hint">{(GO.find(o => o.v === pbGutsOrder) || GO[0]).d} Each leaf is a front/back pair; pagination into leaves is the same in all three.</div>
+                      </>);
+                    })()}
                   </div>
                 )}
                 {pbPart === "guts" ? (
@@ -6316,63 +6388,27 @@ function App() {
                 </div>}
               </div>
             )}
-            {!isPB && spec.sides === 2 && art && (art.pageCount < 2 || multiMode !== "repeat") && (
-              <div style={{ marginTop: 10 }}>
-                <DropZone label="Drop BACK side PDF" sub={multiMode !== "repeat" ? "optional — separate collated back file (page i backs piece i)" : "2-sided job but the front file has one page"}
-                  accept=".pdf" onFiles={f => onFiles(f, "back")} fileName={backArt && backArt.name} />
-              </div>
-            )}
-            {!isSaddle && (
-              <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 10 }}>
-                <span className="lbl">Gang combo — multiple designs on one sheet</span>
-                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginBottom: 6 }}>
-                  Add 2+ same-trim PDFs and each takes a share of the {lay ? `${lay.cells.length} cells` : "cells"} — blank slots = split evenly,
-                  or set counts per file. Each design uses its page 1{spec.sides === 2 ? " + page 2 (back)" : ""}.
-                  Qty = press sheets. Pieces fill contiguous blocks in reading order for clean cutting.
-                </div>
-                <input type="file" multiple accept=".pdf" onChange={e => { addGangFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
-                {gangFiles.length > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    {gangFiles.map((g, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 4 }}>
-                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name} ({g.pageCount}p)</span>
-                        <input type="number" min="1" placeholder="auto" value={g.slots} style={{ width: 58 }}
-                               title="cells for this design (blank = even split)"
-                               onChange={e => setGangFiles(prev => prev.map((x, j) => j === i ? { ...x, slots: e.target.value } : x))} />
-                        <button type="button" className="imp-btn sec" style={{ padding: "2px 8px" }}
-                                onClick={() => setGangFiles(prev => prev.filter((_, j) => j !== i))}>✕</button>
-                      </div>
-                    ))}
-                    {gangFiles.length === 1 && <div style={{ fontSize: 11, color: "#e91e63" }}>Add at least one more file to gang — with one file use the normal drop zone.</div>}
-                    {gangFiles.length >= 2 && (
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>
-                        Gang combo active — the main drop zone, multi-page mode, and separate back file are ignored.
-                        <button type="button" className="imp-btn sec" style={{ marginLeft: 8, padding: "2px 8px" }} onClick={() => setGangFiles([])}>clear gang</button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+            </Acc>
+          )}
 
-            </div>)}
-          </Acc>
-
-          <Acc id="bleed" title="Bleed settings" open={secOpen.bleed} onToggle={() => toggleSec("bleed")}
-               badge={addBleed !== "off" ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>{addBleed.toUpperCase()}</span> : null}>
+          <Acc id="bleed" title="Bleed" open={secOpen.bleed} onToggle={() => toggleSec("bleed")}
+               badge={addBleed !== "off" ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>ADD {addBleed.toUpperCase()}</span> : null}>
             <Field label="Bleed (in)" style={{ maxWidth: 140 }}>
               <input type="number" step="0.0625" min="0" max="0.5" value={bleedIn} onChange={e => setBleedIn(e.target.value)} />
             </Field>
-            <Field label="Add bleed (files with none)">
-              <select value={addBleed} onChange={e => setAddBleed(e.target.value)}
-                      style={addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w))
-                             ? { outline: "2px solid #e91e63" } : undefined}>
-                <option value="off">Off — use file as-is</option>
-                <option value="auto">Auto (text-safe) — mirror, streak where text is near trim</option>
-                <option value="mirror">Mirror edges outward (content at trim stays put)</option>
-                <option value="scale">Scale art up to bleed (shrinks safety margin)</option>
-                <option value="streak">Streak edges (stretch edge sliver — nothing readable)</option>
-              </select>
+            <Field label="Add bleed to files that have none">
+              <Seg value={addBleed} onChange={setAddBleed} dataAttr="data-add-bleed" block
+                   style={addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w))
+                          ? { outline: "2px solid #e91e63" } : undefined}
+                   options={[{ v: "off", l: "Off" }, { v: "auto", l: "Auto" }, { v: "mirror", l: "Mirror" }, { v: "scale", l: "Scale" }, { v: "streak", l: "Streak" }]} />
+              <div className="imp-hint">
+                {{ off: "Use the file as it is — a file without bleed prints paper white at the cut.",
+                   auto: "Text-safe: mirrors clean edges outward, streaks edges that have text near the trim.",
+                   mirror: "Reflects each edge outward past the trim; content at the trim stays put.",
+                   scale: "Enlarges the art just enough to cover the bleed box; the safety margin shrinks by the same amount.",
+                   streak: "Stretches the outermost sliver of art into the bleed — nothing readable, a pure edge colour." }[addBleed]}
+                {" "}Only fires on pages that truly lack bleed.
+              </div>
               {addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w)) && (
                 <div style={{ fontSize: 11, color: "#e91e63", marginTop: 3 }}>
                   This file has no bleed — cut lines may show paper white. Auto is the safe default fix: it mirrors
@@ -6380,7 +6416,8 @@ function App() {
                   (a mirror would visibly reflect people at the edges).
                 </div>
               )}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 8, flexWrap: "wrap" }}>
+              <div className="imp-sub">Art scale and pull-off</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 2, flexWrap: "wrap" }}>
                 <b style={{ fontWeight: 600 }}>Scale art:</b>
                 <input type="number" step="1" min="25" max="400" value={artScale} style={{ width: 74 }}
                        onChange={e => setArtScale(e.target.value)} />
@@ -6425,11 +6462,8 @@ function App() {
                   With Add bleed off, the gap the pull-off opens would print as paper white inside the trim. Set a fill mode.
                 </div>
               )}
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, cursor: "pointer" }}>
-                <input type="checkbox" checked={addBleedSmart} onChange={e => setAddBleedSmart(e.target.checked)} />
-                Smart edge detect — if the art stops just short of trim (≤3/16″), pre-scale so the synthesized
-                bleed never amplifies the white sliver; big white margins are respected as design.
-              </label>
+              <Check checked={addBleedSmart} onChange={setAddBleedSmart} style={{ marginTop: 8 }} label="Smart edge detect"
+                     hint="art that stops just short of the trim (≤ 3/16″) is pre-scaled so the synthesized bleed never amplifies the white sliver; a big white margin is respected as design" />
               {(["auto", "streak"].includes(addBleed) || Object.values(addBleedPages).some(v => v === "auto" || v === "streak")) && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 4 }}>
                   Streak sampler: outermost
@@ -6472,25 +6506,14 @@ function App() {
 
           </Acc>
 
-          <Acc id="specialty" title="Specialty settings" open={secOpen.specialty} onToggle={() => toggleSec("specialty")}
-               badge={(greyPagesTxt.trim() || slipOn || pageSeqTxt.trim() || sheetSeqTxt.trim()) ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>ON</span> : null}>
-            <Field label="Page sequence — source pages (duplicate, repeat, reorder, blanks)">
-              <input type="text" value={pageSeqTxt} onChange={e => setPageSeqTxt(e.target.value)} placeholder="e.g. 1-8, 9x2, blank, 10-last   (empty = pages as they are)" />
-              <SeqNote txt={pageSeqTxt} total={art ? art.pageCount : null} noun="page" what="pages" />
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
-                The run of pages the imposition paginates. <b>5</b> one page · <b>3-8</b> a run · <b>5x2</b> that page twice · <b>3-8x2</b> the run twice · <b>blank</b> an empty page · <b>all</b> · <b>last</b>.
-                A page number past the end refuses rather than skipping. Greyscale page numbers above refer to the file as dropped; the notes and slugs refer to this run. Artwork file only — a separate back file and gang files are untouched.
-              </div>
-            </Field>
+          <Acc id="press" title="Press prep" open={secOpen.press} onToggle={() => toggleSec("press")}
+               badge={(greyPagesTxt.trim() || slipOn || pageSeqTxt.trim() || sheetSeqTxt.trim() || rasterPagesTxt.trim()) ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>ON</span> : null}>
             <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 10, background: "rgba(255,255,255,.02)" }}>
               <span className="lbl" style={{ margin: "0 0 6px", display: "block" }}>Press safety <span style={{ color: "rgba(255,255,255,.4)", fontWeight: 400 }}>— fixes for things that look right on screen and print wrong on the RIP; each is reported in the Job report</span></span>
               {[["stripOverprint", stripOverprint, setStripOverprint, "Remove overprint", "white or light objects set to overprint vanish on the press"],
                 ["fixHairlines", fixHairlines, setFixHairlines, "Thicken zero-width hairlines to 0.25 pt", "\"0 w\" is one device pixel — invisible on paper"],
                 ["flattenAnnots", flattenAnnots, setFlattenAnnots, "Flatten annotations into the page", "stamps, comment boxes and filled form fields print as they display"]].map(([k, v, set, t, d]) => (
-                <label key={k} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, cursor: "pointer", marginBottom: 4 }}>
-                  <input type="checkbox" checked={v} onChange={e => set(e.target.checked)} style={{ width: "auto", marginTop: 3 }} />
-                  <span>{t} <span style={{ color: "rgba(255,255,255,.4)" }}>— {d}</span></span>
-                </label>
+                <Check key={k} checked={v} onChange={set} label={t} hint={d} style={{ marginBottom: 4, fontSize: 12.5 }} />
               ))}
               <Field label="Rasterise pages (last resort)" style={{ marginTop: 8, marginBottom: 0 }}>
                 <input type="text" value={rasterPagesTxt} onChange={e => setRasterPagesTxt(e.target.value)} placeholder="e.g. 2, 5-6  (source page numbers)" />
@@ -6504,6 +6527,14 @@ function App() {
                 Those pages are no longer vector. {art ? `File has ${art.pageCount} page${art.pageCount === 1 ? "" : "s"}.` : ""}
               </div>
             </Field>
+            <Field label="Page sequence — source pages (duplicate, repeat, reorder, blanks)">
+              <input type="text" value={pageSeqTxt} onChange={e => setPageSeqTxt(e.target.value)} placeholder="e.g. 1-8, 9x2, blank, 10-last   (empty = pages as they are)" />
+              <SeqNote txt={pageSeqTxt} total={art ? art.pageCount : null} noun="page" what="pages" />
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                The run of pages the imposition paginates. <b>5</b> one page · <b>3-8</b> a run · <b>5x2</b> that page twice · <b>3-8x2</b> the run twice · <b>blank</b> an empty page · <b>all</b> · <b>last</b>.
+                A page number past the end refuses rather than skipping. Greyscale page numbers above refer to the file as dropped; the notes and slugs refer to this run. Artwork file only — a separate back file and gang files are untouched.
+              </div>
+            </Field>
             <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
               <Field label="Sheet sequence — imposed sheets (repeat or reorder physical sheets)">
                 <input type="text" value={sheetSeqTxt} onChange={e => setSheetSeqTxt(e.target.value)} placeholder="e.g. 1x3, 2-4, blank   (empty = sheets as imposed)" />
@@ -6515,31 +6546,20 @@ function App() {
               </Field>
             </div>
             <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
-              <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", marginBottom: 8 }}>
-                <input type="checkbox" checked={slipOn} onChange={e => setSlipOn(e.target.checked)} style={{ width: "auto" }} />
-                <b>Insert slipsheet</b>
-              </label>
+              <Check checked={slipOn} onChange={setSlipOn} label={<b>Insert slipsheets</b>} hint="a coloured or custom sheet before or after chosen output sheets" />
               {slipOn && (
                 <div>
                   <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-                    <Field label="When" style={{ flex: "0 0 110px" }}>
-                      <select value={slipWhen} onChange={e => setSlipWhen(e.target.value)}>
-                        <option value="before">Before</option>
-                        <option value="after">After</option>
-                      </select>
+                    <Field label="When" style={{ flex: "0 0 auto" }}>
+                      <Seg value={slipWhen} onChange={setSlipWhen} options={[{ v: "before", l: "Before" }, { v: "after", l: "After" }]} />
                     </Field>
                     <Field label="Sheet(s) — imposed output" style={{ flex: 1 }}>
                       <input type="text" value={slipSheets} onChange={e => setSlipSheets(e.target.value)} placeholder="e.g. 1, 5, 10-12" />
                     </Field>
                   </div>
                   <Field label="Slipsheet design">
-                    <select value={slipDesign} onChange={e => setSlipDesign(e.target.value)}>
-                      <option value="C">Solid C</option>
-                      <option value="M">Solid M</option>
-                      <option value="Y">Solid Y</option>
-                      <option value="K">Solid K</option>
-                      <option value="custom">Custom upload…</option>
-                    </select>
+                    <Seg value={slipDesign} onChange={setSlipDesign}
+                         options={[{ v: "C", l: "Solid C" }, { v: "M", l: "Solid M" }, { v: "Y", l: "Solid Y" }, { v: "K", l: "Solid K" }, { v: "custom", l: "Custom upload…" }]} />
                     {slipDesign === "custom" && (
                       <div style={{ marginTop: 6 }}>
                         <input type="file" accept=".pdf,.jpg,.jpeg,.png"
@@ -6574,26 +6594,14 @@ function App() {
             )}
           </Acc>
 
-          <Acc id="marks" title="Markings settings" open={secOpen.marks} onToggle={() => toggleSec("marks")}>
-            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", fontSize: 13, marginBottom: 8 }}>
-              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                <input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} style={{ width: "auto" }} />
-                Crop / trim marks
-              </label>
-              {isSaddle && (
-                <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                  <input type="checkbox" checked={foldMarks} onChange={e => setFoldMarks(e.target.checked)} style={{ width: "auto" }} />
-                  Fold guides
-                </label>
-              )}
-              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                <input type="checkbox" checked={slugOn} onChange={e => setSlugOn(e.target.checked)} style={{ width: "auto" }} />
-                Slug line
-              </label>
+          <Acc id="marks" title="Marks" open={secOpen.marks} onToggle={() => toggleSec("marks")}
+               badge={!marks ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>NO MARKS</span> : null}>
+            <div className="imp-row" style={{ gap: 16, marginBottom: 4 }}>
+              <Check checked={marks} onChange={setMarks} label="Crop / trim marks" style={{ marginBottom: 4 }} />
+              {isSaddle && <Check checked={foldMarks} onChange={setFoldMarks} label="Fold guides" style={{ marginBottom: 4 }} />}
+              <Check checked={slugOn} onChange={setSlugOn} label="Slug line" style={{ marginBottom: 4 }} />
             </div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginBottom: 10 }}>
-              Independent switches — all drawn inside the printable area, as space allows.
-            </div>
+            <div className="imp-hint" style={{ marginBottom: 10 }}>Independent switches — all drawn inside the printable area, as space allows, in K only.</div>
           </Acc>
         </aside>
 
