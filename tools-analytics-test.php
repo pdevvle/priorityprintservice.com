@@ -105,7 +105,9 @@ ok( $op['orders'] === 1 && $op['jobs'] === 1 && $op['sheets'] === 100 && $op['pa
 ok( $d['products']['saddle']['jobs'] === 1 && $d['products']['saddle']['sheets'] === 375 && $d['products']['brochure']['jobs'] === 2, 'by product: jobs received and sheets printed', $d['products'] );
 
 // the screen
-function wc_get_orders( $a ) { global $orders; return $a['page'] === 1 ? $orders : array(); }
+$GLOBALS['queries'] = array();
+function wc_get_orders( $a ) { global $orders; $GLOBALS['queries'][] = $a; return array_map( function ( $o ) { return $o->get_id(); }, $orders ); }
+function wc_get_order( $id ) { global $orders; foreach ( $orders as $o ) if ( $o->get_id() === $id ) return $o; return false; }
 $_GET = array( 'days' => 30 );
 ob_start(); pps_an_render(); $html = ob_get_clean();
 foreach ( array( 'orders received', 'orders fulfilled', 'shipped by must-ship date (1 of 2)', 'median paid → fulfilled', 'press sheets printed (est.)', 'paper + colour (est.)', 'open orders past must-ship', 'Orders received vs fulfilled, per week', 'Press sheets printed (est.), per week', 'Paper + colour cost (est.), per week', 'Fulfilled on time vs late, per week', 'Turnaround: business days', 'By product', 'Late shipments in this window', 'How these are estimated', 'had no paper plan and is not counted', 'costed as full colour both sides', 'no price on file' ) as $w )
@@ -114,6 +116,15 @@ ok( substr_count( $html, '<svg class="pps-an-chart"' ) === 6 && strpos( $html, '
 ok( strpos( $html, '$560' ) !== false || strpos( $html, '560' ) !== false, 'the sheet count reaches the tiles' );
 ok( ! $warn, 'no PHP warnings', $warn );
 ok( isset( $GLOBALS['tr']['pps_analytics_30'] ), 'the build is cached per window' );
+$qs = $GLOBALS['queries'];
+ok( count( $qs ) === 3 && ! array_filter( $qs, function ( $q ) { return ( $q['return'] ?? '' ) !== 'ids'; } )
+    && $qs[0]['date_created'] === '>=2026-09-17' && $qs[1]['status'] === array( 'completed' ) && $qs[1]['date_completed'] === '>=2026-09-20' && $qs[2]['status'] === array( 'processing', 'on-hold' ),
+    'only ids are asked for, and only the orders the window needs: paid in it, completed in it, or open (not 120 days of everything — production ran out of memory)', $qs );
+$gen = pps_an_orders( '2026-09-20' );
+ok( $gen instanceof Generator && count( iterator_to_array( $gen, false ) ) === count( $orders ), 'orders come one at a time, each once' );
+$src = file_get_contents( getenv( 'PPS_AN_PHP' ) ?: __DIR__ . '/pps-analytics.php' );
+ok( strpos( $src, "add_action( 'pps_analytics_refresh', function () { pps_an_get( 90, true ); pps_an_get( 30, true ); } );" ) !== false, 'the 30- and 90-day windows are built hourly in the background' );
+ok( strpos( $src, "echo 'The analytics could not be built: '" ) !== false, 'the panel frame says what failed instead of a bare critical error' );
 ok( pps_an_svg_bars( array(), array() ) === '<p class="description">No data in this window.</p>', 'an empty chart says so' );
 
 // the same screen in the Missive panel's frame

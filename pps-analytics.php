@@ -152,7 +152,7 @@ function pps_an_statuses() { return array( 'processing', 'on-hold', 'completed' 
  * counts as received in the week it was paid (else created) and as fulfilled in the week it
  * was completed.
  */
-function pps_an_build( array $orders, $from, $today, array $rates ) {
+function pps_an_build( $orders, $from, $today, array $rates ) {
     $weeks = array();
     for ( $w = pps_an_week( $from ); $w <= $today; $w = gmdate( 'Y-m-d', strtotime( $w . ' 12:00:00 UTC' ) + 7 * 86400 ) ) {
         $weeks[ $w ] = array( 'received' => 0, 'jobs_in' => 0, 'revenue' => 0.0, 'done' => 0, 'jobs_out' => 0, 'sheets' => 0, 'paper' => 0.0, 'color' => 0.0, 'on_time' => 0, 'late' => 0 );
@@ -238,18 +238,32 @@ function pps_an_build( array $orders, $from, $today, array $rates ) {
     );
 }
 
-/** Orders for a window: paid/created up to 120 days before it starts, so long jobs completed inside it are seen. */
-function pps_an_orders( $from ) {
+/**
+ * The order ids a window needs — and only those: paid (created) in it, completed in it, or
+ * still open (the backlog). Ids, not objects: the first version loaded every order from 120
+ * days before the window, all at once, and on production that ran PHP out of memory or time
+ * — a fatal error, shown in the Missive frame as WordPress's "critical error" (2026-10-19).
+ */
+function pps_an_order_ids( $from ) {
     if ( ! function_exists( 'wc_get_orders' ) ) return array();
-    $since = gmdate( 'Y-m-d', strtotime( $from . ' 12:00:00 UTC' ) - 120 * 86400 );
-    $all = array();
-    for ( $page = 1; $page <= 40; $page++ ) {
-        $batch = wc_get_orders( array( 'limit' => 200, 'page' => $page, 'status' => pps_an_statuses(), 'date_created' => '>=' . $since, 'orderby' => 'date', 'order' => 'ASC' ) );
-        if ( ! $batch ) break;
-        foreach ( $batch as $o ) $all[] = $o;
-        if ( count( $batch ) < 200 ) break;
+    $since = gmdate( 'Y-m-d', strtotime( $from . ' 12:00:00 UTC' ) - 3 * 86400 );   // paid in the window, created a little before
+    $q = function ( array $a ) { $r = wc_get_orders( $a + array( 'limit' => 3000, 'return' => 'ids' ) ); return is_array( $r ) ? $r : array(); };
+    $ids = array_merge(
+        $q( array( 'status' => pps_an_statuses(), 'date_created' => '>=' . $since ) ),
+        $q( array( 'status' => array( 'completed' ), 'date_completed' => '>=' . $from ) ),
+        $q( array( 'status' => array( 'processing', 'on-hold' ) ) )
+    );
+    return array_values( array_unique( array_map( 'intval', $ids ) ) );
+}
+
+/** The orders, one at a time: each is loaded, used and let go (the object cache is emptied as it goes). */
+function pps_an_orders( $from ) {
+    $n = 0;
+    foreach ( pps_an_order_ids( $from ) as $id ) {
+        $o = wc_get_order( $id );
+        if ( $o && is_callable( array( $o, 'get_billing_first_name' ) ) ) yield $o;   // never a refund
+        if ( ++$n % 100 === 0 && function_exists( 'wp_cache_flush_runtime' ) ) wp_cache_flush_runtime();
     }
-    return $all;
 }
 
 function pps_an_get( $days, $refresh = false ) {
@@ -258,11 +272,19 @@ function pps_an_get( $days, $refresh = false ) {
     if ( ! $refresh ) { $c = get_transient( $key ); if ( is_array( $c ) ) return $c; }
     $today = pps_an_today();
     $from  = gmdate( 'Y-m-d', strtotime( $today . ' 12:00:00 UTC' ) - ( $days - 1 ) * 86400 );
+    if ( function_exists( 'set_time_limit' ) ) @set_time_limit( 120 );
     $built = pps_an_build( pps_an_orders( $from ), $from, $today, pps_an_rates() );
     $built['built_at'] = current_time( 'Y-m-d H:i' ); $built['days'] = $days;
     set_transient( $key, $built, HOUR_IN_SECONDS );
     return $built;
 }
+
+/* The 30- and 90-day windows are built hourly in the background, so opening the screen (or
+   the Missive panel's Analytics) normally reads a finished result. */
+add_action( 'pps_analytics_refresh', function () { pps_an_get( 90, true ); pps_an_get( 30, true ); } );
+add_action( 'init', function () {
+    if ( function_exists( 'wp_next_scheduled' ) && ! wp_next_scheduled( 'pps_analytics_refresh' ) ) wp_schedule_event( time() + 300, 'hourly', 'pps_analytics_refresh' );
+} );
 
 /* ── Charts (inline SVG) ────────────────────────────────────── */
 
@@ -444,7 +466,12 @@ add_action( 'wp_loaded', function () {
     if ( ! function_exists( 'pps_mp_key_ok' ) || ! pps_mp_key_ok( $k ) ) { status_header( 403 ); header( 'Content-Type: text/plain; charset=UTF-8' ); echo 'This link is not valid. Open analytics from the Missive panel.'; exit; }
     $refresh = ! empty( $_GET['refresh'] ) && ! get_transient( 'pps_an_frame_refresh' );
     if ( $refresh ) set_transient( 'pps_an_frame_refresh', 1, 60 );
-    $d = pps_an_get( (int) ( $_GET['days'] ?? 90 ), $refresh );
+    try { $d = pps_an_get( (int) ( $_GET['days'] ?? 90 ), $refresh ); }
+    catch ( \Throwable $e ) {
+        error_log( 'PPS analytics: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine() );
+        header( 'Content-Type: text/plain; charset=UTF-8' );
+        echo 'The analytics could not be built: ' . $e->getMessage() . '. The admin screen (PPS Calculators → Production Analytics) shows the same numbers.'; exit;
+    }
     header( 'Content-Type: text/html; charset=UTF-8' );
     header( 'Referrer-Policy: no-referrer' );
     echo pps_an_frame_html( $d, $k );
