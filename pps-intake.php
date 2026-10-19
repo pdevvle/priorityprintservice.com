@@ -234,6 +234,81 @@ function pps_intake_forms() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// FORM TOKEN — a real browser, touched by a person
+// ═══════════════════════════════════════════════════════════════
+
+/*
+ * The 2026-10-18 run: 36 quote requests in three hours, each a made-up name, a nonsense
+ * sentence ("My goldfinch loves to play with it."), "call me back" ticked, a real-looking
+ * Gmail address and a rotating IPv6 address — the shape of subscription bombing, where a
+ * victim's inbox is flooded with form confirmations from hundreds of sites. Nothing in
+ * the TEXT is wrong, so pps_intake_spam_reason() cannot see it, and the honeypot and the
+ * per-IP limit were stepped around.
+ *
+ * What such a bot does not do is run the page: it POSTs to admin-post.php. So the form
+ * carries an empty `pps_tok`, and its script fetches a signed timestamp from an uncached
+ * endpoint the first time a person clicks, taps or types in the form (or at submit). The
+ * pages are cached, so the token cannot be printed into them — the same reason the form
+ * has no nonce. A submission without a good token, or sent within
+ * PPS_INTAKE_TOKEN_MIN_AGE seconds of the first touch, is not refused (the visitor sees
+ * "sent" as always): it is kept as a spam draft and mailed to NOBODY, staff or
+ * confirmation. tools-intake-spam-test.php is the gate.
+ */
+define( 'PPS_INTAKE_TOKEN_MIN_AGE', 2 );
+define( 'PPS_INTAKE_TOKEN_MAX_AGE', 172800 );   // two days
+
+function pps_intake_token_secret() {
+    return ( defined( 'AUTH_SALT' ) ? AUTH_SALT : 'pps' ) . '|pps-intake-token';
+}
+
+function pps_intake_token_make( $t = null ) {
+    $t = (int) ( $t ?? time() );
+    return $t . '.' . substr( hash_hmac( 'sha256', 'pps-intake|' . $t, pps_intake_token_secret() ), 0, 32 );
+}
+
+/** Why a token does not prove a person filled the form, or '' when it does. */
+function pps_intake_token_reason( $tok, $now = null ) {
+    $now = (int) ( $now ?? time() );
+    $tok = is_string( $tok ) ? trim( $tok ) : '';
+    if ( $tok === '' ) return 'no form token (posted without running the page)';
+    if ( ! preg_match( '/^(\d{9,11})\.([0-9a-f]{32})$/', $tok, $m ) ) return 'malformed form token';
+    if ( ! hash_equals( pps_intake_token_make( (int) $m[1] ), $tok ) ) return 'forged form token';
+    $age = $now - (int) $m[1];
+    if ( $age < PPS_INTAKE_TOKEN_MIN_AGE ) return 'sent ' . max( 0, $age ) . 's after the form was first touched';
+    if ( $age > PPS_INTAKE_TOKEN_MAX_AGE ) return 'form token expired';
+    return '';
+}
+
+function pps_intake_token_endpoint() {
+    nocache_headers();
+    header( 'Content-Type: text/plain; charset=UTF-8' );
+    echo pps_intake_token_make();
+    exit;
+}
+add_action( 'wp_ajax_nopriv_pps_intake_token', 'pps_intake_token_endpoint' );
+add_action( 'wp_ajax_pps_intake_token',        'pps_intake_token_endpoint' );
+
+/**
+ * The form's token script. Fetches once, on the first pointer, touch or key in the form;
+ * if submit comes first it holds the submit until the token is in (or the fetch fails —
+ * then it submits anyway and the server keeps the request as a draft, never lost).
+ */
+function pps_intake_token_script( $anchor, $url ) {
+    return sprintf(
+        '<script>(function(){var r=document.getElementById(%s),f=r&&r.querySelector("form");if(!f)return;'
+      . 'var i=f.querySelector(\'[name="pps_tok"]\'),p=null,go=false;if(!i)return;'
+      . 'function get(){if(!p)p=fetch(%s,{credentials:"same-origin",cache:"no-store"})'
+        . '.then(function(x){return x.ok?x.text():""}).then(function(t){if(/^\\d+\\.[0-9a-f]{32}$/.test(t))i.value=t})'
+        . '.catch(function(){});return p}'
+      . '["pointerdown","touchstart","keydown"].forEach(function(e){f.addEventListener(e,get,{once:true,passive:true})});'
+      . 'f.addEventListener("submit",function(ev){if(i.value||go)return;ev.preventDefault();'
+        . 'var b=f.querySelector("[type=submit]");if(b)b.disabled=true;'
+        . 'get().then(function(){go=true;HTMLFormElement.prototype.submit.call(f)})})})();</script>',
+        wp_json_encode( $anchor ), wp_json_encode( $url )
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // RENDER
 // ═══════════════════════════════════════════════════════════════
 
@@ -276,6 +351,7 @@ add_shortcode( 'pps_intake', function ( $atts ) {
     echo '<input type="hidden" name="action" value="pps_intake_submit">';
     echo '<input type="hidden" name="form" value="' . esc_attr( $key ) . '">';
     echo '<input type="hidden" name="ref" value="' . esc_attr( home_url( add_query_arg( array() ) ) ) . '">';
+    echo '<input type="hidden" name="pps_tok" value="">';   // filled by pps_intake_token_script()
 
     // Honeypot. Named to look worth filling in to a bot and hidden from everyone else.
     echo '<div class="pps-intake-hp" aria-hidden="true">'
@@ -391,6 +467,7 @@ add_shortcode( 'pps_intake', function ( $atts ) {
         . 'function(b){b.addEventListener("change",sync)});sync()})();</script>',
         wp_json_encode( $anchor )
     );
+    echo pps_intake_token_script( $anchor, add_query_arg( 'action', 'pps_intake_token', admin_url( 'admin-ajax.php' ) ) );
 
     echo '</div>';
 
@@ -578,7 +655,11 @@ function pps_intake_handle_submit() {
         $values[ $fkey ] = $val;
     }
 
-    $uploads = ! empty( $form['uploads'] ) ? pps_intake_take_uploads() : array( 'urls' => array(), 'error' => '' );
+    // No proof a person filled this in: recorded as a spam draft below, mailed to nobody,
+    // and its files are not kept. The visitor still sees "sent".
+    $values['__spam'] = pps_intake_token_reason( wp_unslash( $_POST['pps_tok'] ?? '' ) );
+
+    $uploads = ! empty( $form['uploads'] ) && $values['__spam'] === '' ? pps_intake_take_uploads() : array( 'urls' => array(), 'error' => '' );
     if ( $uploads['error'] !== '' ) {
         pps_intake_bounce( $key, array( 'pps_err' => $uploads['error'] ) );
     }
@@ -724,6 +805,7 @@ function pps_intake_record( $key, array $form, array $values, array $file_urls, 
  * MESSAGE is normal (Canva, Drive), so it does not count; a link in a name does.
  */
 function pps_intake_spam_reason( array $values ) {
+    if ( ! empty( $values['__spam'] ) ) return (string) $values['__spam'];   // the form token's verdict
     $name = (string) ( $values['name'] ?? '' );
     $link = '~https?://|www\.|\b[a-z0-9-]+\.(?:buzz|ru|xyz|top|io|site|online|click|link|shop|com|net)\b~i';
     foreach ( array( 'name', 'phone', 'order_ref' ) as $f ) {
