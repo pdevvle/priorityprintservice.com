@@ -272,5 +272,15 @@ if ( preg_match( '/function lateStart\(r\)\{.*?\}\n/s', $html, $m ) ) {
 ok( strpos( $html, "if(PREF.lateStart && !lateStart(r)) return false;" ) !== false && strpos( $html, "' late start ('" ) !== false && strpos( $html, "rush:false, lateStart:false, subOnly:true }" ) !== false, 'the board offers a late-start filter with a count, applies it, and reset clears it' );
 ok( strpos( $html, "'Any add-ons'" ) !== false && strpos( $html, "if(!addonOk(r)) return false;" ) !== false && strpos( $html, "paper:'', addon:'', rush:false" ) !== false, 'the board offers the Add-ons filter, applies it, and reset clears it' );
 
+// ── the board in a browser: spec pills, the Analytics frame ──
+$tmp = sys_get_temp_dir() . '/pps-mp-' . getmypid() . '.html';
+file_put_contents( $tmp, pps_mp_page_html( 'KEY123', 'https://site.test/wp-json/pps/v1/missive/panel', '', '', '', '', 'https://site.test/?pps_missive_analytics=1&k=KEY123' ) );
+$out = shell_exec( 'node ' . escapeshellarg( __DIR__ . '/tools-missive-panel-page.mjs' ) . ' ' . escapeshellarg( $tmp ) . ' ' . escapeshellarg( (string) getenv( 'PPS_MP_SHOT' ) ) . ' 2>&1' );
+@unlink( $tmp );
+$res = json_decode( (string) substr( (string) $out, (int) strpos( (string) $out, '{"checks"' ) ), true );
+if ( ! is_array( $res ) ) ok( false, 'the browser run reports', $out );
+else foreach ( $res['checks'] as $c ) ok( $c[0], 'page: ' . $c[1], $c[2] ?? null );
+ok( strpos( pps_mp_page_html( 'K', 'a' ), '"analytics":""' ) !== false, 'without the analytics module the panel offers no Analytics button' );
+
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> MISSIVE PANEL OK ($n checks)\n";
 exit( $fail ? 1 : 0 );

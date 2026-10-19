@@ -280,7 +280,7 @@ $panel = file_get_contents( __DIR__ . '/pps-missive-panel.php' );
 ok( strpos( $panel, "require_once __DIR__ . '/pps-missive-ship.php';" ) !== false, 'the panel loads it' );
 ok( strpos( $panel, "text:' [Ship]'" ) !== false && strpos( $panel, "text:sh.labels?'Ship again':'Ship'" ) !== false && strpos( $panel, "u = shipping ? shipUrl(IMPOSE) : imposeUrl(IMPOSE)" ) !== false, 'a Ship button on the order card and each board row, in the panel\'s frame' );
 ok( strpos( $panel, "e.origin===location.origin && e.data && typeof e.data.ppsOpen==='string'" ) !== false, 'label and tracking links open through Missive, only from the site\'s own pages' );
-ok( strpos( $panel, "DATA=d; if(!IMPOSE) render();" ) !== false, 'new panel data never reloads the shipping page mid-purchase' );
+ok( strpos( $panel, "DATA=d; if(!IMPOSE && !AN) render();" ) !== false, 'new panel data never reloads the shipping page mid-purchase' );
 
 // ── the page in a browser ──
 $tmp = sys_get_temp_dir() . '/pps-ms-' . getmypid() . '.html';

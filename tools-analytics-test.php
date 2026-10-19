@@ -20,7 +20,7 @@ $warn = array(); $GLOBALS['tr'] = array();
 function add_action() {} function add_filter() {} function add_submenu_page() {}
 function esc_html( $s ) { return htmlspecialchars( (string) $s, ENT_QUOTES ); } function esc_attr( $s ) { return esc_html( $s ); } function esc_url( $s ) { return esc_html( $s ); }
 function admin_url( $p = '' ) { return 'https://x/wp-admin/' . $p; } function add_query_arg( $k, $v = null, $u = '' ) { return is_array( $k ) ? $v . '&' . http_build_query( $k ) : $u . '&' . $k . '=' . $v; }
-function wp_nonce_url( $u ) { return $u . '&_wpnonce=n'; } function check_admin_referer() { return 1; } function current_user_can() { return true; } function wp_die( $m ) { throw new Exception( $m ); }
+function wp_nonce_url( $u ) { return $u . '&_wpnonce=n'; } function home_url( $p = '' ) { return 'https://x' . $p; } function check_admin_referer() { return 1; } function current_user_can() { return true; } function wp_die( $m ) { throw new Exception( $m ); }
 function get_transient( $k ) { return $GLOBALS['tr'][ $k ] ?? false; } function set_transient( $k, $v ) { $GLOBALS['tr'][ $k ] = $v; }
 function current_time() { return '2026-10-19 08:00'; } function pps_mp_today() { return '2026-10-19'; }
 function pps_get_config() { return array( 'pcf' => array( 'printing_black_cost' => 0.01, 'printing_fullcolor_cost' => 0.05 ),
@@ -115,6 +115,16 @@ ok( strpos( $html, '$560' ) !== false || strpos( $html, '560' ) !== false, 'the 
 ok( ! $warn, 'no PHP warnings', $warn );
 ok( isset( $GLOBALS['tr']['pps_analytics_30'] ), 'the build is cached per window' );
 ok( pps_an_svg_bars( array(), array() ) === '<p class="description">No data in this window.</p>', 'an empty chart says so' );
+
+// the same screen in the Missive panel's frame
+$fr = pps_an_frame_html( pps_an_get( 30 ), 'KEY9' );
+ok( strpos( $fr, '<!DOCTYPE html>' ) === 0 && strpos( $fr, 'Orders received vs fulfilled, per week' ) !== false && substr_count( $fr, '<svg class="pps-an-chart"' ) === 6, 'the panel frame page carries the whole screen' );
+ok( strpos( $fr, 'pps_missive_analytics=1&amp;k=KEY9&amp;days=90' ) !== false && strpos( $fr, 'pps_missive_analytics=1&amp;k=KEY9&amp;days=30&amp;refresh=1' ) !== false && strpos( $fr, 'wp-admin/admin.php?page=pps-analytics' ) === false, 'its window and Refresh links stay on the key-scoped page, never wp-admin', $fr );
+ok( strpos( $fr, 'window.parent.postMessage({ppsOpen:u},location.origin)' ) !== false, 'an order link is handed to the panel, which opens it through Missive' );
+$src = file_get_contents( getenv( 'PPS_AN_PHP' ) ?: __DIR__ . '/pps-analytics.php' );
+ok( strpos( $src, "if ( ! function_exists( 'pps_mp_key_ok' ) || ! pps_mp_key_ok( \$k ) ) { status_header( 403 );" ) !== false, 'the frame page answers only with the panel key' );
+ok( strpos( $src, "\$refresh = ! empty( \$_GET['refresh'] ) && ! get_transient( 'pps_an_frame_refresh' );" ) !== false, 'a rebuild from the frame page is allowed once a minute' );
+ok( strpos( $src, "minmax(min(100%,420px),1fr)" ) !== false, 'the chart grid folds to one column in a narrow sidebar' );
 
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> ANALYTICS OK ($n checks)\n";
 exit( $fail ? 1 : 0 );

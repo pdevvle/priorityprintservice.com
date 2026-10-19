@@ -287,7 +287,7 @@ function pps_an_svg_bars( array $labels, array $series, $stack = false, $fmt = n
         else foreach ( $series as $se ) $max = max( $max, (float) ( $se[2][ $i ] ?? 0 ) );
     }
     $max = ( $count && $max <= 40 ) ? max( 4, (int) ceil( $max / 4 ) * 4 ) : pps_an_nice_max( $max );
-    $W = 600;                                     // one width for every chart, so the text is one size
+    $W = 440;                                     // one width for every chart, so the text is one size (and legible in the Missive sidebar)
     $L = 52; $T = 8; $B = 34; $ch = $h - $T - $B; $cw = ( $W - $L - 8 ) / $n;
     $o = '<svg class="pps-an-chart" viewBox="0 0 ' . $W . ' ' . $h . '" width="100%" style="max-width:' . ( $W * 1.4 ) . 'px" role="img">';
     for ( $g = 0; $g <= 4; $g++ ) {
@@ -295,7 +295,7 @@ function pps_an_svg_bars( array $labels, array $series, $stack = false, $fmt = n
         $o .= '<line x1="' . $L . '" x2="' . ( $W - 4 ) . '" y1="' . round( $y, 1 ) . '" y2="' . round( $y, 1 ) . '" stroke="#e3e3e3"/>';
         $o .= '<text x="' . ( $L - 6 ) . '" y="' . round( $y + 4, 1 ) . '" text-anchor="end" font-size="10" fill="#777">' . esc_html( $fmt( $max * $g / 4 ) ) . '</text>';
     }
-    $every = max( 1, (int) ceil( $n / 12 ) );
+    $every = max( 1, (int) ceil( $n / 9 ) );
     for ( $i = 0; $i < $n; $i++ ) {
         $x0 = $L + $i * $cw + $cw * 0.15; $bw = $cw * 0.7; $acc = 0;
         $tip = array( $labels[ $i ] );
@@ -328,7 +328,19 @@ function pps_an_render() {
     if ( ! current_user_can( 'manage_woocommerce' ) ) wp_die( 'Not allowed.' );
     $days    = (int) ( $_GET['days'] ?? 90 );
     $refresh = ! empty( $_GET['refresh'] ) && check_admin_referer( 'pps_an_refresh' );
-    $d  = pps_an_get( $days, $refresh );
+    $d   = pps_an_get( $days, $refresh );
+    $url = admin_url( 'admin.php?page=pps-analytics' );
+    echo '<div class="wrap pps-an"><h1>📊 Production Analytics</h1>';
+    pps_an_output( $d, function ( $n ) use ( $url ) { return add_query_arg( 'days', $n, $url ); },
+        wp_nonce_url( add_query_arg( array( 'days' => $d['days'], 'refresh' => 1 ), $url ), 'pps_an_refresh' ) );
+    echo '</div>';
+}
+
+/**
+ * The screen's body, shared by wp-admin and the Missive panel's frame. $days_url( n ) is the
+ * link for another window; $refresh_url rebuilds this one.
+ */
+function pps_an_output( array $d, $days_url, $refresh_url ) {
     $t  = $d['totals']; $op = $d['open'];
     $wk = $d['weeks'];
     $labels = array_map( function ( $w ) { return gmdate( 'M j', strtotime( $w . ' 12:00:00 UTC' ) ); }, array_keys( $wk ) );
@@ -336,14 +348,11 @@ function pps_an_render() {
     $n_weeks = max( 1, count( $wk ) );
     $cost = $t['paper'] + $t['color'];
     $done_with_date = $t['on_time'] + $t['late'];
-    $url = admin_url( 'admin.php?page=pps-analytics' );
-
-    echo '<div class="wrap pps-an"><h1>📊 Production Analytics</h1>';
-    echo '<style>.pps-an .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:12px 0}.pps-an .tile{background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:10px 12px}.pps-an .tile b{display:block;font-size:22px;line-height:1.3}.pps-an .tile span{color:#646970;font-size:12px}.pps-an .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}.pps-an .card{background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:12px 14px;margin-bottom:14px}.pps-an .card h2{margin:0 0 8px;font-size:15px}.pps-an table.widefat td,.pps-an table.widefat th{padding:5px 8px}.pps-an .late{color:#b32d2e}.pps-an .chips a{margin-right:6px}</style>';
+    echo '<style>.pps-an .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:12px 0}.pps-an .tile{background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:10px 12px}.pps-an .tile b{display:block;font-size:22px;line-height:1.3}.pps-an .tile span{color:#646970;font-size:12px}.pps-an .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px}.pps-an .card{background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:12px 14px;margin-bottom:14px}.pps-an .card h2{margin:0 0 8px;font-size:15px}.pps-an table.widefat td,.pps-an table.widefat th{padding:5px 8px}.pps-an .late{color:#b32d2e}.pps-an .chips a{margin-right:6px}</style>';
     echo '<p class="chips">Window: ';
-    foreach ( array( 30, 90, 180, 365 ) as $n ) echo $n === (int) $d['days'] ? '<strong>' . $n . ' days</strong> ' : '<a href="' . esc_url( add_query_arg( 'days', $n, $url ) ) . '">' . $n . ' days</a> ';
+    foreach ( array( 30, 90, 180, 365 ) as $n ) echo $n === (int) $d['days'] ? '<strong>' . $n . ' days</strong> ' : '<a href="' . esc_url( $days_url( $n ) ) . '">' . $n . ' days</a> ';
     echo ' · ' . esc_html( gmdate( 'M j, Y', strtotime( $d['from'] ) ) ) . ' – ' . esc_html( gmdate( 'M j, Y', strtotime( $d['today'] ) ) );
-    echo ' · built ' . esc_html( $d['built_at'] ) . ' <a class="button button-small" href="' . esc_url( wp_nonce_url( add_query_arg( array( 'days' => $d['days'], 'refresh' => 1 ), $url ), 'pps_an_refresh' ) ) . '">Refresh</a></p>';
+    echo ' · built ' . esc_html( $d['built_at'] ) . ' <a class="button button-small" href="' . esc_url( $refresh_url ) . '">Refresh</a></p>';
 
     $tile = function ( $v, $l, $cls = '' ) { return '<div class="tile"><b class="' . $cls . '">' . $v . '</b><span>' . $l . '</span></div>'; };
     $pl = function ( $n, $w ) { return number_format( $n ) . ' ' . $w . ( (int) $n === 1 ? '' : 's' ); };
@@ -401,5 +410,44 @@ function pps_an_render() {
     if ( $t['assumed'] ) echo ' ' . (int) $t['assumed'] . ' custom line' . ( $t['assumed'] === 1 ? '' : 's' ) . ' (colour not recorded) costed as full colour both sides.';
     if ( $t['unpriced'] ) echo ' <span class="late">' . (int) $t['unpriced'] . ' job' . ( $t['unpriced'] === 1 ? '' : 's' ) . ' used a paper with no price on file; their paper cost is missing.</span>';
     echo '</li><li><b>Revenue</b> = order totals as paid, by the week paid. Received and fulfilled weeks are Monday–Sunday.</li></ul></div>';
-    echo '</div>';
 }
+
+/* ── The same screen inside the Missive panel ───────────────────
+ * Owner, 2026-10-19: "add the analytics to the missive panel too". Missive's frame has no
+ * WordPress login, so the page is opened with the panel key (`pps_mp_key_ok()`), like the
+ * panel's ship and impose pages. Read-only. Links (an order's edit screen) are handed to the
+ * panel, which opens them with Missive.openURL. A rebuild through this page is allowed once a
+ * minute (`pps_an_frame_refresh` transient), since the key travels in the URL. */
+
+function pps_an_frame_html( array $d, $key ) {
+    $base = add_query_arg( array( 'pps_missive_analytics' => 1, 'k' => $key ), home_url( '/' ) );
+    ob_start();
+    pps_an_output( $d, function ( $n ) use ( $base ) { return add_query_arg( 'days', $n, $base ); }, add_query_arg( array( 'days' => $d['days'], 'refresh' => 1 ), $base ) );
+    $body = ob_get_clean();
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Production Analytics</title>'
+         . '<style>body{font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;padding:8px;background:#f6f7f7;color:#1d2327}a{color:#2563eb;text-decoration:none}'
+         . 'table.widefat{border-collapse:collapse;width:100%;background:#fff}table.widefat th{text-align:left}table.widefat td,table.widefat th{border-top:1px solid #eee;font-size:12px}'
+         . '.button{border:1px solid #2563eb;border-radius:3px;padding:1px 6px}.description{color:#777}ul{padding-left:4px}</style></head>'
+         . '<body><div class="pps-an">' . $body . '</div>'
+         . '<script>document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[href]");if(!a)return;var u=a.href;'
+         . 'if(u.indexOf("pps_missive_analytics=")>0)return;'
+         . 'e.preventDefault();if(!/^https:\/\//.test(u))return;if(window.parent!==window)window.parent.postMessage({ppsOpen:u},location.origin);else window.open(u,"_blank","noopener");});</script>'
+         . '</body></html>';
+}
+
+add_action( 'wp_loaded', function () {
+    if ( ! isset( $_GET['pps_missive_analytics'] ) ) return;
+    if ( ! defined( 'DONOTCACHEPAGE' ) ) define( 'DONOTCACHEPAGE', true );
+    nocache_headers();
+    header_remove( 'X-Frame-Options' );
+    $k = (string) wp_unslash( $_GET['k'] ?? '' );
+    if ( ! function_exists( 'pps_mp_key_ok' ) || ! pps_mp_key_ok( $k ) ) { status_header( 403 ); header( 'Content-Type: text/plain; charset=UTF-8' ); echo 'This link is not valid. Open analytics from the Missive panel.'; exit; }
+    $refresh = ! empty( $_GET['refresh'] ) && ! get_transient( 'pps_an_frame_refresh' );
+    if ( $refresh ) set_transient( 'pps_an_frame_refresh', 1, 60 );
+    $d = pps_an_get( (int) ( $_GET['days'] ?? 90 ), $refresh );
+    header( 'Content-Type: text/html; charset=UTF-8' );
+    header( 'Referrer-Policy: no-referrer' );
+    echo pps_an_frame_html( $d, $k );
+    exit;
+} );
+

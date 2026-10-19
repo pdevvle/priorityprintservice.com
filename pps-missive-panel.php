@@ -635,12 +635,13 @@ add_action( 'init', function () {
     header( 'Referrer-Policy: no-referrer' );
     echo pps_mp_page_html( $k, rest_url( 'pps/v1/missive/panel' ), rest_url( 'pps/v1/missive/task-state' ), rest_url( 'pps/v1/missive/create-subtasks' ),
         add_query_arg( array( 'pps_missive_impose' => 1, 'k' => $k ), home_url( '/' ) ),
-        add_query_arg( array( 'pps_missive_ship' => 1, 'k' => $k ), home_url( '/' ) ) );
+        add_query_arg( array( 'pps_missive_ship' => 1, 'k' => $k ), home_url( '/' ) ),
+        function_exists( 'pps_an_frame_html' ) ? add_query_arg( array( 'pps_missive_analytics' => 1, 'k' => $k ), home_url( '/' ) ) : '' );
     exit;
 }, 1 );
 
-function pps_mp_page_html( $key, $api, $state_api = '', $create_api = '', $impose_url = '', $ship_url = '' ) {
-    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api, 'impose' => $impose_url, 'ship' => $ship_url, 'build' => substr( md5_file( __FILE__ ), 0, 8 ) ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
+function pps_mp_page_html( $key, $api, $state_api = '', $create_api = '', $impose_url = '', $ship_url = '', $analytics_url = '' ) {
+    $cfg = wp_json_encode( array( 'key' => $key, 'api' => $api, 'stateApi' => $state_api, 'createApi' => $create_api, 'impose' => $impose_url, 'ship' => $ship_url, 'analytics' => $analytics_url, 'build' => substr( md5_file( __FILE__ ), 0, 8 ) ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     return <<<HTML
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -657,6 +658,8 @@ h2{font-size:14px;margin:4px 0 6px} h3{font-size:12px;margin:12px 0 4px;text-tra
 table{border-collapse:collapse;width:100%} td{padding:2px 4px;vertical-align:top;border-top:1px solid rgba(128,128,128,.12);overflow-wrap:anywhere}
 td:first-child{color:#888;white-space:nowrap}
 a{color:#2563eb;cursor:pointer;text-decoration:none}
+.pill{display:inline-block;border:1px solid;border-radius:10px;padding:0 7px;margin:2px 3px 0 0;font-size:11px;line-height:17px;white-space:nowrap}
+.pill.pill-plain{background:rgba(128,128,128,.12);color:inherit;border-color:rgba(128,128,128,.35)} .pill.pill-late{background:#fdecea;color:#b42318;border-color:#f3b4ae;font-weight:600}
 .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
 .st{display:inline-block;border-radius:3px;padding:0 5px;font-size:11px;font-weight:600}
 .st-todo{background:rgba(128,128,128,.18)} .st-in_progress{background:#dbeafe;color:#1e40af} .st-closed{background:#dcfce7;color:#166534} .st-none{background:#fef3c7;color:#92400e}
@@ -702,6 +705,14 @@ function impose(order){ FRAME = 'impose'; IMPOSE = order; render(); window.scrol
    It shows in the same frame; its label and tracking links come back here to open through Missive. */
 function shipUrl(order){ return CFG.ship ? CFG.ship + (CFG.ship.indexOf('?')<0?'?':'&') + 'order=' + encodeURIComponent(order) : ''; }
 function ship(order){ FRAME = 'ship'; IMPOSE = order; render(); window.scrollTo(0,0); }
+// Production Analytics (pps-analytics.php) in the same frame, opened with the panel key.
+var AN = false;
+function analytics(){ AN = true; render(); window.scrollTo(0,0); }
+// Job specs as pills, each value its own colour: the same paper, size or add-on is always the
+// same colour, so matching jobs can be spotted down the board.
+function hue(s){ var h = 2166136261; s = String(s); for(var i=0;i<s.length;i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return Math.round(((h >>> 0) % 1000) * 137.508) % 360; }
+function pill(text, key, title){ var h = hue(key || text);
+  return el('span',{cls:'pill',text:text,title:title||'',style:'background:hsl('+h+',75%,91%);color:hsl('+h+',60%,25%);border-color:hsl('+h+',45%,72%)'}); }
 window.addEventListener('message', function(e){ if(e.origin===location.origin && e.data && typeof e.data.ppsOpen==='string' && /^https:\/\//.test(e.data.ppsOpen)) open(e.data.ppsOpen); });
 
 /* Order numbers in what the conversation says: "#87347", "Order 87347", "order #87347". */
@@ -718,7 +729,7 @@ function load(ids, conv){
   var url = CFG.api + (CFG.api.indexOf('?')<0?'?':'&') + 'orders=' + encodeURIComponent(ids.join(',')) + '&conv=' + encodeURIComponent(conv||'');
   fetch(url,{headers:{'X-PPS-Panel-Key':CFG.key},credentials:'omit',cache:'no-store'})
     .then(function(r){ if(!r.ok) throw new Error('The site answered '+r.status+'.'); return r.json(); })
-    .then(function(d){ DATA=d; if(!IMPOSE) render(); }) // never rebuild the tool's frame mid-job; Back shows the fresh data
+    .then(function(d){ DATA=d; if(!IMPOSE && !AN) render(); }) // never rebuild a frame (tool, shipping, analytics) mid-use; Back shows the fresh data
     .catch(function(e){ app.className=''; app.textContent=''; app.appendChild(el('div',{cls:'late',text:'Could not load: '+e.message})); });
 }
 
@@ -820,13 +831,15 @@ function boardRow(r, here){
     r.drive&&CFG.impose?el('a',{cls:'small',text:' [Impose]',title:'Open the imposition tool for this order',on:function(){ impose(r.order); }}):null,
     CFG.ship?el('a',{cls:'small',text:' [Ship]',title:'Shipping rates and labels for this order',on:function(){ ship(r.order); }}):null,
     ' '+r.customer+' — '+r.what, r.rush?el('span',{cls:'rush',text:' RUSH'}):null, r.printed?el('span',{cls:'muted',text:' · printed'}):null ]));
-  var meta = [];
-  r.papers.forEach(function(p){ meta.push(p.label+' '+p.sheet+' ('+p.sheets+')'); });
-  if(!r.papers.length && r.source==='custom') meta.push('custom order');
-  if(r.qty) meta.push(r.qty+' qty'); if(r.size) meta.push(r.size);
-  if(r.finishing.length) meta.push(r.finishing.join(', '));
-  meta.push('start '+md(r.start));
-  d.appendChild(el('div',{cls:'muted small'},[meta.join(' · '), lateStart(r)?el('span',{cls:'late',text:' · LATE START'}):null]));
+  var specs = el('div',{cls:'specs'});
+  r.papers.forEach(function(p){ specs.appendChild(pill(p.label+' · '+String(p.sheet).replace('x','×')+' · '+p.sheets, 'paper:'+p.label, p.sheets+' press sheets of '+p.label+' on '+p.sheet)); });
+  if(!r.papers.length && r.source==='custom') specs.appendChild(el('span',{cls:'pill pill-plain',text:'custom order'}));
+  if(r.qty) specs.appendChild(pill(Number(r.qty).toLocaleString()+' qty', 'qty:'+r.qty));
+  if(r.size) specs.appendChild(pill(r.size, 'size:'+r.size));
+  (r.addons && r.addons.length ? r.addons : r.finishing).forEach(function(a){ var kind = String(a).split(':')[0].trim(); specs.appendChild(pill(a, 'addon:'+kind)); });
+  specs.appendChild(el('span',{cls:'pill pill-plain',text:'start '+md(r.start)}));
+  if(lateStart(r)) specs.appendChild(el('span',{cls:'pill pill-late',text:'LATE START'}));
+  d.appendChild(specs);
   var tl = taskLine(r.task, r.start, r.due_mismatch); if(tl) d.appendChild(tl);
   return d;
 }
@@ -857,7 +870,8 @@ function addonOk(r){
 function renderBoard(here){
   var wrap = el('div');
   var tools = el('div',{cls:'tools'});
-  tools.appendChild(el('h2',{text:'Open jobs',style:'margin:0 0 4px'}));
+  tools.appendChild(el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:6px'},[ el('h2',{text:'Open jobs',style:'margin:0 0 4px'}),
+    CFG.analytics ? el('button',{cls:'b',text:'📊 Analytics',title:'What the shop is getting done and how fast: sheets, cost, on-time rate',on:function(){ analytics(); }}) : null ]));
   // status filter chips, with counts
   var counts = { all: 0, todo: 0, in_progress: 0, closed: 0, none: 0 };
   DATA.board.forEach(function(r){ counts.all++; counts[stateOf(r)]++; });
@@ -941,6 +955,12 @@ function renderBoard(here){
 
 function render(){
   var d = DATA; app.className=''; app.textContent='';
+  if(AN && CFG.analytics){
+    app.appendChild(el('div',{cls:'impbar'},[ el('button',{cls:'b',text:'← Back to the panel',on:function(){ AN=false; render(); }}),
+      el('b',{text:'Production analytics'}), el('a',{cls:'small',text:'Open wide ↗',title:'The same page in the browser, full width',on:function(){ open(CFG.analytics); }}) ]));
+    app.appendChild(el('iframe',{cls:'imp',src:CFG.analytics,title:'Production analytics'}));
+    return;
+  }
   if(IMPOSE){
     var shipping = FRAME==='ship', u = shipping ? shipUrl(IMPOSE) : imposeUrl(IMPOSE);
     app.appendChild(el('div',{cls:'impbar'},[ el('button',{cls:'b',text:'← Back to the panel',on:function(){ IMPOSE=0; render(); load(LAST.ids, LAST.conv); }}),
