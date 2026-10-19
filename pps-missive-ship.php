@@ -51,7 +51,7 @@ function pps_ms_label_types() {
 function pps_ms_defaults() {
     return array(
         'from'       => array( 'name' => 'Priority Print Service', 'company' => 'Priority Print Service', 'street1' => '2941 W Eastman Dr',
-                               'street2' => '', 'city' => 'Anthem', 'state' => 'AZ', 'zip' => '85086', 'phone' => '', 'email' => 'Office@priorityprintservice.com' ),
+                               'street2' => '', 'city' => 'Anthem', 'state' => 'AZ', 'zip' => '85086', 'phone' => '(623) 267-9479', 'email' => 'Office@priorityprintservice.com' ),
         'allow_buy'  => false,
         'label_type' => '',
     );
@@ -187,6 +187,24 @@ function pps_ms_add_weekdays( $ymd, $n ) {
     while ( (int) $d->format( 'N' ) >= 6 ) $d->modify( '+1 day' );   // a weekend ship date goes out Monday
     for ( $i = 0; $i < (int) $n; ) { $d->modify( '+1 day' ); if ( (int) $d->format( 'N' ) < 6 ) $i++; }
     return $d->format( 'Y-m-d' );
+}
+
+/**
+ * Business days in transit for one rate. The carriers' own figure (`estimated_days`, what
+ * Shippo's screen used to show as "2 business days"), except FedEx's express services: on a
+ * live quote (2026-10-19) FedEx answered one day short across the board — overnight 0, 2Day
+ * and 2Day A.M. 1, Express Saver (a three-day service) 2, while UPS's matched its services
+ * (Next Day Air 1, 2nd Day Air 2, 3 Day Select 3). For those the service's own promise is
+ * used. Ground services keep the carrier's figure; nothing arrives the day it ships.
+ */
+function pps_ms_transit_days( $provider, $token, $estimated ) {
+    if ( strtolower( (string) $provider ) === 'fedex' ) {
+        $t = strtolower( (string) $token );
+        if ( strpos( $t, 'overnight' ) !== false ) return 1;
+        if ( strpos( $t, 'fedex_2_day' ) === 0 ) return 2;
+        if ( $t === 'fedex_express_saver' ) return 3;
+    }
+    return is_numeric( $estimated ) ? max( 1, (int) $estimated ) : null;
 }
 
 /** A ship date as Shippo wants it: noon shop time, in UTC. */
@@ -403,8 +421,10 @@ function pps_ms_rates( $order_id, $to, $parcels, $ship_ymd = '', $extra = array(
         $amount = 0; foreach ( $rs as $gi => $r ) $amount += (float) ( $r['amount'] ?? 0 ) * $groups[ $gi ]['count'];
         $amount = round( $amount, 2 );
         $days = null;
-        // FedEx answers 0 for its overnight services; nothing arrives the day it ships.
-        foreach ( $rs as $r ) if ( isset( $r['estimated_days'] ) && is_numeric( $r['estimated_days'] ) ) $days = max( 1, (int) $days, (int) $r['estimated_days'] );
+        foreach ( $rs as $r ) {
+            $rd = pps_ms_transit_days( $r['provider'] ?? '', ( (array) ( $r['servicelevel'] ?? array() ) )['token'] ?? '', $r['estimated_days'] ?? null );
+            if ( $rd !== null ) $days = max( (int) $days, $rd );
+        }
         $arrives = $days !== null ? pps_ms_add_weekdays( $ship, $days ) : '';
         $acct_id = (string) ( $first['carrier_account'] ?? '' );
         $acct = $accounts[ $acct_id ] ?? array( 'name' => 'account not listed', 'shippo' => false );
@@ -640,7 +660,7 @@ function addressCard(){
   [['name','Name','w'],['company','Company','w'],['street1','Street','w'],['street2','Apt, suite','w'],['city','City'],['state','State'],['zip','ZIP'],['phone','Phone']].forEach(function(f){ g.appendChild(field(t,f[0],f[1],f[2])); });
   c.appendChild(g);
   var f = CFG.from;
-  c.appendChild(el('div',{cls:'muted small',style:'margin-top:6px',text:'From: '+[f.company||f.name, f.street1, f.city+', '+f.state+' '+f.zip].filter(Boolean).join(', ')}));
+  c.appendChild(el('div',{cls:'muted small',style:'margin-top:6px',text:'From: '+[f.company||f.name, f.street1, f.city+', '+f.state+' '+f.zip].filter(Boolean).join(', ')+(f.phone?' · '+f.phone:'')}));
   if(!f.phone) c.appendChild(el('div',{cls:'warn small',text:'No shop phone is set for the ship-from (PPS Calculators → Missive Shipping). USPS, UPS and FedEx may refuse a label without one.'}));
   return c;
 }
@@ -696,7 +716,7 @@ function ratesCard(){
   list.forEach(function(o){
     var r = el('div',{cls:'rate'+(ST.sel===o.id?' sel':''),on:function(){ ST.sel=o.id; render(); }});
     var radio = el('input',{type:'radio',name:'rate'}); radio.checked = ST.sel===o.id; r.appendChild(radio);
-    var when = o.arrives ? 'arrives '+md(o.arrives)+(o.by&&o.by!=='23:59:00'?' by '+o.by.slice(0,5):'')+' ('+o.days+' business day'+(o.days===1?'':'s')+')' : 'no delivery estimate';
+    var when = o.days ? o.days+' business day'+(o.days===1?'':'s')+' · arrives '+md(o.arrives)+(o.by&&o.by!=='23:59:00'?' by '+o.by.slice(0,5):'') : 'no delivery estimate';
     r.appendChild(el('div',{},[
       el('div',{},[el('b',{text:o.carrier+' '+o.service})].concat(o.tags.map(function(t){ return el('span',{cls:'tag',text:t==='BESTVALUE'?'BEST VALUE':t}); }),
         [el('span',{cls:'tag'+(o.own_account?' own':''),text:o.account})])),

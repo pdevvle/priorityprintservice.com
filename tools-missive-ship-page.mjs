@@ -41,14 +41,14 @@ await q.evaluate(() => { const s = [...document.querySelectorAll('select')].find
 await q.waitForTimeout(50);
 await q.locator('input[title="Declared value of each box"]').fill('150'); await q.locator('input[title="Declared value of each box"]').dispatchEvent('change'); await q.waitForTimeout(100);
 ok(/Carriers that cannot take a signature are left out/.test(await txt()) && /its cost is included in each rate/.test(await txt()), 'choosing a signature and insurance says what they do to the rates');
-ok(/From: Priority Print Service, 2941 W Eastman Dr, Anthem, AZ 85086/.test(t) && /No shop phone is set/.test(t), 'the ship-from is shown, and a missing shop phone is said');
+ok(/From: Priority Print Service, 2941 W Eastman Dr, Anthem, AZ 85086 · \(623\) 267-9479/.test(t) && !/No shop phone is set/.test(t), 'the ship-from is shown with the shop phone');
 const buyBtn = () => q.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => /^Buy |Pick a rate/.test(x.textContent)); return b ? { text: b.textContent, disabled: b.disabled } : null; });
 ok((await buyBtn()) === null, 'no buy button before rates');
 await q.getByText('Get rates').click(); await q.waitForTimeout(300);
 t = await txt();
 ok(posts2.length === 1 && posts2[0].token && posts2[0].token.length === 64 && posts2[0].body.order === 87551 && posts2[0].body.boxes.length === 1 && posts2[0].body.boxes[0].count === 2 && posts2[0].body.to.zip === '77058' && posts2[0].body.extra.signature === 'ADULT' && posts2[0].body.extra.insure === 150, 'Get rates sends the order, its token, the address, the boxes with their count, and the signature and insurance', posts2[0]);
 ok(/2 labels, ships Wed, Oct 21 · Adult signature \(21\+\) · insured \$150\.00\/box/i.test(t) && /\$12\.40 each/.test(t) && /includes \$7\.28 insurance/.test(t), 'the rates say what they were priced with, and the price each', t.slice(t.indexOf('RATES'), t.indexOf('RATES') + 120));
-ok(/USPS Ground Advantage/.test(t) && /arrives Wed, Oct 28 \(5 business days\)/.test(t) && /· on time/.test(t), 'each rate says when it arrives and that it is on time');
+ok(/USPS Ground Advantage/.test(t) && /5 business days · arrives Wed, Oct 28/.test(t) && /· on time/.test(t), 'each rate says when it arrives and that it is on time');
 ok(/LATE vs promised Thu, Oct 29/.test(t) && /Work Hard Play Hard Dec 24/.test(t), 'a late rate is marked, and another account is named on its rate');
 ok(/Carrier notes \(1\)/.test(t), 'carrier notes are folded away');
 ok((await buyBtn()).disabled && /Pick a rate/.test((await buyBtn()).text), 'Buy waits for a rate to be picked');

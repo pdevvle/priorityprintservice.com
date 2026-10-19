@@ -161,6 +161,10 @@ ok( $byid['FedEx 2Day® (One Rate)']['account'] === 'Work Hard Play Hard Dec 24'
 ok( $byid['UPS Ground']['arrives'] === '2026-10-26' && $byid['UPS Ground']['on_time'] === true, 'Wed + 3 business days arrives Mon Oct 26 — on time for the promised Oct 29', $byid['UPS Ground'] );
 ok( $byid['USPS Ground Advantage']['arrives'] === '2026-10-28' && $byid['FedEx 2Day® (One Rate)']['arrives'] === '2026-10-23', 'weekends are skipped', array( $byid['USPS Ground Advantage']['arrives'] ) );
 ok( $byid['UPS Next Day Air']['days'] === 1 && $byid['UPS Next Day Air']['arrives'] === '2026-10-22', 'a carrier\'s "0 days" (FedEx overnight) arrives the next business day, not the ship day', $byid['UPS Next Day Air'] );
+// FedEx's express services answer one day short (live quote 2026-10-19); their promise is used
+$td = array( pps_ms_transit_days( 'FedEx', 'fedex_priority_overnight', 0 ), pps_ms_transit_days( 'FedEx', 'fedex_2_day', 1 ), pps_ms_transit_days( 'FedEx', 'fedex_2_day_am', 1 ), pps_ms_transit_days( 'FedEx', 'fedex_express_saver', 2 ),
+             pps_ms_transit_days( 'FedEx', 'fedex_ground', 3 ), pps_ms_transit_days( 'UPS', 'ups_second_day_air', 2 ), pps_ms_transit_days( 'UPS', 'ups_next_day_air', 1 ), pps_ms_transit_days( 'USPS', 'usps_ground_advantage', 3 ), pps_ms_transit_days( 'UPS', 'ups_ground', null ) );
+ok( $td === array( 1, 2, 2, 3, 3, 2, 1, 3, null ), 'business days: FedEx overnight 1, 2Day 2, Express Saver 3 (their promise); FedEx Ground, UPS and USPS as the carrier says; none when none given', $td );
 ok( $byid['UPS Ground']['tags'] === array(), 'a single box\'s "best value" tag is not claimed for a set of boxes' );
 ok( $q['notes'] === array( 'UPS: Request failed due to missing authorization. Please reconnect your carrier account.' ), 'routine carrier messages are dropped; one a person should act on is kept', $q['notes'] );
 $stored = $GLOBALS['tr']['pps_ms_q_87551'];
